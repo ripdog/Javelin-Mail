@@ -61,6 +61,8 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/domain/MailEntities.h
     src/jmap/domain/MailEntityParsers.cpp
     src/jmap/domain/MailEntityParsers.h
+    src/jmap/sync/PendingActions.cpp
+    src/jmap/sync/PendingActions.h
     src/jmap/sync/SyncPlanner.cpp
     src/jmap/sync/SyncPlanner.h
     src/jmap/sync/SyncReconciler.cpp
@@ -82,6 +84,7 @@ set(JAVELIN_FORMAT_FILES
     tests/jmap/MessageContentRepositoryTest.cpp
     tests/jmap/MethodCallerTest.cpp
     tests/jmap/MethodEnvelopeTest.cpp
+    tests/jmap/PendingActionsTest.cpp
     tests/jmap/QueryServiceTest.cpp
     tests/jmap/MailEntityParsersTest.cpp
     tests/jmap/SessionClientTest.cpp
@@ -129,6 +132,8 @@ add_library(javelin_jmap STATIC
     src/jmap/domain/MailEntities.h
     src/jmap/domain/MailEntityParsers.cpp
     src/jmap/domain/MailEntityParsers.h
+    src/jmap/sync/PendingActions.cpp
+    src/jmap/sync/PendingActions.h
     src/jmap/sync/SyncPlanner.cpp
     src/jmap/sync/SyncPlanner.h
     src/jmap/sync/SyncReconciler.cpp
