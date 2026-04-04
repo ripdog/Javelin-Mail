@@ -6,32 +6,67 @@
 #include <unordered_map>
 #include <utility>
 
+namespace javelin::jmap::api::detail
+{
+
+    struct RawAccount
+    {
+        std::string name;
+        bool isPersonal = false;
+        bool isReadOnly = false;
+        std::unordered_map<std::string, glz::json_t> accountCapabilities;
+    };
+
+    struct RawSession
+    {
+        std::string username;
+        std::string apiUrl;
+        std::string downloadUrl;
+        std::string uploadUrl;
+        std::optional<std::string> eventSourceUrl;
+        std::string state;
+        std::unordered_map<std::string, glz::json_t> capabilities;
+        std::unordered_map<std::string, RawAccount> accounts;
+        std::unordered_map<std::string, std::string> primaryAccounts;
+    };
+
+} // namespace javelin::jmap::api::detail
+
+template <> struct glz::meta<javelin::jmap::api::CoreCapability>
+{
+    using T = javelin::jmap::api::CoreCapability;
+
+    static constexpr auto value = glz::object(
+        "maxSizeUpload", &T::maxSizeUpload, "maxConcurrentUpload", &T::maxConcurrentUpload,
+        "maxConcurrentRequests", &T::maxConcurrentRequests, "maxCallsInRequest",
+        &T::maxCallsInRequest, "maxObjectsInGet", &T::maxObjectsInGet, "maxObjectsInSet",
+        &T::maxObjectsInSet, "collationAlgorithms", &T::collationAlgorithms);
+};
+
+template <> struct glz::meta<javelin::jmap::api::detail::RawAccount>
+{
+    using T = javelin::jmap::api::detail::RawAccount;
+
+    static constexpr auto value =
+        glz::object("name", &T::name, "isPersonal", &T::isPersonal, "isReadOnly", &T::isReadOnly,
+                    "accountCapabilities", &T::accountCapabilities);
+};
+
+template <> struct glz::meta<javelin::jmap::api::detail::RawSession>
+{
+    using T = javelin::jmap::api::detail::RawSession;
+
+    static constexpr auto value = glz::object(
+        "username", &T::username, "apiUrl", &T::apiUrl, "downloadUrl", &T::downloadUrl, "uploadUrl",
+        &T::uploadUrl, "eventSourceUrl", &T::eventSourceUrl, "state", &T::state, "capabilities",
+        &T::capabilities, "accounts", &T::accounts, "primaryAccounts", &T::primaryAccounts);
+};
+
 namespace javelin::jmap::api
 {
 
     namespace
     {
-
-        struct RawAccount
-        {
-            std::string name;
-            bool isPersonal = false;
-            bool isReadOnly = false;
-            std::unordered_map<std::string, glz::json_t> accountCapabilities;
-        };
-
-        struct RawSession
-        {
-            std::string username;
-            std::string apiUrl;
-            std::string downloadUrl;
-            std::string uploadUrl;
-            std::optional<std::string> eventSourceUrl;
-            std::string state;
-            std::unordered_map<std::string, glz::json_t> capabilities;
-            std::unordered_map<std::string, RawAccount> accounts;
-            std::unordered_map<std::string, std::string> primaryAccounts;
-        };
 
         [[nodiscard]] bool
         capabilityPresent(const std::unordered_map<std::string, glz::json_t>& capabilities,
@@ -88,7 +123,7 @@ namespace javelin::jmap::api
         }
 
         [[nodiscard]] std::unordered_map<std::string, Account>
-        parseAccounts(std::unordered_map<std::string, RawAccount> rawAccounts)
+        parseAccounts(std::unordered_map<std::string, detail::RawAccount> rawAccounts)
         {
             std::unordered_map<std::string, Account> accounts;
             accounts.reserve(rawAccounts.size());
@@ -115,7 +150,7 @@ namespace javelin::jmap::api
             return accounts;
         }
 
-        [[nodiscard]] Session buildSession(RawSession rawSession)
+        [[nodiscard]] Session buildSession(detail::RawSession rawSession)
         {
             return Session{
                 .username = std::move(rawSession.username),
@@ -147,7 +182,7 @@ namespace javelin::jmap::api
     SessionParseResult parseSession(std::string_view json, const RequiredCapabilities& required)
     {
         std::string buffer{json};
-        RawSession rawSession;
+        detail::RawSession rawSession;
         const auto readError = glz::read_json(rawSession, buffer);
         if (readError)
         {
@@ -198,33 +233,3 @@ namespace javelin::jmap::api
     }
 
 } // namespace javelin::jmap::api
-
-template <> struct glz::meta<javelin::jmap::api::CoreCapability>
-{
-    using T = javelin::jmap::api::CoreCapability;
-
-    static constexpr auto value = glz::object(
-        "maxSizeUpload", &T::maxSizeUpload, "maxConcurrentUpload", &T::maxConcurrentUpload,
-        "maxConcurrentRequests", &T::maxConcurrentRequests, "maxCallsInRequest",
-        &T::maxCallsInRequest, "maxObjectsInGet", &T::maxObjectsInGet, "maxObjectsInSet",
-        &T::maxObjectsInSet, "collationAlgorithms", &T::collationAlgorithms);
-};
-
-template <> struct glz::meta<javelin::jmap::api::RawAccount>
-{
-    using T = javelin::jmap::api::RawAccount;
-
-    static constexpr auto value =
-        glz::object("name", &T::name, "isPersonal", &T::isPersonal, "isReadOnly", &T::isReadOnly,
-                    "accountCapabilities", &T::accountCapabilities);
-};
-
-template <> struct glz::meta<javelin::jmap::api::RawSession>
-{
-    using T = javelin::jmap::api::RawSession;
-
-    static constexpr auto value = glz::object(
-        "username", &T::username, "apiUrl", &T::apiUrl, "downloadUrl", &T::downloadUrl, "uploadUrl",
-        &T::uploadUrl, "eventSourceUrl", &T::eventSourceUrl, "state", &T::state, "capabilities",
-        &T::capabilities, "accounts", &T::accounts, "primaryAccounts", &T::primaryAccounts);
-};
