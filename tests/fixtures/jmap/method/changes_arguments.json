@@ -1,0 +1,15 @@
+{
+  "accountId": "u1",
+  "oldState": "state-1",
+  "newState": "state-2",
+  "hasMoreChanges": true,
+  "created": [
+    "mbx-created"
+  ],
+  "updated": [
+    "mbx-updated"
+  ],
+  "destroyed": [
+    "mbx-destroyed"
+  ]
+}

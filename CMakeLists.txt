@@ -28,6 +28,8 @@ set(JAVELIN_FORMAT_FILES
     src/gui/shell/MainWindow.h
     src/jmap/api/Error.cpp
     src/jmap/api/Error.h
+    src/jmap/api/MailMethods.cpp
+    src/jmap/api/MailMethods.h
     src/jmap/api/MethodCaller.cpp
     src/jmap/api/MethodCaller.h
     src/jmap/api/MethodEnvelope.cpp
@@ -73,6 +75,7 @@ set(JAVELIN_FORMAT_FILES
     tests/jmap/DatabaseTest.cpp
     tests/jmap/EmailRepositoryTest.cpp
     tests/jmap/JmapCoreTest.cpp
+    tests/jmap/MailMethodsTest.cpp
     tests/jmap/MailboxRepositoryTest.cpp
     tests/jmap/MessageContentRepositoryTest.cpp
     tests/jmap/MethodCallerTest.cpp
@@ -90,6 +93,8 @@ set(JAVELIN_FORMAT_FILES
 add_library(javelin_jmap STATIC
     src/jmap/api/Error.cpp
     src/jmap/api/Error.h
+    src/jmap/api/MailMethods.cpp
+    src/jmap/api/MailMethods.h
     src/jmap/api/MethodCaller.cpp
     src/jmap/api/MethodCaller.h
     src/jmap/api/MethodEnvelope.cpp

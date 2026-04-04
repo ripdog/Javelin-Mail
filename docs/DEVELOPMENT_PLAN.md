@@ -493,6 +493,7 @@ Tasks:
 Completed so far:
 
 - [x] Add a typed sync planner that maps persisted sync-state tokens to initial-fetch versus incremental-changes work.
+- [x] Add typed `Mailbox/*` and `Email/*` sync method payloads so incremental sync code can avoid raw method-argument JSON.
 
 Exit criteria:
 

@@ -1,0 +1,52 @@
+{
+  "accountId": "u1",
+  "state": "email-state-1",
+  "list": [
+    {
+      "id": "eml-1",
+      "blobId": "blob-1",
+      "threadId": "thr-123",
+      "mailboxIds": {
+        "mbx-inbox": true,
+        "mbx-archive": false
+      },
+      "keywords": {
+        "$seen": true,
+        "$flagged": true,
+        "$draft": false
+      },
+      "size": 4096,
+      "receivedAt": "2026-04-05T11:22:33Z",
+      "sentAt": "2026-04-05T11:21:00Z",
+      "hasAttachment": true,
+      "subject": "Quarterly update",
+      "from": [
+        {
+          "name": "Alice Sender",
+          "email": "alice@example.com"
+        }
+      ],
+      "to": [
+        {
+          "name": "Bob Recipient",
+          "email": "bob@example.com"
+        }
+      ],
+      "cc": [
+        {
+          "name": "Carol Copy",
+          "email": "carol@example.com"
+        }
+      ],
+      "bcc": [],
+      "replyTo": [
+        {
+          "name": "Support",
+          "email": "support@example.com"
+        }
+      ],
+      "preview": "Here is the short preview text."
+    }
+  ],
+  "notFound": []
+}
