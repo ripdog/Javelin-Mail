@@ -2,6 +2,7 @@
 
 #include <QMainWindow>
 
+class QComboBox;
 class QLabel;
 class QListView;
 class QTreeView;
@@ -13,8 +14,9 @@ namespace javelin::jmap
 
 namespace javelin::jmap::cache
 {
+    class AccountRepository;
     class QueryService;
-}
+} // namespace javelin::jmap::cache
 
 namespace javelin::gui::mailboxes
 {
@@ -33,6 +35,7 @@ namespace javelin::gui::shell
     {
       public:
         explicit MainWindow(javelin::jmap::JmapCore& jmapCore,
+                            javelin::jmap::cache::AccountRepository& accountRepository,
                             javelin::jmap::cache::QueryService& queryService,
                             QWidget* parent = nullptr);
         ~MainWindow() override = default;
@@ -40,10 +43,13 @@ namespace javelin::gui::shell
       private:
         void setupUi();
         void connectSelection();
+        void reloadAccounts();
         void updateEmptyStates();
 
         javelin::jmap::JmapCore& m_jmapCore;
+        javelin::jmap::cache::AccountRepository& m_accountRepository;
         javelin::jmap::cache::QueryService& m_queryService;
+        QComboBox* m_accountCombo = nullptr;
         javelin::gui::mailboxes::MailboxTreeModel* m_mailboxModel = nullptr;
         javelin::gui::messages::MessageListModel* m_messageModel = nullptr;
         QTreeView* m_mailboxView = nullptr;
