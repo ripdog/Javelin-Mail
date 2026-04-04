@@ -1,6 +1,7 @@
 add_executable(javelin_jmap_tests
     FixtureReader.cpp
     FixtureReader.h
+    jmap/AuthTest.cpp
     jmap/JmapCoreTest.cpp
     jmap/SessionTest.cpp
 )

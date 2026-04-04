@@ -25,23 +25,32 @@ set(JAVELIN_FORMAT_FILES
     src/app/ProcessServices.h
     src/gui/shell/MainWindow.cpp
     src/gui/shell/MainWindow.h
+    src/jmap/api/Error.cpp
+    src/jmap/api/Error.h
     src/jmap/api/Session.cpp
     src/jmap/api/Session.h
     src/jmap/api/SessionParser.cpp
     src/jmap/api/SessionParser.h
+    src/jmap/auth/Auth.cpp
+    src/jmap/auth/Auth.h
     src/jmap/JmapCore.cpp
     src/jmap/JmapCore.h
     tests/FixtureReader.cpp
     tests/FixtureReader.h
+    tests/jmap/AuthTest.cpp
     tests/jmap/JmapCoreTest.cpp
     tests/jmap/SessionTest.cpp
 )
 
 add_library(javelin_jmap STATIC
+    src/jmap/api/Error.cpp
+    src/jmap/api/Error.h
     src/jmap/api/Session.cpp
     src/jmap/api/Session.h
     src/jmap/api/SessionParser.cpp
     src/jmap/api/SessionParser.h
+    src/jmap/auth/Auth.cpp
+    src/jmap/auth/Auth.h
     src/jmap/JmapCore.cpp
     src/jmap/JmapCore.h
 )

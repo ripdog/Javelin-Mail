@@ -421,6 +421,7 @@ Completed so far:
 - [x] Add typed session, account, and capability structs for the first session-discovery slice.
 - [x] Centralize capability validation and fail-fast requirement checks in the JMAP library.
 - [x] Add Glaze-backed session parsing and fixture-based tests for the session bootstrap shape.
+- [x] Add typed auth, transport, and protocol error surfaces plus token/secret-store abstractions.
 
 Exit criteria:
 
