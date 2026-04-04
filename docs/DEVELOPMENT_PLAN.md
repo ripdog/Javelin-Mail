@@ -518,6 +518,11 @@ Tasks:
 - Keep list presentation data compact.
 - Implement time-based grouping for recent and older messages in a way that survives pagination and refresh.
 
+Completed so far:
+
+- [x] Add SQL-backed mailbox tree and paged message list queries with compact row shapes for GUI models.
+- [x] Add stable mailbox/message selection keys and diff-based incremental refresh notifications for cache-backed query snapshots.
+
 Exit criteria:
 
 - Large folders do not require full in-memory message materialization.

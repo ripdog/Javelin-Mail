@@ -12,6 +12,7 @@ add_executable(javelin_jmap_tests
     jmap/MethodCallerTest.cpp
     jmap/MethodEnvelopeTest.cpp
     jmap/PendingActionsTest.cpp
+    jmap/QueryDiffTest.cpp
     jmap/QueryServiceTest.cpp
     jmap/MailEntityParsersTest.cpp
     jmap/SessionClientTest.cpp

@@ -61,6 +61,8 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/domain/MailEntities.h
     src/jmap/domain/MailEntityParsers.cpp
     src/jmap/domain/MailEntityParsers.h
+    src/jmap/query/QueryDiff.cpp
+    src/jmap/query/QueryDiff.h
     src/jmap/sync/LongPollWorker.cpp
     src/jmap/sync/LongPollWorker.h
     src/jmap/sync/PendingActions.cpp
@@ -88,6 +90,7 @@ set(JAVELIN_FORMAT_FILES
     tests/jmap/MethodCallerTest.cpp
     tests/jmap/MethodEnvelopeTest.cpp
     tests/jmap/PendingActionsTest.cpp
+    tests/jmap/QueryDiffTest.cpp
     tests/jmap/QueryServiceTest.cpp
     tests/jmap/MailEntityParsersTest.cpp
     tests/jmap/SessionClientTest.cpp
@@ -135,6 +138,8 @@ add_library(javelin_jmap STATIC
     src/jmap/domain/MailEntities.h
     src/jmap/domain/MailEntityParsers.cpp
     src/jmap/domain/MailEntityParsers.h
+    src/jmap/query/QueryDiff.cpp
+    src/jmap/query/QueryDiff.h
     src/jmap/sync/LongPollWorker.cpp
     src/jmap/sync/LongPollWorker.h
     src/jmap/sync/PendingActions.cpp
