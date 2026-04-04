@@ -3,6 +3,7 @@ add_executable(javelin_jmap_tests
     FixtureReader.h
     jmap/AuthTest.cpp
     jmap/DatabaseTest.cpp
+    jmap/EmailRepositoryTest.cpp
     jmap/JmapCoreTest.cpp
     jmap/MailboxRepositoryTest.cpp
     jmap/MethodCallerTest.cpp

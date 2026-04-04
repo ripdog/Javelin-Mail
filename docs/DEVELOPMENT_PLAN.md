@@ -458,6 +458,7 @@ Completed so far:
 - [x] Add a mailbox cache repository with replacement semantics and parent-scoped mailbox queries.
 - [x] Add a cached session bootstrap repository that round-trips typed session and account metadata.
 - [x] Add a thread cache repository that preserves ordered email membership per thread.
+- [x] Add an email summary cache repository that normalizes mailbox, keyword, and address rows.
 
 Exit criteria:
 
