@@ -59,6 +59,8 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/domain/MailEntities.h
     src/jmap/domain/MailEntityParsers.cpp
     src/jmap/domain/MailEntityParsers.h
+    src/jmap/sync/SyncPlanner.cpp
+    src/jmap/sync/SyncPlanner.h
     src/jmap/auth/AccessTokenResolver.cpp
     src/jmap/auth/AccessTokenResolver.h
     src/jmap/auth/Auth.cpp
@@ -81,6 +83,7 @@ set(JAVELIN_FORMAT_FILES
     tests/jmap/SessionRepositoryTest.cpp
     tests/jmap/SessionTest.cpp
     tests/jmap/SyncStateRepositoryTest.cpp
+    tests/jmap/SyncPlannerTest.cpp
     tests/jmap/ThreadRepositoryTest.cpp
 )
 
@@ -118,6 +121,8 @@ add_library(javelin_jmap STATIC
     src/jmap/domain/MailEntities.h
     src/jmap/domain/MailEntityParsers.cpp
     src/jmap/domain/MailEntityParsers.h
+    src/jmap/sync/SyncPlanner.cpp
+    src/jmap/sync/SyncPlanner.h
     src/jmap/auth/AccessTokenResolver.cpp
     src/jmap/auth/AccessTokenResolver.h
     src/jmap/auth/Auth.cpp

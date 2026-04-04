@@ -490,6 +490,10 @@ Tasks:
 - Add pending-action merging rules so local changes survive concurrent server updates.
 - Add resumable long-poll loop with cancellation and structured backoff.
 
+Completed so far:
+
+- [x] Add a typed sync planner that maps persisted sync-state tokens to initial-fetch versus incremental-changes work.
+
 Exit criteria:
 
 - Initial sync populates the cache.
