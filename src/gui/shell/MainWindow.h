@@ -3,8 +3,10 @@
 #include <QMainWindow>
 
 class QComboBox;
+class QCloseEvent;
 class QLabel;
 class QListView;
+class QSplitter;
 class QTreeView;
 
 namespace javelin::jmap
@@ -44,12 +46,16 @@ namespace javelin::gui::shell
         void setupUi();
         void connectSelection();
         void reloadAccounts();
+        void restorePersistentState();
+        void savePersistentState() const;
         void updateEmptyStates();
+        void closeEvent(QCloseEvent* event) override;
 
         javelin::jmap::JmapCore& m_jmapCore;
         javelin::jmap::cache::AccountRepository& m_accountRepository;
         javelin::jmap::cache::QueryService& m_queryService;
         QComboBox* m_accountCombo = nullptr;
+        QSplitter* m_mainSplitter = nullptr;
         javelin::gui::mailboxes::MailboxTreeModel* m_mailboxModel = nullptr;
         javelin::gui::messages::MessageListModel* m_messageModel = nullptr;
         QTreeView* m_mailboxView = nullptr;

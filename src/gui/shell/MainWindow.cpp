@@ -6,10 +6,12 @@
 #include "jmap/cache/AccountRepository.h"
 #include "jmap/cache/QueryService.h"
 
+#include <QCloseEvent>
 #include <QComboBox>
 #include <QItemSelectionModel>
 #include <QLabel>
 #include <QListView>
+#include <QSettings>
 #include <QSplitter>
 #include <QStatusBar>
 #include <QTreeView>
@@ -20,6 +22,10 @@ namespace javelin::gui::shell
 {
     namespace
     {
+        constexpr auto windowGroup = "mainWindow";
+        constexpr auto geometryKey = "geometry";
+        constexpr auto splitterKey = "splitterState";
+        constexpr auto accountIdKey = "selectedAccountId";
 
         [[nodiscard]] std::optional<std::string> currentAccountId(const QComboBox& accountCombo)
         {
@@ -38,6 +44,7 @@ namespace javelin::gui::shell
     {
         setupUi();
         connectSelection();
+        restorePersistentState();
     }
 
     void MainWindow::setupUi()
@@ -72,20 +79,21 @@ namespace javelin::gui::shell
             this);
         messageViewPane->setWordWrap(true);
 
-        auto* splitter = new QSplitter(Qt::Horizontal, this);
-        splitter->addWidget(m_mailboxView);
-        splitter->addWidget(messagePane);
-        splitter->addWidget(messageViewPane);
-        splitter->setStretchFactor(0, 1);
-        splitter->setStretchFactor(1, 2);
-        splitter->setStretchFactor(2, 3);
+        m_mainSplitter = new QSplitter(Qt::Horizontal, this);
+        m_mainSplitter->addWidget(m_mailboxView);
+        m_mainSplitter->addWidget(messagePane);
+        m_mainSplitter->addWidget(messageViewPane);
+        m_mainSplitter->setStretchFactor(0, 1);
+        m_mainSplitter->setStretchFactor(1, 2);
+        m_mainSplitter->setStretchFactor(2, 3);
+        m_mainSplitter->setSizes({240, 420, 780});
 
         auto* central = new QWidget(this);
         auto* centralLayout = new QVBoxLayout(central);
         centralLayout->setContentsMargins(0, 0, 0, 0);
         centralLayout->setSpacing(8);
         centralLayout->addWidget(m_accountCombo);
-        centralLayout->addWidget(splitter);
+        centralLayout->addWidget(m_mainSplitter);
 
         setCentralWidget(central);
         reloadAccounts();
@@ -160,6 +168,55 @@ namespace javelin::gui::shell
         const bool hasMessages = m_messageModel->rowCount() > 0;
         m_messageEmptyState->setVisible(!hasMessages);
         m_messageView->setVisible(hasMessages);
+    }
+
+    void MainWindow::restorePersistentState()
+    {
+        QSettings settings;
+        settings.beginGroup(QLatin1StringView{windowGroup});
+
+        if (const auto geometry = settings.value(QLatin1StringView{geometryKey}).toByteArray();
+            !geometry.isEmpty())
+        {
+            restoreGeometry(geometry);
+        }
+
+        if (const auto splitterState = settings.value(QLatin1StringView{splitterKey}).toByteArray();
+            !splitterState.isEmpty())
+        {
+            m_mainSplitter->restoreState(splitterState);
+        }
+
+        const auto selectedAccountId = settings.value(QLatin1StringView{accountIdKey}).toString();
+        settings.endGroup();
+
+        if (selectedAccountId.isEmpty())
+        {
+            return;
+        }
+
+        const int accountIndex = m_accountCombo->findData(selectedAccountId);
+        if (accountIndex >= 0)
+        {
+            m_accountCombo->setCurrentIndex(accountIndex);
+        }
+    }
+
+    void MainWindow::savePersistentState() const
+    {
+        QSettings settings;
+        settings.beginGroup(QLatin1StringView{windowGroup});
+        settings.setValue(QLatin1StringView{geometryKey}, saveGeometry());
+        settings.setValue(QLatin1StringView{splitterKey}, m_mainSplitter->saveState());
+        settings.setValue(QLatin1StringView{accountIdKey}, m_accountCombo->currentData());
+        settings.endGroup();
+        settings.sync();
+    }
+
+    void MainWindow::closeEvent(QCloseEvent* event)
+    {
+        savePersistentState();
+        QMainWindow::closeEvent(event);
     }
 
 } // namespace javelin::gui::shell
