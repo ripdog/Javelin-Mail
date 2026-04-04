@@ -1,4 +1,5 @@
 #include "app/ApplicationBootstrap.h"
+#include "app/WebEngineSetup.h"
 
 #include <QApplication>
 #include <QLocale>
@@ -6,6 +7,7 @@
 
 int main(int argc, char* argv[])
 {
+    javelin::app::registerInlineMessageUrlScheme();
     QApplication application(argc, argv);
     application.setApplicationName(QStringLiteral("Javelin Mail"));
     application.setOrganizationName(QStringLiteral("Javelin Mail"));

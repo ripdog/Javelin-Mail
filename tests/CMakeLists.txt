@@ -5,6 +5,10 @@ add_executable(javelin_jmap_tests
     jmap/AuthTest.cpp
     jmap/DatabaseTest.cpp
     jmap/EmailRepositoryTest.cpp
+    jmap/HtmlMessageDocumentBuilderTest.cpp
+    jmap/InlinePartPayloadRepositoryTest.cpp
+    jmap/InlineMessageUrlTest.cpp
+    jmap/JmapCoreMessageContentTest.cpp
     jmap/JmapCoreTest.cpp
     jmap/LongPollWorkerTest.cpp
     jmap/MailMethodsTest.cpp

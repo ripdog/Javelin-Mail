@@ -225,6 +225,10 @@ TEST_CASE("message view service loads cached email headers bodies and attachment
     CHECK(snapshot->htmlBody->kind == javelin::jmap::cache::MessageBodyKind::Html);
     CHECK(snapshot->htmlBody->isTruncated);
     CHECK(snapshot->htmlBody->value == "<p>HTML body</p>");
+    REQUIRE(snapshot->htmlRenderDocument.has_value());
+    CHECK(snapshot->htmlRenderDocument->html.find("<!doctype html>") != std::string::npos);
+    CHECK(snapshot->htmlRenderDocument->inlineResourceCount == 0);
+    CHECK(snapshot->htmlRenderDocument->blockedRemoteResourceCount == 0);
     REQUIRE(snapshot->attachments.size() == 1);
     CHECK(snapshot->attachments.front().name == std::optional<std::string>{"chart.png"});
     CHECK(snapshot->attachments.front().cid == std::optional<std::string>{"chart@cid"});

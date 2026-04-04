@@ -2,6 +2,7 @@
 
 #include "jmap/cache/Database.h"
 #include "jmap/domain/MailEntities.h"
+#include "jmap/render/HtmlMessageDocumentBuilder.h"
 
 #include <cstdint>
 #include <optional>
@@ -44,6 +45,7 @@ namespace javelin::jmap::cache
         javelin::jmap::domain::Email email;
         std::optional<MessageBody> plainTextBody;
         std::optional<MessageBody> htmlBody;
+        std::optional<javelin::jmap::render::HtmlRenderDocument> htmlRenderDocument;
         std::vector<MessageAttachment> attachments;
     };
 

@@ -1,9 +1,11 @@
+#include "gui/messageview/HtmlMessageView.h"
 #include "gui/messageview/MessageViewContainer.h"
 
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPlainTextEdit>
 #include <QStackedWidget>
+#include <QStringList>
 #include <QToolButton>
 #include <QVBoxLayout>
 
@@ -39,7 +41,7 @@ namespace javelin::gui::messageview
                 [this] { setActiveView(ActiveView::PlainText); });
 
         m_htmlButton = new QToolButton(buttonRow);
-        m_htmlButton->setText(QStringLiteral("HTML source"));
+        m_htmlButton->setText(QStringLiteral("HTML"));
         m_htmlButton->setCheckable(true);
         connect(m_htmlButton, &QToolButton::clicked, this,
                 [this] { setActiveView(ActiveView::Html); });
@@ -56,8 +58,7 @@ namespace javelin::gui::messageview
         m_plainTextView = new QPlainTextEdit(this);
         m_plainTextView->setReadOnly(true);
 
-        m_htmlView = new QPlainTextEdit(this);
-        m_htmlView->setReadOnly(true);
+        m_htmlView = new HtmlMessageView(this);
 
         m_bodyStack->addWidget(m_placeholderLabel);
         m_bodyStack->addWidget(m_plainTextView);
@@ -71,7 +72,6 @@ namespace javelin::gui::messageview
         layout->addWidget(buttonRow);
         layout->addWidget(m_bodyStack, 1);
         layout->addWidget(m_attachmentLabel);
-        layout->addStretch(1);
 
         updatePresentation();
     }
@@ -155,7 +155,7 @@ namespace javelin::gui::messageview
     void MessageViewContainer::updatePresentation()
     {
         m_plainTextView->clear();
-        m_htmlView->clear();
+        m_htmlView->clearDocument();
         m_attachmentLabel->clear();
 
         if (!m_accountId.has_value())
@@ -223,22 +223,14 @@ namespace javelin::gui::messageview
 
         if (m_snapshot->htmlBody.has_value())
         {
-            m_htmlView->setPlainText(QString::fromStdString(m_snapshot->htmlBody->value));
+            const auto renderDocument =
+                m_snapshot->htmlRenderDocument.has_value()
+                    ? QString::fromStdString(m_snapshot->htmlRenderDocument->html)
+                    : QString::fromStdString(m_snapshot->htmlBody->value);
+            m_htmlView->setDocumentHtml(renderDocument.toStdString());
         }
 
-        if (!m_snapshot->attachments.empty())
-        {
-            QStringList attachmentNames;
-            attachmentNames.reserve(static_cast<qsizetype>(m_snapshot->attachments.size()));
-            for (const auto& attachment : m_snapshot->attachments)
-            {
-                attachmentNames.push_back(
-                    QString::fromStdString(attachment.name.value_or(attachment.partId)));
-            }
-
-            m_attachmentLabel->setText(
-                QStringLiteral("Attachments: %1").arg(attachmentNames.join(QStringLiteral(", "))));
-        }
+        m_attachmentLabel->setText(attachmentSummaryText());
 
         if (m_snapshot->plainTextBody.has_value())
         {
@@ -254,6 +246,48 @@ namespace javelin::gui::messageview
                 "No cached plain-text or HTML body is available for this message yet."));
             setActiveView(ActiveView::Placeholder);
         }
+    }
+
+    QString MessageViewContainer::attachmentSummaryText() const
+    {
+        if (!m_snapshot.has_value())
+        {
+            return {};
+        }
+
+        QStringList segments;
+        if (!m_snapshot->attachments.empty())
+        {
+            QStringList attachmentNames;
+            attachmentNames.reserve(static_cast<qsizetype>(m_snapshot->attachments.size()));
+            for (const auto& attachment : m_snapshot->attachments)
+            {
+                attachmentNames.push_back(
+                    QString::fromStdString(attachment.name.value_or(attachment.partId)));
+            }
+
+            segments.push_back(
+                QStringLiteral("Attachments: %1").arg(attachmentNames.join(QStringLiteral(", "))));
+        }
+
+        if (m_snapshot->htmlRenderDocument.has_value())
+        {
+            const auto& renderDocument = *m_snapshot->htmlRenderDocument;
+            if (renderDocument.inlineResourceCount > 0)
+            {
+                segments.push_back(
+                    QStringLiteral("Inline resources: %1")
+                        .arg(static_cast<qulonglong>(renderDocument.inlineResourceCount)));
+            }
+            if (renderDocument.blockedRemoteResourceCount > 0)
+            {
+                segments.push_back(
+                    QStringLiteral("Blocked remote resources: %1")
+                        .arg(static_cast<qulonglong>(renderDocument.blockedRemoteResourceCount)));
+            }
+        }
+
+        return segments.join(QStringLiteral("\n"));
     }
 
 } // namespace javelin::gui::messageview

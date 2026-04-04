@@ -64,6 +64,17 @@ namespace javelin::jmap::cache
             return makeQueryError("Delete email parts", deleteParts);
         }
 
+        QSqlQuery deleteInlinePayloads{database};
+        deleteInlinePayloads.prepare(
+            "DELETE FROM inline_part_payloads WHERE account_id = :account_id AND email_id = :email_id");
+        deleteInlinePayloads.bindValue(":account_id", QString::fromStdString(std::string{accountId}));
+        deleteInlinePayloads.bindValue(":email_id", QString::fromStdString(std::string{emailId}));
+        if (!deleteInlinePayloads.exec())
+        {
+            database.rollback();
+            return makeQueryError("Delete inline part payloads", deleteInlinePayloads);
+        }
+
         QSqlQuery insertPart{database};
         insertPart.prepare(
             "INSERT INTO email_parts ("

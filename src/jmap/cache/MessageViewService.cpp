@@ -2,6 +2,7 @@
 
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/MessageContentRepository.h"
+#include "jmap/render/HtmlMessageDocumentBuilder.h"
 
 #include <unordered_map>
 
@@ -47,6 +48,7 @@ namespace javelin::jmap::cache
             .email = *email,
             .plainTextBody = std::nullopt,
             .htmlBody = std::nullopt,
+            .htmlRenderDocument = std::nullopt,
             .attachments = {},
         };
 
@@ -110,6 +112,13 @@ namespace javelin::jmap::cache
             {
                 snapshot.htmlBody = body;
             }
+        }
+
+        if (snapshot.htmlBody.has_value())
+        {
+            javelin::jmap::render::HtmlMessageDocumentBuilder builder;
+            snapshot.htmlRenderDocument =
+                builder.build(accountId, emailId, snapshot.htmlBody->value, parts);
         }
 
         return std::optional<MessageViewSnapshot>{std::move(snapshot)};

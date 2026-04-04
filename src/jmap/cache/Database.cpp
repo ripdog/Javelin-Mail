@@ -523,6 +523,17 @@ namespace javelin::jmap::cache
                             "is_body_section INTEGER NOT NULL DEFAULT 0,"
                             "PRIMARY KEY (account_id, email_id, part_id)"
                             ") STRICT",
+                            "CREATE TABLE IF NOT EXISTS inline_part_payloads ("
+                            "account_id TEXT NOT NULL REFERENCES accounts(account_id) ON DELETE "
+                            "CASCADE,"
+                            "email_id TEXT NOT NULL,"
+                            "part_id TEXT NOT NULL,"
+                            "blob_id TEXT NOT NULL,"
+                            "media_type TEXT NOT NULL,"
+                            "payload BLOB NOT NULL,"
+                            "fetched_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+                            "PRIMARY KEY (account_id, email_id, part_id)"
+                            ") STRICT",
                             "CREATE TABLE IF NOT EXISTS identities ("
                             "account_id TEXT NOT NULL REFERENCES accounts(account_id) ON DELETE "
                             "CASCADE,"
@@ -601,6 +612,8 @@ namespace javelin::jmap::cache
                             "(account_id, email_id, part_id)",
                             "CREATE INDEX IF NOT EXISTS idx_email_parts_blob ON email_parts "
                             "(account_id, blob_id)",
+                            "CREATE INDEX IF NOT EXISTS idx_inline_part_payloads_email ON "
+                            "inline_part_payloads (account_id, email_id, part_id)",
                         },
                 },
                 MigrationStep{
@@ -664,6 +677,26 @@ namespace javelin::jmap::cache
                             "(account_id, email_id, part_id)",
                             "CREATE INDEX IF NOT EXISTS idx_email_parts_blob ON email_parts "
                             "(account_id, blob_id)",
+                        },
+                },
+                MigrationStep{
+                    .version = 5,
+                    .name = "inline_part_payloads",
+                    .statements =
+                        {
+                            "CREATE TABLE IF NOT EXISTS inline_part_payloads ("
+                            "account_id TEXT NOT NULL REFERENCES accounts(account_id) ON DELETE "
+                            "CASCADE,"
+                            "email_id TEXT NOT NULL,"
+                            "part_id TEXT NOT NULL,"
+                            "blob_id TEXT NOT NULL,"
+                            "media_type TEXT NOT NULL,"
+                            "payload BLOB NOT NULL,"
+                            "fetched_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+                            "PRIMARY KEY (account_id, email_id, part_id)"
+                            ") STRICT",
+                            "CREATE INDEX IF NOT EXISTS idx_inline_part_payloads_email ON "
+                            "inline_part_payloads (account_id, email_id, part_id)",
                         },
                 },
             },

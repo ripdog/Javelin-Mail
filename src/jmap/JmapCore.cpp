@@ -6,8 +6,10 @@
 #include "jmap/api/MethodEnvelope.h"
 #include "jmap/api/SessionClient.h"
 #include "jmap/api/Transport.h"
+#include "jmap/auth/AccessTokenResolver.h"
 #include "jmap/auth/Auth.h"
 #include "jmap/cache/EmailRepository.h"
+#include "jmap/cache/InlinePartPayloadRepository.h"
 #include "jmap/cache/MailboxRepository.h"
 #include "jmap/cache/MessageContentRepository.h"
 #include "jmap/cache/SessionRepository.h"
@@ -18,6 +20,8 @@
 #include <QDir>
 #include <QFile>
 #include <QStandardPaths>
+#include <QUrl>
+#include <QUrlQuery>
 #include <algorithm>
 #include <unordered_map>
 #include <utility>
@@ -232,6 +236,130 @@ namespace javelin::jmap
             std::ranges::sort(values, [](const auto& left, const auto& right)
                               { return left.partId < right.partId; });
             return values;
+        }
+
+        [[nodiscard]] QString encodedTemplateValue(const std::string_view value)
+        {
+            return QString::fromUtf8(
+                QUrl::toPercentEncoding(QString::fromStdString(std::string{value})));
+        }
+
+        [[nodiscard]] QUrl buildDownloadUrl(const std::string_view templateUrl,
+                                            const std::string_view accountId,
+                                            const javelin::jmap::cache::EmailPart& part)
+        {
+            QString expanded = QString::fromStdString(std::string{templateUrl});
+            expanded.replace(QStringLiteral("{accountId}"), encodedTemplateValue(accountId));
+            expanded.replace(QStringLiteral("{blobId}"),
+                             encodedTemplateValue(*part.blobId));
+            expanded.replace(QStringLiteral("{name}"),
+                             part.name.has_value() ? encodedTemplateValue(*part.name)
+                                                   : QStringLiteral(""));
+            expanded.replace(QStringLiteral("{type}"), encodedTemplateValue(part.mediaType));
+            return QUrl{expanded};
+        }
+
+        [[nodiscard]] javelin::jmap::api::HttpRequest
+        buildDownloadRequest(const QUrl& url, const std::string& accessToken)
+        {
+            return javelin::jmap::api::HttpRequest{
+                .method = javelin::jmap::api::HttpMethod::Get,
+                .url = url,
+                .headers =
+                    {
+                        javelin::jmap::api::HttpHeader{
+                            .name = "Authorization",
+                            .value = QByteArray{"Bearer "} +
+                                     QByteArray::fromStdString(accessToken),
+                        },
+                        javelin::jmap::api::HttpHeader{
+                            .name = "Accept",
+                            .value = "*/*",
+                        },
+                    },
+                .body = {},
+            };
+        }
+
+        [[nodiscard]] std::vector<javelin::jmap::cache::EmailPart>
+        missingInlineImageParts(
+            const std::vector<javelin::jmap::cache::EmailPart>& parts,
+            javelin::jmap::cache::InlinePartPayloadRepository& payloadRepository,
+            const std::string_view accountId)
+        {
+            std::vector<javelin::jmap::cache::EmailPart> missingParts;
+            for (const auto& part : parts)
+            {
+                if (!part.isInlineRenderable || !part.blobId.has_value() ||
+                    !part.cid.has_value() || part.mediaType.rfind("image/", 0) != 0)
+                {
+                    continue;
+                }
+
+                const auto payloadResult =
+                    payloadRepository.find(accountId, part.emailId, part.partId);
+                if (std::holds_alternative<javelin::jmap::cache::DatabaseError>(payloadResult))
+                {
+                    continue;
+                }
+
+                const auto& payload =
+                    std::get<std::optional<javelin::jmap::cache::InlinePartPayload>>(payloadResult);
+                if (payload.has_value() && payload->blobId == *part.blobId)
+                {
+                    continue;
+                }
+
+                missingParts.push_back(part);
+            }
+
+            return missingParts;
+        }
+
+        [[nodiscard]] QCoro::Task<std::optional<LiveRefreshError>>
+        cacheInlineImageParts(javelin::jmap::api::AbstractTransport& transport,
+                              const javelin::jmap::auth::AccountCredentials& credentials,
+                              const std::string_view downloadUrlTemplate,
+                              const std::string_view accountId,
+                              const std::vector<javelin::jmap::cache::EmailPart>& parts,
+                              javelin::jmap::cache::InlinePartPayloadRepository& payloadRepository)
+        {
+            const javelin::jmap::auth::AccessTokenResolver accessTokenResolver;
+            const auto tokenResult = accessTokenResolver.resolve(credentials);
+            if (const auto* error = std::get_if<javelin::jmap::api::AuthError>(&tokenResult))
+            {
+                co_return LiveRefreshError{.message = authMessage(*error)};
+            }
+
+            const auto accessToken =
+                std::get<javelin::jmap::auth::OAuthToken>(tokenResult).accessToken;
+            for (const auto& part : parts)
+            {
+                const auto transportResult = co_await transport.send(
+                    buildDownloadRequest(buildDownloadUrl(downloadUrlTemplate, accountId, part),
+                                         accessToken));
+                if (const auto* error =
+                        std::get_if<javelin::jmap::api::TransportError>(&transportResult))
+                {
+                    co_return LiveRefreshError{.message = transportMessage(*error)};
+                }
+
+                const auto& response =
+                    std::get<javelin::jmap::api::HttpResponse>(transportResult);
+                if (const auto error = payloadRepository.upsert(
+                        accountId, {
+                                       .emailId = part.emailId,
+                                       .partId = part.partId,
+                                       .blobId = *part.blobId,
+                                       .mediaType = part.mediaType,
+                                       .payload = response.body,
+                                   }))
+                {
+                    co_return LiveRefreshError{.message = error->message};
+                }
+            }
+
+            co_return std::nullopt;
         }
 
     } // namespace
@@ -714,6 +842,8 @@ namespace javelin::jmap
 
         javelin::jmap::cache::MessageContentRepository contentRepository{
             *m_impl->databaseConnection};
+        javelin::jmap::cache::InlinePartPayloadRepository payloadRepository{
+            *m_impl->databaseConnection};
         const auto cachedParts = contentRepository.loadParts(accountId, emailId);
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&cachedParts))
         {
@@ -729,7 +859,8 @@ namespace javelin::jmap
         const auto& parts = std::get<std::vector<javelin::jmap::cache::EmailPart>>(cachedParts);
         const auto& bodyValues =
             std::get<std::vector<javelin::jmap::cache::EmailBodyValue>>(cachedBodyValues);
-        if (!parts.empty() || !bodyValues.empty())
+        const auto cachedInlineMissing = missingInlineImageParts(parts, payloadRepository, accountId);
+        if ((!parts.empty() || !bodyValues.empty()) && cachedInlineMissing.empty())
         {
             qInfo().noquote() << "JMAP core message content using cached data"
                               << QString::fromStdString(emailId);
@@ -774,6 +905,41 @@ namespace javelin::jmap
                 },
             .apiUrl = session->apiUrl,
         };
+
+        const javelin::jmap::auth::AccountCredentials downloadCredentials{
+            .accountId = accountId,
+            .emailAddress = settings.loginEmail,
+            .sessionUrl = settings.sessionUrl,
+            .token =
+                {
+                    .accessToken = settings.apiKey,
+                    .refreshToken = std::nullopt,
+                    .expiry = std::nullopt,
+                },
+        };
+
+        if (!cachedInlineMissing.empty())
+        {
+            if (const auto downloadError =
+                    co_await cacheInlineImageParts(*m_impl->transport, downloadCredentials,
+                                                   session->downloadUrl, accountId,
+                                                   cachedInlineMissing, payloadRepository))
+            {
+                co_return *downloadError;
+            }
+
+            qInfo().noquote() << "JMAP core inline payload refresh success from cached MIME"
+                              << QString::fromStdString(emailId)
+                              << static_cast<qulonglong>(cachedInlineMissing.size());
+            reportProgress(QStringLiteral("Loaded message content from local cache."));
+            co_return MessageContentRefreshSummary{
+                .accountId = std::move(accountId),
+                .emailId = std::move(emailId),
+                .partCount = parts.size(),
+                .bodyValueCount = bodyValues.size(),
+                .usedCachedContent = true,
+            };
+        }
 
         const auto requestArguments = javelin::jmap::api::serializeEmailContentGetRequest({
             .accountId = accountId,
@@ -863,6 +1029,19 @@ namespace javelin::jmap
                                                                  contentBodyValues))
         {
             co_return LiveRefreshError{.message = error->message};
+        }
+
+        const auto missingInlineParts =
+            missingInlineImageParts(contentParts, payloadRepository, accountId);
+        if (!missingInlineParts.empty())
+        {
+            if (const auto downloadError =
+                    co_await cacheInlineImageParts(*m_impl->transport, downloadCredentials,
+                                                   session->downloadUrl, accountId,
+                                                   missingInlineParts, payloadRepository))
+            {
+                co_return *downloadError;
+            }
         }
 
         qInfo().noquote() << "JMAP core message content refresh success"

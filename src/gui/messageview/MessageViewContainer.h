@@ -12,9 +12,11 @@ class QLabel;
 class QPlainTextEdit;
 class QStackedWidget;
 class QToolButton;
+class QString;
 
 namespace javelin::gui::messageview
 {
+    class HtmlMessageView;
 
     class MessageViewContainer : public QWidget
     {
@@ -40,6 +42,7 @@ namespace javelin::gui::messageview
         void setActiveView(ActiveView view);
         void updateBodyButtons();
         void updatePresentation();
+        [[nodiscard]] QString attachmentSummaryText() const;
 
         std::optional<std::string> m_accountId;
         std::optional<std::string> m_mailboxId;
@@ -53,7 +56,7 @@ namespace javelin::gui::messageview
         QToolButton* m_htmlButton = nullptr;
         QStackedWidget* m_bodyStack = nullptr;
         QPlainTextEdit* m_plainTextView = nullptr;
-        QPlainTextEdit* m_htmlView = nullptr;
+        HtmlMessageView* m_htmlView = nullptr;
         ActiveView m_activeView = ActiveView::Placeholder;
     };
 

@@ -11,7 +11,7 @@ include(cmake/Dependencies.cmake)
 include(cmake/StaticAnalysis.cmake)
 include(cmake/Sanitizers.cmake)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Network Sql Widgets LinguistTools)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Network Sql Widgets LinguistTools WebEngineCore WebEngineWidgets)
 
 qt_standard_project_setup()
 javelin_configure_dependencies()
@@ -21,6 +21,9 @@ enable_testing()
 set(JAVELIN_FORMAT_FILES
     src/app/ApplicationBootstrap.cpp
     src/app/ApplicationBootstrap.h
+    src/app/InlineMessageSchemeHandler.cpp
+    src/app/InlineMessageSchemeHandler.h
+    src/app/WebEngineSetup.h
     src/app/main.cpp
     src/app/ProcessServices.cpp
     src/app/ProcessServices.h
@@ -28,6 +31,8 @@ set(JAVELIN_FORMAT_FILES
     src/gui/mailboxes/MailboxTreeModel.h
     src/gui/messages/MessageListModel.cpp
     src/gui/messages/MessageListModel.h
+    src/gui/messageview/HtmlMessageView.cpp
+    src/gui/messageview/HtmlMessageView.h
     src/gui/messageview/MessageViewContainer.cpp
     src/gui/messageview/MessageViewContainer.h
     src/gui/settings/PreferencesDialog.cpp
@@ -56,6 +61,8 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/cache/Database.h
     src/jmap/cache/EmailRepository.cpp
     src/jmap/cache/EmailRepository.h
+    src/jmap/cache/InlinePartPayloadRepository.cpp
+    src/jmap/cache/InlinePartPayloadRepository.h
     src/jmap/cache/MailboxRepository.cpp
     src/jmap/cache/MailboxRepository.h
     src/jmap/cache/MessageContentRepository.cpp
@@ -77,6 +84,10 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/query/MessageGrouping.h
     src/jmap/query/QueryDiff.cpp
     src/jmap/query/QueryDiff.h
+    src/jmap/render/HtmlMessageDocumentBuilder.cpp
+    src/jmap/render/HtmlMessageDocumentBuilder.h
+    src/jmap/render/InlineMessageUrl.cpp
+    src/jmap/render/InlineMessageUrl.h
     src/jmap/sync/LongPollWorker.cpp
     src/jmap/sync/LongPollWorker.h
     src/jmap/sync/PendingActions.cpp
@@ -97,6 +108,10 @@ set(JAVELIN_FORMAT_FILES
     tests/jmap/AuthTest.cpp
     tests/jmap/DatabaseTest.cpp
     tests/jmap/EmailRepositoryTest.cpp
+    tests/jmap/HtmlMessageDocumentBuilderTest.cpp
+    tests/jmap/InlinePartPayloadRepositoryTest.cpp
+    tests/jmap/InlineMessageUrlTest.cpp
+    tests/jmap/JmapCoreMessageContentTest.cpp
     tests/jmap/JmapCoreTest.cpp
     tests/jmap/LongPollWorkerTest.cpp
     tests/jmap/MailMethodsTest.cpp
@@ -142,6 +157,8 @@ add_library(javelin_jmap STATIC
     src/jmap/cache/Database.h
     src/jmap/cache/EmailRepository.cpp
     src/jmap/cache/EmailRepository.h
+    src/jmap/cache/InlinePartPayloadRepository.cpp
+    src/jmap/cache/InlinePartPayloadRepository.h
     src/jmap/cache/MailboxRepository.cpp
     src/jmap/cache/MailboxRepository.h
     src/jmap/cache/MessageContentRepository.cpp
@@ -163,6 +180,10 @@ add_library(javelin_jmap STATIC
     src/jmap/query/MessageGrouping.h
     src/jmap/query/QueryDiff.cpp
     src/jmap/query/QueryDiff.h
+    src/jmap/render/HtmlMessageDocumentBuilder.cpp
+    src/jmap/render/HtmlMessageDocumentBuilder.h
+    src/jmap/render/InlineMessageUrl.cpp
+    src/jmap/render/InlineMessageUrl.h
     src/jmap/sync/LongPollWorker.cpp
     src/jmap/sync/LongPollWorker.h
     src/jmap/sync/PendingActions.cpp
@@ -187,6 +208,7 @@ target_link_libraries(javelin_jmap
         Qt::Core
         Qt::Network
         Qt::Sql
+        Qt::WebEngineCore
     PRIVATE
         QCoro6::Network
         glaze::glaze
@@ -200,6 +222,8 @@ add_library(javelin_gui STATIC
     src/gui/mailboxes/MailboxTreeModel.h
     src/gui/messages/MessageListModel.cpp
     src/gui/messages/MessageListModel.h
+    src/gui/messageview/HtmlMessageView.cpp
+    src/gui/messageview/HtmlMessageView.h
     src/gui/messageview/MessageViewContainer.cpp
     src/gui/messageview/MessageViewContainer.h
     src/gui/settings/PreferencesDialog.cpp
@@ -214,6 +238,7 @@ target_link_libraries(javelin_gui
     PUBLIC
         Qt::Core
         Qt::Widgets
+        Qt::WebEngineWidgets
     PRIVATE
         javelin_jmap
 )
@@ -224,6 +249,9 @@ javelin_enable_sanitizers(javelin_gui)
 add_library(javelin_app STATIC
     src/app/ApplicationBootstrap.cpp
     src/app/ApplicationBootstrap.h
+    src/app/InlineMessageSchemeHandler.cpp
+    src/app/InlineMessageSchemeHandler.h
+    src/app/WebEngineSetup.h
     src/app/ProcessServices.cpp
     src/app/ProcessServices.h
 )
@@ -234,6 +262,7 @@ target_link_libraries(javelin_app
     PUBLIC
         Qt::Core
         Qt::Widgets
+        Qt::WebEngineCore
     PRIVATE
         javelin_gui
         javelin_jmap

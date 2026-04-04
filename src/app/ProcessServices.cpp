@@ -1,13 +1,17 @@
 #include "app/ProcessServices.h"
 
+#include "app/InlineMessageSchemeHandler.h"
+
 #include "jmap/JmapCore.h"
 #include "jmap/api/Transport.h"
 #include "jmap/cache/AccountRepository.h"
 #include "jmap/cache/MessageViewService.h"
 #include "jmap/cache/QueryService.h"
+#include "jmap/render/InlineMessageUrl.h"
 
 #include <QDir>
 #include <QStandardPaths>
+#include <QWebEngineProfile>
 
 #include <memory>
 #include <stdexcept>
@@ -45,6 +49,11 @@ namespace javelin::app
         m_networkAccessManager = std::make_unique<QNetworkAccessManager>();
         m_transport =
             std::make_unique<javelin::jmap::api::QtNetworkTransport>(*m_networkAccessManager);
+        m_inlineMessageSchemeHandler =
+            std::make_unique<InlineMessageSchemeHandler>(m_databaseConnection);
+        QWebEngineProfile::defaultProfile()->installUrlSchemeHandler(
+            javelin::jmap::render::inlineMessageUrlScheme().toUtf8(),
+            m_inlineMessageSchemeHandler.get());
         m_jmapCore = std::make_unique<javelin::jmap::JmapCore>(m_databaseConnection, *m_transport);
         m_accountRepository =
             std::make_unique<javelin::jmap::cache::AccountRepository>(m_databaseConnection);
