@@ -9,6 +9,7 @@ add_executable(javelin_jmap_tests
     jmap/MailEntityParsersTest.cpp
     jmap/SessionClientTest.cpp
     jmap/SessionTest.cpp
+    jmap/SyncStateRepositoryTest.cpp
 )
 
 target_include_directories(javelin_jmap_tests

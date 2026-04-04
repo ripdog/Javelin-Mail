@@ -454,6 +454,7 @@ Completed so far:
 - [x] Add a SQLite cache connection boundary with per-thread named connections and explicit close semantics.
 - [x] Add transactional schema versioning and an initial migration runner for the cache schema.
 - [x] Apply the initial WAL/pragma policy at open time and cover fresh-create plus reopen behavior with tests.
+- [x] Add the first cache repository for persisted sync state tokens with deterministic round-trip tests.
 
 Exit criteria:
 
