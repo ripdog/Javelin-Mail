@@ -469,6 +469,7 @@ Completed so far:
 - [x] Add MIME-part metadata and canonical body-value repositories without general attachment payload caching.
 - [x] Add SQL-backed mailbox-tree and paged message-list query APIs shaped for GUI consumption.
 - [x] Add an explicit thread-scoped database connection factory so cache access keeps thread ownership visible in the API.
+- [x] Lock in the initial long-running SQLite policy with WAL pragmas and query-plan regression tests for mailbox tree and message list indexes.
 
 Exit criteria:
 

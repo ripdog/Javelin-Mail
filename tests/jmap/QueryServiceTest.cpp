@@ -7,11 +7,15 @@
 #include <QCoreApplication>
 #include <QSqlQuery>
 #include <QTemporaryDir>
+#include <QVariant>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <QStringList>
+#include <algorithm>
 #include <memory>
 #include <variant>
+#include <vector>
 
 namespace
 {
@@ -97,6 +101,28 @@ namespace
         return *parsed.value;
     }
 
+    [[nodiscard]] QStringList
+    explainQueryPlan(QSqlDatabase& database, const QString& statement,
+                     const std::vector<std::pair<QString, QVariant>>& bindings)
+    {
+        QSqlQuery query{database};
+        query.prepare(QStringLiteral("EXPLAIN QUERY PLAN %1").arg(statement));
+        for (const auto& [name, value] : bindings)
+        {
+            query.bindValue(name, value);
+        }
+
+        REQUIRE(query.exec());
+
+        QStringList details;
+        while (query.next())
+        {
+            details.push_back(query.value(3).toString());
+        }
+
+        return details;
+    }
+
 } // namespace
 
 TEST_CASE("query service returns mailbox tree rows shaped for a tree model", "[jmap][cache][query]")
@@ -170,4 +196,46 @@ TEST_CASE("query service returns paged compact message list rows", "[jmap][cache
     CHECK(secondItems.front().isFlagged);
     REQUIRE(secondItems.front().from.has_value());
     CHECK(secondItems.front().from->email == "alice@example.com");
+}
+
+TEST_CASE("query service SQL plans use the intended cache indexes", "[jmap][cache][query]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+
+    const auto mailboxPlan = explainQueryPlan(
+        databaseContext.connection.database(),
+        "SELECT m.mailbox_id, m.name, m.parent_mailbox_id, m.role, m.sort_order, "
+        "m.total_emails, m.unread_emails, m.total_threads, m.unread_threads, "
+        "m.is_subscribed, "
+        "EXISTS("
+        "  SELECT 1 FROM mailboxes child "
+        "  WHERE child.account_id = m.account_id AND child.parent_mailbox_id = m.mailbox_id"
+        ") AS has_children "
+        "FROM mailboxes m "
+        "WHERE m.account_id = :account_id "
+        "ORDER BY COALESCE(m.parent_mailbox_id, ''), m.sort_order, m.mailbox_id",
+        {{":account_id", "account-1"}});
+    CHECK(std::any_of(mailboxPlan.cbegin(), mailboxPlan.cend(), [](const QString& detail)
+                      { return detail.contains("idx_mailboxes_parent", Qt::CaseInsensitive); }));
+
+    const auto messagePlan = explainQueryPlan(
+        databaseContext.connection.database(),
+        "SELECT e.email_id, e.thread_id, e.subject, e.preview, e.received_at, e.sent_at, "
+        "e.has_attachment "
+        "FROM emails e "
+        "INNER JOIN email_mailboxes em ON em.account_id = e.account_id AND em.email_id = "
+        "e.email_id "
+        "WHERE e.account_id = :account_id AND em.mailbox_id = :mailbox_id "
+        "ORDER BY e.received_at DESC, e.email_id DESC "
+        "LIMIT :limit OFFSET :offset",
+        {{":account_id", "account-1"},
+         {":mailbox_id", "mbx-inbox"},
+         {":limit", 50},
+         {":offset", 0}});
+    CHECK(std::any_of(
+        messagePlan.cbegin(), messagePlan.cend(), [](const QString& detail)
+        { return detail.contains("idx_email_mailboxes_mailbox", Qt::CaseInsensitive); }));
 }
