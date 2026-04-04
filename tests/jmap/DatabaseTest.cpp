@@ -153,3 +153,45 @@ TEST_CASE("database migrations are repeatable when reopening an existing cache",
     CHECK(migrations.back().version == 4);
     CHECK(connection.schemaVersion() == 4);
 }
+
+TEST_CASE("thread connection factory encodes owner tag and current thread in connection names",
+          "[jmap][cache][database]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    QTemporaryDir temporaryDir;
+    REQUIRE(temporaryDir.isValid());
+
+    const QString databasePath = temporaryDir.filePath("cache.sqlite3");
+    const javelin::jmap::cache::ThreadConnectionFactory factory{
+        javelin::jmap::cache::ThreadConnectionFactoryOptions{
+            .connectionNamePrefix = "javelin-cache",
+            .databasePath = databasePath,
+        }};
+
+    auto firstOpen = factory.openForCurrentThread("gui");
+    if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&firstOpen))
+    {
+        FAIL(error->message.toStdString());
+    }
+
+    auto firstConnection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(firstOpen));
+    const QString expectedName =
+        QStringLiteral("javelin-cache-gui-thread-%1")
+            .arg(javelin::jmap::cache::ThreadConnectionFactory::currentThreadTag());
+    CHECK(firstConnection.connectionName() == expectedName);
+
+    firstConnection = {};
+
+    auto secondOpen = factory.openForCurrentThread("gui");
+    if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&secondOpen))
+    {
+        FAIL(error->message.toStdString());
+    }
+
+    auto secondConnection =
+        std::get<javelin::jmap::cache::DatabaseConnection>(std::move(secondOpen));
+    CHECK(secondConnection.connectionName() == expectedName);
+    CHECK(secondConnection.schemaVersion() == 4);
+}

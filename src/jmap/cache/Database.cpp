@@ -2,8 +2,11 @@
 
 #include <QSqlError>
 #include <QSqlQuery>
+#include <QThread>
 
+#include <cstdint>
 #include <span>
+#include <sstream>
 #include <utility>
 
 namespace javelin::jmap::cache
@@ -105,6 +108,13 @@ namespace javelin::jmap::cache
             }
 
             return std::nullopt;
+        }
+
+        [[nodiscard]] QString encodeThreadHandle(const Qt::HANDLE threadHandle)
+        {
+            std::ostringstream stream;
+            stream << reinterpret_cast<std::uintptr_t>(threadHandle);
+            return QString::fromStdString(stream.str());
         }
 
     } // namespace
@@ -290,6 +300,11 @@ namespace javelin::jmap::cache
         return m_database;
     }
 
+    const QString& DatabaseConnection::connectionName() const
+    {
+        return m_connectionName;
+    }
+
     std::optional<DatabaseError> DatabaseConnection::validate() const
     {
         if (!m_database.isValid() || !m_database.isOpen())
@@ -360,6 +375,32 @@ namespace javelin::jmap::cache
 
         m_database = QSqlDatabase{};
         m_connectionName.clear();
+    }
+
+    ThreadConnectionFactory::ThreadConnectionFactory(ThreadConnectionFactoryOptions options)
+        : m_options(std::move(options))
+    {
+    }
+
+    QString ThreadConnectionFactory::currentThreadTag()
+    {
+        return encodeThreadHandle(QThread::currentThreadId());
+    }
+
+    std::variant<DatabaseConnection, DatabaseError>
+    ThreadConnectionFactory::openForCurrentThread(const std::string_view ownerTag) const
+    {
+        return DatabaseConnection::open({
+            .connectionName = makeConnectionName(ownerTag),
+            .databasePath = m_options.databasePath,
+        });
+    }
+
+    QString ThreadConnectionFactory::makeConnectionName(const std::string_view ownerTag) const
+    {
+        return QStringLiteral("%1-%2-thread-%3")
+            .arg(m_options.connectionNamePrefix, QString::fromStdString(std::string{ownerTag}),
+                 currentThreadTag());
     }
 
     MigrationRunner createDefaultMigrationRunner()

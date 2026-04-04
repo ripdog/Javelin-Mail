@@ -2,9 +2,11 @@
 
 #include <QSqlDatabase>
 #include <QString>
+#include <Qt>
 
 #include <optional>
 #include <span>
+#include <string_view>
 #include <variant>
 #include <vector>
 
@@ -57,6 +59,12 @@ namespace javelin::jmap::cache
         QString databasePath;
     };
 
+    struct ThreadConnectionFactoryOptions
+    {
+        QString connectionNamePrefix;
+        QString databasePath;
+    };
+
     class DatabaseConnection
     {
       public:
@@ -72,6 +80,7 @@ namespace javelin::jmap::cache
 
         [[nodiscard]] QSqlDatabase& database();
         [[nodiscard]] const QSqlDatabase& database() const;
+        [[nodiscard]] const QString& connectionName() const;
         [[nodiscard]] std::optional<DatabaseError> validate() const;
         [[nodiscard]] int schemaVersion() const;
         [[nodiscard]] std::variant<std::vector<AppliedMigration>, DatabaseError>
@@ -84,6 +93,21 @@ namespace javelin::jmap::cache
 
         QString m_connectionName;
         QSqlDatabase m_database;
+    };
+
+    class ThreadConnectionFactory
+    {
+      public:
+        explicit ThreadConnectionFactory(ThreadConnectionFactoryOptions options);
+
+        [[nodiscard]] static QString currentThreadTag();
+        [[nodiscard]] std::variant<DatabaseConnection, DatabaseError>
+        openForCurrentThread(std::string_view ownerTag) const;
+
+      private:
+        [[nodiscard]] QString makeConnectionName(std::string_view ownerTag) const;
+
+        ThreadConnectionFactoryOptions m_options;
     };
 
     [[nodiscard]] MigrationRunner createDefaultMigrationRunner();
