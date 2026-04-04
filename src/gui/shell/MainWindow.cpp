@@ -2,6 +2,7 @@
 
 #include "gui/mailboxes/MailboxTreeModel.h"
 #include "gui/messages/MessageListModel.h"
+#include "gui/messageview/MessageViewContainer.h"
 #include "jmap/JmapCore.h"
 #include "jmap/cache/AccountRepository.h"
 #include "jmap/cache/QueryService.h"
@@ -32,6 +33,21 @@ namespace javelin::gui::shell
             const auto accountId = accountCombo.currentData().toString();
             return accountId.isEmpty() ? std::optional<std::string>{std::nullopt}
                                        : std::optional<std::string>{accountId.toStdString()};
+        }
+
+        [[nodiscard]] std::optional<std::string> currentMailboxId(const QTreeView& mailboxView)
+        {
+            const auto currentIndex = mailboxView.currentIndex();
+            if (!currentIndex.isValid())
+            {
+                return std::nullopt;
+            }
+
+            const auto mailboxId =
+                currentIndex.data(javelin::gui::mailboxes::MailboxTreeModel::MailboxIdRole)
+                    .toString();
+            return mailboxId.isEmpty() ? std::optional<std::string>{std::nullopt}
+                                       : std::optional<std::string>{mailboxId.toStdString()};
         }
 
     } // namespace
@@ -74,15 +90,12 @@ namespace javelin::gui::shell
         messageLayout->addWidget(m_messageEmptyState);
         messageLayout->addWidget(m_messageView);
 
-        auto* messageViewPane = new QLabel(
-            QStringLiteral("Message view services will attach selected-message loading here."),
-            this);
-        messageViewPane->setWordWrap(true);
+        m_messageViewContainer = new javelin::gui::messageview::MessageViewContainer(this);
 
         m_mainSplitter = new QSplitter(Qt::Horizontal, this);
         m_mainSplitter->addWidget(m_mailboxView);
         m_mainSplitter->addWidget(messagePane);
-        m_mainSplitter->addWidget(messageViewPane);
+        m_mainSplitter->addWidget(m_messageViewContainer);
         m_mainSplitter->setStretchFactor(0, 1);
         m_mainSplitter->setStretchFactor(1, 2);
         m_mainSplitter->setStretchFactor(2, 3);
@@ -110,8 +123,11 @@ namespace javelin::gui::shell
                     const auto account = accountId.isEmpty()
                                              ? std::optional<std::string>{std::nullopt}
                                              : std::optional<std::string>{accountId.toStdString()};
+                    m_mailboxView->clearSelection();
+                    m_messageView->clearSelection();
                     m_mailboxModel->setAccountId(account);
                     m_messageModel->setMailboxContext(account, std::nullopt);
+                    m_messageViewContainer->setSelection(account, std::nullopt, std::nullopt);
                     updateEmptyStates();
                 });
 
@@ -121,7 +137,9 @@ namespace javelin::gui::shell
                     const auto accountId = currentAccountId(*m_accountCombo);
                     if (!current.isValid())
                     {
+                        m_messageView->clearSelection();
                         m_messageModel->setMailboxContext(accountId, std::nullopt);
+                        m_messageViewContainer->setSelection(accountId, std::nullopt, std::nullopt);
                         updateEmptyStates();
                         return;
                     }
@@ -134,9 +152,39 @@ namespace javelin::gui::shell
                         return;
                     }
 
+                    m_messageView->clearSelection();
                     m_messageModel->setMailboxContext(*accountId, mailboxId.toStdString());
+                    m_messageViewContainer->setSelection(accountId, mailboxId.toStdString(),
+                                                         std::nullopt);
                     updateEmptyStates();
                 });
+
+        connect(
+            m_messageView->selectionModel(), &QItemSelectionModel::currentChanged, this,
+            [this](const QModelIndex& current, const QModelIndex&)
+            {
+                const auto accountId = currentAccountId(*m_accountCombo);
+                const auto mailboxId = currentMailboxId(*m_mailboxView);
+                if (!accountId.has_value() || !mailboxId.has_value())
+                {
+                    m_messageViewContainer->setSelection(accountId, mailboxId, std::nullopt);
+                    return;
+                }
+
+                if (!current.isValid())
+                {
+                    m_messageViewContainer->setSelection(accountId, mailboxId, std::nullopt);
+                    return;
+                }
+
+                const auto emailId =
+                    current.data(javelin::gui::messages::MessageListModel::EmailIdRole).toString();
+                m_messageViewContainer->setSelection(
+                    accountId, mailboxId,
+                    emailId.isEmpty() ? std::optional<std::string>{std::nullopt}
+                                      : std::optional<std::string>{emailId.toStdString()});
+                updateEmptyStates();
+            });
     }
 
     void MainWindow::reloadAccounts()
@@ -160,7 +208,11 @@ namespace javelin::gui::shell
             const auto accountId = m_accountCombo->currentData().toString().toStdString();
             m_mailboxModel->setAccountId(accountId);
             m_messageModel->setMailboxContext(accountId, std::nullopt);
+            m_messageViewContainer->setSelection(accountId, std::nullopt, std::nullopt);
+            return;
         }
+
+        m_messageViewContainer->setSelection(std::nullopt, std::nullopt, std::nullopt);
     }
 
     void MainWindow::updateEmptyStates()

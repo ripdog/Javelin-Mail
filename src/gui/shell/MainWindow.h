@@ -30,6 +30,11 @@ namespace javelin::gui::messages
     class MessageListModel;
 }
 
+namespace javelin::gui::messageview
+{
+    class MessageViewContainer;
+}
+
 namespace javelin::gui::shell
 {
 
@@ -58,6 +63,7 @@ namespace javelin::gui::shell
         QSplitter* m_mainSplitter = nullptr;
         javelin::gui::mailboxes::MailboxTreeModel* m_mailboxModel = nullptr;
         javelin::gui::messages::MessageListModel* m_messageModel = nullptr;
+        javelin::gui::messageview::MessageViewContainer* m_messageViewContainer = nullptr;
         QTreeView* m_mailboxView = nullptr;
         QListView* m_messageView = nullptr;
         QLabel* m_messageEmptyState = nullptr;

@@ -548,6 +548,7 @@ Completed so far:
 - [x] Replace the starter shell with `QAbstractItemModel`-backed mailbox/message panes wired to cache query services and basic empty-state handling.
 - [x] Add cached account selection plumbing so the main shell can switch mailbox and message queries between persisted JMAP accounts.
 - [x] Persist main-window geometry, pane sizes, and selected account so the three-pane shell restores its last layout cleanly.
+- [x] Replace the placeholder right pane with a dedicated message-view container that tracks account, mailbox, and message selection states explicitly.
 
 Exit criteria:
 
