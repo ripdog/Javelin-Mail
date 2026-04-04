@@ -5,6 +5,7 @@
 #include <QString>
 
 #include <cstddef>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -72,10 +73,12 @@ namespace javelin::jmap
 
         [[nodiscard]] QString statusSummary() const;
         [[nodiscard]] QCoro::Task<LiveRefreshResult>
-        refreshFromServer(const LiveConnectionSettings& settings);
+        refreshFromServer(LiveConnectionSettings settings,
+                          std::function<void(const QString&)> progressCallback = {});
         [[nodiscard]] QCoro::Task<MessageContentRefreshResult>
-        refreshMessageContent(const LiveConnectionSettings& settings, std::string accountId,
-                              std::string emailId);
+        refreshMessageContent(LiveConnectionSettings settings, std::string accountId,
+                              std::string emailId,
+                              std::function<void(const QString&)> progressCallback = {});
 
       private:
         struct Impl;

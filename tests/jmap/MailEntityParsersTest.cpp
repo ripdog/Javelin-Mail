@@ -17,6 +17,17 @@ TEST_CASE("mailbox fixtures parse into typed mailbox entities", "[jmap][domain]"
     CHECK_FALSE(result.value->myRights.mayDelete);
 }
 
+TEST_CASE("mailbox parser ignores unknown server fields", "[jmap][domain]")
+{
+    const auto result = javelin::jmap::domain::parseMailbox(
+        R"({"id":"mbx-inbox","name":"Inbox","parentId":null,"role":"inbox","sortOrder":10,"totalEmails":125,"unreadEmails":7,"totalThreads":98,"unreadThreads":5,"isSubscribed":true,"didFoldersCheck":1,"hidden":0,"autoPurge":false,"learnAsSpam":false,"autoLearn":false,"myRights":{"mayReadItems":true,"mayAddItems":true,"mayRemoveItems":true,"maySetSeen":true,"maySetKeywords":true,"mayCreateChild":false,"mayRename":false,"mayDelete":false,"maySubmit":true}})");
+
+    REQUIRE(result.ok());
+    REQUIRE(result.value.has_value());
+    CHECK(result.value->id == "mbx-inbox");
+    CHECK(result.value->role == "inbox");
+}
+
 TEST_CASE("thread fixtures parse into typed thread entities", "[jmap][domain]")
 {
     const auto result = javelin::jmap::domain::parseThread(

@@ -4,6 +4,7 @@
 #include "jmap/auth/AccessTokenResolver.h"
 
 #include <QByteArray>
+#include <QDebug>
 #include <QString>
 #include <QUrl>
 
@@ -51,9 +52,13 @@ namespace javelin::jmap::api
     QCoro::Task<MethodCallerResult> MethodCaller::call(const ApiRequestContext& requestContext,
                                                        const RequestEnvelope& request) const
     {
+        qInfo().noquote() << "JMAP method call start"
+                          << QString::fromStdString(requestContext.apiUrl)
+                          << static_cast<int>(request.methodCalls.size());
         const auto serializedRequest = serializeRequestEnvelope(request);
         if (!serializedRequest.has_value())
         {
+            qWarning() << "JMAP method call serialization failure";
             co_return ProtocolError{
                 .code = ProtocolErrorCode::InvalidResponse,
                 .message = "Failed to serialize JMAP request envelope",
@@ -65,6 +70,9 @@ namespace javelin::jmap::api
         const auto tokenResult = accessTokenResolver.resolve(requestContext.credentials);
         if (std::holds_alternative<AuthError>(tokenResult))
         {
+            const auto& error = std::get<AuthError>(tokenResult);
+            qWarning().noquote() << "JMAP method call auth failure"
+                                 << QString::fromStdString(error.message);
             co_return std::get<AuthError>(tokenResult);
         }
 
@@ -73,6 +81,9 @@ namespace javelin::jmap::api
             *serializedRequest));
         if (std::holds_alternative<TransportError>(transportResult))
         {
+            const auto& error = std::get<TransportError>(transportResult);
+            qWarning().noquote() << "JMAP method call transport failure"
+                                 << QString::fromStdString(error.message);
             co_return std::get<TransportError>(transportResult);
         }
 
@@ -80,12 +91,16 @@ namespace javelin::jmap::api
         const auto parseResult = parseResponseEnvelope(response.body.toStdString());
         if (!parseResult.ok())
         {
+            qWarning().noquote() << "JMAP method call response parse failure"
+                                 << QString::fromStdString(*parseResult.error);
             co_return ProtocolError{
                 .code = ProtocolErrorCode::InvalidResponse,
                 .message = *parseResult.error,
             };
         }
 
+        qInfo() << "JMAP method call success"
+                << static_cast<int>(parseResult.value->methodResponses.size());
         co_return *parseResult.value;
     }
 

@@ -9,6 +9,7 @@
 #pragma GCC diagnostic pop
 #endif
 
+#include <QDebug>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QScopeGuard>
@@ -18,6 +19,18 @@ namespace javelin::jmap::api
 
     namespace
     {
+        constexpr int requestTimeoutMs = 30000;
+
+        [[nodiscard]] QByteArray summarizeBody(const QByteArray& body)
+        {
+            constexpr int maxBytes = 512;
+            if (body.size() <= maxBytes)
+            {
+                return body;
+            }
+
+            return body.first(maxBytes) + "...";
+        }
 
         [[nodiscard]] TransportError mapReplyError(QNetworkReply& reply)
         {
@@ -49,10 +62,14 @@ namespace javelin::jmap::api
     QCoro::Task<TransportResult> QtNetworkTransport::send(const HttpRequest& request)
     {
         QNetworkRequest networkRequest{request.url};
+        networkRequest.setTransferTimeout(requestTimeoutMs);
         for (const HttpHeader& header : request.headers)
         {
             networkRequest.setRawHeader(header.name, header.value);
         }
+
+        qInfo().noquote() << "JMAP transport request" << request.url.toString()
+                          << (request.method == HttpMethod::Get ? "GET" : "POST");
 
         QNetworkReply* reply = nullptr;
         switch (request.method)
@@ -76,13 +93,20 @@ namespace javelin::jmap::api
 
         if (reply->error() != QNetworkReply::NoError)
         {
+            qWarning().noquote() << "JMAP transport network error" << request.url.toString()
+                                 << reply->error() << reply->errorString();
             co_return mapReplyError(*reply);
         }
 
         const auto statusCodeAttribute = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute);
         const int statusCode = statusCodeAttribute.isValid() ? statusCodeAttribute.toInt() : 0;
+        const QByteArray responseBody = reply->readAll();
+        qInfo().noquote() << "JMAP transport response" << request.url.toString() << statusCode
+                          << summarizeBody(responseBody);
         if (statusCode >= 400)
         {
+            qWarning().noquote() << "JMAP transport HTTP failure" << request.url.toString()
+                                 << statusCode << summarizeBody(responseBody);
             co_return TransportError{
                 .code = TransportErrorCode::HttpFailure,
                 .message = reply->errorString().toStdString(),
@@ -92,7 +116,7 @@ namespace javelin::jmap::api
 
         co_return HttpResponse{
             .statusCode = statusCode,
-            .body = reply->readAll(),
+            .body = responseBody,
         };
     }
 

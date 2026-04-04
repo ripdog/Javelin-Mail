@@ -13,6 +13,7 @@
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/cache/SyncStateRepository.h"
 
+#include <QDebug>
 #include <algorithm>
 #include <unordered_map>
 #include <utility>
@@ -216,8 +217,21 @@ namespace javelin::jmap
     }
 
     QCoro::Task<LiveRefreshResult>
-    JmapCore::refreshFromServer(const LiveConnectionSettings& settings)
+    JmapCore::refreshFromServer(LiveConnectionSettings settings,
+                                std::function<void(const QString&)> progressCallback)
     {
+        const auto reportProgress = [&progressCallback](const QString& message)
+        {
+            if (progressCallback)
+            {
+                progressCallback(message);
+            }
+        };
+
+        qInfo().noquote() << "JMAP core refresh start"
+                          << QString::fromStdString(settings.loginEmail)
+                          << QString::fromStdString(settings.sessionUrl);
+        reportProgress(QStringLiteral("Discovering JMAP session..."));
         if (m_impl->databaseConnection == nullptr || m_impl->transport == nullptr)
         {
             co_return LiveRefreshError{
@@ -270,6 +284,7 @@ namespace javelin::jmap
         }
 
         const auto& session = std::get<javelin::jmap::api::Session>(discovered);
+        reportProgress(QStringLiteral("Session discovered. Saving account state..."));
         if (!session.primaryAccounts.mailAccountId.has_value())
         {
             co_return LiveRefreshError{
@@ -280,29 +295,51 @@ namespace javelin::jmap
 
         const auto& accountId = *session.primaryAccounts.mailAccountId;
         javelin::jmap::cache::SessionRepository sessionRepository{*m_impl->databaseConnection};
+        qInfo().noquote() << "JMAP core saving session and accounts"
+                          << QString::fromStdString(accountId)
+                          << static_cast<qulonglong>(session.accounts.size());
         if (const auto error = sessionRepository.replace(accountId, session))
         {
             co_return LiveRefreshError{.message = error->message};
         }
+        reportProgress(QStringLiteral("Cached session. Fetching mailboxes..."));
+        qInfo() << "JMAP core after cached-session progress";
+        qInfo() << "JMAP core before api request context";
 
-        const javelin::jmap::api::ApiRequestContext apiRequestContext{
+        qInfo() << "JMAP core building api request context";
+        javelin::jmap::api::ApiRequestContext apiRequestContext{
             .credentials =
                 {
-                    .accountId = accountId,
-                    .emailAddress = settings.loginEmail,
-                    .sessionUrl = settings.sessionUrl,
+                    .accountId = {},
+                    .emailAddress = {},
+                    .sessionUrl = {},
                     .token =
                         {
-                            .accessToken = settings.apiKey,
+                            .accessToken = {},
                             .refreshToken = std::nullopt,
                             .expiry = std::nullopt,
                         },
                 },
-            .apiUrl = session.apiUrl,
+            .apiUrl = {},
         };
+        qInfo() << "JMAP core request context default constructed";
+        apiRequestContext.credentials.accountId = accountId;
+        qInfo() << "JMAP core request context account set";
+        apiRequestContext.credentials.emailAddress = settings.loginEmail;
+        qInfo() << "JMAP core request context email set";
+        apiRequestContext.credentials.sessionUrl = settings.sessionUrl;
+        qInfo() << "JMAP core request context session url set";
+        apiRequestContext.credentials.token.accessToken = settings.apiKey;
+        qInfo() << "JMAP core request context token set";
+        apiRequestContext.apiUrl = session.apiUrl;
+        qInfo().noquote() << "JMAP core mailbox request context ready"
+                          << QString::fromStdString(apiRequestContext.apiUrl);
 
+        qInfo() << "JMAP core before method caller construction";
         javelin::jmap::api::MethodCaller methodCaller{*m_impl->transport};
+        qInfo() << "JMAP core method caller ready";
 
+        qInfo() << "JMAP core serializing Mailbox/get request";
         const auto mailboxArguments = javelin::jmap::api::serializeGetRequest(
             {.accountId = accountId, .ids = std::nullopt, .properties = std::nullopt});
         if (!mailboxArguments.has_value())
@@ -311,6 +348,8 @@ namespace javelin::jmap
                 .message = QStringLiteral("Failed to encode the Mailbox/get request."),
             };
         }
+        qInfo().noquote() << "JMAP core Mailbox/get request encoded"
+                          << QString::fromStdString(*mailboxArguments);
 
         const javelin::jmap::api::RequestEnvelope mailboxRequest{
             .usingCapabilities =
@@ -328,6 +367,8 @@ namespace javelin::jmap
                 },
             .createdIds = std::nullopt,
         };
+        qInfo() << "JMAP core Mailbox/get envelope ready";
+        qInfo() << "JMAP core before Mailbox/get await";
 
         const auto mailboxEnvelopeResult =
             co_await methodCaller.call(apiRequestContext, mailboxRequest);
@@ -365,6 +406,8 @@ namespace javelin::jmap
                 .message = QStringLiteral("Failed to parse Mailbox/get response."),
             };
         }
+        reportProgress(QStringLiteral("Fetched %1 mailboxes. Updating cache...")
+                           .arg(parsedMailboxes.value->list.size()));
 
         javelin::jmap::cache::MailboxRepository mailboxRepository{*m_impl->databaseConnection};
         if (const auto error = mailboxRepository.replaceAll(accountId, parsedMailboxes.value->list))
@@ -385,6 +428,7 @@ namespace javelin::jmap
 
         if (selectedMailboxId.has_value())
         {
+            reportProgress(QStringLiteral("Fetching message list..."));
             const auto queryArguments = javelin::jmap::api::serializeEmailQueryRequest({
                 .accountId = accountId,
                 .filter =
@@ -465,6 +509,8 @@ namespace javelin::jmap
                     .message = QStringLiteral("Failed to parse Email/query response."),
                 };
             }
+            reportProgress(
+                QStringLiteral("Fetched %1 message ids.").arg(parsedQuery.value->ids.size()));
 
             if (const auto error = syncStateRepository.upsert({.accountId = accountId,
                                                                .objectType = "EmailQuery",
@@ -476,6 +522,7 @@ namespace javelin::jmap
 
             if (!parsedQuery.value->ids.empty())
             {
+                reportProgress(QStringLiteral("Fetching message summaries..."));
                 const auto emailArguments = javelin::jmap::api::serializeGetRequest({
                     .accountId = accountId,
                     .ids = parsedQuery.value->ids,
@@ -559,6 +606,7 @@ namespace javelin::jmap
                 }
 
                 emailCount = parsedEmails.value->list.size();
+                reportProgress(QStringLiteral("Cached %1 message summaries.").arg(emailCount));
             }
         }
 
@@ -566,6 +614,7 @@ namespace javelin::jmap
                                     .arg(parsedMailboxes.value->list.size())
                                     .arg(emailCount)
                                     .arg(QString::fromStdString(settings.loginEmail));
+        qInfo().noquote() << "JMAP core refresh success" << m_impl->statusSummary;
 
         co_return LiveRefreshSummary{
             .accountId = accountId,
@@ -576,9 +625,21 @@ namespace javelin::jmap
     }
 
     QCoro::Task<MessageContentRefreshResult>
-    JmapCore::refreshMessageContent(const LiveConnectionSettings& settings, std::string accountId,
-                                    std::string emailId)
+    JmapCore::refreshMessageContent(LiveConnectionSettings settings, std::string accountId,
+                                    std::string emailId,
+                                    std::function<void(const QString&)> progressCallback)
     {
+        const auto reportProgress = [&progressCallback](const QString& message)
+        {
+            if (progressCallback)
+            {
+                progressCallback(message);
+            }
+        };
+
+        qInfo().noquote() << "JMAP core message content refresh start"
+                          << QString::fromStdString(accountId) << QString::fromStdString(emailId);
+        reportProgress(QStringLiteral("Loading message content..."));
         if (m_impl->databaseConnection == nullptr || m_impl->transport == nullptr)
         {
             co_return LiveRefreshError{
@@ -613,6 +674,9 @@ namespace javelin::jmap
             std::get<std::vector<javelin::jmap::cache::EmailBodyValue>>(cachedBodyValues);
         if (!parts.empty() || !bodyValues.empty())
         {
+            qInfo().noquote() << "JMAP core message content using cached data"
+                              << QString::fromStdString(emailId);
+            reportProgress(QStringLiteral("Loaded message content from local cache."));
             co_return MessageContentRefreshSummary{
                 .accountId = std::move(accountId),
                 .emailId = std::move(emailId),
@@ -737,6 +801,12 @@ namespace javelin::jmap
         {
             co_return LiveRefreshError{.message = error->message};
         }
+
+        qInfo().noquote() << "JMAP core message content refresh success"
+                          << QString::fromStdString(emailId)
+                          << static_cast<qulonglong>(contentParts.size())
+                          << static_cast<qulonglong>(contentBodyValues.size());
+        reportProgress(QStringLiteral("Fetched message body from server."));
 
         co_return MessageContentRefreshSummary{
             .accountId = std::move(accountId),

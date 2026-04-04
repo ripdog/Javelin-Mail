@@ -14,11 +14,13 @@
 #include <QAction>
 #include <QCloseEvent>
 #include <QComboBox>
+#include <QDebug>
 #include <QItemSelectionModel>
 #include <QLabel>
 #include <QListView>
 #include <QMenu>
 #include <QMenuBar>
+#include <QMetaObject>
 #include <QSettings>
 #include <QSplitter>
 #include <QStatusBar>
@@ -332,8 +334,17 @@ namespace javelin::gui::shell
         m_refreshAction->setEnabled(false);
         m_preferencesAction->setEnabled(false);
         statusBar()->showMessage(QStringLiteral("Refreshing mail from server..."));
+        qInfo() << "GUI refresh requested";
 
-        auto task = m_jmapCore.refreshFromServer(toLiveConnectionSettings(settings));
+        auto task = m_jmapCore.refreshFromServer(
+            toLiveConnectionSettings(settings),
+            [this](const QString& message)
+            {
+                qInfo().noquote() << "GUI refresh progress" << message;
+                QMetaObject::invokeMethod(
+                    this, [this, message] { statusBar()->showMessage(message); },
+                    Qt::QueuedConnection);
+            });
         QCoro::connect(
             std::move(task), this,
             [this](javelin::jmap::LiveRefreshResult result)
@@ -344,11 +355,16 @@ namespace javelin::gui::shell
 
                 if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
                 {
+                    qWarning().noquote() << "GUI refresh failed" << error->message;
                     statusBar()->showMessage(error->message, 10000);
                     return;
                 }
 
                 const auto& summary = std::get<javelin::jmap::LiveRefreshSummary>(result);
+                qInfo().noquote() << "GUI refresh succeeded"
+                                  << QString::fromStdString(summary.accountId)
+                                  << static_cast<qulonglong>(summary.mailboxCount)
+                                  << static_cast<qulonglong>(summary.emailCount);
                 reloadAccounts();
                 refreshViewsFromCache();
                 statusBar()->showMessage(
@@ -369,8 +385,15 @@ namespace javelin::gui::shell
             return;
         }
 
-        auto task = m_jmapCore.refreshMessageContent(toLiveConnectionSettings(settings), accountId,
-                                                     emailId);
+        auto task = m_jmapCore.refreshMessageContent(
+            toLiveConnectionSettings(settings), accountId, emailId,
+            [this](const QString& message)
+            {
+                qInfo().noquote() << "GUI message content progress" << message;
+                QMetaObject::invokeMethod(
+                    this, [this, message] { statusBar()->showMessage(message, 5000); },
+                    Qt::QueuedConnection);
+            });
         QCoro::connect(
             std::move(task), this,
             [this, accountId = std::move(accountId),
@@ -378,6 +401,7 @@ namespace javelin::gui::shell
             {
                 if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
                 {
+                    qWarning().noquote() << "GUI message content refresh failed" << error->message;
                     statusBar()->showMessage(error->message, 10000);
                     return;
                 }
@@ -393,6 +417,11 @@ namespace javelin::gui::shell
                 m_messageViewContainer->refresh(m_messageViewService);
 
                 const auto& summary = std::get<javelin::jmap::MessageContentRefreshSummary>(result);
+                qInfo().noquote() << "GUI message content refresh succeeded"
+                                  << QString::fromStdString(summary.emailId)
+                                  << static_cast<qulonglong>(summary.partCount)
+                                  << static_cast<qulonglong>(summary.bodyValueCount)
+                                  << summary.usedCachedContent;
                 if (!summary.usedCachedContent)
                 {
                     statusBar()->showMessage(QStringLiteral("Loaded message content for %1.")

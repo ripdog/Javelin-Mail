@@ -5,6 +5,7 @@
 #include "jmap/auth/AccessTokenResolver.h"
 
 #include <QByteArray>
+#include <QDebug>
 
 #include <string>
 
@@ -47,11 +48,18 @@ namespace javelin::jmap::api
     QCoro::Task<SessionClientResult>
     SessionClient::discover(const javelin::jmap::auth::SessionRequestContext& requestContext) const
     {
+        qInfo().noquote() << "JMAP session discovery start"
+                          << QString::fromStdString(requestContext.credentials.sessionUrl)
+                          << QString::fromStdString(requestContext.credentials.emailAddress);
+
         const javelin::jmap::auth::AccessTokenResolver accessTokenResolver{m_tokenRefresher,
                                                                            m_secretStore};
         const auto tokenResult = accessTokenResolver.resolve(requestContext.credentials);
         if (std::holds_alternative<AuthError>(tokenResult))
         {
+            const auto& error = std::get<AuthError>(tokenResult);
+            qWarning().noquote() << "JMAP session discovery auth failure"
+                                 << QString::fromStdString(error.message);
             co_return std::get<AuthError>(tokenResult);
         }
 
@@ -61,6 +69,9 @@ namespace javelin::jmap::api
 
         if (std::holds_alternative<TransportError>(transportResult))
         {
+            const auto& error = std::get<TransportError>(transportResult);
+            qWarning().noquote() << "JMAP session discovery transport failure"
+                                 << QString::fromStdString(error.message);
             co_return std::get<TransportError>(transportResult);
         }
 
@@ -70,6 +81,8 @@ namespace javelin::jmap::api
         if (!parseResult.ok())
         {
             const SessionParseError& error = *parseResult.error;
+            qWarning().noquote() << "JMAP session discovery parse failure"
+                                 << QString::fromStdString(error.message);
             co_return ProtocolError{
                 .code = error.code == SessionParseErrorCode::CapabilityValidationFailed
                             ? ProtocolErrorCode::CapabilityNegotiationFailed
@@ -78,6 +91,8 @@ namespace javelin::jmap::api
             };
         }
 
+        qInfo().noquote() << "JMAP session discovery success"
+                          << QString::fromStdString(parseResult.session->apiUrl);
         co_return *parseResult.session;
     }
 
