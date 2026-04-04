@@ -422,6 +422,7 @@ Completed so far:
 - [x] Centralize capability validation and fail-fast requirement checks in the JMAP library.
 - [x] Add Glaze-backed session parsing and fixture-based tests for the session bootstrap shape.
 - [x] Add typed auth, transport, and protocol error surfaces plus token/secret-store abstractions.
+- [x] Add a coroutine-based session discovery client over a testable transport interface using `QNetworkAccessManager` and QCoro.
 
 Exit criteria:
 

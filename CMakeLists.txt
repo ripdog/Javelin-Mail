@@ -11,10 +11,11 @@ include(cmake/Dependencies.cmake)
 include(cmake/StaticAnalysis.cmake)
 include(cmake/Sanitizers.cmake)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets LinguistTools)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Network Widgets LinguistTools)
 
 qt_standard_project_setup()
 javelin_configure_dependencies()
+qcoro_enable_coroutines()
 enable_testing()
 
 set(JAVELIN_FORMAT_FILES
@@ -29,8 +30,12 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/api/Error.h
     src/jmap/api/Session.cpp
     src/jmap/api/Session.h
+    src/jmap/api/SessionClient.cpp
+    src/jmap/api/SessionClient.h
     src/jmap/api/SessionParser.cpp
     src/jmap/api/SessionParser.h
+    src/jmap/api/Transport.cpp
+    src/jmap/api/Transport.h
     src/jmap/auth/Auth.cpp
     src/jmap/auth/Auth.h
     src/jmap/JmapCore.cpp
@@ -39,6 +44,7 @@ set(JAVELIN_FORMAT_FILES
     tests/FixtureReader.h
     tests/jmap/AuthTest.cpp
     tests/jmap/JmapCoreTest.cpp
+    tests/jmap/SessionClientTest.cpp
     tests/jmap/SessionTest.cpp
 )
 
@@ -47,8 +53,12 @@ add_library(javelin_jmap STATIC
     src/jmap/api/Error.h
     src/jmap/api/Session.cpp
     src/jmap/api/Session.h
+    src/jmap/api/SessionClient.cpp
+    src/jmap/api/SessionClient.h
     src/jmap/api/SessionParser.cpp
     src/jmap/api/SessionParser.h
+    src/jmap/api/Transport.cpp
+    src/jmap/api/Transport.h
     src/jmap/auth/Auth.cpp
     src/jmap/auth/Auth.h
     src/jmap/JmapCore.cpp
@@ -59,8 +69,11 @@ target_include_directories(javelin_jmap PUBLIC
 )
 target_link_libraries(javelin_jmap
     PUBLIC
+        QCoro6::Coro
         Qt::Core
+        Qt::Network
     PRIVATE
+        QCoro6::Network
         glaze::glaze
 )
 javelin_set_project_warnings(javelin_jmap)
