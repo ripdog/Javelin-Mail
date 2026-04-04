@@ -8,6 +8,7 @@ class QLabel;
 class QListView;
 class QSplitter;
 class QTreeView;
+class QAction;
 
 namespace javelin::jmap
 {
@@ -50,8 +51,10 @@ namespace javelin::gui::shell
         ~MainWindow() override = default;
 
       private:
+        void createMenus();
         void setupUi();
         void connectSelection();
+        void openPreferences();
         void reloadAccounts();
         void restorePersistentState();
         void savePersistentState() const;
@@ -70,6 +73,7 @@ namespace javelin::gui::shell
         QTreeView* m_mailboxView = nullptr;
         QListView* m_messageView = nullptr;
         QLabel* m_messageEmptyState = nullptr;
+        QAction* m_preferencesAction = nullptr;
     };
 
 } // namespace javelin::gui::shell

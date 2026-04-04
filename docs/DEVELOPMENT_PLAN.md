@@ -549,6 +549,7 @@ Completed so far:
 - [x] Add cached account selection plumbing so the main shell can switch mailbox and message queries between persisted JMAP accounts.
 - [x] Persist main-window geometry, pane sizes, and selected account so the three-pane shell restores its last layout cleanly.
 - [x] Replace the placeholder right pane with a dedicated message-view container that tracks account, mailbox, and message selection states explicitly.
+- [x] Add a basic preferences dialog for manual testing so session URL, login email, and API key can be entered from the running app.
 
 Exit criteria:
 

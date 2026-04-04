@@ -3,16 +3,20 @@
 #include "gui/mailboxes/MailboxTreeModel.h"
 #include "gui/messages/MessageListModel.h"
 #include "gui/messageview/MessageViewContainer.h"
+#include "gui/settings/PreferencesDialog.h"
 #include "jmap/JmapCore.h"
 #include "jmap/cache/AccountRepository.h"
 #include "jmap/cache/MessageViewService.h"
 #include "jmap/cache/QueryService.h"
 
+#include <QAction>
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QItemSelectionModel>
 #include <QLabel>
 #include <QListView>
+#include <QMenu>
+#include <QMenuBar>
 #include <QSettings>
 #include <QSplitter>
 #include <QStatusBar>
@@ -61,8 +65,16 @@ namespace javelin::gui::shell
           m_messageViewService(messageViewService), m_queryService(queryService)
     {
         setupUi();
+        createMenus();
         connectSelection();
         restorePersistentState();
+    }
+
+    void MainWindow::createMenus()
+    {
+        auto* settingsMenu = menuBar()->addMenu(QStringLiteral("&Settings"));
+        m_preferencesAction = settingsMenu->addAction(QStringLiteral("Preferences..."));
+        connect(m_preferencesAction, &QAction::triggered, this, &MainWindow::openPreferences);
     }
 
     void MainWindow::setupUi()
@@ -228,6 +240,15 @@ namespace javelin::gui::shell
         const bool hasMessages = m_messageModel->rowCount() > 0;
         m_messageEmptyState->setVisible(!hasMessages);
         m_messageView->setVisible(hasMessages);
+    }
+
+    void MainWindow::openPreferences()
+    {
+        javelin::gui::settings::PreferencesDialog dialog{this};
+        if (dialog.exec() == QDialog::Accepted)
+        {
+            statusBar()->showMessage(QStringLiteral("Saved connection preferences."), 3000);
+        }
     }
 
     void MainWindow::restorePersistentState()
