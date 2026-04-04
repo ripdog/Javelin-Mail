@@ -1,10 +1,17 @@
 #pragma once
 
+#include "jmap/cache/Database.h"
+
 #include <memory>
 
 namespace javelin::jmap
 {
     class JmapCore;
+}
+
+namespace javelin::jmap::cache
+{
+    class QueryService;
 }
 
 namespace javelin::app
@@ -23,9 +30,12 @@ namespace javelin::app
 
         [[nodiscard]] javelin::jmap::JmapCore& jmapCore();
         [[nodiscard]] const javelin::jmap::JmapCore& jmapCore() const;
+        [[nodiscard]] javelin::jmap::cache::QueryService& queryService();
 
       private:
         std::unique_ptr<javelin::jmap::JmapCore> m_jmapCore;
+        javelin::jmap::cache::DatabaseConnection m_databaseConnection;
+        std::unique_ptr<javelin::jmap::cache::QueryService> m_queryService;
     };
 
 } // namespace javelin::app

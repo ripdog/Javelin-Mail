@@ -17,8 +17,8 @@ namespace javelin::app
 
     int ApplicationBootstrap::run()
     {
-        m_mainWindow =
-            std::make_unique<javelin::gui::shell::MainWindow>(m_processServices->jmapCore());
+        m_mainWindow = std::make_unique<javelin::gui::shell::MainWindow>(
+            m_processServices->jmapCore(), m_processServices->queryService());
         m_mainWindow->show();
         return m_application.exec();
     }

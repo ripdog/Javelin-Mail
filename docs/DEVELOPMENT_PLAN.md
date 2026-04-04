@@ -543,6 +543,10 @@ Tasks:
 - Connect GUI models to cache-backed services.
 - Add placeholder empty/error/loading states that do not depend on ad hoc widget mutation.
 
+Completed so far:
+
+- [x] Replace the starter shell with `QAbstractItemModel`-backed mailbox/message panes wired to cache query services and basic empty-state handling.
+
 Exit criteria:
 
 - The app can browse synced mail from the local cache.
