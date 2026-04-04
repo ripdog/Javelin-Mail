@@ -58,6 +58,8 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/cache/MailboxRepository.h
     src/jmap/cache/MessageContentRepository.cpp
     src/jmap/cache/MessageContentRepository.h
+    src/jmap/cache/MessageViewService.cpp
+    src/jmap/cache/MessageViewService.h
     src/jmap/cache/QueryService.cpp
     src/jmap/cache/QueryService.h
     src/jmap/cache/SessionRepository.cpp
@@ -99,6 +101,7 @@ set(JAVELIN_FORMAT_FILES
     tests/jmap/MailboxRepositoryTest.cpp
     tests/jmap/MessageGroupingTest.cpp
     tests/jmap/MessageContentRepositoryTest.cpp
+    tests/jmap/MessageViewServiceTest.cpp
     tests/jmap/MethodCallerTest.cpp
     tests/jmap/MethodEnvelopeTest.cpp
     tests/jmap/PendingActionsTest.cpp
@@ -141,6 +144,8 @@ add_library(javelin_jmap STATIC
     src/jmap/cache/MailboxRepository.h
     src/jmap/cache/MessageContentRepository.cpp
     src/jmap/cache/MessageContentRepository.h
+    src/jmap/cache/MessageViewService.cpp
+    src/jmap/cache/MessageViewService.h
     src/jmap/cache/QueryService.cpp
     src/jmap/cache/QueryService.h
     src/jmap/cache/SessionRepository.cpp

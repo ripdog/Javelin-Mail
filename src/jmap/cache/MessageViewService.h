@@ -1,0 +1,62 @@
+#pragma once
+
+#include "jmap/cache/Database.h"
+#include "jmap/domain/MailEntities.h"
+
+#include <cstdint>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <variant>
+#include <vector>
+
+namespace javelin::jmap::cache
+{
+
+    enum class MessageBodyKind
+    {
+        PlainText,
+        Html,
+    };
+
+    struct MessageBody
+    {
+        MessageBodyKind kind = MessageBodyKind::PlainText;
+        std::string partId;
+        bool isTruncated = false;
+        std::string value;
+    };
+
+    struct MessageAttachment
+    {
+        std::string partId;
+        std::optional<std::string> blobId;
+        std::string mediaType;
+        std::optional<std::string> name;
+        std::optional<std::string> disposition;
+        std::optional<std::string> cid;
+        std::uint64_t size = 0;
+        bool isInlineRenderable = false;
+    };
+
+    struct MessageViewSnapshot
+    {
+        javelin::jmap::domain::Email email;
+        std::optional<MessageBody> plainTextBody;
+        std::optional<MessageBody> htmlBody;
+        std::vector<MessageAttachment> attachments;
+    };
+
+    class MessageViewService
+    {
+      public:
+        explicit MessageViewService(DatabaseConnection& connection);
+
+        [[nodiscard]] std::variant<std::optional<MessageViewSnapshot>, DatabaseError>
+        load(std::string_view accountId, std::string_view emailId) const;
+
+      private:
+        DatabaseConnection& m_connection;
+    };
+
+} // namespace javelin::jmap::cache

@@ -572,6 +572,10 @@ Tasks:
 - Implement on-demand fetch for normal attachments and narrow caching for render-required inline parts only.
 - Investigate language detection and translation hooks.
 
+Completed so far:
+
+- [x] Add a typed cache-backed message-view snapshot service that loads selected-message headers, canonical body values, and attachment metadata from the local store.
+
 Exit criteria:
 
 - Plain-text and HTML mail render through separate paths.
