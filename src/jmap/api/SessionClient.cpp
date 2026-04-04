@@ -2,6 +2,7 @@
 
 #include "jmap/api/SessionParser.h"
 #include "jmap/api/Transport.h"
+#include "jmap/auth/AccessTokenResolver.h"
 
 #include <QByteArray>
 
@@ -46,56 +47,17 @@ namespace javelin::jmap::api
     QCoro::Task<SessionClientResult>
     SessionClient::discover(const javelin::jmap::auth::SessionRequestContext& requestContext) const
     {
-        using namespace std::chrono_literals;
-
-        javelin::jmap::auth::OAuthToken token = requestContext.credentials.token;
-        if (!token.hasAccessToken())
+        const javelin::jmap::auth::AccessTokenResolver accessTokenResolver{m_tokenRefresher,
+                                                                           m_secretStore};
+        const auto tokenResult = accessTokenResolver.resolve(requestContext.credentials);
+        if (std::holds_alternative<AuthError>(tokenResult))
         {
-            co_return AuthError{
-                .code = AuthErrorCode::MissingAccessToken,
-                .message = "Session discovery requires an access token",
-            };
+            co_return std::get<AuthError>(tokenResult);
         }
 
-        if (token.isExpired(javelin::jmap::auth::Clock::now(), 60s))
-        {
-            if (!token.hasRefreshToken())
-            {
-                co_return AuthError{
-                    .code = AuthErrorCode::MissingRefreshToken,
-                    .message = "Access token is expired and no refresh token is available",
-                };
-            }
-
-            if (m_tokenRefresher == nullptr)
-            {
-                co_return AuthError{
-                    .code = AuthErrorCode::TokenExpired,
-                    .message = "Access token is expired and no token refresher is configured",
-                };
-            }
-
-            const auto refreshResult = m_tokenRefresher->refresh(requestContext.credentials);
-            if (std::holds_alternative<AuthError>(refreshResult))
-            {
-                co_return std::get<AuthError>(refreshResult);
-            }
-
-            token = std::get<javelin::jmap::auth::OAuthToken>(refreshResult);
-
-            if (m_secretStore != nullptr &&
-                !m_secretStore->store(requestContext.credentials.accountId, token))
-            {
-                co_return AuthError{
-                    .code = AuthErrorCode::SecretStoreFailure,
-                    .message = "Failed to persist refreshed token",
-                };
-            }
-        }
-
-        const auto transportResult = co_await m_transport.send(
-            buildSessionRequest(QUrl{QString::fromStdString(requestContext.credentials.sessionUrl)},
-                                token.accessToken));
+        const auto transportResult = co_await m_transport.send(buildSessionRequest(
+            QUrl{QString::fromStdString(requestContext.credentials.sessionUrl)},
+            std::get<javelin::jmap::auth::OAuthToken>(tokenResult).accessToken));
 
         if (std::holds_alternative<TransportError>(transportResult))
         {

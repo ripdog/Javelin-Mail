@@ -425,6 +425,7 @@ Completed so far:
 - [x] Add a coroutine-based session discovery client over a testable transport interface using `QNetworkAccessManager` and QCoro.
 - [x] Add typed mailbox, thread, email, and identity entities with fixture-based parsing tests.
 - [x] Add typed JMAP request/response envelope parsing for invocation tuples and batched method calls.
+- [x] Add a reusable batched method caller with typed envelope serialization, auth refresh, and response parsing.
 
 Exit criteria:
 

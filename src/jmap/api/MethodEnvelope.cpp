@@ -71,14 +71,14 @@ namespace javelin::jmap::api
             return buffer;
         }
 
-        [[nodiscard]] glz::json_t decodeJson(const std::string& json)
+        [[nodiscard]] std::optional<glz::json_t> decodeJson(const std::string& json)
         {
             std::string buffer{json};
             glz::json_t value;
             const auto readError = glz::read_json(value, buffer);
             if (readError)
             {
-                return {};
+                return std::nullopt;
             }
 
             return value;
@@ -90,15 +90,6 @@ namespace javelin::jmap::api
                 .name = std::move(rawInvocation.name),
                 .arguments = encodeJson(rawInvocation.arguments),
                 .callId = std::move(rawInvocation.callId),
-            };
-        }
-
-        [[nodiscard]] RawMethodInvocation convertInvocation(MethodInvocation invocation)
-        {
-            return RawMethodInvocation{
-                .name = std::move(invocation.name),
-                .arguments = decodeJson(invocation.arguments),
-                .callId = std::move(invocation.callId),
             };
         }
 
@@ -202,7 +193,17 @@ namespace javelin::jmap::api
         envelope.methodCalls.reserve(request.methodCalls.size());
         for (const auto& methodCall : request.methodCalls)
         {
-            envelope.methodCalls.push_back(convertInvocation(methodCall));
+            const auto decodedArguments = decodeJson(methodCall.arguments);
+            if (!decodedArguments.has_value())
+            {
+                return std::nullopt;
+            }
+
+            envelope.methodCalls.push_back(RawMethodInvocation{
+                .name = methodCall.name,
+                .arguments = std::move(*decodedArguments),
+                .callId = methodCall.callId,
+            });
         }
 
         return serializeEnvelope(envelope);
@@ -218,7 +219,17 @@ namespace javelin::jmap::api
         envelope.methodResponses.reserve(response.methodResponses.size());
         for (const auto& methodResponse : response.methodResponses)
         {
-            envelope.methodResponses.push_back(convertInvocation(methodResponse));
+            const auto decodedArguments = decodeJson(methodResponse.arguments);
+            if (!decodedArguments.has_value())
+            {
+                return std::nullopt;
+            }
+
+            envelope.methodResponses.push_back(RawMethodInvocation{
+                .name = methodResponse.name,
+                .arguments = std::move(*decodedArguments),
+                .callId = methodResponse.callId,
+            });
         }
 
         return serializeEnvelope(envelope);
