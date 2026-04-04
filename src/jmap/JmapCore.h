@@ -58,6 +58,16 @@ namespace javelin::jmap
     using MessageContentRefreshResult =
         std::variant<MessageContentRefreshSummary, LiveRefreshError>;
 
+    struct MailboxMessagesRefreshSummary
+    {
+        std::string accountId;
+        std::string mailboxId;
+        std::size_t emailCount = 0;
+    };
+
+    using MailboxMessagesRefreshResult =
+        std::variant<MailboxMessagesRefreshSummary, LiveRefreshError>;
+
     class JmapCore
     {
       public:
@@ -79,6 +89,10 @@ namespace javelin::jmap
         refreshMessageContent(LiveConnectionSettings settings, std::string accountId,
                               std::string emailId,
                               std::function<void(const QString&)> progressCallback = {});
+        [[nodiscard]] QCoro::Task<MailboxMessagesRefreshResult>
+        refreshMailboxMessages(LiveConnectionSettings settings, std::string accountId,
+                               std::string mailboxId,
+                               std::function<void(const QString&)> progressCallback = {});
 
       private:
         struct Impl;

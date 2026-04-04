@@ -233,6 +233,7 @@ namespace javelin::gui::shell
                     m_messageViewContainer->setSelection(m_messageViewService, accountId,
                                                          mailboxId.toStdString(), std::nullopt);
                     updateEmptyStates();
+                    refreshSelectedMailboxMessages(*accountId, mailboxId.toStdString());
                 });
 
         connect(
@@ -434,6 +435,65 @@ namespace javelin::gui::shell
                         .arg(summary.emailCount)
                         .arg(QString::fromStdString(summary.accountId)),
                     10000);
+            });
+    }
+
+    void MainWindow::refreshSelectedMailboxMessages(std::string accountId, std::string mailboxId)
+    {
+        const auto settings = javelin::gui::settings::PreferencesDialog::loadSettings();
+        if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
+            settings.apiKey.isEmpty())
+        {
+            return;
+        }
+
+        qInfo().noquote() << "GUI mailbox refresh requested" << QString::fromStdString(accountId)
+                          << QString::fromStdString(mailboxId);
+        auto task = m_jmapCore.refreshMailboxMessages(
+            toLiveConnectionSettings(settings), accountId, mailboxId,
+            [this](const QString& message)
+            {
+                qInfo().noquote() << "GUI mailbox refresh progress" << message;
+                QMetaObject::invokeMethod(
+                    this, [this, message] { statusBar()->showMessage(message, 5000); },
+                    Qt::QueuedConnection);
+            });
+        QCoro::connect(
+            std::move(task), this,
+            [this, accountId = std::move(accountId),
+             mailboxId = std::move(mailboxId)](javelin::jmap::MailboxMessagesRefreshResult result)
+            {
+                if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+                {
+                    qWarning().noquote() << "GUI mailbox refresh failed" << error->message;
+                    statusBar()->showMessage(error->message, 10000);
+                    return;
+                }
+
+                const auto currentAccount = currentAccountId(*m_accountCombo);
+                const auto currentMailbox = currentMailboxId(*m_mailboxView);
+                if (currentAccount != std::optional<std::string>{accountId} ||
+                    currentMailbox != std::optional<std::string>{mailboxId})
+                {
+                    return;
+                }
+
+                const auto selectedEmail = currentEmailId(*m_messageView);
+                m_messageModel->refresh();
+                restoreSelection(std::optional<std::string>{mailboxId}, selectedEmail);
+                m_messageViewContainer->refresh(m_messageViewService);
+                updateEmptyStates();
+
+                const auto& summary =
+                    std::get<javelin::jmap::MailboxMessagesRefreshSummary>(result);
+                qInfo().noquote() << "GUI mailbox refresh succeeded"
+                                  << QString::fromStdString(summary.accountId)
+                                  << QString::fromStdString(summary.mailboxId)
+                                  << static_cast<qulonglong>(summary.emailCount);
+                statusBar()->showMessage(
+                    QStringLiteral("Loaded %1 messages for the selected mailbox.")
+                        .arg(summary.emailCount),
+                    5000);
             });
     }
 

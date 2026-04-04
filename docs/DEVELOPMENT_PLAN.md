@@ -552,6 +552,7 @@ Completed so far:
 - [x] Replace the placeholder right pane with a dedicated message-view container that tracks account, mailbox, and message selection states explicitly.
 - [x] Add a basic preferences dialog for manual testing so session URL, login email, and API key can be entered from the running app.
 - [x] Add a menu-driven refresh action that uses saved connection settings to populate the cache from a live JMAP server without blocking the GUI thread.
+- [x] Add mailbox-scoped live fetch on mailbox selection so non-Inbox folders can be exercised against a real server without restarting the app.
 
 Exit criteria:
 
