@@ -113,6 +113,19 @@ TEST_CASE("email query responses parse ids and query metadata", "[jmap][method][
     CHECK(result.value->total == std::optional<std::uint64_t>{2});
 }
 
+TEST_CASE("email query responses ignore unknown server fields", "[jmap][method][mail]")
+{
+    const auto result = javelin::jmap::api::parseEmailQueryResponse(
+        R"({"accountId":"u1","queryState":"query-state-1","canCalculateChanges":true,"position":0,"ids":["eml-1","eml-2"],"total":2,"collapseThreads":false,"isQueryComplete":true})");
+
+    REQUIRE(result.ok());
+    REQUIRE(result.value.has_value());
+    CHECK(result.value->accountId == "u1");
+    CHECK(result.value->queryState == "query-state-1");
+    CHECK(result.value->ids == std::vector<std::string>{"eml-1", "eml-2"});
+    CHECK(result.value->total == std::optional<std::uint64_t>{2});
+}
+
 TEST_CASE("email content get requests serialize body fetch arguments", "[jmap][method][mail]")
 {
     const auto json = javelin::jmap::api::serializeEmailContentGetRequest({
