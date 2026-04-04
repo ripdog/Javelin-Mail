@@ -6,6 +6,7 @@ add_executable(javelin_jmap_tests
     jmap/EmailRepositoryTest.cpp
     jmap/JmapCoreTest.cpp
     jmap/MailboxRepositoryTest.cpp
+    jmap/MessageContentRepositoryTest.cpp
     jmap/MethodCallerTest.cpp
     jmap/MethodEnvelopeTest.cpp
     jmap/MailEntityParsersTest.cpp

@@ -46,6 +46,8 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/cache/EmailRepository.h
     src/jmap/cache/MailboxRepository.cpp
     src/jmap/cache/MailboxRepository.h
+    src/jmap/cache/MessageContentRepository.cpp
+    src/jmap/cache/MessageContentRepository.h
     src/jmap/cache/SessionRepository.cpp
     src/jmap/cache/SessionRepository.h
     src/jmap/cache/SyncStateRepository.cpp
@@ -68,6 +70,7 @@ set(JAVELIN_FORMAT_FILES
     tests/jmap/EmailRepositoryTest.cpp
     tests/jmap/JmapCoreTest.cpp
     tests/jmap/MailboxRepositoryTest.cpp
+    tests/jmap/MessageContentRepositoryTest.cpp
     tests/jmap/MethodCallerTest.cpp
     tests/jmap/MethodEnvelopeTest.cpp
     tests/jmap/MailEntityParsersTest.cpp
@@ -99,6 +102,8 @@ add_library(javelin_jmap STATIC
     src/jmap/cache/EmailRepository.h
     src/jmap/cache/MailboxRepository.cpp
     src/jmap/cache/MailboxRepository.h
+    src/jmap/cache/MessageContentRepository.cpp
+    src/jmap/cache/MessageContentRepository.h
     src/jmap/cache/SessionRepository.cpp
     src/jmap/cache/SessionRepository.h
     src/jmap/cache/SyncStateRepository.cpp

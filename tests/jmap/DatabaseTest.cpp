@@ -81,18 +81,21 @@ TEST_CASE("database connection creates the initial cache schema", "[jmap][cache]
         migrationsResult));
     const auto& migrations =
         std::get<std::vector<javelin::jmap::cache::AppliedMigration>>(migrationsResult);
-    REQUIRE(migrations.size() == 3);
+    REQUIRE(migrations.size() == 4);
     CHECK(migrations.front().version == 1);
     CHECK(migrations.front().name == "initial_cache_schema");
     CHECK(migrations.at(1).version == 2);
     CHECK(migrations.at(1).name == "mailboxes_is_subscribed");
-    CHECK(migrations.back().version == 3);
-    CHECK(migrations.back().name == "session_and_account_metadata");
+    CHECK(migrations.at(2).version == 3);
+    CHECK(migrations.at(2).name == "session_and_account_metadata");
+    CHECK(migrations.back().version == 4);
+    CHECK(migrations.back().name == "email_parts_metadata");
 
     QSqlQuery tableQuery{connection.database()};
     REQUIRE(tableQuery.exec(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN "
-        "('accounts', 'mailboxes', 'emails', 'schema_migrations', 'sync_state') ORDER BY name"));
+        "('accounts', 'mailboxes', 'emails', 'email_parts', 'schema_migrations', 'sync_state') "
+        "ORDER BY name"));
 
     QStringList tableNames;
     while (tableQuery.next())
@@ -100,8 +103,8 @@ TEST_CASE("database connection creates the initial cache schema", "[jmap][cache]
         tableNames.push_back(tableQuery.value(0).toString());
     }
 
-    CHECK(tableNames ==
-          QStringList{"accounts", "emails", "mailboxes", "schema_migrations", "sync_state"});
+    CHECK(tableNames == QStringList{"accounts", "email_parts", "emails", "mailboxes",
+                                    "schema_migrations", "sync_state"});
     CHECK(pragmaValue(connection.database(), "foreign_keys") == "1");
     CHECK(pragmaValue(connection.database(), "journal_mode").compare("wal", Qt::CaseInsensitive) ==
           0);
@@ -143,9 +146,10 @@ TEST_CASE("database migrations are repeatable when reopening an existing cache",
         migrationsResult));
     const auto& migrations =
         std::get<std::vector<javelin::jmap::cache::AppliedMigration>>(migrationsResult);
-    REQUIRE(migrations.size() == 3);
+    REQUIRE(migrations.size() == 4);
     CHECK(migrations.front().version == 1);
     CHECK(migrations.at(1).version == 2);
-    CHECK(migrations.back().version == 3);
-    CHECK(connection.schemaVersion() == 3);
+    CHECK(migrations.at(2).version == 3);
+    CHECK(migrations.back().version == 4);
+    CHECK(connection.schemaVersion() == 4);
 }

@@ -464,29 +464,23 @@ namespace javelin::jmap::cache
                             "value TEXT NOT NULL,"
                             "PRIMARY KEY (account_id, email_id, part_id)"
                             ") STRICT",
-                            "CREATE TABLE IF NOT EXISTS email_attachments ("
+                            "CREATE TABLE IF NOT EXISTS email_parts ("
                             "account_id TEXT NOT NULL REFERENCES accounts(account_id) ON DELETE "
                             "CASCADE,"
                             "email_id TEXT NOT NULL,"
                             "part_id TEXT NOT NULL,"
+                            "parent_part_id TEXT,"
                             "blob_id TEXT,"
-                            "name TEXT,"
+                            "kind TEXT NOT NULL,"
                             "media_type TEXT NOT NULL,"
-                            "size INTEGER NOT NULL DEFAULT 0,"
+                            "name TEXT,"
+                            "charset TEXT,"
                             "disposition TEXT,"
                             "cid TEXT,"
-                            "PRIMARY KEY (account_id, email_id, part_id)"
-                            ") STRICT",
-                            "CREATE TABLE IF NOT EXISTS blobs ("
-                            "account_id TEXT NOT NULL REFERENCES accounts(account_id) ON DELETE "
-                            "CASCADE,"
-                            "blob_id TEXT NOT NULL,"
-                            "content_hash TEXT,"
-                            "media_type TEXT,"
                             "size INTEGER NOT NULL DEFAULT 0,"
-                            "storage_path TEXT,"
-                            "last_accessed_at TEXT,"
-                            "PRIMARY KEY (account_id, blob_id)"
+                            "is_inline_renderable INTEGER NOT NULL DEFAULT 0,"
+                            "is_body_section INTEGER NOT NULL DEFAULT 0,"
+                            "PRIMARY KEY (account_id, email_id, part_id)"
                             ") STRICT",
                             "CREATE TABLE IF NOT EXISTS identities ("
                             "account_id TEXT NOT NULL REFERENCES accounts(account_id) ON DELETE "
@@ -562,6 +556,10 @@ namespace javelin::jmap::cache
                             "(account_id, object_type, query_key)",
                             "CREATE INDEX IF NOT EXISTS idx_pending_actions_status ON "
                             "pending_actions (account_id, status, created_at)",
+                            "CREATE INDEX IF NOT EXISTS idx_email_parts_email ON email_parts "
+                            "(account_id, email_id, part_id)",
+                            "CREATE INDEX IF NOT EXISTS idx_email_parts_blob ON email_parts "
+                            "(account_id, blob_id)",
                         },
                 },
                 MigrationStep{
@@ -596,6 +594,35 @@ namespace javelin::jmap::cache
                             "DEFAULT 'null'",
                             "ALTER TABLE sessions ADD COLUMN primary_mail_account_id TEXT",
                             "ALTER TABLE sessions ADD COLUMN primary_submission_account_id TEXT",
+                        },
+                },
+                MigrationStep{
+                    .version = 4,
+                    .name = "email_parts_metadata",
+                    .statements =
+                        {
+                            "CREATE TABLE IF NOT EXISTS email_parts ("
+                            "account_id TEXT NOT NULL REFERENCES accounts(account_id) ON DELETE "
+                            "CASCADE,"
+                            "email_id TEXT NOT NULL,"
+                            "part_id TEXT NOT NULL,"
+                            "parent_part_id TEXT,"
+                            "blob_id TEXT,"
+                            "kind TEXT NOT NULL,"
+                            "media_type TEXT NOT NULL,"
+                            "name TEXT,"
+                            "charset TEXT,"
+                            "disposition TEXT,"
+                            "cid TEXT,"
+                            "size INTEGER NOT NULL DEFAULT 0,"
+                            "is_inline_renderable INTEGER NOT NULL DEFAULT 0,"
+                            "is_body_section INTEGER NOT NULL DEFAULT 0,"
+                            "PRIMARY KEY (account_id, email_id, part_id)"
+                            ") STRICT",
+                            "CREATE INDEX IF NOT EXISTS idx_email_parts_email ON email_parts "
+                            "(account_id, email_id, part_id)",
+                            "CREATE INDEX IF NOT EXISTS idx_email_parts_blob ON email_parts "
+                            "(account_id, blob_id)",
                         },
                 },
             },

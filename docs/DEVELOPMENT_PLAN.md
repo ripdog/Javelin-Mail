@@ -165,8 +165,7 @@ The local database should be authoritative for the client working set. Target ta
 - `email_keywords`
 - `email_addresses`
 - `email_body_values`
-- `email_attachments`
-- `blobs`
+- `email_parts`
 - `identities`
 - `submissions`
 - `sync_state`
@@ -178,14 +177,18 @@ The local database should be authoritative for the client working set. Target ta
 Design rules:
 
 - Persist server IDs and relevant JMAP state tokens per account and object type.
-- Treat `blobId` as a first-class identifier for attachments and large body parts.
-- Deduplicate stored blob-backed payloads where practical instead of copying large message parts repeatedly.
+- Treat `blobId` as a first-class identifier for body parts and attachment metadata.
 - Separate lightweight list metadata from large body payloads.
 - Store normalized address lists rather than duplicating display strings everywhere.
 - Model pending local actions explicitly so transient offline or retry behavior is recoverable.
 - Version schema migrations from the start.
 - Prefer append/update reconciliation over destructive cache invalidation.
 - Design the cache around a synced working set and durable client state, not around a complete offline replica of the user’s corpus.
+- Cache canonical text and HTML body payloads locally.
+- Persist MIME structure and part metadata for all message parts, even when the binary payload is not cached.
+- Do not cache ordinary downloadable attachment payloads by default.
+- Allow a narrow cache exception for inline render-required parts, such as images referenced by the HTML body through `cid:` or equivalent message-local references.
+- Keep render-required inline part caching aggressively scoped and evictable.
 
 Memory policy:
 
@@ -239,12 +242,14 @@ Use Qt WebEngine for HTML mail with a dedicated message-view pipeline:
 
 - Treat all HTML mail as hostile content by default.
 - Load sanitized stored HTML, not live remote content.
+- Keep canonical stored HTML separate from the derived render document used by WebEngine.
 - Intercept and block remote requests by default.
 - Allow per-message remote content enablement without forcing a full WebEngine reload if technically possible.
 - Inject dark-mode CSS and content policy helpers after document load.
 - Keep CSS/script injection localized to the view layer rather than mutating stored source.
 - Track language detection and translation state separately from original content.
 - Treat sanitization, remote-resource policy, dark-mode adaptation, and translation hooks as core architecture, not late UI polish.
+- Rewrite inline message-local references in the derived render document to internal application URLs instead of embedding arbitrary fetched payloads directly into canonical content.
 
 Subsystems to plan:
 
@@ -261,6 +266,7 @@ Acceptance direction:
 - Enabling remote content is explicit and reversible.
 - Dark mode remains readable across common mail HTML.
 - Translation can be offered without corrupting stored original content.
+- Inline images referenced by the message body render through controlled local resolution without requiring general attachment caching.
 
 ## UI Structure
 
@@ -445,6 +451,7 @@ Tasks:
 - Define schema versioning and migration runner.
 - Implement repositories for accounts, mailboxes, threads, emails, bodies, and sync state.
 - Add blob and attachment storage strategy keyed by `blobId`.
+- Define MIME-part metadata storage and a policy that excludes ordinary attachment payload caching.
 - Add query APIs shaped for mailbox tree and message list consumption.
 - Decide WAL, pragma, and index strategy for a long-running desktop client.
 - Define thread ownership and connection policy for database access.
@@ -459,6 +466,7 @@ Completed so far:
 - [x] Add a cached session bootstrap repository that round-trips typed session and account metadata.
 - [x] Add a thread cache repository that preserves ordered email membership per thread.
 - [x] Add an email summary cache repository that normalizes mailbox, keyword, and address rows.
+- [x] Add MIME-part metadata and canonical body-value repositories without general attachment payload caching.
 
 Exit criteria:
 
@@ -533,9 +541,11 @@ Tasks:
 
 - Implement plain-text view and HTML view switching.
 - Add HTML sanitization/storage pipeline.
+- Build a derived render-document pipeline that rewrites `cid:` and similar inline references to internal application URLs.
 - Add remote-content blocking and allow-list enablement.
 - Add dark-mode CSS injection.
 - Add attachment metadata display and download/open flows.
+- Implement on-demand fetch for normal attachments and narrow caching for render-required inline parts only.
 - Investigate language detection and translation hooks.
 
 Exit criteria:
