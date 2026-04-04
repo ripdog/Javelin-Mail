@@ -37,6 +37,28 @@ namespace
         std::optional<std::uint64_t> maxChanges;
     };
 
+    struct RawEmailQueryFilter
+    {
+        std::optional<std::string> inMailbox;
+    };
+
+    struct RawEmailQuerySort
+    {
+        std::string property;
+        bool isAscending = false;
+    };
+
+    struct RawEmailQueryRequest
+    {
+        std::string accountId;
+        std::optional<RawEmailQueryFilter> filter;
+        std::vector<RawEmailQuerySort> sort;
+        std::optional<std::uint64_t> position;
+        std::optional<std::uint64_t> limit;
+        bool collapseThreads = false;
+        bool calculateTotal = false;
+    };
+
     struct RawChangesResponse
     {
         std::string accountId;
@@ -46,6 +68,16 @@ namespace
         std::vector<std::string> created;
         std::vector<std::string> updated;
         std::vector<std::string> destroyed;
+    };
+
+    struct RawEmailQueryResponse
+    {
+        std::string accountId;
+        std::string queryState;
+        bool canCalculateChanges = false;
+        std::uint64_t position = 0;
+        std::vector<std::string> ids;
+        std::optional<std::uint64_t> total;
     };
 
 } // namespace
@@ -82,6 +114,31 @@ template <> struct glz::meta<RawChangesRequest>
                                               &T::sinceState, "maxChanges", &T::maxChanges);
 };
 
+template <> struct glz::meta<RawEmailQueryFilter>
+{
+    using T = RawEmailQueryFilter;
+
+    static constexpr auto value = glz::object("inMailbox", &T::inMailbox);
+};
+
+template <> struct glz::meta<RawEmailQuerySort>
+{
+    using T = RawEmailQuerySort;
+
+    static constexpr auto value =
+        glz::object("property", &T::property, "isAscending", &T::isAscending);
+};
+
+template <> struct glz::meta<RawEmailQueryRequest>
+{
+    using T = RawEmailQueryRequest;
+
+    static constexpr auto value =
+        glz::object("accountId", &T::accountId, "filter", &T::filter, "sort", &T::sort, "position",
+                    &T::position, "limit", &T::limit, "collapseThreads", &T::collapseThreads,
+                    "calculateTotal", &T::calculateTotal);
+};
+
 template <> struct glz::meta<RawChangesResponse>
 {
     using T = RawChangesResponse;
@@ -90,6 +147,15 @@ template <> struct glz::meta<RawChangesResponse>
         glz::object("accountId", &T::accountId, "oldState", &T::oldState, "newState", &T::newState,
                     "hasMoreChanges", &T::hasMoreChanges, "created", &T::created, "updated",
                     &T::updated, "destroyed", &T::destroyed);
+};
+
+template <> struct glz::meta<RawEmailQueryResponse>
+{
+    using T = RawEmailQueryResponse;
+
+    static constexpr auto value = glz::object(
+        "accountId", &T::accountId, "queryState", &T::queryState, "canCalculateChanges",
+        &T::canCalculateChanges, "position", &T::position, "ids", &T::ids, "total", &T::total);
 };
 
 namespace javelin::jmap::api
@@ -186,6 +252,32 @@ namespace javelin::jmap::api
         });
     }
 
+    std::optional<std::string> serializeEmailQueryRequest(const EmailQueryRequest& request)
+    {
+        std::vector<RawEmailQuerySort> sort;
+        sort.reserve(request.sort.size());
+        for (const auto& comparator : request.sort)
+        {
+            sort.push_back(RawEmailQuerySort{
+                .property = comparator.property,
+                .isAscending = comparator.isAscending,
+            });
+        }
+
+        return serializeMethod(RawEmailQueryRequest{
+            .accountId = request.accountId,
+            .filter = request.filter.has_value()
+                          ? std::optional<RawEmailQueryFilter>{RawEmailQueryFilter{
+                                .inMailbox = request.filter->inMailbox}}
+                          : std::nullopt,
+            .sort = std::move(sort),
+            .position = request.position,
+            .limit = request.limit,
+            .collapseThreads = request.collapseThreads,
+            .calculateTotal = request.calculateTotal,
+        });
+    }
+
     ParsedEnvelope<MailboxGetResponse> parseMailboxGetResponse(std::string_view json)
     {
         const auto parsed = parseMethod<RawMailboxGetResponse>(json);
@@ -249,6 +341,31 @@ namespace javelin::jmap::api
                     .state = std::move(parsed.value->state),
                     .list = std::move(*list.value),
                     .notFound = std::move(parsed.value->notFound),
+                },
+            .error = std::nullopt,
+        };
+    }
+
+    ParsedEnvelope<EmailQueryResponse> parseEmailQueryResponse(std::string_view json)
+    {
+        const auto parsed = parseMethod<RawEmailQueryResponse>(json);
+        if (!parsed.ok())
+        {
+            return {
+                .value = std::nullopt,
+                .error = parsed.error,
+            };
+        }
+
+        return {
+            .value =
+                EmailQueryResponse{
+                    .accountId = std::move(parsed.value->accountId),
+                    .queryState = std::move(parsed.value->queryState),
+                    .canCalculateChanges = parsed.value->canCalculateChanges,
+                    .position = parsed.value->position,
+                    .ids = std::move(parsed.value->ids),
+                    .total = parsed.value->total,
                 },
             .error = std::nullopt,
         };

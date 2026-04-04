@@ -1,6 +1,7 @@
 #include "app/ProcessServices.h"
 
 #include "jmap/JmapCore.h"
+#include "jmap/api/Transport.h"
 #include "jmap/cache/AccountRepository.h"
 #include "jmap/cache/MessageViewService.h"
 #include "jmap/cache/QueryService.h"
@@ -28,7 +29,7 @@ namespace javelin::app
 
     } // namespace
 
-    ProcessServices::ProcessServices() : m_jmapCore(std::make_unique<javelin::jmap::JmapCore>())
+    ProcessServices::ProcessServices()
     {
         auto databaseResult = javelin::jmap::cache::DatabaseConnection::open({
             .connectionName = QStringLiteral("javelin-gui-main"),
@@ -41,6 +42,10 @@ namespace javelin::app
 
         m_databaseConnection =
             std::get<javelin::jmap::cache::DatabaseConnection>(std::move(databaseResult));
+        m_networkAccessManager = std::make_unique<QNetworkAccessManager>();
+        m_transport =
+            std::make_unique<javelin::jmap::api::QtNetworkTransport>(*m_networkAccessManager);
+        m_jmapCore = std::make_unique<javelin::jmap::JmapCore>(m_databaseConnection, *m_transport);
         m_accountRepository =
             std::make_unique<javelin::jmap::cache::AccountRepository>(m_databaseConnection);
         m_messageViewService =

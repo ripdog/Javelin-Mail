@@ -497,6 +497,7 @@ Completed so far:
 - [x] Reconcile mailbox and email change batches into SQL with targeted upsert/delete operations and persisted new state tokens.
 - [x] Add typed pending email patch actions and merge rules so local mailbox/keyword edits survive concurrent server refreshes.
 - [x] Add a resumable long-poll worker with explicit cancellation and structured retry backoff.
+- [x] Add a minimal live bootstrap path that discovers a real session, caches accounts and mailboxes, and hydrates an initial mailbox window for end-to-end testing against a live server.
 
 Exit criteria:
 
@@ -550,6 +551,7 @@ Completed so far:
 - [x] Persist main-window geometry, pane sizes, and selected account so the three-pane shell restores its last layout cleanly.
 - [x] Replace the placeholder right pane with a dedicated message-view container that tracks account, mailbox, and message selection states explicitly.
 - [x] Add a basic preferences dialog for manual testing so session URL, login email, and API key can be entered from the running app.
+- [x] Add a menu-driven refresh action that uses saved connection settings to populate the cache from a live JMAP server without blocking the GUI thread.
 
 Exit criteria:
 

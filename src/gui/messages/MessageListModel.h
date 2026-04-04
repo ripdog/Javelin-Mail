@@ -30,6 +30,7 @@ namespace javelin::gui::messages
 
         void setMailboxContext(std::optional<std::string> accountId,
                                std::optional<std::string> mailboxId);
+        void refresh();
 
       private:
         void reload();

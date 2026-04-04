@@ -107,6 +107,22 @@ namespace javelin::gui::messageview
         updatePresentation();
     }
 
+    void MessageViewContainer::refresh(javelin::jmap::cache::MessageViewService& messageViewService)
+    {
+        m_snapshot = std::nullopt;
+        if (m_accountId.has_value() && m_emailId.has_value())
+        {
+            const auto result = messageViewService.load(*m_accountId, *m_emailId);
+            if (const auto* snapshot =
+                    std::get_if<std::optional<javelin::jmap::cache::MessageViewSnapshot>>(&result))
+            {
+                m_snapshot = *snapshot;
+            }
+        }
+
+        updatePresentation();
+    }
+
     void MessageViewContainer::setActiveView(const ActiveView view)
     {
         m_activeView = view;

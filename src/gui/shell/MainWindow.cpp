@@ -9,6 +9,8 @@
 #include "jmap/cache/MessageViewService.h"
 #include "jmap/cache/QueryService.h"
 
+#include <QCoroTask>
+
 #include <QAction>
 #include <QCloseEvent>
 #include <QComboBox>
@@ -55,6 +57,16 @@ namespace javelin::gui::shell
                                        : std::optional<std::string>{mailboxId.toStdString()};
         }
 
+        [[nodiscard]] javelin::jmap::LiveConnectionSettings
+        toLiveConnectionSettings(const javelin::gui::settings::ConnectionSettings& settings)
+        {
+            return javelin::jmap::LiveConnectionSettings{
+                .sessionUrl = settings.sessionUrl.toStdString(),
+                .loginEmail = settings.loginEmail.toStdString(),
+                .apiKey = settings.apiKey.toStdString(),
+            };
+        }
+
     } // namespace
 
     MainWindow::MainWindow(javelin::jmap::JmapCore& jmapCore,
@@ -72,6 +84,10 @@ namespace javelin::gui::shell
 
     void MainWindow::createMenus()
     {
+        auto* accountMenu = menuBar()->addMenu(QStringLiteral("&Account"));
+        m_refreshAction = accountMenu->addAction(QStringLiteral("Refresh From Server"));
+        connect(m_refreshAction, &QAction::triggered, this, &MainWindow::refreshFromServer);
+
         auto* settingsMenu = menuBar()->addMenu(QStringLiteral("&Settings"));
         m_preferencesAction = settingsMenu->addAction(QStringLiteral("Preferences..."));
         connect(m_preferencesAction, &QAction::triggered, this, &MainWindow::openPreferences);
@@ -207,6 +223,7 @@ namespace javelin::gui::shell
 
     void MainWindow::reloadAccounts()
     {
+        const auto selectedAccountId = m_accountCombo->currentData().toString();
         m_accountCombo->clear();
 
         const auto result = m_accountRepository.listAll();
@@ -223,6 +240,17 @@ namespace javelin::gui::shell
 
         if (m_accountCombo->count() > 0)
         {
+            int accountIndex = 0;
+            if (!selectedAccountId.isEmpty())
+            {
+                const int persistedIndex = m_accountCombo->findData(selectedAccountId);
+                if (persistedIndex >= 0)
+                {
+                    accountIndex = persistedIndex;
+                }
+            }
+
+            m_accountCombo->setCurrentIndex(accountIndex);
             const auto accountId = m_accountCombo->currentData().toString().toStdString();
             m_mailboxModel->setAccountId(accountId);
             m_messageModel->setMailboxContext(accountId, std::nullopt);
@@ -233,6 +261,14 @@ namespace javelin::gui::shell
 
         m_messageViewContainer->setSelection(m_messageViewService, std::nullopt, std::nullopt,
                                              std::nullopt);
+    }
+
+    void MainWindow::refreshViewsFromCache()
+    {
+        m_mailboxModel->refresh();
+        m_messageModel->refresh();
+        m_messageViewContainer->refresh(m_messageViewService);
+        updateEmptyStates();
     }
 
     void MainWindow::updateEmptyStates()
@@ -248,7 +284,62 @@ namespace javelin::gui::shell
         if (dialog.exec() == QDialog::Accepted)
         {
             statusBar()->showMessage(QStringLiteral("Saved connection preferences."), 3000);
+            const auto settings = dialog.settings();
+            if (!settings.sessionUrl.isEmpty() && !settings.loginEmail.isEmpty() &&
+                !settings.apiKey.isEmpty())
+            {
+                refreshFromServer();
+            }
         }
+    }
+
+    void MainWindow::refreshFromServer()
+    {
+        if (m_refreshInFlight)
+        {
+            return;
+        }
+
+        const auto settings = javelin::gui::settings::PreferencesDialog::loadSettings();
+        if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
+            settings.apiKey.isEmpty())
+        {
+            statusBar()->showMessage(
+                QStringLiteral("Set Session URL, Login Email, and API Key in Preferences first."),
+                5000);
+            return;
+        }
+
+        m_refreshInFlight = true;
+        m_refreshAction->setEnabled(false);
+        m_preferencesAction->setEnabled(false);
+        statusBar()->showMessage(QStringLiteral("Refreshing mail from server..."));
+
+        auto task = m_jmapCore.refreshFromServer(toLiveConnectionSettings(settings));
+        QCoro::connect(
+            std::move(task), this,
+            [this](javelin::jmap::LiveRefreshResult result)
+            {
+                m_refreshInFlight = false;
+                m_refreshAction->setEnabled(true);
+                m_preferencesAction->setEnabled(true);
+
+                if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+                {
+                    statusBar()->showMessage(error->message, 10000);
+                    return;
+                }
+
+                const auto& summary = std::get<javelin::jmap::LiveRefreshSummary>(result);
+                reloadAccounts();
+                refreshViewsFromCache();
+                statusBar()->showMessage(
+                    QStringLiteral("Synced %1 mailboxes and %2 messages for %3.")
+                        .arg(summary.mailboxCount)
+                        .arg(summary.emailCount)
+                        .arg(QString::fromStdString(summary.accountId)),
+                    10000);
+            });
     }
 
     void MainWindow::restorePersistentState()

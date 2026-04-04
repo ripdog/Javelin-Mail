@@ -27,6 +27,33 @@ TEST_CASE("changes requests serialize typed state-token inputs", "[jmap][method]
     CHECK(*json == R"({"accountId":"u1","sinceState":"state-1","maxChanges":100})");
 }
 
+TEST_CASE("email query requests serialize mailbox-scoped sort windows", "[jmap][method][mail]")
+{
+    const auto json = javelin::jmap::api::serializeEmailQueryRequest({
+        .accountId = "u1",
+        .filter =
+            javelin::jmap::api::EmailQueryFilter{
+                .inMailbox = "mbx-inbox",
+            },
+        .sort =
+            {
+                javelin::jmap::api::EmailQuerySort{
+                    .property = "receivedAt",
+                    .isAscending = false,
+                },
+            },
+        .position = 0,
+        .limit = 100,
+        .collapseThreads = false,
+        .calculateTotal = false,
+    });
+
+    REQUIRE(json.has_value());
+    CHECK(
+        *json ==
+        R"({"accountId":"u1","filter":{"inMailbox":"mbx-inbox"},"sort":[{"property":"receivedAt","isAscending":false}],"position":0,"limit":100,"collapseThreads":false,"calculateTotal":false})");
+}
+
 TEST_CASE("mailbox get responses parse into typed mailbox entities", "[jmap][method][mail]")
 {
     const auto result = javelin::jmap::api::parseMailboxGetResponse(
@@ -70,4 +97,18 @@ TEST_CASE("changes responses parse created updated and destroyed ids", "[jmap][m
     CHECK(result.value->created == std::vector<std::string>{"mbx-created"});
     CHECK(result.value->updated == std::vector<std::string>{"mbx-updated"});
     CHECK(result.value->destroyed == std::vector<std::string>{"mbx-destroyed"});
+}
+
+TEST_CASE("email query responses parse ids and query metadata", "[jmap][method][mail]")
+{
+    const auto result = javelin::jmap::api::parseEmailQueryResponse(
+        R"({"accountId":"u1","queryState":"query-state-1","canCalculateChanges":true,"position":0,"ids":["eml-1","eml-2"],"total":2})");
+
+    REQUIRE(result.ok());
+    REQUIRE(result.value.has_value());
+    CHECK(result.value->accountId == "u1");
+    CHECK(result.value->queryState == "query-state-1");
+    CHECK(result.value->canCalculateChanges);
+    CHECK(result.value->ids == std::vector<std::string>{"eml-1", "eml-2"});
+    CHECK(result.value->total == std::optional<std::uint64_t>{2});
 }

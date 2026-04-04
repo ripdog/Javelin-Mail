@@ -129,6 +129,11 @@ namespace javelin::gui::mailboxes
         rebuild();
     }
 
+    void MailboxTreeModel::refresh()
+    {
+        rebuild();
+    }
+
     const MailboxTreeModel::Node* MailboxTreeModel::nodeForIndex(const QModelIndex& index) const
     {
         return index.isValid() ? static_cast<const Node*>(index.internalPointer()) : nullptr;

@@ -4,9 +4,16 @@
 
 #include <memory>
 
+class QNetworkAccessManager;
+
 namespace javelin::jmap
 {
     class JmapCore;
+}
+
+namespace javelin::jmap::api
+{
+    class QtNetworkTransport;
 }
 
 namespace javelin::jmap::cache
@@ -39,6 +46,8 @@ namespace javelin::app
       private:
         std::unique_ptr<javelin::jmap::JmapCore> m_jmapCore;
         javelin::jmap::cache::DatabaseConnection m_databaseConnection;
+        std::unique_ptr<QNetworkAccessManager> m_networkAccessManager;
+        std::unique_ptr<javelin::jmap::api::QtNetworkTransport> m_transport;
         std::unique_ptr<javelin::jmap::cache::AccountRepository> m_accountRepository;
         std::unique_ptr<javelin::jmap::cache::MessageViewService> m_messageViewService;
         std::unique_ptr<javelin::jmap::cache::QueryService> m_queryService;

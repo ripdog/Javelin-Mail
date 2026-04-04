@@ -54,6 +54,8 @@ namespace javelin::gui::shell
         void createMenus();
         void setupUi();
         void connectSelection();
+        void refreshViewsFromCache();
+        void refreshFromServer();
         void openPreferences();
         void reloadAccounts();
         void restorePersistentState();
@@ -73,7 +75,9 @@ namespace javelin::gui::shell
         QTreeView* m_mailboxView = nullptr;
         QListView* m_messageView = nullptr;
         QLabel* m_messageEmptyState = nullptr;
+        QAction* m_refreshAction = nullptr;
         QAction* m_preferencesAction = nullptr;
+        bool m_refreshInFlight = false;
     };
 
 } // namespace javelin::gui::shell

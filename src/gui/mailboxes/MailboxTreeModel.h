@@ -33,6 +33,7 @@ namespace javelin::gui::mailboxes
         [[nodiscard]] QVariant data(const QModelIndex& index, int role) const override;
 
         void setAccountId(std::optional<std::string> accountId);
+        void refresh();
 
       private:
         struct Node

@@ -27,6 +27,7 @@ namespace javelin::gui::messageview
         void setSelection(javelin::jmap::cache::MessageViewService& messageViewService,
                           std::optional<std::string> accountId,
                           std::optional<std::string> mailboxId, std::optional<std::string> emailId);
+        void refresh(javelin::jmap::cache::MessageViewService& messageViewService);
 
       private:
         enum class ActiveView

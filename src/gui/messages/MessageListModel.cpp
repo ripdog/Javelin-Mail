@@ -65,6 +65,11 @@ namespace javelin::gui::messages
         reload();
     }
 
+    void MessageListModel::refresh()
+    {
+        reload();
+    }
+
     void MessageListModel::reload()
     {
         beginResetModel();
