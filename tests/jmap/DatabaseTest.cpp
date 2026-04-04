@@ -81,9 +81,11 @@ TEST_CASE("database connection creates the initial cache schema", "[jmap][cache]
         migrationsResult));
     const auto& migrations =
         std::get<std::vector<javelin::jmap::cache::AppliedMigration>>(migrationsResult);
-    REQUIRE(migrations.size() == 1);
+    REQUIRE(migrations.size() == 2);
     CHECK(migrations.front().version == 1);
     CHECK(migrations.front().name == "initial_cache_schema");
+    CHECK(migrations.back().version == 2);
+    CHECK(migrations.back().name == "mailboxes_is_subscribed");
 
     QSqlQuery tableQuery{connection.database()};
     REQUIRE(tableQuery.exec(
@@ -139,7 +141,8 @@ TEST_CASE("database migrations are repeatable when reopening an existing cache",
         migrationsResult));
     const auto& migrations =
         std::get<std::vector<javelin::jmap::cache::AppliedMigration>>(migrationsResult);
-    REQUIRE(migrations.size() == 1);
+    REQUIRE(migrations.size() == 2);
     CHECK(migrations.front().version == 1);
-    CHECK(connection.schemaVersion() == 1);
+    CHECK(migrations.back().version == 2);
+    CHECK(connection.schemaVersion() == 2);
 }

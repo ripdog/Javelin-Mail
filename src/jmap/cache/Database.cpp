@@ -564,6 +564,15 @@ namespace javelin::jmap::cache
                             "pending_actions (account_id, status, created_at)",
                         },
                 },
+                MigrationStep{
+                    .version = 2,
+                    .name = "mailboxes_is_subscribed",
+                    .statements =
+                        {
+                            "ALTER TABLE mailboxes ADD COLUMN is_subscribed INTEGER NOT NULL "
+                            "DEFAULT 0",
+                        },
+                },
             },
         };
     }
