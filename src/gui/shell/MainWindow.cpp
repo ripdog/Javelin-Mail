@@ -73,6 +73,34 @@ namespace javelin::gui::shell
                                      : std::optional<std::string>{emailId.toStdString()};
         }
 
+        [[nodiscard]] QModelIndex findIndexByRole(const QAbstractItemModel& model, const int role,
+                                                  const QString& value,
+                                                  const QModelIndex& parent = {})
+        {
+            const int rowCount = model.rowCount(parent);
+            for (int row = 0; row < rowCount; ++row)
+            {
+                const QModelIndex index = model.index(row, 0, parent);
+                if (!index.isValid())
+                {
+                    continue;
+                }
+
+                if (index.data(role).toString() == value)
+                {
+                    return index;
+                }
+
+                const QModelIndex childMatch = findIndexByRole(model, role, value, index);
+                if (childMatch.isValid())
+                {
+                    return childMatch;
+                }
+            }
+
+            return {};
+        }
+
         [[nodiscard]] javelin::jmap::LiveConnectionSettings
         toLiveConnectionSettings(const javelin::gui::settings::ConnectionSettings& settings)
         {
@@ -291,6 +319,34 @@ namespace javelin::gui::shell
         updateEmptyStates();
     }
 
+    void MainWindow::restoreSelection(std::optional<std::string> mailboxId,
+                                      std::optional<std::string> emailId)
+    {
+        if (mailboxId.has_value())
+        {
+            const QModelIndex mailboxIndex = findIndexByRole(
+                *m_mailboxModel, javelin::gui::mailboxes::MailboxTreeModel::MailboxIdRole,
+                QString::fromStdString(*mailboxId));
+            if (mailboxIndex.isValid())
+            {
+                m_mailboxView->setCurrentIndex(mailboxIndex);
+                m_mailboxView->scrollTo(mailboxIndex);
+            }
+        }
+
+        if (emailId.has_value())
+        {
+            const QModelIndex emailIndex = findIndexByRole(
+                *m_messageModel, javelin::gui::messages::MessageListModel::EmailIdRole,
+                QString::fromStdString(*emailId));
+            if (emailIndex.isValid())
+            {
+                m_messageView->setCurrentIndex(emailIndex);
+                m_messageView->scrollTo(emailIndex);
+            }
+        }
+    }
+
     void MainWindow::updateEmptyStates()
     {
         const bool hasMessages = m_messageModel->rowCount() > 0;
@@ -361,12 +417,17 @@ namespace javelin::gui::shell
                 }
 
                 const auto& summary = std::get<javelin::jmap::LiveRefreshSummary>(result);
+                const auto mailboxId = currentMailboxId(*m_mailboxView).has_value()
+                                           ? currentMailboxId(*m_mailboxView)
+                                           : summary.selectedMailboxId;
+                const auto emailId = currentEmailId(*m_messageView);
                 qInfo().noquote() << "GUI refresh succeeded"
                                   << QString::fromStdString(summary.accountId)
                                   << static_cast<qulonglong>(summary.mailboxCount)
                                   << static_cast<qulonglong>(summary.emailCount);
                 reloadAccounts();
                 refreshViewsFromCache();
+                restoreSelection(mailboxId, emailId);
                 statusBar()->showMessage(
                     QStringLiteral("Synced %1 mailboxes and %2 messages for %3.")
                         .arg(summary.mailboxCount)

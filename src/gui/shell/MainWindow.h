@@ -59,6 +59,8 @@ namespace javelin::gui::shell
         void refreshSelectedMessageContent(std::string accountId, std::string emailId);
         void openPreferences();
         void reloadAccounts();
+        void restoreSelection(std::optional<std::string> mailboxId,
+                              std::optional<std::string> emailId);
         void restorePersistentState();
         void savePersistentState() const;
         void updateEmptyStates();
