@@ -457,6 +457,7 @@ Completed so far:
 - [x] Add the first cache repository for persisted sync state tokens with deterministic round-trip tests.
 - [x] Add a mailbox cache repository with replacement semantics and parent-scoped mailbox queries.
 - [x] Add a cached session bootstrap repository that round-trips typed session and account metadata.
+- [x] Add a thread cache repository that preserves ordered email membership per thread.
 
 Exit criteria:
 

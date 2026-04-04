@@ -12,6 +12,7 @@ add_executable(javelin_jmap_tests
     jmap/SessionRepositoryTest.cpp
     jmap/SessionTest.cpp
     jmap/SyncStateRepositoryTest.cpp
+    jmap/ThreadRepositoryTest.cpp
 )
 
 target_include_directories(javelin_jmap_tests
