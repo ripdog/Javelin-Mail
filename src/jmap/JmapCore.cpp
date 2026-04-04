@@ -13,7 +13,11 @@
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/cache/SyncStateRepository.h"
 
+#include <QDateTime>
 #include <QDebug>
+#include <QDir>
+#include <QFile>
+#include <QStandardPaths>
 #include <algorithm>
 #include <unordered_map>
 #include <utility>
@@ -84,6 +88,41 @@ namespace javelin::jmap
             }
 
             return std::nullopt;
+        }
+
+        [[nodiscard]] std::optional<QString> dumpRawJsonToTempFile(const QString& stem,
+                                                                   std::string_view json)
+        {
+            const QString tempPath = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
+            if (tempPath.isEmpty())
+            {
+                return std::nullopt;
+            }
+
+            QDir directory{tempPath};
+            const QString fileName = QStringLiteral("javelin-mail-%1-%2.json")
+                                         .arg(stem, QDateTime::currentDateTimeUtc().toString(
+                                                        QStringLiteral("yyyyMMddHHmmsszzz")));
+            const QString filePath = directory.filePath(fileName);
+
+            QFile file{filePath};
+            if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text))
+            {
+                qWarning().noquote()
+                    << "JMAP raw JSON dump failed" << filePath << file.errorString();
+                return std::nullopt;
+            }
+
+            const auto written = file.write(json.data(), static_cast<qint64>(json.size()));
+            if (written != static_cast<qint64>(json.size()) || !file.flush())
+            {
+                qWarning().noquote()
+                    << "JMAP raw JSON dump incomplete" << filePath << file.errorString();
+                return std::nullopt;
+            }
+
+            qWarning().noquote() << "JMAP raw JSON dumped" << filePath;
+            return filePath;
         }
 
         [[nodiscard]] std::optional<std::string>
@@ -402,8 +441,14 @@ namespace javelin::jmap
             javelin::jmap::api::parseMailboxGetResponse(mailboxMethod->arguments);
         if (!parsedMailboxes.ok() || !parsedMailboxes.value.has_value())
         {
+            const auto dumped =
+                dumpRawJsonToTempFile(QStringLiteral("mailbox-get"), mailboxMethod->arguments);
             co_return LiveRefreshError{
-                .message = QStringLiteral("Failed to parse Mailbox/get response."),
+                .message = dumped.has_value()
+                               ? QStringLiteral("Failed to parse Mailbox/get response. Raw JSON "
+                                                "dumped to %1.")
+                                     .arg(*dumped)
+                               : QStringLiteral("Failed to parse Mailbox/get response."),
             };
         }
         reportProgress(QStringLiteral("Fetched %1 mailboxes. Updating cache...")
@@ -505,8 +550,14 @@ namespace javelin::jmap
                 javelin::jmap::api::parseEmailQueryResponse(queryMethod->arguments);
             if (!parsedQuery.ok() || !parsedQuery.value.has_value())
             {
+                const auto dumped =
+                    dumpRawJsonToTempFile(QStringLiteral("email-query"), queryMethod->arguments);
                 co_return LiveRefreshError{
-                    .message = QStringLiteral("Failed to parse Email/query response."),
+                    .message = dumped.has_value()
+                                   ? QStringLiteral("Failed to parse Email/query response. Raw "
+                                                    "JSON dumped to %1.")
+                                         .arg(*dumped)
+                                   : QStringLiteral("Failed to parse Email/query response."),
                 };
             }
             reportProgress(
@@ -586,8 +637,14 @@ namespace javelin::jmap
                     javelin::jmap::api::parseEmailGetResponse(emailMethod->arguments);
                 if (!parsedEmails.ok() || !parsedEmails.value.has_value())
                 {
+                    const auto dumped =
+                        dumpRawJsonToTempFile(QStringLiteral("email-get"), emailMethod->arguments);
                     co_return LiveRefreshError{
-                        .message = QStringLiteral("Failed to parse Email/get response."),
+                        .message = dumped.has_value()
+                                       ? QStringLiteral("Failed to parse Email/get response. Raw "
+                                                        "JSON dumped to %1.")
+                                             .arg(*dumped)
+                                       : QStringLiteral("Failed to parse Email/get response."),
                     };
                 }
 
@@ -780,8 +837,14 @@ namespace javelin::jmap
         const auto parsed = javelin::jmap::api::parseEmailContentGetResponse(method->arguments);
         if (!parsed.ok() || !parsed.value.has_value())
         {
+            const auto dumped =
+                dumpRawJsonToTempFile(QStringLiteral("email-content-get"), method->arguments);
             co_return LiveRefreshError{
-                .message = QStringLiteral("Failed to parse Email/get content response."),
+                .message = dumped.has_value()
+                               ? QStringLiteral("Failed to parse Email/get content response. Raw "
+                                                "JSON dumped to %1.")
+                                     .arg(*dumped)
+                               : QStringLiteral("Failed to parse Email/get content response."),
             };
         }
 
