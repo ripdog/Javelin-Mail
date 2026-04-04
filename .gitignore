@@ -85,3 +85,6 @@ CMakeLists.txt.user*
 /out/
 /.qtcreator/
 /.idea
+
+#docs
+/docs/vendor

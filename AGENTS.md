@@ -55,7 +55,7 @@ This repository is for a Qt Widgets JMAP email client. Treat it as a modern-only
 
 ## Static Analysis And Quality Gates
 
-- Keep the codebase `clang-format` clean.
+- Keep the codebase `clang-format` clean. Do NOT run clang-format on non-code, such as CMakeLists.txt
 - Run `clang-tidy` regularly and fix warnings instead of normalizing them.
 - Run clazy for Qt-specific issues and treat findings seriously.
 - Use AddressSanitizer in debug/test workflows by default where supported.
