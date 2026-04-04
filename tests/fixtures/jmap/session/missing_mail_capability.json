@@ -1,0 +1,21 @@
+{
+  "capabilities": {
+    "urn:ietf:params:jmap:core": {
+      "maxConcurrentRequests": 8
+    }
+  },
+  "accounts": {
+    "u1": {
+      "name": "Personal",
+      "isPersonal": true,
+      "isReadOnly": false,
+      "accountCapabilities": {}
+    }
+  },
+  "primaryAccounts": {},
+  "username": "alice@example.com",
+  "apiUrl": "https://mail.example.com/jmap/api",
+  "downloadUrl": "https://mail.example.com/jmap/download/{accountId}/{blobId}/{name}?type={type}",
+  "uploadUrl": "https://mail.example.com/jmap/upload/{accountId}",
+  "state": "session-state-2"
+}

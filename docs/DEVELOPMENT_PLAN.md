@@ -391,7 +391,8 @@ Tasks:
 - [x] Add `cmake/Warnings.cmake`, `cmake/StaticAnalysis.cmake`, and `cmake/Sanitizers.cmake`.
 - [x] Add `.clang-format` and `.clang-tidy`.
 - [x] Add CMake presets for debug, ASan, and release.
-- [ ] Fetch Catch2 with `FetchContent`.
+- [x] Fetch Catch2 with `FetchContent`.
+- [x] Add an initial `tests/jmap` Catch2 target and verify it runs in the debug preset.
 
 Exit criteria:
 
@@ -414,6 +415,12 @@ Tasks:
 - Add typed error surfaces for network, auth, and protocol failures.
 - Define capability negotiation surfaces and fail-fast unsupported-feature handling.
 - Define auth/session abstractions with token refresh and secret-storage integration points.
+
+Completed so far:
+
+- [x] Add typed session, account, and capability structs for the first session-discovery slice.
+- [x] Centralize capability validation and fail-fast requirement checks in the JMAP library.
+- [x] Add Glaze-backed session parsing and fixture-based tests for the session bootstrap shape.
 
 Exit criteria:
 
@@ -617,7 +624,7 @@ The immediate next changes after this plan should be:
 1. [x] Replace the current root-level sample files with the `src/app`, `src/gui`, and `src/jmap` split.
 2. [x] Restructure `CMakeLists.txt` into explicit library and executable targets.
 3. [x] Add tooling files for warnings, formatting, sanitizers, clazy, and `clang-tidy`.
-4. [ ] Introduce Catch2 through `FetchContent`.
+4. [x] Introduce Catch2 through `FetchContent`.
 5. [ ] Build the typed JMAP session/bootstrap path and fixture tests before touching the real GUI.
 6. [ ] Implement the database schema and migration runner before building mailbox/message models.
 7. [ ] Define auth/secret storage and capability negotiation before building feature-specific flows.

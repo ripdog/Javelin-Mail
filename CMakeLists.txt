@@ -7,12 +7,15 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 include(cmake/Warnings.cmake)
+include(cmake/Dependencies.cmake)
 include(cmake/StaticAnalysis.cmake)
 include(cmake/Sanitizers.cmake)
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets LinguistTools)
 
 qt_standard_project_setup()
+javelin_configure_dependencies()
+enable_testing()
 
 set(JAVELIN_FORMAT_FILES
     src/app/ApplicationBootstrap.cpp
@@ -22,11 +25,23 @@ set(JAVELIN_FORMAT_FILES
     src/app/ProcessServices.h
     src/gui/shell/MainWindow.cpp
     src/gui/shell/MainWindow.h
+    src/jmap/api/Session.cpp
+    src/jmap/api/Session.h
+    src/jmap/api/SessionParser.cpp
+    src/jmap/api/SessionParser.h
     src/jmap/JmapCore.cpp
     src/jmap/JmapCore.h
+    tests/FixtureReader.cpp
+    tests/FixtureReader.h
+    tests/jmap/JmapCoreTest.cpp
+    tests/jmap/SessionTest.cpp
 )
 
 add_library(javelin_jmap STATIC
+    src/jmap/api/Session.cpp
+    src/jmap/api/Session.h
+    src/jmap/api/SessionParser.cpp
+    src/jmap/api/SessionParser.h
     src/jmap/JmapCore.cpp
     src/jmap/JmapCore.h
 )
@@ -36,6 +51,8 @@ target_include_directories(javelin_jmap PUBLIC
 target_link_libraries(javelin_jmap
     PUBLIC
         Qt::Core
+    PRIVATE
+        glaze::glaze
 )
 javelin_set_project_warnings(javelin_jmap)
 javelin_enable_static_analysis(javelin_jmap)
@@ -100,8 +117,10 @@ javelin_enable_sanitizers(Javelin-Mail)
 
 javelin_add_format_targets(${JAVELIN_FORMAT_FILES})
 
+add_subdirectory(tests)
+
 install(TARGETS Javelin-Mail
-    BUNDLE  DESTINATION .
+    BUNDLE DESTINATION .
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )

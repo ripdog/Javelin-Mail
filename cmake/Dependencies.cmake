@@ -1,0 +1,29 @@
+include_guard(GLOBAL)
+
+include(FetchContent)
+
+function(javelin_configure_dependencies)
+    set(CATCH_INSTALL_DOCS OFF CACHE BOOL "" FORCE)
+    set(CATCH_INSTALL_EXTRAS ON CACHE BOOL "" FORCE)
+    set(glaze_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(glaze_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+
+    FetchContent_Declare(
+        Catch2
+        GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+        GIT_TAG v3.7.1
+        GIT_SHALLOW TRUE
+    )
+
+    FetchContent_Declare(
+        glaze
+        GIT_REPOSITORY https://github.com/stephenberry/glaze.git
+        GIT_TAG v5.7.2
+        GIT_SHALLOW TRUE
+    )
+
+    FetchContent_MakeAvailable(Catch2 glaze)
+
+    list(APPEND CMAKE_MODULE_PATH "${catch2_SOURCE_DIR}/extras")
+    set(CMAKE_MODULE_PATH "${CMAKE_MODULE_PATH}" PARENT_SCOPE)
+endfunction()
