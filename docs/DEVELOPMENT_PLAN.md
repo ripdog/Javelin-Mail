@@ -386,12 +386,12 @@ Goals:
 
 Tasks:
 
-- Move the current executable entrypoint into `src/app`.
-- Split targets into at least `javelin_jmap`, `javelin_gui`, and `Javelin-Mail`.
-- Add `cmake/Warnings.cmake`, `cmake/StaticAnalysis.cmake`, and `cmake/Sanitizers.cmake`.
-- Add `.clang-format` and `.clang-tidy`.
-- Add CMake presets for debug, ASan, and release.
-- Fetch Catch2 with `FetchContent`.
+- [x] Move the current executable entrypoint into `src/app`.
+- [x] Split targets into at least `javelin_jmap`, `javelin_gui`, and `Javelin-Mail`.
+- [x] Add `cmake/Warnings.cmake`, `cmake/StaticAnalysis.cmake`, and `cmake/Sanitizers.cmake`.
+- [x] Add `.clang-format` and `.clang-tidy`.
+- [x] Add CMake presets for debug, ASan, and release.
+- [ ] Fetch Catch2 with `FetchContent`.
 
 Exit criteria:
 
@@ -614,13 +614,13 @@ Exit criteria:
 
 The immediate next changes after this plan should be:
 
-1. Replace the current root-level sample files with the `src/app`, `src/gui`, and `src/jmap` split.
-2. Restructure `CMakeLists.txt` into explicit library and executable targets.
-3. Add tooling files for warnings, formatting, sanitizers, clazy, and `clang-tidy`.
-4. Introduce Catch2 through `FetchContent`.
-5. Build the typed JMAP session/bootstrap path and fixture tests before touching the real GUI.
-6. Implement the database schema and migration runner before building mailbox/message models.
-7. Define auth/secret storage and capability negotiation before building feature-specific flows.
+1. [x] Replace the current root-level sample files with the `src/app`, `src/gui`, and `src/jmap` split.
+2. [x] Restructure `CMakeLists.txt` into explicit library and executable targets.
+3. [x] Add tooling files for warnings, formatting, sanitizers, clazy, and `clang-tidy`.
+4. [ ] Introduce Catch2 through `FetchContent`.
+5. [ ] Build the typed JMAP session/bootstrap path and fixture tests before touching the real GUI.
+6. [ ] Implement the database schema and migration runner before building mailbox/message models.
+7. [ ] Define auth/secret storage and capability negotiation before building feature-specific flows.
 
 This order keeps the project from growing another throwaway UI shell on top of the sample scaffold.
 

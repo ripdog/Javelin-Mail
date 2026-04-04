@@ -81,5 +81,7 @@ CMakeLists.txt.user*
 .rcc/
 .uic/
 /build*/
+.out/
+/out/
 /.qtcreator/
 /.idea
