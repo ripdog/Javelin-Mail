@@ -467,6 +467,7 @@ Completed so far:
 - [x] Add a thread cache repository that preserves ordered email membership per thread.
 - [x] Add an email summary cache repository that normalizes mailbox, keyword, and address rows.
 - [x] Add MIME-part metadata and canonical body-value repositories without general attachment payload caching.
+- [x] Add SQL-backed mailbox-tree and paged message-list query APIs shaped for GUI consumption.
 
 Exit criteria:
 
