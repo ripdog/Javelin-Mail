@@ -18,20 +18,20 @@ namespace
     struct RawEmail
     {
         std::string id;
-        std::string blobId;
-        std::string threadId;
-        std::unordered_map<std::string, bool> mailboxIds;
-        std::unordered_map<std::string, bool> keywords;
-        std::uint64_t size = 0;
-        std::string receivedAt;
+        std::optional<std::string> blobId;
+        std::optional<std::string> threadId;
+        std::optional<std::unordered_map<std::string, bool>> mailboxIds;
+        std::optional<std::unordered_map<std::string, bool>> keywords;
+        std::optional<std::uint64_t> size;
+        std::optional<std::string> receivedAt;
         std::optional<std::string> sentAt;
-        bool hasAttachment = false;
+        std::optional<bool> hasAttachment;
         std::optional<std::string> subject;
-        std::vector<javelin::jmap::domain::EmailAddress> from;
-        std::vector<javelin::jmap::domain::EmailAddress> to;
-        std::vector<javelin::jmap::domain::EmailAddress> cc;
-        std::vector<javelin::jmap::domain::EmailAddress> bcc;
-        std::vector<javelin::jmap::domain::EmailAddress> replyTo;
+        std::optional<std::vector<javelin::jmap::domain::EmailAddress>> from;
+        std::optional<std::vector<javelin::jmap::domain::EmailAddress>> to;
+        std::optional<std::vector<javelin::jmap::domain::EmailAddress>> cc;
+        std::optional<std::vector<javelin::jmap::domain::EmailAddress>> bcc;
+        std::optional<std::vector<javelin::jmap::domain::EmailAddress>> replyTo;
         std::optional<std::string> preview;
     };
 
@@ -147,29 +147,34 @@ namespace javelin::jmap::domain
 
     ParsedObject<Email> parseEmail(std::string_view json)
     {
-        return parseWithGlaze<RawEmail, Email>(json,
-                                               [](RawEmail rawEmail)
-                                               {
-                                                   return Email{
-                                                       .id = std::move(rawEmail.id),
-                                                       .blobId = std::move(rawEmail.blobId),
-                                                       .threadId = std::move(rawEmail.threadId),
-                                                       .mailboxIds =
-                                                           enabledKeys(rawEmail.mailboxIds),
-                                                       .keywords = enabledKeys(rawEmail.keywords),
-                                                       .size = rawEmail.size,
-                                                       .receivedAt = std::move(rawEmail.receivedAt),
-                                                       .sentAt = std::move(rawEmail.sentAt),
-                                                       .hasAttachment = rawEmail.hasAttachment,
-                                                       .subject = std::move(rawEmail.subject),
-                                                       .from = std::move(rawEmail.from),
-                                                       .to = std::move(rawEmail.to),
-                                                       .cc = std::move(rawEmail.cc),
-                                                       .bcc = std::move(rawEmail.bcc),
-                                                       .replyTo = std::move(rawEmail.replyTo),
-                                                       .preview = std::move(rawEmail.preview),
-                                                   };
-                                               });
+        return parseWithGlaze<RawEmail, Email>(
+            json,
+            [](RawEmail rawEmail)
+            {
+                return Email{
+                    .id = std::move(rawEmail.id),
+                    .blobId = rawEmail.blobId.value_or(std::string{}),
+                    .threadId = rawEmail.threadId.value_or(std::string{}),
+                    .mailboxIds = enabledKeys(
+                        rawEmail.mailboxIds.value_or(std::unordered_map<std::string, bool>{})),
+                    .keywords = enabledKeys(
+                        rawEmail.keywords.value_or(std::unordered_map<std::string, bool>{})),
+                    .size = rawEmail.size.value_or(0),
+                    .receivedAt = rawEmail.receivedAt.value_or(std::string{}),
+                    .sentAt = std::move(rawEmail.sentAt),
+                    .hasAttachment = rawEmail.hasAttachment.value_or(false),
+                    .subject = std::move(rawEmail.subject),
+                    .from =
+                        rawEmail.from.value_or(std::vector<javelin::jmap::domain::EmailAddress>{}),
+                    .to = rawEmail.to.value_or(std::vector<javelin::jmap::domain::EmailAddress>{}),
+                    .cc = rawEmail.cc.value_or(std::vector<javelin::jmap::domain::EmailAddress>{}),
+                    .bcc =
+                        rawEmail.bcc.value_or(std::vector<javelin::jmap::domain::EmailAddress>{}),
+                    .replyTo = rawEmail.replyTo.value_or(
+                        std::vector<javelin::jmap::domain::EmailAddress>{}),
+                    .preview = std::move(rawEmail.preview),
+                };
+            });
     }
 
     ParsedObject<Identity> parseIdentity(std::string_view json)

@@ -60,6 +60,26 @@ TEST_CASE("email fixtures parse into typed email entities", "[jmap][domain]")
     CHECK(result.value->replyTo.front().email == "support@example.com");
 }
 
+TEST_CASE("email parser ignores unknown server fields and missing optional arrays",
+          "[jmap][domain]")
+{
+    const auto result = javelin::jmap::domain::parseEmail(
+        R"({"id":"eml-fastmail","blobId":"blob-fastmail","threadId":"thr-fastmail","mailboxIds":{"mbx-inbox":true},"keywords":{"$seen":true},"size":2048,"receivedAt":"2026-04-05T11:22:33Z","hasAttachment":false,"subject":"Inbox update","from":[{"name":"Fastmail","email":"no-reply@fastmail.com"}],"preview":"Preview text","sender":null,"bodyValues":{},"attachments":[]})");
+
+    REQUIRE(result.ok());
+    REQUIRE(result.value.has_value());
+    CHECK(result.value->id == "eml-fastmail");
+    CHECK(result.value->blobId == "blob-fastmail");
+    CHECK(result.value->threadId == "thr-fastmail");
+    CHECK(result.value->mailboxIds == std::vector<std::string>{"mbx-inbox"});
+    CHECK(result.value->keywords == std::vector<std::string>{"$seen"});
+    CHECK(result.value->from.size() == 1);
+    CHECK(result.value->to.empty());
+    CHECK(result.value->cc.empty());
+    CHECK(result.value->bcc.empty());
+    CHECK(result.value->replyTo.empty());
+}
+
 TEST_CASE("identity fixtures parse into typed identity entities", "[jmap][domain]")
 {
     const auto result = javelin::jmap::domain::parseIdentity(
