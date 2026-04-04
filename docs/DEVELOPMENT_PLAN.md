@@ -496,6 +496,7 @@ Completed so far:
 - [x] Add typed `Mailbox/*` and `Email/*` sync method payloads so incremental sync code can avoid raw method-argument JSON.
 - [x] Reconcile mailbox and email change batches into SQL with targeted upsert/delete operations and persisted new state tokens.
 - [x] Add typed pending email patch actions and merge rules so local mailbox/keyword edits survive concurrent server refreshes.
+- [x] Add a resumable long-poll worker with explicit cancellation and structured retry backoff.
 
 Exit criteria:
 
