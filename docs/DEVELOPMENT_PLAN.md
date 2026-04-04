@@ -449,6 +449,12 @@ Tasks:
 - Decide WAL, pragma, and index strategy for a long-running desktop client.
 - Define thread ownership and connection policy for database access.
 
+Completed so far:
+
+- [x] Add a SQLite cache connection boundary with per-thread named connections and explicit close semantics.
+- [x] Add transactional schema versioning and an initial migration runner for the cache schema.
+- [x] Apply the initial WAL/pragma policy at open time and cover fresh-create plus reopen behavior with tests.
+
 Exit criteria:
 
 - Fresh database creation works.

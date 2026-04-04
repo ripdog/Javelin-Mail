@@ -11,7 +11,7 @@ include(cmake/Dependencies.cmake)
 include(cmake/StaticAnalysis.cmake)
 include(cmake/Sanitizers.cmake)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Network Widgets LinguistTools)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Network Sql Widgets LinguistTools)
 
 qt_standard_project_setup()
 javelin_configure_dependencies()
@@ -40,6 +40,8 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/api/SessionParser.h
     src/jmap/api/Transport.cpp
     src/jmap/api/Transport.h
+    src/jmap/cache/Database.cpp
+    src/jmap/cache/Database.h
     src/jmap/domain/MailEntities.h
     src/jmap/domain/MailEntityParsers.cpp
     src/jmap/domain/MailEntityParsers.h
@@ -52,6 +54,7 @@ set(JAVELIN_FORMAT_FILES
     tests/FixtureReader.cpp
     tests/FixtureReader.h
     tests/jmap/AuthTest.cpp
+    tests/jmap/DatabaseTest.cpp
     tests/jmap/JmapCoreTest.cpp
     tests/jmap/MethodCallerTest.cpp
     tests/jmap/MethodEnvelopeTest.cpp
@@ -75,6 +78,8 @@ add_library(javelin_jmap STATIC
     src/jmap/api/SessionParser.h
     src/jmap/api/Transport.cpp
     src/jmap/api/Transport.h
+    src/jmap/cache/Database.cpp
+    src/jmap/cache/Database.h
     src/jmap/domain/MailEntities.h
     src/jmap/domain/MailEntityParsers.cpp
     src/jmap/domain/MailEntityParsers.h
@@ -93,6 +98,7 @@ target_link_libraries(javelin_jmap
         QCoro6::Coro
         Qt::Core
         Qt::Network
+        Qt::Sql
     PRIVATE
         QCoro6::Network
         glaze::glaze
