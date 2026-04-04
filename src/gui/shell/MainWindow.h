@@ -17,6 +17,7 @@ namespace javelin::jmap
 namespace javelin::jmap::cache
 {
     class AccountRepository;
+    class MessageViewService;
     class QueryService;
 } // namespace javelin::jmap::cache
 
@@ -43,6 +44,7 @@ namespace javelin::gui::shell
       public:
         explicit MainWindow(javelin::jmap::JmapCore& jmapCore,
                             javelin::jmap::cache::AccountRepository& accountRepository,
+                            javelin::jmap::cache::MessageViewService& messageViewService,
                             javelin::jmap::cache::QueryService& queryService,
                             QWidget* parent = nullptr);
         ~MainWindow() override = default;
@@ -58,6 +60,7 @@ namespace javelin::gui::shell
 
         javelin::jmap::JmapCore& m_jmapCore;
         javelin::jmap::cache::AccountRepository& m_accountRepository;
+        javelin::jmap::cache::MessageViewService& m_messageViewService;
         javelin::jmap::cache::QueryService& m_queryService;
         QComboBox* m_accountCombo = nullptr;
         QSplitter* m_mainSplitter = nullptr;

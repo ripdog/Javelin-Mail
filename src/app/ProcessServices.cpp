@@ -2,6 +2,7 @@
 
 #include "jmap/JmapCore.h"
 #include "jmap/cache/AccountRepository.h"
+#include "jmap/cache/MessageViewService.h"
 #include "jmap/cache/QueryService.h"
 
 #include <QDir>
@@ -42,6 +43,8 @@ namespace javelin::app
             std::get<javelin::jmap::cache::DatabaseConnection>(std::move(databaseResult));
         m_accountRepository =
             std::make_unique<javelin::jmap::cache::AccountRepository>(m_databaseConnection);
+        m_messageViewService =
+            std::make_unique<javelin::jmap::cache::MessageViewService>(m_databaseConnection);
         m_queryService = std::make_unique<javelin::jmap::cache::QueryService>(m_databaseConnection);
     }
 
@@ -60,6 +63,11 @@ namespace javelin::app
     javelin::jmap::cache::AccountRepository& ProcessServices::accountRepository()
     {
         return *m_accountRepository;
+    }
+
+    javelin::jmap::cache::MessageViewService& ProcessServices::messageViewService()
+    {
+        return *m_messageViewService;
     }
 
     javelin::jmap::cache::QueryService& ProcessServices::queryService()

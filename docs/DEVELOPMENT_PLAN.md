@@ -575,6 +575,7 @@ Tasks:
 Completed so far:
 
 - [x] Add a typed cache-backed message-view snapshot service that loads selected-message headers, canonical body values, and attachment metadata from the local store.
+- [x] Wire the message-view container to cached selected-message data with explicit plain-text and HTML-source switching plus lightweight attachment metadata display.
 
 Exit criteria:
 
