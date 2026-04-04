@@ -17,6 +17,7 @@ add_executable(javelin_jmap_tests
     jmap/SessionTest.cpp
     jmap/SyncStateRepositoryTest.cpp
     jmap/SyncPlannerTest.cpp
+    jmap/SyncReconcilerTest.cpp
     jmap/ThreadRepositoryTest.cpp
 )
 

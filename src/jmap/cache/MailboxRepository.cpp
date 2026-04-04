@@ -163,6 +163,122 @@ namespace javelin::jmap::cache
         return std::nullopt;
     }
 
+    std::optional<DatabaseError>
+    MailboxRepository::upsertMany(const std::string_view accountId,
+                                  const std::vector<javelin::jmap::domain::Mailbox>& mailboxes)
+    {
+        if (const auto error = m_connection.validate())
+        {
+            return error;
+        }
+
+        if (mailboxes.empty())
+        {
+            return std::nullopt;
+        }
+
+        QSqlDatabase& database = m_connection.database();
+        if (!database.transaction())
+        {
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message = "Begin mailbox upsert transaction: " + database.lastError().text(),
+            };
+        }
+
+        QSqlQuery query{database};
+        query.prepare(
+            "INSERT INTO mailboxes ("
+            "account_id, mailbox_id, parent_mailbox_id, name, role, sort_order, total_emails, "
+            "unread_emails, total_threads, unread_threads, is_subscribed, rights_json, state"
+            ") VALUES ("
+            ":account_id, :mailbox_id, :parent_mailbox_id, :name, :role, :sort_order, "
+            ":total_emails, :unread_emails, :total_threads, :unread_threads, :is_subscribed, "
+            ":rights_json, :state"
+            ") ON CONFLICT(account_id, mailbox_id) DO UPDATE SET "
+            "parent_mailbox_id = excluded.parent_mailbox_id, "
+            "name = excluded.name, "
+            "role = excluded.role, "
+            "sort_order = excluded.sort_order, "
+            "total_emails = excluded.total_emails, "
+            "unread_emails = excluded.unread_emails, "
+            "total_threads = excluded.total_threads, "
+            "unread_threads = excluded.unread_threads, "
+            "is_subscribed = excluded.is_subscribed, "
+            "rights_json = excluded.rights_json, "
+            "state = excluded.state");
+
+        for (const auto& mailbox : mailboxes)
+        {
+            bindMailbox(query, accountId, mailbox);
+            if (!query.exec())
+            {
+                database.rollback();
+                return makeQueryError("Upsert mailbox", query);
+            }
+        }
+
+        if (!database.commit())
+        {
+            database.rollback();
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message = "Commit mailbox upsert transaction: " + database.lastError().text(),
+            };
+        }
+
+        return std::nullopt;
+    }
+
+    std::optional<DatabaseError>
+    MailboxRepository::removeMany(const std::string_view accountId,
+                                  const std::span<const std::string> mailboxIds)
+    {
+        if (const auto error = m_connection.validate())
+        {
+            return error;
+        }
+
+        if (mailboxIds.empty())
+        {
+            return std::nullopt;
+        }
+
+        QSqlDatabase& database = m_connection.database();
+        if (!database.transaction())
+        {
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message = "Begin mailbox delete transaction: " + database.lastError().text(),
+            };
+        }
+
+        QSqlQuery query{database};
+        query.prepare(
+            "DELETE FROM mailboxes WHERE account_id = :account_id AND mailbox_id = :mailbox_id");
+        for (const auto& mailboxId : mailboxIds)
+        {
+            query.bindValue(":account_id", QString::fromStdString(std::string{accountId}));
+            query.bindValue(":mailbox_id", QString::fromStdString(mailboxId));
+            if (!query.exec())
+            {
+                database.rollback();
+                return makeQueryError("Delete mailbox", query);
+            }
+        }
+
+        if (!database.commit())
+        {
+            database.rollback();
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message = "Commit mailbox delete transaction: " + database.lastError().text(),
+            };
+        }
+
+        return std::nullopt;
+    }
+
     std::variant<std::vector<javelin::jmap::domain::Mailbox>, DatabaseError>
     MailboxRepository::listByParent(const std::string_view accountId,
                                     const std::optional<std::string_view> parentId) const
