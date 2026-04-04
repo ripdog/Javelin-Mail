@@ -23,6 +23,19 @@ TEST_CASE("session capability validation succeeds when required capabilities are
     CHECK(result.session->accounts.at("u1").accountCapabilities.mail);
 }
 
+TEST_CASE("session parser ignores unknown server fields", "[jmap]")
+{
+    const auto result = javelin::jmap::api::parseSession(
+        R"({"username":"alice@example.com","apiUrl":"https://mail.example.com/jmap/api","downloadUrl":"https://mail.example.com/jmap/download/{accountId}/{blobId}/{name}?type={type}","uploadUrl":"https://mail.example.com/jmap/upload/{accountId}","eventSourceUrl":"https://mail.example.com/jmap/event/","state":"session-state-1","capabilities":{"urn:ietf:params:jmap:core":{"maxConcurrentRequests":8,"maxCallsInRequest":16,"maxObjectsInGet":500},"urn:ietf:params:jmap:mail":{"maxMailboxesPerEmail":1000}},"accounts":{"u1":{"name":"Personal","isPersonal":true,"isReadOnly":false,"accountCapabilities":{"urn:ietf:params:jmap:mail":{}},"unexpectedAccountField":true}},"primaryAccounts":{"urn:ietf:params:jmap:mail":"u1"},"unexpectedTopLevelField":"ignored"})",
+        javelin::jmap::api::RequiredCapabilities{.mail = true, .submission = false});
+
+    REQUIRE(result.ok());
+    REQUIRE(result.session.has_value());
+    CHECK(result.session->username == "alice@example.com");
+    CHECK(result.session->primaryAccounts.mailAccountId == "u1");
+    CHECK(result.session->accounts.contains("u1"));
+}
+
 TEST_CASE("session capability validation fails when primary mail account is missing", "[jmap]")
 {
     javelin::jmap::api::Session session{

@@ -49,7 +49,8 @@ namespace javelin::jmap::cache
         {
             std::string buffer = json.toStdString();
             glz::json_t object;
-            const auto readError = glz::read_json(object, buffer);
+            const auto readError =
+                glz::read<glz::opts{.error_on_unknown_keys = false}>(object, buffer);
             if (readError || !object.is_object())
             {
                 return {};

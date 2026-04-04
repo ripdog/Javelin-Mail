@@ -91,7 +91,8 @@ namespace javelin::jmap::cache
             }
 
             detail::RawCoreCapability raw;
-            const auto readError = glz::read_json(raw, buffer);
+            const auto readError =
+                glz::read<glz::opts{.error_on_unknown_keys = false}>(raw, buffer);
             if (readError)
             {
                 return std::nullopt;

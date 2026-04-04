@@ -92,7 +92,8 @@ namespace javelin::jmap::api
             }
 
             CoreCapability coreCapability;
-            const auto readError = glz::read_json(coreCapability, buffer);
+            const auto readError =
+                glz::read<glz::opts{.error_on_unknown_keys = false}>(coreCapability, buffer);
             if (readError)
             {
                 return std::nullopt;
@@ -183,7 +184,8 @@ namespace javelin::jmap::api
     {
         std::string buffer{json};
         detail::RawSession rawSession;
-        const auto readError = glz::read_json(rawSession, buffer);
+        const auto readError =
+            glz::read<glz::opts{.error_on_unknown_keys = false}>(rawSession, buffer);
         if (readError)
         {
             return SessionParseResult{

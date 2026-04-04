@@ -31,6 +31,19 @@ TEST_CASE("response envelopes parse typed invocation tuples from fixtures", "[jm
     CHECK(result.value->methodResponses.back().callId == "c2");
 }
 
+TEST_CASE("response envelopes ignore unknown server fields", "[jmap][method]")
+{
+    const auto result = javelin::jmap::api::parseResponseEnvelope(
+        R"({"sessionState":"session-state-2","methodResponses":[["Mailbox/get",{"accountId":"u1","state":"mailbox-state-1","list":[],"notFound":[],"serverSpecificField":true},"c1"]],"createdIds":{"draft-1":"eml-draft-server-id"},"unexpectedTopLevelField":"ignored"})");
+
+    REQUIRE(result.ok());
+    REQUIRE(result.value.has_value());
+    CHECK(result.value->sessionState == "session-state-2");
+    REQUIRE(result.value->methodResponses.size() == 1);
+    CHECK(result.value->methodResponses.front().name == "Mailbox/get");
+    CHECK(result.value->methodResponses.front().callId == "c1");
+}
+
 TEST_CASE("request envelopes serialize and round-trip", "[jmap][method]")
 {
     const auto parsed = javelin::jmap::api::parseRequestEnvelope(

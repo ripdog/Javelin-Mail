@@ -75,7 +75,8 @@ namespace javelin::jmap::api
         {
             std::string buffer{json};
             glz::json_t value;
-            const auto readError = glz::read_json(value, buffer);
+            const auto readError =
+                glz::read<glz::opts{.error_on_unknown_keys = false}>(value, buffer);
             if (readError)
             {
                 return std::nullopt;
@@ -97,7 +98,8 @@ namespace javelin::jmap::api
         {
             std::string buffer{json};
             T envelope{};
-            const auto readError = glz::read_json(envelope, buffer);
+            const auto readError =
+                glz::read<glz::opts{.error_on_unknown_keys = false}>(envelope, buffer);
             if (readError)
             {
                 return {
