@@ -573,6 +573,31 @@ namespace javelin::jmap::cache
                             "DEFAULT 0",
                         },
                 },
+                MigrationStep{
+                    .version = 3,
+                    .name = "session_and_account_metadata",
+                    .statements =
+                        {
+                            "ALTER TABLE accounts ADD COLUMN name TEXT NOT NULL DEFAULT ''",
+                            "ALTER TABLE accounts ADD COLUMN is_personal INTEGER NOT NULL DEFAULT "
+                            "0",
+                            "ALTER TABLE accounts ADD COLUMN is_read_only INTEGER NOT NULL DEFAULT "
+                            "0",
+                            "ALTER TABLE accounts ADD COLUMN cap_mail INTEGER NOT NULL DEFAULT 0",
+                            "ALTER TABLE accounts ADD COLUMN cap_submission INTEGER NOT NULL "
+                            "DEFAULT 0",
+                            "ALTER TABLE sessions ADD COLUMN has_core_capability INTEGER NOT NULL "
+                            "DEFAULT 0",
+                            "ALTER TABLE sessions ADD COLUMN has_mail_capability INTEGER NOT NULL "
+                            "DEFAULT 0",
+                            "ALTER TABLE sessions ADD COLUMN has_submission_capability INTEGER NOT "
+                            "NULL DEFAULT 0",
+                            "ALTER TABLE sessions ADD COLUMN core_capabilities_json TEXT NOT NULL "
+                            "DEFAULT 'null'",
+                            "ALTER TABLE sessions ADD COLUMN primary_mail_account_id TEXT",
+                            "ALTER TABLE sessions ADD COLUMN primary_submission_account_id TEXT",
+                        },
+                },
             },
         };
     }
