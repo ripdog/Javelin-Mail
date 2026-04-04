@@ -112,3 +112,49 @@ TEST_CASE("email query responses parse ids and query metadata", "[jmap][method][
     CHECK(result.value->ids == std::vector<std::string>{"eml-1", "eml-2"});
     CHECK(result.value->total == std::optional<std::uint64_t>{2});
 }
+
+TEST_CASE("email content get requests serialize body fetch arguments", "[jmap][method][mail]")
+{
+    const auto json = javelin::jmap::api::serializeEmailContentGetRequest({
+        .accountId = "u1",
+        .ids = {"eml-1"},
+        .properties = {"id", "textBody", "htmlBody", "attachments", "bodyValues"},
+        .bodyProperties = {"partId", "blobId", "size", "name", "type", "charset", "disposition",
+                           "cid"},
+        .fetchTextBodyValues = true,
+        .fetchHTMLBodyValues = true,
+        .fetchAllBodyValues = false,
+        .maxBodyValueBytes = 131072,
+    });
+
+    REQUIRE(json.has_value());
+    CHECK(
+        *json ==
+        R"({"accountId":"u1","ids":["eml-1"],"properties":["id","textBody","htmlBody","attachments","bodyValues"],"bodyProperties":["partId","blobId","size","name","type","charset","disposition","cid"],"fetchTextBodyValues":true,"fetchHTMLBodyValues":true,"fetchAllBodyValues":false,"maxBodyValueBytes":131072})");
+}
+
+TEST_CASE("email content get responses parse typed body sections and values",
+          "[jmap][method][mail]")
+{
+    const auto result = javelin::jmap::api::parseEmailContentGetResponse(
+        R"({"accountId":"u1","state":"email-state-1","list":[{"id":"eml-1","textBody":[{"partId":"1","blobId":"blob-text","size":24,"type":"text/plain","charset":"utf-8"}],"htmlBody":[{"partId":"2","blobId":"blob-html","size":48,"type":"text/html","charset":"utf-8","cid":"inline-1"}],"attachments":[{"partId":"3","blobId":"blob-pdf","size":5120,"name":"report.pdf","type":"application/pdf","disposition":"attachment"}],"bodyValues":{"1":{"isEncodingProblem":false,"isTruncated":false,"value":"Plain text body"},"2":{"isEncodingProblem":false,"isTruncated":true,"value":"<p>HTML body</p>"}}}],"notFound":[]})");
+
+    REQUIRE(result.ok());
+    REQUIRE(result.value.has_value());
+    CHECK(result.value->accountId == "u1");
+    CHECK(result.value->state == "email-state-1");
+    REQUIRE(result.value->list.size() == 1);
+    const auto& content = result.value->list.front();
+    CHECK(content.id == "eml-1");
+    REQUIRE(content.textBody.size() == 1);
+    CHECK(content.textBody.front().partId == std::optional<std::string>{"1"});
+    CHECK(content.textBody.front().type == "text/plain");
+    REQUIRE(content.htmlBody.size() == 1);
+    CHECK(content.htmlBody.front().cid == std::optional<std::string>{"inline-1"});
+    REQUIRE(content.attachments.size() == 1);
+    CHECK(content.attachments.front().name == std::optional<std::string>{"report.pdf"});
+    REQUIRE(content.bodyValues.contains("1"));
+    CHECK(content.bodyValues.at("1").value == "Plain text body");
+    REQUIRE(content.bodyValues.contains("2"));
+    CHECK(content.bodyValues.at("2").isTruncated);
+}

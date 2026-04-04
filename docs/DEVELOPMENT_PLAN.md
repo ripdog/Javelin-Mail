@@ -579,6 +579,7 @@ Completed so far:
 
 - [x] Add a typed cache-backed message-view snapshot service that loads selected-message headers, canonical body values, and attachment metadata from the local store.
 - [x] Wire the message-view container to cached selected-message data with explicit plain-text and HTML-source switching plus lightweight attachment metadata display.
+- [x] Add an on-demand `Email/get` content fetch path that caches selected-message body sections and attachment metadata when the local store does not have them yet.
 
 Exit criteria:
 

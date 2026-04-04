@@ -9,9 +9,12 @@
 #include "jmap/auth/Auth.h"
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/MailboxRepository.h"
+#include "jmap/cache/MessageContentRepository.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/cache/SyncStateRepository.h"
 
+#include <algorithm>
+#include <unordered_map>
 #include <utility>
 
 namespace javelin::jmap
@@ -80,6 +83,115 @@ namespace javelin::jmap
             }
 
             return std::nullopt;
+        }
+
+        [[nodiscard]] std::optional<std::string>
+        normalizedPartId(const javelin::jmap::api::EmailContentBodyPart& part)
+        {
+            if (!part.partId.has_value() || part.partId->empty())
+            {
+                return std::nullopt;
+            }
+
+            return part.partId;
+        }
+
+        void upsertContentPart(
+            std::unordered_map<std::string, javelin::jmap::cache::EmailPart>& partsById,
+            const std::string& emailId, const javelin::jmap::api::EmailContentBodyPart& part,
+            const bool isBodySection)
+        {
+            const auto partId = normalizedPartId(part);
+            if (!partId.has_value())
+            {
+                return;
+            }
+
+            const bool isInlineRenderable = part.type.rfind("image/", 0) == 0 ||
+                                            part.type.rfind("audio/", 0) == 0 ||
+                                            part.type.rfind("video/", 0) == 0;
+
+            auto [iterator, inserted] =
+                partsById.try_emplace(*partId, javelin::jmap::cache::EmailPart{
+                                                   .emailId = emailId,
+                                                   .partId = *partId,
+                                                   .parentPartId = std::nullopt,
+                                                   .blobId = part.blobId,
+                                                   .kind = isBodySection ? "body" : "attachment",
+                                                   .mediaType = part.type,
+                                                   .name = part.name,
+                                                   .charset = part.charset,
+                                                   .disposition = part.disposition,
+                                                   .cid = part.cid,
+                                                   .size = part.size,
+                                                   .isInlineRenderable = isInlineRenderable,
+                                                   .isBodySection = isBodySection,
+                                               });
+            if (!inserted)
+            {
+                iterator->second.blobId = part.blobId;
+                iterator->second.mediaType = part.type;
+                iterator->second.name = part.name;
+                iterator->second.charset = part.charset;
+                iterator->second.disposition = part.disposition;
+                iterator->second.cid = part.cid;
+                iterator->second.size = part.size;
+                iterator->second.isInlineRenderable =
+                    iterator->second.isInlineRenderable || isInlineRenderable;
+                iterator->second.isBodySection = iterator->second.isBodySection || isBodySection;
+            }
+        }
+
+        [[nodiscard]] std::vector<javelin::jmap::cache::EmailPart>
+        buildContentParts(const javelin::jmap::api::EmailContent& content)
+        {
+            std::unordered_map<std::string, javelin::jmap::cache::EmailPart> partsById;
+            for (const auto& part : content.textBody)
+            {
+                upsertContentPart(partsById, content.id, part, true);
+            }
+            for (const auto& part : content.htmlBody)
+            {
+                upsertContentPart(partsById, content.id, part, true);
+            }
+            for (const auto& part : content.attachments)
+            {
+                upsertContentPart(partsById, content.id, part, false);
+            }
+
+            std::vector<javelin::jmap::cache::EmailPart> parts;
+            parts.reserve(partsById.size());
+            for (auto& [ignoredPartId, part] : partsById)
+            {
+                Q_UNUSED(ignoredPartId);
+                parts.push_back(std::move(part));
+            }
+
+            std::ranges::sort(parts, [](const auto& left, const auto& right)
+                              { return left.partId < right.partId; });
+            return parts;
+        }
+
+        [[nodiscard]] std::vector<javelin::jmap::cache::EmailBodyValue>
+        buildBodyValues(const javelin::jmap::api::EmailContent& content)
+        {
+            std::vector<javelin::jmap::cache::EmailBodyValue> values;
+            values.reserve(content.bodyValues.size());
+
+            for (const auto& [partId, bodyValue] : content.bodyValues)
+            {
+                values.push_back(javelin::jmap::cache::EmailBodyValue{
+                    .emailId = content.id,
+                    .partId = partId,
+                    .blobId = std::nullopt,
+                    .isTruncated = bodyValue.isTruncated,
+                    .value = bodyValue.value,
+                });
+            }
+
+            std::ranges::sort(values, [](const auto& left, const auto& right)
+                              { return left.partId < right.partId; });
+            return values;
         }
 
     } // namespace
@@ -460,6 +572,178 @@ namespace javelin::jmap
             .selectedMailboxId = selectedMailboxId,
             .mailboxCount = parsedMailboxes.value->list.size(),
             .emailCount = emailCount,
+        };
+    }
+
+    QCoro::Task<MessageContentRefreshResult>
+    JmapCore::refreshMessageContent(const LiveConnectionSettings& settings, std::string accountId,
+                                    std::string emailId)
+    {
+        if (m_impl->databaseConnection == nullptr || m_impl->transport == nullptr)
+        {
+            co_return LiveRefreshError{
+                .message =
+                    QStringLiteral("Live refresh is unavailable in this process configuration."),
+            };
+        }
+
+        if (settings.loginEmail.empty() || settings.apiKey.empty())
+        {
+            co_return LiveRefreshError{
+                .message = QStringLiteral("Login email and API key are required."),
+            };
+        }
+
+        javelin::jmap::cache::MessageContentRepository contentRepository{
+            *m_impl->databaseConnection};
+        const auto cachedParts = contentRepository.loadParts(accountId, emailId);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&cachedParts))
+        {
+            co_return LiveRefreshError{.message = error->message};
+        }
+
+        const auto cachedBodyValues = contentRepository.loadBodyValues(accountId, emailId);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&cachedBodyValues))
+        {
+            co_return LiveRefreshError{.message = error->message};
+        }
+
+        const auto& parts = std::get<std::vector<javelin::jmap::cache::EmailPart>>(cachedParts);
+        const auto& bodyValues =
+            std::get<std::vector<javelin::jmap::cache::EmailBodyValue>>(cachedBodyValues);
+        if (!parts.empty() || !bodyValues.empty())
+        {
+            co_return MessageContentRefreshSummary{
+                .accountId = std::move(accountId),
+                .emailId = std::move(emailId),
+                .partCount = parts.size(),
+                .bodyValueCount = bodyValues.size(),
+                .usedCachedContent = true,
+            };
+        }
+
+        javelin::jmap::cache::SessionRepository sessionRepository{*m_impl->databaseConnection};
+        const auto cachedSession = sessionRepository.load(accountId);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&cachedSession))
+        {
+            co_return LiveRefreshError{.message = error->message};
+        }
+
+        const auto& session = std::get<std::optional<javelin::jmap::api::Session>>(cachedSession);
+        if (!session.has_value())
+        {
+            co_return LiveRefreshError{
+                .message = QStringLiteral("No cached session exists for the selected account yet."),
+            };
+        }
+
+        javelin::jmap::api::MethodCaller methodCaller{*m_impl->transport};
+        const javelin::jmap::api::ApiRequestContext apiRequestContext{
+            .credentials =
+                {
+                    .accountId = accountId,
+                    .emailAddress = settings.loginEmail,
+                    .sessionUrl = settings.sessionUrl,
+                    .token =
+                        {
+                            .accessToken = settings.apiKey,
+                            .refreshToken = std::nullopt,
+                            .expiry = std::nullopt,
+                        },
+                },
+            .apiUrl = session->apiUrl,
+        };
+
+        const auto requestArguments = javelin::jmap::api::serializeEmailContentGetRequest({
+            .accountId = accountId,
+            .ids = {emailId},
+            .properties = {"id", "textBody", "htmlBody", "attachments", "bodyValues"},
+            .bodyProperties = {"partId", "blobId", "size", "name", "type", "charset", "disposition",
+                               "cid"},
+            .fetchTextBodyValues = true,
+            .fetchHTMLBodyValues = true,
+            .fetchAllBodyValues = false,
+            .maxBodyValueBytes = 262144,
+        });
+        if (!requestArguments.has_value())
+        {
+            co_return LiveRefreshError{
+                .message = QStringLiteral("Failed to encode the Email/get content request."),
+            };
+        }
+
+        const javelin::jmap::api::RequestEnvelope request{
+            .usingCapabilities =
+                {
+                    std::string{javelin::jmap::api::coreCapabilityUri},
+                    std::string{javelin::jmap::api::mailCapabilityUri},
+                },
+            .methodCalls =
+                {
+                    javelin::jmap::api::MethodInvocation{
+                        .name = "Email/get",
+                        .arguments = *requestArguments,
+                        .callId = "email-content",
+                    },
+                },
+            .createdIds = std::nullopt,
+        };
+
+        const auto envelopeResult = co_await methodCaller.call(apiRequestContext, request);
+        if (const auto* error = std::get_if<javelin::jmap::api::TransportError>(&envelopeResult))
+        {
+            co_return LiveRefreshError{.message = transportMessage(*error)};
+        }
+        if (const auto* error = std::get_if<javelin::jmap::api::AuthError>(&envelopeResult))
+        {
+            co_return LiveRefreshError{.message = authMessage(*error)};
+        }
+        if (const auto* error = std::get_if<javelin::jmap::api::ProtocolError>(&envelopeResult))
+        {
+            co_return LiveRefreshError{.message = protocolMessage(*error)};
+        }
+
+        const auto& envelope = std::get<javelin::jmap::api::ResponseEnvelope>(envelopeResult);
+        const auto method = findMethodResponse(envelope, "Email/get", "email-content");
+        if (!method.has_value())
+        {
+            co_return LiveRefreshError{
+                .message = QStringLiteral(
+                    "The server response did not contain Email/get content results."),
+            };
+        }
+
+        const auto parsed = javelin::jmap::api::parseEmailContentGetResponse(method->arguments);
+        if (!parsed.ok() || !parsed.value.has_value())
+        {
+            co_return LiveRefreshError{
+                .message = QStringLiteral("Failed to parse Email/get content response."),
+            };
+        }
+
+        const auto contentIt =
+            std::ranges::find(parsed.value->list, emailId, &javelin::jmap::api::EmailContent::id);
+        if (contentIt == parsed.value->list.end())
+        {
+            co_return LiveRefreshError{
+                .message = QStringLiteral("The selected message was not returned by Email/get."),
+            };
+        }
+
+        const auto contentParts = buildContentParts(*contentIt);
+        const auto contentBodyValues = buildBodyValues(*contentIt);
+        if (const auto error = contentRepository.replaceForEmail(accountId, emailId, contentParts,
+                                                                 contentBodyValues))
+        {
+            co_return LiveRefreshError{.message = error->message};
+        }
+
+        co_return MessageContentRefreshSummary{
+            .accountId = std::move(accountId),
+            .emailId = std::move(emailId),
+            .partCount = contentParts.size(),
+            .bodyValueCount = contentBodyValues.size(),
+            .usedCachedContent = false,
         };
     }
 

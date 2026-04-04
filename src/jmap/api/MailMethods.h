@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace javelin::jmap::api
@@ -73,6 +74,54 @@ namespace javelin::jmap::api
         std::optional<std::uint64_t> total;
     };
 
+    struct EmailContentBodyPart
+    {
+        std::optional<std::string> partId;
+        std::optional<std::string> blobId;
+        std::uint64_t size = 0;
+        std::optional<std::string> name;
+        std::string type;
+        std::optional<std::string> charset;
+        std::optional<std::string> disposition;
+        std::optional<std::string> cid;
+    };
+
+    struct EmailBodyValue
+    {
+        bool isEncodingProblem = false;
+        bool isTruncated = false;
+        std::string value;
+    };
+
+    struct EmailContent
+    {
+        std::string id;
+        std::vector<EmailContentBodyPart> textBody;
+        std::vector<EmailContentBodyPart> htmlBody;
+        std::vector<EmailContentBodyPart> attachments;
+        std::unordered_map<std::string, EmailBodyValue> bodyValues;
+    };
+
+    struct EmailContentGetRequest
+    {
+        std::string accountId;
+        std::vector<std::string> ids;
+        std::vector<std::string> properties;
+        std::vector<std::string> bodyProperties;
+        bool fetchTextBodyValues = false;
+        bool fetchHTMLBodyValues = false;
+        bool fetchAllBodyValues = false;
+        std::uint64_t maxBodyValueBytes = 0;
+    };
+
+    struct EmailContentGetResponse
+    {
+        std::string accountId;
+        std::string state;
+        std::vector<EmailContent> list;
+        std::vector<std::string> notFound;
+    };
+
     struct ChangesResponse
     {
         std::string accountId;
@@ -88,10 +137,14 @@ namespace javelin::jmap::api
     [[nodiscard]] std::optional<std::string> serializeChangesRequest(const ChangesRequest& request);
     [[nodiscard]] std::optional<std::string>
     serializeEmailQueryRequest(const EmailQueryRequest& request);
+    [[nodiscard]] std::optional<std::string>
+    serializeEmailContentGetRequest(const EmailContentGetRequest& request);
 
     [[nodiscard]] ParsedEnvelope<MailboxGetResponse> parseMailboxGetResponse(std::string_view json);
     [[nodiscard]] ParsedEnvelope<EmailGetResponse> parseEmailGetResponse(std::string_view json);
     [[nodiscard]] ParsedEnvelope<EmailQueryResponse> parseEmailQueryResponse(std::string_view json);
+    [[nodiscard]] ParsedEnvelope<EmailContentGetResponse>
+    parseEmailContentGetResponse(std::string_view json);
     [[nodiscard]] ParsedEnvelope<ChangesResponse> parseChangesResponse(std::string_view json);
 
 } // namespace javelin::jmap::api

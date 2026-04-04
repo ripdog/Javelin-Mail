@@ -59,6 +59,54 @@ namespace
         bool calculateTotal = false;
     };
 
+    struct RawEmailContentBodyPart
+    {
+        std::optional<std::string> partId;
+        std::optional<std::string> blobId;
+        std::uint64_t size = 0;
+        std::optional<std::string> name;
+        std::string type;
+        std::optional<std::string> charset;
+        std::optional<std::string> disposition;
+        std::optional<std::string> cid;
+    };
+
+    struct RawEmailBodyValue
+    {
+        bool isEncodingProblem = false;
+        bool isTruncated = false;
+        std::string value;
+    };
+
+    struct RawEmailContent
+    {
+        std::string id;
+        std::vector<RawEmailContentBodyPart> textBody;
+        std::vector<RawEmailContentBodyPart> htmlBody;
+        std::vector<RawEmailContentBodyPart> attachments;
+        std::unordered_map<std::string, RawEmailBodyValue> bodyValues;
+    };
+
+    struct RawEmailContentGetRequest
+    {
+        std::string accountId;
+        std::vector<std::string> ids;
+        std::vector<std::string> properties;
+        std::vector<std::string> bodyProperties;
+        bool fetchTextBodyValues = false;
+        bool fetchHTMLBodyValues = false;
+        bool fetchAllBodyValues = false;
+        std::uint64_t maxBodyValueBytes = 0;
+    };
+
+    struct RawEmailContentGetResponse
+    {
+        std::string accountId;
+        std::string state;
+        std::vector<RawEmailContent> list;
+        std::vector<std::string> notFound;
+    };
+
     struct RawChangesResponse
     {
         std::string accountId;
@@ -137,6 +185,51 @@ template <> struct glz::meta<RawEmailQueryRequest>
         glz::object("accountId", &T::accountId, "filter", &T::filter, "sort", &T::sort, "position",
                     &T::position, "limit", &T::limit, "collapseThreads", &T::collapseThreads,
                     "calculateTotal", &T::calculateTotal);
+};
+
+template <> struct glz::meta<RawEmailContentBodyPart>
+{
+    using T = RawEmailContentBodyPart;
+
+    static constexpr auto value = glz::object(
+        "partId", &T::partId, "blobId", &T::blobId, "size", &T::size, "name", &T::name, "type",
+        &T::type, "charset", &T::charset, "disposition", &T::disposition, "cid", &T::cid);
+};
+
+template <> struct glz::meta<RawEmailBodyValue>
+{
+    using T = RawEmailBodyValue;
+
+    static constexpr auto value = glz::object("isEncodingProblem", &T::isEncodingProblem,
+                                              "isTruncated", &T::isTruncated, "value", &T::value);
+};
+
+template <> struct glz::meta<RawEmailContent>
+{
+    using T = RawEmailContent;
+
+    static constexpr auto value =
+        glz::object("id", &T::id, "textBody", &T::textBody, "htmlBody", &T::htmlBody, "attachments",
+                    &T::attachments, "bodyValues", &T::bodyValues);
+};
+
+template <> struct glz::meta<RawEmailContentGetRequest>
+{
+    using T = RawEmailContentGetRequest;
+
+    static constexpr auto value = glz::object(
+        "accountId", &T::accountId, "ids", &T::ids, "properties", &T::properties, "bodyProperties",
+        &T::bodyProperties, "fetchTextBodyValues", &T::fetchTextBodyValues, "fetchHTMLBodyValues",
+        &T::fetchHTMLBodyValues, "fetchAllBodyValues", &T::fetchAllBodyValues, "maxBodyValueBytes",
+        &T::maxBodyValueBytes);
+};
+
+template <> struct glz::meta<RawEmailContentGetResponse>
+{
+    using T = RawEmailContentGetResponse;
+
+    static constexpr auto value = glz::object("accountId", &T::accountId, "state", &T::state,
+                                              "list", &T::list, "notFound", &T::notFound);
 };
 
 template <> struct glz::meta<RawChangesResponse>
@@ -232,6 +325,61 @@ namespace javelin::jmap::api
             };
         }
 
+        [[nodiscard]] EmailContentBodyPart convertBodyPart(const RawEmailContentBodyPart& part)
+        {
+            return EmailContentBodyPart{
+                .partId = part.partId,
+                .blobId = part.blobId,
+                .size = part.size,
+                .name = part.name,
+                .type = part.type,
+                .charset = part.charset,
+                .disposition = part.disposition,
+                .cid = part.cid,
+            };
+        }
+
+        [[nodiscard]] EmailContent convertEmailContent(RawEmailContent raw)
+        {
+            EmailContent content{
+                .id = std::move(raw.id),
+                .textBody = {},
+                .htmlBody = {},
+                .attachments = {},
+                .bodyValues = {},
+            };
+
+            content.textBody.reserve(raw.textBody.size());
+            for (const auto& part : raw.textBody)
+            {
+                content.textBody.push_back(convertBodyPart(part));
+            }
+
+            content.htmlBody.reserve(raw.htmlBody.size());
+            for (const auto& part : raw.htmlBody)
+            {
+                content.htmlBody.push_back(convertBodyPart(part));
+            }
+
+            content.attachments.reserve(raw.attachments.size());
+            for (const auto& part : raw.attachments)
+            {
+                content.attachments.push_back(convertBodyPart(part));
+            }
+
+            for (auto& [partId, bodyValue] : raw.bodyValues)
+            {
+                content.bodyValues.emplace(std::move(partId),
+                                           EmailBodyValue{
+                                               .isEncodingProblem = bodyValue.isEncodingProblem,
+                                               .isTruncated = bodyValue.isTruncated,
+                                               .value = std::move(bodyValue.value),
+                                           });
+            }
+
+            return content;
+        }
+
     } // namespace
 
     std::optional<std::string> serializeGetRequest(const GetRequest& request)
@@ -275,6 +423,21 @@ namespace javelin::jmap::api
             .limit = request.limit,
             .collapseThreads = request.collapseThreads,
             .calculateTotal = request.calculateTotal,
+        });
+    }
+
+    std::optional<std::string>
+    serializeEmailContentGetRequest(const EmailContentGetRequest& request)
+    {
+        return serializeMethod(RawEmailContentGetRequest{
+            .accountId = request.accountId,
+            .ids = request.ids,
+            .properties = request.properties,
+            .bodyProperties = request.bodyProperties,
+            .fetchTextBodyValues = request.fetchTextBodyValues,
+            .fetchHTMLBodyValues = request.fetchHTMLBodyValues,
+            .fetchAllBodyValues = request.fetchAllBodyValues,
+            .maxBodyValueBytes = request.maxBodyValueBytes,
         });
     }
 
@@ -367,6 +530,35 @@ namespace javelin::jmap::api
                     .ids = std::move(parsed.value->ids),
                     .total = parsed.value->total,
                 },
+            .error = std::nullopt,
+        };
+    }
+
+    ParsedEnvelope<EmailContentGetResponse> parseEmailContentGetResponse(std::string_view json)
+    {
+        const auto parsed = parseMethod<RawEmailContentGetResponse>(json);
+        if (!parsed.ok())
+        {
+            return {
+                .value = std::nullopt,
+                .error = parsed.error,
+            };
+        }
+
+        EmailContentGetResponse response{
+            .accountId = std::move(parsed.value->accountId),
+            .state = std::move(parsed.value->state),
+            .list = {},
+            .notFound = std::move(parsed.value->notFound),
+        };
+        response.list.reserve(parsed.value->list.size());
+        for (auto& rawContent : parsed.value->list)
+        {
+            response.list.push_back(convertEmailContent(rawContent));
+        }
+
+        return {
+            .value = std::move(response),
             .error = std::nullopt,
         };
     }

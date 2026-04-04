@@ -56,6 +56,7 @@ namespace javelin::gui::shell
         void connectSelection();
         void refreshViewsFromCache();
         void refreshFromServer();
+        void refreshSelectedMessageContent(std::string accountId, std::string emailId);
         void openPreferences();
         void reloadAccounts();
         void restorePersistentState();
