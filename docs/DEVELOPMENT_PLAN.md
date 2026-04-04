@@ -423,6 +423,7 @@ Completed so far:
 - [x] Add Glaze-backed session parsing and fixture-based tests for the session bootstrap shape.
 - [x] Add typed auth, transport, and protocol error surfaces plus token/secret-store abstractions.
 - [x] Add a coroutine-based session discovery client over a testable transport interface using `QNetworkAccessManager` and QCoro.
+- [x] Add typed mailbox, thread, email, and identity entities with fixture-based parsing tests.
 
 Exit criteria:
 

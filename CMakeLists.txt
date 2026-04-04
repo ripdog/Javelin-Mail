@@ -36,6 +36,9 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/api/SessionParser.h
     src/jmap/api/Transport.cpp
     src/jmap/api/Transport.h
+    src/jmap/domain/MailEntities.h
+    src/jmap/domain/MailEntityParsers.cpp
+    src/jmap/domain/MailEntityParsers.h
     src/jmap/auth/Auth.cpp
     src/jmap/auth/Auth.h
     src/jmap/JmapCore.cpp
@@ -44,6 +47,7 @@ set(JAVELIN_FORMAT_FILES
     tests/FixtureReader.h
     tests/jmap/AuthTest.cpp
     tests/jmap/JmapCoreTest.cpp
+    tests/jmap/MailEntityParsersTest.cpp
     tests/jmap/SessionClientTest.cpp
     tests/jmap/SessionTest.cpp
 )
@@ -59,6 +63,9 @@ add_library(javelin_jmap STATIC
     src/jmap/api/SessionParser.h
     src/jmap/api/Transport.cpp
     src/jmap/api/Transport.h
+    src/jmap/domain/MailEntities.h
+    src/jmap/domain/MailEntityParsers.cpp
+    src/jmap/domain/MailEntityParsers.h
     src/jmap/auth/Auth.cpp
     src/jmap/auth/Auth.h
     src/jmap/JmapCore.cpp

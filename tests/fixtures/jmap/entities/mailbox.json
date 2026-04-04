@@ -1,0 +1,23 @@
+{
+  "id": "mbx-inbox",
+  "name": "Inbox",
+  "parentId": null,
+  "role": "inbox",
+  "sortOrder": 10,
+  "totalEmails": 125,
+  "unreadEmails": 7,
+  "totalThreads": 98,
+  "unreadThreads": 5,
+  "isSubscribed": true,
+  "myRights": {
+    "mayReadItems": true,
+    "mayAddItems": true,
+    "mayRemoveItems": true,
+    "maySetSeen": true,
+    "maySetKeywords": true,
+    "mayCreateChild": false,
+    "mayRename": false,
+    "mayDelete": false,
+    "maySubmit": true
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "id": "ident-1",
+  "name": "Alice Sender",
+  "email": "alice@example.com",
+  "replyTo": [
+    {
+      "name": "Support",
+      "email": "support@example.com"
+    }
+  ],
+  "bcc": [
+    {
+      "name": null,
+      "email": "audit@example.com"
+    }
+  ],
+  "textSignature": "Regards,\nAlice",
+  "htmlSignature": "<p>Regards,<br>Alice</p>",
+  "mayDelete": false
+}
