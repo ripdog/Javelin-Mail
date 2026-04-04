@@ -522,6 +522,7 @@ Completed so far:
 
 - [x] Add SQL-backed mailbox tree and paged message list queries with compact row shapes for GUI models.
 - [x] Add stable mailbox/message selection keys and diff-based incremental refresh notifications for cache-backed query snapshots.
+- [x] Add deterministic time-based message grouping with day buckets for recent mail and month buckets for older mail.
 
 Exit criteria:
 

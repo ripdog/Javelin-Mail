@@ -8,6 +8,7 @@ add_executable(javelin_jmap_tests
     jmap/LongPollWorkerTest.cpp
     jmap/MailMethodsTest.cpp
     jmap/MailboxRepositoryTest.cpp
+    jmap/MessageGroupingTest.cpp
     jmap/MessageContentRepositoryTest.cpp
     jmap/MethodCallerTest.cpp
     jmap/MethodEnvelopeTest.cpp
