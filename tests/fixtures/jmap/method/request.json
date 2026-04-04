@@ -1,0 +1,35 @@
+{
+  "using": [
+    "urn:ietf:params:jmap:core",
+    "urn:ietf:params:jmap:mail"
+  ],
+  "methodCalls": [
+    [
+      "Mailbox/get",
+      {
+        "accountId": "u1",
+        "ids": [
+          "mbx-inbox"
+        ]
+      },
+      "c1"
+    ],
+    [
+      "Email/get",
+      {
+        "accountId": "u1",
+        "ids": [
+          "eml-1"
+        ],
+        "properties": [
+          "id",
+          "subject"
+        ]
+      },
+      "c2"
+    ]
+  ],
+  "createdIds": {
+    "draft-1": "eml-draft-server-id"
+  }
+}

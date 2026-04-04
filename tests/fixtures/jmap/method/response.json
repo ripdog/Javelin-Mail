@@ -1,0 +1,38 @@
+{
+  "methodResponses": [
+    [
+      "Mailbox/get",
+      {
+        "accountId": "u1",
+        "state": "mailbox-state-1",
+        "list": [
+          {
+            "id": "mbx-inbox",
+            "name": "Inbox"
+          }
+        ],
+        "notFound": []
+      },
+      "c1"
+    ],
+    [
+      "Email/get",
+      {
+        "accountId": "u1",
+        "state": "email-state-1",
+        "list": [
+          {
+            "id": "eml-1",
+            "subject": "Quarterly update"
+          }
+        ],
+        "notFound": []
+      },
+      "c2"
+    ]
+  ],
+  "createdIds": {
+    "draft-1": "eml-draft-server-id"
+  },
+  "sessionState": "session-state-2"
+}
