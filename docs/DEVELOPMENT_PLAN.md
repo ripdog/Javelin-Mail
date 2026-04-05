@@ -567,6 +567,7 @@ Goals:
 
 Tasks:
 
+- Make mailbox message lists thread-backed, using collapsed thread queries and thread-member fetches rather than flat per-message windows.
 - Implement plain-text view and HTML view switching.
 - Add HTML sanitization/storage pipeline.
 - Build a derived render-document pipeline that rewrites `cid:` and similar inline references to internal application URLs.

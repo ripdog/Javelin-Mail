@@ -83,6 +83,20 @@ TEST_CASE("email get responses parse into typed email entities", "[jmap][method]
     CHECK(result.value->list.front().subject == std::optional<std::string>{"Quarterly update"});
 }
 
+TEST_CASE("thread get responses parse into typed thread entities", "[jmap][method][mail]")
+{
+    const auto result = javelin::jmap::api::parseThreadGetResponse(
+        R"({"accountId":"u1","state":"thread-state-1","list":[{"id":"thr-1","emailIds":["eml-1","eml-2"]}],"notFound":[]})");
+
+    REQUIRE(result.ok());
+    REQUIRE(result.value.has_value());
+    CHECK(result.value->accountId == "u1");
+    CHECK(result.value->state == "thread-state-1");
+    REQUIRE(result.value->list.size() == 1);
+    CHECK(result.value->list.front().id == "thr-1");
+    CHECK(result.value->list.front().emailIds == std::vector<std::string>{"eml-1", "eml-2"});
+}
+
 TEST_CASE("changes responses parse created updated and destroyed ids", "[jmap][method][mail]")
 {
     const auto result = javelin::jmap::api::parseChangesResponse(

@@ -36,6 +36,7 @@ namespace javelin::jmap::cache
         std::optional<std::string> preview;
         std::string receivedAt;
         std::optional<std::string> sentAt;
+        std::uint64_t threadMessageCount = 1;
         bool hasAttachment = false;
         bool isUnread = false;
         bool isFlagged = false;

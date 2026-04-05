@@ -1,6 +1,7 @@
 #include "gui/shell/MainWindow.h"
 
 #include "gui/mailboxes/MailboxTreeModel.h"
+#include "gui/messages/MessageListDelegate.h"
 #include "gui/messages/MessageListModel.h"
 #include "gui/messageview/MessageViewContainer.h"
 #include "gui/settings/PreferencesDialog.h"
@@ -17,7 +18,9 @@
 #include <QDebug>
 #include <QDesktopServices>
 #include <QFileDialog>
+#include <QFrame>
 #include <QFutureWatcher>
+#include <QHBoxLayout>
 #include <QItemSelectionModel>
 #include <QLabel>
 #include <QListView>
@@ -30,6 +33,7 @@
 #include <QSettings>
 #include <QSplitter>
 #include <QStatusBar>
+#include <QToolButton>
 #include <QTreeView>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -242,14 +246,40 @@ namespace javelin::gui::shell
 
         m_messageView = new QListView(this);
         m_messageView->setModel(m_messageModel);
+        m_messageView->setItemDelegate(
+            new javelin::gui::messages::MessageListDelegate(m_messageView));
+        m_messageView->setSpacing(6);
+        m_messageView->setFrameShape(QFrame::NoFrame);
+        m_messageView->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+        m_messageView->setSelectionMode(QAbstractItemView::SingleSelection);
+        m_messageView->setStyleSheet(
+            QStringLiteral("QListView { background: #26272c; border: none; padding: 3px; }"));
 
         auto* messagePane = new QWidget(this);
         auto* messageLayout = new QVBoxLayout(messagePane);
         messageLayout->setContentsMargins(0, 0, 0, 0);
         messageLayout->setSpacing(8);
+        auto* messageHeader = new QWidget(messagePane);
+        auto* messageHeaderLayout = new QHBoxLayout(messageHeader);
+        messageHeaderLayout->setContentsMargins(8, 3, 8, 3);
+        messageHeaderLayout->setSpacing(8);
+        m_messageListTitleLabel = new QLabel(messageHeader);
+        m_messageListMetaLabel = new QLabel(messageHeader);
+        m_messageQuickFilterButton = new QToolButton(messageHeader);
+        m_messageQuickFilterButton->setText(QStringLiteral("Quick Filter"));
+        m_messageQuickFilterButton->setEnabled(false);
+        auto titleFont = m_messageListTitleLabel->font();
+        titleFont.setPointSize(titleFont.pointSize() + 4);
+        titleFont.setBold(true);
+        m_messageListTitleLabel->setFont(titleFont);
+        messageHeaderLayout->addWidget(m_messageListTitleLabel);
+        messageHeaderLayout->addWidget(m_messageListMetaLabel);
+        messageHeaderLayout->addStretch(1);
+        messageHeaderLayout->addWidget(m_messageQuickFilterButton);
         m_messageEmptyState = new QLabel(
             QStringLiteral("No messages are available for the selected mailbox yet."), messagePane);
         m_messageEmptyState->setWordWrap(true);
+        messageLayout->addWidget(messageHeader);
         messageLayout->addWidget(m_messageEmptyState);
         messageLayout->addWidget(m_messageView);
 
@@ -289,6 +319,7 @@ namespace javelin::gui::shell
         reloadAccounts();
         statusBar()->showMessage(m_jmapCore.statusSummary());
         updateEmptyStates();
+        updateMessageListHeader();
     }
 
     void MainWindow::connectSelection()
@@ -307,6 +338,7 @@ namespace javelin::gui::shell
                     m_messageViewContainer->setSelection(m_messageViewService, account,
                                                          std::nullopt, std::nullopt);
                     updateEmptyStates();
+                    updateMessageListHeader();
                 });
 
         connect(m_mailboxView->selectionModel(), &QItemSelectionModel::currentChanged, this,
@@ -320,6 +352,7 @@ namespace javelin::gui::shell
                         m_messageViewContainer->setSelection(m_messageViewService, accountId,
                                                              std::nullopt, std::nullopt);
                         updateEmptyStates();
+                        updateMessageListHeader();
                         return;
                     }
 
@@ -336,6 +369,7 @@ namespace javelin::gui::shell
                     m_messageViewContainer->setSelection(m_messageViewService, accountId,
                                                          mailboxId.toStdString(), std::nullopt);
                     updateEmptyStates();
+                    updateMessageListHeader();
                     refreshSelectedMailboxMessages(*accountId, mailboxId.toStdString());
                 });
 
@@ -366,6 +400,7 @@ namespace javelin::gui::shell
                     emailId.isEmpty() ? std::optional<std::string>{std::nullopt}
                                       : std::optional<std::string>{emailId.toStdString()});
                 updateEmptyStates();
+                updateMessageListHeader();
                 if (!emailId.isEmpty())
                 {
                     refreshSelectedMessageContent(*accountId, emailId.toStdString());
@@ -421,6 +456,7 @@ namespace javelin::gui::shell
         m_messageModel->refresh();
         m_messageViewContainer->refresh(m_messageViewService);
         updateEmptyStates();
+        updateMessageListHeader();
     }
 
     void MainWindow::restoreSelection(std::optional<std::string> mailboxId,
@@ -456,6 +492,17 @@ namespace javelin::gui::shell
         const bool hasMessages = m_messageModel->rowCount() > 0;
         m_messageEmptyState->setVisible(!hasMessages);
         m_messageView->setVisible(hasMessages);
+    }
+
+    void MainWindow::updateMessageListHeader()
+    {
+        const auto mailboxIndex = m_mailboxView->currentIndex();
+        const auto mailboxName = mailboxIndex.isValid()
+                                     ? mailboxIndex.data(Qt::DisplayRole).toString()
+                                     : QStringLiteral("Messages");
+        m_messageListTitleLabel->setText(mailboxName);
+        m_messageListMetaLabel->setText(
+            QStringLiteral("%1 Messages").arg(m_messageModel->rowCount()));
     }
 
     void MainWindow::saveAttachment(std::string accountId, std::string emailId, std::string partId)

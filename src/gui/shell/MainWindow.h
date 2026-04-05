@@ -8,6 +8,7 @@ class QCloseEvent;
 class QLabel;
 class QListView;
 class QSplitter;
+class QToolButton;
 class QTreeView;
 class QAction;
 
@@ -68,6 +69,7 @@ namespace javelin::gui::shell
         void restorePersistentState();
         void savePersistentState() const;
         void updateEmptyStates();
+        void updateMessageListHeader();
         void closeEvent(QCloseEvent* event) override;
 
         javelin::jmap::JmapCore& m_jmapCore;
@@ -81,6 +83,9 @@ namespace javelin::gui::shell
         javelin::gui::messageview::MessageViewContainer* m_messageViewContainer = nullptr;
         QTreeView* m_mailboxView = nullptr;
         QListView* m_messageView = nullptr;
+        QLabel* m_messageListTitleLabel = nullptr;
+        QLabel* m_messageListMetaLabel = nullptr;
+        QToolButton* m_messageQuickFilterButton = nullptr;
         QLabel* m_messageEmptyState = nullptr;
         QAction* m_refreshAction = nullptr;
         QAction* m_preferencesAction = nullptr;

@@ -35,6 +35,14 @@ namespace javelin::jmap::api
         std::vector<std::string> notFound;
     };
 
+    struct ThreadGetResponse
+    {
+        std::string accountId;
+        std::string state;
+        std::vector<javelin::jmap::domain::Thread> list;
+        std::vector<std::string> notFound;
+    };
+
     struct ChangesRequest
     {
         std::string accountId;
@@ -142,6 +150,7 @@ namespace javelin::jmap::api
 
     [[nodiscard]] ParsedEnvelope<MailboxGetResponse> parseMailboxGetResponse(std::string_view json);
     [[nodiscard]] ParsedEnvelope<EmailGetResponse> parseEmailGetResponse(std::string_view json);
+    [[nodiscard]] ParsedEnvelope<ThreadGetResponse> parseThreadGetResponse(std::string_view json);
     [[nodiscard]] ParsedEnvelope<EmailQueryResponse> parseEmailQueryResponse(std::string_view json);
     [[nodiscard]] ParsedEnvelope<EmailContentGetResponse>
     parseEmailContentGetResponse(std::string_view json);

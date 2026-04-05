@@ -31,6 +31,10 @@ set(JAVELIN_FORMAT_FILES
     src/gui/mailboxes/MailboxTreeModel.h
     src/gui/messages/MessageListModel.cpp
     src/gui/messages/MessageListModel.h
+    src/gui/messages/MessageListDelegate.cpp
+    src/gui/messages/MessageListDelegate.h
+    src/gui/messages/MessageListDelegate.cpp
+    src/gui/messages/MessageListDelegate.h
     src/gui/messageview/HtmlMessageView.cpp
     src/gui/messageview/HtmlMessageView.h
     src/gui/messageview/MessageViewContainer.cpp
@@ -222,6 +226,8 @@ add_library(javelin_gui STATIC
     src/gui/mailboxes/MailboxTreeModel.h
     src/gui/messages/MessageListModel.cpp
     src/gui/messages/MessageListModel.h
+    src/gui/messages/MessageListDelegate.cpp
+    src/gui/messages/MessageListDelegate.h
     src/gui/messageview/HtmlMessageView.cpp
     src/gui/messageview/HtmlMessageView.h
     src/gui/messageview/MessageViewContainer.cpp

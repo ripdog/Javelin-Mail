@@ -19,6 +19,15 @@ namespace javelin::gui::messages
         enum Roles
         {
             EmailIdRole = Qt::UserRole + 1,
+            ThreadIdRole,
+            SenderDisplayRole,
+            SubjectRole,
+            PreviewRole,
+            ReceivedAtRole,
+            HasAttachmentRole,
+            IsUnreadRole,
+            IsFlaggedRole,
+            ThreadMessageCountRole,
         };
 
         explicit MessageListModel(javelin::jmap::cache::QueryService& queryService,

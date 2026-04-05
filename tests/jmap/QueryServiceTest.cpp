@@ -166,15 +166,23 @@ TEST_CASE("query service returns paged compact message list rows", "[jmap][cache
     seedAccount(databaseContext.connection);
 
     auto first = loadEmailFixture();
+    first.threadId = "thr-1";
     first.keywords = {"$flagged"};
     auto second = first;
     second.id = "eml-2";
+    second.threadId = "thr-1";
     second.receivedAt = "2026-04-06T11:22:33Z";
     second.subject = "Later message";
     second.keywords = {"$seen"};
+    auto third = first;
+    third.id = "eml-3";
+    third.threadId = "thr-2";
+    third.receivedAt = "2026-04-04T11:22:33Z";
+    third.subject = "Other thread";
+    third.keywords = {"$seen"};
 
     javelin::jmap::cache::EmailRepository emailRepository{databaseContext.connection};
-    REQUIRE_FALSE(emailRepository.replaceAll("account-1", {first, second}).has_value());
+    REQUIRE_FALSE(emailRepository.replaceAll("account-1", {first, second, third}).has_value());
 
     javelin::jmap::cache::QueryService queryService{databaseContext.connection};
     const auto firstPage = queryService.listMailboxMessages("account-1", "mbx-inbox", 1, 0);
@@ -183,17 +191,21 @@ TEST_CASE("query service returns paged compact message list rows", "[jmap][cache
         std::get<std::vector<javelin::jmap::cache::MessageListItem>>(firstPage);
     REQUIRE(firstItems.size() == 1);
     CHECK(firstItems.front().emailId == "eml-2");
-    CHECK_FALSE(firstItems.front().isUnread);
-    CHECK_FALSE(firstItems.front().isFlagged);
+    CHECK(firstItems.front().threadId == "thr-1");
+    CHECK(firstItems.front().threadMessageCount == 2);
+    CHECK(firstItems.front().isUnread);
+    CHECK(firstItems.front().isFlagged);
 
     const auto secondPage = queryService.listMailboxMessages("account-1", "mbx-inbox", 1, 1);
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MessageListItem>>(secondPage));
     const auto& secondItems =
         std::get<std::vector<javelin::jmap::cache::MessageListItem>>(secondPage);
     REQUIRE(secondItems.size() == 1);
-    CHECK(secondItems.front().emailId == "eml-1");
-    CHECK(secondItems.front().isUnread);
-    CHECK(secondItems.front().isFlagged);
+    CHECK(secondItems.front().emailId == "eml-3");
+    CHECK(secondItems.front().threadId == "thr-2");
+    CHECK(secondItems.front().threadMessageCount == 1);
+    CHECK_FALSE(secondItems.front().isUnread);
+    CHECK_FALSE(secondItems.front().isFlagged);
     REQUIRE(secondItems.front().from.has_value());
     CHECK(secondItems.front().from->email == "alice@example.com");
 }
@@ -221,21 +233,36 @@ TEST_CASE("query service SQL plans use the intended cache indexes", "[jmap][cach
     CHECK(std::any_of(mailboxPlan.cbegin(), mailboxPlan.cend(), [](const QString& detail)
                       { return detail.contains("idx_mailboxes_parent", Qt::CaseInsensitive); }));
 
-    const auto messagePlan = explainQueryPlan(
-        databaseContext.connection.database(),
-        "SELECT e.email_id, e.thread_id, e.subject, e.preview, e.received_at, e.sent_at, "
-        "e.has_attachment "
-        "FROM emails e "
-        "INNER JOIN email_mailboxes em ON em.account_id = e.account_id AND em.email_id = "
-        "e.email_id "
-        "WHERE e.account_id = :account_id AND em.mailbox_id = :mailbox_id "
-        "ORDER BY e.received_at DESC, e.email_id DESC "
-        "LIMIT :limit OFFSET :offset",
-        {{":account_id", "account-1"},
-         {":mailbox_id", "mbx-inbox"},
-         {":limit", 50},
-         {":offset", 0}});
-    CHECK(std::any_of(
-        messagePlan.cbegin(), messagePlan.cend(), [](const QString& detail)
-        { return detail.contains("idx_email_mailboxes_mailbox", Qt::CaseInsensitive); }));
+    const auto messagePlan =
+        explainQueryPlan(databaseContext.connection.database(),
+                         "WITH mailbox_threads AS ("
+                         "  SELECT DISTINCT e.thread_id "
+                         "  FROM emails e "
+                         "  INNER JOIN email_mailboxes em ON em.account_id = e.account_id AND "
+                         "em.email_id = e.email_id "
+                         "  WHERE e.account_id = :account_id AND em.mailbox_id = :mailbox_id"
+                         "), ranked_threads AS ("
+                         "  SELECT e.email_id, e.thread_id, "
+                         "         ROW_NUMBER() OVER (PARTITION BY e.thread_id ORDER BY "
+                         "e.received_at DESC, e.email_id DESC) AS thread_rank "
+                         "  FROM emails e "
+                         "  INNER JOIN mailbox_threads mt ON mt.thread_id = e.thread_id "
+                         "  WHERE e.account_id = :account_id"
+                         ") "
+                         "SELECT rt.email_id, rt.thread_id "
+                         "FROM ranked_threads rt "
+                         "WHERE rt.thread_rank = 1 "
+                         "ORDER BY rt.email_id DESC "
+                         "LIMIT :limit OFFSET :offset",
+                         {{":account_id", "account-1"},
+                          {":mailbox_id", "mbx-inbox"},
+                          {":limit", 50},
+                          {":offset", 0}});
+    CHECK(std::any_of(messagePlan.cbegin(), messagePlan.cend(),
+                      [](const QString& detail)
+                      {
+                          return detail.contains("idx_email_mailboxes_mailbox",
+                                                 Qt::CaseInsensitive) ||
+                                 detail.contains("idx_emails_thread", Qt::CaseInsensitive);
+                      }));
 }

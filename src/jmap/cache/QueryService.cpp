@@ -86,35 +86,50 @@ namespace javelin::jmap::cache
 
         QSqlQuery query{m_connection.database()};
         query.prepare(
-            "SELECT e.email_id, e.thread_id, e.subject, e.preview, e.received_at, e.sent_at, "
-            "e.has_attachment, "
-            "EXISTS("
-            "  SELECT 1 FROM email_keywords k "
-            "  WHERE k.account_id = e.account_id AND k.email_id = e.email_id AND k.keyword = "
-            "'$seen'"
-            ") AS has_seen, "
-            "EXISTS("
-            "  SELECT 1 FROM email_keywords k "
-            "  WHERE k.account_id = e.account_id AND k.email_id = e.email_id AND k.keyword = "
-            "'$flagged'"
-            ") AS has_flagged, "
+            "WITH mailbox_threads AS ("
+            "  SELECT DISTINCT e.thread_id "
+            "  FROM emails e "
+            "  INNER JOIN email_mailboxes em ON em.account_id = e.account_id AND em.email_id = "
+            "e.email_id "
+            "  WHERE e.account_id = :account_id AND em.mailbox_id = :mailbox_id"
+            "), ranked_threads AS ("
+            "  SELECT e.email_id, e.thread_id, e.subject, e.preview, e.received_at, e.sent_at, "
+            "         ROW_NUMBER() OVER (PARTITION BY e.thread_id "
+            "                            ORDER BY e.received_at DESC, e.email_id DESC) AS "
+            "thread_rank, "
+            "         COUNT(*) OVER (PARTITION BY e.thread_id) AS thread_message_count, "
+            "         MAX(e.has_attachment) OVER (PARTITION BY e.thread_id) AS "
+            "thread_has_attachment, "
+            "         MAX(CASE WHEN seen.email_id IS NULL THEN 1 ELSE 0 END) OVER "
+            "             (PARTITION BY e.thread_id) AS thread_has_unread, "
+            "         MAX(CASE WHEN flagged.email_id IS NULL THEN 0 ELSE 1 END) OVER "
+            "             (PARTITION BY e.thread_id) AS thread_has_flagged "
+            "  FROM emails e "
+            "  INNER JOIN mailbox_threads mt ON mt.thread_id = e.thread_id "
+            "  LEFT JOIN email_keywords seen ON seen.account_id = e.account_id "
+            "       AND seen.email_id = e.email_id AND seen.keyword = '$seen' "
+            "  LEFT JOIN email_keywords flagged ON flagged.account_id = e.account_id "
+            "       AND flagged.email_id = e.email_id AND flagged.keyword = '$flagged' "
+            "  WHERE e.account_id = :account_id"
+            ") "
+            "SELECT rt.email_id, rt.thread_id, rt.subject, rt.preview, rt.received_at, rt.sent_at, "
+            "rt.thread_message_count, rt.thread_has_attachment, rt.thread_has_unread, "
+            "rt.thread_has_flagged, "
             "("
             "  SELECT a.display_name FROM email_addresses a "
-            "  WHERE a.account_id = e.account_id AND a.email_id = e.email_id AND a.field_name = "
+            "  WHERE a.account_id = :account_id AND a.email_id = rt.email_id AND a.field_name = "
             "'from' "
             "  ORDER BY a.position LIMIT 1"
             ") AS from_name, "
             "("
             "  SELECT a.address FROM email_addresses a "
-            "  WHERE a.account_id = e.account_id AND a.email_id = e.email_id AND a.field_name = "
+            "  WHERE a.account_id = :account_id AND a.email_id = rt.email_id AND a.field_name = "
             "'from' "
             "  ORDER BY a.position LIMIT 1"
             ") AS from_email "
-            "FROM emails e "
-            "INNER JOIN email_mailboxes em ON em.account_id = e.account_id AND em.email_id = "
-            "e.email_id "
-            "WHERE e.account_id = :account_id AND em.mailbox_id = :mailbox_id "
-            "ORDER BY e.received_at DESC, e.email_id DESC "
+            "FROM ranked_threads rt "
+            "WHERE rt.thread_rank = 1 "
+            "ORDER BY rt.received_at DESC, rt.email_id DESC "
             "LIMIT :limit OFFSET :offset");
         query.bindValue(":account_id", QString::fromStdString(std::string{accountId}));
         query.bindValue(":mailbox_id", QString::fromStdString(std::string{mailboxId}));
@@ -141,19 +156,20 @@ namespace javelin::jmap::cache
                 .sentAt = query.value(5).isNull()
                               ? std::nullopt
                               : std::optional{query.value(5).toString().toStdString()},
-                .hasAttachment = query.value(6).toInt() != 0,
-                .isUnread = query.value(7).toInt() == 0,
-                .isFlagged = query.value(8).toInt() != 0,
+                .threadMessageCount = query.value(6).toULongLong(),
+                .hasAttachment = query.value(7).toInt() != 0,
+                .isUnread = query.value(8).toInt() != 0,
+                .isFlagged = query.value(9).toInt() != 0,
                 .from = std::nullopt,
             };
 
-            if (!query.value(10).isNull())
+            if (!query.value(11).isNull())
             {
                 item.from = javelin::jmap::domain::EmailAddress{
-                    .name = query.value(9).isNull()
+                    .name = query.value(10).isNull()
                                 ? std::nullopt
-                                : std::optional{query.value(9).toString().toStdString()},
-                    .email = query.value(10).toString().toStdString(),
+                                : std::optional{query.value(10).toString().toStdString()},
+                    .email = query.value(11).toString().toStdString(),
                 };
             }
 

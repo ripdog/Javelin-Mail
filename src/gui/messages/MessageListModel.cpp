@@ -1,5 +1,7 @@
 #include "gui/messages/MessageListModel.h"
 
+#include <QDateTime>
+
 namespace javelin::gui::messages
 {
 
@@ -30,23 +32,71 @@ namespace javelin::gui::messages
         }
 
         const auto& item = m_items[static_cast<std::size_t>(index.row())];
+        const auto sender = item.from.has_value()
+                                ? QString::fromStdString(item.from->name.value_or(item.from->email))
+                                : QStringLiteral("(unknown sender)");
+        const auto subject = item.subject.has_value() ? QString::fromStdString(*item.subject)
+                                                      : QStringLiteral("(no subject)");
+        const auto preview =
+            item.preview.has_value() ? QString::fromStdString(*item.preview) : QString{};
         if (role == Qt::DisplayRole)
         {
-            const auto sender = item.from.has_value() ? QString::fromStdString(item.from->email)
-                                                      : QStringLiteral("(unknown sender)");
-            const auto subject = item.subject.has_value() ? QString::fromStdString(*item.subject)
-                                                          : QStringLiteral("(no subject)");
             return QStringLiteral("%1  %2").arg(sender, subject);
         }
 
         if (role == Qt::ToolTipRole)
         {
-            return QString::fromStdString(item.preview.value_or(std::string{}));
+            return preview;
         }
 
         if (role == EmailIdRole)
         {
             return QString::fromStdString(item.emailId);
+        }
+
+        if (role == ThreadIdRole)
+        {
+            return QString::fromStdString(item.threadId);
+        }
+
+        if (role == SenderDisplayRole)
+        {
+            return sender;
+        }
+
+        if (role == SubjectRole)
+        {
+            return subject;
+        }
+
+        if (role == PreviewRole)
+        {
+            return preview;
+        }
+
+        if (role == ReceivedAtRole)
+        {
+            return QString::fromStdString(item.receivedAt);
+        }
+
+        if (role == HasAttachmentRole)
+        {
+            return item.hasAttachment;
+        }
+
+        if (role == IsUnreadRole)
+        {
+            return item.isUnread;
+        }
+
+        if (role == IsFlaggedRole)
+        {
+            return item.isFlagged;
+        }
+
+        if (role == ThreadMessageCountRole)
+        {
+            return static_cast<qulonglong>(item.threadMessageCount);
         }
 
         return {};

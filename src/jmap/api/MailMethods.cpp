@@ -30,6 +30,14 @@ namespace
         std::vector<std::string> notFound;
     };
 
+    struct RawThreadGetResponse
+    {
+        std::string accountId;
+        std::string state;
+        std::vector<glz::json_t> list;
+        std::vector<std::string> notFound;
+    };
+
     struct RawChangesRequest
     {
         std::string accountId;
@@ -149,6 +157,14 @@ template <> struct glz::meta<RawMailboxGetResponse>
 template <> struct glz::meta<RawEmailGetResponse>
 {
     using T = RawEmailGetResponse;
+
+    static constexpr auto value = glz::object("accountId", &T::accountId, "state", &T::state,
+                                              "list", &T::list, "notFound", &T::notFound);
+};
+
+template <> struct glz::meta<RawThreadGetResponse>
+{
+    using T = RawThreadGetResponse;
 
     static constexpr auto value = glz::object("accountId", &T::accountId, "state", &T::state,
                                               "list", &T::list, "notFound", &T::notFound);
@@ -501,6 +517,40 @@ namespace javelin::jmap::api
         return {
             .value =
                 EmailGetResponse{
+                    .accountId = std::move(parsed.value->accountId),
+                    .state = std::move(parsed.value->state),
+                    .list = std::move(*list.value),
+                    .notFound = std::move(parsed.value->notFound),
+                },
+            .error = std::nullopt,
+        };
+    }
+
+    ParsedEnvelope<ThreadGetResponse> parseThreadGetResponse(std::string_view json)
+    {
+        const auto parsed = parseMethod<RawThreadGetResponse>(json);
+        if (!parsed.ok())
+        {
+            return {
+                .value = std::nullopt,
+                .error = parsed.error,
+            };
+        }
+
+        const auto list = convertEntities<javelin::jmap::domain::Thread>(
+            parsed.value->list, [](const std::string& entityJson)
+            { return javelin::jmap::domain::parseThread(entityJson); });
+        if (!list.ok())
+        {
+            return {
+                .value = std::nullopt,
+                .error = list.error,
+            };
+        }
+
+        return {
+            .value =
+                ThreadGetResponse{
                     .accountId = std::move(parsed.value->accountId),
                     .state = std::move(parsed.value->state),
                     .list = std::move(*list.value),
