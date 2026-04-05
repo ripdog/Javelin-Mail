@@ -571,6 +571,7 @@ Tasks:
 - Add HTML sanitization/storage pipeline.
 - Build a derived render-document pipeline that rewrites `cid:` and similar inline references to internal application URLs.
 - Add remote-content blocking and allow-list enablement.
+- Add an explicit script-removal and inline-event-handler stripping pass before any document-side interactivity is allowed.
 - Add dark-mode CSS injection.
 - Add attachment metadata display and download/open flows.
 - Implement on-demand fetch for normal attachments and narrow caching for render-required inline parts only.

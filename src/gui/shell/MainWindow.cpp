@@ -15,18 +15,26 @@
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QDebug>
+#include <QDesktopServices>
+#include <QFileDialog>
+#include <QFutureWatcher>
 #include <QItemSelectionModel>
 #include <QLabel>
 #include <QListView>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMetaObject>
+#include <QMimeDatabase>
+#include <QRegularExpression>
+#include <QSaveFile>
 #include <QSettings>
 #include <QSplitter>
 #include <QStatusBar>
 #include <QTreeView>
+#include <QUrl>
 #include <QVBoxLayout>
 #include <QWidget>
+#include <QtConcurrent>
 
 namespace javelin::gui::shell
 {
@@ -111,6 +119,87 @@ namespace javelin::gui::shell
             };
         }
 
+        struct FileWriteResult
+        {
+            QString path;
+            QString errorMessage;
+        };
+
+        [[nodiscard]] QString sanitizedFileName(QString name, const QString& fallback)
+        {
+            name = name.trimmed();
+            if (name.isEmpty())
+            {
+                name = fallback;
+            }
+
+            static const QRegularExpression invalidPattern{
+                QStringLiteral(R"([\\/:*?"<>|\x00-\x1F])")};
+            name.replace(invalidPattern, QStringLiteral("_"));
+            return name.isEmpty() ? fallback : name;
+        }
+
+        [[nodiscard]] QString suggestedFileName(const javelin::jmap::AttachmentDownload& download)
+        {
+            QString fileName =
+                QString::fromStdString(download.name.value_or("attachment-" + download.partId));
+            fileName = sanitizedFileName(
+                fileName,
+                QStringLiteral("attachment-%1").arg(QString::fromStdString(download.partId)));
+
+            if (!fileName.contains(QLatin1Char('.')))
+            {
+                const QMimeDatabase mimeDatabase;
+                const auto mimeType =
+                    mimeDatabase.mimeTypeForName(QString::fromStdString(download.mediaType));
+                const auto suffix = mimeType.preferredSuffix();
+                if (!suffix.isEmpty())
+                {
+                    fileName += QStringLiteral(".") + suffix;
+                }
+            }
+
+            return fileName;
+        }
+
+        [[nodiscard]] FileWriteResult writePayloadToPath(const QString& path,
+                                                         const QByteArray& payload)
+        {
+            QSaveFile file{path};
+            if (!file.open(QIODevice::WriteOnly))
+            {
+                return FileWriteResult{
+                    .path = path,
+                    .errorMessage = file.errorString(),
+                };
+            }
+
+            if (file.write(payload) != payload.size())
+            {
+                return FileWriteResult{
+                    .path = path,
+                    .errorMessage = file.errorString(),
+                };
+            }
+
+            if (!file.commit())
+            {
+                return FileWriteResult{
+                    .path = path,
+                    .errorMessage = file.errorString(),
+                };
+            }
+
+            return FileWriteResult{.path = path, .errorMessage = {}};
+        }
+
+        [[nodiscard]] QString tempAttachmentPath(QTemporaryDir& directory,
+                                                 const javelin::jmap::AttachmentDownload& download)
+        {
+            return directory.filePath(QStringLiteral("%1-%2").arg(
+                QString::fromStdString(download.emailId), suggestedFileName(download)));
+        }
+
     } // namespace
 
     MainWindow::MainWindow(javelin::jmap::JmapCore& jmapCore,
@@ -165,6 +254,20 @@ namespace javelin::gui::shell
         messageLayout->addWidget(m_messageView);
 
         m_messageViewContainer = new javelin::gui::messageview::MessageViewContainer(this);
+        connect(m_messageViewContainer,
+                &javelin::gui::messageview::MessageViewContainer::saveAttachmentRequested, this,
+                [this](const QString& accountId, const QString& emailId, const QString& partId)
+                {
+                    saveAttachment(accountId.toStdString(), emailId.toStdString(),
+                                   partId.toStdString());
+                });
+        connect(m_messageViewContainer,
+                &javelin::gui::messageview::MessageViewContainer::openAttachmentRequested, this,
+                [this](const QString& accountId, const QString& emailId, const QString& partId)
+                {
+                    openAttachment(accountId.toStdString(), emailId.toStdString(),
+                                   partId.toStdString());
+                });
 
         m_mainSplitter = new QSplitter(Qt::Horizontal, this);
         m_mainSplitter->addWidget(m_mailboxView);
@@ -353,6 +456,136 @@ namespace javelin::gui::shell
         const bool hasMessages = m_messageModel->rowCount() > 0;
         m_messageEmptyState->setVisible(!hasMessages);
         m_messageView->setVisible(hasMessages);
+    }
+
+    void MainWindow::saveAttachment(std::string accountId, std::string emailId, std::string partId)
+    {
+        const auto settings = javelin::gui::settings::PreferencesDialog::loadSettings();
+        if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
+            settings.apiKey.isEmpty())
+        {
+            statusBar()->showMessage(
+                QStringLiteral("Set Session URL, Login Email, and API Key in Preferences first."),
+                5000);
+            return;
+        }
+
+        statusBar()->showMessage(QStringLiteral("Downloading attachment..."));
+        auto task =
+            m_jmapCore.downloadAttachment(toLiveConnectionSettings(settings), std::move(accountId),
+                                          std::move(emailId), std::move(partId));
+        QCoro::connect(
+            std::move(task), this,
+            [this](javelin::jmap::AttachmentDownloadResult result)
+            {
+                if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+                {
+                    statusBar()->showMessage(error->message, 10000);
+                    return;
+                }
+
+                const auto& download = std::get<javelin::jmap::AttachmentDownload>(result);
+                const QString targetPath = QFileDialog::getSaveFileName(
+                    this, QStringLiteral("Save Attachment"), suggestedFileName(download));
+                if (targetPath.isEmpty())
+                {
+                    statusBar()->showMessage(QStringLiteral("Attachment save canceled."), 3000);
+                    return;
+                }
+
+                statusBar()->showMessage(QStringLiteral("Saving attachment..."));
+
+                auto* watcher = new QFutureWatcher<FileWriteResult>(this);
+                connect(watcher, &QFutureWatcher<FileWriteResult>::finished, this,
+                        [this, watcher]
+                        {
+                            const auto writeResult = watcher->result();
+                            if (!writeResult.errorMessage.isEmpty())
+                            {
+                                statusBar()->showMessage(
+                                    QStringLiteral("Failed to save attachment: %1")
+                                        .arg(writeResult.errorMessage),
+                                    10000);
+                            }
+                            else
+                            {
+                                statusBar()->showMessage(
+                                    QStringLiteral("Saved attachment to %1").arg(writeResult.path),
+                                    5000);
+                            }
+                            watcher->deleteLater();
+                        });
+                watcher->setFuture(
+                    QtConcurrent::run([targetPath, payload = download.payload]
+                                      { return writePayloadToPath(targetPath, payload); }));
+            });
+    }
+
+    void MainWindow::openAttachment(std::string accountId, std::string emailId, std::string partId)
+    {
+        const auto settings = javelin::gui::settings::PreferencesDialog::loadSettings();
+        if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
+            settings.apiKey.isEmpty())
+        {
+            statusBar()->showMessage(
+                QStringLiteral("Set Session URL, Login Email, and API Key in Preferences first."),
+                5000);
+            return;
+        }
+
+        if (!m_openAttachmentDirectory.isValid())
+        {
+            statusBar()->showMessage(
+                QStringLiteral("A temporary directory for attachments is unavailable."), 10000);
+            return;
+        }
+
+        statusBar()->showMessage(QStringLiteral("Downloading attachment..."));
+        auto task =
+            m_jmapCore.downloadAttachment(toLiveConnectionSettings(settings), std::move(accountId),
+                                          std::move(emailId), std::move(partId));
+        QCoro::connect(
+            std::move(task), this,
+            [this](javelin::jmap::AttachmentDownloadResult result)
+            {
+                if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+                {
+                    statusBar()->showMessage(error->message, 10000);
+                    return;
+                }
+
+                const auto& download = std::get<javelin::jmap::AttachmentDownload>(result);
+                const QString targetPath = tempAttachmentPath(m_openAttachmentDirectory, download);
+                statusBar()->showMessage(QStringLiteral("Preparing attachment..."));
+
+                auto* watcher = new QFutureWatcher<FileWriteResult>(this);
+                connect(watcher, &QFutureWatcher<FileWriteResult>::finished, this,
+                        [this, watcher]
+                        {
+                            const auto writeResult = watcher->result();
+                            if (!writeResult.errorMessage.isEmpty())
+                            {
+                                statusBar()->showMessage(
+                                    QStringLiteral("Failed to prepare attachment: %1")
+                                        .arg(writeResult.errorMessage),
+                                    10000);
+                                watcher->deleteLater();
+                                return;
+                            }
+
+                            const bool opened =
+                                QDesktopServices::openUrl(QUrl::fromLocalFile(writeResult.path));
+                            statusBar()->showMessage(
+                                opened ? QStringLiteral("Opened attachment.")
+                                       : QStringLiteral(
+                                             "The attachment was saved, but no app opened it."),
+                                5000);
+                            watcher->deleteLater();
+                        });
+                watcher->setFuture(
+                    QtConcurrent::run([targetPath, payload = download.payload]
+                                      { return writePayloadToPath(targetPath, payload); }));
+            });
     }
 
     void MainWindow::openPreferences()

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QMainWindow>
+#include <QTemporaryDir>
 
 class QComboBox;
 class QCloseEvent;
@@ -58,6 +59,8 @@ namespace javelin::gui::shell
         void refreshFromServer();
         void refreshSelectedMailboxMessages(std::string accountId, std::string mailboxId);
         void refreshSelectedMessageContent(std::string accountId, std::string emailId);
+        void saveAttachment(std::string accountId, std::string emailId, std::string partId);
+        void openAttachment(std::string accountId, std::string emailId, std::string partId);
         void openPreferences();
         void reloadAccounts();
         void restoreSelection(std::optional<std::string> mailboxId,
@@ -82,6 +85,7 @@ namespace javelin::gui::shell
         QAction* m_refreshAction = nullptr;
         QAction* m_preferencesAction = nullptr;
         bool m_refreshInFlight = false;
+        QTemporaryDir m_openAttachmentDirectory;
     };
 
 } // namespace javelin::gui::shell

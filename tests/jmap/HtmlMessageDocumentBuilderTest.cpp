@@ -47,5 +47,20 @@ TEST_CASE("html message document builder blocks remote resources and strips scri
     CHECK(document.html.find("<script") == std::string::npos);
     CHECK(document.html.find("data-javelin-blocked-src=\"https://tracker.example.com/pixel.png\"") !=
           std::string::npos);
+    CHECK(document.html.find("data-javelin-remote-attr=\"src\"") != std::string::npos);
     CHECK(document.html.find("default-src 'none'") != std::string::npos);
+}
+
+TEST_CASE("html message document builder preserves blocked remote styles for live re-enable",
+          "[jmap][render][html]")
+{
+    javelin::jmap::render::HtmlMessageDocumentBuilder builder;
+    const auto document = builder.build(
+        "account-1", "eml-1",
+        R"HTML(<div style="background-image:url(https://images.example.com/banner.png)"></div>)HTML",
+        {});
+
+    CHECK(document.blockedRemoteResourceCount == 1);
+    CHECK(document.html.find("data-javelin-blocked-style=") != std::string::npos);
+    CHECK(document.html.find("data-javelin-disabled-style=") != std::string::npos);
 }

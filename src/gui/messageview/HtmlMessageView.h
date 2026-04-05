@@ -17,9 +17,14 @@ namespace javelin::gui::messageview
 
         void setDocumentHtml(std::string_view html);
         void clearDocument();
+        void setRemoteContentEnabled(bool enabled);
+        [[nodiscard]] bool remoteContentEnabled() const;
 
       private:
+        void applyRemoteContentPolicy();
+
         QWebEngineView* m_view = nullptr;
+        bool m_remoteContentEnabled = false;
     };
 
 } // namespace javelin::gui::messageview

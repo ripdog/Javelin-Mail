@@ -11,7 +11,7 @@ include(cmake/Dependencies.cmake)
 include(cmake/StaticAnalysis.cmake)
 include(cmake/Sanitizers.cmake)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Network Sql Widgets LinguistTools WebEngineCore WebEngineWidgets)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Network Sql Widgets Concurrent LinguistTools WebEngineCore WebEngineWidgets)
 
 qt_standard_project_setup()
 javelin_configure_dependencies()
@@ -240,6 +240,7 @@ target_link_libraries(javelin_gui
         Qt::Widgets
         Qt::WebEngineWidgets
     PRIVATE
+        Qt::Concurrent
         javelin_jmap
 )
 javelin_set_project_warnings(javelin_gui)

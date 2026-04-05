@@ -2,6 +2,7 @@
 
 #include <QCoroTask>
 
+#include <QByteArray>
 #include <QString>
 
 #include <cstddef>
@@ -68,6 +69,19 @@ namespace javelin::jmap
     using MailboxMessagesRefreshResult =
         std::variant<MailboxMessagesRefreshSummary, LiveRefreshError>;
 
+    struct AttachmentDownload
+    {
+        std::string accountId;
+        std::string emailId;
+        std::string partId;
+        std::optional<std::string> name;
+        std::string mediaType;
+        QByteArray payload;
+        bool usedCachedInlinePayload = false;
+    };
+
+    using AttachmentDownloadResult = std::variant<AttachmentDownload, LiveRefreshError>;
+
     class JmapCore
     {
       public:
@@ -93,6 +107,9 @@ namespace javelin::jmap
         refreshMailboxMessages(LiveConnectionSettings settings, std::string accountId,
                                std::string mailboxId,
                                std::function<void(const QString&)> progressCallback = {});
+        [[nodiscard]] QCoro::Task<AttachmentDownloadResult>
+        downloadAttachment(LiveConnectionSettings settings, std::string accountId,
+                           std::string emailId, std::string partId);
 
       private:
         struct Impl;

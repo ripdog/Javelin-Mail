@@ -250,11 +250,10 @@ namespace javelin::jmap
         {
             QString expanded = QString::fromStdString(std::string{templateUrl});
             expanded.replace(QStringLiteral("{accountId}"), encodedTemplateValue(accountId));
-            expanded.replace(QStringLiteral("{blobId}"),
-                             encodedTemplateValue(*part.blobId));
-            expanded.replace(QStringLiteral("{name}"),
-                             part.name.has_value() ? encodedTemplateValue(*part.name)
-                                                   : QStringLiteral(""));
+            expanded.replace(QStringLiteral("{blobId}"), encodedTemplateValue(*part.blobId));
+            expanded.replace(QStringLiteral("{name}"), part.name.has_value()
+                                                           ? encodedTemplateValue(*part.name)
+                                                           : QStringLiteral(""));
             expanded.replace(QStringLiteral("{type}"), encodedTemplateValue(part.mediaType));
             return QUrl{expanded};
         }
@@ -269,8 +268,7 @@ namespace javelin::jmap
                     {
                         javelin::jmap::api::HttpHeader{
                             .name = "Authorization",
-                            .value = QByteArray{"Bearer "} +
-                                     QByteArray::fromStdString(accessToken),
+                            .value = QByteArray{"Bearer "} + QByteArray::fromStdString(accessToken),
                         },
                         javelin::jmap::api::HttpHeader{
                             .name = "Accept",
@@ -281,8 +279,7 @@ namespace javelin::jmap
             };
         }
 
-        [[nodiscard]] std::vector<javelin::jmap::cache::EmailPart>
-        missingInlineImageParts(
+        [[nodiscard]] std::vector<javelin::jmap::cache::EmailPart> missingInlineImageParts(
             const std::vector<javelin::jmap::cache::EmailPart>& parts,
             javelin::jmap::cache::InlinePartPayloadRepository& payloadRepository,
             const std::string_view accountId)
@@ -290,8 +287,8 @@ namespace javelin::jmap
             std::vector<javelin::jmap::cache::EmailPart> missingParts;
             for (const auto& part : parts)
             {
-                if (!part.isInlineRenderable || !part.blobId.has_value() ||
-                    !part.cid.has_value() || part.mediaType.rfind("image/", 0) != 0)
+                if (!part.isInlineRenderable || !part.blobId.has_value() || !part.cid.has_value() ||
+                    part.mediaType.rfind("image/", 0) != 0)
                 {
                     continue;
                 }
@@ -335,31 +332,59 @@ namespace javelin::jmap
                 std::get<javelin::jmap::auth::OAuthToken>(tokenResult).accessToken;
             for (const auto& part : parts)
             {
-                const auto transportResult = co_await transport.send(
-                    buildDownloadRequest(buildDownloadUrl(downloadUrlTemplate, accountId, part),
-                                         accessToken));
+                const auto transportResult = co_await transport.send(buildDownloadRequest(
+                    buildDownloadUrl(downloadUrlTemplate, accountId, part), accessToken));
                 if (const auto* error =
                         std::get_if<javelin::jmap::api::TransportError>(&transportResult))
                 {
                     co_return LiveRefreshError{.message = transportMessage(*error)};
                 }
 
-                const auto& response =
-                    std::get<javelin::jmap::api::HttpResponse>(transportResult);
-                if (const auto error = payloadRepository.upsert(
-                        accountId, {
-                                       .emailId = part.emailId,
-                                       .partId = part.partId,
-                                       .blobId = *part.blobId,
-                                       .mediaType = part.mediaType,
-                                       .payload = response.body,
-                                   }))
+                const auto& response = std::get<javelin::jmap::api::HttpResponse>(transportResult);
+                if (const auto error =
+                        payloadRepository.upsert(accountId, {
+                                                                .emailId = part.emailId,
+                                                                .partId = part.partId,
+                                                                .blobId = *part.blobId,
+                                                                .mediaType = part.mediaType,
+                                                                .payload = response.body,
+                                                            }))
                 {
                     co_return LiveRefreshError{.message = error->message};
                 }
             }
 
             co_return std::nullopt;
+        }
+
+        [[nodiscard]] std::optional<javelin::jmap::cache::EmailPart>
+        findAttachmentPart(javelin::jmap::cache::MessageContentRepository& contentRepository,
+                           const std::string_view accountId, const std::string_view emailId,
+                           const std::string_view partId, QString& errorMessage)
+        {
+            const auto partsResult = contentRepository.loadParts(accountId, emailId);
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&partsResult))
+            {
+                errorMessage = error->message;
+                return std::nullopt;
+            }
+
+            const auto& parts = std::get<std::vector<javelin::jmap::cache::EmailPart>>(partsResult);
+            const auto partIt = std::ranges::find(parts, std::string{partId},
+                                                  &javelin::jmap::cache::EmailPart::partId);
+            if (partIt == parts.end())
+            {
+                errorMessage = QStringLiteral("The selected attachment is not cached locally.");
+                return std::nullopt;
+            }
+
+            if (!partIt->blobId.has_value() || partIt->blobId->empty())
+            {
+                errorMessage = QStringLiteral("The selected attachment does not expose a blob id.");
+                return std::nullopt;
+            }
+
+            return *partIt;
         }
 
     } // namespace
@@ -859,7 +884,8 @@ namespace javelin::jmap
         const auto& parts = std::get<std::vector<javelin::jmap::cache::EmailPart>>(cachedParts);
         const auto& bodyValues =
             std::get<std::vector<javelin::jmap::cache::EmailBodyValue>>(cachedBodyValues);
-        const auto cachedInlineMissing = missingInlineImageParts(parts, payloadRepository, accountId);
+        const auto cachedInlineMissing =
+            missingInlineImageParts(parts, payloadRepository, accountId);
         if ((!parts.empty() || !bodyValues.empty()) && cachedInlineMissing.empty())
         {
             qInfo().noquote() << "JMAP core message content using cached data"
@@ -920,10 +946,9 @@ namespace javelin::jmap
 
         if (!cachedInlineMissing.empty())
         {
-            if (const auto downloadError =
-                    co_await cacheInlineImageParts(*m_impl->transport, downloadCredentials,
-                                                   session->downloadUrl, accountId,
-                                                   cachedInlineMissing, payloadRepository))
+            if (const auto downloadError = co_await cacheInlineImageParts(
+                    *m_impl->transport, downloadCredentials, session->downloadUrl, accountId,
+                    cachedInlineMissing, payloadRepository))
             {
                 co_return *downloadError;
             }
@@ -1035,10 +1060,9 @@ namespace javelin::jmap
             missingInlineImageParts(contentParts, payloadRepository, accountId);
         if (!missingInlineParts.empty())
         {
-            if (const auto downloadError =
-                    co_await cacheInlineImageParts(*m_impl->transport, downloadCredentials,
-                                                   session->downloadUrl, accountId,
-                                                   missingInlineParts, payloadRepository))
+            if (const auto downloadError = co_await cacheInlineImageParts(
+                    *m_impl->transport, downloadCredentials, session->downloadUrl, accountId,
+                    missingInlineParts, payloadRepository))
             {
                 co_return *downloadError;
             }
@@ -1056,6 +1080,118 @@ namespace javelin::jmap
             .partCount = contentParts.size(),
             .bodyValueCount = contentBodyValues.size(),
             .usedCachedContent = false,
+        };
+    }
+
+    QCoro::Task<AttachmentDownloadResult>
+    JmapCore::downloadAttachment(LiveConnectionSettings settings, std::string accountId,
+                                 std::string emailId, std::string partId)
+    {
+        if (m_impl->databaseConnection == nullptr || m_impl->transport == nullptr)
+        {
+            co_return LiveRefreshError{
+                .message = QStringLiteral(
+                    "Attachment download is unavailable in this process configuration."),
+            };
+        }
+
+        if (settings.sessionUrl.empty() || settings.loginEmail.empty() || settings.apiKey.empty())
+        {
+            co_return LiveRefreshError{
+                .message = QStringLiteral("Session URL, login email, and API key are required."),
+            };
+        }
+
+        javelin::jmap::cache::MessageContentRepository contentRepository{
+            *m_impl->databaseConnection};
+        QString loadErrorMessage;
+        const auto part =
+            findAttachmentPart(contentRepository, accountId, emailId, partId, loadErrorMessage);
+        if (!part.has_value())
+        {
+            co_return LiveRefreshError{.message = loadErrorMessage};
+        }
+
+        javelin::jmap::cache::InlinePartPayloadRepository payloadRepository{
+            *m_impl->databaseConnection};
+        const auto payloadResult = payloadRepository.find(accountId, emailId, partId);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&payloadResult))
+        {
+            co_return LiveRefreshError{.message = error->message};
+        }
+
+        const auto& cachedPayload =
+            std::get<std::optional<javelin::jmap::cache::InlinePartPayload>>(payloadResult);
+        if (cachedPayload.has_value() && cachedPayload->blobId == *part->blobId)
+        {
+            co_return AttachmentDownload{
+                .accountId = std::move(accountId),
+                .emailId = std::move(emailId),
+                .partId = std::move(partId),
+                .name = part->name,
+                .mediaType = cachedPayload->mediaType,
+                .payload = cachedPayload->payload,
+                .usedCachedInlinePayload = true,
+            };
+        }
+
+        javelin::jmap::cache::SessionRepository sessionRepository{*m_impl->databaseConnection};
+        const auto sessionResult = sessionRepository.load(accountId);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&sessionResult))
+        {
+            co_return LiveRefreshError{.message = error->message};
+        }
+
+        const auto& session = std::get<std::optional<javelin::jmap::api::Session>>(sessionResult);
+        if (!session.has_value())
+        {
+            co_return LiveRefreshError{
+                .message = QStringLiteral("No cached JMAP session is available for this account."),
+            };
+        }
+
+        const javelin::jmap::auth::AccessTokenResolver accessTokenResolver;
+        const auto tokenResult = accessTokenResolver.resolve({
+            .accountId = accountId,
+            .emailAddress = settings.loginEmail,
+            .sessionUrl = settings.sessionUrl,
+            .token =
+                {
+                    .accessToken = settings.apiKey,
+                    .refreshToken = std::nullopt,
+                    .expiry = std::nullopt,
+                },
+        });
+        if (const auto* error = std::get_if<javelin::jmap::api::AuthError>(&tokenResult))
+        {
+            co_return LiveRefreshError{.message = authMessage(*error)};
+        }
+
+        const auto accessToken = std::get<javelin::jmap::auth::OAuthToken>(tokenResult).accessToken;
+        const auto transportResult = co_await m_impl->transport->send(buildDownloadRequest(
+            buildDownloadUrl(session->downloadUrl, accountId, *part), accessToken));
+        if (const auto* error = std::get_if<javelin::jmap::api::TransportError>(&transportResult))
+        {
+            co_return LiveRefreshError{.message = transportMessage(*error)};
+        }
+
+        const auto& response = std::get<javelin::jmap::api::HttpResponse>(transportResult);
+        if (response.statusCode < 200 || response.statusCode >= 300)
+        {
+            co_return LiveRefreshError{
+                .message = QStringLiteral("Attachment download failed with HTTP status %1.")
+                               .arg(response.statusCode),
+            };
+        }
+
+        co_return AttachmentDownload{
+            .accountId = std::move(accountId),
+            .emailId = std::move(emailId),
+            .partId = std::move(partId),
+            .name = part->name,
+            .mediaType = part->mediaType,
+            .payload = response.body,
+            .usedCachedInlinePayload = false,
         };
     }
 

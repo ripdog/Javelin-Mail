@@ -3,6 +3,7 @@
 #include "jmap/api/SessionParser.h"
 #include "jmap/api/Transport.h"
 #include "jmap/cache/InlinePartPayloadRepository.h"
+#include "jmap/cache/MessageContentRepository.h"
 #include "jmap/cache/SessionRepository.h"
 
 #include <QCoroTask>
@@ -151,11 +152,13 @@ TEST_CASE("JmapCore refreshMessageContent caches inline image payloads for HTML 
     });
 
     javelin::jmap::JmapCore core{databaseContext.connection, transport};
-    const auto result = QCoro::waitFor(core.refreshMessageContent({
-        .sessionUrl = "https://mail.example.com/.well-known/jmap",
-        .loginEmail = "alice@example.com",
-        .apiKey = "access-token",
-    }, "u1", "eml-1"));
+    const auto result = QCoro::waitFor(core.refreshMessageContent(
+        {
+            .sessionUrl = "https://mail.example.com/.well-known/jmap",
+            .loginEmail = "alice@example.com",
+            .apiKey = "access-token",
+        },
+        "u1", "eml-1"));
 
     if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
     {
@@ -178,11 +181,155 @@ TEST_CASE("JmapCore refreshMessageContent caches inline image payloads for HTML 
 
     javelin::jmap::cache::InlinePartPayloadRepository payloadRepository{databaseContext.connection};
     const auto payloadResult = payloadRepository.find("u1", "eml-1", "3");
-    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::InlinePartPayload>>(payloadResult));
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::InlinePartPayload>>(
+        payloadResult));
     const auto& payload =
         std::get<std::optional<javelin::jmap::cache::InlinePartPayload>>(payloadResult);
     REQUIRE(payload.has_value());
     CHECK(payload->blobId == "blob-inline");
     CHECK(payload->mediaType == "image/png");
     CHECK(payload->payload == QByteArrayLiteral("PNGDATA"));
+}
+
+TEST_CASE("JmapCore downloadAttachment fetches normal attachment payloads on demand",
+          "[jmap][core][message-content]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    javelin::jmap::cache::SessionRepository sessionRepository{databaseContext.connection};
+    const auto session = loadSessionFixture();
+    REQUIRE_FALSE(sessionRepository.replace("u1", session).has_value());
+    seedEmail(databaseContext.connection);
+
+    javelin::jmap::cache::MessageContentRepository contentRepository{databaseContext.connection};
+    REQUIRE_FALSE(
+        contentRepository
+            .replaceForEmail("u1", "eml-1",
+                             {
+                                 javelin::jmap::cache::EmailPart{
+                                     .emailId = "eml-1",
+                                     .partId = "4",
+                                     .parentPartId = std::nullopt,
+                                     .blobId = std::optional<std::string>{"blob-pdf"},
+                                     .kind = "attachment",
+                                     .mediaType = "application/pdf",
+                                     .name = std::optional<std::string>{"report.pdf"},
+                                     .charset = std::nullopt,
+                                     .disposition = std::optional<std::string>{"attachment"},
+                                     .cid = std::nullopt,
+                                     .size = 4096,
+                                     .isInlineRenderable = false,
+                                     .isBodySection = false,
+                                 },
+                             },
+                             {})
+            .has_value());
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body = QByteArrayLiteral("%PDF-data"),
+    });
+
+    javelin::jmap::JmapCore core{databaseContext.connection, transport};
+    const auto result = QCoro::waitFor(core.downloadAttachment(
+        {
+            .sessionUrl = "https://mail.example.com/.well-known/jmap",
+            .loginEmail = "alice@example.com",
+            .apiKey = "access-token",
+        },
+        "u1", "eml-1", "4"));
+
+    if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+    {
+        FAIL(error->message.toStdString());
+    }
+
+    REQUIRE(std::holds_alternative<javelin::jmap::AttachmentDownload>(result));
+    const auto& download = std::get<javelin::jmap::AttachmentDownload>(result);
+    CHECK(download.partId == "4");
+    CHECK(download.name == std::optional<std::string>{"report.pdf"});
+    CHECK(download.mediaType == "application/pdf");
+    CHECK(download.payload == QByteArrayLiteral("%PDF-data"));
+    CHECK_FALSE(download.usedCachedInlinePayload);
+
+    REQUIRE(transport.requests.size() == 1);
+    CHECK(transport.requests.front().method == javelin::jmap::api::HttpMethod::Get);
+    CHECK(transport.requests.front().url.path() ==
+          QStringLiteral("/jmap/download/u1/blob-pdf/report.pdf"));
+    CHECK(transport.requests.front().headers.front().value == "Bearer access-token");
+}
+
+TEST_CASE("JmapCore downloadAttachment reuses cached inline payloads when available",
+          "[jmap][core][message-content]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    javelin::jmap::cache::SessionRepository sessionRepository{databaseContext.connection};
+    const auto session = loadSessionFixture();
+    REQUIRE_FALSE(sessionRepository.replace("u1", session).has_value());
+    seedEmail(databaseContext.connection);
+
+    javelin::jmap::cache::MessageContentRepository contentRepository{databaseContext.connection};
+    REQUIRE_FALSE(contentRepository
+                      .replaceForEmail("u1", "eml-1",
+                                       {
+                                           javelin::jmap::cache::EmailPart{
+                                               .emailId = "eml-1",
+                                               .partId = "3",
+                                               .parentPartId = std::nullopt,
+                                               .blobId = std::optional<std::string>{"blob-inline"},
+                                               .kind = "attachment",
+                                               .mediaType = "image/png",
+                                               .name = std::optional<std::string>{"chart.png"},
+                                               .charset = std::nullopt,
+                                               .disposition = std::optional<std::string>{"inline"},
+                                               .cid = std::optional<std::string>{"chart@cid"},
+                                               .size = 7,
+                                               .isInlineRenderable = true,
+                                               .isBodySection = false,
+                                           },
+                                       },
+                                       {})
+                      .has_value());
+
+    javelin::jmap::cache::InlinePartPayloadRepository payloadRepository{databaseContext.connection};
+    REQUIRE_FALSE(payloadRepository
+                      .upsert("u1",
+                              {
+                                  .emailId = "eml-1",
+                                  .partId = "3",
+                                  .blobId = "blob-inline",
+                                  .mediaType = "image/png",
+                                  .payload = QByteArrayLiteral("PNGDATA"),
+                              })
+                      .has_value());
+
+    FakeTransport transport;
+    javelin::jmap::JmapCore core{databaseContext.connection, transport};
+    const auto result = QCoro::waitFor(core.downloadAttachment(
+        {
+            .sessionUrl = "https://mail.example.com/.well-known/jmap",
+            .loginEmail = "alice@example.com",
+            .apiKey = "access-token",
+        },
+        "u1", "eml-1", "3"));
+
+    if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+    {
+        FAIL(error->message.toStdString());
+    }
+
+    REQUIRE(std::holds_alternative<javelin::jmap::AttachmentDownload>(result));
+    const auto& download = std::get<javelin::jmap::AttachmentDownload>(result);
+    CHECK(download.partId == "3");
+    CHECK(download.name == std::optional<std::string>{"chart.png"});
+    CHECK(download.mediaType == "image/png");
+    CHECK(download.payload == QByteArrayLiteral("PNGDATA"));
+    CHECK(download.usedCachedInlinePayload);
+    CHECK(transport.requests.empty());
 }

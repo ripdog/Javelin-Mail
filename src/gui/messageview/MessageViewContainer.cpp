@@ -1,8 +1,9 @@
-#include "gui/messageview/HtmlMessageView.h"
 #include "gui/messageview/MessageViewContainer.h"
+#include "gui/messageview/HtmlMessageView.h"
 
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QLocale>
 #include <QPlainTextEdit>
 #include <QStackedWidget>
 #include <QStringList>
@@ -11,6 +12,19 @@
 
 namespace javelin::gui::messageview
 {
+    namespace
+    {
+
+        [[nodiscard]] QString
+        attachmentDescription(const javelin::jmap::cache::MessageAttachment& attachment)
+        {
+            const auto name = QString::fromStdString(attachment.name.value_or(attachment.partId));
+            const auto type = QString::fromStdString(attachment.mediaType);
+            return QStringLiteral("%1  •  %2  •  %3")
+                .arg(name, type, QLocale{}.formattedDataSize(static_cast<qint64>(attachment.size)));
+        }
+
+    } // namespace
 
     MessageViewContainer::MessageViewContainer(QWidget* parent) : QWidget(parent)
     {
@@ -46,8 +60,19 @@ namespace javelin::gui::messageview
         connect(m_htmlButton, &QToolButton::clicked, this,
                 [this] { setActiveView(ActiveView::Html); });
 
+        m_remoteContentButton = new QToolButton(buttonRow);
+        m_remoteContentButton->setText(QStringLiteral("Load remote content"));
+        m_remoteContentButton->setCheckable(true);
+        connect(m_remoteContentButton, &QToolButton::clicked, this,
+                [this](const bool checked)
+                {
+                    m_htmlView->setRemoteContentEnabled(checked);
+                    updateRemoteContentButton();
+                });
+
         buttonLayout->addWidget(m_plainTextButton);
         buttonLayout->addWidget(m_htmlButton);
+        buttonLayout->addWidget(m_remoteContentButton);
         buttonLayout->addStretch(1);
 
         m_bodyStack = new QStackedWidget(this);
@@ -64,14 +89,20 @@ namespace javelin::gui::messageview
         m_bodyStack->addWidget(m_plainTextView);
         m_bodyStack->addWidget(m_htmlView);
 
-        m_attachmentLabel = new QLabel(this);
-        m_attachmentLabel->setWordWrap(true);
+        m_attachmentStatusLabel = new QLabel(this);
+        m_attachmentStatusLabel->setWordWrap(true);
+
+        m_attachmentListWidget = new QWidget(this);
+        m_attachmentListLayout = new QVBoxLayout(m_attachmentListWidget);
+        m_attachmentListLayout->setContentsMargins(0, 0, 0, 0);
+        m_attachmentListLayout->setSpacing(8);
 
         layout->addWidget(m_titleLabel);
         layout->addWidget(m_detailLabel);
         layout->addWidget(buttonRow);
         layout->addWidget(m_bodyStack, 1);
-        layout->addWidget(m_attachmentLabel);
+        layout->addWidget(m_attachmentStatusLabel);
+        layout->addWidget(m_attachmentListWidget);
 
         updatePresentation();
     }
@@ -127,6 +158,7 @@ namespace javelin::gui::messageview
     {
         m_activeView = view;
         updateBodyButtons();
+        updateRemoteContentButton();
 
         switch (m_activeView)
         {
@@ -152,11 +184,27 @@ namespace javelin::gui::messageview
         m_htmlButton->setChecked(m_activeView == ActiveView::Html);
     }
 
+    void MessageViewContainer::updateRemoteContentButton()
+    {
+        const bool hasBlockedRemoteContent =
+            m_snapshot.has_value() && m_snapshot->htmlRenderDocument.has_value() &&
+            m_snapshot->htmlRenderDocument->blockedRemoteResourceCount > 0;
+        m_remoteContentButton->setVisible(hasBlockedRemoteContent);
+        m_remoteContentButton->setEnabled(hasBlockedRemoteContent);
+        m_remoteContentButton->setChecked(hasBlockedRemoteContent &&
+                                          m_htmlView->remoteContentEnabled());
+        m_remoteContentButton->setText(m_htmlView->remoteContentEnabled()
+                                           ? QStringLiteral("Hide remote content")
+                                           : QStringLiteral("Load remote content"));
+    }
+
     void MessageViewContainer::updatePresentation()
     {
         m_plainTextView->clear();
         m_htmlView->clearDocument();
-        m_attachmentLabel->clear();
+        m_attachmentStatusLabel->clear();
+        rebuildAttachmentRows();
+        updateRemoteContentButton();
 
         if (!m_accountId.has_value())
         {
@@ -230,7 +278,9 @@ namespace javelin::gui::messageview
             m_htmlView->setDocumentHtml(renderDocument.toStdString());
         }
 
-        m_attachmentLabel->setText(attachmentSummaryText());
+        m_attachmentStatusLabel->setText(attachmentStatusText());
+        rebuildAttachmentRows();
+        updateRemoteContentButton();
 
         if (m_snapshot->plainTextBody.has_value())
         {
@@ -248,7 +298,62 @@ namespace javelin::gui::messageview
         }
     }
 
-    QString MessageViewContainer::attachmentSummaryText() const
+    void MessageViewContainer::rebuildAttachmentRows()
+    {
+        while (QLayoutItem* item = m_attachmentListLayout->takeAt(0))
+        {
+            if (QWidget* widget = item->widget())
+            {
+                widget->deleteLater();
+            }
+            delete item;
+        }
+
+        const bool hasAttachments = m_snapshot.has_value() && !m_snapshot->attachments.empty();
+        m_attachmentListWidget->setVisible(hasAttachments);
+        if (!hasAttachments || !m_accountId.has_value() || !m_emailId.has_value())
+        {
+            return;
+        }
+
+        for (const auto& attachment : m_snapshot->attachments)
+        {
+            auto* row = new QWidget(m_attachmentListWidget);
+            auto* rowLayout = new QHBoxLayout(row);
+            rowLayout->setContentsMargins(0, 0, 0, 0);
+            rowLayout->setSpacing(8);
+
+            auto* label = new QLabel(attachmentDescription(attachment), row);
+            label->setWordWrap(true);
+
+            auto* saveButton = new QToolButton(row);
+            saveButton->setText(QStringLiteral("Save"));
+            saveButton->setEnabled(attachment.blobId.has_value());
+            connect(saveButton, &QToolButton::clicked, this,
+                    [this, partId = QString::fromStdString(attachment.partId)]
+                    {
+                        emit saveAttachmentRequested(QString::fromStdString(*m_accountId),
+                                                     QString::fromStdString(*m_emailId), partId);
+                    });
+
+            auto* openButton = new QToolButton(row);
+            openButton->setText(QStringLiteral("Open"));
+            openButton->setEnabled(attachment.blobId.has_value());
+            connect(openButton, &QToolButton::clicked, this,
+                    [this, partId = QString::fromStdString(attachment.partId)]
+                    {
+                        emit openAttachmentRequested(QString::fromStdString(*m_accountId),
+                                                     QString::fromStdString(*m_emailId), partId);
+                    });
+
+            rowLayout->addWidget(label, 1);
+            rowLayout->addWidget(saveButton);
+            rowLayout->addWidget(openButton);
+            m_attachmentListLayout->addWidget(row);
+        }
+    }
+
+    QString MessageViewContainer::attachmentStatusText() const
     {
         if (!m_snapshot.has_value())
         {
@@ -258,16 +363,8 @@ namespace javelin::gui::messageview
         QStringList segments;
         if (!m_snapshot->attachments.empty())
         {
-            QStringList attachmentNames;
-            attachmentNames.reserve(static_cast<qsizetype>(m_snapshot->attachments.size()));
-            for (const auto& attachment : m_snapshot->attachments)
-            {
-                attachmentNames.push_back(
-                    QString::fromStdString(attachment.name.value_or(attachment.partId)));
-            }
-
-            segments.push_back(
-                QStringLiteral("Attachments: %1").arg(attachmentNames.join(QStringLiteral(", "))));
+            segments.push_back(QStringLiteral("Attachments: %1")
+                                   .arg(static_cast<qulonglong>(m_snapshot->attachments.size())));
         }
 
         if (m_snapshot->htmlRenderDocument.has_value())

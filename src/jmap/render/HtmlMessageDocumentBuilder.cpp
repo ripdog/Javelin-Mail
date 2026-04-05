@@ -41,6 +41,17 @@ namespace javelin::jmap::render
             return escaped;
         }
 
+        [[nodiscard]] QString blockRemoteCssUrls(const QString& style, bool& changed)
+        {
+            QString blocked = style;
+            const QRegularExpression remoteCssUrl{
+                QStringLiteral("(?i)url\\((['\"]?)(https?:)?//[^)'\"]+\\1\\)")};
+            auto iterator = remoteCssUrl.globalMatch(style);
+            changed = iterator.hasNext();
+            blocked.replace(remoteCssUrl, QStringLiteral("url(about:blank)"));
+            return blocked;
+        }
+
     } // namespace
 
     HtmlRenderDocument HtmlMessageDocumentBuilder::build(
@@ -109,10 +120,44 @@ namespace javelin::jmap::render
             {
                 ++blockedRemoteResourceCount;
                 replacement = QStringLiteral(
-                                  "%1=\"about:blank\" data-javelin-blocked-src=\"%2\"")
-                                  .arg(attributeName, escapeHtmlAttribute(attributeValue));
+                                  "%1=\"about:blank\" data-javelin-blocked-src=\"%2\" "
+                                  "data-javelin-remote-attr=\"%3\"")
+                                  .arg(attributeName, escapeHtmlAttribute(attributeValue),
+                                       attributeName.toLower());
             }
 
+            html.replace(match.capturedStart(0), match.capturedLength(0), replacement);
+            offset = match.capturedStart(0) + replacement.size();
+        }
+
+        QRegularExpression stylePattern{
+            QStringLiteral("(?i)\\bstyle\\s*=\\s*(\"([^\"]*)\"|'([^']*)')")};
+        offset = 0;
+        while (true)
+        {
+            const auto match = stylePattern.match(html, offset);
+            if (!match.hasMatch())
+            {
+                break;
+            }
+
+            const auto originalStyle =
+                match.captured(2).isEmpty() ? match.captured(3) : match.captured(2);
+            bool changed = false;
+            const auto blockedStyle = blockRemoteCssUrls(originalStyle, changed);
+            if (!changed)
+            {
+                offset = match.capturedEnd(0);
+                continue;
+            }
+
+            ++blockedRemoteResourceCount;
+            const auto replacement = QStringLiteral(
+                                         "style=\"%1\" data-javelin-blocked-style=\"%2\" "
+                                         "data-javelin-disabled-style=\"%3\"")
+                                         .arg(escapeHtmlAttribute(blockedStyle),
+                                              escapeHtmlAttribute(originalStyle),
+                                              escapeHtmlAttribute(blockedStyle));
             html.replace(match.capturedStart(0), match.capturedLength(0), replacement);
             offset = match.capturedStart(0) + replacement.size();
         }
@@ -126,8 +171,9 @@ namespace javelin::jmap::render
                 QStringLiteral(
                     "<!doctype html><html><head><meta charset=\"utf-8\">"
                     "<meta http-equiv=\"Content-Security-Policy\" "
-                    "content=\"default-src 'none'; img-src data: about: "
-                    "javelin-message-inline:; media-src data: about: javelin-message-inline:; "
+                    "content=\"default-src 'none'; img-src data: about: http: https: "
+                    "javelin-message-inline:; media-src data: about: http: https: "
+                    "javelin-message-inline:; "
                     "style-src 'unsafe-inline'; font-src data:;\">"
                     "</head><body>%1</body></html>")
                     .arg(html)

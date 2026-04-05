@@ -12,7 +12,9 @@ class QLabel;
 class QPlainTextEdit;
 class QStackedWidget;
 class QToolButton;
+class QVBoxLayout;
 class QString;
+class QWidget;
 
 namespace javelin::gui::messageview
 {
@@ -31,6 +33,10 @@ namespace javelin::gui::messageview
                           std::optional<std::string> mailboxId, std::optional<std::string> emailId);
         void refresh(javelin::jmap::cache::MessageViewService& messageViewService);
 
+      signals:
+        void saveAttachmentRequested(QString accountId, QString emailId, QString partId);
+        void openAttachmentRequested(QString accountId, QString emailId, QString partId);
+
       private:
         enum class ActiveView
         {
@@ -42,7 +48,9 @@ namespace javelin::gui::messageview
         void setActiveView(ActiveView view);
         void updateBodyButtons();
         void updatePresentation();
-        [[nodiscard]] QString attachmentSummaryText() const;
+        void updateRemoteContentButton();
+        void rebuildAttachmentRows();
+        [[nodiscard]] QString attachmentStatusText() const;
 
         std::optional<std::string> m_accountId;
         std::optional<std::string> m_mailboxId;
@@ -51,12 +59,15 @@ namespace javelin::gui::messageview
         QLabel* m_titleLabel = nullptr;
         QLabel* m_detailLabel = nullptr;
         QLabel* m_placeholderLabel = nullptr;
-        QLabel* m_attachmentLabel = nullptr;
+        QLabel* m_attachmentStatusLabel = nullptr;
         QToolButton* m_plainTextButton = nullptr;
         QToolButton* m_htmlButton = nullptr;
+        QToolButton* m_remoteContentButton = nullptr;
         QStackedWidget* m_bodyStack = nullptr;
         QPlainTextEdit* m_plainTextView = nullptr;
         HtmlMessageView* m_htmlView = nullptr;
+        QWidget* m_attachmentListWidget = nullptr;
+        QVBoxLayout* m_attachmentListLayout = nullptr;
         ActiveView m_activeView = ActiveView::Placeholder;
     };
 
