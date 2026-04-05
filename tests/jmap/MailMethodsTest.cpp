@@ -185,3 +185,51 @@ TEST_CASE("email content get responses parse typed body sections and values",
     REQUIRE(content.bodyValues.contains("2"));
     CHECK(content.bodyValues.at("2").isTruncated);
 }
+
+TEST_CASE("email set requests serialize typed mailbox and keyword updates", "[jmap][method][mail]")
+{
+    const auto json = javelin::jmap::api::serializeEmailSetRequest({
+        .accountId = "u1",
+        .update =
+            {
+                {"eml-1",
+                 javelin::jmap::api::EmailSetUpdate{
+                     .mailboxIds = {{"mbx-archive", true}},
+                     .keywords = {{"$seen", true}},
+                 }},
+            },
+    });
+
+    REQUIRE(json.has_value());
+    CHECK(*json ==
+          R"({"accountId":"u1","update":{"eml-1":{"mailboxIds":{"mbx-archive":true},"keywords":{"$seen":true}}}})");
+}
+
+TEST_CASE("email set responses parse updated and failed ids", "[jmap][method][mail]")
+{
+    const auto result = javelin::jmap::api::parseEmailSetResponse(
+        R"({"accountId":"u1","oldState":"old-1","newState":"new-1","updated":{"eml-1":null},"notUpdated":{"eml-2":{"type":"forbidden"}}})");
+
+    REQUIRE(result.ok());
+    REQUIRE(result.value.has_value());
+    CHECK(result.value->accountId == "u1");
+    CHECK(result.value->oldState == "old-1");
+    CHECK(result.value->newState == "new-1");
+    CHECK(result.value->updated == std::vector<std::string>{"eml-1"});
+    CHECK(result.value->notUpdated == std::vector<std::string>{"eml-2"});
+}
+
+TEST_CASE("email set responses accept nullable oldState and null updated maps",
+          "[jmap][method][mail]")
+{
+    const auto result = javelin::jmap::api::parseEmailSetResponse(
+        R"({"accountId":"u1","oldState":null,"newState":"new-1","updated":null,"notUpdated":null})");
+
+    REQUIRE(result.ok());
+    REQUIRE(result.value.has_value());
+    CHECK(result.value->accountId == "u1");
+    CHECK(result.value->oldState.empty());
+    CHECK(result.value->newState == "new-1");
+    CHECK(result.value->updated.empty());
+    CHECK(result.value->notUpdated.empty());
+}

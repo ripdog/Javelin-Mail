@@ -32,6 +32,11 @@ namespace javelin::gui::messageview
         layout->setContentsMargins(16, 16, 16, 16);
         layout->setSpacing(12);
 
+        auto* titleRow = new QWidget(this);
+        auto* titleRowLayout = new QHBoxLayout(titleRow);
+        titleRowLayout->setContentsMargins(0, 0, 0, 0);
+        titleRowLayout->setSpacing(8);
+
         m_titleLabel = new QLabel(this);
         m_titleLabel->setObjectName(QStringLiteral("messageViewTitle"));
 
@@ -39,6 +44,36 @@ namespace javelin::gui::messageview
         titleFont.setPointSize(titleFont.pointSize() + 4);
         titleFont.setBold(true);
         m_titleLabel->setFont(titleFont);
+
+        m_archiveButton = new QToolButton(titleRow);
+        m_archiveButton->setText(QStringLiteral("Archive"));
+        connect(m_archiveButton, &QToolButton::clicked, this,
+                [this]
+                {
+                    if (m_accountId.has_value() && m_mailboxId.has_value() && m_emailId.has_value())
+                    {
+                        emit archiveRequested(QString::fromStdString(*m_accountId),
+                                              QString::fromStdString(*m_mailboxId),
+                                              QString::fromStdString(*m_emailId));
+                    }
+                });
+
+        m_deleteButton = new QToolButton(titleRow);
+        m_deleteButton->setText(QStringLiteral("Delete"));
+        connect(m_deleteButton, &QToolButton::clicked, this,
+                [this]
+                {
+                    if (m_accountId.has_value() && m_mailboxId.has_value() && m_emailId.has_value())
+                    {
+                        emit deleteRequested(QString::fromStdString(*m_accountId),
+                                             QString::fromStdString(*m_mailboxId),
+                                             QString::fromStdString(*m_emailId));
+                    }
+                });
+
+        titleRowLayout->addWidget(m_titleLabel, 1);
+        titleRowLayout->addWidget(m_archiveButton);
+        titleRowLayout->addWidget(m_deleteButton);
 
         m_detailLabel = new QLabel(this);
         m_detailLabel->setWordWrap(true);
@@ -97,7 +132,7 @@ namespace javelin::gui::messageview
         m_attachmentListLayout->setContentsMargins(0, 0, 0, 0);
         m_attachmentListLayout->setSpacing(8);
 
-        layout->addWidget(m_titleLabel);
+        layout->addWidget(titleRow);
         layout->addWidget(m_detailLabel);
         layout->addWidget(buttonRow);
         layout->addWidget(m_bodyStack, 1);
@@ -203,6 +238,8 @@ namespace javelin::gui::messageview
         m_plainTextView->clear();
         m_htmlView->clearDocument();
         m_attachmentStatusLabel->clear();
+        m_archiveButton->setEnabled(false);
+        m_deleteButton->setEnabled(false);
         rebuildAttachmentRows();
         updateRemoteContentButton();
 
@@ -260,6 +297,8 @@ namespace javelin::gui::messageview
                                  : QStringLiteral("(no subject)");
 
         m_titleLabel->setText(subject);
+        m_archiveButton->setEnabled(true);
+        m_deleteButton->setEnabled(true);
         m_detailLabel->setText(
             QStringLiteral("From %1\nReceived %2")
                 .arg(sender, QString::fromStdString(m_snapshot->email.receivedAt)));

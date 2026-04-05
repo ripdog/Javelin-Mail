@@ -115,6 +115,27 @@ namespace
         std::vector<std::string> notFound;
     };
 
+    struct RawEmailSetUpdate
+    {
+        std::unordered_map<std::string, bool> mailboxIds;
+        std::unordered_map<std::string, bool> keywords;
+    };
+
+    struct RawEmailSetRequest
+    {
+        std::string accountId;
+        std::unordered_map<std::string, RawEmailSetUpdate> update;
+    };
+
+    struct RawEmailSetResponse
+    {
+        std::string accountId;
+        std::optional<std::string> oldState;
+        std::string newState;
+        std::optional<std::unordered_map<std::string, glz::json_t>> updated;
+        std::optional<std::unordered_map<std::string, glz::json_t>> notUpdated;
+    };
+
     struct RawChangesResponse
     {
         std::string accountId;
@@ -246,6 +267,30 @@ template <> struct glz::meta<RawEmailContentGetResponse>
 
     static constexpr auto value = glz::object("accountId", &T::accountId, "state", &T::state,
                                               "list", &T::list, "notFound", &T::notFound);
+};
+
+template <> struct glz::meta<RawEmailSetUpdate>
+{
+    using T = RawEmailSetUpdate;
+
+    static constexpr auto value =
+        glz::object("mailboxIds", &T::mailboxIds, "keywords", &T::keywords);
+};
+
+template <> struct glz::meta<RawEmailSetRequest>
+{
+    using T = RawEmailSetRequest;
+
+    static constexpr auto value = glz::object("accountId", &T::accountId, "update", &T::update);
+};
+
+template <> struct glz::meta<RawEmailSetResponse>
+{
+    using T = RawEmailSetResponse;
+
+    static constexpr auto value = glz::object("accountId", &T::accountId, "oldState",
+                                              &T::oldState, "newState", &T::newState, "updated",
+                                              &T::updated, "notUpdated", &T::notUpdated);
 };
 
 template <> struct glz::meta<RawChangesResponse>
@@ -458,6 +503,24 @@ namespace javelin::jmap::api
         });
     }
 
+    std::optional<std::string> serializeEmailSetRequest(const EmailSetRequest& request)
+    {
+        std::unordered_map<std::string, RawEmailSetUpdate> rawUpdates;
+        rawUpdates.reserve(request.update.size());
+        for (const auto& [emailId, update] : request.update)
+        {
+            rawUpdates.emplace(emailId, RawEmailSetUpdate{
+                                            .mailboxIds = update.mailboxIds,
+                                            .keywords = update.keywords,
+                                        });
+        }
+
+        return serializeMethod(RawEmailSetRequest{
+            .accountId = request.accountId,
+            .update = std::move(rawUpdates),
+        });
+    }
+
     ParsedEnvelope<MailboxGetResponse> parseMailboxGetResponse(std::string_view json)
     {
         const auto parsed = parseMethod<RawMailboxGetResponse>(json);
@@ -610,6 +673,50 @@ namespace javelin::jmap::api
 
         return {
             .value = std::move(response),
+            .error = std::nullopt,
+        };
+    }
+
+    ParsedEnvelope<EmailSetResponse> parseEmailSetResponse(std::string_view json)
+    {
+        const auto parsed = parseMethod<RawEmailSetResponse>(json);
+        if (!parsed.ok())
+        {
+            return {
+                .value = std::nullopt,
+                .error = parsed.error,
+            };
+        }
+
+        std::vector<std::string> updated;
+        const auto& rawUpdated =
+            parsed.value->updated.value_or(std::unordered_map<std::string, glz::json_t>{});
+        updated.reserve(rawUpdated.size());
+        for (const auto& [emailId, ignored] : rawUpdated)
+        {
+            static_cast<void>(ignored);
+            updated.push_back(emailId);
+        }
+
+        std::vector<std::string> notUpdated;
+        const auto& rawNotUpdated =
+            parsed.value->notUpdated.value_or(std::unordered_map<std::string, glz::json_t>{});
+        notUpdated.reserve(rawNotUpdated.size());
+        for (const auto& [emailId, ignored] : rawNotUpdated)
+        {
+            static_cast<void>(ignored);
+            notUpdated.push_back(emailId);
+        }
+
+        return {
+            .value =
+                EmailSetResponse{
+                    .accountId = std::move(parsed.value->accountId),
+                    .oldState = parsed.value->oldState.value_or(std::string{}),
+                    .newState = std::move(parsed.value->newState),
+                    .updated = std::move(updated),
+                    .notUpdated = std::move(notUpdated),
+                },
             .error = std::nullopt,
         };
     }

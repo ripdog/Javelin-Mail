@@ -69,6 +69,26 @@ namespace javelin::jmap
     using MailboxMessagesRefreshResult =
         std::variant<MailboxMessagesRefreshSummary, LiveRefreshError>;
 
+    struct QueuedEmailMutation
+    {
+        std::string pendingActionId;
+        std::string accountId;
+        std::string emailId;
+    };
+
+    using QueuedEmailMutationResult = std::variant<QueuedEmailMutation, LiveRefreshError>;
+
+    struct SubmittedEmailMutations
+    {
+        std::string accountId;
+        std::size_t attemptedEmailCount = 0;
+        std::size_t updatedEmailCount = 0;
+        std::size_t failedEmailCount = 0;
+    };
+
+    using SubmittedEmailMutationsResult =
+        std::variant<SubmittedEmailMutations, LiveRefreshError>;
+
     struct AttachmentDownload
     {
         std::string accountId;
@@ -110,6 +130,21 @@ namespace javelin::jmap
         [[nodiscard]] QCoro::Task<AttachmentDownloadResult>
         downloadAttachment(LiveConnectionSettings settings, std::string accountId,
                            std::string emailId, std::string partId);
+        [[nodiscard]] QueuedEmailMutationResult queueMoveEmail(std::string accountId,
+                                                               std::string emailId,
+                                                               std::string sourceMailboxId,
+                                                               std::string destinationMailboxId);
+        [[nodiscard]] QueuedEmailMutationResult queueArchiveEmail(std::string accountId,
+                                                                  std::string emailId,
+                                                                  std::string sourceMailboxId,
+                                                                  std::string archiveMailboxId);
+        [[nodiscard]] QueuedEmailMutationResult queueDeleteEmail(std::string accountId,
+                                                                 std::string emailId,
+                                                                 std::string sourceMailboxId,
+                                                                 std::string trashMailboxId);
+        [[nodiscard]] QCoro::Task<SubmittedEmailMutationsResult>
+        submitPendingEmailMutations(LiveConnectionSettings settings, std::string accountId,
+                                    std::size_t limit = 25);
 
       private:
         struct Impl;

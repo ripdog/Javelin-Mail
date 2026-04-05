@@ -130,6 +130,27 @@ namespace javelin::jmap::api
         std::vector<std::string> notFound;
     };
 
+    struct EmailSetUpdate
+    {
+        std::unordered_map<std::string, bool> mailboxIds;
+        std::unordered_map<std::string, bool> keywords;
+    };
+
+    struct EmailSetRequest
+    {
+        std::string accountId;
+        std::unordered_map<std::string, EmailSetUpdate> update;
+    };
+
+    struct EmailSetResponse
+    {
+        std::string accountId;
+        std::string oldState;
+        std::string newState;
+        std::vector<std::string> updated;
+        std::vector<std::string> notUpdated;
+    };
+
     struct ChangesResponse
     {
         std::string accountId;
@@ -147,6 +168,7 @@ namespace javelin::jmap::api
     serializeEmailQueryRequest(const EmailQueryRequest& request);
     [[nodiscard]] std::optional<std::string>
     serializeEmailContentGetRequest(const EmailContentGetRequest& request);
+    [[nodiscard]] std::optional<std::string> serializeEmailSetRequest(const EmailSetRequest& request);
 
     [[nodiscard]] ParsedEnvelope<MailboxGetResponse> parseMailboxGetResponse(std::string_view json);
     [[nodiscard]] ParsedEnvelope<EmailGetResponse> parseEmailGetResponse(std::string_view json);
@@ -154,6 +176,7 @@ namespace javelin::jmap::api
     [[nodiscard]] ParsedEnvelope<EmailQueryResponse> parseEmailQueryResponse(std::string_view json);
     [[nodiscard]] ParsedEnvelope<EmailContentGetResponse>
     parseEmailContentGetResponse(std::string_view json);
+    [[nodiscard]] ParsedEnvelope<EmailSetResponse> parseEmailSetResponse(std::string_view json);
     [[nodiscard]] ParsedEnvelope<ChangesResponse> parseChangesResponse(std::string_view json);
 
 } // namespace javelin::jmap::api

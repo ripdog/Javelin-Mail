@@ -46,6 +46,12 @@ namespace javelin::jmap::sync
         [[nodiscard]]
         std::variant<std::vector<PendingActionRecord>, javelin::jmap::cache::DatabaseError>
         listForEmail(std::string_view accountId, std::string_view emailId) const;
+        [[nodiscard]]
+        std::variant<std::vector<PendingActionRecord>, javelin::jmap::cache::DatabaseError>
+        listByStatus(std::string_view accountId, PendingActionStatus status,
+                     std::size_t limit) const;
+        [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
+        updateStatus(std::string_view pendingActionId, PendingActionStatus status);
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
         remove(std::string_view pendingActionId);
 

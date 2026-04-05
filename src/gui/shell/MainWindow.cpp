@@ -204,6 +204,29 @@ namespace javelin::gui::shell
                 QString::fromStdString(download.emailId), suggestedFileName(download)));
         }
 
+        [[nodiscard]] std::optional<javelin::jmap::cache::MailboxTreeItem>
+        findMailboxByRole(javelin::jmap::cache::QueryService& queryService,
+                          const std::string_view accountId, const std::string_view role)
+        {
+            const auto result = queryService.listMailboxTree(accountId);
+            const auto* mailboxes =
+                std::get_if<std::vector<javelin::jmap::cache::MailboxTreeItem>>(&result);
+            if (mailboxes == nullptr)
+            {
+                return std::nullopt;
+            }
+
+            for (const auto& mailbox : *mailboxes)
+            {
+                if (mailbox.role == std::optional<std::string>{std::string{role}})
+                {
+                    return mailbox;
+                }
+            }
+
+            return std::nullopt;
+        }
+
     } // namespace
 
     MainWindow::MainWindow(javelin::jmap::JmapCore& jmapCore,
@@ -298,6 +321,24 @@ namespace javelin::gui::shell
                     openAttachment(accountId.toStdString(), emailId.toStdString(),
                                    partId.toStdString());
                 });
+        connect(m_messageViewContainer,
+                &javelin::gui::messageview::MessageViewContainer::archiveRequested, this,
+                [this](const QString& accountId, const QString& mailboxId, const QString& emailId)
+                {
+                    queueArchiveEmail(accountId.toStdString(), mailboxId.toStdString(),
+                                      emailId.toStdString());
+                });
+        connect(m_messageViewContainer,
+                &javelin::gui::messageview::MessageViewContainer::deleteRequested, this,
+                [this](const QString& accountId, const QString& mailboxId, const QString& emailId)
+                {
+                    queueDeleteEmail(accountId.toStdString(), mailboxId.toStdString(),
+                                     emailId.toStdString());
+                });
+
+        m_messageView->setContextMenuPolicy(Qt::CustomContextMenu);
+        connect(m_messageView, &QListView::customContextMenuRequested, this,
+                &MainWindow::showMessageListContextMenu);
 
         m_mainSplitter = new QSplitter(Qt::Horizontal, this);
         m_mainSplitter->addWidget(m_mailboxView);
@@ -830,6 +871,164 @@ namespace javelin::gui::shell
                                              5000);
                 }
             });
+    }
+
+    void MainWindow::queueArchiveEmail(std::string accountId, std::string mailboxId,
+                                       std::string emailId)
+    {
+        const auto archiveMailbox =
+            findMailboxByRole(m_queryService, accountId, "archive");
+        if (!archiveMailbox.has_value())
+        {
+            statusBar()->showMessage(QStringLiteral("No Archive mailbox is available."), 5000);
+            return;
+        }
+
+        queueMoveEmail(std::move(accountId), std::move(mailboxId), archiveMailbox->id,
+                       std::move(emailId), QStringLiteral("Queued archive."));
+    }
+
+    void MainWindow::queueDeleteEmail(std::string accountId, std::string mailboxId,
+                                      std::string emailId)
+    {
+        const auto trashMailbox =
+            findMailboxByRole(m_queryService, accountId, "trash");
+        if (!trashMailbox.has_value())
+        {
+            statusBar()->showMessage(QStringLiteral("No Trash mailbox is available."), 5000);
+            return;
+        }
+
+        queueMoveEmail(std::move(accountId), std::move(mailboxId), trashMailbox->id,
+                       std::move(emailId), QStringLiteral("Queued delete."));
+    }
+
+    void MainWindow::queueMoveEmail(std::string accountId, std::string sourceMailboxId,
+                                    std::string destinationMailboxId, std::string emailId,
+                                    QString successMessage)
+    {
+        const auto result = m_jmapCore.queueMoveEmail(accountId, emailId, sourceMailboxId,
+                                                      destinationMailboxId);
+        if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+        {
+            statusBar()->showMessage(error->message, 10000);
+            return;
+        }
+
+        const auto currentAccount = currentAccountId(*m_accountCombo);
+        const auto currentMailbox = currentMailboxId(*m_mailboxView);
+        const auto currentEmail = currentEmailId(*m_messageView);
+        m_messageModel->refresh();
+        if (currentAccount == std::optional<std::string>{accountId} &&
+            currentMailbox == std::optional<std::string>{sourceMailboxId} &&
+            currentEmail == std::optional<std::string>{emailId})
+        {
+            m_messageView->clearSelection();
+            m_messageViewContainer->setSelection(m_messageViewService, currentAccount,
+                                                 currentMailbox, std::nullopt);
+        }
+        else
+        {
+            m_messageViewContainer->refresh(m_messageViewService);
+        }
+        updateEmptyStates();
+        updateMessageListHeader();
+        statusBar()->showMessage(std::move(successMessage), 5000);
+
+        const auto settings = javelin::gui::settings::PreferencesDialog::loadSettings();
+        if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
+            settings.apiKey.isEmpty())
+        {
+            return;
+        }
+
+        auto task = m_jmapCore.submitPendingEmailMutations(toLiveConnectionSettings(settings),
+                                                           accountId);
+        QCoro::connect(
+            std::move(task), this,
+            [this](javelin::jmap::SubmittedEmailMutationsResult submitResult)
+            {
+                if (const auto* error =
+                        std::get_if<javelin::jmap::LiveRefreshError>(&submitResult))
+                {
+                    statusBar()->showMessage(error->message, 10000);
+                    return;
+                }
+
+                const auto& summary =
+                    std::get<javelin::jmap::SubmittedEmailMutations>(submitResult);
+                if (summary.updatedEmailCount > 0)
+                {
+                    m_messageModel->refresh();
+                    m_messageViewContainer->refresh(m_messageViewService);
+                    updateEmptyStates();
+                    updateMessageListHeader();
+                }
+            });
+    }
+
+    void MainWindow::showMessageListContextMenu(const QPoint& position)
+    {
+        const QModelIndex index = m_messageView->indexAt(position);
+        if (!index.isValid())
+        {
+            return;
+        }
+
+        const auto accountId = currentAccountId(*m_accountCombo);
+        const auto sourceMailboxId = currentMailboxId(*m_mailboxView);
+        const auto emailId = index.data(javelin::gui::messages::MessageListModel::EmailIdRole)
+                                 .toString()
+                                 .toStdString();
+        if (!accountId.has_value() || !sourceMailboxId.has_value() || emailId.empty())
+        {
+            return;
+        }
+
+        m_messageView->setCurrentIndex(index);
+
+        QMenu menu{this};
+        auto* archiveAction = menu.addAction(QStringLiteral("Archive"));
+        auto* deleteAction = menu.addAction(QStringLiteral("Delete"));
+        menu.addSeparator();
+        auto* moveMenu = menu.addMenu(QStringLiteral("Move to"));
+
+        const auto mailboxesResult = m_queryService.listMailboxTree(*accountId);
+        const auto* mailboxes =
+            std::get_if<std::vector<javelin::jmap::cache::MailboxTreeItem>>(&mailboxesResult);
+        if (mailboxes != nullptr)
+        {
+            for (const auto& mailbox : *mailboxes)
+            {
+                if (mailbox.id == *sourceMailboxId)
+                {
+                    continue;
+                }
+
+                auto* action =
+                    moveMenu->addAction(QString::fromStdString(mailbox.name));
+                connect(action, &QAction::triggered, this,
+                        [this, accountId = *accountId, sourceMailboxId = *sourceMailboxId,
+                         destinationMailboxId = mailbox.id, emailId]
+                        {
+                            queueMoveEmail(accountId, sourceMailboxId, destinationMailboxId, emailId,
+                                           QStringLiteral("Queued move."));
+                        });
+            }
+        }
+        if (moveMenu->actions().empty())
+        {
+            moveMenu->setEnabled(false);
+        }
+
+        connect(archiveAction, &QAction::triggered, this,
+                [this, accountId = *accountId, sourceMailboxId = *sourceMailboxId, emailId]
+                { queueArchiveEmail(accountId, sourceMailboxId, emailId); });
+        connect(deleteAction, &QAction::triggered, this,
+                [this, accountId = *accountId, sourceMailboxId = *sourceMailboxId, emailId]
+                { queueDeleteEmail(accountId, sourceMailboxId, emailId); });
+
+        menu.exec(m_messageView->viewport()->mapToGlobal(position));
     }
 
     void MainWindow::restorePersistentState()

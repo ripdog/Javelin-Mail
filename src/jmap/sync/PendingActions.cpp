@@ -203,6 +203,76 @@ namespace javelin::jmap::sync
         return records;
     }
 
+    std::variant<std::vector<PendingActionRecord>, javelin::jmap::cache::DatabaseError>
+    PendingActionRepository::listByStatus(const std::string_view accountId,
+                                          const PendingActionStatus status,
+                                          const std::size_t limit) const
+    {
+        if (const auto error = m_connection.validate())
+        {
+            return *error;
+        }
+
+        QSqlQuery query{m_connection.database()};
+        query.prepare("SELECT pending_action_id, account_id, status, payload_json "
+                      "FROM pending_actions "
+                      "WHERE account_id = :account_id AND action_type = 'email_patch' "
+                      "AND status = :status "
+                      "ORDER BY created_at, pending_action_id "
+                      "LIMIT :limit");
+        query.bindValue(":account_id", QString::fromStdString(std::string{accountId}));
+        query.bindValue(":status", QString::fromStdString(std::string{toString(status)}));
+        query.bindValue(":limit", static_cast<qulonglong>(limit));
+        if (!query.exec())
+        {
+            return makeQueryError("Read pending actions by status", query);
+        }
+
+        std::vector<PendingActionRecord> records;
+        while (query.next())
+        {
+            const auto patch = parsePayload(query.value(3).toString());
+            const auto parsedStatus =
+                pendingActionStatusFromString(query.value(2).toString().toStdString());
+            if (!patch.has_value() || !parsedStatus.has_value())
+            {
+                continue;
+            }
+
+            records.push_back(PendingActionRecord{
+                .pendingActionId = query.value(0).toString().toStdString(),
+                .accountId = query.value(1).toString().toStdString(),
+                .status = *parsedStatus,
+                .emailPatch = *patch,
+            });
+        }
+
+        return records;
+    }
+
+    std::optional<javelin::jmap::cache::DatabaseError>
+    PendingActionRepository::updateStatus(const std::string_view pendingActionId,
+                                          const PendingActionStatus status)
+    {
+        if (const auto error = m_connection.validate())
+        {
+            return error;
+        }
+
+        QSqlQuery query{m_connection.database()};
+        query.prepare("UPDATE pending_actions "
+                      "SET status = :status, updated_at = CURRENT_TIMESTAMP "
+                      "WHERE pending_action_id = :pending_action_id");
+        query.bindValue(":status", QString::fromStdString(std::string{toString(status)}));
+        query.bindValue(":pending_action_id", QString::fromStdString(std::string{pendingActionId}));
+        if (!query.exec())
+        {
+            return makeQueryError("Update pending action status", query);
+        }
+
+        return std::nullopt;
+    }
+
     std::optional<javelin::jmap::cache::DatabaseError>
     PendingActionRepository::remove(const std::string_view pendingActionId)
     {

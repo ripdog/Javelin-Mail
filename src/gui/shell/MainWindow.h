@@ -7,6 +7,7 @@ class QComboBox;
 class QCloseEvent;
 class QLabel;
 class QListView;
+class QPoint;
 class QSplitter;
 class QToolButton;
 class QTreeView;
@@ -44,6 +45,8 @@ namespace javelin::gui::shell
 
     class MainWindow : public QMainWindow
     {
+        Q_OBJECT
+
       public:
         explicit MainWindow(javelin::jmap::JmapCore& jmapCore,
                             javelin::jmap::cache::AccountRepository& accountRepository,
@@ -60,6 +63,12 @@ namespace javelin::gui::shell
         void refreshFromServer();
         void refreshSelectedMailboxMessages(std::string accountId, std::string mailboxId);
         void refreshSelectedMessageContent(std::string accountId, std::string emailId);
+        void queueArchiveEmail(std::string accountId, std::string mailboxId, std::string emailId);
+        void queueDeleteEmail(std::string accountId, std::string mailboxId, std::string emailId);
+        void queueMoveEmail(std::string accountId, std::string sourceMailboxId,
+                            std::string destinationMailboxId, std::string emailId,
+                            QString successMessage);
+        void showMessageListContextMenu(const QPoint& position);
         void saveAttachment(std::string accountId, std::string emailId, std::string partId);
         void openAttachment(std::string accountId, std::string emailId, std::string partId);
         void openPreferences();

@@ -36,6 +36,8 @@ namespace javelin::gui::messageview
       signals:
         void saveAttachmentRequested(QString accountId, QString emailId, QString partId);
         void openAttachmentRequested(QString accountId, QString emailId, QString partId);
+        void archiveRequested(QString accountId, QString mailboxId, QString emailId);
+        void deleteRequested(QString accountId, QString mailboxId, QString emailId);
 
       private:
         enum class ActiveView
@@ -60,6 +62,8 @@ namespace javelin::gui::messageview
         QLabel* m_detailLabel = nullptr;
         QLabel* m_placeholderLabel = nullptr;
         QLabel* m_attachmentStatusLabel = nullptr;
+        QToolButton* m_archiveButton = nullptr;
+        QToolButton* m_deleteButton = nullptr;
         QToolButton* m_plainTextButton = nullptr;
         QToolButton* m_htmlButton = nullptr;
         QToolButton* m_remoteContentButton = nullptr;

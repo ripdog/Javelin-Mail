@@ -2,9 +2,12 @@
 #include "jmap/JmapCore.h"
 #include "jmap/api/SessionParser.h"
 #include "jmap/api/Transport.h"
+#include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/InlinePartPayloadRepository.h"
 #include "jmap/cache/MessageContentRepository.h"
 #include "jmap/cache/SessionRepository.h"
+#include "jmap/domain/MailEntityParsers.h"
+#include "jmap/sync/PendingActions.h"
 
 #include <QCoroTask>
 
@@ -103,6 +106,27 @@ namespace
         return *parsed.session;
     }
 
+    [[nodiscard]] javelin::jmap::domain::Email loadEmailFixture()
+    {
+        const auto parsed = javelin::jmap::domain::parseEmail(
+            javelin::tests::loadFixture("jmap/entities/email.json"));
+        REQUIRE(parsed.ok());
+        REQUIRE(parsed.value.has_value());
+        return *parsed.value;
+    }
+
+    void seedAccount(javelin::jmap::cache::DatabaseConnection& connection)
+    {
+        QSqlQuery query{connection.database()};
+        query.prepare("INSERT INTO accounts (account_id, email_address, session_url, is_primary) "
+                      "VALUES (:account_id, :email_address, :session_url, :is_primary)");
+        query.bindValue(":account_id", "account-1");
+        query.bindValue(":email_address", "alice@example.com");
+        query.bindValue(":session_url", "https://mail.example.com/.well-known/jmap");
+        query.bindValue(":is_primary", 1);
+        REQUIRE(query.exec());
+    }
+
     void seedEmail(javelin::jmap::cache::DatabaseConnection& connection)
     {
         QSqlQuery query{connection.database()};
@@ -189,6 +213,74 @@ TEST_CASE("JmapCore refreshMessageContent caches inline image payloads for HTML 
     CHECK(payload->blobId == "blob-inline");
     CHECK(payload->mediaType == "image/png");
     CHECK(payload->payload == QByteArrayLiteral("PNGDATA"));
+}
+
+TEST_CASE("JmapCore queues archive and delete mailbox moves as pending actions",
+          "[jmap][core][pending-actions]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    auto email = loadEmailFixture();
+    email.id = "eml-1";
+    email.threadId = "thr-1";
+    email.mailboxIds = {"mbx-inbox"};
+    email.keywords = {};
+
+    javelin::jmap::cache::EmailRepository emailRepository{databaseContext.connection};
+    REQUIRE_FALSE(emailRepository.replaceAll("account-1", {email}).has_value());
+
+    FakeTransport transport;
+    javelin::jmap::JmapCore core{databaseContext.connection, transport};
+
+    const auto archiveResult =
+        core.queueArchiveEmail("account-1", "eml-1", "mbx-inbox", "mbx-archive");
+    REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(archiveResult));
+
+    const auto archivedEmailResult = emailRepository.find("account-1", "eml-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(archivedEmailResult));
+    const auto& archivedEmail =
+        std::get<std::optional<javelin::jmap::domain::Email>>(archivedEmailResult);
+    REQUIRE(archivedEmail.has_value());
+    CHECK(archivedEmail->mailboxIds == std::vector<std::string>{"mbx-archive"});
+
+    const auto deleteResult =
+        core.queueDeleteEmail("account-1", "eml-1", "mbx-archive", "mbx-trash");
+    REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(deleteResult));
+
+    const auto deletedEmailResult = emailRepository.find("account-1", "eml-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(deletedEmailResult));
+    const auto& deletedEmail =
+        std::get<std::optional<javelin::jmap::domain::Email>>(deletedEmailResult);
+    REQUIRE(deletedEmail.has_value());
+    CHECK(deletedEmail->mailboxIds == std::vector<std::string>{"mbx-trash"});
+
+    javelin::jmap::sync::PendingActionRepository pendingActionRepository{
+        databaseContext.connection};
+    const auto pendingResult = pendingActionRepository.listForEmail("account-1", "eml-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::PendingActionRecord>>(
+        pendingResult));
+    const auto& records =
+        std::get<std::vector<javelin::jmap::sync::PendingActionRecord>>(pendingResult);
+    REQUIRE(records.size() == 2);
+    CHECK(std::any_of(records.cbegin(), records.cend(),
+                      [](const auto& record)
+                      {
+                          return record.emailPatch.addMailboxIds ==
+                                     std::vector<std::string>{"mbx-archive"} &&
+                                 record.emailPatch.removeMailboxIds ==
+                                     std::vector<std::string>{"mbx-inbox"};
+                      }));
+    CHECK(std::any_of(records.cbegin(), records.cend(),
+                      [](const auto& record)
+                      {
+                          return record.emailPatch.addMailboxIds ==
+                                     std::vector<std::string>{"mbx-trash"} &&
+                                 record.emailPatch.removeMailboxIds ==
+                                     std::vector<std::string>{"mbx-archive"};
+                      }));
 }
 
 TEST_CASE("JmapCore downloadAttachment fetches normal attachment payloads on demand",
@@ -332,4 +424,77 @@ TEST_CASE("JmapCore downloadAttachment reuses cached inline payloads when availa
     CHECK(download.payload == QByteArrayLiteral("PNGDATA"));
     CHECK(download.usedCachedInlinePayload);
     CHECK(transport.requests.empty());
+}
+
+TEST_CASE("JmapCore submits queued mailbox mutations through Email/set",
+          "[jmap][core][pending-actions]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    javelin::jmap::cache::SessionRepository sessionRepository{databaseContext.connection};
+    const auto session = loadSessionFixture();
+    REQUIRE_FALSE(sessionRepository.replace("u1", session).has_value());
+
+    auto email = loadEmailFixture();
+    email.id = "eml-1";
+    email.threadId = "thr-1";
+    email.mailboxIds = {"mbx-inbox"};
+    email.keywords = {"$seen"};
+
+    javelin::jmap::cache::EmailRepository emailRepository{databaseContext.connection};
+    REQUIRE_FALSE(emailRepository.replaceAll("u1", {email}).has_value());
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body =
+            R"({"methodResponses":[["Email/set",{"accountId":"u1","oldState":"email-state-1","newState":"email-state-2","updated":{"eml-1":null},"notUpdated":{}},"queued-email-set"]],"createdIds":{},"sessionState":"session-state-2"})",
+    });
+
+    javelin::jmap::JmapCore core{databaseContext.connection, transport};
+    const auto queuedResult = core.queueArchiveEmail("u1", "eml-1", "mbx-inbox", "mbx-archive");
+    REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(queuedResult));
+
+    const auto submitResult = QCoro::waitFor(core.submitPendingEmailMutations(
+        {
+            .sessionUrl = "https://mail.example.com/.well-known/jmap",
+            .loginEmail = "alice@example.com",
+            .apiKey = "access-token",
+        },
+        "u1"));
+
+    if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&submitResult))
+    {
+        FAIL(error->message.toStdString());
+    }
+
+    REQUIRE(std::holds_alternative<javelin::jmap::SubmittedEmailMutations>(submitResult));
+    const auto& summary = std::get<javelin::jmap::SubmittedEmailMutations>(submitResult);
+    CHECK(summary.attemptedEmailCount == 1);
+    CHECK(summary.updatedEmailCount == 1);
+    CHECK(summary.failedEmailCount == 0);
+
+    REQUIRE(transport.requests.size() == 1);
+    CHECK(transport.requests.front().method == javelin::jmap::api::HttpMethod::Post);
+    CHECK(transport.requests.front().body.contains("\"Email/set\""));
+    CHECK(transport.requests.front().body.contains("\"mbx-archive\":true"));
+    CHECK_FALSE(transport.requests.front().body.contains("\"mbx-inbox\":true"));
+
+    const auto refreshedEmailResult = emailRepository.find("u1", "eml-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(refreshedEmailResult));
+    const auto& refreshedEmail =
+        std::get<std::optional<javelin::jmap::domain::Email>>(refreshedEmailResult);
+    REQUIRE(refreshedEmail.has_value());
+    CHECK(refreshedEmail->mailboxIds == std::vector<std::string>{"mbx-archive"});
+    CHECK(refreshedEmail->keywords == std::vector<std::string>{"$seen"});
+
+    javelin::jmap::sync::PendingActionRepository pendingActionRepository{
+        databaseContext.connection};
+    const auto pendingResult = pendingActionRepository.listForEmail("u1", "eml-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::PendingActionRecord>>(
+        pendingResult));
+    CHECK(
+        std::get<std::vector<javelin::jmap::sync::PendingActionRecord>>(pendingResult).empty());
 }
