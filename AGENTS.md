@@ -1,5 +1,8 @@
 # AGENTS.md
 
+## General instructions
+Do not run git commands in parallel - you will hit git lock file contention.
+
 This repository is for a Qt Widgets JMAP email client. Treat it as a modern-only codebase:
 
 - Target Qt 6 and C++20 directly.

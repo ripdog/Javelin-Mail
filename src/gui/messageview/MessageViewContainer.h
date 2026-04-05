@@ -48,7 +48,6 @@ namespace javelin::gui::messageview
         };
 
         void setActiveView(ActiveView view);
-        void updateBodyButtons();
         void updatePresentation();
         void updateRemoteContentButton();
         void rebuildAttachmentRows();
@@ -64,9 +63,8 @@ namespace javelin::gui::messageview
         QLabel* m_attachmentStatusLabel = nullptr;
         QToolButton* m_archiveButton = nullptr;
         QToolButton* m_deleteButton = nullptr;
-        QToolButton* m_plainTextButton = nullptr;
-        QToolButton* m_htmlButton = nullptr;
         QToolButton* m_remoteContentButton = nullptr;
+        QWidget* m_bodyControlsWidget = nullptr;
         QStackedWidget* m_bodyStack = nullptr;
         QPlainTextEdit* m_plainTextView = nullptr;
         HtmlMessageView* m_htmlView = nullptr;

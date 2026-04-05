@@ -78,24 +78,12 @@ namespace javelin::gui::messageview
         m_detailLabel = new QLabel(this);
         m_detailLabel->setWordWrap(true);
 
-        auto* buttonRow = new QWidget(this);
-        auto* buttonLayout = new QHBoxLayout(buttonRow);
+        m_bodyControlsWidget = new QWidget(this);
+        auto* buttonLayout = new QHBoxLayout(m_bodyControlsWidget);
         buttonLayout->setContentsMargins(0, 0, 0, 0);
         buttonLayout->setSpacing(8);
 
-        m_plainTextButton = new QToolButton(buttonRow);
-        m_plainTextButton->setText(QStringLiteral("Plain text"));
-        m_plainTextButton->setCheckable(true);
-        connect(m_plainTextButton, &QToolButton::clicked, this,
-                [this] { setActiveView(ActiveView::PlainText); });
-
-        m_htmlButton = new QToolButton(buttonRow);
-        m_htmlButton->setText(QStringLiteral("HTML"));
-        m_htmlButton->setCheckable(true);
-        connect(m_htmlButton, &QToolButton::clicked, this,
-                [this] { setActiveView(ActiveView::Html); });
-
-        m_remoteContentButton = new QToolButton(buttonRow);
+        m_remoteContentButton = new QToolButton(m_bodyControlsWidget);
         m_remoteContentButton->setText(QStringLiteral("Load remote content"));
         m_remoteContentButton->setCheckable(true);
         connect(m_remoteContentButton, &QToolButton::clicked, this,
@@ -105,8 +93,6 @@ namespace javelin::gui::messageview
                     updateRemoteContentButton();
                 });
 
-        buttonLayout->addWidget(m_plainTextButton);
-        buttonLayout->addWidget(m_htmlButton);
         buttonLayout->addWidget(m_remoteContentButton);
         buttonLayout->addStretch(1);
 
@@ -134,7 +120,7 @@ namespace javelin::gui::messageview
 
         layout->addWidget(titleRow);
         layout->addWidget(m_detailLabel);
-        layout->addWidget(buttonRow);
+        layout->addWidget(m_bodyControlsWidget);
         layout->addWidget(m_bodyStack, 1);
         layout->addWidget(m_attachmentStatusLabel);
         layout->addWidget(m_attachmentListWidget);
@@ -192,7 +178,6 @@ namespace javelin::gui::messageview
     void MessageViewContainer::setActiveView(const ActiveView view)
     {
         m_activeView = view;
-        updateBodyButtons();
         updateRemoteContentButton();
 
         switch (m_activeView)
@@ -209,21 +194,12 @@ namespace javelin::gui::messageview
         }
     }
 
-    void MessageViewContainer::updateBodyButtons()
-    {
-        const bool hasPlainText = m_snapshot.has_value() && m_snapshot->plainTextBody.has_value();
-        const bool hasHtml = m_snapshot.has_value() && m_snapshot->htmlBody.has_value();
-        m_plainTextButton->setEnabled(hasPlainText);
-        m_htmlButton->setEnabled(hasHtml);
-        m_plainTextButton->setChecked(m_activeView == ActiveView::PlainText);
-        m_htmlButton->setChecked(m_activeView == ActiveView::Html);
-    }
-
     void MessageViewContainer::updateRemoteContentButton()
     {
         const bool hasBlockedRemoteContent =
             m_snapshot.has_value() && m_snapshot->htmlRenderDocument.has_value() &&
             m_snapshot->htmlRenderDocument->blockedRemoteResourceCount > 0;
+        m_bodyControlsWidget->setVisible(hasBlockedRemoteContent);
         m_remoteContentButton->setVisible(hasBlockedRemoteContent);
         m_remoteContentButton->setEnabled(hasBlockedRemoteContent);
         m_remoteContentButton->setChecked(hasBlockedRemoteContent &&
@@ -321,13 +297,13 @@ namespace javelin::gui::messageview
         rebuildAttachmentRows();
         updateRemoteContentButton();
 
-        if (m_snapshot->plainTextBody.has_value())
-        {
-            setActiveView(ActiveView::PlainText);
-        }
-        else if (m_snapshot->htmlBody.has_value())
+        if (m_snapshot->htmlBody.has_value())
         {
             setActiveView(ActiveView::Html);
+        }
+        else if (m_snapshot->plainTextBody.has_value())
+        {
+            setActiveView(ActiveView::PlainText);
         }
         else
         {
