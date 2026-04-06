@@ -6,6 +6,7 @@
 #include <QString>
 #include <QWebEngineSettings>
 #include <QWebEngineView>
+#include <QWebEnginePage>
 
 namespace javelin::gui::messageview
 {
@@ -33,7 +34,13 @@ namespace javelin::gui::messageview
         layout->addWidget(m_view);
     }
 
-    HtmlMessageView::~HtmlMessageView() = default;
+    HtmlMessageView::~HtmlMessageView()
+    {
+        if (m_view && m_view->page())
+        {
+            m_view->setPage(nullptr);
+        }
+    }
 
     void HtmlMessageView::setDocumentHtml(const std::string_view html)
     {

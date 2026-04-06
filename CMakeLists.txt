@@ -11,7 +11,7 @@ include(cmake/Dependencies.cmake)
 include(cmake/StaticAnalysis.cmake)
 include(cmake/Sanitizers.cmake)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Network Sql Widgets Concurrent LinguistTools WebEngineCore WebEngineWidgets)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Network Sql Widgets Concurrent LinguistTools WebEngineCore WebEngineWidgets Svg)
 
 qt_standard_project_setup()
 javelin_configure_dependencies()
@@ -262,6 +262,11 @@ add_library(javelin_app STATIC
     src/app/ProcessServices.cpp
     src/app/ProcessServices.h
 )
+qt_add_resources(javelin_app "javelin_icons"
+    PREFIX "/icons"
+    BASE "res"
+    FILES "res/icon.svg"
+)
 target_include_directories(javelin_app PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
 )
@@ -270,6 +275,7 @@ target_link_libraries(javelin_app
         Qt::Core
         Qt::Widgets
         Qt::WebEngineCore
+        Qt::Svg
     PRIVATE
         javelin_gui
         javelin_jmap
@@ -291,6 +297,7 @@ qt_add_translations(
 target_link_libraries(Javelin-Mail
     PRIVATE
         javelin_app
+        Qt::Svg
 )
 javelin_set_project_warnings(Javelin-Mail)
 javelin_enable_static_analysis(Javelin-Mail)

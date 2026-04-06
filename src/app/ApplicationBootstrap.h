@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <QPointer>
 
 class QApplication;
 
@@ -13,6 +14,9 @@ namespace javelin::gui::shell
 {
     class MainWindow;
 }
+
+class QSystemTrayIcon;
+class QMenu;
 
 namespace javelin::app
 {
@@ -31,9 +35,15 @@ namespace javelin::app
         [[nodiscard]] int run();
 
       private:
+        void toggleMainWindow();
+        void createMainWindow();
+        void setupSystemTray();
+
         QApplication& m_application;
         std::unique_ptr<ProcessServices> m_processServices;
-        std::unique_ptr<javelin::gui::shell::MainWindow> m_mainWindow;
+        QPointer<javelin::gui::shell::MainWindow> m_mainWindow;
+        std::unique_ptr<QSystemTrayIcon> m_trayIcon;
+        std::unique_ptr<QMenu> m_trayMenu;
     };
 
 } // namespace javelin::app
