@@ -23,14 +23,14 @@ namespace javelin::app
             return QWebEngineUrlScheme::schemeByName(
                        javelin::jmap::render::inlineMessageUrlScheme().toUtf8())
                        .name()
-                   .size() > 0;
+                       .size() > 0;
         }
 
         [[nodiscard]] QString escapedSvgText(QString value)
         {
-            value.replace('&', QStringLiteral("&amp;"));
-            value.replace('<', QStringLiteral("&lt;"));
-            value.replace('>', QStringLiteral("&gt;"));
+            value.replace(QLatin1String("&"), QStringLiteral("&amp;"));
+            value.replace(QLatin1String("<"), QStringLiteral("&lt;"));
+            value.replace(QLatin1String(">"), QStringLiteral("&gt;"));
             return value;
         }
 
@@ -76,14 +76,14 @@ namespace javelin::app
 
         const auto& cachedParts =
             std::get<std::vector<javelin::jmap::cache::EmailPart>>(loadResult);
-        const auto it = std::find_if(cachedParts.begin(), cachedParts.end(),
-                                     [&parts](const auto& part)
-                                     {
-                                         return part.partId == parts->partId &&
-                                                part.blobId == std::optional<std::string>{
-                                                                   parts->blobId} &&
-                                                part.isInlineRenderable;
-                                     });
+        const auto it =
+            std::find_if(cachedParts.begin(), cachedParts.end(),
+                         [&parts](const auto& part)
+                         {
+                             return part.partId == parts->partId &&
+                                    part.blobId == std::optional<std::string>{parts->blobId} &&
+                                    part.isInlineRenderable;
+                         });
         if (it == cachedParts.end())
         {
             return std::nullopt;
@@ -92,8 +92,7 @@ namespace javelin::app
         javelin::jmap::cache::InlinePartPayloadRepository payloadRepository{m_connection};
         const auto payloadResult =
             payloadRepository.find(parts->accountId, parts->emailId, parts->partId);
-        if (const auto* error =
-                std::get_if<javelin::jmap::cache::DatabaseError>(&payloadResult))
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&payloadResult))
         {
             Q_UNUSED(error);
             return std::nullopt;
@@ -111,9 +110,8 @@ namespace javelin::app
 
         if (it->mediaType.rfind("image/", 0) == 0)
         {
-            const QString label =
-                it->name.has_value() ? QString::fromStdString(*it->name)
-                                     : QString::fromStdString(it->partId);
+            const QString label = it->name.has_value() ? QString::fromStdString(*it->name)
+                                                       : QString::fromStdString(it->partId);
             return ReplyPayload{
                 .mimeType = QByteArrayLiteral("image/svg+xml"),
                 .body = unavailableInlineImageSvg(label),
@@ -129,7 +127,8 @@ namespace javelin::app
                    "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"480\" height=\"160\" "
                    "viewBox=\"0 0 480 160\">"
                    "<rect width=\"480\" height=\"160\" fill=\"#f4efe6\"/>"
-                   "<rect x=\"16\" y=\"16\" width=\"448\" height=\"128\" rx=\"12\" fill=\"#e3d6c4\" "
+                   "<rect x=\"16\" y=\"16\" width=\"448\" height=\"128\" rx=\"12\" "
+                   "fill=\"#e3d6c4\" "
                    "stroke=\"#8a6f54\" stroke-width=\"2\" stroke-dasharray=\"8 6\"/>"
                    "<text x=\"32\" y=\"68\" font-family=\"sans-serif\" font-size=\"18\" "
                    "fill=\"#5c4733\">Inline media is referenced by this message.</text>"
@@ -147,11 +146,9 @@ namespace javelin::app
             return;
         }
 
-        QWebEngineUrlScheme scheme{
-            javelin::jmap::render::inlineMessageUrlScheme().toUtf8()};
+        QWebEngineUrlScheme scheme{javelin::jmap::render::inlineMessageUrlScheme().toUtf8()};
         scheme.setSyntax(QWebEngineUrlScheme::Syntax::Host);
-        scheme.setFlags(QWebEngineUrlScheme::SecureScheme |
-                        QWebEngineUrlScheme::LocalScheme |
+        scheme.setFlags(QWebEngineUrlScheme::SecureScheme | QWebEngineUrlScheme::LocalScheme |
                         QWebEngineUrlScheme::LocalAccessAllowed);
         QWebEngineUrlScheme::registerScheme(scheme);
     }

@@ -60,7 +60,7 @@ TEST_CASE("database connection creates the initial cache schema", "[jmap][cache]
     QTemporaryDir temporaryDir;
     REQUIRE(temporaryDir.isValid());
 
-    const QString databasePath = temporaryDir.filePath("cache.sqlite3");
+    const QString databasePath = temporaryDir.filePath(QStringLiteral("cache.sqlite3"));
     auto result = javelin::jmap::cache::DatabaseConnection::open({
         .connectionName = makeConnectionName(),
         .databasePath = databasePath,
@@ -83,22 +83,22 @@ TEST_CASE("database connection creates the initial cache schema", "[jmap][cache]
         std::get<std::vector<javelin::jmap::cache::AppliedMigration>>(migrationsResult);
     REQUIRE(migrations.size() == 5);
     CHECK(migrations.front().version == 1);
-    CHECK(migrations.front().name == "initial_cache_schema");
+    CHECK(migrations.front().name == QStringLiteral("initial_cache_schema"));
     CHECK(migrations.at(1).version == 2);
-    CHECK(migrations.at(1).name == "mailboxes_is_subscribed");
+    CHECK(migrations.at(1).name == QStringLiteral("mailboxes_is_subscribed"));
     CHECK(migrations.at(2).version == 3);
-    CHECK(migrations.at(2).name == "session_and_account_metadata");
+    CHECK(migrations.at(2).name == QStringLiteral("session_and_account_metadata"));
     CHECK(migrations.at(3).version == 4);
-    CHECK(migrations.at(3).name == "email_parts_metadata");
+    CHECK(migrations.at(3).name == QStringLiteral("email_parts_metadata"));
     CHECK(migrations.back().version == 5);
-    CHECK(migrations.back().name == "inline_part_payloads");
+    CHECK(migrations.back().name == QStringLiteral("inline_part_payloads"));
 
     QSqlQuery tableQuery{connection.database()};
     REQUIRE(tableQuery.exec(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN "
-        "('accounts', 'inline_part_payloads', 'mailboxes', 'emails', 'email_parts', "
-        "'schema_migrations', 'sync_state') "
-        "ORDER BY name"));
+        QStringLiteral("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN "
+                       "('accounts', 'inline_part_payloads', 'mailboxes', 'emails', 'email_parts', "
+                       "'schema_migrations', 'sync_state') "
+                       "ORDER BY name")));
 
     QStringList tableNames;
     while (tableQuery.next())
@@ -106,11 +106,15 @@ TEST_CASE("database connection creates the initial cache schema", "[jmap][cache]
         tableNames.push_back(tableQuery.value(0).toString());
     }
 
-    CHECK(tableNames == QStringList{"accounts", "email_parts", "emails", "inline_part_payloads", "mailboxes",
-                                    "schema_migrations", "sync_state"});
-    CHECK(pragmaValue(connection.database(), "foreign_keys") == "1");
-    CHECK(pragmaValue(connection.database(), "journal_mode").compare("wal", Qt::CaseInsensitive) ==
-          0);
+    CHECK(tableNames ==
+          QStringList{QStringLiteral("accounts"), QStringLiteral("email_parts"),
+                      QStringLiteral("emails"), QStringLiteral("inline_part_payloads"),
+                      QStringLiteral("mailboxes"), QStringLiteral("schema_migrations"),
+                      QStringLiteral("sync_state")});
+    CHECK(pragmaValue(connection.database(), QStringLiteral("foreign_keys")) ==
+          QStringLiteral("1"));
+    CHECK(pragmaValue(connection.database(), QStringLiteral("journal_mode"))
+              .compare(QStringLiteral("wal"), Qt::CaseInsensitive) == 0);
 }
 
 TEST_CASE("database migrations are repeatable when reopening an existing cache",
@@ -122,7 +126,7 @@ TEST_CASE("database migrations are repeatable when reopening an existing cache",
     QTemporaryDir temporaryDir;
     REQUIRE(temporaryDir.isValid());
 
-    const QString databasePath = temporaryDir.filePath("cache.sqlite3");
+    const QString databasePath = temporaryDir.filePath(QStringLiteral("cache.sqlite3"));
     {
         auto firstOpen = javelin::jmap::cache::DatabaseConnection::open({
             .connectionName = makeConnectionName(),
@@ -166,10 +170,10 @@ TEST_CASE("thread connection factory encodes owner tag and current thread in con
     QTemporaryDir temporaryDir;
     REQUIRE(temporaryDir.isValid());
 
-    const QString databasePath = temporaryDir.filePath("cache.sqlite3");
+    const QString databasePath = temporaryDir.filePath(QStringLiteral("cache.sqlite3"));
     const javelin::jmap::cache::ThreadConnectionFactory factory{
         javelin::jmap::cache::ThreadConnectionFactoryOptions{
-            .connectionNamePrefix = "javelin-cache",
+            .connectionNamePrefix = QStringLiteral("javelin-cache"),
             .databasePath = databasePath,
         }};
 

@@ -52,7 +52,7 @@ namespace javelin::gui::messageview
                 {
                     if (m_accountId.has_value() && m_mailboxId.has_value() && m_emailId.has_value())
                     {
-                        emit archiveRequested(QString::fromStdString(*m_accountId),
+                        Q_EMIT archiveRequested(QString::fromStdString(*m_accountId),
                                               QString::fromStdString(*m_mailboxId),
                                               QString::fromStdString(*m_emailId));
                     }
@@ -65,7 +65,7 @@ namespace javelin::gui::messageview
                 {
                     if (m_accountId.has_value() && m_mailboxId.has_value() && m_emailId.has_value())
                     {
-                        emit deleteRequested(QString::fromStdString(*m_accountId),
+                        Q_EMIT deleteRequested(QString::fromStdString(*m_accountId),
                                              QString::fromStdString(*m_mailboxId),
                                              QString::fromStdString(*m_emailId));
                     }
@@ -347,7 +347,7 @@ namespace javelin::gui::messageview
             connect(saveButton, &QToolButton::clicked, this,
                     [this, partId = QString::fromStdString(attachment.partId)]
                     {
-                        emit saveAttachmentRequested(QString::fromStdString(*m_accountId),
+                        Q_EMIT saveAttachmentRequested(QString::fromStdString(*m_accountId),
                                                      QString::fromStdString(*m_emailId), partId);
                     });
 
@@ -357,7 +357,7 @@ namespace javelin::gui::messageview
             connect(openButton, &QToolButton::clicked, this,
                     [this, partId = QString::fromStdString(attachment.partId)]
                     {
-                        emit openAttachmentRequested(QString::fromStdString(*m_accountId),
+                        Q_EMIT openAttachmentRequested(QString::fromStdString(*m_accountId),
                                                      QString::fromStdString(*m_emailId), partId);
                     });
 

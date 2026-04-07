@@ -60,7 +60,7 @@ namespace
 
         auto result = javelin::jmap::cache::DatabaseConnection::open({
             .connectionName = makeConnectionName(),
-            .databasePath = context.temporaryDir.filePath("cache.sqlite3"),
+            .databasePath = context.temporaryDir.filePath(QStringLiteral("cache.sqlite3")),
         });
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
         {
@@ -74,12 +74,14 @@ namespace
     void seedAccount(javelin::jmap::cache::DatabaseConnection& connection)
     {
         QSqlQuery query{connection.database()};
-        query.prepare("INSERT INTO accounts (account_id, email_address, session_url, is_primary) "
-                      "VALUES (:account_id, :email_address, :session_url, :is_primary)");
-        query.bindValue(":account_id", "account-1");
-        query.bindValue(":email_address", "alice@example.com");
-        query.bindValue(":session_url", "https://mail.example.com/.well-known/jmap");
-        query.bindValue(":is_primary", 1);
+        query.prepare(QStringLiteral(
+            "INSERT INTO accounts (account_id, email_address, session_url, is_primary) "
+            "VALUES (:account_id, :email_address, :session_url, :is_primary)"));
+        query.bindValue(QStringLiteral(":account_id"), QStringLiteral("account-1"));
+        query.bindValue(QStringLiteral(":email_address"), QStringLiteral("alice@example.com"));
+        query.bindValue(QStringLiteral(":session_url"),
+                        QStringLiteral("https://mail.example.com/.well-known/jmap"));
+        query.bindValue(QStringLiteral(":is_primary"), 1);
         REQUIRE(query.exec());
     }
 
@@ -219,50 +221,53 @@ TEST_CASE("query service SQL plans use the intended cache indexes", "[jmap][cach
 
     const auto mailboxPlan = explainQueryPlan(
         databaseContext.connection.database(),
-        "SELECT m.mailbox_id, m.name, m.parent_mailbox_id, m.role, m.sort_order, "
-        "m.total_emails, m.unread_emails, m.total_threads, m.unread_threads, "
-        "m.is_subscribed, "
-        "EXISTS("
-        "  SELECT 1 FROM mailboxes child "
-        "  WHERE child.account_id = m.account_id AND child.parent_mailbox_id = m.mailbox_id"
-        ") AS has_children "
-        "FROM mailboxes m "
-        "WHERE m.account_id = :account_id "
-        "ORDER BY COALESCE(m.parent_mailbox_id, ''), m.sort_order, m.mailbox_id",
-        {{":account_id", "account-1"}});
-    CHECK(std::any_of(mailboxPlan.cbegin(), mailboxPlan.cend(), [](const QString& detail)
-                      { return detail.contains("idx_mailboxes_parent", Qt::CaseInsensitive); }));
+        QStringLiteral(
+            "SELECT m.mailbox_id, m.name, m.parent_mailbox_id, m.role, m.sort_order, "
+            "m.total_emails, m.unread_emails, m.total_threads, m.unread_threads, "
+            "m.is_subscribed, "
+            "EXISTS("
+            "  SELECT 1 FROM mailboxes child "
+            "  WHERE child.account_id = m.account_id AND child.parent_mailbox_id = m.mailbox_id"
+            ") AS has_children "
+            "FROM mailboxes m "
+            "WHERE m.account_id = :account_id "
+            "ORDER BY COALESCE(m.parent_mailbox_id, ''), m.sort_order, m.mailbox_id"),
+        {{QStringLiteral(":account_id"), QStringLiteral("account-1")}});
+    CHECK(std::any_of(
+        mailboxPlan.cbegin(), mailboxPlan.cend(), [](const QString& detail)
+        { return detail.contains(QStringLiteral("idx_mailboxes_parent"), Qt::CaseInsensitive); }));
 
-    const auto messagePlan =
-        explainQueryPlan(databaseContext.connection.database(),
-                         "WITH mailbox_threads AS ("
-                         "  SELECT DISTINCT e.thread_id "
-                         "  FROM emails e "
-                         "  INNER JOIN email_mailboxes em ON em.account_id = e.account_id AND "
-                         "em.email_id = e.email_id "
-                         "  WHERE e.account_id = :account_id AND em.mailbox_id = :mailbox_id"
-                         "), ranked_threads AS ("
-                         "  SELECT e.email_id, e.thread_id, "
-                         "         ROW_NUMBER() OVER (PARTITION BY e.thread_id ORDER BY "
-                         "e.received_at DESC, e.email_id DESC) AS thread_rank "
-                         "  FROM emails e "
-                         "  INNER JOIN mailbox_threads mt ON mt.thread_id = e.thread_id "
-                         "  WHERE e.account_id = :account_id"
-                         ") "
-                         "SELECT rt.email_id, rt.thread_id "
-                         "FROM ranked_threads rt "
-                         "WHERE rt.thread_rank = 1 "
-                         "ORDER BY rt.email_id DESC "
-                         "LIMIT :limit OFFSET :offset",
-                         {{":account_id", "account-1"},
-                          {":mailbox_id", "mbx-inbox"},
-                          {":limit", 50},
-                          {":offset", 0}});
+    const auto messagePlan = explainQueryPlan(
+        databaseContext.connection.database(),
+        QStringLiteral("WITH mailbox_threads AS ("
+                       "  SELECT DISTINCT e.thread_id "
+                       "  FROM emails e "
+                       "  INNER JOIN email_mailboxes em ON em.account_id = e.account_id AND "
+                       "em.email_id = e.email_id "
+                       "  WHERE e.account_id = :account_id AND em.mailbox_id = :mailbox_id"
+                       "), ranked_threads AS ("
+                       "  SELECT e.email_id, e.thread_id, "
+                       "         ROW_NUMBER() OVER (PARTITION BY e.thread_id ORDER BY "
+                       "e.received_at DESC, e.email_id DESC) AS thread_rank "
+                       "  FROM emails e "
+                       "  INNER JOIN mailbox_threads mt ON mt.thread_id = e.thread_id "
+                       "  WHERE e.account_id = :account_id"
+                       ") "
+                       "SELECT rt.email_id, rt.thread_id "
+                       "FROM ranked_threads rt "
+                       "WHERE rt.thread_rank = 1 "
+                       "ORDER BY rt.email_id DESC "
+                       "LIMIT :limit OFFSET :offset"),
+        {{QStringLiteral(":account_id"), QStringLiteral("account-1")},
+         {QStringLiteral(":mailbox_id"), QStringLiteral("mbx-inbox")},
+         {QStringLiteral(":limit"), 50},
+         {QStringLiteral(":offset"), 0}});
     CHECK(std::any_of(messagePlan.cbegin(), messagePlan.cend(),
                       [](const QString& detail)
                       {
-                          return detail.contains("idx_email_mailboxes_mailbox",
+                          return detail.contains(QStringLiteral("idx_email_mailboxes_mailbox"),
                                                  Qt::CaseInsensitive) ||
-                                 detail.contains("idx_emails_thread", Qt::CaseInsensitive);
+                                 detail.contains(QStringLiteral("idx_emails_thread"),
+                                                 Qt::CaseInsensitive);
                       }));
 }

@@ -52,7 +52,7 @@ namespace
 
         auto result = javelin::jmap::cache::DatabaseConnection::open({
             .connectionName = makeConnectionName(),
-            .databasePath = context.temporaryDir.filePath("cache.sqlite3"),
+            .databasePath = context.temporaryDir.filePath(QStringLiteral("cache.sqlite3")),
         });
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
         {
@@ -73,12 +73,14 @@ TEST_CASE("inline part payload repository round-trips cached inline blobs",
 
     auto databaseContext = makeDatabaseContext();
     QSqlQuery seedAccount{databaseContext.connection.database()};
-    seedAccount.prepare("INSERT INTO accounts (account_id, email_address, session_url, is_primary) "
-                        "VALUES (:account_id, :email_address, :session_url, :is_primary)");
-    seedAccount.bindValue(":account_id", "account-1");
-    seedAccount.bindValue(":email_address", "alice@example.com");
-    seedAccount.bindValue(":session_url", "https://mail.example.com/.well-known/jmap");
-    seedAccount.bindValue(":is_primary", 1);
+    seedAccount.prepare(
+        QStringLiteral("INSERT INTO accounts (account_id, email_address, session_url, is_primary) "
+                       "VALUES (:account_id, :email_address, :session_url, :is_primary)"));
+    seedAccount.bindValue(QStringLiteral(":account_id"), QStringLiteral("account-1"));
+    seedAccount.bindValue(QStringLiteral(":email_address"), QStringLiteral("alice@example.com"));
+    seedAccount.bindValue(QStringLiteral(":session_url"),
+                          QStringLiteral("https://mail.example.com/.well-known/jmap"));
+    seedAccount.bindValue(QStringLiteral(":is_primary"), 1);
     REQUIRE(seedAccount.exec());
 
     javelin::jmap::cache::InlinePartPayloadRepository repository{databaseContext.connection};
@@ -98,8 +100,7 @@ TEST_CASE("inline part payload repository round-trips cached inline blobs",
     const auto result = repository.find("account-1", "eml-1", "3");
 
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::InlinePartPayload>>(result));
-    const auto& loaded =
-        std::get<std::optional<javelin::jmap::cache::InlinePartPayload>>(result);
+    const auto& loaded = std::get<std::optional<javelin::jmap::cache::InlinePartPayload>>(result);
     REQUIRE(loaded.has_value());
     CHECK(loaded->blobId == "blob-inline");
     CHECK(loaded->mediaType == "image/png");

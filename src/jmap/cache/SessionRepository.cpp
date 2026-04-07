@@ -49,7 +49,7 @@ namespace javelin::jmap::cache
         {
             return DatabaseError{
                 .code = DatabaseErrorCode::QueryFailed,
-                .message = operation + ": " + query.lastError().text(),
+                .message = operation + QStringLiteral(": ") + query.lastError().text(),
             };
         }
 
@@ -111,15 +111,16 @@ namespace javelin::jmap::cache
 
         void bindAccount(QSqlQuery& query, const javelin::jmap::api::Account& account)
         {
-            query.bindValue(":account_id", QString::fromStdString(account.id));
-            query.bindValue(":email_address", QStringLiteral(""));
-            query.bindValue(":session_url", QStringLiteral(""));
-            query.bindValue(":is_primary", 0);
-            query.bindValue(":name", QString::fromStdString(account.name));
-            query.bindValue(":is_personal", account.isPersonal ? 1 : 0);
-            query.bindValue(":is_read_only", account.isReadOnly ? 1 : 0);
-            query.bindValue(":cap_mail", account.accountCapabilities.mail ? 1 : 0);
-            query.bindValue(":cap_submission", account.accountCapabilities.submission ? 1 : 0);
+            query.bindValue(QStringLiteral(":account_id"), QString::fromStdString(account.id));
+            query.bindValue(QStringLiteral(":email_address"), QStringLiteral(""));
+            query.bindValue(QStringLiteral(":session_url"), QStringLiteral(""));
+            query.bindValue(QStringLiteral(":is_primary"), 0);
+            query.bindValue(QStringLiteral(":name"), QString::fromStdString(account.name));
+            query.bindValue(QStringLiteral(":is_personal"), account.isPersonal ? 1 : 0);
+            query.bindValue(QStringLiteral(":is_read_only"), account.isReadOnly ? 1 : 0);
+            query.bindValue(QStringLiteral(":cap_mail"), account.accountCapabilities.mail ? 1 : 0);
+            query.bindValue(QStringLiteral(":cap_submission"),
+                            account.accountCapabilities.submission ? 1 : 0);
         }
 
     } // namespace
@@ -142,42 +143,45 @@ namespace javelin::jmap::cache
         {
             return DatabaseError{
                 .code = DatabaseErrorCode::QueryFailed,
-                .message = "Begin session replacement transaction: " + database.lastError().text(),
+                .message = QStringLiteral("Begin session replacement transaction: ") +
+                           database.lastError().text(),
             };
         }
 
         QSqlQuery deleteSession{database};
-        deleteSession.prepare("DELETE FROM sessions WHERE account_id = :account_id");
-        deleteSession.bindValue(":account_id", QString::fromStdString(std::string{ownerAccountId}));
+        deleteSession.prepare(
+            QStringLiteral("DELETE FROM sessions WHERE account_id = :account_id"));
+        deleteSession.bindValue(QStringLiteral(":account_id"),
+                                QString::fromStdString(std::string{ownerAccountId}));
         if (!deleteSession.exec())
         {
             database.rollback();
-            return makeQueryError("Delete session row", deleteSession);
+            return makeQueryError(QStringLiteral("Delete session row"), deleteSession);
         }
 
         QSqlQuery deleteAccounts{database};
-        deleteAccounts.prepare("DELETE FROM accounts");
+        deleteAccounts.prepare(QStringLiteral("DELETE FROM accounts"));
         if (!deleteAccounts.exec())
         {
             database.rollback();
-            return makeQueryError("Delete cached accounts", deleteAccounts);
+            return makeQueryError(QStringLiteral("Delete cached accounts"), deleteAccounts);
         }
 
         QSqlQuery insertAccount{database};
-        insertAccount.prepare(
+        insertAccount.prepare(QStringLiteral(
             "INSERT INTO accounts ("
             "account_id, email_address, session_url, is_primary, name, is_personal, "
             "is_read_only, "
             "cap_mail, cap_submission"
             ") VALUES ("
             ":account_id, :email_address, :session_url, :is_primary, :name, :is_personal, "
-            ":is_read_only, :cap_mail, :cap_submission)");
+            ":is_read_only, :cap_mail, :cap_submission)"));
         for (const auto& [accountId, account] : session.accounts)
         {
             auto storedAccount = account;
             storedAccount.id = accountId;
             bindAccount(insertAccount, storedAccount);
-            insertAccount.bindValue(":is_primary",
+            insertAccount.bindValue(QStringLiteral(":is_primary"),
                                     (session.primaryAccounts.mailAccountId == accountId ||
                                      session.primaryAccounts.submissionAccountId == accountId)
                                         ? 1
@@ -185,12 +189,12 @@ namespace javelin::jmap::cache
             if (!insertAccount.exec())
             {
                 database.rollback();
-                return makeQueryError("Insert cached account", insertAccount);
+                return makeQueryError(QStringLiteral("Insert cached account"), insertAccount);
             }
         }
 
         QSqlQuery insertSession{database};
-        insertSession.prepare(
+        insertSession.prepare(QStringLiteral(
             "INSERT INTO sessions ("
             "account_id, api_url, download_url, upload_url, event_source_url, state, username, "
             "has_core_capability, has_mail_capability, has_submission_capability, "
@@ -200,38 +204,44 @@ namespace javelin::jmap::cache
             ":username, :has_core_capability, :has_mail_capability, "
             ":has_submission_capability, "
             ":core_capabilities_json, :primary_mail_account_id, "
-            ":primary_submission_account_id)");
-        insertSession.bindValue(":account_id", QString::fromStdString(std::string{ownerAccountId}));
-        insertSession.bindValue(":api_url", QString::fromStdString(session.apiUrl));
-        insertSession.bindValue(":download_url", QString::fromStdString(session.downloadUrl));
-        insertSession.bindValue(":upload_url", QString::fromStdString(session.uploadUrl));
-        insertSession.bindValue(":event_source_url",
+            ":primary_submission_account_id)"));
+        insertSession.bindValue(QStringLiteral(":account_id"),
+                                QString::fromStdString(std::string{ownerAccountId}));
+        insertSession.bindValue(QStringLiteral(":api_url"), QString::fromStdString(session.apiUrl));
+        insertSession.bindValue(QStringLiteral(":download_url"),
+                                QString::fromStdString(session.downloadUrl));
+        insertSession.bindValue(QStringLiteral(":upload_url"),
+                                QString::fromStdString(session.uploadUrl));
+        insertSession.bindValue(QStringLiteral(":event_source_url"),
                                 session.eventSourceUrl.has_value()
                                     ? QVariant{QString::fromStdString(*session.eventSourceUrl)}
                                     : QVariant{});
-        insertSession.bindValue(":state", QString::fromStdString(session.state));
-        insertSession.bindValue(":username", QString::fromStdString(session.username));
-        insertSession.bindValue(":has_core_capability", session.capabilities.core ? 1 : 0);
-        insertSession.bindValue(":has_mail_capability", session.capabilities.mail ? 1 : 0);
-        insertSession.bindValue(":has_submission_capability",
+        insertSession.bindValue(QStringLiteral(":state"), QString::fromStdString(session.state));
+        insertSession.bindValue(QStringLiteral(":username"),
+                                QString::fromStdString(session.username));
+        insertSession.bindValue(QStringLiteral(":has_core_capability"),
+                                session.capabilities.core ? 1 : 0);
+        insertSession.bindValue(QStringLiteral(":has_mail_capability"),
+                                session.capabilities.mail ? 1 : 0);
+        insertSession.bindValue(QStringLiteral(":has_submission_capability"),
                                 session.capabilities.submission ? 1 : 0);
         insertSession.bindValue(
-            ":core_capabilities_json",
+            QStringLiteral(":core_capabilities_json"),
             QString::fromStdString(serializeCoreCapability(session.capabilities.coreDetails)));
         insertSession.bindValue(
-            ":primary_mail_account_id",
+            QStringLiteral(":primary_mail_account_id"),
             session.primaryAccounts.mailAccountId.has_value()
                 ? QVariant{QString::fromStdString(*session.primaryAccounts.mailAccountId)}
                 : QVariant{});
         insertSession.bindValue(
-            ":primary_submission_account_id",
+            QStringLiteral(":primary_submission_account_id"),
             session.primaryAccounts.submissionAccountId.has_value()
                 ? QVariant{QString::fromStdString(*session.primaryAccounts.submissionAccountId)}
                 : QVariant{});
         if (!insertSession.exec())
         {
             database.rollback();
-            return makeQueryError("Insert cached session", insertSession);
+            return makeQueryError(QStringLiteral("Insert cached session"), insertSession);
         }
 
         if (!database.commit())
@@ -239,7 +249,8 @@ namespace javelin::jmap::cache
             database.rollback();
             return DatabaseError{
                 .code = DatabaseErrorCode::QueryFailed,
-                .message = "Commit session replacement transaction: " + database.lastError().text(),
+                .message = QStringLiteral("Commit session replacement transaction: ") +
+                           database.lastError().text(),
             };
         }
 
@@ -255,15 +266,16 @@ namespace javelin::jmap::cache
         }
 
         QSqlQuery sessionQuery{m_connection.database()};
-        sessionQuery.prepare(
+        sessionQuery.prepare(QStringLiteral(
             "SELECT api_url, download_url, upload_url, event_source_url, state, username, "
             "has_core_capability, has_mail_capability, has_submission_capability, "
             "core_capabilities_json, primary_mail_account_id, primary_submission_account_id "
-            "FROM sessions WHERE account_id = :account_id");
-        sessionQuery.bindValue(":account_id", QString::fromStdString(std::string{ownerAccountId}));
+            "FROM sessions WHERE account_id = :account_id"));
+        sessionQuery.bindValue(QStringLiteral(":account_id"),
+                               QString::fromStdString(std::string{ownerAccountId}));
         if (!sessionQuery.exec())
         {
-            return makeQueryError("Read cached session", sessionQuery);
+            return makeQueryError(QStringLiteral("Read cached session"), sessionQuery);
         }
 
         if (!sessionQuery.next())
@@ -302,11 +314,11 @@ namespace javelin::jmap::cache
         };
 
         QSqlQuery accountQuery{m_connection.database()};
-        if (!accountQuery.exec(
+        if (!accountQuery.exec(QStringLiteral(
                 "SELECT account_id, name, is_personal, is_read_only, cap_mail, cap_submission "
-                "FROM accounts ORDER BY account_id"))
+                "FROM accounts ORDER BY account_id")))
         {
-            return makeQueryError("Read cached accounts", accountQuery);
+            return makeQueryError(QStringLiteral("Read cached accounts"), accountQuery);
         }
 
         while (accountQuery.next())

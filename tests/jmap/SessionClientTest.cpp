@@ -132,7 +132,8 @@ TEST_CASE("session client discovers a session through the transport abstraction"
     REQUIRE(std::holds_alternative<javelin::jmap::api::Session>(result));
     const auto& session = std::get<javelin::jmap::api::Session>(result);
     CHECK(session.username == "alice@example.com");
-    CHECK(transport.lastRequest.url == QUrl{"https://mail.example.com/.well-known/jmap"});
+    CHECK(transport.lastRequest.url ==
+          QUrl{QStringLiteral("https://mail.example.com/.well-known/jmap")});
     REQUIRE(transport.lastRequest.headers.size() == 2);
     CHECK(transport.lastRequest.headers.front().name == "Authorization");
     CHECK(transport.lastRequest.headers.front().value == "Bearer access-token");

@@ -53,7 +53,7 @@ namespace
 
         auto result = javelin::jmap::cache::DatabaseConnection::open({
             .connectionName = makeConnectionName(),
-            .databasePath = context.temporaryDir.filePath("cache.sqlite3"),
+            .databasePath = context.temporaryDir.filePath(QStringLiteral("cache.sqlite3")),
         });
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
         {
@@ -67,35 +67,39 @@ namespace
     void seedAccount(javelin::jmap::cache::DatabaseConnection& connection)
     {
         QSqlQuery query{connection.database()};
-        query.prepare("INSERT INTO accounts (account_id, email_address, session_url, is_primary) "
-                      "VALUES (:account_id, :email_address, :session_url, :is_primary)");
-        query.bindValue(":account_id", "account-1");
-        query.bindValue(":email_address", "alice@example.com");
-        query.bindValue(":session_url", "https://mail.example.com/.well-known/jmap");
-        query.bindValue(":is_primary", 1);
+        query.prepare(QStringLiteral(
+            "INSERT INTO accounts (account_id, email_address, session_url, is_primary) "
+            "VALUES (:account_id, :email_address, :session_url, :is_primary)"));
+        query.bindValue(QStringLiteral(":account_id"), QStringLiteral("account-1"));
+        query.bindValue(QStringLiteral(":email_address"), QStringLiteral("alice@example.com"));
+        query.bindValue(QStringLiteral(":session_url"),
+                        QStringLiteral("https://mail.example.com/.well-known/jmap"));
+        query.bindValue(QStringLiteral(":is_primary"), 1);
         REQUIRE(query.exec());
     }
 
     void seedEmail(javelin::jmap::cache::DatabaseConnection& connection)
     {
         QSqlQuery query{connection.database()};
-        query.prepare("INSERT INTO emails (account_id, email_id, thread_id, blob_id, received_at, "
-                      "subject, preview, "
-                      "mailbox_ids_json, keywords_json, has_attachment, size) "
-                      "VALUES (:account_id, :email_id, :thread_id, :blob_id, :received_at, "
-                      ":subject, :preview, "
-                      ":mailbox_ids_json, :keywords_json, :has_attachment, :size)");
-        query.bindValue(":account_id", "account-1");
-        query.bindValue(":email_id", "eml-1");
-        query.bindValue(":thread_id", "thr-1");
-        query.bindValue(":blob_id", "blob-root");
-        query.bindValue(":received_at", "2026-04-05T11:22:33Z");
-        query.bindValue(":subject", "Quarterly update");
-        query.bindValue(":preview", "Here is the short preview text.");
-        query.bindValue(":mailbox_ids_json", "[]");
-        query.bindValue(":keywords_json", "{}");
-        query.bindValue(":has_attachment", 1);
-        query.bindValue(":size", 4096);
+        query.prepare(QStringLiteral(
+            "INSERT INTO emails (account_id, email_id, thread_id, blob_id, received_at, "
+            "subject, preview, "
+            "mailbox_ids_json, keywords_json, has_attachment, size) "
+            "VALUES (:account_id, :email_id, :thread_id, :blob_id, :received_at, "
+            ":subject, :preview, "
+            ":mailbox_ids_json, :keywords_json, :has_attachment, :size)"));
+        query.bindValue(QStringLiteral(":account_id"), QStringLiteral("account-1"));
+        query.bindValue(QStringLiteral(":email_id"), QStringLiteral("eml-1"));
+        query.bindValue(QStringLiteral(":thread_id"), QStringLiteral("thr-1"));
+        query.bindValue(QStringLiteral(":blob_id"), QStringLiteral("blob-root"));
+        query.bindValue(QStringLiteral(":received_at"), QStringLiteral("2026-04-05T11:22:33Z"));
+        query.bindValue(QStringLiteral(":subject"), QStringLiteral("Quarterly update"));
+        query.bindValue(QStringLiteral(":preview"),
+                        QStringLiteral("Here is the short preview text."));
+        query.bindValue(QStringLiteral(":mailbox_ids_json"), QStringLiteral("[]"));
+        query.bindValue(QStringLiteral(":keywords_json"), QStringLiteral("{}"));
+        query.bindValue(QStringLiteral(":has_attachment"), 1);
+        query.bindValue(QStringLiteral(":size"), 4096);
         REQUIRE(query.exec());
     }
 

@@ -32,7 +32,7 @@ namespace javelin::jmap::query
                 };
             }
 
-            const auto yearMonth = utcDate.toString("yyyy-MM").toStdString();
+            const auto yearMonth = utcDate.toString(QStringLiteral("yyyy-MM")).toStdString();
             return GroupIdentity{
                 .id = "month:" + yearMonth,
                 .label = yearMonth,

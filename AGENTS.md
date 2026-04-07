@@ -39,6 +39,16 @@ This repository is for a Qt Widgets JMAP email client. Treat it as a modern-only
 - Prefer `QAbstractItemModel`-based models backed by the cache rather than in-memory duplication.
 - Use `QProperty`/bindable properties where they simplify state propagation cleanly.
 
+### Qt String and Keyword Conventions
+
+KDE cmake settings enable `QT_NO_CAST_FROM_ASCII` and `QT_NO_KEYWORDS`. All code must comply:
+
+- **Never pass raw string literals (`"..."`) to Qt APIs.** Use `QStringLiteral("...")` for compile-time string literals passed to `QString`-accepting parameters (e.g., `query.prepare()`, `query.bindValue()`, `query.exec()`, `QDir::filePath()`, `QDate::toString()`).
+- **For `QString::replace()` with single characters**, use `QLatin1String` for the search argument: `str.replace(QLatin1String("&"), QStringLiteral("&amp;"))`.
+- **For `std::string` → `QString` conversion**, use `QString::fromStdString()`.
+- **Use macro-based Qt keywords**, not the keyword forms: `Q_SIGNALS:` not `signals:`, `Q_SLOTS:` not `slots:`, `Q_EMIT` not `emit`.
+- **In test assertions**, compare `QString` against `QStringLiteral(...)`, not raw string literals: `CHECK(value == QStringLiteral("expected"))`.
+
 ## Memory And Cache Policy
 
 - The application is expected to run continuously for notifications, so memory pressure matters at all times.

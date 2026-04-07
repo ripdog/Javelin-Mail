@@ -1,9 +1,8 @@
 #pragma once
 
-#include <QMainWindow>
+#include <KXmlGuiWindow>
 #include <QTemporaryDir>
 
-class QComboBox;
 class QCloseEvent;
 class QLabel;
 class QListView;
@@ -43,7 +42,7 @@ namespace javelin::gui::messageview
 namespace javelin::gui::shell
 {
 
-    class MainWindow : public QMainWindow
+    class MainWindow : public KXmlGuiWindow
     {
         Q_OBJECT
 
@@ -56,7 +55,7 @@ namespace javelin::gui::shell
         ~MainWindow() override = default;
 
       private:
-        void createMenus();
+        void createActions();
         void setupUi();
         void connectSelection();
         void refreshViewsFromCache();
@@ -85,7 +84,6 @@ namespace javelin::gui::shell
         javelin::jmap::cache::AccountRepository& m_accountRepository;
         javelin::jmap::cache::MessageViewService& m_messageViewService;
         javelin::jmap::cache::QueryService& m_queryService;
-        QComboBox* m_accountCombo = nullptr;
         QSplitter* m_mainSplitter = nullptr;
         javelin::gui::mailboxes::MailboxTreeModel* m_mailboxModel = nullptr;
         javelin::gui::messages::MessageListModel* m_messageModel = nullptr;

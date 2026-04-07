@@ -55,7 +55,7 @@ namespace
 
         auto result = javelin::jmap::cache::DatabaseConnection::open({
             .connectionName = makeConnectionName(),
-            .databasePath = context.temporaryDir.filePath("cache.sqlite3"),
+            .databasePath = context.temporaryDir.filePath(QStringLiteral("cache.sqlite3")),
         });
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
         {
@@ -69,12 +69,14 @@ namespace
     void seedAccount(javelin::jmap::cache::DatabaseConnection& connection)
     {
         QSqlQuery query{connection.database()};
-        query.prepare("INSERT INTO accounts (account_id, email_address, session_url, is_primary) "
-                      "VALUES (:account_id, :email_address, :session_url, :is_primary)");
-        query.bindValue(":account_id", "account-1");
-        query.bindValue(":email_address", "alice@example.com");
-        query.bindValue(":session_url", "https://mail.example.com/.well-known/jmap");
-        query.bindValue(":is_primary", 1);
+        query.prepare(QStringLiteral(
+            "INSERT INTO accounts (account_id, email_address, session_url, is_primary) "
+            "VALUES (:account_id, :email_address, :session_url, :is_primary)"));
+        query.bindValue(QStringLiteral(":account_id"), QStringLiteral("account-1"));
+        query.bindValue(QStringLiteral(":email_address"), QStringLiteral("alice@example.com"));
+        query.bindValue(QStringLiteral(":session_url"),
+                        QStringLiteral("https://mail.example.com/.well-known/jmap"));
+        query.bindValue(QStringLiteral(":is_primary"), 1);
         REQUIRE(query.exec());
     }
 

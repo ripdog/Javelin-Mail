@@ -41,7 +41,7 @@ namespace javelin::jmap::sync
         {
             return javelin::jmap::cache::DatabaseError{
                 .code = javelin::jmap::cache::DatabaseErrorCode::QueryFailed,
-                .message = operation + ": " + query.lastError().text(),
+                .message = operation + QStringLiteral(": ") + query.lastError().text(),
             };
         }
 
@@ -128,29 +128,32 @@ namespace javelin::jmap::sync
         {
             return javelin::jmap::cache::DatabaseError{
                 .code = javelin::jmap::cache::DatabaseErrorCode::QueryFailed,
-                .message = "Serialize pending action payload failed",
+                .message = QStringLiteral("Serialize pending action payload failed"),
             };
         }
 
         QSqlQuery query{m_connection.database()};
-        query.prepare("INSERT INTO pending_actions ("
-                      "pending_action_id, account_id, action_type, status, payload_json"
-                      ") VALUES ("
-                      ":pending_action_id, :account_id, :action_type, :status, :payload_json"
-                      ") ON CONFLICT(pending_action_id) DO UPDATE SET "
-                      "account_id = excluded.account_id, "
-                      "action_type = excluded.action_type, "
-                      "status = excluded.status, "
-                      "payload_json = excluded.payload_json, "
-                      "updated_at = CURRENT_TIMESTAMP");
-        query.bindValue(":pending_action_id", QString::fromStdString(record.pendingActionId));
-        query.bindValue(":account_id", QString::fromStdString(record.accountId));
-        query.bindValue(":action_type", "email_patch");
-        query.bindValue(":status", QString::fromStdString(std::string{toString(record.status)}));
-        query.bindValue(":payload_json", QString::fromStdString(*payload));
+        query.prepare(
+            QStringLiteral("INSERT INTO pending_actions ("
+                           "pending_action_id, account_id, action_type, status, payload_json"
+                           ") VALUES ("
+                           ":pending_action_id, :account_id, :action_type, :status, :payload_json"
+                           ") ON CONFLICT(pending_action_id) DO UPDATE SET "
+                           "account_id = excluded.account_id, "
+                           "action_type = excluded.action_type, "
+                           "status = excluded.status, "
+                           "payload_json = excluded.payload_json, "
+                           "updated_at = CURRENT_TIMESTAMP"));
+        query.bindValue(QStringLiteral(":pending_action_id"),
+                        QString::fromStdString(record.pendingActionId));
+        query.bindValue(QStringLiteral(":account_id"), QString::fromStdString(record.accountId));
+        query.bindValue(QStringLiteral(":action_type"), QStringLiteral("email_patch"));
+        query.bindValue(QStringLiteral(":status"),
+                        QString::fromStdString(std::string{toString(record.status)}));
+        query.bindValue(QStringLiteral(":payload_json"), QString::fromStdString(*payload));
         if (!query.exec())
         {
-            return makeQueryError("Upsert pending action", query);
+            return makeQueryError(QStringLiteral("Upsert pending action"), query);
         }
 
         return std::nullopt;
@@ -166,14 +169,16 @@ namespace javelin::jmap::sync
         }
 
         QSqlQuery query{m_connection.database()};
-        query.prepare("SELECT pending_action_id, account_id, status, payload_json "
-                      "FROM pending_actions "
-                      "WHERE account_id = :account_id AND action_type = 'email_patch' "
-                      "ORDER BY created_at, pending_action_id");
-        query.bindValue(":account_id", QString::fromStdString(std::string{accountId}));
+        query.prepare(
+            QStringLiteral("SELECT pending_action_id, account_id, status, payload_json "
+                           "FROM pending_actions "
+                           "WHERE account_id = :account_id AND action_type = 'email_patch' "
+                           "ORDER BY created_at, pending_action_id"));
+        query.bindValue(QStringLiteral(":account_id"),
+                        QString::fromStdString(std::string{accountId}));
         if (!query.exec())
         {
-            return makeQueryError("Read pending actions", query);
+            return makeQueryError(QStringLiteral("Read pending actions"), query);
         }
 
         std::vector<PendingActionRecord> records;
@@ -214,18 +219,21 @@ namespace javelin::jmap::sync
         }
 
         QSqlQuery query{m_connection.database()};
-        query.prepare("SELECT pending_action_id, account_id, status, payload_json "
-                      "FROM pending_actions "
-                      "WHERE account_id = :account_id AND action_type = 'email_patch' "
-                      "AND status = :status "
-                      "ORDER BY created_at, pending_action_id "
-                      "LIMIT :limit");
-        query.bindValue(":account_id", QString::fromStdString(std::string{accountId}));
-        query.bindValue(":status", QString::fromStdString(std::string{toString(status)}));
-        query.bindValue(":limit", static_cast<qulonglong>(limit));
+        query.prepare(
+            QStringLiteral("SELECT pending_action_id, account_id, status, payload_json "
+                           "FROM pending_actions "
+                           "WHERE account_id = :account_id AND action_type = 'email_patch' "
+                           "AND status = :status "
+                           "ORDER BY created_at, pending_action_id "
+                           "LIMIT :limit"));
+        query.bindValue(QStringLiteral(":account_id"),
+                        QString::fromStdString(std::string{accountId}));
+        query.bindValue(QStringLiteral(":status"),
+                        QString::fromStdString(std::string{toString(status)}));
+        query.bindValue(QStringLiteral(":limit"), static_cast<qulonglong>(limit));
         if (!query.exec())
         {
-            return makeQueryError("Read pending actions by status", query);
+            return makeQueryError(QStringLiteral("Read pending actions by status"), query);
         }
 
         std::vector<PendingActionRecord> records;
@@ -260,14 +268,16 @@ namespace javelin::jmap::sync
         }
 
         QSqlQuery query{m_connection.database()};
-        query.prepare("UPDATE pending_actions "
-                      "SET status = :status, updated_at = CURRENT_TIMESTAMP "
-                      "WHERE pending_action_id = :pending_action_id");
-        query.bindValue(":status", QString::fromStdString(std::string{toString(status)}));
-        query.bindValue(":pending_action_id", QString::fromStdString(std::string{pendingActionId}));
+        query.prepare(QStringLiteral("UPDATE pending_actions "
+                                     "SET status = :status, updated_at = CURRENT_TIMESTAMP "
+                                     "WHERE pending_action_id = :pending_action_id"));
+        query.bindValue(QStringLiteral(":status"),
+                        QString::fromStdString(std::string{toString(status)}));
+        query.bindValue(QStringLiteral(":pending_action_id"),
+                        QString::fromStdString(std::string{pendingActionId}));
         if (!query.exec())
         {
-            return makeQueryError("Update pending action status", query);
+            return makeQueryError(QStringLiteral("Update pending action status"), query);
         }
 
         return std::nullopt;
@@ -282,11 +292,13 @@ namespace javelin::jmap::sync
         }
 
         QSqlQuery query{m_connection.database()};
-        query.prepare("DELETE FROM pending_actions WHERE pending_action_id = :pending_action_id");
-        query.bindValue(":pending_action_id", QString::fromStdString(std::string{pendingActionId}));
+        query.prepare(QStringLiteral(
+            "DELETE FROM pending_actions WHERE pending_action_id = :pending_action_id"));
+        query.bindValue(QStringLiteral(":pending_action_id"),
+                        QString::fromStdString(std::string{pendingActionId}));
         if (!query.exec())
         {
-            return makeQueryError("Delete pending action", query);
+            return makeQueryError(QStringLiteral("Delete pending action"), query);
         }
 
         return std::nullopt;

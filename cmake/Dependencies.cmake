@@ -10,9 +10,14 @@ function(javelin_configure_dependencies)
     set(QCORO_WITH_QTDBUS OFF CACHE BOOL "" FORCE)
     set(QCORO_WITH_QTNETWORK ON CACHE BOOL "" FORCE)
     set(QCORO_WITH_QTWEBSOCKETS OFF CACHE BOOL "" FORCE)
+    set(QCORO_GENERATE_PRI_FILES OFF CACHE BOOL "" FORCE)
     set(USE_QT_VERSION 6 CACHE STRING "" FORCE)
     set(glaze_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
     set(glaze_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+
+    # Hide Extra CMake Modules from QCoro to prevent buggy PRI generation
+    set(CMAKE_DISABLE_FIND_PACKAGE_ECM ON)
+    set(ECM_FOUND OFF)
 
     FetchContent_Declare(
         Catch2

@@ -34,10 +34,10 @@ namespace javelin::jmap::render
         [[nodiscard]] QString escapeHtmlAttribute(const QString& value)
         {
             QString escaped = value;
-            escaped.replace('&', QStringLiteral("&amp;"));
-            escaped.replace('"', QStringLiteral("&quot;"));
-            escaped.replace('<', QStringLiteral("&lt;"));
-            escaped.replace('>', QStringLiteral("&gt;"));
+            escaped.replace(QLatin1String("&"), QStringLiteral("&amp;"));
+            escaped.replace(QLatin1String("\""), QStringLiteral("&quot;"));
+            escaped.replace(QLatin1String("<"), QStringLiteral("&lt;"));
+            escaped.replace(QLatin1String(">"), QStringLiteral("&gt;"));
             return escaped;
         }
 
@@ -77,11 +77,11 @@ namespace javelin::jmap::render
             inlineUrlsByCid.emplace(normalizeCid(*part.cid), *url);
         }
 
-        QString html = QString::fromUtf8(sourceHtml.data(),
-                                         static_cast<qsizetype>(sourceHtml.size()));
+        QString html =
+            QString::fromUtf8(sourceHtml.data(), static_cast<qsizetype>(sourceHtml.size()));
         html.remove(QRegularExpression{QStringLiteral("(?is)<script\\b[^>]*>.*?</script>")});
-        html.replace(QRegularExpression{
-                         QStringLiteral("(?i)\\s+on[a-z0-9_-]+\\s*=\\s*(\"[^\"]*\"|'[^']*'|[^\\s>]+)")},
+        html.replace(QRegularExpression{QStringLiteral(
+                         "(?i)\\s+on[a-z0-9_-]+\\s*=\\s*(\"[^\"]*\"|'[^']*'|[^\\s>]+)")},
                      QString{});
 
         std::size_t inlineResourceCount = 0;
@@ -112,16 +112,14 @@ namespace javelin::jmap::render
                 {
                     ++inlineResourceCount;
                     replacement = QStringLiteral("%1=\"%2\"")
-                                      .arg(attributeName,
-                                           QString::fromStdString(it->second));
+                                      .arg(attributeName, QString::fromStdString(it->second));
                 }
             }
             else if (isRemoteUrl(attributeValue))
             {
                 ++blockedRemoteResourceCount;
-                replacement = QStringLiteral(
-                                  "%1=\"about:blank\" data-javelin-blocked-src=\"%2\" "
-                                  "data-javelin-remote-attr=\"%3\"")
+                replacement = QStringLiteral("%1=\"about:blank\" data-javelin-blocked-src=\"%2\" "
+                                             "data-javelin-remote-attr=\"%3\"")
                                   .arg(attributeName, escapeHtmlAttribute(attributeValue),
                                        attributeName.toLower());
             }
@@ -152,12 +150,11 @@ namespace javelin::jmap::render
             }
 
             ++blockedRemoteResourceCount;
-            const auto replacement = QStringLiteral(
-                                         "style=\"%1\" data-javelin-blocked-style=\"%2\" "
-                                         "data-javelin-disabled-style=\"%3\"")
-                                         .arg(escapeHtmlAttribute(blockedStyle),
-                                              escapeHtmlAttribute(originalStyle),
-                                              escapeHtmlAttribute(blockedStyle));
+            const auto replacement =
+                QStringLiteral("style=\"%1\" data-javelin-blocked-style=\"%2\" "
+                               "data-javelin-disabled-style=\"%3\"")
+                    .arg(escapeHtmlAttribute(blockedStyle), escapeHtmlAttribute(originalStyle),
+                         escapeHtmlAttribute(blockedStyle));
             html.replace(match.capturedStart(0), match.capturedLength(0), replacement);
             offset = match.capturedStart(0) + replacement.size();
         }
@@ -168,14 +165,13 @@ namespace javelin::jmap::render
 
         return HtmlRenderDocument{
             .html =
-                QStringLiteral(
-                    "<!doctype html><html><head><meta charset=\"utf-8\">"
-                    "<meta http-equiv=\"Content-Security-Policy\" "
-                    "content=\"default-src 'none'; img-src data: about: http: https: "
-                    "javelin-message-inline:; media-src data: about: http: https: "
-                    "javelin-message-inline:; "
-                    "style-src 'unsafe-inline'; font-src data:;\">"
-                    "</head><body>%1</body></html>")
+                QStringLiteral("<!doctype html><html><head><meta charset=\"utf-8\">"
+                               "<meta http-equiv=\"Content-Security-Policy\" "
+                               "content=\"default-src 'none'; img-src data: about: http: https: "
+                               "javelin-message-inline:; media-src data: about: http: https: "
+                               "javelin-message-inline:; "
+                               "style-src 'unsafe-inline'; font-src data:;\">"
+                               "</head><body>%1</body></html>")
                     .arg(html)
                     .toStdString(),
             .inlineResourceCount = inlineResourceCount,
@@ -183,9 +179,10 @@ namespace javelin::jmap::render
         };
     }
 
-    std::optional<std::string> HtmlMessageDocumentBuilder::makeInlinePartUrl(
-        const std::string_view accountId, const std::string_view emailId,
-        const javelin::jmap::cache::EmailPart& part)
+    std::optional<std::string>
+    HtmlMessageDocumentBuilder::makeInlinePartUrl(const std::string_view accountId,
+                                                  const std::string_view emailId,
+                                                  const javelin::jmap::cache::EmailPart& part)
     {
         if (!part.blobId.has_value())
         {

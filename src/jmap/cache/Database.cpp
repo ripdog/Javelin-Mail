@@ -21,7 +21,7 @@ namespace javelin::jmap::cache
         {
             return DatabaseError{
                 .code = code,
-                .message = operation + ": " + database.lastError().text(),
+                .message = operation + QStringLiteral(": ") + database.lastError().text(),
             };
         }
 
@@ -30,7 +30,7 @@ namespace javelin::jmap::cache
         {
             return DatabaseError{
                 .code = code,
-                .message = operation + ": " + query.lastError().text(),
+                .message = operation + QStringLiteral(": ") + query.lastError().text(),
             };
         }
 
@@ -64,22 +64,25 @@ namespace javelin::jmap::cache
 
         [[nodiscard]] std::optional<DatabaseError> ensureMigrationTable(QSqlDatabase& database)
         {
-            return executeStatement(database,
-                                    "CREATE TABLE IF NOT EXISTS schema_migrations ("
-                                    "version INTEGER PRIMARY KEY,"
-                                    "name TEXT NOT NULL,"
-                                    "applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP"
-                                    ") STRICT",
-                                    "Create schema_migrations");
+            return executeStatement(
+                database,
+                QStringLiteral("CREATE TABLE IF NOT EXISTS schema_migrations ("
+                               "version INTEGER PRIMARY KEY,"
+                               "name TEXT NOT NULL,"
+                               "applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                               ") STRICT"),
+                QStringLiteral("Create schema_migrations"));
         }
 
         [[nodiscard]] std::variant<int, DatabaseError>
         readCurrentVersion(const QSqlDatabase& database)
         {
             QSqlQuery query{database};
-            if (!query.exec("SELECT COALESCE(MAX(version), 0) FROM schema_migrations"))
+            if (!query.exec(
+                    QStringLiteral("SELECT COALESCE(MAX(version), 0) FROM schema_migrations")))
             {
-                return makeQueryError(DatabaseErrorCode::QueryFailed, "Read schema version", query);
+                return makeQueryError(DatabaseErrorCode::QueryFailed,
+                                      QStringLiteral("Read schema version"), query);
             }
 
             if (!query.next())
@@ -93,10 +96,12 @@ namespace javelin::jmap::cache
         [[nodiscard]] std::optional<DatabaseError> applyPragmas(QSqlDatabase& database)
         {
             const std::vector<std::pair<QString, QString>> pragmas{
-                {"Enable foreign keys", "PRAGMA foreign_keys = ON"},
-                {"Enable WAL", "PRAGMA journal_mode = WAL"},
-                {"Reduce fsync pressure", "PRAGMA synchronous = NORMAL"},
-                {"Configure busy timeout", "PRAGMA busy_timeout = 5000"},
+                {QStringLiteral("Enable foreign keys"), QStringLiteral("PRAGMA foreign_keys = ON")},
+                {QStringLiteral("Enable WAL"), QStringLiteral("PRAGMA journal_mode = WAL")},
+                {QStringLiteral("Reduce fsync pressure"),
+                 QStringLiteral("PRAGMA synchronous = NORMAL")},
+                {QStringLiteral("Configure busy timeout"),
+                 QStringLiteral("PRAGMA busy_timeout = 5000")},
             };
 
             for (const auto& [operation, statement] : pragmas)
@@ -129,7 +134,7 @@ namespace javelin::jmap::cache
         {
             return DatabaseError{
                 .code = DatabaseErrorCode::MigrationFailed,
-                .message = "Migration steps must have strictly increasing versions",
+                .message = QStringLiteral("Migration steps must have strictly increasing versions"),
             };
         }
 
@@ -154,17 +159,17 @@ namespace javelin::jmap::cache
 
             if (!database.transaction())
             {
-                return makeError(DatabaseErrorCode::MigrationFailed, "Begin migration transaction",
-                                 database);
+                return makeError(DatabaseErrorCode::MigrationFailed,
+                                 QStringLiteral("Begin migration transaction"), database);
             }
 
             std::optional<DatabaseError> failure;
             for (const auto& statement : step.statements)
             {
-                if (const auto error =
-                        executeStatement(database, statement,
-                                         "Apply migration " + QString::number(step.version) + " (" +
-                                             step.name + ")"))
+                if (const auto error = executeStatement(
+                        database, statement,
+                        QStringLiteral("Apply migration ") + QString::number(step.version) +
+                            QStringLiteral(" (") + step.name + QStringLiteral(")")))
                 {
                     failure = error;
                     break;
@@ -174,21 +179,22 @@ namespace javelin::jmap::cache
             if (!failure.has_value())
             {
                 QSqlQuery insertQuery{database};
-                insertQuery.prepare(
-                    "INSERT INTO schema_migrations (version, name) VALUES (:version, :name)");
-                insertQuery.bindValue(":version", step.version);
-                insertQuery.bindValue(":name", step.name);
+                insertQuery.prepare(QStringLiteral(
+                    "INSERT INTO schema_migrations (version, name) VALUES (:version, :name)"));
+                insertQuery.bindValue(QStringLiteral(":version"), step.version);
+                insertQuery.bindValue(QStringLiteral(":name"), step.name);
                 if (!insertQuery.exec())
                 {
-                    failure = makeQueryError(DatabaseErrorCode::MigrationFailed,
-                                             "Record schema migration", insertQuery);
+                    failure =
+                        makeQueryError(DatabaseErrorCode::MigrationFailed,
+                                       QStringLiteral("Record schema migration"), insertQuery);
                 }
             }
 
             if (!failure.has_value() && !database.commit())
             {
-                failure =
-                    makeError(DatabaseErrorCode::MigrationFailed, "Commit migration", database);
+                failure = makeError(DatabaseErrorCode::MigrationFailed,
+                                    QStringLiteral("Commit migration"), database);
             }
 
             if (failure.has_value())
@@ -254,19 +260,21 @@ namespace javelin::jmap::cache
     std::variant<DatabaseConnection, DatabaseError>
     DatabaseConnection::open(const DatabaseConnectionOptions& options)
     {
-        if (!QSqlDatabase::isDriverAvailable("QSQLITE"))
+        if (!QSqlDatabase::isDriverAvailable(QStringLiteral("QSQLITE")))
         {
             return DatabaseError{
                 .code = DatabaseErrorCode::DriverUnavailable,
-                .message = "Qt SQLite driver is not available",
+                .message = QStringLiteral("Qt SQLite driver is not available"),
             };
         }
 
-        QSqlDatabase database = QSqlDatabase::addDatabase("QSQLITE", options.connectionName);
+        QSqlDatabase database =
+            QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), options.connectionName);
         database.setDatabaseName(options.databasePath);
         if (!database.open())
         {
-            const auto error = makeError(DatabaseErrorCode::OpenFailed, "Open database", database);
+            const auto error =
+                makeError(DatabaseErrorCode::OpenFailed, QStringLiteral("Open database"), database);
             database.close();
             database = QSqlDatabase{};
             return error;
@@ -311,7 +319,7 @@ namespace javelin::jmap::cache
         {
             return DatabaseError{
                 .code = DatabaseErrorCode::OpenFailed,
-                .message = "Database connection is not open",
+                .message = QStringLiteral("Database connection is not open"),
             };
         }
 
@@ -344,9 +352,11 @@ namespace javelin::jmap::cache
         }
 
         QSqlQuery query{m_database};
-        if (!query.exec("SELECT version, name FROM schema_migrations ORDER BY version"))
+        if (!query.exec(
+                QStringLiteral("SELECT version, name FROM schema_migrations ORDER BY version")))
         {
-            return makeQueryError(DatabaseErrorCode::QueryFailed, "Read schema_migrations", query);
+            return makeQueryError(DatabaseErrorCode::QueryFailed,
+                                  QStringLiteral("Read schema_migrations"), query);
         }
 
         std::vector<AppliedMigration> migrations;
@@ -409,294 +419,337 @@ namespace javelin::jmap::cache
             {
                 MigrationStep{
                     .version = 1,
-                    .name = "initial_cache_schema",
+                    .name = QStringLiteral("initial_cache_schema"),
                     .statements =
                         {
-                            "CREATE TABLE IF NOT EXISTS accounts ("
-                            "account_id TEXT PRIMARY KEY,"
-                            "email_address TEXT NOT NULL,"
-                            "session_url TEXT NOT NULL,"
-                            "is_primary INTEGER NOT NULL DEFAULT 0,"
-                            "created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
-                            "updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP"
-                            ") STRICT",
-                            "CREATE TABLE IF NOT EXISTS sessions ("
-                            "account_id TEXT PRIMARY KEY REFERENCES accounts(account_id) ON "
-                            "DELETE CASCADE,"
-                            "api_url TEXT NOT NULL,"
-                            "download_url TEXT,"
-                            "upload_url TEXT,"
-                            "event_source_url TEXT,"
-                            "state TEXT,"
-                            "username TEXT NOT NULL"
-                            ") STRICT",
-                            "CREATE TABLE IF NOT EXISTS mailboxes ("
-                            "account_id TEXT NOT NULL REFERENCES accounts(account_id) ON DELETE "
-                            "CASCADE,"
-                            "mailbox_id TEXT NOT NULL,"
-                            "parent_mailbox_id TEXT,"
-                            "name TEXT NOT NULL,"
-                            "role TEXT,"
-                            "sort_order INTEGER NOT NULL DEFAULT 0,"
-                            "total_emails INTEGER NOT NULL DEFAULT 0,"
-                            "unread_emails INTEGER NOT NULL DEFAULT 0,"
-                            "total_threads INTEGER NOT NULL DEFAULT 0,"
-                            "unread_threads INTEGER NOT NULL DEFAULT 0,"
-                            "rights_json TEXT NOT NULL DEFAULT '{}',"
-                            "state TEXT,"
-                            "PRIMARY KEY (account_id, mailbox_id)"
-                            ") STRICT",
-                            "CREATE TABLE IF NOT EXISTS threads ("
-                            "account_id TEXT NOT NULL REFERENCES accounts(account_id) ON DELETE "
-                            "CASCADE,"
-                            "thread_id TEXT NOT NULL,"
-                            "email_ids_json TEXT NOT NULL DEFAULT '[]',"
-                            "state TEXT,"
-                            "PRIMARY KEY (account_id, thread_id)"
-                            ") STRICT",
-                            "CREATE TABLE IF NOT EXISTS emails ("
-                            "account_id TEXT NOT NULL REFERENCES accounts(account_id) ON DELETE "
-                            "CASCADE,"
-                            "email_id TEXT NOT NULL,"
-                            "thread_id TEXT,"
-                            "blob_id TEXT,"
-                            "received_at TEXT,"
-                            "sent_at TEXT,"
-                            "subject TEXT NOT NULL DEFAULT '',"
-                            "preview TEXT NOT NULL DEFAULT '',"
-                            "mailbox_ids_json TEXT NOT NULL DEFAULT '[]',"
-                            "keywords_json TEXT NOT NULL DEFAULT '{}',"
-                            "has_attachment INTEGER NOT NULL DEFAULT 0,"
-                            "size INTEGER NOT NULL DEFAULT 0,"
-                            "state TEXT,"
-                            "PRIMARY KEY (account_id, email_id)"
-                            ") STRICT",
-                            "CREATE TABLE IF NOT EXISTS email_mailboxes ("
-                            "account_id TEXT NOT NULL REFERENCES accounts(account_id) ON DELETE "
-                            "CASCADE,"
-                            "email_id TEXT NOT NULL,"
-                            "mailbox_id TEXT NOT NULL,"
-                            "PRIMARY KEY (account_id, email_id, mailbox_id)"
-                            ") STRICT",
-                            "CREATE TABLE IF NOT EXISTS email_keywords ("
-                            "account_id TEXT NOT NULL REFERENCES accounts(account_id) ON DELETE "
-                            "CASCADE,"
-                            "email_id TEXT NOT NULL,"
-                            "keyword TEXT NOT NULL,"
-                            "PRIMARY KEY (account_id, email_id, keyword)"
-                            ") STRICT",
-                            "CREATE TABLE IF NOT EXISTS email_addresses ("
-                            "account_id TEXT NOT NULL REFERENCES accounts(account_id) ON DELETE "
-                            "CASCADE,"
-                            "email_id TEXT NOT NULL,"
-                            "field_name TEXT NOT NULL,"
-                            "position INTEGER NOT NULL,"
-                            "display_name TEXT,"
-                            "address TEXT NOT NULL,"
-                            "PRIMARY KEY (account_id, email_id, field_name, position)"
-                            ") STRICT",
-                            "CREATE TABLE IF NOT EXISTS email_body_values ("
-                            "account_id TEXT NOT NULL REFERENCES accounts(account_id) ON DELETE "
-                            "CASCADE,"
-                            "email_id TEXT NOT NULL,"
-                            "part_id TEXT NOT NULL,"
-                            "blob_id TEXT,"
-                            "is_truncated INTEGER NOT NULL DEFAULT 0,"
-                            "value TEXT NOT NULL,"
-                            "PRIMARY KEY (account_id, email_id, part_id)"
-                            ") STRICT",
-                            "CREATE TABLE IF NOT EXISTS email_parts ("
-                            "account_id TEXT NOT NULL REFERENCES accounts(account_id) ON DELETE "
-                            "CASCADE,"
-                            "email_id TEXT NOT NULL,"
-                            "part_id TEXT NOT NULL,"
-                            "parent_part_id TEXT,"
-                            "blob_id TEXT,"
-                            "kind TEXT NOT NULL,"
-                            "media_type TEXT NOT NULL,"
-                            "name TEXT,"
-                            "charset TEXT,"
-                            "disposition TEXT,"
-                            "cid TEXT,"
-                            "size INTEGER NOT NULL DEFAULT 0,"
-                            "is_inline_renderable INTEGER NOT NULL DEFAULT 0,"
-                            "is_body_section INTEGER NOT NULL DEFAULT 0,"
-                            "PRIMARY KEY (account_id, email_id, part_id)"
-                            ") STRICT",
-                            "CREATE TABLE IF NOT EXISTS inline_part_payloads ("
-                            "account_id TEXT NOT NULL REFERENCES accounts(account_id) ON DELETE "
-                            "CASCADE,"
-                            "email_id TEXT NOT NULL,"
-                            "part_id TEXT NOT NULL,"
-                            "blob_id TEXT NOT NULL,"
-                            "media_type TEXT NOT NULL,"
-                            "payload BLOB NOT NULL,"
-                            "fetched_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
-                            "PRIMARY KEY (account_id, email_id, part_id)"
-                            ") STRICT",
-                            "CREATE TABLE IF NOT EXISTS identities ("
-                            "account_id TEXT NOT NULL REFERENCES accounts(account_id) ON DELETE "
-                            "CASCADE,"
-                            "identity_id TEXT NOT NULL,"
-                            "email_address TEXT NOT NULL,"
-                            "name TEXT,"
-                            "reply_to_json TEXT NOT NULL DEFAULT '[]',"
-                            "bcc_json TEXT NOT NULL DEFAULT '[]',"
-                            "text_signature TEXT,"
-                            "html_signature TEXT,"
-                            "may_delete INTEGER NOT NULL DEFAULT 0,"
-                            "state TEXT,"
-                            "PRIMARY KEY (account_id, identity_id)"
-                            ") STRICT",
-                            "CREATE TABLE IF NOT EXISTS submissions ("
-                            "account_id TEXT NOT NULL REFERENCES accounts(account_id) ON DELETE "
-                            "CASCADE,"
-                            "submission_id TEXT NOT NULL,"
-                            "email_id TEXT NOT NULL,"
-                            "thread_id TEXT,"
-                            "envelope_json TEXT NOT NULL DEFAULT '{}',"
-                            "undo_status TEXT,"
-                            "delivery_status TEXT,"
-                            "state TEXT,"
-                            "PRIMARY KEY (account_id, submission_id)"
-                            ") STRICT",
-                            "CREATE TABLE IF NOT EXISTS sync_state ("
-                            "account_id TEXT NOT NULL REFERENCES accounts(account_id) ON DELETE "
-                            "CASCADE,"
-                            "object_type TEXT NOT NULL,"
-                            "query_key TEXT NOT NULL DEFAULT '',"
-                            "state_token TEXT NOT NULL,"
-                            "updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
-                            "PRIMARY KEY (account_id, object_type, query_key)"
-                            ") STRICT",
-                            "CREATE TABLE IF NOT EXISTS pending_actions ("
-                            "pending_action_id TEXT PRIMARY KEY,"
-                            "account_id TEXT NOT NULL REFERENCES accounts(account_id) ON DELETE "
-                            "CASCADE,"
-                            "action_type TEXT NOT NULL,"
-                            "status TEXT NOT NULL,"
-                            "payload_json TEXT NOT NULL,"
-                            "created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
-                            "updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP"
-                            ") STRICT",
-                            "CREATE TABLE IF NOT EXISTS notifications ("
-                            "notification_id TEXT PRIMARY KEY,"
-                            "account_id TEXT REFERENCES accounts(account_id) ON DELETE CASCADE,"
-                            "kind TEXT NOT NULL,"
-                            "payload_json TEXT NOT NULL,"
-                            "created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
-                            "read_at TEXT"
-                            ") STRICT",
-                            "CREATE TABLE IF NOT EXISTS settings ("
-                            "scope TEXT NOT NULL,"
-                            "key TEXT NOT NULL,"
-                            "value_json TEXT NOT NULL,"
-                            "updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
-                            "PRIMARY KEY (scope, key)"
-                            ") STRICT",
-                            "CREATE INDEX IF NOT EXISTS idx_mailboxes_parent ON mailboxes "
-                            "(account_id, parent_mailbox_id, sort_order, mailbox_id)",
-                            "CREATE INDEX IF NOT EXISTS idx_emails_thread ON emails (account_id, "
-                            "thread_id)",
-                            "CREATE INDEX IF NOT EXISTS idx_emails_received ON emails "
-                            "(account_id, received_at DESC, email_id)",
-                            "CREATE INDEX IF NOT EXISTS idx_email_mailboxes_mailbox ON "
-                            "email_mailboxes (account_id, mailbox_id, email_id)",
-                            "CREATE INDEX IF NOT EXISTS idx_email_keywords_keyword ON "
-                            "email_keywords (account_id, keyword, email_id)",
-                            "CREATE INDEX IF NOT EXISTS idx_sync_state_object ON sync_state "
-                            "(account_id, object_type, query_key)",
-                            "CREATE INDEX IF NOT EXISTS idx_pending_actions_status ON "
-                            "pending_actions (account_id, status, created_at)",
-                            "CREATE INDEX IF NOT EXISTS idx_email_parts_email ON email_parts "
-                            "(account_id, email_id, part_id)",
-                            "CREATE INDEX IF NOT EXISTS idx_email_parts_blob ON email_parts "
-                            "(account_id, blob_id)",
-                            "CREATE INDEX IF NOT EXISTS idx_inline_part_payloads_email ON "
-                            "inline_part_payloads (account_id, email_id, part_id)",
+                            QStringLiteral("CREATE TABLE IF NOT EXISTS accounts ("
+                                           "account_id TEXT PRIMARY KEY,"
+                                           "email_address TEXT NOT NULL,"
+                                           "session_url TEXT NOT NULL,"
+                                           "is_primary INTEGER NOT NULL DEFAULT 0,"
+                                           "created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+                                           "updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                                           ") STRICT"),
+                            QStringLiteral(
+                                "CREATE TABLE IF NOT EXISTS sessions ("
+                                "account_id TEXT PRIMARY KEY REFERENCES accounts(account_id) ON "
+                                "DELETE CASCADE,"
+                                "api_url TEXT NOT NULL,"
+                                "download_url TEXT,"
+                                "upload_url TEXT,"
+                                "event_source_url TEXT,"
+                                "state TEXT,"
+                                "username TEXT NOT NULL"
+                                ") STRICT"),
+                            QStringLiteral("CREATE TABLE IF NOT EXISTS mailboxes ("
+                                           "account_id TEXT NOT NULL REFERENCES "
+                                           "accounts(account_id) ON DELETE "
+                                           "CASCADE,"
+                                           "mailbox_id TEXT NOT NULL,"
+                                           "parent_mailbox_id TEXT,"
+                                           "name TEXT NOT NULL,"
+                                           "role TEXT,"
+                                           "sort_order INTEGER NOT NULL DEFAULT 0,"
+                                           "total_emails INTEGER NOT NULL DEFAULT 0,"
+                                           "unread_emails INTEGER NOT NULL DEFAULT 0,"
+                                           "total_threads INTEGER NOT NULL DEFAULT 0,"
+                                           "unread_threads INTEGER NOT NULL DEFAULT 0,"
+                                           "rights_json TEXT NOT NULL DEFAULT '{}',"
+                                           "state TEXT,"
+                                           "PRIMARY KEY (account_id, mailbox_id)"
+                                           ") STRICT"),
+                            QStringLiteral("CREATE TABLE IF NOT EXISTS threads ("
+                                           "account_id TEXT NOT NULL REFERENCES "
+                                           "accounts(account_id) ON DELETE "
+                                           "CASCADE,"
+                                           "thread_id TEXT NOT NULL,"
+                                           "email_ids_json TEXT NOT NULL DEFAULT '[]',"
+                                           "state TEXT,"
+                                           "PRIMARY KEY (account_id, thread_id)"
+                                           ") STRICT"),
+                            QStringLiteral("CREATE TABLE IF NOT EXISTS emails ("
+                                           "account_id TEXT NOT NULL REFERENCES "
+                                           "accounts(account_id) ON DELETE "
+                                           "CASCADE,"
+                                           "email_id TEXT NOT NULL,"
+                                           "thread_id TEXT,"
+                                           "blob_id TEXT,"
+                                           "received_at TEXT,"
+                                           "sent_at TEXT,"
+                                           "subject TEXT NOT NULL DEFAULT '',"
+                                           "preview TEXT NOT NULL DEFAULT '',"
+                                           "mailbox_ids_json TEXT NOT NULL DEFAULT '[]',"
+                                           "keywords_json TEXT NOT NULL DEFAULT '{}',"
+                                           "has_attachment INTEGER NOT NULL DEFAULT 0,"
+                                           "size INTEGER NOT NULL DEFAULT 0,"
+                                           "state TEXT,"
+                                           "PRIMARY KEY (account_id, email_id)"
+                                           ") STRICT"),
+                            QStringLiteral("CREATE TABLE IF NOT EXISTS email_mailboxes ("
+                                           "account_id TEXT NOT NULL REFERENCES "
+                                           "accounts(account_id) ON DELETE "
+                                           "CASCADE,"
+                                           "email_id TEXT NOT NULL,"
+                                           "mailbox_id TEXT NOT NULL,"
+                                           "PRIMARY KEY (account_id, email_id, mailbox_id)"
+                                           ") STRICT"),
+                            QStringLiteral("CREATE TABLE IF NOT EXISTS email_keywords ("
+                                           "account_id TEXT NOT NULL REFERENCES "
+                                           "accounts(account_id) ON DELETE "
+                                           "CASCADE,"
+                                           "email_id TEXT NOT NULL,"
+                                           "keyword TEXT NOT NULL,"
+                                           "PRIMARY KEY (account_id, email_id, keyword)"
+                                           ") STRICT"),
+                            QStringLiteral(
+                                "CREATE TABLE IF NOT EXISTS email_addresses ("
+                                "account_id TEXT NOT NULL REFERENCES accounts(account_id) ON "
+                                "DELETE "
+                                "CASCADE,"
+                                "email_id TEXT NOT NULL,"
+                                "field_name TEXT NOT NULL,"
+                                "position INTEGER NOT NULL,"
+                                "display_name TEXT,"
+                                "address TEXT NOT NULL,"
+                                "PRIMARY KEY (account_id, email_id, field_name, position)"
+                                ") STRICT"),
+                            QStringLiteral("CREATE TABLE IF NOT EXISTS email_body_values ("
+                                           "account_id TEXT NOT NULL REFERENCES "
+                                           "accounts(account_id) ON DELETE "
+                                           "CASCADE,"
+                                           "email_id TEXT NOT NULL,"
+                                           "part_id TEXT NOT NULL,"
+                                           "blob_id TEXT,"
+                                           "is_truncated INTEGER NOT NULL DEFAULT 0,"
+                                           "value TEXT NOT NULL,"
+                                           "PRIMARY KEY (account_id, email_id, part_id)"
+                                           ") STRICT"),
+                            QStringLiteral("CREATE TABLE IF NOT EXISTS email_parts ("
+                                           "account_id TEXT NOT NULL REFERENCES "
+                                           "accounts(account_id) ON DELETE "
+                                           "CASCADE,"
+                                           "email_id TEXT NOT NULL,"
+                                           "part_id TEXT NOT NULL,"
+                                           "parent_part_id TEXT,"
+                                           "blob_id TEXT,"
+                                           "kind TEXT NOT NULL,"
+                                           "media_type TEXT NOT NULL,"
+                                           "name TEXT,"
+                                           "charset TEXT,"
+                                           "disposition TEXT,"
+                                           "cid TEXT,"
+                                           "size INTEGER NOT NULL DEFAULT 0,"
+                                           "is_inline_renderable INTEGER NOT NULL DEFAULT 0,"
+                                           "is_body_section INTEGER NOT NULL DEFAULT 0,"
+                                           "PRIMARY KEY (account_id, email_id, part_id)"
+                                           ") STRICT"),
+                            QStringLiteral("CREATE TABLE IF NOT EXISTS inline_part_payloads ("
+                                           "account_id TEXT NOT NULL REFERENCES "
+                                           "accounts(account_id) ON DELETE "
+                                           "CASCADE,"
+                                           "email_id TEXT NOT NULL,"
+                                           "part_id TEXT NOT NULL,"
+                                           "blob_id TEXT NOT NULL,"
+                                           "media_type TEXT NOT NULL,"
+                                           "payload BLOB NOT NULL,"
+                                           "fetched_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+                                           "PRIMARY KEY (account_id, email_id, part_id)"
+                                           ") STRICT"),
+                            QStringLiteral("CREATE TABLE IF NOT EXISTS identities ("
+                                           "account_id TEXT NOT NULL REFERENCES "
+                                           "accounts(account_id) ON DELETE "
+                                           "CASCADE,"
+                                           "identity_id TEXT NOT NULL,"
+                                           "email_address TEXT NOT NULL,"
+                                           "name TEXT,"
+                                           "reply_to_json TEXT NOT NULL DEFAULT '[]',"
+                                           "bcc_json TEXT NOT NULL DEFAULT '[]',"
+                                           "text_signature TEXT,"
+                                           "html_signature TEXT,"
+                                           "may_delete INTEGER NOT NULL DEFAULT 0,"
+                                           "state TEXT,"
+                                           "PRIMARY KEY (account_id, identity_id)"
+                                           ") STRICT"),
+                            QStringLiteral("CREATE TABLE IF NOT EXISTS submissions ("
+                                           "account_id TEXT NOT NULL REFERENCES "
+                                           "accounts(account_id) ON DELETE "
+                                           "CASCADE,"
+                                           "submission_id TEXT NOT NULL,"
+                                           "email_id TEXT NOT NULL,"
+                                           "thread_id TEXT,"
+                                           "envelope_json TEXT NOT NULL DEFAULT '{}',"
+                                           "undo_status TEXT,"
+                                           "delivery_status TEXT,"
+                                           "state TEXT,"
+                                           "PRIMARY KEY (account_id, submission_id)"
+                                           ") STRICT"),
+                            QStringLiteral("CREATE TABLE IF NOT EXISTS sync_state ("
+                                           "account_id TEXT NOT NULL REFERENCES "
+                                           "accounts(account_id) ON DELETE "
+                                           "CASCADE,"
+                                           "object_type TEXT NOT NULL,"
+                                           "query_key TEXT NOT NULL DEFAULT '',"
+                                           "state_token TEXT NOT NULL,"
+                                           "updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+                                           "PRIMARY KEY (account_id, object_type, query_key)"
+                                           ") STRICT"),
+                            QStringLiteral("CREATE TABLE IF NOT EXISTS pending_actions ("
+                                           "pending_action_id TEXT PRIMARY KEY,"
+                                           "account_id TEXT NOT NULL REFERENCES "
+                                           "accounts(account_id) ON DELETE "
+                                           "CASCADE,"
+                                           "action_type TEXT NOT NULL,"
+                                           "status TEXT NOT NULL,"
+                                           "payload_json TEXT NOT NULL,"
+                                           "created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+                                           "updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                                           ") STRICT"),
+                            QStringLiteral(
+                                "CREATE TABLE IF NOT EXISTS notifications ("
+                                "notification_id TEXT PRIMARY KEY,"
+                                "account_id TEXT REFERENCES accounts(account_id) ON DELETE CASCADE,"
+                                "kind TEXT NOT NULL,"
+                                "payload_json TEXT NOT NULL,"
+                                "created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+                                "read_at TEXT"
+                                ") STRICT"),
+                            QStringLiteral("CREATE TABLE IF NOT EXISTS settings ("
+                                           "scope TEXT NOT NULL,"
+                                           "key TEXT NOT NULL,"
+                                           "value_json TEXT NOT NULL,"
+                                           "updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+                                           "PRIMARY KEY (scope, key)"
+                                           ") STRICT"),
+                            QStringLiteral(
+                                "CREATE INDEX IF NOT EXISTS idx_mailboxes_parent ON mailboxes "
+                                "(account_id, parent_mailbox_id, sort_order, mailbox_id)"),
+                            QStringLiteral("CREATE INDEX IF NOT EXISTS idx_emails_thread ON emails "
+                                           "(account_id, "
+                                           "thread_id)"),
+                            QStringLiteral(
+                                "CREATE INDEX IF NOT EXISTS idx_emails_received ON emails "
+                                "(account_id, received_at DESC, email_id)"),
+                            QStringLiteral(
+                                "CREATE INDEX IF NOT EXISTS idx_email_mailboxes_mailbox ON "
+                                "email_mailboxes (account_id, mailbox_id, email_id)"),
+                            QStringLiteral(
+                                "CREATE INDEX IF NOT EXISTS idx_email_keywords_keyword ON "
+                                "email_keywords (account_id, keyword, email_id)"),
+                            QStringLiteral(
+                                "CREATE INDEX IF NOT EXISTS idx_sync_state_object ON sync_state "
+                                "(account_id, object_type, query_key)"),
+                            QStringLiteral(
+                                "CREATE INDEX IF NOT EXISTS idx_pending_actions_status ON "
+                                "pending_actions (account_id, status, created_at)"),
+                            QStringLiteral(
+                                "CREATE INDEX IF NOT EXISTS idx_email_parts_email ON email_parts "
+                                "(account_id, email_id, part_id)"),
+                            QStringLiteral(
+                                "CREATE INDEX IF NOT EXISTS idx_email_parts_blob ON email_parts "
+                                "(account_id, blob_id)"),
+                            QStringLiteral(
+                                "CREATE INDEX IF NOT EXISTS idx_inline_part_payloads_email ON "
+                                "inline_part_payloads (account_id, email_id, part_id)"),
                         },
                 },
                 MigrationStep{
                     .version = 2,
-                    .name = "mailboxes_is_subscribed",
+                    .name = QStringLiteral("mailboxes_is_subscribed"),
                     .statements =
                         {
-                            "ALTER TABLE mailboxes ADD COLUMN is_subscribed INTEGER NOT NULL "
-                            "DEFAULT 0",
+                            QStringLiteral(
+                                "ALTER TABLE mailboxes ADD COLUMN is_subscribed INTEGER NOT NULL "
+                                "DEFAULT 0"),
                         },
                 },
                 MigrationStep{
                     .version = 3,
-                    .name = "session_and_account_metadata",
+                    .name = QStringLiteral("session_and_account_metadata"),
                     .statements =
                         {
-                            "ALTER TABLE accounts ADD COLUMN name TEXT NOT NULL DEFAULT ''",
-                            "ALTER TABLE accounts ADD COLUMN is_personal INTEGER NOT NULL DEFAULT "
-                            "0",
-                            "ALTER TABLE accounts ADD COLUMN is_read_only INTEGER NOT NULL DEFAULT "
-                            "0",
-                            "ALTER TABLE accounts ADD COLUMN cap_mail INTEGER NOT NULL DEFAULT 0",
-                            "ALTER TABLE accounts ADD COLUMN cap_submission INTEGER NOT NULL "
-                            "DEFAULT 0",
-                            "ALTER TABLE sessions ADD COLUMN has_core_capability INTEGER NOT NULL "
-                            "DEFAULT 0",
-                            "ALTER TABLE sessions ADD COLUMN has_mail_capability INTEGER NOT NULL "
-                            "DEFAULT 0",
-                            "ALTER TABLE sessions ADD COLUMN has_submission_capability INTEGER NOT "
-                            "NULL DEFAULT 0",
-                            "ALTER TABLE sessions ADD COLUMN core_capabilities_json TEXT NOT NULL "
-                            "DEFAULT 'null'",
-                            "ALTER TABLE sessions ADD COLUMN primary_mail_account_id TEXT",
-                            "ALTER TABLE sessions ADD COLUMN primary_submission_account_id TEXT",
+                            QStringLiteral(
+                                "ALTER TABLE accounts ADD COLUMN name TEXT NOT NULL DEFAULT ''"),
+                            QStringLiteral("ALTER TABLE accounts ADD COLUMN is_personal INTEGER "
+                                           "NOT NULL DEFAULT "
+                                           "0"),
+                            QStringLiteral("ALTER TABLE accounts ADD COLUMN is_read_only INTEGER "
+                                           "NOT NULL DEFAULT "
+                                           "0"),
+                            QStringLiteral("ALTER TABLE accounts ADD COLUMN cap_mail INTEGER NOT "
+                                           "NULL DEFAULT 0"),
+                            QStringLiteral(
+                                "ALTER TABLE accounts ADD COLUMN cap_submission INTEGER NOT NULL "
+                                "DEFAULT 0"),
+                            QStringLiteral("ALTER TABLE sessions ADD COLUMN has_core_capability "
+                                           "INTEGER NOT NULL "
+                                           "DEFAULT 0"),
+                            QStringLiteral("ALTER TABLE sessions ADD COLUMN has_mail_capability "
+                                           "INTEGER NOT NULL "
+                                           "DEFAULT 0"),
+                            QStringLiteral("ALTER TABLE sessions ADD COLUMN "
+                                           "has_submission_capability INTEGER NOT "
+                                           "NULL DEFAULT 0"),
+                            QStringLiteral("ALTER TABLE sessions ADD COLUMN core_capabilities_json "
+                                           "TEXT NOT NULL "
+                                           "DEFAULT 'null'"),
+                            QStringLiteral(
+                                "ALTER TABLE sessions ADD COLUMN primary_mail_account_id TEXT"),
+                            QStringLiteral("ALTER TABLE sessions ADD COLUMN "
+                                           "primary_submission_account_id TEXT"),
                         },
                 },
                 MigrationStep{
                     .version = 4,
-                    .name = "email_parts_metadata",
+                    .name = QStringLiteral("email_parts_metadata"),
                     .statements =
                         {
-                            "CREATE TABLE IF NOT EXISTS email_parts ("
-                            "account_id TEXT NOT NULL REFERENCES accounts(account_id) ON DELETE "
-                            "CASCADE,"
-                            "email_id TEXT NOT NULL,"
-                            "part_id TEXT NOT NULL,"
-                            "parent_part_id TEXT,"
-                            "blob_id TEXT,"
-                            "kind TEXT NOT NULL,"
-                            "media_type TEXT NOT NULL,"
-                            "name TEXT,"
-                            "charset TEXT,"
-                            "disposition TEXT,"
-                            "cid TEXT,"
-                            "size INTEGER NOT NULL DEFAULT 0,"
-                            "is_inline_renderable INTEGER NOT NULL DEFAULT 0,"
-                            "is_body_section INTEGER NOT NULL DEFAULT 0,"
-                            "PRIMARY KEY (account_id, email_id, part_id)"
-                            ") STRICT",
-                            "CREATE INDEX IF NOT EXISTS idx_email_parts_email ON email_parts "
-                            "(account_id, email_id, part_id)",
-                            "CREATE INDEX IF NOT EXISTS idx_email_parts_blob ON email_parts "
-                            "(account_id, blob_id)",
+                            QStringLiteral("CREATE TABLE IF NOT EXISTS email_parts ("
+                                           "account_id TEXT NOT NULL REFERENCES "
+                                           "accounts(account_id) ON DELETE "
+                                           "CASCADE,"
+                                           "email_id TEXT NOT NULL,"
+                                           "part_id TEXT NOT NULL,"
+                                           "parent_part_id TEXT,"
+                                           "blob_id TEXT,"
+                                           "kind TEXT NOT NULL,"
+                                           "media_type TEXT NOT NULL,"
+                                           "name TEXT,"
+                                           "charset TEXT,"
+                                           "disposition TEXT,"
+                                           "cid TEXT,"
+                                           "size INTEGER NOT NULL DEFAULT 0,"
+                                           "is_inline_renderable INTEGER NOT NULL DEFAULT 0,"
+                                           "is_body_section INTEGER NOT NULL DEFAULT 0,"
+                                           "PRIMARY KEY (account_id, email_id, part_id)"
+                                           ") STRICT"),
+                            QStringLiteral(
+                                "CREATE INDEX IF NOT EXISTS idx_email_parts_email ON email_parts "
+                                "(account_id, email_id, part_id)"),
+                            QStringLiteral(
+                                "CREATE INDEX IF NOT EXISTS idx_email_parts_blob ON email_parts "
+                                "(account_id, blob_id)"),
                         },
                 },
                 MigrationStep{
                     .version = 5,
-                    .name = "inline_part_payloads",
+                    .name = QStringLiteral("inline_part_payloads"),
                     .statements =
                         {
-                            "CREATE TABLE IF NOT EXISTS inline_part_payloads ("
-                            "account_id TEXT NOT NULL REFERENCES accounts(account_id) ON DELETE "
-                            "CASCADE,"
-                            "email_id TEXT NOT NULL,"
-                            "part_id TEXT NOT NULL,"
-                            "blob_id TEXT NOT NULL,"
-                            "media_type TEXT NOT NULL,"
-                            "payload BLOB NOT NULL,"
-                            "fetched_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
-                            "PRIMARY KEY (account_id, email_id, part_id)"
-                            ") STRICT",
-                            "CREATE INDEX IF NOT EXISTS idx_inline_part_payloads_email ON "
-                            "inline_part_payloads (account_id, email_id, part_id)",
+                            QStringLiteral("CREATE TABLE IF NOT EXISTS inline_part_payloads ("
+                                           "account_id TEXT NOT NULL REFERENCES "
+                                           "accounts(account_id) ON DELETE "
+                                           "CASCADE,"
+                                           "email_id TEXT NOT NULL,"
+                                           "part_id TEXT NOT NULL,"
+                                           "blob_id TEXT NOT NULL,"
+                                           "media_type TEXT NOT NULL,"
+                                           "payload BLOB NOT NULL,"
+                                           "fetched_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+                                           "PRIMARY KEY (account_id, email_id, part_id)"
+                                           ") STRICT"),
+                            QStringLiteral(
+                                "CREATE INDEX IF NOT EXISTS idx_inline_part_payloads_email ON "
+                                "inline_part_payloads (account_id, email_id, part_id)"),
                         },
                 },
             },

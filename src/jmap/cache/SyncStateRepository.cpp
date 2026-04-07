@@ -13,15 +13,15 @@ namespace javelin::jmap::cache
         {
             return DatabaseError{
                 .code = DatabaseErrorCode::QueryFailed,
-                .message = operation + ": " + query.lastError().text(),
+                .message = operation + QStringLiteral(": ") + query.lastError().text(),
             };
         }
 
         void bindKey(QSqlQuery& query, const SyncStateKey& key)
         {
-            query.bindValue(":account_id", QString::fromStdString(key.accountId));
-            query.bindValue(":object_type", QString::fromStdString(key.objectType));
-            query.bindValue(":query_key", QString::fromStdString(key.queryKey));
+            query.bindValue(QStringLiteral(":account_id"), QString::fromStdString(key.accountId));
+            query.bindValue(QStringLiteral(":object_type"), QString::fromStdString(key.objectType));
+            query.bindValue(QStringLiteral(":query_key"), QString::fromStdString(key.queryKey));
         }
 
     } // namespace
@@ -40,17 +40,18 @@ namespace javelin::jmap::cache
         }
 
         QSqlQuery query{m_connection.database()};
-        query.prepare(
+        query.prepare(QStringLiteral(
             "INSERT INTO sync_state (account_id, object_type, query_key, state_token, updated_at) "
             "VALUES (:account_id, :object_type, :query_key, :state_token, CURRENT_TIMESTAMP) "
             "ON CONFLICT(account_id, object_type, query_key) DO UPDATE SET "
             "state_token = excluded.state_token, "
-            "updated_at = CURRENT_TIMESTAMP");
+            "updated_at = CURRENT_TIMESTAMP"));
         bindKey(query, key);
-        query.bindValue(":state_token", QString::fromStdString(std::string{stateToken}));
+        query.bindValue(QStringLiteral(":state_token"),
+                        QString::fromStdString(std::string{stateToken}));
         if (!query.exec())
         {
-            return makeQueryError("Upsert sync_state", query);
+            return makeQueryError(QStringLiteral("Upsert sync_state"), query);
         }
 
         return std::nullopt;
@@ -65,15 +66,15 @@ namespace javelin::jmap::cache
         }
 
         QSqlQuery query{m_connection.database()};
-        query.prepare(
+        query.prepare(QStringLiteral(
             "SELECT state_token, updated_at "
             "FROM sync_state "
             "WHERE account_id = :account_id AND object_type = :object_type AND query_key = "
-            ":query_key");
+            ":query_key"));
         bindKey(query, key);
         if (!query.exec())
         {
-            return makeQueryError("Read sync_state", query);
+            return makeQueryError(QStringLiteral("Read sync_state"), query);
         }
 
         if (!query.next())
@@ -96,14 +97,14 @@ namespace javelin::jmap::cache
         }
 
         QSqlQuery query{m_connection.database()};
-        query.prepare(
+        query.prepare(QStringLiteral(
             "DELETE FROM sync_state "
             "WHERE account_id = :account_id AND object_type = :object_type AND query_key = "
-            ":query_key");
+            ":query_key"));
         bindKey(query, key);
         if (!query.exec())
         {
-            return makeQueryError("Delete sync_state", query);
+            return makeQueryError(QStringLiteral("Delete sync_state"), query);
         }
 
         return std::nullopt;

@@ -52,7 +52,7 @@ namespace
 
         auto result = javelin::jmap::cache::DatabaseConnection::open({
             .connectionName = makeConnectionName(),
-            .databasePath = context.temporaryDir.filePath("cache.sqlite3"),
+            .databasePath = context.temporaryDir.filePath(QStringLiteral("cache.sqlite3")),
         });
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
         {
@@ -67,21 +67,24 @@ namespace
                      const QString& name, const bool isPrimary)
     {
         QSqlQuery query{connection.database()};
-        query.prepare("INSERT INTO accounts ("
-                      "account_id, email_address, session_url, is_primary, name, is_personal, "
-                      "is_read_only, cap_mail, cap_submission"
-                      ") VALUES ("
-                      ":account_id, :email_address, :session_url, :is_primary, :name, "
-                      ":is_personal, :is_read_only, :cap_mail, :cap_submission)");
-        query.bindValue(":account_id", accountId);
-        query.bindValue(":email_address", accountId + "@example.com");
-        query.bindValue(":session_url", "https://mail.example.com/.well-known/jmap");
-        query.bindValue(":is_primary", isPrimary ? 1 : 0);
-        query.bindValue(":name", name);
-        query.bindValue(":is_personal", 1);
-        query.bindValue(":is_read_only", 0);
-        query.bindValue(":cap_mail", 1);
-        query.bindValue(":cap_submission", 0);
+        query.prepare(
+            QStringLiteral("INSERT INTO accounts ("
+                           "account_id, email_address, session_url, is_primary, name, is_personal, "
+                           "is_read_only, cap_mail, cap_submission"
+                           ") VALUES ("
+                           ":account_id, :email_address, :session_url, :is_primary, :name, "
+                           ":is_personal, :is_read_only, :cap_mail, :cap_submission)"));
+        query.bindValue(QStringLiteral(":account_id"), accountId);
+        query.bindValue(QStringLiteral(":email_address"),
+                        QStringLiteral("%1@example.com").arg(accountId));
+        query.bindValue(QStringLiteral(":session_url"),
+                        QStringLiteral("https://mail.example.com/.well-known/jmap"));
+        query.bindValue(QStringLiteral(":is_primary"), isPrimary ? 1 : 0);
+        query.bindValue(QStringLiteral(":name"), name);
+        query.bindValue(QStringLiteral(":is_personal"), 1);
+        query.bindValue(QStringLiteral(":is_read_only"), 0);
+        query.bindValue(QStringLiteral(":cap_mail"), 1);
+        query.bindValue(QStringLiteral(":cap_submission"), 0);
         REQUIRE(query.exec());
     }
 
@@ -93,8 +96,10 @@ TEST_CASE("account repository lists cached accounts with primary accounts first"
     Q_UNUSED(application);
 
     auto databaseContext = makeDatabaseContext();
-    seedAccount(databaseContext.connection, "account-2", "Work", false);
-    seedAccount(databaseContext.connection, "account-1", "Personal", true);
+    seedAccount(databaseContext.connection, QStringLiteral("account-2"), QStringLiteral("Work"),
+                false);
+    seedAccount(databaseContext.connection, QStringLiteral("account-1"), QStringLiteral("Personal"),
+                true);
 
     javelin::jmap::cache::AccountRepository repository{databaseContext.connection};
     const auto result = repository.listAll();

@@ -15,7 +15,7 @@ namespace javelin::jmap::cache
         {
             return DatabaseError{
                 .code = DatabaseErrorCode::QueryFailed,
-                .message = operation + ": " + query.lastError().text(),
+                .message = operation + QStringLiteral(": ") + query.lastError().text(),
             };
         }
 
@@ -25,27 +25,30 @@ namespace javelin::jmap::cache
                         const std::vector<javelin::jmap::domain::EmailAddress>& addresses)
         {
             QSqlQuery query{database};
-            query.prepare(
+            query.prepare(QStringLiteral(
                 "INSERT INTO email_addresses ("
                 "account_id, email_id, field_name, position, display_name, address"
                 ") VALUES ("
-                ":account_id, :email_id, :field_name, :position, :display_name, :address)");
+                ":account_id, :email_id, :field_name, :position, :display_name, :address)"));
 
             int position = 0;
             for (const auto& address : addresses)
             {
-                query.bindValue(":account_id", QString::fromStdString(std::string{accountId}));
-                query.bindValue(":email_id", QString::fromStdString(std::string{emailId}));
-                query.bindValue(":field_name", QString::fromStdString(std::string{fieldName}));
-                query.bindValue(":position", position);
-                query.bindValue(":display_name",
+                query.bindValue(QStringLiteral(":account_id"),
+                                QString::fromStdString(std::string{accountId}));
+                query.bindValue(QStringLiteral(":email_id"),
+                                QString::fromStdString(std::string{emailId}));
+                query.bindValue(QStringLiteral(":field_name"),
+                                QString::fromStdString(std::string{fieldName}));
+                query.bindValue(QStringLiteral(":position"), position);
+                query.bindValue(QStringLiteral(":display_name"),
                                 address.name.has_value()
                                     ? QVariant{QString::fromStdString(*address.name)}
                                     : QVariant{});
-                query.bindValue(":address", QString::fromStdString(address.email));
+                query.bindValue(QStringLiteral(":address"), QString::fromStdString(address.email));
                 if (!query.exec())
                 {
-                    return makeQueryError("Insert email address", query);
+                    return makeQueryError(QStringLiteral("Insert email address"), query);
                 }
 
                 ++position;
@@ -59,17 +62,21 @@ namespace javelin::jmap::cache
                       std::string_view fieldName, std::optional<DatabaseError>& error)
         {
             QSqlQuery query{database};
-            query.prepare("SELECT display_name, address "
-                          "FROM email_addresses "
-                          "WHERE account_id = :account_id AND email_id = :email_id AND field_name "
-                          "= :field_name "
-                          "ORDER BY position");
-            query.bindValue(":account_id", QString::fromStdString(std::string{accountId}));
-            query.bindValue(":email_id", QString::fromStdString(std::string{emailId}));
-            query.bindValue(":field_name", QString::fromStdString(std::string{fieldName}));
+            query.prepare(QStringLiteral(
+                "SELECT display_name, address "
+                "FROM email_addresses "
+                "WHERE account_id = :account_id AND email_id = :email_id AND field_name "
+                "= :field_name "
+                "ORDER BY position"));
+            query.bindValue(QStringLiteral(":account_id"),
+                            QString::fromStdString(std::string{accountId}));
+            query.bindValue(QStringLiteral(":email_id"),
+                            QString::fromStdString(std::string{emailId}));
+            query.bindValue(QStringLiteral(":field_name"),
+                            QString::fromStdString(std::string{fieldName}));
             if (!query.exec())
             {
-                error = makeQueryError("Read email addresses", query);
+                error = makeQueryError(QStringLiteral("Read email addresses"), query);
                 return {};
             }
 
@@ -101,12 +108,13 @@ namespace javelin::jmap::cache
                     QStringLiteral(
                         "DELETE FROM %1 WHERE account_id = :account_id AND email_id = :email_id")
                         .arg(table));
-                deleteQuery.bindValue(":account_id",
+                deleteQuery.bindValue(QStringLiteral(":account_id"),
                                       QString::fromStdString(std::string{accountId}));
-                deleteQuery.bindValue(":email_id", QString::fromStdString(std::string{emailId}));
+                deleteQuery.bindValue(QStringLiteral(":email_id"),
+                                      QString::fromStdString(std::string{emailId}));
                 if (!deleteQuery.exec())
                 {
-                    return makeQueryError("Delete email child rows", deleteQuery);
+                    return makeQueryError(QStringLiteral("Delete email child rows"), deleteQuery);
                 }
             }
 
@@ -133,7 +141,8 @@ namespace javelin::jmap::cache
         {
             return DatabaseError{
                 .code = DatabaseErrorCode::QueryFailed,
-                .message = "Begin email replacement transaction: " + database.lastError().text(),
+                .message = QStringLiteral("Begin email replacement transaction: ") +
+                           database.lastError().text(),
             };
         }
 
@@ -145,82 +154,94 @@ namespace javelin::jmap::cache
             QSqlQuery deleteQuery{database};
             deleteQuery.prepare(
                 QStringLiteral("DELETE FROM %1 WHERE account_id = :account_id").arg(table));
-            deleteQuery.bindValue(":account_id", QString::fromStdString(std::string{accountId}));
+            deleteQuery.bindValue(QStringLiteral(":account_id"),
+                                  QString::fromStdString(std::string{accountId}));
             if (!deleteQuery.exec())
             {
                 database.rollback();
-                return makeQueryError("Delete cached email rows", deleteQuery);
+                return makeQueryError(QStringLiteral("Delete cached email rows"), deleteQuery);
             }
         }
 
         QSqlQuery emailQuery{database};
-        emailQuery.prepare(
+        emailQuery.prepare(QStringLiteral(
             "INSERT INTO emails ("
             "account_id, email_id, thread_id, blob_id, received_at, sent_at, subject, preview, "
             "mailbox_ids_json, keywords_json, has_attachment, size, state"
             ") VALUES ("
             ":account_id, :email_id, :thread_id, :blob_id, :received_at, :sent_at, :subject, "
             ":preview, "
-            ":mailbox_ids_json, :keywords_json, :has_attachment, :size, :state)");
+            ":mailbox_ids_json, :keywords_json, :has_attachment, :size, :state)"));
 
         QSqlQuery mailboxQuery{database};
-        mailboxQuery.prepare("INSERT INTO email_mailboxes (account_id, email_id, mailbox_id) "
-                             "VALUES (:account_id, :email_id, :mailbox_id)");
+        mailboxQuery.prepare(
+            QStringLiteral("INSERT INTO email_mailboxes (account_id, email_id, mailbox_id) "
+                           "VALUES (:account_id, :email_id, :mailbox_id)"));
 
         QSqlQuery keywordQuery{database};
-        keywordQuery.prepare("INSERT INTO email_keywords (account_id, email_id, keyword) "
-                             "VALUES (:account_id, :email_id, :keyword)");
+        keywordQuery.prepare(
+            QStringLiteral("INSERT INTO email_keywords (account_id, email_id, keyword) "
+                           "VALUES (:account_id, :email_id, :keyword)"));
 
         for (const auto& email : emails)
         {
-            emailQuery.bindValue(":account_id", QString::fromStdString(std::string{accountId}));
-            emailQuery.bindValue(":email_id", QString::fromStdString(email.id));
-            emailQuery.bindValue(":thread_id", QString::fromStdString(email.threadId));
-            emailQuery.bindValue(":blob_id", QString::fromStdString(email.blobId));
-            emailQuery.bindValue(":received_at", QString::fromStdString(email.receivedAt));
-            emailQuery.bindValue(":sent_at", email.sentAt.has_value()
-                                                 ? QVariant{QString::fromStdString(*email.sentAt)}
-                                                 : QVariant{});
-            emailQuery.bindValue(":subject", email.subject.has_value()
-                                                 ? QVariant{QString::fromStdString(*email.subject)}
-                                                 : QVariant{});
-            emailQuery.bindValue(":preview", email.preview.has_value()
-                                                 ? QVariant{QString::fromStdString(*email.preview)}
-                                                 : QVariant{});
-            emailQuery.bindValue(":mailbox_ids_json", QStringLiteral("[]"));
-            emailQuery.bindValue(":keywords_json", QStringLiteral("{}"));
-            emailQuery.bindValue(":has_attachment", email.hasAttachment ? 1 : 0);
-            emailQuery.bindValue(":size", static_cast<qulonglong>(email.size));
-            emailQuery.bindValue(":state", QVariant{});
+            emailQuery.bindValue(QStringLiteral(":account_id"),
+                                 QString::fromStdString(std::string{accountId}));
+            emailQuery.bindValue(QStringLiteral(":email_id"), QString::fromStdString(email.id));
+            emailQuery.bindValue(QStringLiteral(":thread_id"),
+                                 QString::fromStdString(email.threadId));
+            emailQuery.bindValue(QStringLiteral(":blob_id"), QString::fromStdString(email.blobId));
+            emailQuery.bindValue(QStringLiteral(":received_at"),
+                                 QString::fromStdString(email.receivedAt));
+            emailQuery.bindValue(QStringLiteral(":sent_at"),
+                                 email.sentAt.has_value()
+                                     ? QVariant{QString::fromStdString(*email.sentAt)}
+                                     : QVariant{});
+            emailQuery.bindValue(QStringLiteral(":subject"),
+                                 email.subject.has_value()
+                                     ? QVariant{QString::fromStdString(*email.subject)}
+                                     : QVariant{});
+            emailQuery.bindValue(QStringLiteral(":preview"),
+                                 email.preview.has_value()
+                                     ? QVariant{QString::fromStdString(*email.preview)}
+                                     : QVariant{});
+            emailQuery.bindValue(QStringLiteral(":mailbox_ids_json"), QStringLiteral("[]"));
+            emailQuery.bindValue(QStringLiteral(":keywords_json"), QStringLiteral("{}"));
+            emailQuery.bindValue(QStringLiteral(":has_attachment"), email.hasAttachment ? 1 : 0);
+            emailQuery.bindValue(QStringLiteral(":size"), static_cast<qulonglong>(email.size));
+            emailQuery.bindValue(QStringLiteral(":state"), QVariant{});
             if (!emailQuery.exec())
             {
                 database.rollback();
-                return makeQueryError("Insert email", emailQuery);
+                return makeQueryError(QStringLiteral("Insert email"), emailQuery);
             }
 
             for (const auto& mailboxId : email.mailboxIds)
             {
-                mailboxQuery.bindValue(":account_id",
+                mailboxQuery.bindValue(QStringLiteral(":account_id"),
                                        QString::fromStdString(std::string{accountId}));
-                mailboxQuery.bindValue(":email_id", QString::fromStdString(email.id));
-                mailboxQuery.bindValue(":mailbox_id", QString::fromStdString(mailboxId));
+                mailboxQuery.bindValue(QStringLiteral(":email_id"),
+                                       QString::fromStdString(email.id));
+                mailboxQuery.bindValue(QStringLiteral(":mailbox_id"),
+                                       QString::fromStdString(mailboxId));
                 if (!mailboxQuery.exec())
                 {
                     database.rollback();
-                    return makeQueryError("Insert email mailbox", mailboxQuery);
+                    return makeQueryError(QStringLiteral("Insert email mailbox"), mailboxQuery);
                 }
             }
 
             for (const auto& keyword : email.keywords)
             {
-                keywordQuery.bindValue(":account_id",
+                keywordQuery.bindValue(QStringLiteral(":account_id"),
                                        QString::fromStdString(std::string{accountId}));
-                keywordQuery.bindValue(":email_id", QString::fromStdString(email.id));
-                keywordQuery.bindValue(":keyword", QString::fromStdString(keyword));
+                keywordQuery.bindValue(QStringLiteral(":email_id"),
+                                       QString::fromStdString(email.id));
+                keywordQuery.bindValue(QStringLiteral(":keyword"), QString::fromStdString(keyword));
                 if (!keywordQuery.exec())
                 {
                     database.rollback();
-                    return makeQueryError("Insert email keyword", keywordQuery);
+                    return makeQueryError(QStringLiteral("Insert email keyword"), keywordQuery);
                 }
             }
 
@@ -245,7 +266,8 @@ namespace javelin::jmap::cache
             database.rollback();
             return DatabaseError{
                 .code = DatabaseErrorCode::QueryFailed,
-                .message = "Commit email replacement transaction: " + database.lastError().text(),
+                .message = QStringLiteral("Commit email replacement transaction: ") +
+                           database.lastError().text(),
             };
         }
 
@@ -271,12 +293,13 @@ namespace javelin::jmap::cache
         {
             return DatabaseError{
                 .code = DatabaseErrorCode::QueryFailed,
-                .message = "Begin email upsert transaction: " + database.lastError().text(),
+                .message = QStringLiteral("Begin email upsert transaction: ") +
+                           database.lastError().text(),
             };
         }
 
         QSqlQuery emailQuery{database};
-        emailQuery.prepare(
+        emailQuery.prepare(QStringLiteral(
             "INSERT INTO emails ("
             "account_id, email_id, thread_id, blob_id, received_at, sent_at, subject, preview, "
             "mailbox_ids_json, keywords_json, has_attachment, size, state"
@@ -294,15 +317,17 @@ namespace javelin::jmap::cache
             "keywords_json = excluded.keywords_json, "
             "has_attachment = excluded.has_attachment, "
             "size = excluded.size, "
-            "state = excluded.state");
+            "state = excluded.state"));
 
         QSqlQuery mailboxQuery{database};
-        mailboxQuery.prepare("INSERT INTO email_mailboxes (account_id, email_id, mailbox_id) "
-                             "VALUES (:account_id, :email_id, :mailbox_id)");
+        mailboxQuery.prepare(
+            QStringLiteral("INSERT INTO email_mailboxes (account_id, email_id, mailbox_id) "
+                           "VALUES (:account_id, :email_id, :mailbox_id)"));
 
         QSqlQuery keywordQuery{database};
-        keywordQuery.prepare("INSERT INTO email_keywords (account_id, email_id, keyword) "
-                             "VALUES (:account_id, :email_id, :keyword)");
+        keywordQuery.prepare(
+            QStringLiteral("INSERT INTO email_keywords (account_id, email_id, keyword) "
+                           "VALUES (:account_id, :email_id, :keyword)"));
 
         for (const auto& email : emails)
         {
@@ -312,54 +337,63 @@ namespace javelin::jmap::cache
                 return error;
             }
 
-            emailQuery.bindValue(":account_id", QString::fromStdString(std::string{accountId}));
-            emailQuery.bindValue(":email_id", QString::fromStdString(email.id));
-            emailQuery.bindValue(":thread_id", QString::fromStdString(email.threadId));
-            emailQuery.bindValue(":blob_id", QString::fromStdString(email.blobId));
-            emailQuery.bindValue(":received_at", QString::fromStdString(email.receivedAt));
-            emailQuery.bindValue(":sent_at", email.sentAt.has_value()
-                                                 ? QVariant{QString::fromStdString(*email.sentAt)}
-                                                 : QVariant{});
-            emailQuery.bindValue(":subject", email.subject.has_value()
-                                                 ? QVariant{QString::fromStdString(*email.subject)}
-                                                 : QVariant{});
-            emailQuery.bindValue(":preview", email.preview.has_value()
-                                                 ? QVariant{QString::fromStdString(*email.preview)}
-                                                 : QVariant{});
-            emailQuery.bindValue(":mailbox_ids_json", QStringLiteral("[]"));
-            emailQuery.bindValue(":keywords_json", QStringLiteral("{}"));
-            emailQuery.bindValue(":has_attachment", email.hasAttachment ? 1 : 0);
-            emailQuery.bindValue(":size", static_cast<qulonglong>(email.size));
-            emailQuery.bindValue(":state", QVariant{});
+            emailQuery.bindValue(QStringLiteral(":account_id"),
+                                 QString::fromStdString(std::string{accountId}));
+            emailQuery.bindValue(QStringLiteral(":email_id"), QString::fromStdString(email.id));
+            emailQuery.bindValue(QStringLiteral(":thread_id"),
+                                 QString::fromStdString(email.threadId));
+            emailQuery.bindValue(QStringLiteral(":blob_id"), QString::fromStdString(email.blobId));
+            emailQuery.bindValue(QStringLiteral(":received_at"),
+                                 QString::fromStdString(email.receivedAt));
+            emailQuery.bindValue(QStringLiteral(":sent_at"),
+                                 email.sentAt.has_value()
+                                     ? QVariant{QString::fromStdString(*email.sentAt)}
+                                     : QVariant{});
+            emailQuery.bindValue(QStringLiteral(":subject"),
+                                 email.subject.has_value()
+                                     ? QVariant{QString::fromStdString(*email.subject)}
+                                     : QVariant{});
+            emailQuery.bindValue(QStringLiteral(":preview"),
+                                 email.preview.has_value()
+                                     ? QVariant{QString::fromStdString(*email.preview)}
+                                     : QVariant{});
+            emailQuery.bindValue(QStringLiteral(":mailbox_ids_json"), QStringLiteral("[]"));
+            emailQuery.bindValue(QStringLiteral(":keywords_json"), QStringLiteral("{}"));
+            emailQuery.bindValue(QStringLiteral(":has_attachment"), email.hasAttachment ? 1 : 0);
+            emailQuery.bindValue(QStringLiteral(":size"), static_cast<qulonglong>(email.size));
+            emailQuery.bindValue(QStringLiteral(":state"), QVariant{});
             if (!emailQuery.exec())
             {
                 database.rollback();
-                return makeQueryError("Upsert email", emailQuery);
+                return makeQueryError(QStringLiteral("Upsert email"), emailQuery);
             }
 
             for (const auto& mailboxId : email.mailboxIds)
             {
-                mailboxQuery.bindValue(":account_id",
+                mailboxQuery.bindValue(QStringLiteral(":account_id"),
                                        QString::fromStdString(std::string{accountId}));
-                mailboxQuery.bindValue(":email_id", QString::fromStdString(email.id));
-                mailboxQuery.bindValue(":mailbox_id", QString::fromStdString(mailboxId));
+                mailboxQuery.bindValue(QStringLiteral(":email_id"),
+                                       QString::fromStdString(email.id));
+                mailboxQuery.bindValue(QStringLiteral(":mailbox_id"),
+                                       QString::fromStdString(mailboxId));
                 if (!mailboxQuery.exec())
                 {
                     database.rollback();
-                    return makeQueryError("Insert email mailbox", mailboxQuery);
+                    return makeQueryError(QStringLiteral("Insert email mailbox"), mailboxQuery);
                 }
             }
 
             for (const auto& keyword : email.keywords)
             {
-                keywordQuery.bindValue(":account_id",
+                keywordQuery.bindValue(QStringLiteral(":account_id"),
                                        QString::fromStdString(std::string{accountId}));
-                keywordQuery.bindValue(":email_id", QString::fromStdString(email.id));
-                keywordQuery.bindValue(":keyword", QString::fromStdString(keyword));
+                keywordQuery.bindValue(QStringLiteral(":email_id"),
+                                       QString::fromStdString(email.id));
+                keywordQuery.bindValue(QStringLiteral(":keyword"), QString::fromStdString(keyword));
                 if (!keywordQuery.exec())
                 {
                     database.rollback();
-                    return makeQueryError("Insert email keyword", keywordQuery);
+                    return makeQueryError(QStringLiteral("Insert email keyword"), keywordQuery);
                 }
             }
 
@@ -384,7 +418,8 @@ namespace javelin::jmap::cache
             database.rollback();
             return DatabaseError{
                 .code = DatabaseErrorCode::QueryFailed,
-                .message = "Commit email upsert transaction: " + database.lastError().text(),
+                .message = QStringLiteral("Commit email upsert transaction: ") +
+                           database.lastError().text(),
             };
         }
 
@@ -410,13 +445,14 @@ namespace javelin::jmap::cache
         {
             return DatabaseError{
                 .code = DatabaseErrorCode::QueryFailed,
-                .message = "Begin email delete transaction: " + database.lastError().text(),
+                .message = QStringLiteral("Begin email delete transaction: ") +
+                           database.lastError().text(),
             };
         }
 
         QSqlQuery deleteEmailQuery{database};
-        deleteEmailQuery.prepare(
-            "DELETE FROM emails WHERE account_id = :account_id AND email_id = :email_id");
+        deleteEmailQuery.prepare(QStringLiteral(
+            "DELETE FROM emails WHERE account_id = :account_id AND email_id = :email_id"));
         for (const auto& emailId : emailIds)
         {
             if (const auto error = deleteEmailChildren(database, accountId, emailId))
@@ -425,13 +461,14 @@ namespace javelin::jmap::cache
                 return error;
             }
 
-            deleteEmailQuery.bindValue(":account_id",
+            deleteEmailQuery.bindValue(QStringLiteral(":account_id"),
                                        QString::fromStdString(std::string{accountId}));
-            deleteEmailQuery.bindValue(":email_id", QString::fromStdString(emailId));
+            deleteEmailQuery.bindValue(QStringLiteral(":email_id"),
+                                       QString::fromStdString(emailId));
             if (!deleteEmailQuery.exec())
             {
                 database.rollback();
-                return makeQueryError("Delete email", deleteEmailQuery);
+                return makeQueryError(QStringLiteral("Delete email"), deleteEmailQuery);
             }
         }
 
@@ -440,7 +477,8 @@ namespace javelin::jmap::cache
             database.rollback();
             return DatabaseError{
                 .code = DatabaseErrorCode::QueryFailed,
-                .message = "Commit email delete transaction: " + database.lastError().text(),
+                .message = QStringLiteral("Commit email delete transaction: ") +
+                           database.lastError().text(),
             };
         }
 
@@ -457,14 +495,17 @@ namespace javelin::jmap::cache
 
         QSqlDatabase& database = m_connection.database();
         QSqlQuery emailQuery{database};
-        emailQuery.prepare("SELECT blob_id, thread_id, size, received_at, sent_at, has_attachment, "
+        emailQuery.prepare(
+            QStringLiteral("SELECT blob_id, thread_id, size, received_at, sent_at, has_attachment, "
                            "subject, preview "
-                           "FROM emails WHERE account_id = :account_id AND email_id = :email_id");
-        emailQuery.bindValue(":account_id", QString::fromStdString(std::string{accountId}));
-        emailQuery.bindValue(":email_id", QString::fromStdString(std::string{emailId}));
+                           "FROM emails WHERE account_id = :account_id AND email_id = :email_id"));
+        emailQuery.bindValue(QStringLiteral(":account_id"),
+                             QString::fromStdString(std::string{accountId}));
+        emailQuery.bindValue(QStringLiteral(":email_id"),
+                             QString::fromStdString(std::string{emailId}));
         if (!emailQuery.exec())
         {
-            return makeQueryError("Read email", emailQuery);
+            return makeQueryError(QStringLiteral("Read email"), emailQuery);
         }
 
         if (!emailQuery.next())
@@ -473,14 +514,16 @@ namespace javelin::jmap::cache
         }
 
         QSqlQuery mailboxQuery{database};
-        mailboxQuery.prepare(
+        mailboxQuery.prepare(QStringLiteral(
             "SELECT mailbox_id FROM email_mailboxes "
-            "WHERE account_id = :account_id AND email_id = :email_id ORDER BY mailbox_id");
-        mailboxQuery.bindValue(":account_id", QString::fromStdString(std::string{accountId}));
-        mailboxQuery.bindValue(":email_id", QString::fromStdString(std::string{emailId}));
+            "WHERE account_id = :account_id AND email_id = :email_id ORDER BY mailbox_id"));
+        mailboxQuery.bindValue(QStringLiteral(":account_id"),
+                               QString::fromStdString(std::string{accountId}));
+        mailboxQuery.bindValue(QStringLiteral(":email_id"),
+                               QString::fromStdString(std::string{emailId}));
         if (!mailboxQuery.exec())
         {
-            return makeQueryError("Read email mailboxes", mailboxQuery);
+            return makeQueryError(QStringLiteral("Read email mailboxes"), mailboxQuery);
         }
 
         std::vector<std::string> mailboxIds;
@@ -490,14 +533,16 @@ namespace javelin::jmap::cache
         }
 
         QSqlQuery keywordQuery{database};
-        keywordQuery.prepare(
+        keywordQuery.prepare(QStringLiteral(
             "SELECT keyword FROM email_keywords "
-            "WHERE account_id = :account_id AND email_id = :email_id ORDER BY keyword");
-        keywordQuery.bindValue(":account_id", QString::fromStdString(std::string{accountId}));
-        keywordQuery.bindValue(":email_id", QString::fromStdString(std::string{emailId}));
+            "WHERE account_id = :account_id AND email_id = :email_id ORDER BY keyword"));
+        keywordQuery.bindValue(QStringLiteral(":account_id"),
+                               QString::fromStdString(std::string{accountId}));
+        keywordQuery.bindValue(QStringLiteral(":email_id"),
+                               QString::fromStdString(std::string{emailId}));
         if (!keywordQuery.exec())
         {
-            return makeQueryError("Read email keywords", keywordQuery);
+            return makeQueryError(QStringLiteral("Read email keywords"), keywordQuery);
         }
 
         std::vector<std::string> keywords;

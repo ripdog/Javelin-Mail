@@ -33,7 +33,7 @@ namespace javelin::gui::messageview
                           std::optional<std::string> mailboxId, std::optional<std::string> emailId);
         void refresh(javelin::jmap::cache::MessageViewService& messageViewService);
 
-      signals:
+      Q_SIGNALS:
         void saveAttachmentRequested(QString accountId, QString emailId, QString partId);
         void openAttachmentRequested(QString accountId, QString emailId, QString partId);
         void archiveRequested(QString accountId, QString mailboxId, QString emailId);

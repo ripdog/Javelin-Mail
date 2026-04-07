@@ -13,7 +13,7 @@ namespace javelin::jmap::cache
         {
             return DatabaseError{
                 .code = DatabaseErrorCode::QueryFailed,
-                .message = operation + ": " + query.lastError().text(),
+                .message = operation + QStringLiteral(": ") + query.lastError().text(),
             };
         }
 
@@ -31,11 +31,12 @@ namespace javelin::jmap::cache
         }
 
         QSqlQuery query{m_connection.database()};
-        if (!query.exec("SELECT account_id, name, is_personal, is_read_only, is_primary "
-                        "FROM accounts "
-                        "ORDER BY is_primary DESC, name, account_id"))
+        if (!query.exec(
+                QStringLiteral("SELECT account_id, name, is_personal, is_read_only, is_primary "
+                               "FROM accounts "
+                               "ORDER BY is_primary DESC, name, account_id")))
         {
-            return makeQueryError("Read cached accounts", query);
+            return makeQueryError(QStringLiteral("Read cached accounts"), query);
         }
 
         std::vector<CachedAccount> accounts;

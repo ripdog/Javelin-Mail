@@ -1,13 +1,15 @@
 #include "app/ApplicationBootstrap.h"
 
 #include "app/ProcessServices.h"
+#include "gui/settings/PreferencesDialog.h"
 #include "gui/shell/MainWindow.h"
 
-#include <QApplication>
-#include <QSystemTrayIcon>
-#include <QMenu>
-#include <QIcon>
+#include <KAboutData>
 #include <QAction>
+#include <QApplication>
+#include <QIcon>
+#include <QMenu>
+#include <QSystemTrayIcon>
 
 namespace javelin::app
 {
@@ -21,15 +23,31 @@ namespace javelin::app
 
     int ApplicationBootstrap::run()
     {
+        KAboutData aboutData(QStringLiteral("javelinmail"), QStringLiteral("Javelin Mail"),
+                             QStringLiteral("0.1.0"), QStringLiteral("A JMAP email client"),
+                             KAboutLicense::GPL_V3);
+        aboutData.setOrganizationDomain("javelin.app");
+        KAboutData::setApplicationData(aboutData);
+
         m_application.setQuitOnLastWindowClosed(false);
         setupSystemTray();
         createMainWindow();
+
+        const auto settings = javelin::gui::settings::PreferencesDialog::loadSettings();
+        if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
+            settings.apiKey.isEmpty())
+        {
+            javelin::gui::settings::PreferencesDialog dialog{m_mainWindow};
+            dialog.exec();
+        }
+
         return m_application.exec();
     }
 
     void ApplicationBootstrap::createMainWindow()
     {
-        if (m_mainWindow) {
+        if (m_mainWindow)
+        {
             m_mainWindow->show();
             m_mainWindow->raise();
             m_mainWindow->activateWindow();
@@ -39,7 +57,7 @@ namespace javelin::app
         m_mainWindow = new javelin::gui::shell::MainWindow(
             m_processServices->jmapCore(), m_processServices->accountRepository(),
             m_processServices->messageViewService(), m_processServices->queryService());
-        
+
         m_mainWindow->setAttribute(Qt::WA_DeleteOnClose);
 
         m_mainWindow->show();
@@ -47,9 +65,12 @@ namespace javelin::app
 
     void ApplicationBootstrap::toggleMainWindow()
     {
-        if (m_mainWindow) {
+        if (m_mainWindow)
+        {
             m_mainWindow->close();
-        } else {
+        }
+        else
+        {
             createMainWindow();
         }
     }
@@ -68,12 +89,16 @@ namespace javelin::app
         QObject::connect(quitAction, &QAction::triggered, [&]() { m_application.quit(); });
 
         m_trayIcon->setContextMenu(m_trayMenu.get());
-        
-        QObject::connect(m_trayIcon.get(), &QSystemTrayIcon::activated, [&](QSystemTrayIcon::ActivationReason reason) {
-            if (reason == QSystemTrayIcon::Trigger || reason == QSystemTrayIcon::DoubleClick) {
-                toggleMainWindow();
-            }
-        });
+
+        QObject::connect(m_trayIcon.get(), &QSystemTrayIcon::activated,
+                         [&](QSystemTrayIcon::ActivationReason reason)
+                         {
+                             if (reason == QSystemTrayIcon::Trigger ||
+                                 reason == QSystemTrayIcon::DoubleClick)
+                             {
+                                 toggleMainWindow();
+                             }
+                         });
 
         m_trayIcon->show();
     }

@@ -7,10 +7,13 @@
 namespace javelin::gui::mailboxes
 {
 
-    MailboxTreeModel::MailboxTreeModel(javelin::jmap::cache::QueryService& queryService,
+    MailboxTreeModel::MailboxTreeModel(javelin::jmap::cache::AccountRepository& accountRepository,
+                                       javelin::jmap::cache::QueryService& queryService,
                                        QObject* parent)
-        : QAbstractItemModel(parent), m_queryService(queryService)
+        : QAbstractItemModel(parent), m_accountRepository(accountRepository),
+          m_queryService(queryService)
     {
+        rebuild();
     }
 
     MailboxTreeModel::~MailboxTreeModel() = default;
@@ -34,12 +37,14 @@ namespace javelin::gui::mailboxes
         }
 
         const auto* parentNode = static_cast<const Node*>(parentIndex.internalPointer());
-        if (parentNode == nullptr || static_cast<std::size_t>(row) >= parentNode->children.size())
+        if (parentNode == nullptr ||
+            static_cast<std::size_t>(row) >= parentNode->children.size())
         {
             return {};
         }
 
-        return createIndex(row, column, parentNode->children[static_cast<std::size_t>(row)].get());
+        return createIndex(row, column,
+                           parentNode->children[static_cast<std::size_t>(row)].get());
     }
 
     QModelIndex MailboxTreeModel::parent(const QModelIndex& child) const
@@ -57,11 +62,11 @@ namespace javelin::gui::mailboxes
 
         const auto* grandParent = node->parent->parent;
         const auto& siblings = grandParent == nullptr ? m_rootNodes : grandParent->children;
-        for (std::size_t index = 0; index < siblings.size(); ++index)
+        for (std::size_t idx = 0; idx < siblings.size(); ++idx)
         {
-            if (siblings[index].get() == node->parent)
+            if (siblings[idx].get() == node->parent)
             {
-                return createIndex(static_cast<int>(index), 0, node->parent);
+                return createIndex(static_cast<int>(idx), 0, node->parent);
             }
         }
 
@@ -84,9 +89,9 @@ namespace javelin::gui::mailboxes
         return parentNode == nullptr ? 0 : static_cast<int>(parentNode->children.size());
     }
 
-    int MailboxTreeModel::columnCount(const QModelIndex& parent) const
+    int MailboxTreeModel::columnCount(const QModelIndex& parentIdx) const
     {
-        Q_UNUSED(parent);
+        Q_UNUSED(parentIdx);
         return 1;
     }
 
@@ -100,33 +105,39 @@ namespace javelin::gui::mailboxes
 
         if (role == Qt::DisplayRole)
         {
-            return QString::fromStdString(node->item.name);
+            if (!node->mailboxId.empty() && node->unreadEmails > 0)
+            {
+                return QStringLiteral("%1 (%2)")
+                    .arg(QString::fromStdString(node->displayName))
+                    .arg(node->unreadEmails);
+            }
+            return QString::fromStdString(node->displayName);
         }
 
         if (role == Qt::ToolTipRole)
         {
-            return QStringLiteral("%1 (%2 unread)")
-                .arg(QString::fromStdString(node->item.name))
-                .arg(node->item.unreadEmails);
+            if (!node->mailboxId.empty())
+            {
+                return QStringLiteral("%1 (%2 unread)")
+                    .arg(QString::fromStdString(node->displayName))
+                    .arg(node->unreadEmails);
+            }
+            return QString::fromStdString(node->displayName);
         }
 
         if (role == MailboxIdRole)
         {
-            return QString::fromStdString(node->item.id);
+            // Returns empty string for account-level nodes (selecting an account is not a
+            // mailbox selection).
+            return QString::fromStdString(node->mailboxId);
+        }
+
+        if (role == AccountIdRole)
+        {
+            return QString::fromStdString(node->accountId);
         }
 
         return {};
-    }
-
-    void MailboxTreeModel::setAccountId(std::optional<std::string> accountId)
-    {
-        if (m_accountId == accountId)
-        {
-            return;
-        }
-
-        m_accountId = std::move(accountId);
-        rebuild();
     }
 
     void MailboxTreeModel::refresh()
@@ -144,74 +155,101 @@ namespace javelin::gui::mailboxes
         beginResetModel();
         m_rootNodes.clear();
 
-        if (!m_accountId.has_value())
+        const auto accountsResult = m_accountRepository.listAll();
+        const auto* accounts =
+            std::get_if<std::vector<javelin::jmap::cache::CachedAccount>>(&accountsResult);
+        if (accounts == nullptr)
         {
             endResetModel();
             return;
         }
 
-        const auto result = m_queryService.listMailboxTree(*m_accountId);
-        if (const auto* items =
-                std::get_if<std::vector<javelin::jmap::cache::MailboxTreeItem>>(&result))
+        for (const auto& account : *accounts)
         {
-            std::unordered_map<std::string, Node*> nodesById;
-            std::vector<javelin::jmap::cache::MailboxTreeItem> roots;
-            std::unordered_map<std::string, std::vector<javelin::jmap::cache::MailboxTreeItem>>
-                deferredChildren;
+            auto accountNode = std::make_unique<Node>();
+            accountNode->accountId = account.accountId;
+            accountNode->displayName = account.name.empty() ? account.accountId : account.name;
+            // mailboxId left empty — this is an account-level node.
 
-            auto attachChildren = [&nodesById, &deferredChildren](const auto& self,
-                                                                  Node* parentNode) -> void
+            const auto mailboxResult = m_queryService.listMailboxTree(account.accountId);
+            const auto* mailboxItems =
+                std::get_if<std::vector<javelin::jmap::cache::MailboxTreeItem>>(&mailboxResult);
+
+            if (mailboxItems != nullptr)
             {
-                const auto deferredIt = deferredChildren.find(parentNode->item.id);
-                if (deferredIt == deferredChildren.end())
-                {
-                    return;
-                }
+                std::unordered_map<std::string, Node*> nodesById;
+                std::vector<javelin::jmap::cache::MailboxTreeItem> roots;
+                std::unordered_map<std::string,
+                                   std::vector<javelin::jmap::cache::MailboxTreeItem>>
+                    deferredChildren;
 
-                auto children = std::move(deferredIt->second);
-                deferredChildren.erase(deferredIt);
-                for (auto& childItem : children)
+                auto attachChildren = [&nodesById, &deferredChildren,
+                                       &accountId = account.accountId](const auto& self,
+                                                                        Node* parentNode) -> void
                 {
+                    const auto deferredIt = deferredChildren.find(parentNode->mailboxId);
+                    if (deferredIt == deferredChildren.end())
+                    {
+                        return;
+                    }
+
+                    auto children = std::move(deferredIt->second);
+                    deferredChildren.erase(deferredIt);
+                    for (auto& childItem : children)
+                    {
+                        auto child = std::make_unique<Node>();
+                        child->accountId = accountId;
+                        child->displayName = childItem.name;
+                        child->mailboxId = childItem.id;
+                        child->unreadEmails = childItem.unreadEmails;
+                        child->parent = parentNode;
+                        nodesById.emplace(child->mailboxId, child.get());
+                        parentNode->children.push_back(std::move(child));
+                        self(self, parentNode->children.back().get());
+                    }
+                };
+
+                for (const auto& item : *mailboxItems)
+                {
+                    if (!item.parentId.has_value())
+                    {
+                        roots.push_back(item);
+                        continue;
+                    }
+
+                    const auto parentIt = nodesById.find(*item.parentId);
+                    if (parentIt == nodesById.end())
+                    {
+                        deferredChildren[*item.parentId].push_back(item);
+                        continue;
+                    }
+
                     auto child = std::make_unique<Node>();
-                    child->item = std::move(childItem);
-                    child->parent = parentNode;
-                    nodesById.emplace(child->item.id, child.get());
-                    parentNode->children.push_back(std::move(child));
-                    self(self, parentNode->children.back().get());
+                    child->accountId = account.accountId;
+                    child->displayName = item.name;
+                    child->mailboxId = item.id;
+                    child->unreadEmails = item.unreadEmails;
+                    child->parent = parentIt->second;
+                    nodesById.emplace(child->mailboxId, child.get());
+                    parentIt->second->children.push_back(std::move(child));
+                    attachChildren(attachChildren, parentIt->second->children.back().get());
                 }
-            };
 
-            for (const auto& item : *items)
-            {
-                if (!item.parentId.has_value())
+                for (auto& rootItem : roots)
                 {
-                    roots.push_back(item);
-                    continue;
+                    auto rootMailboxNode = std::make_unique<Node>();
+                    rootMailboxNode->accountId = account.accountId;
+                    rootMailboxNode->displayName = rootItem.name;
+                    rootMailboxNode->mailboxId = rootItem.id;
+                    rootMailboxNode->unreadEmails = rootItem.unreadEmails;
+                    rootMailboxNode->parent = accountNode.get();
+                    nodesById.emplace(rootMailboxNode->mailboxId, rootMailboxNode.get());
+                    accountNode->children.push_back(std::move(rootMailboxNode));
+                    attachChildren(attachChildren, accountNode->children.back().get());
                 }
-
-                const auto parentIt = nodesById.find(*item.parentId);
-                if (parentIt == nodesById.end())
-                {
-                    deferredChildren[*item.parentId].push_back(item);
-                    continue;
-                }
-
-                auto child = std::make_unique<Node>();
-                child->item = item;
-                child->parent = parentIt->second;
-                nodesById.emplace(child->item.id, child.get());
-                parentIt->second->children.push_back(std::move(child));
-                attachChildren(attachChildren, parentIt->second->children.back().get());
             }
 
-            for (auto& rootItem : roots)
-            {
-                auto root = std::make_unique<Node>();
-                root->item = std::move(rootItem);
-                nodesById.emplace(root->item.id, root.get());
-                m_rootNodes.push_back(std::move(root));
-                attachChildren(attachChildren, m_rootNodes.back().get());
-            }
+            m_rootNodes.push_back(std::move(accountNode));
         }
 
         endResetModel();

@@ -139,7 +139,7 @@ TEST_CASE("method caller posts a typed request envelope and parses the response"
     const auto& response = std::get<javelin::jmap::api::ResponseEnvelope>(result);
     CHECK(response.sessionState == "session-state-2");
     CHECK(transport.lastRequest.method == javelin::jmap::api::HttpMethod::Post);
-    CHECK(transport.lastRequest.url == QUrl{"https://mail.example.com/jmap/api"});
+    CHECK(transport.lastRequest.url == QUrl{QStringLiteral("https://mail.example.com/jmap/api")});
     REQUIRE(transport.lastRequest.headers.size() == 3);
     CHECK(transport.lastRequest.headers.front().name == "Authorization");
     CHECK(transport.lastRequest.headers.front().value == "Bearer access-token");

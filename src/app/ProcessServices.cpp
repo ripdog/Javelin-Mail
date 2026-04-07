@@ -28,7 +28,7 @@ namespace javelin::app
                 QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
             QDir directory;
             directory.mkpath(basePath);
-            return QDir(basePath).filePath("cache.sqlite3");
+            return QDir(basePath).filePath(QStringLiteral("cache.sqlite3"));
         }
 
     } // namespace

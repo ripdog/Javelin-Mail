@@ -83,7 +83,7 @@ namespace
 
         auto result = javelin::jmap::cache::DatabaseConnection::open({
             .connectionName = makeConnectionName(),
-            .databasePath = context.temporaryDir.filePath("cache.sqlite3"),
+            .databasePath = context.temporaryDir.filePath(QStringLiteral("cache.sqlite3")),
         });
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
         {
@@ -118,35 +118,38 @@ namespace
     void seedAccount(javelin::jmap::cache::DatabaseConnection& connection)
     {
         QSqlQuery query{connection.database()};
-        query.prepare("INSERT INTO accounts (account_id, email_address, session_url, is_primary) "
-                      "VALUES (:account_id, :email_address, :session_url, :is_primary)");
-        query.bindValue(":account_id", "account-1");
-        query.bindValue(":email_address", "alice@example.com");
-        query.bindValue(":session_url", "https://mail.example.com/.well-known/jmap");
-        query.bindValue(":is_primary", 1);
+        query.prepare(QStringLiteral(
+            "INSERT INTO accounts (account_id, email_address, session_url, is_primary) "
+            "VALUES (:account_id, :email_address, :session_url, :is_primary)"));
+        query.bindValue(QStringLiteral(":account_id"), QStringLiteral("account-1"));
+        query.bindValue(QStringLiteral(":email_address"), QStringLiteral("alice@example.com"));
+        query.bindValue(QStringLiteral(":session_url"),
+                        QStringLiteral("https://mail.example.com/.well-known/jmap"));
+        query.bindValue(QStringLiteral(":is_primary"), 1);
         REQUIRE(query.exec());
     }
 
     void seedEmail(javelin::jmap::cache::DatabaseConnection& connection)
     {
         QSqlQuery query{connection.database()};
-        query.prepare("INSERT INTO emails ("
-                      "account_id, email_id, thread_id, blob_id, received_at, subject, preview, "
-                      "mailbox_ids_json, keywords_json, has_attachment, size"
-                      ") VALUES ("
-                      ":account_id, :email_id, :thread_id, :blob_id, :received_at, :subject, "
-                      ":preview, :mailbox_ids_json, :keywords_json, :has_attachment, :size)");
-        query.bindValue(":account_id", "u1");
-        query.bindValue(":email_id", "eml-1");
-        query.bindValue(":thread_id", "thr-1");
-        query.bindValue(":blob_id", "blob-root");
-        query.bindValue(":received_at", "2026-04-05T11:22:33Z");
-        query.bindValue(":subject", "Inline image");
-        query.bindValue(":preview", "Preview");
-        query.bindValue(":mailbox_ids_json", "[]");
-        query.bindValue(":keywords_json", "{}");
-        query.bindValue(":has_attachment", 1);
-        query.bindValue(":size", 512);
+        query.prepare(QStringLiteral(
+            "INSERT INTO emails ("
+            "account_id, email_id, thread_id, blob_id, received_at, subject, preview, "
+            "mailbox_ids_json, keywords_json, has_attachment, size"
+            ") VALUES ("
+            ":account_id, :email_id, :thread_id, :blob_id, :received_at, :subject, "
+            ":preview, :mailbox_ids_json, :keywords_json, :has_attachment, :size)"));
+        query.bindValue(QStringLiteral(":account_id"), QStringLiteral("u1"));
+        query.bindValue(QStringLiteral(":email_id"), QStringLiteral("eml-1"));
+        query.bindValue(QStringLiteral(":thread_id"), QStringLiteral("thr-1"));
+        query.bindValue(QStringLiteral(":blob_id"), QStringLiteral("blob-root"));
+        query.bindValue(QStringLiteral(":received_at"), QStringLiteral("2026-04-05T11:22:33Z"));
+        query.bindValue(QStringLiteral(":subject"), QStringLiteral("Inline image"));
+        query.bindValue(QStringLiteral(":preview"), QStringLiteral("Preview"));
+        query.bindValue(QStringLiteral(":mailbox_ids_json"), QStringLiteral("[]"));
+        query.bindValue(QStringLiteral(":keywords_json"), QStringLiteral("{}"));
+        query.bindValue(QStringLiteral(":has_attachment"), 1);
+        query.bindValue(QStringLiteral(":size"), 512);
         REQUIRE(query.exec());
     }
 
@@ -240,7 +243,8 @@ TEST_CASE("JmapCore queues archive and delete mailbox moves as pending actions",
     REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(archiveResult));
 
     const auto archivedEmailResult = emailRepository.find("account-1", "eml-1");
-    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(archivedEmailResult));
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(archivedEmailResult));
     const auto& archivedEmail =
         std::get<std::optional<javelin::jmap::domain::Email>>(archivedEmailResult);
     REQUIRE(archivedEmail.has_value());
@@ -251,7 +255,8 @@ TEST_CASE("JmapCore queues archive and delete mailbox moves as pending actions",
     REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(deleteResult));
 
     const auto deletedEmailResult = emailRepository.find("account-1", "eml-1");
-    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(deletedEmailResult));
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(deletedEmailResult));
     const auto& deletedEmail =
         std::get<std::optional<javelin::jmap::domain::Email>>(deletedEmailResult);
     REQUIRE(deletedEmail.has_value());
@@ -483,7 +488,8 @@ TEST_CASE("JmapCore submits queued mailbox mutations through Email/set",
     CHECK_FALSE(transport.requests.front().body.contains("\"mbx-inbox\":true"));
 
     const auto refreshedEmailResult = emailRepository.find("u1", "eml-1");
-    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(refreshedEmailResult));
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(refreshedEmailResult));
     const auto& refreshedEmail =
         std::get<std::optional<javelin::jmap::domain::Email>>(refreshedEmailResult);
     REQUIRE(refreshedEmail.has_value());
@@ -495,6 +501,5 @@ TEST_CASE("JmapCore submits queued mailbox mutations through Email/set",
     const auto pendingResult = pendingActionRepository.listForEmail("u1", "eml-1");
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::PendingActionRecord>>(
         pendingResult));
-    CHECK(
-        std::get<std::vector<javelin::jmap::sync::PendingActionRecord>>(pendingResult).empty());
+    CHECK(std::get<std::vector<javelin::jmap::sync::PendingActionRecord>>(pendingResult).empty());
 }

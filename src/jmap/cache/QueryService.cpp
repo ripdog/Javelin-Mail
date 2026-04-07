@@ -13,7 +13,7 @@ namespace javelin::jmap::cache
         {
             return DatabaseError{
                 .code = DatabaseErrorCode::QueryFailed,
-                .message = operation + ": " + query.lastError().text(),
+                .message = operation + QStringLiteral(": ") + query.lastError().text(),
             };
         }
 
@@ -32,7 +32,7 @@ namespace javelin::jmap::cache
         }
 
         QSqlQuery query{m_connection.database()};
-        query.prepare(
+        query.prepare(QStringLiteral(
             "SELECT m.mailbox_id, m.name, m.parent_mailbox_id, m.role, m.sort_order, "
             "m.total_emails, m.unread_emails, m.total_threads, m.unread_threads, "
             "m.is_subscribed, "
@@ -42,11 +42,12 @@ namespace javelin::jmap::cache
             ") AS has_children "
             "FROM mailboxes m "
             "WHERE m.account_id = :account_id "
-            "ORDER BY COALESCE(m.parent_mailbox_id, ''), m.sort_order, m.mailbox_id");
-        query.bindValue(":account_id", QString::fromStdString(std::string{accountId}));
+            "ORDER BY COALESCE(m.parent_mailbox_id, ''), m.sort_order, m.mailbox_id"));
+        query.bindValue(QStringLiteral(":account_id"),
+                        QString::fromStdString(std::string{accountId}));
         if (!query.exec())
         {
-            return makeQueryError("Read mailbox tree", query);
+            return makeQueryError(QStringLiteral("Read mailbox tree"), query);
         }
 
         std::vector<MailboxTreeItem> items;
@@ -85,7 +86,7 @@ namespace javelin::jmap::cache
         }
 
         QSqlQuery query{m_connection.database()};
-        query.prepare(
+        query.prepare(QStringLiteral(
             "WITH mailbox_threads AS ("
             "  SELECT DISTINCT e.thread_id "
             "  FROM emails e "
@@ -130,14 +131,16 @@ namespace javelin::jmap::cache
             "FROM ranked_threads rt "
             "WHERE rt.thread_rank = 1 "
             "ORDER BY rt.received_at DESC, rt.email_id DESC "
-            "LIMIT :limit OFFSET :offset");
-        query.bindValue(":account_id", QString::fromStdString(std::string{accountId}));
-        query.bindValue(":mailbox_id", QString::fromStdString(std::string{mailboxId}));
-        query.bindValue(":limit", static_cast<qulonglong>(limit));
-        query.bindValue(":offset", static_cast<qulonglong>(offset));
+            "LIMIT :limit OFFSET :offset"));
+        query.bindValue(QStringLiteral(":account_id"),
+                        QString::fromStdString(std::string{accountId}));
+        query.bindValue(QStringLiteral(":mailbox_id"),
+                        QString::fromStdString(std::string{mailboxId}));
+        query.bindValue(QStringLiteral(":limit"), static_cast<qulonglong>(limit));
+        query.bindValue(QStringLiteral(":offset"), static_cast<qulonglong>(offset));
         if (!query.exec())
         {
-            return makeQueryError("Read mailbox message list", query);
+            return makeQueryError(QStringLiteral("Read mailbox message list"), query);
         }
 
         std::vector<MessageListItem> items;

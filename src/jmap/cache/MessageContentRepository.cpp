@@ -13,7 +13,7 @@ namespace javelin::jmap::cache
         {
             return DatabaseError{
                 .code = DatabaseErrorCode::QueryFailed,
-                .message = operation + ": " + query.lastError().text(),
+                .message = operation + QStringLiteral(": ") + query.lastError().text(),
             };
         }
 
@@ -38,108 +38,128 @@ namespace javelin::jmap::cache
         {
             return DatabaseError{
                 .code = DatabaseErrorCode::QueryFailed,
-                .message = "Begin message content transaction: " + database.lastError().text(),
+                .message = QStringLiteral("Begin message content transaction: ") +
+                           database.lastError().text(),
             };
         }
 
         QSqlQuery deleteBodies{database};
-        deleteBodies.prepare("DELETE FROM email_body_values WHERE account_id = :account_id AND "
-                             "email_id = :email_id");
-        deleteBodies.bindValue(":account_id", QString::fromStdString(std::string{accountId}));
-        deleteBodies.bindValue(":email_id", QString::fromStdString(std::string{emailId}));
+        deleteBodies.prepare(
+            QStringLiteral("DELETE FROM email_body_values WHERE account_id = :account_id AND "
+                           "email_id = :email_id"));
+        deleteBodies.bindValue(QStringLiteral(":account_id"),
+                               QString::fromStdString(std::string{accountId}));
+        deleteBodies.bindValue(QStringLiteral(":email_id"),
+                               QString::fromStdString(std::string{emailId}));
         if (!deleteBodies.exec())
         {
             database.rollback();
-            return makeQueryError("Delete email body values", deleteBodies);
+            return makeQueryError(QStringLiteral("Delete email body values"), deleteBodies);
         }
 
         QSqlQuery deleteParts{database};
-        deleteParts.prepare(
-            "DELETE FROM email_parts WHERE account_id = :account_id AND email_id = :email_id");
-        deleteParts.bindValue(":account_id", QString::fromStdString(std::string{accountId}));
-        deleteParts.bindValue(":email_id", QString::fromStdString(std::string{emailId}));
+        deleteParts.prepare(QStringLiteral(
+            "DELETE FROM email_parts WHERE account_id = :account_id AND email_id = :email_id"));
+        deleteParts.bindValue(QStringLiteral(":account_id"),
+                              QString::fromStdString(std::string{accountId}));
+        deleteParts.bindValue(QStringLiteral(":email_id"),
+                              QString::fromStdString(std::string{emailId}));
         if (!deleteParts.exec())
         {
             database.rollback();
-            return makeQueryError("Delete email parts", deleteParts);
+            return makeQueryError(QStringLiteral("Delete email parts"), deleteParts);
         }
 
         QSqlQuery deleteInlinePayloads{database};
         deleteInlinePayloads.prepare(
-            "DELETE FROM inline_part_payloads WHERE account_id = :account_id AND email_id = :email_id");
-        deleteInlinePayloads.bindValue(":account_id", QString::fromStdString(std::string{accountId}));
-        deleteInlinePayloads.bindValue(":email_id", QString::fromStdString(std::string{emailId}));
+            QStringLiteral("DELETE FROM inline_part_payloads WHERE account_id = :account_id AND "
+                           "email_id = :email_id"));
+        deleteInlinePayloads.bindValue(QStringLiteral(":account_id"),
+                                       QString::fromStdString(std::string{accountId}));
+        deleteInlinePayloads.bindValue(QStringLiteral(":email_id"),
+                                       QString::fromStdString(std::string{emailId}));
         if (!deleteInlinePayloads.exec())
         {
             database.rollback();
-            return makeQueryError("Delete inline part payloads", deleteInlinePayloads);
+            return makeQueryError(QStringLiteral("Delete inline part payloads"),
+                                  deleteInlinePayloads);
         }
 
         QSqlQuery insertPart{database};
-        insertPart.prepare(
+        insertPart.prepare(QStringLiteral(
             "INSERT INTO email_parts ("
             "account_id, email_id, part_id, parent_part_id, blob_id, kind, media_type, name, "
             "charset, disposition, cid, size, is_inline_renderable, is_body_section"
             ") VALUES ("
             ":account_id, :email_id, :part_id, :parent_part_id, :blob_id, :kind, :media_type, "
-            ":name, :charset, :disposition, :cid, :size, :is_inline_renderable, :is_body_section)");
+            ":name, :charset, :disposition, :cid, :size, :is_inline_renderable, "
+            ":is_body_section)"));
         for (const auto& part : parts)
         {
-            insertPart.bindValue(":account_id", QString::fromStdString(std::string{accountId}));
-            insertPart.bindValue(":email_id", QString::fromStdString(part.emailId));
-            insertPart.bindValue(":part_id", QString::fromStdString(part.partId));
-            insertPart.bindValue(":parent_part_id",
+            insertPart.bindValue(QStringLiteral(":account_id"),
+                                 QString::fromStdString(std::string{accountId}));
+            insertPart.bindValue(QStringLiteral(":email_id"), QString::fromStdString(part.emailId));
+            insertPart.bindValue(QStringLiteral(":part_id"), QString::fromStdString(part.partId));
+            insertPart.bindValue(QStringLiteral(":parent_part_id"),
                                  part.parentPartId.has_value()
                                      ? QVariant{QString::fromStdString(*part.parentPartId)}
                                      : QVariant{});
-            insertPart.bindValue(":blob_id", part.blobId.has_value()
-                                                 ? QVariant{QString::fromStdString(*part.blobId)}
-                                                 : QVariant{});
-            insertPart.bindValue(":kind", QString::fromStdString(part.kind));
-            insertPart.bindValue(":media_type", QString::fromStdString(part.mediaType));
-            insertPart.bindValue(":name", part.name.has_value()
-                                              ? QVariant{QString::fromStdString(*part.name)}
-                                              : QVariant{});
-            insertPart.bindValue(":charset", part.charset.has_value()
-                                                 ? QVariant{QString::fromStdString(*part.charset)}
-                                                 : QVariant{});
-            insertPart.bindValue(":disposition",
+            insertPart.bindValue(QStringLiteral(":blob_id"),
+                                 part.blobId.has_value()
+                                     ? QVariant{QString::fromStdString(*part.blobId)}
+                                     : QVariant{});
+            insertPart.bindValue(QStringLiteral(":kind"), QString::fromStdString(part.kind));
+            insertPart.bindValue(QStringLiteral(":media_type"),
+                                 QString::fromStdString(part.mediaType));
+            insertPart.bindValue(
+                QStringLiteral(":name"),
+                part.name.has_value() ? QVariant{QString::fromStdString(*part.name)} : QVariant{});
+            insertPart.bindValue(QStringLiteral(":charset"),
+                                 part.charset.has_value()
+                                     ? QVariant{QString::fromStdString(*part.charset)}
+                                     : QVariant{});
+            insertPart.bindValue(QStringLiteral(":disposition"),
                                  part.disposition.has_value()
                                      ? QVariant{QString::fromStdString(*part.disposition)}
                                      : QVariant{});
-            insertPart.bindValue(":cid", part.cid.has_value()
-                                             ? QVariant{QString::fromStdString(*part.cid)}
-                                             : QVariant{});
-            insertPart.bindValue(":size", static_cast<qulonglong>(part.size));
-            insertPart.bindValue(":is_inline_renderable", part.isInlineRenderable ? 1 : 0);
-            insertPart.bindValue(":is_body_section", part.isBodySection ? 1 : 0);
+            insertPart.bindValue(QStringLiteral(":cid"),
+                                 part.cid.has_value() ? QVariant{QString::fromStdString(*part.cid)}
+                                                      : QVariant{});
+            insertPart.bindValue(QStringLiteral(":size"), static_cast<qulonglong>(part.size));
+            insertPart.bindValue(QStringLiteral(":is_inline_renderable"),
+                                 part.isInlineRenderable ? 1 : 0);
+            insertPart.bindValue(QStringLiteral(":is_body_section"), part.isBodySection ? 1 : 0);
             if (!insertPart.exec())
             {
                 database.rollback();
-                return makeQueryError("Insert email part", insertPart);
+                return makeQueryError(QStringLiteral("Insert email part"), insertPart);
             }
         }
 
         QSqlQuery insertBody{database};
-        insertBody.prepare("INSERT INTO email_body_values ("
+        insertBody.prepare(
+            QStringLiteral("INSERT INTO email_body_values ("
                            "account_id, email_id, part_id, blob_id, is_truncated, value"
                            ") VALUES ("
-                           ":account_id, :email_id, :part_id, :blob_id, :is_truncated, :value)");
+                           ":account_id, :email_id, :part_id, :blob_id, :is_truncated, :value)"));
         for (const auto& bodyValue : bodyValues)
         {
-            insertBody.bindValue(":account_id", QString::fromStdString(std::string{accountId}));
-            insertBody.bindValue(":email_id", QString::fromStdString(bodyValue.emailId));
-            insertBody.bindValue(":part_id", QString::fromStdString(bodyValue.partId));
-            insertBody.bindValue(":blob_id",
+            insertBody.bindValue(QStringLiteral(":account_id"),
+                                 QString::fromStdString(std::string{accountId}));
+            insertBody.bindValue(QStringLiteral(":email_id"),
+                                 QString::fromStdString(bodyValue.emailId));
+            insertBody.bindValue(QStringLiteral(":part_id"),
+                                 QString::fromStdString(bodyValue.partId));
+            insertBody.bindValue(QStringLiteral(":blob_id"),
                                  bodyValue.blobId.has_value()
                                      ? QVariant{QString::fromStdString(*bodyValue.blobId)}
                                      : QVariant{});
-            insertBody.bindValue(":is_truncated", bodyValue.isTruncated ? 1 : 0);
-            insertBody.bindValue(":value", QString::fromStdString(bodyValue.value));
+            insertBody.bindValue(QStringLiteral(":is_truncated"), bodyValue.isTruncated ? 1 : 0);
+            insertBody.bindValue(QStringLiteral(":value"), QString::fromStdString(bodyValue.value));
             if (!insertBody.exec())
             {
                 database.rollback();
-                return makeQueryError("Insert email body value", insertBody);
+                return makeQueryError(QStringLiteral("Insert email body value"), insertBody);
             }
         }
 
@@ -148,7 +168,8 @@ namespace javelin::jmap::cache
             database.rollback();
             return DatabaseError{
                 .code = DatabaseErrorCode::QueryFailed,
-                .message = "Commit message content transaction: " + database.lastError().text(),
+                .message = QStringLiteral("Commit message content transaction: ") +
+                           database.lastError().text(),
             };
         }
 
@@ -165,16 +186,18 @@ namespace javelin::jmap::cache
         }
 
         QSqlQuery query{m_connection.database()};
-        query.prepare("SELECT part_id, parent_part_id, blob_id, kind, media_type, name, charset, "
-                      "disposition, "
-                      "cid, size, is_inline_renderable, is_body_section "
-                      "FROM email_parts WHERE account_id = :account_id AND email_id = :email_id "
-                      "ORDER BY part_id");
-        query.bindValue(":account_id", QString::fromStdString(std::string{accountId}));
-        query.bindValue(":email_id", QString::fromStdString(std::string{emailId}));
+        query.prepare(QStringLiteral(
+            "SELECT part_id, parent_part_id, blob_id, kind, media_type, name, charset, "
+            "disposition, "
+            "cid, size, is_inline_renderable, is_body_section "
+            "FROM email_parts WHERE account_id = :account_id AND email_id = :email_id "
+            "ORDER BY part_id"));
+        query.bindValue(QStringLiteral(":account_id"),
+                        QString::fromStdString(std::string{accountId}));
+        query.bindValue(QStringLiteral(":email_id"), QString::fromStdString(std::string{emailId}));
         if (!query.exec())
         {
-            return makeQueryError("Read email parts", query);
+            return makeQueryError(QStringLiteral("Read email parts"), query);
         }
 
         std::vector<EmailPart> parts;
@@ -222,15 +245,16 @@ namespace javelin::jmap::cache
         }
 
         QSqlQuery query{m_connection.database()};
-        query.prepare(
+        query.prepare(QStringLiteral(
             "SELECT part_id, blob_id, is_truncated, value "
             "FROM email_body_values WHERE account_id = :account_id AND email_id = :email_id "
-            "ORDER BY part_id");
-        query.bindValue(":account_id", QString::fromStdString(std::string{accountId}));
-        query.bindValue(":email_id", QString::fromStdString(std::string{emailId}));
+            "ORDER BY part_id"));
+        query.bindValue(QStringLiteral(":account_id"),
+                        QString::fromStdString(std::string{accountId}));
+        query.bindValue(QStringLiteral(":email_id"), QString::fromStdString(std::string{emailId}));
         if (!query.exec())
         {
-            return makeQueryError("Read email body values", query);
+            return makeQueryError(QStringLiteral("Read email body values"), query);
         }
 
         std::vector<EmailBodyValue> values;

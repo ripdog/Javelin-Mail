@@ -21,5 +21,6 @@ function(javelin_set_project_warnings target)
         -Wnull-dereference
         -Wimplicit-fallthrough
         -Werror
+        -Wno-missing-include-dirs
     )
 endfunction()

@@ -50,5 +50,8 @@ javelin_set_project_warnings(javelin_jmap_tests)
 javelin_enable_static_analysis(javelin_jmap_tests)
 javelin_enable_sanitizers(javelin_jmap_tests)
 
+# QCoro's waitFor and fixture loading require exceptions
+target_compile_options(javelin_jmap_tests PRIVATE -fexceptions)
+
 include(Catch)
 catch_discover_tests(javelin_jmap_tests)

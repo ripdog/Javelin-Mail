@@ -11,11 +11,25 @@ include(cmake/Dependencies.cmake)
 include(cmake/StaticAnalysis.cmake)
 include(cmake/Sanitizers.cmake)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Network Sql Widgets Concurrent LinguistTools WebEngineCore WebEngineWidgets Svg)
+# 1. Find Qt6 FIRST
+find_package(Qt6 6.6 REQUIRED COMPONENTS Core Network Sql Widgets Concurrent LinguistTools WebEngineCore WebEngineWidgets Svg)
 
-qt_standard_project_setup()
+# 2. Fetch Dependencies BEFORE KDE is allowed to load
 javelin_configure_dependencies()
 qcoro_enable_coroutines()
+
+# 3. NOW it is safe to load ECM and KDE Frameworks
+set(KF_MIN_VERSION "6.0.0")
+find_package(ECM ${KF_MIN_VERSION} REQUIRED NO_MODULE)
+list(APPEND CMAKE_MODULE_PATH ${ECM_MODULE_PATH})
+include(KDEInstallDirs)
+include(KDECMakeSettings)
+include(KDECompilerSettings NO_POLICY_SCOPE)
+include(FeatureSummary)
+
+find_package(KF6 REQUIRED COMPONENTS XmlGui CoreAddons)
+
+qt_standard_project_setup()
 enable_testing()
 
 set(JAVELIN_FORMAT_FILES
@@ -245,6 +259,7 @@ target_link_libraries(javelin_gui
         Qt::Core
         Qt::Widgets
         Qt::WebEngineWidgets
+        KF6::XmlGui
     PRIVATE
         Qt::Concurrent
         javelin_jmap
@@ -252,6 +267,8 @@ target_link_libraries(javelin_gui
 javelin_set_project_warnings(javelin_gui)
 javelin_enable_static_analysis(javelin_gui)
 javelin_enable_sanitizers(javelin_gui)
+# QCoro uses exceptions internally
+target_compile_options(javelin_gui PRIVATE -fexceptions)
 
 add_library(javelin_app STATIC
     src/app/ApplicationBootstrap.cpp
@@ -276,6 +293,7 @@ target_link_libraries(javelin_app
         Qt::Widgets
         Qt::WebEngineCore
         Qt::Svg
+        KF6::CoreAddons
     PRIVATE
         javelin_gui
         javelin_jmap
@@ -283,10 +301,20 @@ target_link_libraries(javelin_app
 javelin_set_project_warnings(javelin_app)
 javelin_enable_static_analysis(javelin_app)
 javelin_enable_sanitizers(javelin_app)
+# QCoro and ProcessServices use exceptions internally
+target_compile_options(javelin_app PRIVATE -fexceptions)
 
 qt_add_executable(Javelin-Mail
     WIN32 MACOSX_BUNDLE
     src/app/main.cpp
+)
+
+# Copy the KXMLGUI .rc file into the build directory so KXmlGuiWindow can
+# locate it at runtime without a full install.
+configure_file(
+    ${PROJECT_SOURCE_DIR}/res/javelinmailui.rc
+    ${CMAKE_CURRENT_BINARY_DIR}/javelinmailui.rc
+    COPYONLY
 )
 
 qt_add_translations(
@@ -311,6 +339,10 @@ install(TARGETS Javelin-Mail
     BUNDLE DESTINATION .
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
+
+install(FILES res/javelinmailui.rc
+    DESTINATION ${KDE_INSTALL_KXMLGUIDIR}/javelinmail
 )
 
 qt_generate_deploy_app_script(
