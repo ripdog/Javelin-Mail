@@ -88,3 +88,6 @@ CMakeLists.txt.user*
 
 #docs
 /docs/vendor
+
+#AI crap
+/logs
