@@ -36,6 +36,8 @@ Thumbs.db
 /.qmake.cache
 /.qmake.stash
 **/.qmlls.ini
+/pkg
+*.pkg.*
 
 # qtcreator generated files
 *.pro.user*
@@ -94,3 +96,4 @@ compile_commands.json
 
 #AI crap
 /logs
+.codex

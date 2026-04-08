@@ -24,7 +24,7 @@ namespace javelin::jmap::cache
         [[nodiscard]] std::string
         serializeRights(const javelin::jmap::domain::MailboxRights& rights)
         {
-            glz::json_t object;
+            glz::generic object;
             object["mayReadItems"] = rights.mayReadItems;
             object["mayAddItems"] = rights.mayAddItems;
             object["mayRemoveItems"] = rights.mayRemoveItems;
@@ -48,7 +48,7 @@ namespace javelin::jmap::cache
         [[nodiscard]] javelin::jmap::domain::MailboxRights deserializeRights(const QString& json)
         {
             std::string buffer = json.toStdString();
-            glz::json_t object;
+            glz::generic object;
             const auto readError =
                 glz::read<glz::opts{.error_on_unknown_keys = false}>(object, buffer);
             if (readError || !object.is_object())

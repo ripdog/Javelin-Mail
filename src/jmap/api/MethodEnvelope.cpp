@@ -10,7 +10,7 @@ namespace
     struct RawMethodInvocation
     {
         std::string name;
-        glz::json_t arguments;
+        glz::generic arguments;
         std::string callId;
     };
 
@@ -59,7 +59,7 @@ namespace javelin::jmap::api
     namespace
     {
 
-        [[nodiscard]] std::string encodeJson(const glz::json_t& value)
+        [[nodiscard]] std::string encodeJson(const glz::generic& value)
         {
             std::string buffer;
             const auto writeError = glz::write_json(value, buffer);
@@ -71,10 +71,10 @@ namespace javelin::jmap::api
             return buffer;
         }
 
-        [[nodiscard]] std::optional<glz::json_t> decodeJson(const std::string& json)
+        [[nodiscard]] std::optional<glz::generic> decodeJson(const std::string& json)
         {
             std::string buffer{json};
-            glz::json_t value;
+            glz::generic value;
             const auto readError =
                 glz::read<glz::opts{.error_on_unknown_keys = false}>(value, buffer);
             if (readError)

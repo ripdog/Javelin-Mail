@@ -14,7 +14,7 @@ namespace javelin::jmap::api::detail
         std::string name;
         bool isPersonal = false;
         bool isReadOnly = false;
-        std::unordered_map<std::string, glz::json_t> accountCapabilities;
+        std::unordered_map<std::string, glz::generic> accountCapabilities;
     };
 
     struct RawSession
@@ -25,7 +25,7 @@ namespace javelin::jmap::api::detail
         std::string uploadUrl;
         std::optional<std::string> eventSourceUrl;
         std::string state;
-        std::unordered_map<std::string, glz::json_t> capabilities;
+        std::unordered_map<std::string, glz::generic> capabilities;
         std::unordered_map<std::string, RawAccount> accounts;
         std::unordered_map<std::string, std::string> primaryAccounts;
     };
@@ -69,14 +69,14 @@ namespace javelin::jmap::api
     {
 
         [[nodiscard]] bool
-        capabilityPresent(const std::unordered_map<std::string, glz::json_t>& capabilities,
+        capabilityPresent(const std::unordered_map<std::string, glz::generic>& capabilities,
                           const std::string_view uri)
         {
             return capabilities.contains(std::string{uri});
         }
 
         [[nodiscard]] std::optional<CoreCapability>
-        parseCoreCapability(const std::unordered_map<std::string, glz::json_t>& capabilities)
+        parseCoreCapability(const std::unordered_map<std::string, glz::generic>& capabilities)
         {
             const auto it = capabilities.find(std::string{coreCapabilityUri});
             if (it == capabilities.end())

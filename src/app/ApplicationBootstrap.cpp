@@ -18,6 +18,10 @@
 namespace javelin::app
 {
 
+#ifndef JAVELIN_APP_VERSION
+#define JAVELIN_APP_VERSION "0.0.0"
+#endif
+
     namespace
     {
         class ActivationTokenScope final
@@ -87,7 +91,8 @@ namespace javelin::app
     int ApplicationBootstrap::run()
     {
         KAboutData aboutData(QStringLiteral("javelinmail"), QStringLiteral("Javelin Mail"),
-                             QStringLiteral("0.1.0"), QStringLiteral("A JMAP email client"),
+                             QStringLiteral(JAVELIN_APP_VERSION),
+                             QStringLiteral("A JMAP email client"),
                              KAboutLicense::GPL_V3);
         aboutData.setOrganizationDomain("javelin.app");
         KAboutData::setApplicationData(aboutData);

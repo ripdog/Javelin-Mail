@@ -1,15 +1,18 @@
 cmake_minimum_required(VERSION 3.19)
-project(Javelin-Mail LANGUAGES CXX)
+project(Javelin-Mail VERSION 0.1.0 LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+option(JAVELIN_ENABLE_LOCAL_DATA_INSTALL "Copy app data into the active install prefix during builds" ON)
 
 include(cmake/Warnings.cmake)
 include(cmake/Dependencies.cmake)
 include(cmake/StaticAnalysis.cmake)
 include(cmake/Sanitizers.cmake)
+include(CTest)
 
 # 1. Find Qt6 FIRST
 find_package(Qt6 6.6 REQUIRED COMPONENTS Core DBus Network Sql Widgets Concurrent LinguistTools WebEngineCore WebEngineWidgets Svg)
@@ -30,7 +33,6 @@ include(FeatureSummary)
 find_package(KF6 REQUIRED COMPONENTS XmlGui CoreAddons)
 
 qt_standard_project_setup()
-enable_testing()
 
 set(JAVELIN_FORMAT_FILES
     src/app/ApplicationBootstrap.cpp
@@ -360,13 +362,15 @@ endif()
 # than running `cmake --install` (which would also try to install
 # FetchContent dependencies).
 set(_local_kxmlgui_dir "${CMAKE_INSTALL_PREFIX}/${KDE_INSTALL_KXMLGUIDIR}/javelinmail")
-add_custom_target(install_data ALL
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${_local_kxmlgui_dir}"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        ${PROJECT_SOURCE_DIR}/res/javelinmailui.rc
-        "${_local_kxmlgui_dir}/javelinmailui.rc"
-    COMMENT "Installing data files to local prefix"
-)
+if(JAVELIN_ENABLE_LOCAL_DATA_INSTALL)
+    add_custom_target(install_data ALL
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${_local_kxmlgui_dir}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${PROJECT_SOURCE_DIR}/res/javelinmailui.rc
+            "${_local_kxmlgui_dir}/javelinmailui.rc"
+        COMMENT "Installing data files to local prefix"
+    )
+endif()
 
 qt_add_translations(
     TARGETS Javelin-Mail
@@ -380,16 +384,21 @@ target_link_libraries(Javelin-Mail
 )
 target_compile_definitions(Javelin-Mail
     PRIVATE
+        JAVELIN_APP_VERSION="${PROJECT_VERSION}"
         JAVELIN_DATA_DIR="${CMAKE_INSTALL_PREFIX}/${KDE_INSTALL_DATADIR}"
 )
-add_dependencies(Javelin-Mail install_data)
+if(JAVELIN_ENABLE_LOCAL_DATA_INSTALL)
+    add_dependencies(Javelin-Mail install_data)
+endif()
 javelin_set_project_warnings(Javelin-Mail)
 javelin_enable_static_analysis(Javelin-Mail)
 javelin_enable_sanitizers(Javelin-Mail)
 
 javelin_add_format_targets(${JAVELIN_FORMAT_FILES})
 
-add_subdirectory(tests)
+if(BUILD_TESTING)
+    add_subdirectory(tests)
+endif()
 
 install(TARGETS Javelin-Mail
     BUNDLE DESTINATION .
@@ -401,9 +410,20 @@ install(FILES res/javelinmailui.rc
     DESTINATION ${KDE_INSTALL_KXMLGUIDIR}/javelinmail
 )
 
+install(FILES res/javelinmail.desktop
+    DESTINATION ${KDE_INSTALL_APPDIR}
+)
+
+install(FILES res/icon.svg
+    DESTINATION ${KDE_INSTALL_ICONDIR}/hicolor/scalable/apps
+    RENAME javelinmail.svg
+)
+
 qt_generate_deploy_app_script(
     TARGET Javelin-Mail
     OUTPUT_SCRIPT deploy_script
     NO_UNSUPPORTED_PLATFORM_ERROR
 )
-install(SCRIPT ${deploy_script})
+if(WIN32 OR APPLE)
+    install(SCRIPT ${deploy_script})
+endif()

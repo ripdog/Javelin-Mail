@@ -19,7 +19,7 @@ namespace
     {
         std::string accountId;
         std::string state;
-        std::vector<glz::json_t> list;
+        std::vector<glz::generic> list;
         std::vector<std::string> notFound;
     };
 
@@ -27,7 +27,7 @@ namespace
     {
         std::string accountId;
         std::string state;
-        std::vector<glz::json_t> list;
+        std::vector<glz::generic> list;
         std::vector<std::string> notFound;
     };
 
@@ -35,7 +35,7 @@ namespace
     {
         std::string accountId;
         std::string state;
-        std::vector<glz::json_t> list;
+        std::vector<glz::generic> list;
         std::vector<std::string> notFound;
     };
 
@@ -144,8 +144,8 @@ namespace
         std::string accountId;
         std::optional<std::string> oldState;
         std::string newState;
-        std::optional<std::unordered_map<std::string, glz::json_t>> updated;
-        std::optional<std::unordered_map<std::string, glz::json_t>> notUpdated;
+        std::optional<std::unordered_map<std::string, glz::generic>> updated;
+        std::optional<std::unordered_map<std::string, glz::generic>> notUpdated;
     };
 
     struct RawChangesResponse
@@ -416,7 +416,7 @@ namespace javelin::jmap::api
 
         template <typename Entity, typename Convert>
         [[nodiscard]] ParsedEnvelope<std::vector<Entity>>
-        convertEntities(const std::vector<glz::json_t>& rawEntities, Convert&& convert)
+        convertEntities(const std::vector<glz::generic>& rawEntities, Convert&& convert)
         {
             std::vector<Entity> entities;
             entities.reserve(rawEntities.size());
@@ -819,7 +819,7 @@ namespace javelin::jmap::api
 
         std::vector<std::string> updated;
         const auto& rawUpdated =
-            parsed.value->updated.value_or(std::unordered_map<std::string, glz::json_t>{});
+            parsed.value->updated.value_or(std::unordered_map<std::string, glz::generic>{});
         updated.reserve(rawUpdated.size());
         for (const auto& [emailId, ignored] : rawUpdated)
         {
@@ -829,7 +829,7 @@ namespace javelin::jmap::api
 
         std::vector<std::string> notUpdated;
         const auto& rawNotUpdated =
-            parsed.value->notUpdated.value_or(std::unordered_map<std::string, glz::json_t>{});
+            parsed.value->notUpdated.value_or(std::unordered_map<std::string, glz::generic>{});
         notUpdated.reserve(rawNotUpdated.size());
         for (const auto& [emailId, ignored] : rawNotUpdated)
         {

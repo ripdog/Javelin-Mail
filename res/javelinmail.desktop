@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Javelin Mail
+Comment=A JMAP email client
+Exec=Javelin-Mail
+Icon=javelinmail
+Terminal=false
+Categories=Network;Email;Office;
+StartupNotify=true
+StartupWMClass=Javelin-Mail
