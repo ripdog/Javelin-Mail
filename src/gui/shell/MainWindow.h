@@ -80,6 +80,7 @@ namespace javelin::gui::shell
         void showMoveMenu();
         void showMessageListContextMenu(const QPoint& position);
         void saveAttachment(std::string accountId, std::string emailId, std::string partId);
+        void saveAllAttachments(std::string accountId, std::string emailId);
         void openAttachment(std::string accountId, std::string emailId, std::string partId);
         void openPreferences();
         void reloadAccounts();

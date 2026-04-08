@@ -20,6 +20,7 @@
 #include <QCloseEvent>
 #include <QDebug>
 #include <QDesktopServices>
+#include <QDir>
 #include <QFileDialog>
 #include <QFrame>
 #include <QFutureWatcher>
@@ -43,6 +44,9 @@
 #include <QVBoxLayout>
 #include <QWidget>
 #include <QtConcurrent>
+
+#include <algorithm>
+#include <cctype>
 
 namespace javelin::gui::shell
 {
@@ -197,6 +201,25 @@ namespace javelin::gui::shell
             QString errorMessage;
         };
 
+        struct DownloadedAttachmentFile
+        {
+            QString fileName;
+            QByteArray payload;
+        };
+
+        struct SaveAllDownloadResult
+        {
+            std::vector<DownloadedAttachmentFile> files;
+            QString errorMessage;
+        };
+
+        struct BatchWriteResult
+        {
+            int savedCount = 0;
+            QString errorMessage;
+            QString failedPath;
+        };
+
         [[nodiscard]] QString sanitizedFileName(QString name, const QString& fallback)
         {
             name = name.trimmed();
@@ -263,6 +286,88 @@ namespace javelin::gui::shell
             }
 
             return FileWriteResult{.path = path, .errorMessage = {}};
+        }
+
+        [[nodiscard]] BatchWriteResult
+        writePayloadBatchToDirectory(const QString& directoryPath,
+                                     const std::vector<DownloadedAttachmentFile>& files)
+        {
+            QDir directory{directoryPath};
+            BatchWriteResult result;
+            for (const auto& file : files)
+            {
+                const auto writeResult = writePayloadToPath(directory.filePath(file.fileName),
+                                                            file.payload);
+                if (!writeResult.errorMessage.isEmpty())
+                {
+                    return BatchWriteResult{
+                        .savedCount = result.savedCount,
+                        .errorMessage = writeResult.errorMessage,
+                        .failedPath = writeResult.path,
+                    };
+                }
+
+                ++result.savedCount;
+            }
+
+            return result;
+        }
+
+        [[nodiscard]] std::vector<javelin::jmap::cache::MessageAttachment>
+        visibleDownloadableAttachments(const javelin::jmap::cache::MessageViewSnapshot& snapshot)
+        {
+            std::vector<javelin::jmap::cache::MessageAttachment> attachments;
+            attachments.reserve(snapshot.attachments.size());
+            for (const auto& attachment : snapshot.attachments)
+            {
+                const bool isEmbeddedInline =
+                    attachment.cid.has_value() && attachment.disposition.has_value() &&
+                    std::ranges::equal(*attachment.disposition, std::string_view{"inline"},
+                                       [](const char left, const char right)
+                                       {
+                                           return std::tolower(static_cast<unsigned char>(left)) ==
+                                                  std::tolower(static_cast<unsigned char>(right));
+                                       });
+                if (!isEmbeddedInline && attachment.blobId.has_value())
+                {
+                    attachments.push_back(attachment);
+                }
+            }
+
+            return attachments;
+        }
+
+        [[nodiscard]] QCoro::Task<SaveAllDownloadResult>
+        downloadAttachments(javelin::jmap::JmapCore& jmapCore,
+                            const javelin::jmap::LiveConnectionSettings& settings,
+                            const std::string& accountId, const std::string& emailId,
+                            const std::vector<javelin::jmap::cache::MessageAttachment>& attachments)
+        {
+            SaveAllDownloadResult result;
+            result.files.reserve(attachments.size());
+
+            for (const auto& attachment : attachments)
+            {
+                const auto downloadResult =
+                    co_await jmapCore.downloadAttachment(settings, accountId, emailId,
+                                                         attachment.partId);
+                if (const auto* error =
+                        std::get_if<javelin::jmap::LiveRefreshError>(&downloadResult))
+                {
+                    co_return SaveAllDownloadResult{
+                        .files = {},
+                        .errorMessage = error->message,
+                    };
+                }
+
+                const auto& download = std::get<javelin::jmap::AttachmentDownload>(downloadResult);
+                result.files.push_back(DownloadedAttachmentFile{
+                    .fileName = suggestedFileName(download),
+                    .payload = download.payload,
+                });
+            }
+
+            co_return result;
         }
 
         [[nodiscard]] QString tempAttachmentPath(QTemporaryDir& directory,
@@ -478,6 +583,10 @@ namespace javelin::gui::shell
                     saveAttachment(accountId.toStdString(), emailId.toStdString(),
                                    partId.toStdString());
                 });
+        connect(m_messageViewContainer,
+                &javelin::gui::messageview::MessageViewContainer::saveAllAttachmentsRequested, this,
+                [this](const QString& accountId, const QString& emailId)
+                { saveAllAttachments(accountId.toStdString(), emailId.toStdString()); });
         connect(m_messageViewContainer,
                 &javelin::gui::messageview::MessageViewContainer::openAttachmentRequested, this,
                 [this](const QString& accountId, const QString& emailId, const QString& partId)
@@ -767,6 +876,91 @@ namespace javelin::gui::shell
                 watcher->setFuture(
                     QtConcurrent::run([targetPath, payload = download.payload]
                                       { return writePayloadToPath(targetPath, payload); }));
+            });
+    }
+
+    void MainWindow::saveAllAttachments(std::string accountId, std::string emailId)
+    {
+        const auto snapshotResult = m_messageViewService.load(accountId, emailId);
+        if (const auto* error =
+                std::get_if<javelin::jmap::cache::DatabaseError>(&snapshotResult))
+        {
+            statusBar()->showMessage(error->message, 10000);
+            return;
+        }
+
+        const auto& snapshot =
+            std::get<std::optional<javelin::jmap::cache::MessageViewSnapshot>>(snapshotResult);
+        if (!snapshot.has_value())
+        {
+            statusBar()->showMessage(QStringLiteral("The selected message is unavailable."), 5000);
+            return;
+        }
+
+        const auto attachments = visibleDownloadableAttachments(*snapshot);
+        if (attachments.empty())
+        {
+            statusBar()->showMessage(QStringLiteral("No downloadable attachments are available."),
+                                     5000);
+            return;
+        }
+
+        const auto settings = javelin::gui::settings::PreferencesDialog::loadSettings();
+        if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
+            settings.apiKey.isEmpty())
+        {
+            statusBar()->showMessage(
+                QStringLiteral("Set Session URL, Login Email, and API Key in Preferences first."),
+                5000);
+            return;
+        }
+
+        const QString targetDirectory = QFileDialog::getExistingDirectory(
+            this, QStringLiteral("Save All Attachments"), QDir::homePath());
+        if (targetDirectory.isEmpty())
+        {
+            statusBar()->showMessage(QStringLiteral("Save all attachments canceled."), 3000);
+            return;
+        }
+
+        statusBar()->showMessage(QStringLiteral("Downloading attachments..."));
+        auto task = downloadAttachments(m_jmapCore, toLiveConnectionSettings(settings), accountId,
+                                        emailId, attachments);
+        QCoro::connect(
+            std::move(task), this,
+            [this, targetDirectory](SaveAllDownloadResult result)
+            {
+                if (!result.errorMessage.isEmpty())
+                {
+                    statusBar()->showMessage(result.errorMessage, 10000);
+                    return;
+                }
+
+                statusBar()->showMessage(QStringLiteral("Saving attachments..."));
+                auto* watcher = new QFutureWatcher<BatchWriteResult>(this);
+                connect(watcher, &QFutureWatcher<BatchWriteResult>::finished, this,
+                        [this, watcher]
+                        {
+                            const auto writeResult = watcher->result();
+                            if (!writeResult.errorMessage.isEmpty())
+                            {
+                                statusBar()->showMessage(
+                                    QStringLiteral("Failed to save attachments to %1: %2")
+                                        .arg(writeResult.failedPath, writeResult.errorMessage),
+                                    10000);
+                            }
+                            else
+                            {
+                                statusBar()->showMessage(
+                                    QStringLiteral("Saved %1 attachments.")
+                                        .arg(writeResult.savedCount),
+                                    5000);
+                            }
+                            watcher->deleteLater();
+                        });
+                watcher->setFuture(QtConcurrent::run(
+                    [targetDirectory, files = std::move(result.files)]
+                    { return writePayloadBatchToDirectory(targetDirectory, files); }));
             });
     }
 
