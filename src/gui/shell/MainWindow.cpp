@@ -22,11 +22,13 @@
 #include <QDebug>
 #include <QDesktopServices>
 #include <QDir>
+#include <QEvent>
 #include <QFileDialog>
 #include <QFrame>
 #include <QFutureWatcher>
 #include <QHBoxLayout>
 #include <QItemSelectionModel>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QListView>
 #include <QMenu>
@@ -356,14 +358,15 @@ namespace javelin::gui::shell
 
         m_messageView = new QListView(this);
         m_messageView->setModel(m_messageModel);
-        m_messageView->setItemDelegate(
-            new javelin::gui::messages::MessageListDelegate(m_messageView));
+        auto* messageListDelegate = new javelin::gui::messages::MessageListDelegate(m_messageView);
+        m_messageView->setItemDelegate(messageListDelegate);
         m_messageView->setSpacing(6);
         m_messageView->setFrameShape(QFrame::NoFrame);
         m_messageView->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
         m_messageView->setSelectionMode(QAbstractItemView::SingleSelection);
         m_messageView->setStyleSheet(
             QStringLiteral("QListView { background: #26272c; border: none; padding: 3px; }"));
+        m_messageView->installEventFilter(this);
 
         auto* messagePane = new QWidget(this);
         auto* messageLayout = new QVBoxLayout(messagePane);
@@ -417,6 +420,36 @@ namespace javelin::gui::shell
         m_messageView->setContextMenuPolicy(Qt::CustomContextMenu);
         connect(m_messageView, &QListView::customContextMenuRequested, this,
                 &MainWindow::showMessageListContextMenu);
+        connect(messageListDelegate,
+                &javelin::gui::messages::MessageListDelegate::threadExpansionToggled, this,
+                [this](const QModelIndex& index)
+                {
+                    if (!index.isValid())
+                    {
+                        return;
+                    }
+
+                    const auto threadId =
+                        index.data(javelin::gui::messages::MessageListModel::ThreadIdRole)
+                            .toString();
+                    if (threadId.isEmpty())
+                    {
+                        return;
+                    }
+
+                    const bool isExpanded =
+                        index.data(javelin::gui::messages::MessageListModel::IsExpandedRole)
+                            .toBool();
+                    if (isExpanded &&
+                        currentThreadId(*m_messageView) ==
+                            std::optional<std::string>{threadId.toStdString()})
+                    {
+                        m_messageView->setCurrentIndex(index);
+                    }
+
+                    static_cast<void>(
+                        m_messageModel->setThreadExpanded(threadId.toStdString(), !isExpanded));
+                });
 
         m_mainSplitter = new QSplitter(Qt::Horizontal, this);
         m_mainSplitter->addWidget(m_mailboxView);
@@ -502,6 +535,13 @@ namespace javelin::gui::shell
 
                 const auto emailId =
                     current.data(javelin::gui::messages::MessageListModel::EmailIdRole).toString();
+                const auto threadId =
+                    current.data(javelin::gui::messages::MessageListModel::ThreadIdRole).toString();
+                if (!threadId.isEmpty())
+                {
+                    static_cast<void>(m_messageModel->setThreadExpanded(threadId.toStdString(),
+                                                                       true));
+                }
                 m_messageViewContainer->setSelection(
                     m_messageViewService, accountId, mailboxId,
                     emailId.isEmpty() ? std::optional<std::string>{std::nullopt}
@@ -551,18 +591,18 @@ namespace javelin::gui::shell
         }
 
         QModelIndex selectedMessageIndex;
-        if (threadId.has_value())
-        {
-            selectedMessageIndex = findIndexByRole(
-                *m_messageModel, javelin::gui::messages::MessageListModel::ThreadIdRole,
-                QString::fromStdString(*threadId));
-        }
-
-        if (!selectedMessageIndex.isValid() && emailId.has_value())
+        if (emailId.has_value())
         {
             selectedMessageIndex = findIndexByRole(
                 *m_messageModel, javelin::gui::messages::MessageListModel::EmailIdRole,
                 QString::fromStdString(*emailId));
+        }
+
+        if (!selectedMessageIndex.isValid() && threadId.has_value())
+        {
+            selectedMessageIndex = findIndexByRole(
+                *m_messageModel, javelin::gui::messages::MessageListModel::ThreadIdRole,
+                QString::fromStdString(*threadId));
         }
 
         if (selectedMessageIndex.isValid())
@@ -634,6 +674,53 @@ namespace javelin::gui::shell
         m_deleteAction->setEnabled(hasSelection);
         m_moveAction->setEnabled(hasSelection);
         m_viewSourceAction->setEnabled(hasSelection);
+    }
+
+    bool MainWindow::eventFilter(QObject* watched, QEvent* event)
+    {
+        if (watched == m_messageView && event->type() == QEvent::KeyPress)
+        {
+            const auto* keyEvent = static_cast<QKeyEvent*>(event);
+            const QModelIndex currentIndex = m_messageView->currentIndex();
+            if (!currentIndex.isValid())
+            {
+                return KXmlGuiWindow::eventFilter(watched, event);
+            }
+
+            const auto threadId =
+                currentIndex.data(javelin::gui::messages::MessageListModel::ThreadIdRole).toString();
+            if (threadId.isEmpty())
+            {
+                return KXmlGuiWindow::eventFilter(watched, event);
+            }
+
+            if (keyEvent->key() == Qt::Key_Right)
+            {
+                if (m_messageModel->setThreadExpanded(threadId.toStdString(), true))
+                {
+                    return true;
+                }
+            }
+
+            if (keyEvent->key() == Qt::Key_Left)
+            {
+                if (m_messageModel->setThreadExpanded(threadId.toStdString(), false))
+                {
+                    const auto summaryEmailId =
+                        m_messageModel->summaryEmailIdForThread(threadId.toStdString());
+                    if (summaryEmailId.has_value())
+                    {
+                        restoreSelection(currentAccountId(*m_mailboxView),
+                                         currentMailboxId(*m_mailboxView),
+                                         std::optional<std::string>{threadId.toStdString()},
+                                         summaryEmailId);
+                    }
+                    return true;
+                }
+            }
+        }
+
+        return KXmlGuiWindow::eventFilter(watched, event);
     }
 
     void MainWindow::saveAttachment(std::string accountId, std::string emailId, std::string partId)

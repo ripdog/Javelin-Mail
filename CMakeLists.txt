@@ -59,6 +59,8 @@ set(JAVELIN_FORMAT_FILES
     src/gui/messageview/MessageViewContainer.h
     src/gui/settings/PreferencesDialog.cpp
     src/gui/settings/PreferencesDialog.h
+    src/gui/shell/MessageFileUtils.cpp
+    src/gui/shell/MessageFileUtils.h
     src/gui/shell/MainWindow.cpp
     src/gui/shell/MainWindow.h
     src/jmap/api/Error.cpp
@@ -279,6 +281,8 @@ add_library(javelin_gui STATIC
     src/gui/messageview/MessageViewContainer.h
     src/gui/settings/PreferencesDialog.cpp
     src/gui/settings/PreferencesDialog.h
+    src/gui/shell/MessageFileUtils.cpp
+    src/gui/shell/MessageFileUtils.h
     src/gui/shell/MainWindow.cpp
     src/gui/shell/MainWindow.h
 )

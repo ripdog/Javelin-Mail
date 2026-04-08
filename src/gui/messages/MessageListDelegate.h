@@ -3,6 +3,9 @@
 #include <QIcon>
 #include <QStyledItemDelegate>
 
+class QEvent;
+class QModelIndex;
+
 namespace javelin::gui::messages
 {
 
@@ -18,6 +21,12 @@ namespace javelin::gui::messages
                    const QModelIndex& index) const override;
         [[nodiscard]] QSize sizeHint(const QStyleOptionViewItem& option,
                                      const QModelIndex& index) const override;
+        bool editorEvent(QEvent* event, QAbstractItemModel* model,
+                         const QStyleOptionViewItem& option,
+                         const QModelIndex& index) override;
+
+      Q_SIGNALS:
+        void threadExpansionToggled(QModelIndex index);
 
       private:
         [[nodiscard]] const QIcon& attachmentIcon() const;

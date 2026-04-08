@@ -2,6 +2,7 @@
 #include "FixtureReader.h"
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/MailboxRepository.h"
+#include "jmap/cache/ThreadRepository.h"
 #include "jmap/domain/MailEntityParsers.h"
 
 #include <QCoreApplication>
@@ -210,6 +211,55 @@ TEST_CASE("query service returns paged compact message list rows", "[jmap][cache
     CHECK_FALSE(secondItems.front().isFlagged);
     REQUIRE(secondItems.front().from.has_value());
     CHECK(secondItems.front().from->email == "alice@example.com");
+}
+
+TEST_CASE("query service returns thread messages in cached thread order", "[jmap][cache][query]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+
+    auto first = loadEmailFixture();
+    first.id = "eml-1";
+    first.threadId = "thr-1";
+    first.receivedAt = "2026-03-30T06:06:00Z";
+    first.sentAt = "2026-03-30T06:06:00Z";
+    first.subject = "First";
+
+    auto second = first;
+    second.id = "eml-2";
+    second.receivedAt = "2026-03-30T10:25:00Z";
+    second.sentAt = "2026-03-30T10:25:00Z";
+    second.subject = "Second";
+
+    auto third = first;
+    third.id = "eml-3";
+    third.receivedAt = "2026-04-01T21:56:00Z";
+    third.sentAt = "2026-04-01T21:56:00Z";
+    third.subject = "Third";
+
+    javelin::jmap::cache::EmailRepository emailRepository{databaseContext.connection};
+    REQUIRE_FALSE(emailRepository.replaceAll("account-1", {first, second, third}).has_value());
+
+    javelin::jmap::cache::ThreadRepository threadRepository{databaseContext.connection};
+    REQUIRE_FALSE(threadRepository
+                      .replaceAll("account-1", {javelin::jmap::domain::Thread{
+                                                   .id = "thr-1",
+                                                   .emailIds = {"eml-2", "eml-1", "eml-3"},
+                                               }})
+                      .has_value());
+
+    javelin::jmap::cache::QueryService queryService{databaseContext.connection};
+    const auto result = queryService.listThreadMessages("account-1", "thr-1");
+
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MessageListItem>>(result));
+    const auto& items = std::get<std::vector<javelin::jmap::cache::MessageListItem>>(result);
+    REQUIRE(items.size() == 3);
+    CHECK(items[0].emailId == "eml-2");
+    CHECK(items[1].emailId == "eml-1");
+    CHECK(items[2].emailId == "eml-3");
 }
 
 TEST_CASE("query service SQL plans use the intended cache indexes", "[jmap][cache][query]")

@@ -1,10 +1,10 @@
 #pragma once
 
 #include "jmap/cache/QueryService.h"
-#include "jmap/query/QueryDiff.h"
 
 #include <QAbstractListModel>
 
+#include <cstddef>
 #include <optional>
 #include <string>
 #include <vector>
@@ -17,6 +17,12 @@ namespace javelin::gui::messages
         Q_OBJECT
 
       public:
+        enum class RowKind
+        {
+            ThreadSummary = 0,
+            ThreadMember = 1,
+        };
+
         enum Roles
         {
             EmailIdRole = Qt::UserRole + 1,
@@ -29,6 +35,9 @@ namespace javelin::gui::messages
             IsUnreadRole,
             IsFlaggedRole,
             ThreadMessageCountRole,
+            RowKindRole,
+            IsExpandedRole,
+            CanExpandRole,
         };
 
         explicit MessageListModel(javelin::jmap::cache::QueryService& queryService,
@@ -37,21 +46,45 @@ namespace javelin::gui::messages
 
         [[nodiscard]] int rowCount(const QModelIndex& parent = QModelIndex{}) const override;
         [[nodiscard]] QVariant data(const QModelIndex& index, int role) const override;
-        [[nodiscard]] std::optional<std::size_t>
-        indexOfThread(std::string_view threadId) const;
 
         void setMailboxContext(std::optional<std::string> accountId,
                                std::optional<std::string> mailboxId);
         void refresh();
+        [[nodiscard]] bool setThreadExpanded(std::string_view threadId, bool expanded);
+        [[nodiscard]] bool toggleThreadExpanded(std::string_view threadId);
+        [[nodiscard]] bool isThreadExpanded(std::string_view threadId) const;
+        [[nodiscard]] std::optional<std::string> summaryEmailIdForThread(
+            std::string_view threadId) const;
 
       private:
-        void reload(bool preserveSelection);
-        void applyRefresh(const std::vector<javelin::jmap::cache::MessageListItem>& items);
+        struct ThreadEntry
+        {
+            javelin::jmap::cache::MessageListItem summary;
+            std::vector<javelin::jmap::cache::MessageListItem> members;
+            bool membersLoaded = false;
+        };
+
+        struct VisibleRow
+        {
+            RowKind kind = RowKind::ThreadSummary;
+            std::size_t threadIndex = 0;
+            std::optional<std::size_t> memberIndex;
+        };
+
+        [[nodiscard]] const javelin::jmap::cache::MessageListItem&
+        itemForRow(const VisibleRow& row) const;
+        [[nodiscard]] std::optional<std::size_t> findThreadIndex(std::string_view threadId) const;
+        [[nodiscard]] std::optional<int> visibleSummaryRowForThread(std::size_t threadIndex) const;
+        [[nodiscard]] bool loadThreadMembers(std::size_t threadIndex);
+        void rebuildVisibleRows();
+        void reload();
 
         javelin::jmap::cache::QueryService& m_queryService;
         std::optional<std::string> m_accountId;
         std::optional<std::string> m_mailboxId;
-        std::vector<javelin::jmap::cache::MessageListItem> m_items;
+        std::vector<ThreadEntry> m_threads;
+        std::vector<VisibleRow> m_rows;
+        std::vector<std::string> m_expandedThreadIds;
     };
 
 } // namespace javelin::gui::messages

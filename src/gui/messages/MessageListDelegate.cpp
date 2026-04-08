@@ -4,6 +4,7 @@
 
 #include <QApplication>
 #include <QDateTime>
+#include <QMouseEvent>
 #include <QPainter>
 #include <QStyle>
 
@@ -28,8 +29,15 @@ namespace javelin::gui::messages
             return rect.adjusted(amount, amount, -amount, -amount);
         }
 
+        [[nodiscard]] QRect disclosureRect(const QRect& contentRect, const bool isMemberRow)
+        {
+            const int leftInset = isMemberRow ? 24 : 0;
+            return QRect{contentRect.left() + leftInset, contentRect.top() + 2, 18, 18};
+        }
+
         constexpr int unreadDotDiameter = 10;
         constexpr int unreadDotGap = 10;
+        constexpr int memberIndent = 22;
 
     } // namespace
 
@@ -68,15 +76,23 @@ namespace javelin::gui::messages
         painter->setRenderHint(QPainter::TextAntialiasing, true);
 
         const auto outerRect = insetRect(option.rect, 1);
-        const auto cardRect = insetRect(outerRect, 1);
+        const auto rowKind =
+            static_cast<MessageListModel::RowKind>(index.data(MessageListModel::RowKindRole).toInt());
+        const bool isMemberRow = rowKind == MessageListModel::RowKind::ThreadMember;
+        const auto cardRect = isMemberRow ? insetRect(outerRect.adjusted(memberIndent, 0, 0, 0), 1)
+                                          : insetRect(outerRect, 1);
         const bool isSelected = (option.state & QStyle::State_Selected) != 0;
         const bool isUnread = index.data(MessageListModel::IsUnreadRole).toBool();
         const bool isFlagged = index.data(MessageListModel::IsFlaggedRole).toBool();
         const bool hasAttachment = index.data(MessageListModel::HasAttachmentRole).toBool();
         const auto threadCount = index.data(MessageListModel::ThreadMessageCountRole).toULongLong();
+        const bool canExpand = index.data(MessageListModel::CanExpandRole).toBool();
+        const bool isExpanded = index.data(MessageListModel::IsExpandedRole).toBool();
 
-        const QColor background = isSelected ? QColor{37, 29, 45} : QColor{27, 28, 32};
-        const QColor border = isSelected ? QColor{102, 72, 122} : QColor{58, 60, 68};
+        const QColor background = isSelected ? QColor{37, 29, 45}
+                                             : (isMemberRow ? QColor{30, 31, 36} : QColor{27, 28, 32});
+        const QColor border = isSelected ? QColor{102, 72, 122}
+                                         : (isMemberRow ? QColor{70, 72, 80} : QColor{58, 60, 68});
         const QColor senderColor = isUnread ? QColor{235, 236, 240} : QColor{214, 215, 220};
         const QColor textColor = QColor{214, 215, 220};
         const QColor mutedColor = QColor{154, 156, 164};
@@ -93,7 +109,20 @@ namespace javelin::gui::messages
         painter->setBrush(Qt::NoBrush);
         painter->drawRoundedRect(cardRect, 10, 10);
 
-        const QRect contentRect = insetRect(cardRect, 14);
+        QRect contentRect = insetRect(cardRect, 14);
+        if (canExpand)
+        {
+            const QRect arrowRect = disclosureRect(contentRect, isMemberRow);
+            const auto primitive = isExpanded ? QStyle::PE_IndicatorArrowDown
+                                              : QStyle::PE_IndicatorArrowRight;
+            QStyleOption arrowOption;
+            arrowOption.rect = arrowRect;
+            arrowOption.palette = option.palette;
+            arrowOption.state = QStyle::State_Enabled;
+            QApplication::style()->drawPrimitive(primitive, &arrowOption, painter);
+            contentRect.adjust(arrowRect.width() + 8, 0, 0, 0);
+        }
+
         const auto sender = index.data(MessageListModel::SenderDisplayRole).toString();
         const auto subject = index.data(MessageListModel::SubjectRole).toString();
         const auto preview = index.data(MessageListModel::PreviewRole).toString();
@@ -101,7 +130,7 @@ namespace javelin::gui::messages
             formattedTimestamp(index.data(MessageListModel::ReceivedAtRole).toString());
 
         auto senderFont = option.font;
-        senderFont.setPointSize(senderFont.pointSize() + 1);
+        senderFont.setPointSize(senderFont.pointSize() + (isMemberRow ? 0 : 1));
         senderFont.setBold(true);
         painter->setFont(senderFont);
         painter->setPen(senderColor);
@@ -140,7 +169,7 @@ namespace javelin::gui::messages
         painter->drawText(rightHeaderRect, Qt::AlignRight | Qt::AlignVCenter, timestamp);
 
         auto subjectFont = option.font;
-        subjectFont.setPointSize(subjectFont.pointSize() + 2);
+        subjectFont.setPointSize(subjectFont.pointSize() + (isMemberRow ? 1 : 2));
         painter->setFont(subjectFont);
         painter->setPen(textColor);
         const auto subjectMetrics = QFontMetrics{subjectFont};
@@ -154,10 +183,11 @@ namespace javelin::gui::messages
         painter->setFont(previewFont);
         painter->setPen(mutedColor);
         const auto previewMetrics = QFontMetrics{previewFont};
-        const QString lowerMeta = threadCount > 1
-                                      ? QStringLiteral("Reply thread  %1 messages").arg(threadCount)
-                                      : QString{};
-        const QString lowerLine = lowerMeta.isEmpty() ? preview : lowerMeta;
+        QString lowerLine = preview;
+        if (!isMemberRow && threadCount > 1)
+        {
+            lowerLine = QStringLiteral("Reply thread  %1 messages").arg(threadCount);
+        }
         constexpr int attachmentWidth = 18;
         constexpr int attachmentGap = 8;
         const int attachmentReserve = hasAttachment ? attachmentWidth + attachmentGap : 0;
@@ -174,7 +204,7 @@ namespace javelin::gui::messages
             painter->drawText(QRect{contentRect.right() - 24, contentRect.bottom() - 4, 24, 20},
                               Qt::AlignRight | Qt::AlignBottom, QStringLiteral("HOT"));
         }
-        else if (threadCount > 1)
+        else if (!isMemberRow && threadCount > 1)
         {
             painter->setPen(accentColor);
             painter->drawText(QRect{contentRect.right() - 32, contentRect.bottom() - 4, 32, 20},
@@ -196,11 +226,47 @@ namespace javelin::gui::messages
                                         const QModelIndex& index) const
     {
         Q_UNUSED(option);
-        const auto threadCount = index.data(MessageListModel::ThreadMessageCountRole).toULongLong();
+        const auto rowKind =
+            static_cast<MessageListModel::RowKind>(index.data(MessageListModel::RowKindRole).toInt());
         return {
             0,
-            threadCount > 1 ? 112 : 106,
+            rowKind == MessageListModel::RowKind::ThreadMember ? 98 : 112,
         };
+    }
+
+    bool MessageListDelegate::editorEvent(QEvent* event, QAbstractItemModel* model,
+                                          const QStyleOptionViewItem& option,
+                                          const QModelIndex& index)
+    {
+        Q_UNUSED(model);
+        if (!index.isValid() || !index.data(MessageListModel::CanExpandRole).toBool())
+        {
+            return QStyledItemDelegate::editorEvent(event, model, option, index);
+        }
+
+        if (event->type() != QEvent::MouseButtonPress &&
+            event->type() != QEvent::MouseButtonRelease &&
+            event->type() != QEvent::MouseButtonDblClick)
+        {
+            return QStyledItemDelegate::editorEvent(event, model, option, index);
+        }
+
+        const auto* mouseEvent = static_cast<QMouseEvent*>(event);
+        QRect contentRect = insetRect(insetRect(option.rect, 1), 15);
+        const bool isMemberRow =
+            static_cast<MessageListModel::RowKind>(index.data(MessageListModel::RowKindRole).toInt()) ==
+            MessageListModel::RowKind::ThreadMember;
+        if (disclosureRect(contentRect, isMemberRow).contains(mouseEvent->position().toPoint()))
+        {
+            if (event->type() == QEvent::MouseButtonRelease &&
+                mouseEvent->button() == Qt::LeftButton)
+            {
+                Q_EMIT threadExpansionToggled(index);
+            }
+            return true;
+        }
+
+        return QStyledItemDelegate::editorEvent(event, model, option, index);
     }
 
 } // namespace javelin::gui::messages

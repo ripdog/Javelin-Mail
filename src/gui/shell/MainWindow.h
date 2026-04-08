@@ -97,6 +97,7 @@ namespace javelin::gui::shell
         void updateMessageListHeader();
         void updateMessageActions();
         void closeEvent(QCloseEvent* event) override;
+        bool eventFilter(QObject* watched, QEvent* event) override;
 
         javelin::jmap::JmapCore& m_jmapCore;
         javelin::jmap::cache::AccountRepository& m_accountRepository;
