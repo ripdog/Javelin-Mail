@@ -309,6 +309,8 @@ namespace javelin::gui::messageview
 
         m_htmlView = new HtmlMessageView(this);
         m_htmlView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+        connect(m_htmlView, &HtmlMessageView::viewSourceRequested, this,
+                &MessageViewContainer::viewSourceRequested);
 
         m_bodyStack->addWidget(m_placeholderPanel);
         m_bodyStack->addWidget(m_plainTextView);

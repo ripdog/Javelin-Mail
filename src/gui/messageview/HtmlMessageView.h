@@ -11,6 +11,8 @@ namespace javelin::gui::messageview
 
     class HtmlMessageView : public QWidget
     {
+        Q_OBJECT
+
       public:
         explicit HtmlMessageView(QWidget* parent = nullptr);
         ~HtmlMessageView() override;
@@ -19,6 +21,9 @@ namespace javelin::gui::messageview
         void clearDocument();
         void setRemoteContentEnabled(bool enabled);
         [[nodiscard]] bool remoteContentEnabled() const;
+
+      Q_SIGNALS:
+        void viewSourceRequested();
 
       private:
         void applyRemoteContentPolicy();

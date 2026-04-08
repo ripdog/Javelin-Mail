@@ -130,6 +130,12 @@ namespace javelin::gui::shell
             return currentIndex.row();
         }
 
+        [[nodiscard]] bool indexIsUnread(const QModelIndex& index)
+        {
+            return index.isValid() &&
+                   index.data(javelin::gui::messages::MessageListModel::IsUnreadRole).toBool();
+        }
+
         [[nodiscard]] QModelIndex findIndexByRole(const QAbstractItemModel& model, const int role,
                                                   const QString& value,
                                                   const QModelIndex& parent = {})
@@ -345,6 +351,11 @@ namespace javelin::gui::shell
         actionCollection()->addAction(QStringLiteral("archive_email"), m_archiveAction);
         actionCollection()->setDefaultShortcut(m_archiveAction, QKeySequence{Qt::Key_A});
 
+        m_markUnreadAction = new QAction(QIcon::fromTheme(QStringLiteral("mail-mark-unread")),
+                                         QStringLiteral("Mark &Unread"), this);
+        connect(m_markUnreadAction, &QAction::triggered, this, &MainWindow::markSelectedEmailUnread);
+        actionCollection()->addAction(QStringLiteral("mark_email_unread"), m_markUnreadAction);
+
         m_deleteAction = new QAction(QIcon::fromTheme(QStringLiteral("mail-delete")),
                                      QStringLiteral("&Delete"), this);
         m_deleteAction->setShortcut(QKeySequence::Delete);
@@ -438,6 +449,9 @@ namespace javelin::gui::shell
                     openAttachment(accountId.toStdString(), emailId.toStdString(),
                                    partId.toStdString());
                 });
+        connect(m_messageViewContainer,
+                &javelin::gui::messageview::MessageViewContainer::viewSourceRequested, this,
+                &MainWindow::viewSelectedMessageSource);
 
         m_messageView->setContextMenuPolicy(Qt::CustomContextMenu);
         connect(m_messageView, &QListView::customContextMenuRequested, this,
@@ -559,6 +573,7 @@ namespace javelin::gui::shell
                     current.data(javelin::gui::messages::MessageListModel::EmailIdRole).toString();
                 const auto threadId =
                     current.data(javelin::gui::messages::MessageListModel::ThreadIdRole).toString();
+                const bool isUnread = indexIsUnread(current);
                 if (!threadId.isEmpty())
                 {
                     static_cast<void>(m_messageModel->setThreadExpanded(threadId.toStdString(),
@@ -580,6 +595,10 @@ namespace javelin::gui::shell
                                                  "message if needed."));
                     }
                     refreshSelectedMessageContent(*accountId, emailId.toStdString());
+                    if (isUnread)
+                    {
+                        queueMarkEmailRead(*accountId, emailId.toStdString());
+                    }
                 }
             });
     }
@@ -739,7 +758,9 @@ namespace javelin::gui::shell
         const bool hasSelection = currentAccountId(*m_mailboxView).has_value() &&
                                   currentMailboxId(*m_mailboxView).has_value() &&
                                   currentEmailId(*m_messageView).has_value();
+        const bool isUnread = indexIsUnread(m_messageView->currentIndex());
         m_archiveAction->setEnabled(hasSelection);
+        m_markUnreadAction->setEnabled(hasSelection && !isUnread);
         m_deleteAction->setEnabled(hasSelection);
         m_moveAction->setEnabled(hasSelection);
         m_viewSourceAction->setEnabled(hasSelection);
@@ -1384,6 +1405,48 @@ namespace javelin::gui::shell
                        });
     }
 
+    void MainWindow::queueMarkEmailRead(std::string accountId, std::string emailId)
+    {
+        const auto result = m_jmapCore.queueMarkEmailRead(accountId, emailId);
+        if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+        {
+            statusBar()->showMessage(error->message, 10000);
+            return;
+        }
+
+        refreshMessageListPreservingSelection();
+        refreshSelectionFromModels();
+        submitQueuedEmailMutations(std::move(accountId));
+    }
+
+    void MainWindow::markSelectedEmailUnread()
+    {
+        const auto accountId = currentAccountId(*m_mailboxView);
+        const auto emailId = currentEmailId(*m_messageView);
+        if (!accountId.has_value() || !emailId.has_value())
+        {
+            statusBar()->showMessage(QStringLiteral("Select a message to mark unread."), 3000);
+            return;
+        }
+
+        if (indexIsUnread(m_messageView->currentIndex()))
+        {
+            return;
+        }
+
+        const auto result = m_jmapCore.queueMarkEmailUnread(*accountId, *emailId);
+        if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+        {
+            statusBar()->showMessage(error->message, 10000);
+            return;
+        }
+
+        refreshMessageListPreservingSelection();
+        refreshSelectionFromModels();
+        statusBar()->showMessage(QStringLiteral("Marked unread."), 5000);
+        submitQueuedEmailMutations(*accountId);
+    }
+
     void MainWindow::showMessageListContextMenu(const QPoint& position)
     {
         const QModelIndex index = m_messageView->indexAt(position);
@@ -1408,6 +1471,7 @@ namespace javelin::gui::shell
         menu.addAction(m_viewSourceAction);
         menu.addSeparator();
         menu.addAction(m_archiveAction);
+        menu.addAction(m_markUnreadAction);
         menu.addAction(m_deleteAction);
         menu.addSeparator();
         auto* moveMenu = menu.addMenu(QStringLiteral("Move to"));
@@ -1440,6 +1504,51 @@ namespace javelin::gui::shell
         }
 
         menu.exec(m_messageView->viewport()->mapToGlobal(position));
+    }
+
+    void MainWindow::refreshMessageListPreservingSelection()
+    {
+        const auto currentAccount = currentAccountId(*m_mailboxView);
+        const auto currentMailbox = currentMailboxId(*m_mailboxView);
+        const auto currentThread = currentThreadId(*m_messageView);
+        const auto currentEmail = currentEmailId(*m_messageView);
+
+        QSignalBlocker blocker{m_messageView->selectionModel()};
+        m_messageModel->refresh();
+        restoreSelection(currentAccount, currentMailbox, currentThread, currentEmail);
+    }
+
+    void MainWindow::submitQueuedEmailMutations(std::string accountId)
+    {
+        const auto settings = javelin::gui::settings::PreferencesDialog::loadSettings();
+        if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
+            settings.apiKey.isEmpty())
+        {
+            return;
+        }
+
+        auto task =
+            m_jmapCore.submitPendingEmailMutations(toLiveConnectionSettings(settings), accountId);
+        QCoro::connect(std::move(task), this,
+                       [this](javelin::jmap::SubmittedEmailMutationsResult submitResult)
+                       {
+                           if (const auto* error =
+                                   std::get_if<javelin::jmap::LiveRefreshError>(&submitResult))
+                           {
+                               statusBar()->showMessage(error->message, 10000);
+                               return;
+                           }
+
+                           const auto& summary =
+                               std::get<javelin::jmap::SubmittedEmailMutations>(submitResult);
+                           if (summary.updatedEmailCount == 0)
+                           {
+                               return;
+                           }
+
+                           refreshMessageListPreservingSelection();
+                           refreshSelectionFromModels();
+                       });
     }
 
     void MainWindow::viewSelectedMessageSource()

@@ -8,6 +8,7 @@
 #include "jmap/domain/MailEntityParsers.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
 #include "jmap/sync/MailboxRefreshExecutor.h"
+#include "jmap/sync/PendingActions.h"
 
 #include <QCoroTask>
 
@@ -301,6 +302,89 @@ TEST_CASE("mailbox refresh executor bootstraps a collapsed mailbox into the cach
     REQUIRE(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(queryState).has_value());
     CHECK(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(queryState)->stateToken ==
           "query-state-1");
+}
+
+TEST_CASE("mailbox refresh executor reapplies pending keyword mutations after a full refresh",
+          "[jmap][sync][refresh]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+
+    javelin::jmap::sync::PendingActionRepository pendingActionRepository{
+        databaseContext.connection};
+    REQUIRE_FALSE(
+        pendingActionRepository
+            .put({
+                .pendingActionId = "action-unread",
+                .accountId = "account-1",
+                .status = javelin::jmap::sync::PendingActionStatus::Pending,
+                .emailPatch =
+                    {
+                        .emailId = "eml-1",
+                        .addMailboxIds = {},
+                        .removeMailboxIds = {},
+                        .addKeywords = {},
+                        .removeKeywords = {"$seen"},
+                    },
+            })
+            .has_value());
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body = QByteArray::fromStdString(serializeResponseEnvelope({
+            .methodResponses =
+                {
+                    javelin::jmap::api::MethodInvocation{
+                        .name = "Email/query",
+                        .arguments =
+                            R"({"accountId":"account-1","queryState":"query-state-1","canCalculateChanges":true,"position":0,"ids":["eml-1"],"total":1})",
+                        .callId = "mailbox-query",
+                    },
+                    javelin::jmap::api::MethodInvocation{
+                        .name = "Email/get",
+                        .arguments = emailGetArguments(
+                            "email-state-1",
+                            javelin::tests::loadFixture("jmap/entities/email.json")),
+                        .callId = "thread-ids-get",
+                    },
+                    javelin::jmap::api::MethodInvocation{
+                        .name = "Thread/get",
+                        .arguments =
+                            R"({"accountId":"account-1","state":"thread-state-1","list":[{"id":"thr-123","emailIds":["eml-1"]}],"notFound":[]})",
+                        .callId = "threads-get",
+                    },
+                    javelin::jmap::api::MethodInvocation{
+                        .name = "Email/get",
+                        .arguments = emailGetArguments(
+                            "email-state-1",
+                            javelin::tests::loadFixture("jmap/entities/email.json")),
+                        .callId = "mailbox-emails-get",
+                    },
+                },
+            .createdIds = std::nullopt,
+            .sessionState = "session-state-1",
+        })),
+    });
+
+    javelin::jmap::api::MethodCaller methodCaller{transport};
+    javelin::jmap::sync::MailboxRefreshExecutor executor{
+        databaseContext.connection, methodCaller, makeRequestContext()};
+    const auto result =
+        QCoro::waitFor(executor.refreshCollapsedMailbox("account-1", "mbx-inbox", {}));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailboxRefreshSummary>(result));
+
+    javelin::jmap::cache::EmailRepository emailRepository{databaseContext.connection};
+    const auto emailResult = emailRepository.find("account-1", "eml-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(emailResult));
+    const auto& email = std::get<std::optional<javelin::jmap::domain::Email>>(emailResult);
+    REQUIRE(email.has_value());
+    CHECK(std::find(email->keywords.cbegin(), email->keywords.cend(), std::string{"$seen"}) ==
+          email->keywords.cend());
 }
 
 TEST_CASE("mailbox refresh executor applies updated-only deltas without full rebuild",

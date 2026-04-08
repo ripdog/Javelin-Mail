@@ -76,6 +76,8 @@ namespace javelin::gui::shell
         void queueMoveEmail(std::string accountId, std::string sourceMailboxId,
                             std::string destinationMailboxId, std::string emailId,
                             QString successMessage);
+        void queueMarkEmailRead(std::string accountId, std::string emailId);
+        void markSelectedEmailUnread();
         void archiveSelectedEmail();
         void deleteSelectedEmail();
         void showMoveMenu();
@@ -97,6 +99,8 @@ namespace javelin::gui::shell
                                                  std::optional<int> previousMessageRow);
         [[nodiscard]] QModelIndex restoreMessageSelection(std::optional<std::string> threadId,
                                                           std::optional<std::string> emailId);
+        void refreshMessageListPreservingSelection();
+        void submitQueuedEmailMutations(std::string accountId);
         void refreshSelectionFromModels();
         void restorePersistentState();
         void savePersistentState() const;
@@ -127,6 +131,7 @@ namespace javelin::gui::shell
         QAction* m_quitAction = nullptr;
         QAction* m_preferencesAction = nullptr;
         QAction* m_archiveAction = nullptr;
+        QAction* m_markUnreadAction = nullptr;
         QAction* m_deleteAction = nullptr;
         QAction* m_moveAction = nullptr;
         QAction* m_viewSourceAction = nullptr;

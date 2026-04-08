@@ -288,6 +288,48 @@ TEST_CASE("JmapCore queues archive and delete mailbox moves as pending actions",
                       }));
 }
 
+TEST_CASE("JmapCore queues read keyword mutations as pending actions",
+          "[jmap][core][pending-actions]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    auto email = loadEmailFixture();
+    email.id = "eml-1";
+    email.threadId = "thr-1";
+    email.mailboxIds = {"mbx-inbox"};
+    email.keywords = {};
+
+    javelin::jmap::cache::EmailRepository emailRepository{databaseContext.connection};
+    REQUIRE_FALSE(emailRepository.replaceAll("account-1", {email}).has_value());
+
+    FakeTransport transport;
+    javelin::jmap::JmapCore core{databaseContext.connection, transport};
+
+    const auto markReadResult = core.queueMarkEmailRead("account-1", "eml-1");
+    REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(markReadResult));
+
+    const auto readEmailResult = emailRepository.find("account-1", "eml-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(readEmailResult));
+    const auto& readEmail =
+        std::get<std::optional<javelin::jmap::domain::Email>>(readEmailResult);
+    REQUIRE(readEmail.has_value());
+    CHECK(readEmail->keywords == std::vector<std::string>{"$seen"});
+
+    const auto markUnreadResult = core.queueMarkEmailUnread("account-1", "eml-1");
+    REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(markUnreadResult));
+
+    const auto unreadEmailResult = emailRepository.find("account-1", "eml-1");
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(unreadEmailResult));
+    const auto& unreadEmail =
+        std::get<std::optional<javelin::jmap::domain::Email>>(unreadEmailResult);
+    REQUIRE(unreadEmail.has_value());
+    CHECK(unreadEmail->keywords.empty());
+}
+
 TEST_CASE("JmapCore downloadAttachment fetches normal attachment payloads on demand",
           "[jmap][core][message-content]")
 {
@@ -502,4 +544,67 @@ TEST_CASE("JmapCore submits queued mailbox mutations through Email/set",
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::PendingActionRecord>>(
         pendingResult));
     CHECK(std::get<std::vector<javelin::jmap::sync::PendingActionRecord>>(pendingResult).empty());
+}
+
+TEST_CASE("JmapCore submits queued read keyword mutations through Email/set",
+          "[jmap][core][pending-actions]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    javelin::jmap::cache::SessionRepository sessionRepository{databaseContext.connection};
+    const auto session = loadSessionFixture();
+    REQUIRE_FALSE(sessionRepository.replace("u1", session).has_value());
+
+    auto email = loadEmailFixture();
+    email.id = "eml-1";
+    email.threadId = "thr-1";
+    email.mailboxIds = {"mbx-inbox"};
+    email.keywords = {};
+
+    javelin::jmap::cache::EmailRepository emailRepository{databaseContext.connection};
+    REQUIRE_FALSE(emailRepository.replaceAll("u1", {email}).has_value());
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body =
+            R"({"methodResponses":[["Email/set",{"accountId":"u1","oldState":"email-state-1","newState":"email-state-2","updated":{"eml-1":null},"notUpdated":{}},"queued-email-set"]],"createdIds":{},"sessionState":"session-state-2"})",
+    });
+
+    javelin::jmap::JmapCore core{databaseContext.connection, transport};
+    const auto queuedResult = core.queueMarkEmailRead("u1", "eml-1");
+    REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(queuedResult));
+
+    const auto submitResult = QCoro::waitFor(core.submitPendingEmailMutations(
+        {
+            .sessionUrl = "https://mail.example.com/.well-known/jmap",
+            .loginEmail = "alice@example.com",
+            .apiKey = "access-token",
+        },
+        "u1"));
+
+    if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&submitResult))
+    {
+        FAIL(error->message.toStdString());
+    }
+
+    REQUIRE(std::holds_alternative<javelin::jmap::SubmittedEmailMutations>(submitResult));
+    const auto& summary = std::get<javelin::jmap::SubmittedEmailMutations>(submitResult);
+    CHECK(summary.attemptedEmailCount == 1);
+    CHECK(summary.updatedEmailCount == 1);
+    CHECK(summary.failedEmailCount == 0);
+
+    REQUIRE(transport.requests.size() == 1);
+    CHECK(transport.requests.front().body.contains("\"Email/set\""));
+    CHECK(transport.requests.front().body.contains("\"$seen\":true"));
+
+    const auto refreshedEmailResult = emailRepository.find("u1", "eml-1");
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(refreshedEmailResult));
+    const auto& refreshedEmail =
+        std::get<std::optional<javelin::jmap::domain::Email>>(refreshedEmailResult);
+    REQUIRE(refreshedEmail.has_value());
+    CHECK(refreshedEmail->keywords == std::vector<std::string>{"$seen"});
 }

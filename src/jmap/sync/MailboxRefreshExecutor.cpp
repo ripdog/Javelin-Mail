@@ -7,6 +7,7 @@
 #include "jmap/cache/SyncStateRepository.h"
 #include "jmap/cache/ThreadRepository.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
+#include "jmap/sync/PendingActions.h"
 #include "jmap/sync/RefreshNotificationPlanner.h"
 #include "jmap/sync/SyncPlanner.h"
 
@@ -132,6 +133,82 @@ namespace javelin::jmap::sync
             }
 
             return std::get<std::vector<javelin::jmap::cache::MessageListItem>>(result).size();
+        }
+
+        [[nodiscard]] std::vector<javelin::jmap::sync::PendingActionRecord>
+        activePendingActions(const std::vector<javelin::jmap::sync::PendingActionRecord>& actions)
+        {
+            std::vector<javelin::jmap::sync::PendingActionRecord> filtered;
+            filtered.reserve(actions.size());
+            for (const auto& action : actions)
+            {
+                if (action.status != javelin::jmap::sync::PendingActionStatus::Failed)
+                {
+                    filtered.push_back(action);
+                }
+            }
+
+            return filtered;
+        }
+
+        [[nodiscard]] std::optional<MailboxRefreshError> reapplyPendingEmailPatches(
+            javelin::jmap::cache::DatabaseConnection& databaseConnection,
+            const std::string_view accountId, std::vector<std::string> emailIds)
+        {
+            const auto ids = deduplicatedIds(std::move(emailIds));
+            if (ids.empty())
+            {
+                return std::nullopt;
+            }
+
+            javelin::jmap::cache::EmailRepository emailRepository{databaseConnection};
+            javelin::jmap::sync::PendingActionRepository pendingActionRepository{databaseConnection};
+            std::vector<javelin::jmap::domain::Email> reconciledEmails;
+            reconciledEmails.reserve(ids.size());
+
+            for (const auto& emailId : ids)
+            {
+                const auto emailResult = emailRepository.find(accountId, emailId);
+                if (const auto* error =
+                        std::get_if<javelin::jmap::cache::DatabaseError>(&emailResult))
+                {
+                    return MailboxRefreshError{.message = error->message};
+                }
+
+                const auto& email =
+                    std::get<std::optional<javelin::jmap::domain::Email>>(emailResult);
+                if (!email.has_value())
+                {
+                    continue;
+                }
+
+                const auto pendingResult = pendingActionRepository.listForEmail(accountId, emailId);
+                if (const auto* error =
+                        std::get_if<javelin::jmap::cache::DatabaseError>(&pendingResult))
+                {
+                    return MailboxRefreshError{.message = error->message};
+                }
+
+                const auto pendingActions = activePendingActions(
+                    std::get<std::vector<javelin::jmap::sync::PendingActionRecord>>(pendingResult));
+                if (pendingActions.empty())
+                {
+                    continue;
+                }
+
+                reconciledEmails.push_back(
+                    javelin::jmap::sync::mergePendingEmailPatch(*email, pendingActions));
+            }
+
+            if (!reconciledEmails.empty())
+            {
+                if (const auto error = emailRepository.upsertMany(accountId, reconciledEmails))
+                {
+                    return MailboxRefreshError{.message = error->message};
+                }
+            }
+
+            return std::nullopt;
         }
 
         struct CollapsedMailboxFetch
@@ -700,6 +777,19 @@ namespace javelin::jmap::sync
                     {
                         co_return MailboxRefreshError{.message = error->message};
                     }
+
+                    std::vector<std::string> updatedEmailIds;
+                    updatedEmailIds.reserve(incremental.updatedEmails.size());
+                    for (const auto& email : incremental.updatedEmails)
+                    {
+                        updatedEmailIds.push_back(email.id);
+                    }
+
+                    if (const auto error = reapplyPendingEmailPatches(
+                            m_databaseConnection, accountId, std::move(updatedEmailIds)))
+                    {
+                        co_return *error;
+                    }
                 }
 
                 if (const auto error =
@@ -745,6 +835,18 @@ namespace javelin::jmap::sync
             if (const auto error = emailRepository.replaceAll(accountId, fetch.emails))
             {
                 co_return MailboxRefreshError{.message = error->message};
+            }
+
+            std::vector<std::string> fetchedEmailIds;
+            fetchedEmailIds.reserve(fetch.emails.size());
+            for (const auto& email : fetch.emails)
+            {
+                fetchedEmailIds.push_back(email.id);
+            }
+            if (const auto error = reapplyPendingEmailPatches(m_databaseConnection, accountId,
+                                                              std::move(fetchedEmailIds)))
+            {
+                co_return *error;
             }
 
             if (!fetch.emailState.empty())

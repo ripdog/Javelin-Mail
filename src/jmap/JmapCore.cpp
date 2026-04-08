@@ -568,6 +568,69 @@ namespace javelin::jmap
             };
         }
 
+        [[nodiscard]] QueuedEmailMutationResult
+        queueKeywordPatch(javelin::jmap::cache::DatabaseConnection& connection, std::string accountId,
+                          std::string emailId, std::string keyword, const bool enabled)
+        {
+            if (keyword.empty())
+            {
+                return LiveRefreshError{
+                    .message = QStringLiteral("A keyword id is required."),
+                };
+            }
+
+            javelin::jmap::cache::EmailRepository emailRepository{connection};
+            const auto emailResult = emailRepository.find(accountId, emailId);
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&emailResult))
+            {
+                return LiveRefreshError{.message = error->message};
+            }
+
+            const auto& email = std::get<std::optional<javelin::jmap::domain::Email>>(emailResult);
+            if (!email.has_value())
+            {
+                return LiveRefreshError{
+                    .message = QStringLiteral("The selected message is not cached locally."),
+                };
+            }
+
+            const auto pendingActionId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+            const javelin::jmap::sync::PendingActionRecord pendingAction{
+                .pendingActionId = pendingActionId.toStdString(),
+                .accountId = accountId,
+                .status = javelin::jmap::sync::PendingActionStatus::Pending,
+                .emailPatch =
+                    {
+                        .emailId = emailId,
+                        .addMailboxIds = {},
+                        .removeMailboxIds = {},
+                        .addKeywords = enabled ? std::vector<std::string>{keyword}
+                                               : std::vector<std::string>{},
+                        .removeKeywords = enabled ? std::vector<std::string>{}
+                                                  : std::vector<std::string>{keyword},
+                    },
+            };
+
+            javelin::jmap::sync::PendingActionRepository pendingActionRepository{connection};
+            if (const auto error = pendingActionRepository.put(pendingAction))
+            {
+                return LiveRefreshError{.message = error->message};
+            }
+
+            const auto reconciledEmail =
+                javelin::jmap::sync::mergePendingEmailPatch(*email, {pendingAction});
+            if (const auto error = emailRepository.upsertMany(accountId, {reconciledEmail}))
+            {
+                return LiveRefreshError{.message = error->message};
+            }
+
+            return QueuedEmailMutation{
+                .pendingActionId = pendingActionId.toStdString(),
+                .accountId = std::move(accountId),
+                .emailId = std::move(emailId),
+            };
+        }
+
         [[nodiscard]] std::unordered_map<std::string, bool>
         enabledMap(const std::vector<std::string>& values)
         {
@@ -1184,6 +1247,34 @@ namespace javelin::jmap
     {
         return queueMoveEmail(std::move(accountId), std::move(emailId), std::move(sourceMailboxId),
                               std::move(trashMailboxId));
+    }
+
+    QueuedEmailMutationResult JmapCore::queueMarkEmailRead(std::string accountId,
+                                                           std::string emailId)
+    {
+        if (m_impl->databaseConnection == nullptr)
+        {
+            return LiveRefreshError{
+                .message = QStringLiteral("Queued mutations are unavailable in this process."),
+            };
+        }
+
+        return queueKeywordPatch(*m_impl->databaseConnection, std::move(accountId),
+                                 std::move(emailId), "$seen", true);
+    }
+
+    QueuedEmailMutationResult JmapCore::queueMarkEmailUnread(std::string accountId,
+                                                             std::string emailId)
+    {
+        if (m_impl->databaseConnection == nullptr)
+        {
+            return LiveRefreshError{
+                .message = QStringLiteral("Queued mutations are unavailable in this process."),
+            };
+        }
+
+        return queueKeywordPatch(*m_impl->databaseConnection, std::move(accountId),
+                                 std::move(emailId), "$seen", false);
     }
 
     QCoro::Task<SubmittedEmailMutationsResult>
