@@ -14,6 +14,7 @@
 
 #include <KActionCollection>
 #include <KStandardAction>
+#include <KToolBar>
 
 #include <QAction>
 #include <QCloseEvent>
@@ -49,6 +50,9 @@ namespace javelin::gui::shell
         constexpr auto windowGroup = "mainWindow";
         constexpr auto geometryKey = "geometry";
         constexpr auto splitterKey = "splitterState";
+        constexpr auto accountIdKey = "selectedAccountId";
+        constexpr auto mailboxIdKey = "selectedMailboxId";
+        constexpr auto emailIdKey = "selectedEmailId";
 
         /// Returns the account ID for the currently selected mailbox tree index.
         /// Works for both account-level nodes and mailbox nodes.
@@ -115,6 +119,43 @@ namespace javelin::gui::shell
                 }
 
                 const QModelIndex childMatch = findIndexByRole(model, role, value, index);
+                if (childMatch.isValid())
+                {
+                    return childMatch;
+                }
+            }
+
+            return {};
+        }
+
+        [[nodiscard]] QModelIndex findMailboxIndexForSelection(const QAbstractItemModel& model,
+                                                               const QString& accountId,
+                                                               const std::optional<QString>& mailboxId,
+                                                               const QModelIndex& parent = {})
+        {
+            const int rowCount = model.rowCount(parent);
+            for (int row = 0; row < rowCount; ++row)
+            {
+                const QModelIndex index = model.index(row, 0, parent);
+                if (!index.isValid())
+                {
+                    continue;
+                }
+
+                const QString indexAccountId =
+                    index.data(javelin::gui::mailboxes::MailboxTreeModel::AccountIdRole).toString();
+                const QString indexMailboxId =
+                    index.data(javelin::gui::mailboxes::MailboxTreeModel::MailboxIdRole).toString();
+                const bool accountMatches = indexAccountId == accountId;
+                const bool mailboxMatches = mailboxId.has_value() ? indexMailboxId == *mailboxId
+                                                                  : indexMailboxId.isEmpty();
+                if (accountMatches && mailboxMatches)
+                {
+                    return index;
+                }
+
+                const QModelIndex childMatch =
+                    findMailboxIndexForSelection(model, accountId, mailboxId, index);
                 if (childMatch.isValid())
                 {
                     return childMatch;
@@ -249,9 +290,30 @@ namespace javelin::gui::shell
     {
         setupUi();
         createActions();
-        setupGUI(KXmlGuiWindow::Default, QStringLiteral("javelinmailui.rc"));
+        createShell();
+        setupGUI(KXmlGuiWindow::Create | KXmlGuiWindow::Keys, QStringLiteral("javelinmailui.rc"));
         connectSelection();
         restorePersistentState();
+    }
+
+    void MainWindow::createShell()
+    {
+        // KXmlGuiWindow::Default = Create | Save | Keys.  The Save flag restores
+        // a previous toolbar layout that may hide toolbars.  We create the toolbar
+        // ourselves, add actions, then call setupGUI() to load the menu bar and
+        // shortcuts, and finally force the toolbar visible.
+        auto* toolBar = new KToolBar(QStringLiteral("mainToolBar"), this);
+        toolBar->setObjectName(QStringLiteral("mainToolBar"));
+
+        toolBar->addAction(m_archiveAction);
+        toolBar->addAction(m_deleteAction);
+        toolBar->addAction(m_moveAction);
+        toolBar->addSeparator();
+        toolBar->addAction(m_refreshAction);
+        toolBar->addSeparator();
+        toolBar->addAction(m_preferencesAction);
+
+        addToolBar(toolBar);
     }
 
     void MainWindow::createActions()
@@ -265,14 +327,33 @@ namespace javelin::gui::shell
 
         m_preferencesAction =
             KStandardAction::preferences(this, &MainWindow::openPreferences, actionCollection());
+
+        m_archiveAction = new QAction(QIcon::fromTheme(QStringLiteral("mail-archive")),
+                                      QStringLiteral("&Archive"), this);
+        m_archiveAction->setShortcut(QKeySequence{Qt::Key_A});
+        connect(m_archiveAction, &QAction::triggered, this, &MainWindow::archiveSelectedEmail);
+        actionCollection()->addAction(QStringLiteral("archive_email"), m_archiveAction);
+        actionCollection()->setDefaultShortcut(m_archiveAction, QKeySequence{Qt::Key_A});
+
+        m_deleteAction = new QAction(QIcon::fromTheme(QStringLiteral("mail-delete")),
+                                     QStringLiteral("&Delete"), this);
+        m_deleteAction->setShortcut(QKeySequence::Delete);
+        connect(m_deleteAction, &QAction::triggered, this, &MainWindow::deleteSelectedEmail);
+        actionCollection()->addAction(QStringLiteral("delete_email"), m_deleteAction);
+        actionCollection()->setDefaultShortcut(m_deleteAction, QKeySequence::Delete);
+
+        m_moveAction = new QAction(QIcon::fromTheme(QStringLiteral("mail-move")),
+                                   QStringLiteral("&Move to…"), this);
+        connect(m_moveAction, &QAction::triggered, this, &MainWindow::showMoveMenu);
+        actionCollection()->addAction(QStringLiteral("move_email"), m_moveAction);
     }
 
     void MainWindow::setupUi()
     {
         setWindowTitle(QStringLiteral("Javelin Mail"));
 
-        m_mailboxModel = new javelin::gui::mailboxes::MailboxTreeModel(
-            m_accountRepository, m_queryService, this);
+        m_mailboxModel = new javelin::gui::mailboxes::MailboxTreeModel(m_accountRepository,
+                                                                       m_queryService, this);
         m_messageModel = new javelin::gui::messages::MessageListModel(m_queryService, this);
 
         m_mailboxView = new QTreeView(this);
@@ -335,20 +416,6 @@ namespace javelin::gui::shell
                     openAttachment(accountId.toStdString(), emailId.toStdString(),
                                    partId.toStdString());
                 });
-        connect(m_messageViewContainer,
-                &javelin::gui::messageview::MessageViewContainer::archiveRequested, this,
-                [this](const QString& accountId, const QString& mailboxId, const QString& emailId)
-                {
-                    queueArchiveEmail(accountId.toStdString(), mailboxId.toStdString(),
-                                      emailId.toStdString());
-                });
-        connect(m_messageViewContainer,
-                &javelin::gui::messageview::MessageViewContainer::deleteRequested, this,
-                [this](const QString& accountId, const QString& mailboxId, const QString& emailId)
-                {
-                    queueDeleteEmail(accountId.toStdString(), mailboxId.toStdString(),
-                                     emailId.toStdString());
-                });
 
         m_messageView->setContextMenuPolicy(Qt::CustomContextMenu);
         connect(m_messageView, &QListView::customContextMenuRequested, this,
@@ -385,6 +452,7 @@ namespace javelin::gui::shell
                                                              std::nullopt, std::nullopt);
                         updateEmptyStates();
                         updateMessageListHeader();
+                        updateMessageActions();
                         return;
                     }
 
@@ -397,6 +465,7 @@ namespace javelin::gui::shell
                                                              std::nullopt, std::nullopt);
                         updateEmptyStates();
                         updateMessageListHeader();
+                        updateMessageActions();
                         return;
                     }
 
@@ -406,6 +475,7 @@ namespace javelin::gui::shell
                                                          *mailboxId, std::nullopt);
                     updateEmptyStates();
                     updateMessageListHeader();
+                    updateMessageActions();
                     refreshSelectedMailboxMessages(*accountId, *mailboxId);
                 });
 
@@ -419,6 +489,7 @@ namespace javelin::gui::shell
                 {
                     m_messageViewContainer->setSelection(m_messageViewService, accountId, mailboxId,
                                                          std::nullopt);
+                    updateMessageActions();
                     return;
                 }
 
@@ -426,6 +497,7 @@ namespace javelin::gui::shell
                 {
                     m_messageViewContainer->setSelection(m_messageViewService, accountId, mailboxId,
                                                          std::nullopt);
+                    updateMessageActions();
                     return;
                 }
 
@@ -437,6 +509,7 @@ namespace javelin::gui::shell
                                       : std::optional<std::string>{emailId.toStdString()});
                 updateEmptyStates();
                 updateMessageListHeader();
+                updateMessageActions();
                 if (!emailId.isEmpty())
                 {
                     refreshSelectedMessageContent(*accountId, emailId.toStdString());
@@ -460,14 +533,17 @@ namespace javelin::gui::shell
         updateMessageListHeader();
     }
 
-    void MainWindow::restoreSelection(std::optional<std::string> mailboxId,
+    void MainWindow::restoreSelection(std::optional<std::string> accountId,
+                                      std::optional<std::string> mailboxId,
                                       std::optional<std::string> emailId)
     {
-        if (mailboxId.has_value())
+        if (accountId.has_value())
         {
-            const QModelIndex mailboxIndex = findIndexByRole(
-                *m_mailboxModel, javelin::gui::mailboxes::MailboxTreeModel::MailboxIdRole,
-                QString::fromStdString(*mailboxId));
+            const auto mailboxIdValue =
+                mailboxId.has_value() ? std::optional<QString>{QString::fromStdString(*mailboxId)}
+                                      : std::optional<QString>{std::nullopt};
+            const QModelIndex mailboxIndex = findMailboxIndexForSelection(
+                *m_mailboxModel, QString::fromStdString(*accountId), mailboxIdValue);
             if (mailboxIndex.isValid())
             {
                 m_mailboxView->setCurrentIndex(mailboxIndex);
@@ -504,6 +580,16 @@ namespace javelin::gui::shell
         m_messageListTitleLabel->setText(mailboxName);
         m_messageListMetaLabel->setText(
             QStringLiteral("%1 Messages").arg(m_messageModel->rowCount()));
+    }
+
+    void MainWindow::updateMessageActions()
+    {
+        const bool hasSelection = currentAccountId(*m_mailboxView).has_value() &&
+                                  currentMailboxId(*m_mailboxView).has_value() &&
+                                  currentEmailId(*m_messageView).has_value();
+        m_archiveAction->setEnabled(hasSelection);
+        m_deleteAction->setEnabled(hasSelection);
+        m_moveAction->setEnabled(hasSelection);
     }
 
     void MainWindow::saveAttachment(std::string accountId, std::string emailId, std::string partId)
@@ -699,6 +785,9 @@ namespace javelin::gui::shell
                 }
 
                 const auto& summary = std::get<javelin::jmap::LiveRefreshSummary>(result);
+                const auto accountId = currentAccountId(*m_mailboxView).has_value()
+                                           ? currentAccountId(*m_mailboxView)
+                                           : std::optional<std::string>{summary.accountId};
                 const auto mailboxId = currentMailboxId(*m_mailboxView).has_value()
                                            ? currentMailboxId(*m_mailboxView)
                                            : summary.selectedMailboxId;
@@ -709,7 +798,7 @@ namespace javelin::gui::shell
                                   << static_cast<qulonglong>(summary.emailCount);
                 reloadAccounts();
                 refreshViewsFromCache();
-                restoreSelection(mailboxId, emailId);
+                restoreSelection(accountId, mailboxId, emailId);
                 statusBar()->showMessage(
                     QStringLiteral("Synced %1 mailboxes and %2 messages for %3.")
                         .arg(summary.mailboxCount)
@@ -761,7 +850,8 @@ namespace javelin::gui::shell
 
                 const auto selectedEmail = currentEmailId(*m_messageView);
                 m_messageModel->refresh();
-                restoreSelection(std::optional<std::string>{mailboxId}, selectedEmail);
+                restoreSelection(std::optional<std::string>{accountId},
+                                 std::optional<std::string>{mailboxId}, selectedEmail);
                 m_messageViewContainer->refresh(m_messageViewService);
                 updateEmptyStates();
 
@@ -833,6 +923,79 @@ namespace javelin::gui::shell
             });
     }
 
+    void MainWindow::archiveSelectedEmail()
+    {
+        const auto accountId = currentAccountId(*m_mailboxView);
+        const auto mailboxId = currentMailboxId(*m_mailboxView);
+        const auto emailId = currentEmailId(*m_messageView);
+        if (!accountId.has_value() || !mailboxId.has_value() || !emailId.has_value())
+        {
+            statusBar()->showMessage(QStringLiteral("Select a message to archive."), 3000);
+            return;
+        }
+
+        queueArchiveEmail(*accountId, *mailboxId, *emailId);
+    }
+
+    void MainWindow::deleteSelectedEmail()
+    {
+        const auto accountId = currentAccountId(*m_mailboxView);
+        const auto mailboxId = currentMailboxId(*m_mailboxView);
+        const auto emailId = currentEmailId(*m_messageView);
+        if (!accountId.has_value() || !mailboxId.has_value() || !emailId.has_value())
+        {
+            statusBar()->showMessage(QStringLiteral("Select a message to delete."), 3000);
+            return;
+        }
+
+        queueDeleteEmail(*accountId, *mailboxId, *emailId);
+    }
+
+    void MainWindow::showMoveMenu()
+    {
+        const auto accountId = currentAccountId(*m_mailboxView);
+        const auto sourceMailboxId = currentMailboxId(*m_mailboxView);
+        const auto emailId = currentEmailId(*m_messageView);
+        if (!accountId.has_value() || !sourceMailboxId.has_value() || !emailId.has_value())
+        {
+            statusBar()->showMessage(QStringLiteral("Select a message to move."), 3000);
+            return;
+        }
+
+        QMenu menu{this};
+        menu.setTitle(QStringLiteral("Move to"));
+
+        const auto mailboxesResult = m_queryService.listMailboxTree(*accountId);
+        const auto* mailboxes =
+            std::get_if<std::vector<javelin::jmap::cache::MailboxTreeItem>>(&mailboxesResult);
+        if (mailboxes != nullptr)
+        {
+            for (const auto& mailbox : *mailboxes)
+            {
+                if (mailbox.id == *sourceMailboxId)
+                {
+                    continue;
+                }
+
+                auto* action = menu.addAction(QString::fromStdString(mailbox.name));
+                connect(action, &QAction::triggered, this,
+                        [this, accountId = *accountId, sourceMailboxId = *sourceMailboxId,
+                         destinationMailboxId = mailbox.id, emailId = *emailId]
+                        {
+                            queueMoveEmail(accountId, sourceMailboxId, destinationMailboxId,
+                                           emailId, QStringLiteral("Queued move."));
+                        });
+            }
+        }
+        if (menu.actions().empty())
+        {
+            statusBar()->showMessage(QStringLiteral("No destination mailboxes available."), 3000);
+            return;
+        }
+
+        menu.exec(QCursor::pos());
+    }
+
     void MainWindow::queueArchiveEmail(std::string accountId, std::string mailboxId,
                                        std::string emailId)
     {
@@ -865,8 +1028,8 @@ namespace javelin::gui::shell
                                     std::string destinationMailboxId, std::string emailId,
                                     QString successMessage)
     {
-        const auto result = m_jmapCore.queueMoveEmail(accountId, emailId, sourceMailboxId,
-                                                      destinationMailboxId);
+        const auto result =
+            m_jmapCore.queueMoveEmail(accountId, emailId, sourceMailboxId, destinationMailboxId);
         if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
         {
             statusBar()->showMessage(error->message, 10000);
@@ -900,29 +1063,28 @@ namespace javelin::gui::shell
             return;
         }
 
-        auto task = m_jmapCore.submitPendingEmailMutations(toLiveConnectionSettings(settings),
-                                                           accountId);
-        QCoro::connect(
-            std::move(task), this,
-            [this](javelin::jmap::SubmittedEmailMutationsResult submitResult)
-            {
-                if (const auto* error =
-                        std::get_if<javelin::jmap::LiveRefreshError>(&submitResult))
-                {
-                    statusBar()->showMessage(error->message, 10000);
-                    return;
-                }
+        auto task =
+            m_jmapCore.submitPendingEmailMutations(toLiveConnectionSettings(settings), accountId);
+        QCoro::connect(std::move(task), this,
+                       [this](javelin::jmap::SubmittedEmailMutationsResult submitResult)
+                       {
+                           if (const auto* error =
+                                   std::get_if<javelin::jmap::LiveRefreshError>(&submitResult))
+                           {
+                               statusBar()->showMessage(error->message, 10000);
+                               return;
+                           }
 
-                const auto& summary =
-                    std::get<javelin::jmap::SubmittedEmailMutations>(submitResult);
-                if (summary.updatedEmailCount > 0)
-                {
-                    m_messageModel->refresh();
-                    m_messageViewContainer->refresh(m_messageViewService);
-                    updateEmptyStates();
-                    updateMessageListHeader();
-                }
-            });
+                           const auto& summary =
+                               std::get<javelin::jmap::SubmittedEmailMutations>(submitResult);
+                           if (summary.updatedEmailCount > 0)
+                           {
+                               m_messageModel->refresh();
+                               m_messageViewContainer->refresh(m_messageViewService);
+                               updateEmptyStates();
+                               updateMessageListHeader();
+                           }
+                       });
     }
 
     void MainWindow::showMessageListContextMenu(const QPoint& position)
@@ -946,8 +1108,8 @@ namespace javelin::gui::shell
         m_messageView->setCurrentIndex(index);
 
         QMenu menu{this};
-        auto* archiveAction = menu.addAction(QStringLiteral("Archive"));
-        auto* deleteAction = menu.addAction(QStringLiteral("Delete"));
+        menu.addAction(m_archiveAction);
+        menu.addAction(m_deleteAction);
         menu.addSeparator();
         auto* moveMenu = menu.addMenu(QStringLiteral("Move to"));
 
@@ -968,8 +1130,8 @@ namespace javelin::gui::shell
                         [this, accountId = *accountId, sourceMailboxId = *sourceMailboxId,
                          destinationMailboxId = mailbox.id, emailId]
                         {
-                            queueMoveEmail(accountId, sourceMailboxId, destinationMailboxId, emailId,
-                                           QStringLiteral("Queued move."));
+                            queueMoveEmail(accountId, sourceMailboxId, destinationMailboxId,
+                                           emailId, QStringLiteral("Queued move."));
                         });
             }
         }
@@ -977,13 +1139,6 @@ namespace javelin::gui::shell
         {
             moveMenu->setEnabled(false);
         }
-
-        connect(archiveAction, &QAction::triggered, this,
-                [this, accountId = *accountId, sourceMailboxId = *sourceMailboxId, emailId]
-                { queueArchiveEmail(accountId, sourceMailboxId, emailId); });
-        connect(deleteAction, &QAction::triggered, this,
-                [this, accountId = *accountId, sourceMailboxId = *sourceMailboxId, emailId]
-                { queueDeleteEmail(accountId, sourceMailboxId, emailId); });
 
         menu.exec(m_messageView->viewport()->mapToGlobal(position));
     }
@@ -1005,15 +1160,42 @@ namespace javelin::gui::shell
             m_mainSplitter->restoreState(splitterState);
         }
 
+        const auto selectedAccountId = settings.value(QLatin1StringView{accountIdKey}).toString();
+        const auto selectedMailboxId = settings.value(QLatin1StringView{mailboxIdKey}).toString();
+        const auto selectedEmailId = settings.value(QLatin1StringView{emailIdKey}).toString();
+
         settings.endGroup();
+        restoreSelection(
+            selectedAccountId.isEmpty()
+                ? std::optional<std::string>{std::nullopt}
+                : std::optional<std::string>{selectedAccountId.toStdString()},
+            selectedMailboxId.isEmpty()
+                ? std::optional<std::string>{std::nullopt}
+                : std::optional<std::string>{selectedMailboxId.toStdString()},
+            selectedEmailId.isEmpty() ? std::optional<std::string>{std::nullopt}
+                                      : std::optional<std::string>{selectedEmailId.toStdString()});
     }
 
     void MainWindow::savePersistentState() const
     {
         QSettings settings;
         settings.beginGroup(QLatin1StringView{windowGroup});
+        const auto selectedAccountId = currentAccountId(*m_mailboxView);
+        const auto selectedMailboxId = currentMailboxId(*m_mailboxView);
+        const auto selectedEmailId = currentEmailId(*m_messageView);
         settings.setValue(QLatin1StringView{geometryKey}, saveGeometry());
         settings.setValue(QLatin1StringView{splitterKey}, m_mainSplitter->saveState());
+        settings.setValue(QLatin1StringView{accountIdKey},
+                          selectedAccountId.has_value()
+                              ? QString::fromStdString(*selectedAccountId)
+                              : QString{});
+        settings.setValue(QLatin1StringView{mailboxIdKey},
+                          selectedMailboxId.has_value()
+                              ? QString::fromStdString(*selectedMailboxId)
+                              : QString{});
+        settings.setValue(QLatin1StringView{emailIdKey},
+                          selectedEmailId.has_value() ? QString::fromStdString(*selectedEmailId)
+                                                      : QString{});
         settings.endGroup();
         settings.sync();
     }

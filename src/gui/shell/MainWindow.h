@@ -56,6 +56,7 @@ namespace javelin::gui::shell
 
       private:
         void createActions();
+        void createShell();
         void setupUi();
         void connectSelection();
         void refreshViewsFromCache();
@@ -67,17 +68,22 @@ namespace javelin::gui::shell
         void queueMoveEmail(std::string accountId, std::string sourceMailboxId,
                             std::string destinationMailboxId, std::string emailId,
                             QString successMessage);
+        void archiveSelectedEmail();
+        void deleteSelectedEmail();
+        void showMoveMenu();
         void showMessageListContextMenu(const QPoint& position);
         void saveAttachment(std::string accountId, std::string emailId, std::string partId);
         void openAttachment(std::string accountId, std::string emailId, std::string partId);
         void openPreferences();
         void reloadAccounts();
-        void restoreSelection(std::optional<std::string> mailboxId,
+        void restoreSelection(std::optional<std::string> accountId,
+                              std::optional<std::string> mailboxId,
                               std::optional<std::string> emailId);
         void restorePersistentState();
         void savePersistentState() const;
         void updateEmptyStates();
         void updateMessageListHeader();
+        void updateMessageActions();
         void closeEvent(QCloseEvent* event) override;
 
         javelin::jmap::JmapCore& m_jmapCore;
@@ -96,6 +102,9 @@ namespace javelin::gui::shell
         QLabel* m_messageEmptyState = nullptr;
         QAction* m_refreshAction = nullptr;
         QAction* m_preferencesAction = nullptr;
+        QAction* m_archiveAction = nullptr;
+        QAction* m_deleteAction = nullptr;
+        QAction* m_moveAction = nullptr;
         bool m_refreshInFlight = false;
         QTemporaryDir m_openAttachmentDirectory;
     };

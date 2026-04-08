@@ -309,12 +309,17 @@ qt_add_executable(Javelin-Mail
     src/app/main.cpp
 )
 
-# Copy the KXMLGUI .rc file into the build directory so KXmlGuiWindow can
-# locate it at runtime without a full install.
-configure_file(
-    ${PROJECT_SOURCE_DIR}/res/javelinmailui.rc
-    ${CMAKE_CURRENT_BINARY_DIR}/javelinmailui.rc
-    COPYONLY
+# Install data files (KXMLGUI .rc, etc.) into the local install prefix so
+# KXmlGuiWindow can find them at runtime.  We copy only our own files rather
+# than running `cmake --install` (which would also try to install
+# FetchContent dependencies).
+set(_local_kxmlgui_dir "${CMAKE_INSTALL_PREFIX}/${KDE_INSTALL_DATADIR}/kxmlgui/javelinmail")
+add_custom_target(install_data ALL
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${_local_kxmlgui_dir}"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${PROJECT_SOURCE_DIR}/res/javelinmailui.rc
+        "${_local_kxmlgui_dir}/javelinmailui.rc"
+    COMMENT "Installing data files to local prefix"
 )
 
 qt_add_translations(
@@ -326,6 +331,10 @@ target_link_libraries(Javelin-Mail
     PRIVATE
         javelin_app
         Qt::Svg
+)
+target_compile_definitions(Javelin-Mail
+    PRIVATE
+        JAVELIN_DATA_DIR="${CMAKE_INSTALL_PREFIX}/${KDE_INSTALL_DATADIR}"
 )
 javelin_set_project_warnings(Javelin-Mail)
 javelin_enable_static_analysis(Javelin-Mail)
