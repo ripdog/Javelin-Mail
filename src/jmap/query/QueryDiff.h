@@ -50,6 +50,9 @@ namespace javelin::jmap::query
         bool selectionPreserved = false;
     };
 
+    [[nodiscard]] std::optional<std::size_t>
+    selectionFallbackIndexAfterRemoval(std::size_t previousIndex, std::size_t currentCount);
+
     [[nodiscard]] MailboxTreeRefresh
     diffMailboxTree(const std::vector<javelin::jmap::cache::MailboxTreeItem>& previous,
                     const std::vector<javelin::jmap::cache::MailboxTreeItem>& current,

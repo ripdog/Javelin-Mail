@@ -5,6 +5,17 @@
 
 namespace javelin::jmap::query
 {
+    std::optional<std::size_t>
+    selectionFallbackIndexAfterRemoval(const std::size_t previousIndex,
+                                       const std::size_t currentCount)
+    {
+        if (currentCount == 0)
+        {
+            return std::nullopt;
+        }
+
+        return std::min(previousIndex, currentCount - 1);
+    }
 
     namespace
     {

@@ -86,3 +86,27 @@ TEST_CASE("message list diff falls back to the first visible item when selection
     CHECK(refresh.nextSelection->threadId == "thread-2");
     CHECK_FALSE(refresh.changes.empty());
 }
+
+TEST_CASE("selection fallback keeps the same row when a next item is available", "[jmap][query]")
+{
+    const auto fallback = javelin::jmap::query::selectionFallbackIndexAfterRemoval(1, 3);
+
+    REQUIRE(fallback.has_value());
+    CHECK(*fallback == 1);
+}
+
+TEST_CASE("selection fallback moves to the previous row when the removed row was last",
+          "[jmap][query]")
+{
+    const auto fallback = javelin::jmap::query::selectionFallbackIndexAfterRemoval(2, 2);
+
+    REQUIRE(fallback.has_value());
+    CHECK(*fallback == 1);
+}
+
+TEST_CASE("selection fallback clears when the list becomes empty", "[jmap][query]")
+{
+    const auto fallback = javelin::jmap::query::selectionFallbackIndexAfterRemoval(0, 0);
+
+    CHECK_FALSE(fallback.has_value());
+}

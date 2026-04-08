@@ -382,6 +382,7 @@ target_compile_definitions(Javelin-Mail
     PRIVATE
         JAVELIN_DATA_DIR="${CMAKE_INSTALL_PREFIX}/${KDE_INSTALL_DATADIR}"
 )
+add_dependencies(Javelin-Mail install_data)
 javelin_set_project_warnings(Javelin-Mail)
 javelin_enable_static_analysis(Javelin-Mail)
 javelin_enable_sanitizers(Javelin-Mail)

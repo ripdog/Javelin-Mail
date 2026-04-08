@@ -1,6 +1,7 @@
 #pragma once
 
 #include <KXmlGuiWindow>
+#include <QModelIndex>
 #include <QTemporaryDir>
 
 class QCloseEvent;
@@ -89,6 +90,13 @@ namespace javelin::gui::shell
                               std::optional<std::string> mailboxId,
                               std::optional<std::string> threadId,
                               std::optional<std::string> emailId);
+        void restoreSelectionAfterMessageRefresh(std::optional<std::string> accountId,
+                                                 std::optional<std::string> mailboxId,
+                                                 std::optional<std::string> threadId,
+                                                 std::optional<std::string> emailId,
+                                                 std::optional<int> previousMessageRow);
+        [[nodiscard]] QModelIndex restoreMessageSelection(std::optional<std::string> threadId,
+                                                          std::optional<std::string> emailId);
         void refreshSelectionFromModels();
         void restorePersistentState();
         void savePersistentState() const;
@@ -116,6 +124,7 @@ namespace javelin::gui::shell
         QToolButton* m_messageQuickFilterButton = nullptr;
         QLabel* m_messageEmptyState = nullptr;
         QAction* m_refreshAction = nullptr;
+        QAction* m_quitAction = nullptr;
         QAction* m_preferencesAction = nullptr;
         QAction* m_archiveAction = nullptr;
         QAction* m_deleteAction = nullptr;
