@@ -32,6 +32,7 @@ qrc_*.cpp
 Thumbs.db
 *.res
 *.rc
+!res/javelinmailui.rc
 /.qmake.cache
 /.qmake.stash
 **/.qmlls.ini

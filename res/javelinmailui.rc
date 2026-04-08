@@ -1,0 +1,24 @@
+<!DOCTYPE gui SYSTEM "kpartgui.dtd">
+<gui name="javelinmail" version="2">
+  <MenuBar>
+    <Menu name="account"><text>&amp;Account</text>
+      <Action name="refresh_from_server"/>
+      <Separator/>
+      <Action name="archive_email"/>
+      <Action name="delete_email"/>
+      <Action name="move_email"/>
+    </Menu>
+    <Menu name="settings"><text>&amp;Settings</text>
+      <Action name="options_configure"/>
+    </Menu>
+  </MenuBar>
+  <ToolBar name="mainToolBar"><text>Main Toolbar</text>
+    <Action name="archive_email"/>
+    <Action name="delete_email"/>
+    <Action name="move_email"/>
+    <Separator/>
+    <Action name="refresh_from_server"/>
+    <Separator/>
+    <Action name="options_configure"/>
+  </ToolBar>
+</gui>

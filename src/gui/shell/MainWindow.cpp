@@ -14,7 +14,6 @@
 
 #include <KActionCollection>
 #include <KStandardAction>
-#include <KToolBar>
 
 #include <QAction>
 #include <QCloseEvent>
@@ -290,30 +289,12 @@ namespace javelin::gui::shell
     {
         setupUi();
         createActions();
-        createShell();
-        setupGUI(KXmlGuiWindow::Create | KXmlGuiWindow::Keys, QStringLiteral("javelinmailui.rc"));
+        setupGUI(KXmlGuiWindow::ToolBar | KXmlGuiWindow::Keys | KXmlGuiWindow::Save |
+                     KXmlGuiWindow::Create,
+                 QStringLiteral("javelinmailui.rc"));
+        setToolBarVisible(QStringLiteral("mainToolBar"), true);
         connectSelection();
         restorePersistentState();
-    }
-
-    void MainWindow::createShell()
-    {
-        // KXmlGuiWindow::Default = Create | Save | Keys.  The Save flag restores
-        // a previous toolbar layout that may hide toolbars.  We create the toolbar
-        // ourselves, add actions, then call setupGUI() to load the menu bar and
-        // shortcuts, and finally force the toolbar visible.
-        auto* toolBar = new KToolBar(QStringLiteral("mainToolBar"), this);
-        toolBar->setObjectName(QStringLiteral("mainToolBar"));
-
-        toolBar->addAction(m_archiveAction);
-        toolBar->addAction(m_deleteAction);
-        toolBar->addAction(m_moveAction);
-        toolBar->addSeparator();
-        toolBar->addAction(m_refreshAction);
-        toolBar->addSeparator();
-        toolBar->addAction(m_preferencesAction);
-
-        addToolBar(toolBar);
     }
 
     void MainWindow::createActions()

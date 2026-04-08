@@ -56,7 +56,6 @@ namespace javelin::gui::shell
 
       private:
         void createActions();
-        void createShell();
         void setupUi();
         void connectSelection();
         void refreshViewsFromCache();

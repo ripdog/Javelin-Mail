@@ -309,11 +309,17 @@ qt_add_executable(Javelin-Mail
     src/app/main.cpp
 )
 
+# KDEInstallDirs can leave KDE_INSTALL_KXMLGUIDIR empty in some local/dev
+# configurations; default to the documented DATAROOTDIR/kxmlgui5 location.
+if(NOT KDE_INSTALL_KXMLGUIDIR)
+    set(KDE_INSTALL_KXMLGUIDIR "${KDE_INSTALL_DATAROOTDIR}/kxmlgui5")
+endif()
+
 # Install data files (KXMLGUI .rc, etc.) into the local install prefix so
 # KXmlGuiWindow can find them at runtime.  We copy only our own files rather
 # than running `cmake --install` (which would also try to install
 # FetchContent dependencies).
-set(_local_kxmlgui_dir "${CMAKE_INSTALL_PREFIX}/${KDE_INSTALL_DATADIR}/kxmlgui/javelinmail")
+set(_local_kxmlgui_dir "${CMAKE_INSTALL_PREFIX}/${KDE_INSTALL_KXMLGUIDIR}/javelinmail")
 add_custom_target(install_data ALL
     COMMAND ${CMAKE_COMMAND} -E make_directory "${_local_kxmlgui_dir}"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
