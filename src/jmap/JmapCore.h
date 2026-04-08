@@ -102,6 +102,17 @@ namespace javelin::jmap
 
     using AttachmentDownloadResult = std::variant<AttachmentDownload, LiveRefreshError>;
 
+    struct MessageSourceDownload
+    {
+        std::string accountId;
+        std::string emailId;
+        std::string blobId;
+        std::optional<std::string> subject;
+        QByteArray payload;
+    };
+
+    using MessageSourceDownloadResult = std::variant<MessageSourceDownload, LiveRefreshError>;
+
     class JmapCore
     {
       public:
@@ -130,6 +141,9 @@ namespace javelin::jmap
         [[nodiscard]] QCoro::Task<AttachmentDownloadResult>
         downloadAttachment(LiveConnectionSettings settings, std::string accountId,
                            std::string emailId, std::string partId);
+        [[nodiscard]] QCoro::Task<MessageSourceDownloadResult>
+        downloadMessageSource(LiveConnectionSettings settings, std::string accountId,
+                              std::string emailId);
         [[nodiscard]] QueuedEmailMutationResult queueMoveEmail(std::string accountId,
                                                                std::string emailId,
                                                                std::string sourceMailboxId,

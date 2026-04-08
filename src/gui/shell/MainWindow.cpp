@@ -5,6 +5,7 @@
 #include "gui/messages/MessageListDelegate.h"
 #include "gui/messages/MessageListModel.h"
 #include "gui/messageview/MessageViewContainer.h"
+#include "gui/shell/MessageFileUtils.h"
 #include "gui/settings/PreferencesDialog.h"
 #include "jmap/JmapCore.h"
 #include "jmap/cache/AccountRepository.h"
@@ -31,9 +32,6 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QMetaObject>
-#include <QMimeDatabase>
-#include <QRegularExpression>
-#include <QSaveFile>
 #include <QSignalBlocker>
 #include <QSettings>
 #include <QSplitter>
@@ -44,9 +42,6 @@
 #include <QVBoxLayout>
 #include <QWidget>
 #include <QtConcurrent>
-
-#include <algorithm>
-#include <cctype>
 
 namespace javelin::gui::shell
 {
@@ -195,188 +190,6 @@ namespace javelin::gui::shell
             };
         }
 
-        struct FileWriteResult
-        {
-            QString path;
-            QString errorMessage;
-        };
-
-        struct DownloadedAttachmentFile
-        {
-            QString fileName;
-            QByteArray payload;
-        };
-
-        struct SaveAllDownloadResult
-        {
-            std::vector<DownloadedAttachmentFile> files;
-            QString errorMessage;
-        };
-
-        struct BatchWriteResult
-        {
-            int savedCount = 0;
-            QString errorMessage;
-            QString failedPath;
-        };
-
-        [[nodiscard]] QString sanitizedFileName(QString name, const QString& fallback)
-        {
-            name = name.trimmed();
-            if (name.isEmpty())
-            {
-                name = fallback;
-            }
-
-            static const QRegularExpression invalidPattern{
-                QStringLiteral(R"([\\/:*?"<>|\x00-\x1F])")};
-            name.replace(invalidPattern, QStringLiteral("_"));
-            return name.isEmpty() ? fallback : name;
-        }
-
-        [[nodiscard]] QString suggestedFileName(const javelin::jmap::AttachmentDownload& download)
-        {
-            QString fileName =
-                QString::fromStdString(download.name.value_or("attachment-" + download.partId));
-            fileName = sanitizedFileName(
-                fileName,
-                QStringLiteral("attachment-%1").arg(QString::fromStdString(download.partId)));
-
-            if (!fileName.contains(QLatin1Char('.')))
-            {
-                const QMimeDatabase mimeDatabase;
-                const auto mimeType =
-                    mimeDatabase.mimeTypeForName(QString::fromStdString(download.mediaType));
-                const auto suffix = mimeType.preferredSuffix();
-                if (!suffix.isEmpty())
-                {
-                    fileName += QStringLiteral(".") + suffix;
-                }
-            }
-
-            return fileName;
-        }
-
-        [[nodiscard]] FileWriteResult writePayloadToPath(const QString& path,
-                                                         const QByteArray& payload)
-        {
-            QSaveFile file{path};
-            if (!file.open(QIODevice::WriteOnly))
-            {
-                return FileWriteResult{
-                    .path = path,
-                    .errorMessage = file.errorString(),
-                };
-            }
-
-            if (file.write(payload) != payload.size())
-            {
-                return FileWriteResult{
-                    .path = path,
-                    .errorMessage = file.errorString(),
-                };
-            }
-
-            if (!file.commit())
-            {
-                return FileWriteResult{
-                    .path = path,
-                    .errorMessage = file.errorString(),
-                };
-            }
-
-            return FileWriteResult{.path = path, .errorMessage = {}};
-        }
-
-        [[nodiscard]] BatchWriteResult
-        writePayloadBatchToDirectory(const QString& directoryPath,
-                                     const std::vector<DownloadedAttachmentFile>& files)
-        {
-            QDir directory{directoryPath};
-            BatchWriteResult result;
-            for (const auto& file : files)
-            {
-                const auto writeResult = writePayloadToPath(directory.filePath(file.fileName),
-                                                            file.payload);
-                if (!writeResult.errorMessage.isEmpty())
-                {
-                    return BatchWriteResult{
-                        .savedCount = result.savedCount,
-                        .errorMessage = writeResult.errorMessage,
-                        .failedPath = writeResult.path,
-                    };
-                }
-
-                ++result.savedCount;
-            }
-
-            return result;
-        }
-
-        [[nodiscard]] std::vector<javelin::jmap::cache::MessageAttachment>
-        visibleDownloadableAttachments(const javelin::jmap::cache::MessageViewSnapshot& snapshot)
-        {
-            std::vector<javelin::jmap::cache::MessageAttachment> attachments;
-            attachments.reserve(snapshot.attachments.size());
-            for (const auto& attachment : snapshot.attachments)
-            {
-                const bool isEmbeddedInline =
-                    attachment.cid.has_value() && attachment.disposition.has_value() &&
-                    std::ranges::equal(*attachment.disposition, std::string_view{"inline"},
-                                       [](const char left, const char right)
-                                       {
-                                           return std::tolower(static_cast<unsigned char>(left)) ==
-                                                  std::tolower(static_cast<unsigned char>(right));
-                                       });
-                if (!isEmbeddedInline && attachment.blobId.has_value())
-                {
-                    attachments.push_back(attachment);
-                }
-            }
-
-            return attachments;
-        }
-
-        [[nodiscard]] QCoro::Task<SaveAllDownloadResult>
-        downloadAttachments(javelin::jmap::JmapCore& jmapCore,
-                            const javelin::jmap::LiveConnectionSettings& settings,
-                            const std::string& accountId, const std::string& emailId,
-                            const std::vector<javelin::jmap::cache::MessageAttachment>& attachments)
-        {
-            SaveAllDownloadResult result;
-            result.files.reserve(attachments.size());
-
-            for (const auto& attachment : attachments)
-            {
-                const auto downloadResult =
-                    co_await jmapCore.downloadAttachment(settings, accountId, emailId,
-                                                         attachment.partId);
-                if (const auto* error =
-                        std::get_if<javelin::jmap::LiveRefreshError>(&downloadResult))
-                {
-                    co_return SaveAllDownloadResult{
-                        .files = {},
-                        .errorMessage = error->message,
-                    };
-                }
-
-                const auto& download = std::get<javelin::jmap::AttachmentDownload>(downloadResult);
-                result.files.push_back(DownloadedAttachmentFile{
-                    .fileName = suggestedFileName(download),
-                    .payload = download.payload,
-                });
-            }
-
-            co_return result;
-        }
-
-        [[nodiscard]] QString tempAttachmentPath(QTemporaryDir& directory,
-                                                 const javelin::jmap::AttachmentDownload& download)
-        {
-            return directory.filePath(QStringLiteral("%1-%2").arg(
-                QString::fromStdString(download.emailId), suggestedFileName(download)));
-        }
-
         [[nodiscard]] std::optional<javelin::jmap::cache::MailboxTreeItem>
         findMailboxByRole(javelin::jmap::cache::QueryService& queryService,
                           const std::string_view accountId, const std::string_view role)
@@ -519,6 +332,12 @@ namespace javelin::gui::shell
                                    QStringLiteral("&Move to…"), this);
         connect(m_moveAction, &QAction::triggered, this, &MainWindow::showMoveMenu);
         actionCollection()->addAction(QStringLiteral("move_email"), m_moveAction);
+
+        m_viewSourceAction = new QAction(QIcon::fromTheme(QStringLiteral("document-open")),
+                                         QStringLiteral("View &Source"), this);
+        connect(m_viewSourceAction, &QAction::triggered, this,
+                &MainWindow::viewSelectedMessageSource);
+        actionCollection()->addAction(QStringLiteral("view_message_source"), m_viewSourceAction);
     }
 
     void MainWindow::setupUi()
@@ -814,6 +633,7 @@ namespace javelin::gui::shell
         m_archiveAction->setEnabled(hasSelection);
         m_deleteAction->setEnabled(hasSelection);
         m_moveAction->setEnabled(hasSelection);
+        m_viewSourceAction->setEnabled(hasSelection);
     }
 
     void MainWindow::saveAttachment(std::string accountId, std::string emailId, std::string partId)
@@ -1433,6 +1253,8 @@ namespace javelin::gui::shell
         m_messageView->setCurrentIndex(index);
 
         QMenu menu{this};
+        menu.addAction(m_viewSourceAction);
+        menu.addSeparator();
         menu.addAction(m_archiveAction);
         menu.addAction(m_deleteAction);
         menu.addSeparator();
@@ -1466,6 +1288,81 @@ namespace javelin::gui::shell
         }
 
         menu.exec(m_messageView->viewport()->mapToGlobal(position));
+    }
+
+    void MainWindow::viewSelectedMessageSource()
+    {
+        const auto accountId = currentAccountId(*m_mailboxView);
+        const auto emailId = currentEmailId(*m_messageView);
+        if (!accountId.has_value() || !emailId.has_value())
+        {
+            statusBar()->showMessage(QStringLiteral("Select a message to view its source."), 3000);
+            return;
+        }
+
+        const auto settings = javelin::gui::settings::PreferencesDialog::loadSettings();
+        if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
+            settings.apiKey.isEmpty())
+        {
+            statusBar()->showMessage(
+                QStringLiteral("Set Session URL, Login Email, and API Key in Preferences first."),
+                5000);
+            return;
+        }
+
+        if (!m_openAttachmentDirectory.isValid())
+        {
+            statusBar()->showMessage(
+                QStringLiteral("A temporary directory for message source files is unavailable."),
+                10000);
+            return;
+        }
+
+        statusBar()->showMessage(QStringLiteral("Downloading message source..."));
+        auto task = m_jmapCore.downloadMessageSource(toLiveConnectionSettings(settings), *accountId,
+                                                     *emailId);
+        QCoro::connect(
+            std::move(task), this,
+            [this](javelin::jmap::MessageSourceDownloadResult result)
+            {
+                if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+                {
+                    statusBar()->showMessage(error->message, 10000);
+                    return;
+                }
+
+                const auto& download = std::get<javelin::jmap::MessageSourceDownload>(result);
+                const QString targetPath = tempMessageSourcePath(m_openAttachmentDirectory, download);
+                statusBar()->showMessage(QStringLiteral("Preparing message source..."));
+
+                auto* watcher = new QFutureWatcher<FileWriteResult>(this);
+                connect(watcher, &QFutureWatcher<FileWriteResult>::finished, this,
+                        [this, watcher]
+                        {
+                            const auto writeResult = watcher->result();
+                            if (!writeResult.errorMessage.isEmpty())
+                            {
+                                statusBar()->showMessage(
+                                    QStringLiteral("Failed to prepare message source: %1")
+                                        .arg(writeResult.errorMessage),
+                                    10000);
+                                watcher->deleteLater();
+                                return;
+                            }
+
+                            const bool opened =
+                                QDesktopServices::openUrl(QUrl::fromLocalFile(writeResult.path));
+                            statusBar()->showMessage(
+                                opened ? QStringLiteral("Opened message source.")
+                                       : QStringLiteral(
+                                             "The source file was saved, but no app opened it."),
+                                5000);
+                            watcher->deleteLater();
+                        });
+                watcher->setFuture(
+                    QtConcurrent::run([targetPath, payload = download.payload]
+                                      { return writePayloadToPath(targetPath, payload); }));
+            });
     }
 
     void MainWindow::restorePersistentState()

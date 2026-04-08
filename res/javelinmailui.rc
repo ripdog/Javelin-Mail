@@ -3,6 +3,9 @@
   <MenuBar>
     <Menu name="account"><text>&amp;Account</text>
       <Action name="refresh_from_server"/>
+    </Menu>
+    <Menu name="message"><text>&amp;Message</text>
+      <Action name="view_message_source"/>
       <Separator/>
       <Action name="archive_email"/>
       <Action name="delete_email"/>

@@ -79,6 +79,7 @@ namespace javelin::gui::shell
         void deleteSelectedEmail();
         void showMoveMenu();
         void showMessageListContextMenu(const QPoint& position);
+        void viewSelectedMessageSource();
         void saveAttachment(std::string accountId, std::string emailId, std::string partId);
         void saveAllAttachments(std::string accountId, std::string emailId);
         void openAttachment(std::string accountId, std::string emailId, std::string partId);
@@ -118,6 +119,7 @@ namespace javelin::gui::shell
         QAction* m_archiveAction = nullptr;
         QAction* m_deleteAction = nullptr;
         QAction* m_moveAction = nullptr;
+        QAction* m_viewSourceAction = nullptr;
         bool m_refreshInFlight = false;
         QTemporaryDir m_openAttachmentDirectory;
     };
