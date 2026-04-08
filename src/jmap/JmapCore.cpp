@@ -836,7 +836,7 @@ namespace javelin::jmap
 
         qInfo().noquote() << "JMAP core message content refresh start"
                           << QString::fromStdString(accountId) << QString::fromStdString(emailId);
-        reportProgress(QStringLiteral("Loading message content..."));
+        reportProgress(QStringLiteral("Checking for saved message content..."));
         if (m_impl->databaseConnection == nullptr || m_impl->transport == nullptr)
         {
             co_return LiveRefreshError{
@@ -875,7 +875,7 @@ namespace javelin::jmap
         {
             qInfo().noquote() << "JMAP core message content using cached data"
                               << QString::fromStdString(emailId);
-            reportProgress(QStringLiteral("Loaded message content from local cache."));
+            reportProgress(QStringLiteral("Opened message from saved content."));
             co_return MessageContentRefreshSummary{
                 .accountId = std::move(accountId),
                 .emailId = std::move(emailId),
@@ -898,6 +898,7 @@ namespace javelin::jmap
 
         if (!cachedInlineMissing.empty())
         {
+            reportProgress(QStringLiteral("Loading inline images from the server..."));
             if (const auto downloadError = co_await cacheInlineImageParts(
                     *m_impl->transport, downloadCredentials, session.downloadUrl, accountId,
                     cachedInlineMissing, payloadRepository))
@@ -908,7 +909,7 @@ namespace javelin::jmap
             qInfo().noquote() << "JMAP core inline payload refresh success from cached MIME"
                               << QString::fromStdString(emailId)
                               << static_cast<qulonglong>(cachedInlineMissing.size());
-            reportProgress(QStringLiteral("Loaded message content from local cache."));
+            reportProgress(QStringLiteral("Opened message from saved content."));
             co_return MessageContentRefreshSummary{
                 .accountId = std::move(accountId),
                 .emailId = std::move(emailId),
@@ -940,6 +941,7 @@ namespace javelin::jmap
         requestBuilder.useCore().useMail();
         const auto contentHandle = requestBuilder.call(*requestMethod, "email-content");
 
+        reportProgress(QStringLiteral("Downloading message from the server..."));
         const auto envelopeResult = co_await methodCaller.call(apiRequestContext, requestBuilder);
         if (const auto* error = std::get_if<javelin::jmap::api::TransportError>(&envelopeResult))
         {
@@ -989,6 +991,7 @@ namespace javelin::jmap
             missingInlineImageParts(contentParts, payloadRepository, accountId);
         if (!missingInlineParts.empty())
         {
+            reportProgress(QStringLiteral("Loading inline images from the server..."));
             if (const auto downloadError = co_await cacheInlineImageParts(
                     *m_impl->transport, downloadCredentials, session.downloadUrl, accountId,
                     missingInlineParts, payloadRepository))
@@ -1001,7 +1004,7 @@ namespace javelin::jmap
                           << QString::fromStdString(emailId)
                           << static_cast<qulonglong>(contentParts.size())
                           << static_cast<qulonglong>(contentBodyValues.size());
-        reportProgress(QStringLiteral("Fetched message body from server."));
+        reportProgress(QStringLiteral("Message ready."));
 
         co_return MessageContentRefreshSummary{
             .accountId = std::move(accountId),

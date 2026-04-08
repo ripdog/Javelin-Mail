@@ -13,6 +13,7 @@
 #include <QMimeDatabase>
 #include <QMouseEvent>
 #include <QPlainTextEdit>
+#include <QProgressBar>
 #include <QSizePolicy>
 #include <QStackedWidget>
 #include <QStyle>
@@ -242,9 +243,65 @@ namespace javelin::gui::messageview
         m_bodyStack = new QStackedWidget(this);
         m_bodyStack->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
-        m_placeholderLabel = new QLabel(this);
-        m_placeholderLabel->setWordWrap(true);
-        makeLabelSelectable(m_placeholderLabel);
+        m_placeholderPanel = new QWidget(this);
+        auto* placeholderOuterLayout = new QVBoxLayout(m_placeholderPanel);
+        placeholderOuterLayout->setContentsMargins(0, 12, 0, 12);
+        placeholderOuterLayout->addStretch(1);
+
+        auto* placeholderCard = new QWidget(m_placeholderPanel);
+        placeholderCard->setObjectName(QStringLiteral("messagePlaceholderCard"));
+        placeholderCard->setMinimumWidth(280);
+        placeholderCard->setMaximumWidth(520);
+        placeholderCard->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
+        placeholderCard->setStyleSheet(QStringLiteral(
+            "#messagePlaceholderCard {"
+            " background: #1f2126;"
+            " border: 1px solid #393d46;"
+            " border-radius: 16px;"
+            "}"
+            "#messagePlaceholderCard QLabel {"
+            " color: #e6e9ef;"
+            "}"));
+
+        auto* placeholderCardLayout = new QVBoxLayout(placeholderCard);
+        placeholderCardLayout->setContentsMargins(24, 22, 24, 22);
+        placeholderCardLayout->setSpacing(10);
+
+        m_placeholderTitleLabel = new QLabel(placeholderCard);
+        auto placeholderTitleFont = m_placeholderTitleLabel->font();
+        placeholderTitleFont.setPointSize(placeholderTitleFont.pointSize() + 2);
+        placeholderTitleFont.setBold(true);
+        m_placeholderTitleLabel->setFont(placeholderTitleFont);
+        m_placeholderTitleLabel->setWordWrap(true);
+        makeLabelSelectable(m_placeholderTitleLabel);
+
+        m_placeholderDetailLabel = new QLabel(placeholderCard);
+        m_placeholderDetailLabel->setWordWrap(true);
+        m_placeholderDetailLabel->setStyleSheet(QStringLiteral("color: #c5cad3;"));
+        makeLabelSelectable(m_placeholderDetailLabel);
+
+        m_loadingIndicator = new QProgressBar(placeholderCard);
+        m_loadingIndicator->setRange(0, 0);
+        m_loadingIndicator->setTextVisible(false);
+        m_loadingIndicator->setFixedHeight(8);
+        m_loadingIndicator->setVisible(false);
+        m_loadingIndicator->setStyleSheet(QStringLiteral(
+            "QProgressBar {"
+            " background: #2a2d34;"
+            " border: 1px solid #393d46;"
+            " border-radius: 4px;"
+            "}"
+            "QProgressBar::chunk {"
+            " background: #7fb0ff;"
+            " border-radius: 4px;"
+            "}"));
+
+        placeholderCardLayout->addWidget(m_placeholderTitleLabel);
+        placeholderCardLayout->addWidget(m_placeholderDetailLabel);
+        placeholderCardLayout->addWidget(m_loadingIndicator);
+
+        placeholderOuterLayout->addWidget(placeholderCard, 0, Qt::AlignHCenter);
+        placeholderOuterLayout->addStretch(1);
 
         m_plainTextView = new QPlainTextEdit(this);
         m_plainTextView->setReadOnly(true);
@@ -253,7 +310,7 @@ namespace javelin::gui::messageview
         m_htmlView = new HtmlMessageView(this);
         m_htmlView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
-        m_bodyStack->addWidget(m_placeholderLabel);
+        m_bodyStack->addWidget(m_placeholderPanel);
         m_bodyStack->addWidget(m_plainTextView);
         m_bodyStack->addWidget(m_htmlView);
 
@@ -329,6 +386,7 @@ namespace javelin::gui::messageview
         m_mailboxId = std::move(mailboxId);
         m_emailId = std::move(emailId);
         m_attachmentsExpanded = false;
+        m_loading = false;
 
         m_snapshot = std::nullopt;
         if (m_accountId.has_value() && m_emailId.has_value())
@@ -346,6 +404,7 @@ namespace javelin::gui::messageview
 
     void MessageViewContainer::refresh(javelin::jmap::cache::MessageViewService& messageViewService)
     {
+        m_loading = false;
         m_snapshot = std::nullopt;
         if (m_accountId.has_value() && m_emailId.has_value())
         {
@@ -368,7 +427,7 @@ namespace javelin::gui::messageview
         switch (m_activeView)
         {
         case ActiveView::Placeholder:
-            m_bodyStack->setCurrentWidget(m_placeholderLabel);
+            m_bodyStack->setCurrentWidget(m_placeholderPanel);
             break;
         case ActiveView::PlainText:
             m_bodyStack->setCurrentWidget(m_plainTextView);
@@ -377,6 +436,27 @@ namespace javelin::gui::messageview
             m_bodyStack->setCurrentWidget(m_htmlView);
             break;
         }
+    }
+
+    void MessageViewContainer::setLoadingState(const bool loading, const QString& detailText)
+    {
+        m_loading = loading;
+        if (!detailText.isEmpty())
+        {
+            m_placeholderDetailLabel->setText(detailText);
+        }
+        updatePresentation();
+    }
+
+    bool MessageViewContainer::hasContentSnapshot() const
+    {
+        return m_snapshot.has_value();
+    }
+
+    bool MessageViewContainer::hasReadableBody() const
+    {
+        return m_snapshot.has_value() &&
+               (m_snapshot->htmlBody.has_value() || m_snapshot->plainTextBody.has_value());
     }
 
     void MessageViewContainer::updateRemoteContentButton()
@@ -414,15 +494,16 @@ namespace javelin::gui::messageview
         rebuildAttachmentRows();
         updateAttachmentSection();
         updateRemoteContentButton();
+        m_loadingIndicator->setVisible(false);
 
         if (!m_accountId.has_value())
         {
             m_titleLabel->setText(QStringLiteral("Choose an account"));
-            m_detailLabel->setText(
-                QStringLiteral("Select one of the cached JMAP accounts to browse mail."));
-            m_placeholderLabel->setText(
-                QStringLiteral("The message viewer stays lightweight until an account, mailbox, "
-                               "and message are selected."));
+            m_detailLabel->setText(QStringLiteral("Select an account to browse your mail."));
+            m_placeholderTitleLabel->setText(QStringLiteral("Ready when you are"));
+            m_placeholderDetailLabel->setText(
+                QStringLiteral("Message details will appear here after you choose an account, "
+                               "mailbox, and message."));
             setActiveView(ActiveView::Placeholder);
             return;
         }
@@ -432,9 +513,9 @@ namespace javelin::gui::messageview
             m_titleLabel->setText(QStringLiteral("Choose a mailbox"));
             m_detailLabel->setText(
                 QStringLiteral("Select a mailbox in the left pane to populate the message list."));
-            m_placeholderLabel->setText(QStringLiteral("The selected account is ready. Message "
-                                                       "rendering will attach here after mailbox "
-                                                       "selection."));
+            m_placeholderTitleLabel->setText(QStringLiteral("Choose a mailbox"));
+            m_placeholderDetailLabel->setText(
+                QStringLiteral("Choose a mailbox to see its messages here."));
             setActiveView(ActiveView::Placeholder);
             return;
         }
@@ -444,19 +525,36 @@ namespace javelin::gui::messageview
             m_titleLabel->setText(QStringLiteral("Choose a message"));
             m_detailLabel->setText(
                 QStringLiteral("Select a message in the center pane to open it here."));
-            m_placeholderLabel->setText(QStringLiteral(
-                "Stage 6 is now wiring cache-backed message loading into this pane."));
+            m_placeholderTitleLabel->setText(QStringLiteral("Choose a message"));
+            m_placeholderDetailLabel->setText(
+                QStringLiteral("Select a message to read it here."));
             setActiveView(ActiveView::Placeholder);
             return;
         }
 
         if (!m_snapshot.has_value())
         {
-            m_titleLabel->setText(QStringLiteral("Message is unavailable"));
-            m_detailLabel->setText(
-                QStringLiteral("The selected message is not present in the local cache yet."));
-            m_placeholderLabel->setText(QStringLiteral(
-                "A later sync pass or on-demand fetch path will need to populate it."));
+            if (m_loading)
+            {
+                m_titleLabel->setText(QStringLiteral("Loading message"));
+                m_detailLabel->setText(QStringLiteral("Downloading the selected message now."));
+                m_placeholderTitleLabel->setText(QStringLiteral("Loading message"));
+                if (m_placeholderDetailLabel->text().isEmpty())
+                {
+                    m_placeholderDetailLabel->setText(
+                        QStringLiteral("Downloading the selected message now."));
+                }
+                m_loadingIndicator->setVisible(true);
+            }
+            else
+            {
+                m_titleLabel->setText(QStringLiteral("Message is unavailable"));
+                m_detailLabel->setText(
+                    QStringLiteral("This message is not available on this device yet."));
+                m_placeholderTitleLabel->setText(QStringLiteral("Message unavailable"));
+                m_placeholderDetailLabel->setText(QStringLiteral(
+                    "Try refreshing the mailbox or reopening the message in a moment."));
+            }
             setActiveView(ActiveView::Placeholder);
             return;
         }
@@ -502,8 +600,21 @@ namespace javelin::gui::messageview
         }
         else
         {
-            m_placeholderLabel->setText(QStringLiteral(
-                "No cached plain-text or HTML body is available for this message yet."));
+            if (m_loading)
+            {
+                m_titleLabel->setText(QStringLiteral("Loading message"));
+                m_detailLabel->setText(QStringLiteral("Downloading the selected message now."));
+                m_placeholderTitleLabel->setText(QStringLiteral("Loading message"));
+                m_placeholderDetailLabel->setText(
+                    QStringLiteral("Downloading the selected message now."));
+                m_loadingIndicator->setVisible(true);
+            }
+            else
+            {
+                m_placeholderTitleLabel->setText(QStringLiteral("Nothing to display"));
+                m_placeholderDetailLabel->setText(QStringLiteral(
+                    "This message does not currently have a readable body available."));
+            }
             setActiveView(ActiveView::Placeholder);
         }
     }

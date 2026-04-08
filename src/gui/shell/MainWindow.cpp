@@ -551,6 +551,12 @@ namespace javelin::gui::shell
                 updateMessageActions();
                 if (!emailId.isEmpty())
                 {
+                    if (!m_messageViewContainer->hasReadableBody())
+                    {
+                        m_messageViewContainer->setLoadingState(
+                            true, QStringLiteral("Checking your saved copy, then downloading the "
+                                                 "message if needed."));
+                    }
                     refreshSelectedMessageContent(*accountId, emailId.toStdString());
                 }
             });
@@ -1114,6 +1120,7 @@ namespace javelin::gui::shell
             [this, accountId = std::move(accountId),
              emailId = std::move(emailId)](javelin::jmap::MessageContentRefreshResult result)
             {
+                m_messageViewContainer->setLoadingState(false);
                 if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
                 {
                     qWarning().noquote() << "GUI message content refresh failed" << error->message;
@@ -1142,9 +1149,7 @@ namespace javelin::gui::shell
                                   << summary.usedCachedContent;
                 if (!summary.usedCachedContent)
                 {
-                    statusBar()->showMessage(QStringLiteral("Loaded message content for %1.")
-                                                 .arg(QString::fromStdString(summary.emailId)),
-                                             5000);
+                    statusBar()->showMessage(QStringLiteral("Message ready."), 5000);
                 }
             });
     }
