@@ -17,7 +17,7 @@ namespace javelin::gui::messageview
         layout->setContentsMargins(0, 0, 0, 0);
 
         m_view = new QWebEngineView(this);
-        m_view->setContextMenuPolicy(Qt::NoContextMenu);
+        m_view->setContextMenuPolicy(Qt::DefaultContextMenu);
         auto* settings = m_view->settings();
         settings->setAttribute(QWebEngineSettings::JavascriptEnabled, true);
         settings->setAttribute(QWebEngineSettings::LocalContentCanAccessFileUrls, false);

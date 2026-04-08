@@ -57,6 +57,7 @@ namespace javelin::gui::messageview
         std::optional<javelin::jmap::cache::MessageViewSnapshot> m_snapshot;
         QLabel* m_titleLabel = nullptr;
         QLabel* m_detailLabel = nullptr;
+        QLabel* m_remoteContentStatusLabel = nullptr;
         QLabel* m_placeholderLabel = nullptr;
         QLabel* m_attachmentStatusLabel = nullptr;
         QToolButton* m_remoteContentButton = nullptr;

@@ -5,6 +5,7 @@
 #include <QLabel>
 #include <QLocale>
 #include <QPlainTextEdit>
+#include <QSizePolicy>
 #include <QStackedWidget>
 #include <QStringList>
 #include <QToolButton>
@@ -24,36 +25,52 @@ namespace javelin::gui::messageview
                 .arg(name, type, QLocale{}.formattedDataSize(static_cast<qint64>(attachment.size)));
         }
 
+        void makeLabelSelectable(QLabel* label)
+        {
+            label->setTextInteractionFlags(Qt::TextSelectableByMouse);
+            label->setCursor(Qt::IBeamCursor);
+            label->setFocusPolicy(Qt::NoFocus);
+            label->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        }
+
     } // namespace
 
     MessageViewContainer::MessageViewContainer(QWidget* parent) : QWidget(parent)
     {
         auto* layout = new QVBoxLayout(this);
-        layout->setContentsMargins(16, 16, 16, 16);
+        layout->setContentsMargins(8, 8, 8, 0);
         layout->setSpacing(12);
 
-        auto* titleRow = new QWidget(this);
-        auto* titleRowLayout = new QHBoxLayout(titleRow);
-        titleRowLayout->setContentsMargins(0, 0, 0, 0);
-        titleRowLayout->setSpacing(8);
+        auto* headerWidget = new QWidget(this);
+        auto* headerLayout = new QVBoxLayout(headerWidget);
+        headerLayout->setContentsMargins(0, 0, 0, 0);
+        headerLayout->setSpacing(8);
 
         m_titleLabel = new QLabel(this);
         m_titleLabel->setObjectName(QStringLiteral("messageViewTitle"));
+        m_titleLabel->setWordWrap(true);
+        makeLabelSelectable(m_titleLabel);
 
         auto titleFont = m_titleLabel->font();
         titleFont.setPointSize(titleFont.pointSize() + 4);
         titleFont.setBold(true);
         m_titleLabel->setFont(titleFont);
 
-        titleRowLayout->addWidget(m_titleLabel, 1);
-
         m_detailLabel = new QLabel(this);
         m_detailLabel->setWordWrap(true);
+        makeLabelSelectable(m_detailLabel);
+
+        headerLayout->addWidget(m_titleLabel);
+        headerLayout->addWidget(m_detailLabel);
 
         m_bodyControlsWidget = new QWidget(this);
         auto* buttonLayout = new QHBoxLayout(m_bodyControlsWidget);
         buttonLayout->setContentsMargins(0, 0, 0, 0);
         buttonLayout->setSpacing(8);
+
+        m_remoteContentStatusLabel = new QLabel(m_bodyControlsWidget);
+        m_remoteContentStatusLabel->setWordWrap(true);
+        makeLabelSelectable(m_remoteContentStatusLabel);
 
         m_remoteContentButton = new QToolButton(m_bodyControlsWidget);
         m_remoteContentButton->setText(QStringLiteral("Load remote content"));
@@ -65,18 +82,22 @@ namespace javelin::gui::messageview
                     updateRemoteContentButton();
                 });
 
+        buttonLayout->addWidget(m_remoteContentStatusLabel, 1);
         buttonLayout->addWidget(m_remoteContentButton);
-        buttonLayout->addStretch(1);
 
         m_bodyStack = new QStackedWidget(this);
+        m_bodyStack->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
         m_placeholderLabel = new QLabel(this);
         m_placeholderLabel->setWordWrap(true);
+        makeLabelSelectable(m_placeholderLabel);
 
         m_plainTextView = new QPlainTextEdit(this);
         m_plainTextView->setReadOnly(true);
+        m_plainTextView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
         m_htmlView = new HtmlMessageView(this);
+        m_htmlView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
         m_bodyStack->addWidget(m_placeholderLabel);
         m_bodyStack->addWidget(m_plainTextView);
@@ -84,14 +105,16 @@ namespace javelin::gui::messageview
 
         m_attachmentStatusLabel = new QLabel(this);
         m_attachmentStatusLabel->setWordWrap(true);
+        makeLabelSelectable(m_attachmentStatusLabel);
+        m_attachmentStatusLabel->setVisible(false);
 
         m_attachmentListWidget = new QWidget(this);
         m_attachmentListLayout = new QVBoxLayout(m_attachmentListWidget);
         m_attachmentListLayout->setContentsMargins(0, 0, 0, 0);
         m_attachmentListLayout->setSpacing(8);
+        m_attachmentListWidget->setVisible(false);
 
-        layout->addWidget(titleRow);
-        layout->addWidget(m_detailLabel);
+        layout->addWidget(headerWidget);
         layout->addWidget(m_bodyControlsWidget);
         layout->addWidget(m_bodyStack, 1);
         layout->addWidget(m_attachmentStatusLabel);
@@ -172,10 +195,22 @@ namespace javelin::gui::messageview
             m_snapshot.has_value() && m_snapshot->htmlRenderDocument.has_value() &&
             m_snapshot->htmlRenderDocument->blockedRemoteResourceCount > 0;
         m_bodyControlsWidget->setVisible(hasBlockedRemoteContent);
+        m_remoteContentStatusLabel->setVisible(hasBlockedRemoteContent);
         m_remoteContentButton->setVisible(hasBlockedRemoteContent);
         m_remoteContentButton->setEnabled(hasBlockedRemoteContent);
         m_remoteContentButton->setChecked(hasBlockedRemoteContent &&
                                           m_htmlView->remoteContentEnabled());
+        if (hasBlockedRemoteContent)
+        {
+            m_remoteContentStatusLabel->setText(
+                QStringLiteral("Blocked remote resources: %1")
+                    .arg(static_cast<qulonglong>(
+                        m_snapshot->htmlRenderDocument->blockedRemoteResourceCount)));
+        }
+        else
+        {
+            m_remoteContentStatusLabel->clear();
+        }
         m_remoteContentButton->setText(m_htmlView->remoteContentEnabled()
                                            ? QStringLiteral("Hide remote content")
                                            : QStringLiteral("Load remote content"));
@@ -262,6 +297,7 @@ namespace javelin::gui::messageview
         }
 
         m_attachmentStatusLabel->setText(attachmentStatusText());
+        m_attachmentStatusLabel->setVisible(!m_attachmentStatusLabel->text().isEmpty());
         rebuildAttachmentRows();
         updateRemoteContentButton();
 
@@ -308,6 +344,7 @@ namespace javelin::gui::messageview
 
             auto* label = new QLabel(attachmentDescription(attachment), row);
             label->setWordWrap(true);
+            makeLabelSelectable(label);
 
             auto* saveButton = new QToolButton(row);
             saveButton->setText(QStringLiteral("Save"));
@@ -358,12 +395,6 @@ namespace javelin::gui::messageview
                 segments.push_back(
                     QStringLiteral("Inline resources: %1")
                         .arg(static_cast<qulonglong>(renderDocument.inlineResourceCount)));
-            }
-            if (renderDocument.blockedRemoteResourceCount > 0)
-            {
-                segments.push_back(
-                    QStringLiteral("Blocked remote resources: %1")
-                        .arg(static_cast<qulonglong>(renderDocument.blockedRemoteResourceCount)));
             }
         }
 

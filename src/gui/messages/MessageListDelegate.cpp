@@ -28,6 +28,9 @@ namespace javelin::gui::messages
             return rect.adjusted(amount, amount, -amount, -amount);
         }
 
+        constexpr int unreadDotDiameter = 10;
+        constexpr int unreadDotGap = 10;
+
     } // namespace
 
     MessageListDelegate::MessageListDelegate(QObject* parent) : QStyledItemDelegate(parent)
@@ -106,14 +109,30 @@ namespace javelin::gui::messages
         const auto senderMetrics = QFontMetrics{senderFont};
         const auto timestampMetrics = QFontMetrics{option.font};
         const int timestampWidth = timestampMetrics.boundingRect(timestamp).width() + 12;
+        const int unreadDotReserve = isUnread ? unreadDotDiameter + unreadDotGap : 0;
         const QRect rightHeaderRect{
             contentRect.left() + contentRect.width() - timestampWidth,
             contentRect.top(),
             timestampWidth,
             24,
         };
-        const QRect leftHeaderRect{contentRect.left(), contentRect.top(),
-                                   std::max(0, contentRect.width() - timestampWidth - 10), 24};
+        const QRect leftHeaderRect{contentRect.left() + unreadDotReserve, contentRect.top(),
+                                   std::max(0, contentRect.width() - timestampWidth - 10 -
+                                                   unreadDotReserve),
+                                   24};
+
+        if (isUnread)
+        {
+            const QRect dotRect{contentRect.left(),
+                                contentRect.top() + (leftHeaderRect.height() - unreadDotDiameter) / 2,
+                                unreadDotDiameter, unreadDotDiameter};
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(accentColor);
+            painter->drawEllipse(dotRect);
+        }
+
+        painter->setFont(senderFont);
+        painter->setPen(senderColor);
         painter->drawText(leftHeaderRect, Qt::AlignLeft | Qt::AlignVCenter,
                           senderMetrics.elidedText(sender, Qt::ElideRight, leftHeaderRect.width()));
 
