@@ -998,7 +998,10 @@ namespace javelin::gui::shell
                     return;
                 }
 
-                refreshSelectionFromModels();
+                m_messageViewContainer->refresh(m_messageViewService);
+                updateEmptyStates();
+                updateMessageListHeader();
+                updateMessageActions();
 
                 const auto& summary = std::get<javelin::jmap::MessageContentRefreshSummary>(result);
                 qInfo().noquote() << "GUI message content refresh succeeded"
