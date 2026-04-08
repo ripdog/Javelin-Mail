@@ -37,6 +37,8 @@ set(JAVELIN_FORMAT_FILES
     src/app/ApplicationBootstrap.h
     src/app/InlineMessageSchemeHandler.cpp
     src/app/InlineMessageSchemeHandler.h
+    src/app/LongPollService.cpp
+    src/app/LongPollService.h
     src/app/WebEngineSetup.h
     src/app/main.cpp
     src/app/ProcessServices.cpp
@@ -65,6 +67,8 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/api/MethodCaller.h
     src/jmap/api/MethodEnvelope.cpp
     src/jmap/api/MethodEnvelope.h
+    src/jmap/api/RequestBuilder.h
+    src/jmap/api/ResponseReader.h
     src/jmap/api/Session.cpp
     src/jmap/api/Session.h
     src/jmap/api/SessionClient.cpp
@@ -108,8 +112,18 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/render/InlineMessageUrl.h
     src/jmap/sync/LongPollWorker.cpp
     src/jmap/sync/LongPollWorker.h
+    src/jmap/sync/EventSourceLongPoll.cpp
+    src/jmap/sync/EventSourceLongPoll.h
+    src/jmap/sync/LongPollMailboxObserver.cpp
+    src/jmap/sync/LongPollMailboxObserver.h
+    src/jmap/sync/MailboxRefreshExecutor.cpp
+    src/jmap/sync/MailboxRefreshExecutor.h
+    src/jmap/sync/MailboxQueryDescriptor.cpp
+    src/jmap/sync/MailboxQueryDescriptor.h
     src/jmap/sync/PendingActions.cpp
     src/jmap/sync/PendingActions.h
+    src/jmap/sync/RefreshNotificationPlanner.cpp
+    src/jmap/sync/RefreshNotificationPlanner.h
     src/jmap/sync/SyncPlanner.cpp
     src/jmap/sync/SyncPlanner.h
     src/jmap/sync/SyncReconciler.cpp
@@ -131,9 +145,11 @@ set(JAVELIN_FORMAT_FILES
     tests/jmap/InlineMessageUrlTest.cpp
     tests/jmap/JmapCoreMessageContentTest.cpp
     tests/jmap/JmapCoreTest.cpp
+    tests/jmap/LongPollMailboxObserverTest.cpp
     tests/jmap/LongPollWorkerTest.cpp
     tests/jmap/MailMethodsTest.cpp
     tests/jmap/MailboxRepositoryTest.cpp
+    tests/jmap/MailboxRefreshExecutorTest.cpp
     tests/jmap/MessageGroupingTest.cpp
     tests/jmap/MessageContentRepositoryTest.cpp
     tests/jmap/MessageViewServiceTest.cpp
@@ -142,6 +158,7 @@ set(JAVELIN_FORMAT_FILES
     tests/jmap/PendingActionsTest.cpp
     tests/jmap/QueryDiffTest.cpp
     tests/jmap/QueryServiceTest.cpp
+    tests/jmap/RefreshNotificationPlannerTest.cpp
     tests/jmap/MailEntityParsersTest.cpp
     tests/jmap/SessionClientTest.cpp
     tests/jmap/SessionRepositoryTest.cpp
@@ -161,6 +178,8 @@ add_library(javelin_jmap STATIC
     src/jmap/api/MethodCaller.h
     src/jmap/api/MethodEnvelope.cpp
     src/jmap/api/MethodEnvelope.h
+    src/jmap/api/RequestBuilder.h
+    src/jmap/api/ResponseReader.h
     src/jmap/api/Session.cpp
     src/jmap/api/Session.h
     src/jmap/api/SessionClient.cpp
@@ -204,8 +223,18 @@ add_library(javelin_jmap STATIC
     src/jmap/render/InlineMessageUrl.h
     src/jmap/sync/LongPollWorker.cpp
     src/jmap/sync/LongPollWorker.h
+    src/jmap/sync/EventSourceLongPoll.cpp
+    src/jmap/sync/EventSourceLongPoll.h
+    src/jmap/sync/LongPollMailboxObserver.cpp
+    src/jmap/sync/LongPollMailboxObserver.h
+    src/jmap/sync/MailboxRefreshExecutor.cpp
+    src/jmap/sync/MailboxRefreshExecutor.h
+    src/jmap/sync/MailboxQueryDescriptor.cpp
+    src/jmap/sync/MailboxQueryDescriptor.h
     src/jmap/sync/PendingActions.cpp
     src/jmap/sync/PendingActions.h
+    src/jmap/sync/RefreshNotificationPlanner.cpp
+    src/jmap/sync/RefreshNotificationPlanner.h
     src/jmap/sync/SyncPlanner.cpp
     src/jmap/sync/SyncPlanner.h
     src/jmap/sync/SyncReconciler.cpp
@@ -275,6 +304,8 @@ add_library(javelin_app STATIC
     src/app/ApplicationBootstrap.h
     src/app/InlineMessageSchemeHandler.cpp
     src/app/InlineMessageSchemeHandler.h
+    src/app/LongPollService.cpp
+    src/app/LongPollService.h
     src/app/WebEngineSetup.h
     src/app/ProcessServices.cpp
     src/app/ProcessServices.h

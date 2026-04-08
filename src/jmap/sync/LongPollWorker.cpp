@@ -1,5 +1,7 @@
 #include "jmap/sync/LongPollWorker.h"
 
+#include <QDebug>
+
 #include <algorithm>
 
 namespace javelin::jmap::sync
@@ -35,9 +37,10 @@ namespace javelin::jmap::sync
     LongPollWorker::LongPollWorker(AbstractLongPollChannel& channel,
                                    AbstractLongPollObserver& observer,
                                    AbstractLongPollSleeper& sleeper,
-                                   const BackoffPolicy backoffPolicy)
+                                   const BackoffPolicy backoffPolicy,
+                                   LongPollStatusCallback statusCallback)
         : m_channel(channel), m_observer(observer), m_sleeper(sleeper),
-          m_backoffPolicy(backoffPolicy)
+          m_backoffPolicy(backoffPolicy), m_statusCallback(std::move(statusCallback))
     {
     }
 
@@ -54,14 +57,36 @@ namespace javelin::jmap::sync
         std::size_t consecutiveFailures = 0;
         while (!cancellation.isCancelled())
         {
+            if (m_statusCallback)
+            {
+                m_statusCallback(LongPollConnectionStatus::Connecting);
+            }
+
+            qInfo().noquote() << "Long poll worker polling"
+                              << QString::fromStdString(request.accountId)
+                              << QString::fromStdString(request.lastState);
+
             const auto result = co_await m_channel.poll(request);
             if (std::holds_alternative<javelin::jmap::api::TransportError>(result))
             {
                 const auto& error = std::get<javelin::jmap::api::TransportError>(result);
+                qWarning().noquote() << "Long poll worker transport error"
+                                     << static_cast<int>(error.code)
+                                     << QString::fromStdString(error.message)
+                                     << error.httpStatus.value_or(0);
                 if (error.code == javelin::jmap::api::TransportErrorCode::Cancelled)
                 {
+                    if (m_statusCallback)
+                    {
+                        m_statusCallback(LongPollConnectionStatus::Disconnected);
+                    }
                     summary.cancelled = true;
                     break;
+                }
+
+                if (m_statusCallback)
+                {
+                    m_statusCallback(LongPollConnectionStatus::Disconnected);
                 }
 
                 ++summary.transientFailures;
@@ -76,14 +101,21 @@ namespace javelin::jmap::sync
 
             consecutiveFailures = 0;
             const auto& response = std::get<LongPollResponse>(result);
+            qInfo().noquote() << "Long poll worker received response"
+                              << QString::fromStdString(response.newState)
+                              << static_cast<qulonglong>(response.changedTypes.size());
             request.lastState = response.newState;
             summary.lastState = response.newState;
             ++summary.successfulPolls;
-            m_observer.onUpdate(response);
+            co_await m_observer.onUpdate(response);
         }
 
         if (cancellation.isCancelled())
         {
+            if (m_statusCallback)
+            {
+                m_statusCallback(LongPollConnectionStatus::Disconnected);
+            }
             summary.cancelled = true;
         }
 

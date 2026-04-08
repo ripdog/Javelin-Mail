@@ -7,6 +7,8 @@
 namespace javelin::jmap::api
 {
 
+    template <typename T> struct ParsedEnvelope;
+
     enum class TransportErrorCode
     {
         Cancelled,
@@ -50,8 +52,15 @@ namespace javelin::jmap::api
         std::string message;
     };
 
+    struct MethodError
+    {
+        std::string type;
+        std::optional<std::string> description;
+    };
+
     [[nodiscard]] std::string_view toString(TransportErrorCode code);
     [[nodiscard]] std::string_view toString(AuthErrorCode code);
     [[nodiscard]] std::string_view toString(ProtocolErrorCode code);
+    [[nodiscard]] ParsedEnvelope<MethodError> parseMethodError(std::string_view json);
 
 } // namespace javelin::jmap::api

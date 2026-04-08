@@ -1,6 +1,7 @@
 #include "app/ProcessServices.h"
 
 #include "app/InlineMessageSchemeHandler.h"
+#include "app/LongPollService.h"
 
 #include "jmap/JmapCore.h"
 #include "jmap/api/Transport.h"
@@ -60,6 +61,9 @@ namespace javelin::app
         m_messageViewService =
             std::make_unique<javelin::jmap::cache::MessageViewService>(m_databaseConnection);
         m_queryService = std::make_unique<javelin::jmap::cache::QueryService>(m_databaseConnection);
+        m_longPollService = std::make_unique<LongPollService>(
+            m_databaseConnection, *m_transport, *m_networkAccessManager, *m_accountRepository,
+            *m_queryService);
     }
 
     ProcessServices::~ProcessServices() = default;
@@ -87,6 +91,11 @@ namespace javelin::app
     javelin::jmap::cache::QueryService& ProcessServices::queryService()
     {
         return *m_queryService;
+    }
+
+    LongPollService& ProcessServices::longPollService()
+    {
+        return *m_longPollService;
     }
 
 } // namespace javelin::app

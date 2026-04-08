@@ -1,5 +1,6 @@
 #include "app/ApplicationBootstrap.h"
 
+#include "app/LongPollService.h"
 #include "app/ProcessServices.h"
 #include "gui/settings/PreferencesDialog.h"
 #include "gui/shell/MainWindow.h"
@@ -13,6 +14,21 @@
 
 namespace javelin::app
 {
+
+    namespace
+    {
+
+        [[nodiscard]] javelin::jmap::LiveConnectionSettings
+        toLiveConnectionSettings(const javelin::gui::settings::ConnectionSettings& settings)
+        {
+            return javelin::jmap::LiveConnectionSettings{
+                .sessionUrl = settings.sessionUrl.toStdString(),
+                .loginEmail = settings.loginEmail.toStdString(),
+                .apiKey = settings.apiKey.toStdString(),
+            };
+        }
+
+    } // namespace
 
     ApplicationBootstrap::ApplicationBootstrap(QApplication& application)
         : m_application(application), m_processServices(std::make_unique<ProcessServices>())
@@ -40,6 +56,10 @@ namespace javelin::app
             javelin::gui::settings::PreferencesDialog dialog{m_mainWindow};
             dialog.exec();
         }
+        else
+        {
+            m_processServices->longPollService().applySettings(toLiveConnectionSettings(settings));
+        }
 
         return m_application.exec();
     }
@@ -56,7 +76,8 @@ namespace javelin::app
 
         m_mainWindow = new javelin::gui::shell::MainWindow(
             m_processServices->jmapCore(), m_processServices->accountRepository(),
-            m_processServices->messageViewService(), m_processServices->queryService());
+            m_processServices->messageViewService(), m_processServices->queryService(),
+            m_processServices->longPollService());
 
         m_mainWindow->setAttribute(Qt::WA_DeleteOnClose);
 
@@ -89,6 +110,14 @@ namespace javelin::app
         QObject::connect(quitAction, &QAction::triggered, [&]() { m_application.quit(); });
 
         m_trayIcon->setContextMenu(m_trayMenu.get());
+
+        QObject::connect(&m_processServices->longPollService(), &LongPollService::notificationRaised,
+                         m_trayIcon.get(),
+                         [this](const QString& title, const QString& message)
+                         {
+                             m_trayIcon->showMessage(title, message,
+                                                     QSystemTrayIcon::Information, 10000);
+                         });
 
         QObject::connect(m_trayIcon.get(), &QSystemTrayIcon::activated,
                          [&](QSystemTrayIcon::ActivationReason reason)

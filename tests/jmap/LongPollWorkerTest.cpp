@@ -51,7 +51,8 @@ namespace
         javelin::jmap::sync::LongPollCancellation* cancellation = nullptr;
         std::optional<std::size_t> cancelAfterUpdates;
 
-        void onUpdate(const javelin::jmap::sync::LongPollResponse& response) override
+        [[nodiscard]] QCoro::Task<void>
+        onUpdate(const javelin::jmap::sync::LongPollResponse& response) override
         {
             updates.push_back(response);
             if (cancellation != nullptr && cancelAfterUpdates.has_value() &&
@@ -59,6 +60,7 @@ namespace
             {
                 cancellation->cancel();
             }
+            co_return;
         }
     };
 
@@ -80,6 +82,7 @@ namespace
             .accountId = "account-1",
             .eventSourceUrl = "https://mail.example.com/jmap/eventsource",
             .lastState = "state-1",
+            .types = {"Email", "Mailbox"},
         };
     }
 
@@ -203,4 +206,44 @@ TEST_CASE("long poll worker exits immediately when transport reports cancellatio
     CHECK(summary.successfulPolls == 0);
     CHECK(summary.transientFailures == 0);
     CHECK(sleeper.delays.empty());
+}
+
+TEST_CASE("long poll worker reports connection status transitions", "[jmap][sync]")
+{
+    ensureApplication();
+
+    FakeLongPollChannel channel;
+    channel.queuedResults = {
+        javelin::jmap::api::TransportError{
+            .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
+            .message = "temporary failure",
+            .httpStatus = std::nullopt,
+        },
+        javelin::jmap::sync::LongPollResponse{
+            .newState = "state-2",
+            .changedTypes = {"Email"},
+        },
+    };
+
+    javelin::jmap::sync::LongPollCancellation cancellation;
+    FakeLongPollObserver observer;
+    observer.cancellation = &cancellation;
+    observer.cancelAfterUpdates = 1;
+    FakeLongPollSleeper sleeper;
+    std::vector<javelin::jmap::sync::LongPollConnectionStatus> statuses;
+
+    const javelin::jmap::sync::LongPollWorker worker{
+        channel, observer, sleeper, {},
+        [&statuses](const javelin::jmap::sync::LongPollConnectionStatus status)
+        {
+            statuses.push_back(status);
+        }};
+    const auto summary = QCoro::waitFor(worker.run(makeRequest(), cancellation));
+
+    CHECK(summary.successfulPolls == 1);
+    CHECK(statuses == std::vector<javelin::jmap::sync::LongPollConnectionStatus>{
+                          javelin::jmap::sync::LongPollConnectionStatus::Connecting,
+                          javelin::jmap::sync::LongPollConnectionStatus::Disconnected,
+                          javelin::jmap::sync::LongPollConnectionStatus::Connecting,
+                          javelin::jmap::sync::LongPollConnectionStatus::Disconnected});
 }

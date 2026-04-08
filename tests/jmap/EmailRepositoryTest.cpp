@@ -141,3 +141,55 @@ TEST_CASE("email repository replacement removes stale email rows", "[jmap][cache
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(stale));
     CHECK_FALSE(std::get<std::optional<javelin::jmap::domain::Email>>(stale).has_value());
 }
+
+TEST_CASE("email repository reports which email ids already exist", "[jmap][cache][repository]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    javelin::jmap::cache::EmailRepository repository{databaseContext.connection};
+
+    auto first = loadEmailFixture();
+    auto second = first;
+    second.id = "eml-2";
+
+    REQUIRE_FALSE(repository.replaceAll("account-1", {first, second}).has_value());
+
+    const auto result = repository.existingIds(
+        "account-1", std::vector<std::string>{"eml-2", "eml-missing", "eml-1"});
+    REQUIRE(std::holds_alternative<std::vector<std::string>>(result));
+    CHECK(std::get<std::vector<std::string>>(result) ==
+          std::vector<std::string>{"eml-2", "eml-1"});
+}
+
+TEST_CASE("email repository lists mailbox email ids", "[jmap][cache][repository]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    javelin::jmap::cache::EmailRepository repository{databaseContext.connection};
+
+    auto inboxEmail = loadEmailFixture();
+    inboxEmail.id = "eml-inbox";
+    inboxEmail.mailboxIds = {"mbx-inbox"};
+
+    auto archivedEmail = inboxEmail;
+    archivedEmail.id = "eml-archive";
+    archivedEmail.mailboxIds = {"mbx-archive"};
+
+    auto bothMailboxes = inboxEmail;
+    bothMailboxes.id = "eml-both";
+    bothMailboxes.mailboxIds = {"mbx-inbox", "mbx-archive"};
+
+    REQUIRE_FALSE(
+        repository.replaceAll("account-1", {inboxEmail, archivedEmail, bothMailboxes}).has_value());
+
+    const auto result = repository.listMailboxEmailIds("account-1", "mbx-inbox");
+    REQUIRE(std::holds_alternative<std::vector<std::string>>(result));
+    CHECK(std::get<std::vector<std::string>>(result) ==
+          std::vector<std::string>{"eml-both", "eml-inbox"});
+}

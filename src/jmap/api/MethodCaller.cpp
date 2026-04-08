@@ -104,4 +104,10 @@ namespace javelin::jmap::api
         co_return *parseResult.value;
     }
 
+    QCoro::Task<MethodCallerResult> MethodCaller::call(const ApiRequestContext& requestContext,
+                                                       const RequestBuilder& request) const
+    {
+        co_return co_await call(requestContext, request.build());
+    }
+
 } // namespace javelin::jmap::api

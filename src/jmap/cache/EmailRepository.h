@@ -25,6 +25,10 @@ namespace javelin::jmap::cache
                    const std::vector<javelin::jmap::domain::Email>& emails);
         [[nodiscard]] std::optional<DatabaseError>
         removeMany(std::string_view accountId, std::span<const std::string> emailIds);
+        [[nodiscard]] std::variant<std::vector<std::string>, DatabaseError>
+        existingIds(std::string_view accountId, std::span<const std::string> emailIds) const;
+        [[nodiscard]] std::variant<std::vector<std::string>, DatabaseError>
+        listMailboxEmailIds(std::string_view accountId, std::string_view mailboxId) const;
         [[nodiscard]] std::variant<std::optional<javelin::jmap::domain::Email>, DatabaseError>
         find(std::string_view accountId, std::string_view emailId) const;
 

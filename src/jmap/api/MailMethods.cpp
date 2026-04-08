@@ -11,6 +11,7 @@ namespace
     {
         std::string accountId;
         std::optional<std::vector<std::string>> ids;
+        std::optional<javelin::jmap::api::GetRequest::ResultReference> idsReference;
         std::optional<std::vector<std::string>> properties;
     };
 
@@ -65,6 +66,17 @@ namespace
         std::optional<std::uint64_t> limit;
         bool collapseThreads = false;
         bool calculateTotal = false;
+    };
+
+    struct RawEmailQueryChangesRequest
+    {
+        std::string accountId;
+        std::string sinceQueryState;
+        std::optional<std::uint64_t> maxChanges;
+        std::optional<std::string> upToId;
+        std::optional<RawEmailQueryFilter> filter;
+        std::vector<RawEmailQuerySort> sort;
+        bool collapseThreads = false;
     };
 
     struct RawEmailContentBodyPart
@@ -157,14 +169,39 @@ namespace
         std::optional<std::uint64_t> total;
     };
 
+    struct RawAddedItem
+    {
+        std::string id;
+        std::uint64_t index = 0;
+    };
+
+    struct RawEmailQueryChangesResponse
+    {
+        std::string accountId;
+        std::string oldQueryState;
+        std::string newQueryState;
+        std::vector<RawAddedItem> added;
+        std::vector<std::string> removed;
+        bool hasMoreChanges = false;
+        std::optional<std::uint64_t> total;
+    };
+
 } // namespace
 
 template <> struct glz::meta<RawGetRequest>
 {
     using T = RawGetRequest;
 
+    static constexpr auto value = glz::object("accountId", &T::accountId, "ids", &T::ids, "#ids",
+                                              &T::idsReference, "properties", &T::properties);
+};
+
+template <> struct glz::meta<javelin::jmap::api::GetRequest::ResultReference>
+{
+    using T = javelin::jmap::api::GetRequest::ResultReference;
+
     static constexpr auto value =
-        glz::object("accountId", &T::accountId, "ids", &T::ids, "properties", &T::properties);
+        glz::object("resultOf", &T::resultOf, "name", &T::name, "path", &T::path);
 };
 
 template <> struct glz::meta<RawMailboxGetResponse>
@@ -222,6 +259,16 @@ template <> struct glz::meta<RawEmailQueryRequest>
         glz::object("accountId", &T::accountId, "filter", &T::filter, "sort", &T::sort, "position",
                     &T::position, "limit", &T::limit, "collapseThreads", &T::collapseThreads,
                     "calculateTotal", &T::calculateTotal);
+};
+
+template <> struct glz::meta<RawEmailQueryChangesRequest>
+{
+    using T = RawEmailQueryChangesRequest;
+
+    static constexpr auto value = glz::object(
+        "accountId", &T::accountId, "sinceQueryState", &T::sinceQueryState, "maxChanges",
+        &T::maxChanges, "upToId", &T::upToId, "filter", &T::filter, "sort", &T::sort,
+        "collapseThreads", &T::collapseThreads);
 };
 
 template <> struct glz::meta<RawEmailContentBodyPart>
@@ -310,6 +357,23 @@ template <> struct glz::meta<RawEmailQueryResponse>
     static constexpr auto value = glz::object(
         "accountId", &T::accountId, "queryState", &T::queryState, "canCalculateChanges",
         &T::canCalculateChanges, "position", &T::position, "ids", &T::ids, "total", &T::total);
+};
+
+template <> struct glz::meta<RawAddedItem>
+{
+    using T = RawAddedItem;
+
+    static constexpr auto value = glz::object("id", &T::id, "index", &T::index);
+};
+
+template <> struct glz::meta<RawEmailQueryChangesResponse>
+{
+    using T = RawEmailQueryChangesResponse;
+
+    static constexpr auto value = glz::object(
+        "accountId", &T::accountId, "oldQueryState", &T::oldQueryState, "newQueryState",
+        &T::newQueryState, "added", &T::added, "removed", &T::removed, "hasMoreChanges",
+        &T::hasMoreChanges, "total", &T::total);
 };
 
 namespace javelin::jmap::api
@@ -449,6 +513,7 @@ namespace javelin::jmap::api
         return serializeMethod(RawGetRequest{
             .accountId = request.accountId,
             .ids = request.ids,
+            .idsReference = request.idsReference,
             .properties = request.properties,
         });
     }
@@ -485,6 +550,33 @@ namespace javelin::jmap::api
             .limit = request.limit,
             .collapseThreads = request.collapseThreads,
             .calculateTotal = request.calculateTotal,
+        });
+    }
+
+    std::optional<std::string>
+    serializeEmailQueryChangesRequest(const EmailQueryChangesRequest& request)
+    {
+        std::vector<RawEmailQuerySort> sort;
+        sort.reserve(request.sort.size());
+        for (const auto& comparator : request.sort)
+        {
+            sort.push_back(RawEmailQuerySort{
+                .property = comparator.property,
+                .isAscending = comparator.isAscending,
+            });
+        }
+
+        return serializeMethod(RawEmailQueryChangesRequest{
+            .accountId = request.accountId,
+            .sinceQueryState = request.sinceQueryState,
+            .maxChanges = request.maxChanges,
+            .upToId = request.upToId,
+            .filter = request.filter.has_value()
+                          ? std::optional<RawEmailQueryFilter>{RawEmailQueryFilter{
+                                .inMailbox = request.filter->inMailbox}}
+                          : std::nullopt,
+            .sort = std::move(sort),
+            .collapseThreads = request.collapseThreads,
         });
     }
 
@@ -648,6 +740,43 @@ namespace javelin::jmap::api
         };
     }
 
+    ParsedEnvelope<EmailQueryChangesResponse>
+    parseEmailQueryChangesResponse(std::string_view json)
+    {
+        const auto parsed = parseMethod<RawEmailQueryChangesResponse>(json);
+        if (!parsed.ok())
+        {
+            return {
+                .value = std::nullopt,
+                .error = parsed.error,
+            };
+        }
+
+        std::vector<AddedItem> added;
+        added.reserve(parsed.value->added.size());
+        for (const auto& item : parsed.value->added)
+        {
+            added.push_back(AddedItem{
+                .id = item.id,
+                .index = item.index,
+            });
+        }
+
+        return {
+            .value =
+                EmailQueryChangesResponse{
+                    .accountId = std::move(parsed.value->accountId),
+                    .oldQueryState = std::move(parsed.value->oldQueryState),
+                    .newQueryState = std::move(parsed.value->newQueryState),
+                    .added = std::move(added),
+                    .removed = std::move(parsed.value->removed),
+                    .hasMoreChanges = parsed.value->hasMoreChanges,
+                    .total = parsed.value->total,
+                },
+            .error = std::nullopt,
+        };
+    }
+
     ParsedEnvelope<EmailContentGetResponse> parseEmailContentGetResponse(std::string_view json)
     {
         const auto parsed = parseMethod<RawEmailContentGetResponse>(json);
@@ -744,6 +873,146 @@ namespace javelin::jmap::api
                     .destroyed = std::move(parsed.value->destroyed),
                 },
             .error = std::nullopt,
+        };
+    }
+
+    ParsedEnvelope<EmailChangesResponse> parseEmailChangesResponse(std::string_view json)
+    {
+        const auto parsed = parseChangesResponse(json);
+        if (!parsed.ok() || !parsed.value.has_value())
+        {
+            return {
+                .value = std::nullopt,
+                .error = parsed.error,
+            };
+        }
+
+        return {
+            .value =
+                EmailChangesResponse{
+                    .accountId = std::move(parsed.value->accountId),
+                    .oldState = std::move(parsed.value->oldState),
+                    .newState = std::move(parsed.value->newState),
+                    .hasMoreChanges = parsed.value->hasMoreChanges,
+                    .created = std::move(parsed.value->created),
+                    .updated = std::move(parsed.value->updated),
+                    .destroyed = std::move(parsed.value->destroyed),
+                },
+            .error = std::nullopt,
+        };
+    }
+
+    std::optional<MethodRequest<MailboxGetResponse>> mailboxGet(const GetRequest& request)
+    {
+        const auto arguments = serializeGetRequest(request);
+        if (!arguments.has_value())
+        {
+            return std::nullopt;
+        }
+
+        return MethodRequest<MailboxGetResponse>{
+            .name = "Mailbox/get",
+            .arguments = *arguments,
+        };
+    }
+
+    std::optional<MethodRequest<EmailGetResponse>> emailGet(const GetRequest& request)
+    {
+        const auto arguments = serializeGetRequest(request);
+        if (!arguments.has_value())
+        {
+            return std::nullopt;
+        }
+
+        return MethodRequest<EmailGetResponse>{
+            .name = "Email/get",
+            .arguments = *arguments,
+        };
+    }
+
+    std::optional<MethodRequest<ThreadGetResponse>> threadGet(const GetRequest& request)
+    {
+        const auto arguments = serializeGetRequest(request);
+        if (!arguments.has_value())
+        {
+            return std::nullopt;
+        }
+
+        return MethodRequest<ThreadGetResponse>{
+            .name = "Thread/get",
+            .arguments = *arguments,
+        };
+    }
+
+    std::optional<MethodRequest<EmailQueryResponse>> emailQuery(const EmailQueryRequest& request)
+    {
+        const auto arguments = serializeEmailQueryRequest(request);
+        if (!arguments.has_value())
+        {
+            return std::nullopt;
+        }
+
+        return MethodRequest<EmailQueryResponse>{
+            .name = "Email/query",
+            .arguments = *arguments,
+        };
+    }
+
+    std::optional<MethodRequest<EmailQueryChangesResponse>>
+    emailQueryChanges(const EmailQueryChangesRequest& request)
+    {
+        const auto arguments = serializeEmailQueryChangesRequest(request);
+        if (!arguments.has_value())
+        {
+            return std::nullopt;
+        }
+
+        return MethodRequest<EmailQueryChangesResponse>{
+            .name = "Email/queryChanges",
+            .arguments = *arguments,
+        };
+    }
+
+    std::optional<MethodRequest<EmailChangesResponse>> emailChanges(const ChangesRequest& request)
+    {
+        const auto arguments = serializeChangesRequest(request);
+        if (!arguments.has_value())
+        {
+            return std::nullopt;
+        }
+
+        return MethodRequest<EmailChangesResponse>{
+            .name = "Email/changes",
+            .arguments = *arguments,
+        };
+    }
+
+    std::optional<MethodRequest<EmailContentGetResponse>>
+    emailContentGet(const EmailContentGetRequest& request)
+    {
+        const auto arguments = serializeEmailContentGetRequest(request);
+        if (!arguments.has_value())
+        {
+            return std::nullopt;
+        }
+
+        return MethodRequest<EmailContentGetResponse>{
+            .name = "Email/get",
+            .arguments = *arguments,
+        };
+    }
+
+    std::optional<MethodRequest<EmailSetResponse>> emailSet(const EmailSetRequest& request)
+    {
+        const auto arguments = serializeEmailSetRequest(request);
+        if (!arguments.has_value())
+        {
+            return std::nullopt;
+        }
+
+        return MethodRequest<EmailSetResponse>{
+            .name = "Email/set",
+            .arguments = *arguments,
         };
     }
 

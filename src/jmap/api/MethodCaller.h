@@ -2,6 +2,7 @@
 
 #include "jmap/api/Error.h"
 #include "jmap/api/MethodEnvelope.h"
+#include "jmap/api/RequestBuilder.h"
 #include "jmap/auth/Auth.h"
 
 #include <QCoroTask>
@@ -31,6 +32,8 @@ namespace javelin::jmap::api
 
         [[nodiscard]] QCoro::Task<MethodCallerResult> call(const ApiRequestContext& requestContext,
                                                            const RequestEnvelope& request) const;
+        [[nodiscard]] QCoro::Task<MethodCallerResult> call(const ApiRequestContext& requestContext,
+                                                           const RequestBuilder& request) const;
 
       private:
         AbstractTransport& m_transport;

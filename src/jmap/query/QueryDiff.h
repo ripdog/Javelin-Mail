@@ -17,7 +17,7 @@ namespace javelin::jmap::query
 
     struct MessageSelectionKey
     {
-        std::string emailId;
+        std::string threadId;
     };
 
     enum class QueryRowChangeKind

@@ -49,7 +49,7 @@ namespace javelin::jmap::query
         [[nodiscard]] MessageSelectionKey makeSelectionKey(const std::string& id,
                                                            const MessageSelectionKey*)
         {
-            return MessageSelectionKey{.emailId = id};
+            return MessageSelectionKey{.threadId = id};
         }
 
         template <typename Item, typename SelectionKey, typename Refresh, typename MakeKey>
@@ -136,7 +136,7 @@ namespace javelin::jmap::query
                     }
                     else
                     {
-                        return currentSelection->emailId;
+                        return currentSelection->threadId;
                     }
                 }();
 
@@ -176,7 +176,7 @@ namespace javelin::jmap::query
     {
         return diffItems<javelin::jmap::cache::MessageListItem, MessageSelectionKey,
                          MessageListRefresh>(previous, current, currentSelection,
-                                             [](const auto& item) { return item.emailId; });
+                                             [](const auto& item) { return item.threadId; });
     }
 
 } // namespace javelin::jmap::query

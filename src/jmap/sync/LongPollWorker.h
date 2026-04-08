@@ -5,6 +5,7 @@
 #include <QCoroTask>
 
 #include <chrono>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -19,6 +20,7 @@ namespace javelin::jmap::sync
         std::string accountId;
         std::string eventSourceUrl;
         std::string lastState;
+        std::vector<std::string> types;
     };
 
     struct LongPollResponse
@@ -48,6 +50,15 @@ namespace javelin::jmap::sync
 
     using LongPollResult = std::variant<LongPollResponse, javelin::jmap::api::TransportError>;
 
+    enum class LongPollConnectionStatus
+    {
+        Disconnected,
+        Connecting,
+        Connected,
+    };
+
+    using LongPollStatusCallback = std::function<void(LongPollConnectionStatus)>;
+
     class AbstractLongPollChannel
     {
       public:
@@ -61,7 +72,7 @@ namespace javelin::jmap::sync
       public:
         virtual ~AbstractLongPollObserver() = default;
 
-        virtual void onUpdate(const LongPollResponse& response) = 0;
+        [[nodiscard]] virtual QCoro::Task<void> onUpdate(const LongPollResponse& response) = 0;
     };
 
     class AbstractLongPollSleeper
@@ -84,7 +95,8 @@ namespace javelin::jmap::sync
     {
       public:
         LongPollWorker(AbstractLongPollChannel& channel, AbstractLongPollObserver& observer,
-                       AbstractLongPollSleeper& sleeper, BackoffPolicy backoffPolicy = {});
+                       AbstractLongPollSleeper& sleeper, BackoffPolicy backoffPolicy = {},
+                       LongPollStatusCallback statusCallback = {});
 
         [[nodiscard]] QCoro::Task<LongPollRunSummary> run(LongPollRequest request,
                                                           LongPollCancellation& cancellation) const;
@@ -94,6 +106,7 @@ namespace javelin::jmap::sync
         AbstractLongPollObserver& m_observer;
         AbstractLongPollSleeper& m_sleeper;
         BackoffPolicy m_backoffPolicy;
+        LongPollStatusCallback m_statusCallback;
     };
 
 } // namespace javelin::jmap::sync

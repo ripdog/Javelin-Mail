@@ -23,12 +23,13 @@ namespace
         };
     }
 
-    [[nodiscard]] javelin::jmap::cache::MessageListItem message(std::string id, std::string subject,
+    [[nodiscard]] javelin::jmap::cache::MessageListItem message(std::string id, std::string threadId,
+                                                                std::string subject,
                                                                 std::string receivedAt)
     {
         return javelin::jmap::cache::MessageListItem{
             .emailId = std::move(id),
-            .threadId = "thread",
+            .threadId = std::move(threadId),
             .subject = std::move(subject),
             .preview = std::nullopt,
             .receivedAt = std::move(receivedAt),
@@ -69,19 +70,19 @@ TEST_CASE("message list diff falls back to the first visible item when selection
           "[jmap][query]")
 {
     const auto previous = std::vector{
-        message("eml-1", "First", "2026-04-05T10:00:00Z"),
-        message("eml-2", "Second", "2026-04-05T09:00:00Z"),
+        message("eml-1", "thread-1", "First", "2026-04-05T10:00:00Z"),
+        message("eml-2", "thread-2", "Second", "2026-04-05T09:00:00Z"),
     };
     const auto current = std::vector{
-        message("eml-3", "Newest", "2026-04-05T11:00:00Z"),
-        message("eml-2", "Second updated", "2026-04-05T09:00:00Z"),
+        message("eml-3", "thread-3", "Newest", "2026-04-05T11:00:00Z"),
+        message("eml-4", "thread-2", "Second updated", "2026-04-05T09:00:00Z"),
     };
 
     const auto refresh = javelin::jmap::query::diffMessageList(
-        previous, current, javelin::jmap::query::MessageSelectionKey{.emailId = "eml-1"});
+        previous, current, javelin::jmap::query::MessageSelectionKey{.threadId = "thread-2"});
 
-    CHECK_FALSE(refresh.selectionPreserved);
+    CHECK(refresh.selectionPreserved);
     REQUIRE(refresh.nextSelection.has_value());
-    CHECK(refresh.nextSelection->emailId == "eml-3");
+    CHECK(refresh.nextSelection->threadId == "thread-2");
     CHECK_FALSE(refresh.changes.empty());
 }

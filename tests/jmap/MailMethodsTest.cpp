@@ -8,11 +8,31 @@ TEST_CASE("get requests serialize typed account, ids, and properties", "[jmap][m
     const auto json = javelin::jmap::api::serializeGetRequest({
         .accountId = "u1",
         .ids = std::vector<std::string>{"mbx-inbox"},
+        .idsReference = std::nullopt,
         .properties = std::vector<std::string>{"id", "name"},
     });
 
     REQUIRE(json.has_value());
     CHECK(*json == R"({"accountId":"u1","ids":["mbx-inbox"],"properties":["id","name"]})");
+}
+
+TEST_CASE("get requests serialize result references for chained ids", "[jmap][method][mail]")
+{
+    const auto json = javelin::jmap::api::serializeGetRequest({
+        .accountId = "u1",
+        .ids = std::nullopt,
+        .idsReference =
+            javelin::jmap::api::GetRequest::ResultReference{
+                .resultOf = "mailbox-query",
+                .name = "Email/query",
+                .path = "/ids",
+            },
+        .properties = std::vector<std::string>{"threadId"},
+    });
+
+    REQUIRE(json.has_value());
+    CHECK(*json ==
+          R"({"accountId":"u1","#ids":{"resultOf":"mailbox-query","name":"Email/query","path":"/ids"},"properties":["threadId"]})");
 }
 
 TEST_CASE("changes requests serialize typed state-token inputs", "[jmap][method][mail]")
@@ -52,6 +72,34 @@ TEST_CASE("email query requests serialize mailbox-scoped sort windows", "[jmap][
     CHECK(
         *json ==
         R"({"accountId":"u1","filter":{"inMailbox":"mbx-inbox"},"sort":[{"property":"receivedAt","isAscending":false}],"position":0,"limit":100,"collapseThreads":false,"calculateTotal":false})");
+}
+
+TEST_CASE("email queryChanges requests serialize incremental mailbox windows",
+          "[jmap][method][mail]")
+{
+    const auto json = javelin::jmap::api::serializeEmailQueryChangesRequest({
+        .accountId = "u1",
+        .sinceQueryState = "query-state-1",
+        .maxChanges = 50,
+        .upToId = std::nullopt,
+        .filter =
+            javelin::jmap::api::EmailQueryFilter{
+                .inMailbox = "mbx-inbox",
+            },
+        .sort =
+            {
+                javelin::jmap::api::EmailQuerySort{
+                    .property = "receivedAt",
+                    .isAscending = false,
+                },
+            },
+        .collapseThreads = true,
+    });
+
+    REQUIRE(json.has_value());
+    CHECK(
+        *json ==
+        R"({"accountId":"u1","sinceQueryState":"query-state-1","maxChanges":50,"filter":{"inMailbox":"mbx-inbox"},"sort":[{"property":"receivedAt","isAscending":false}],"collapseThreads":true})");
 }
 
 TEST_CASE("mailbox get responses parse into typed mailbox entities", "[jmap][method][mail]")
@@ -113,6 +161,22 @@ TEST_CASE("changes responses parse created updated and destroyed ids", "[jmap][m
     CHECK(result.value->destroyed == std::vector<std::string>{"mbx-destroyed"});
 }
 
+TEST_CASE("email changes responses parse typed incremental ids", "[jmap][method][mail]")
+{
+    const auto result = javelin::jmap::api::parseEmailChangesResponse(
+        R"({"accountId":"u1","oldState":"state-1","newState":"state-2","hasMoreChanges":false,"created":["eml-created"],"updated":["eml-updated"],"destroyed":["eml-destroyed"]})");
+
+    REQUIRE(result.ok());
+    REQUIRE(result.value.has_value());
+    CHECK(result.value->accountId == "u1");
+    CHECK(result.value->oldState == "state-1");
+    CHECK(result.value->newState == "state-2");
+    CHECK_FALSE(result.value->hasMoreChanges);
+    CHECK(result.value->created == std::vector<std::string>{"eml-created"});
+    CHECK(result.value->updated == std::vector<std::string>{"eml-updated"});
+    CHECK(result.value->destroyed == std::vector<std::string>{"eml-destroyed"});
+}
+
 TEST_CASE("email query responses parse ids and query metadata", "[jmap][method][mail]")
 {
     const auto result = javelin::jmap::api::parseEmailQueryResponse(
@@ -137,6 +201,24 @@ TEST_CASE("email query responses ignore unknown server fields", "[jmap][method][
     CHECK(result.value->accountId == "u1");
     CHECK(result.value->queryState == "query-state-1");
     CHECK(result.value->ids == std::vector<std::string>{"eml-1", "eml-2"});
+    CHECK(result.value->total == std::optional<std::uint64_t>{2});
+}
+
+TEST_CASE("email queryChanges responses parse added and removed ids", "[jmap][method][mail]")
+{
+    const auto result = javelin::jmap::api::parseEmailQueryChangesResponse(
+        R"({"accountId":"u1","oldQueryState":"query-state-1","newQueryState":"query-state-2","added":[{"id":"eml-3","index":0}],"removed":["eml-1"],"hasMoreChanges":false,"total":2})");
+
+    REQUIRE(result.ok());
+    REQUIRE(result.value.has_value());
+    CHECK(result.value->accountId == "u1");
+    CHECK(result.value->oldQueryState == "query-state-1");
+    CHECK(result.value->newQueryState == "query-state-2");
+    REQUIRE(result.value->added.size() == 1);
+    CHECK(result.value->added.front().id == "eml-3");
+    CHECK(result.value->added.front().index == 0);
+    CHECK(result.value->removed == std::vector<std::string>{"eml-1"});
+    CHECK_FALSE(result.value->hasMoreChanges);
     CHECK(result.value->total == std::optional<std::uint64_t>{2});
 }
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "jmap/api/MethodEnvelope.h"
+#include "jmap/api/RequestBuilder.h"
 #include "jmap/domain/MailEntities.h"
 
 #include <cstdint>
@@ -14,8 +15,16 @@ namespace javelin::jmap::api
 
     struct GetRequest
     {
+        struct ResultReference
+        {
+            std::string resultOf;
+            std::string name;
+            std::string path;
+        };
+
         std::string accountId;
         std::optional<std::vector<std::string>> ids;
+        std::optional<ResultReference> idsReference;
         std::optional<std::vector<std::string>> properties;
     };
 
@@ -79,6 +88,34 @@ namespace javelin::jmap::api
         bool canCalculateChanges = false;
         std::uint64_t position = 0;
         std::vector<std::string> ids;
+        std::optional<std::uint64_t> total;
+    };
+
+    struct EmailQueryChangesRequest
+    {
+        std::string accountId;
+        std::string sinceQueryState;
+        std::optional<std::uint64_t> maxChanges;
+        std::optional<std::string> upToId;
+        std::optional<EmailQueryFilter> filter;
+        std::vector<EmailQuerySort> sort;
+        bool collapseThreads = false;
+    };
+
+    struct AddedItem
+    {
+        std::string id;
+        std::uint64_t index = 0;
+    };
+
+    struct EmailQueryChangesResponse
+    {
+        std::string accountId;
+        std::string oldQueryState;
+        std::string newQueryState;
+        std::vector<AddedItem> added;
+        std::vector<std::string> removed;
+        bool hasMoreChanges = false;
         std::optional<std::uint64_t> total;
     };
 
@@ -162,10 +199,23 @@ namespace javelin::jmap::api
         std::vector<std::string> destroyed;
     };
 
+    struct EmailChangesResponse
+    {
+        std::string accountId;
+        std::string oldState;
+        std::string newState;
+        bool hasMoreChanges = false;
+        std::vector<std::string> created;
+        std::vector<std::string> updated;
+        std::vector<std::string> destroyed;
+    };
+
     [[nodiscard]] std::optional<std::string> serializeGetRequest(const GetRequest& request);
     [[nodiscard]] std::optional<std::string> serializeChangesRequest(const ChangesRequest& request);
     [[nodiscard]] std::optional<std::string>
     serializeEmailQueryRequest(const EmailQueryRequest& request);
+    [[nodiscard]] std::optional<std::string>
+    serializeEmailQueryChangesRequest(const EmailQueryChangesRequest& request);
     [[nodiscard]] std::optional<std::string>
     serializeEmailContentGetRequest(const EmailContentGetRequest& request);
     [[nodiscard]] std::optional<std::string> serializeEmailSetRequest(const EmailSetRequest& request);
@@ -174,9 +224,146 @@ namespace javelin::jmap::api
     [[nodiscard]] ParsedEnvelope<EmailGetResponse> parseEmailGetResponse(std::string_view json);
     [[nodiscard]] ParsedEnvelope<ThreadGetResponse> parseThreadGetResponse(std::string_view json);
     [[nodiscard]] ParsedEnvelope<EmailQueryResponse> parseEmailQueryResponse(std::string_view json);
+    [[nodiscard]] ParsedEnvelope<EmailQueryChangesResponse>
+    parseEmailQueryChangesResponse(std::string_view json);
     [[nodiscard]] ParsedEnvelope<EmailContentGetResponse>
     parseEmailContentGetResponse(std::string_view json);
     [[nodiscard]] ParsedEnvelope<EmailSetResponse> parseEmailSetResponse(std::string_view json);
     [[nodiscard]] ParsedEnvelope<ChangesResponse> parseChangesResponse(std::string_view json);
+    [[nodiscard]] ParsedEnvelope<EmailChangesResponse> parseEmailChangesResponse(std::string_view json);
+
+    [[nodiscard]] std::optional<MethodRequest<MailboxGetResponse>>
+    mailboxGet(const GetRequest& request);
+    [[nodiscard]] std::optional<MethodRequest<EmailGetResponse>>
+    emailGet(const GetRequest& request);
+    [[nodiscard]] std::optional<MethodRequest<ThreadGetResponse>>
+    threadGet(const GetRequest& request);
+    [[nodiscard]] std::optional<MethodRequest<EmailQueryResponse>>
+    emailQuery(const EmailQueryRequest& request);
+    [[nodiscard]] std::optional<MethodRequest<EmailQueryChangesResponse>>
+    emailQueryChanges(const EmailQueryChangesRequest& request);
+    [[nodiscard]] std::optional<MethodRequest<EmailChangesResponse>>
+    emailChanges(const ChangesRequest& request);
+    [[nodiscard]] std::optional<MethodRequest<EmailContentGetResponse>>
+    emailContentGet(const EmailContentGetRequest& request);
+    [[nodiscard]] std::optional<MethodRequest<EmailSetResponse>>
+    emailSet(const EmailSetRequest& request);
+
+    template <typename Response> struct MethodResponseTraits;
+
+    template <> struct MethodResponseTraits<MailboxGetResponse>
+    {
+        static constexpr std::string_view methodName = "Mailbox/get";
+
+        [[nodiscard]] static ParsedEnvelope<MailboxGetResponse> parse(std::string_view json)
+        {
+            return parseMailboxGetResponse(json);
+        }
+    };
+
+    template <> struct MethodResponseTraits<EmailGetResponse>
+    {
+        static constexpr std::string_view methodName = "Email/get";
+
+        [[nodiscard]] static ParsedEnvelope<EmailGetResponse> parse(std::string_view json)
+        {
+            return parseEmailGetResponse(json);
+        }
+    };
+
+    template <> struct MethodResponseTraits<ThreadGetResponse>
+    {
+        static constexpr std::string_view methodName = "Thread/get";
+
+        [[nodiscard]] static ParsedEnvelope<ThreadGetResponse> parse(std::string_view json)
+        {
+            return parseThreadGetResponse(json);
+        }
+    };
+
+    template <> struct MethodResponseTraits<EmailQueryResponse>
+    {
+        static constexpr std::string_view methodName = "Email/query";
+
+        [[nodiscard]] static ParsedEnvelope<EmailQueryResponse> parse(std::string_view json)
+        {
+            return parseEmailQueryResponse(json);
+        }
+    };
+
+    template <> struct MethodResponseTraits<EmailContentGetResponse>
+    {
+        static constexpr std::string_view methodName = "Email/get";
+
+        [[nodiscard]] static ParsedEnvelope<EmailContentGetResponse> parse(std::string_view json)
+        {
+            return parseEmailContentGetResponse(json);
+        }
+    };
+
+    template <> struct MethodResponseTraits<EmailQueryChangesResponse>
+    {
+        static constexpr std::string_view methodName = "Email/queryChanges";
+
+        [[nodiscard]] static ParsedEnvelope<EmailQueryChangesResponse> parse(std::string_view json)
+        {
+            return parseEmailQueryChangesResponse(json);
+        }
+    };
+
+    template <> struct MethodResponseTraits<EmailSetResponse>
+    {
+        static constexpr std::string_view methodName = "Email/set";
+
+        [[nodiscard]] static ParsedEnvelope<EmailSetResponse> parse(std::string_view json)
+        {
+            return parseEmailSetResponse(json);
+        }
+    };
+
+    template <> struct MethodResponseTraits<EmailChangesResponse>
+    {
+        static constexpr std::string_view methodName = "Email/changes";
+
+        [[nodiscard]] static ParsedEnvelope<EmailChangesResponse> parse(std::string_view json)
+        {
+            return parseEmailChangesResponse(json);
+        }
+    };
+
+    template <> struct MethodResponseTraits<ChangesResponse>
+    {
+        static constexpr std::string_view methodName = "";
+
+        [[nodiscard]] static ParsedEnvelope<ChangesResponse> parse(std::string_view json)
+        {
+            return parseChangesResponse(json);
+        }
+    };
+
+    template <typename Response>
+    [[nodiscard]] GetRequest::ResultReference
+    resultReference(const CallHandle<Response>& handle, std::string path)
+    {
+        return GetRequest::ResultReference{
+            .resultOf = handle.callId,
+            .name = std::string{MethodResponseTraits<Response>::methodName},
+            .path = std::move(path),
+        };
+    }
+
+    template <typename Response>
+    [[nodiscard]] GetRequest getRequestFrom(std::string accountId, const CallHandle<Response>& handle,
+                                            std::string path,
+                                            std::optional<std::vector<std::string>> properties =
+                                                std::nullopt)
+    {
+        return GetRequest{
+            .accountId = std::move(accountId),
+            .ids = std::nullopt,
+            .idsReference = resultReference(handle, std::move(path)),
+            .properties = std::move(properties),
+        };
+    }
 
 } // namespace javelin::jmap::api

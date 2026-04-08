@@ -1,6 +1,7 @@
 #pragma once
 
 #include "jmap/cache/QueryService.h"
+#include "jmap/query/QueryDiff.h"
 
 #include <QAbstractListModel>
 
@@ -36,13 +37,16 @@ namespace javelin::gui::messages
 
         [[nodiscard]] int rowCount(const QModelIndex& parent = QModelIndex{}) const override;
         [[nodiscard]] QVariant data(const QModelIndex& index, int role) const override;
+        [[nodiscard]] std::optional<std::size_t>
+        indexOfThread(std::string_view threadId) const;
 
         void setMailboxContext(std::optional<std::string> accountId,
                                std::optional<std::string> mailboxId);
         void refresh();
 
       private:
-        void reload();
+        void reload(bool preserveSelection);
+        void applyRefresh(const std::vector<javelin::jmap::cache::MessageListItem>& items);
 
         javelin::jmap::cache::QueryService& m_queryService;
         std::optional<std::string> m_accountId;

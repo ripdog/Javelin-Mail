@@ -1,4 +1,25 @@
 #include "jmap/api/Error.h"
+#include "jmap/api/MethodEnvelope.h"
+
+#include <glaze/glaze.hpp>
+
+namespace
+{
+
+    struct RawMethodError
+    {
+        std::string type;
+        std::optional<std::string> description;
+    };
+
+} // namespace
+
+template <> struct glz::meta<RawMethodError>
+{
+    using T = RawMethodError;
+
+    static constexpr auto value = glz::object("type", &T::type, "description", &T::description);
+};
 
 namespace javelin::jmap::api
 {
@@ -52,6 +73,30 @@ namespace javelin::jmap::api
         }
 
         return "unknown_protocol_error";
+    }
+
+    ParsedEnvelope<MethodError> parseMethodError(const std::string_view json)
+    {
+        std::string buffer{json};
+        RawMethodError raw{};
+        const auto readError =
+            glz::read<glz::opts{.error_on_unknown_keys = false}>(raw, buffer);
+        if (readError)
+        {
+            return {
+                .value = std::nullopt,
+                .error = glz::format_error(readError, buffer),
+            };
+        }
+
+        return {
+            .value =
+                MethodError{
+                    .type = std::move(raw.type),
+                    .description = std::move(raw.description),
+                },
+            .error = std::nullopt,
+        };
     }
 
 } // namespace javelin::jmap::api

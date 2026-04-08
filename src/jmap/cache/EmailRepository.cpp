@@ -604,4 +604,74 @@ namespace javelin::jmap::cache
         }};
     }
 
+    std::variant<std::vector<std::string>, DatabaseError>
+    EmailRepository::existingIds(const std::string_view accountId,
+                                 const std::span<const std::string> emailIds) const
+    {
+        if (const auto error = m_connection.validate())
+        {
+            return *error;
+        }
+
+        std::vector<std::string> existing;
+        existing.reserve(emailIds.size());
+
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "SELECT 1 FROM emails WHERE account_id = :account_id AND email_id = :email_id"));
+
+        for (const auto& emailId : emailIds)
+        {
+            query.bindValue(QStringLiteral(":account_id"),
+                            QString::fromStdString(std::string{accountId}));
+            query.bindValue(QStringLiteral(":email_id"), QString::fromStdString(emailId));
+            if (!query.exec())
+            {
+                return makeQueryError(QStringLiteral("Read existing email ids"), query);
+            }
+
+            if (query.next())
+            {
+                existing.push_back(emailId);
+            }
+
+            query.finish();
+        }
+
+        return existing;
+    }
+
+    std::variant<std::vector<std::string>, DatabaseError>
+    EmailRepository::listMailboxEmailIds(const std::string_view accountId,
+                                         const std::string_view mailboxId) const
+    {
+        if (const auto error = m_connection.validate())
+        {
+            return *error;
+        }
+
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "SELECT em.email_id "
+            "FROM email_mailboxes em "
+            "WHERE em.account_id = :account_id AND em.mailbox_id = :mailbox_id "
+            "ORDER BY em.email_id"));
+        query.bindValue(QStringLiteral(":account_id"),
+                        QString::fromStdString(std::string{accountId}));
+        query.bindValue(QStringLiteral(":mailbox_id"),
+                        QString::fromStdString(std::string{mailboxId}));
+        if (!query.exec())
+        {
+            return makeQueryError(QStringLiteral("Read mailbox email ids"), query);
+        }
+
+        std::vector<std::string> emailIds;
+        while (query.next())
+        {
+            emailIds.push_back(query.value(0).toString().toStdString());
+        }
+
+        return emailIds;
+    }
+
 } // namespace javelin::jmap::cache

@@ -14,6 +14,7 @@ namespace javelin::jmap
 namespace javelin::app
 {
     class InlineMessageSchemeHandler;
+    class LongPollService;
 }
 
 namespace javelin::jmap::api
@@ -47,6 +48,7 @@ namespace javelin::app
         [[nodiscard]] javelin::jmap::cache::AccountRepository& accountRepository();
         [[nodiscard]] javelin::jmap::cache::MessageViewService& messageViewService();
         [[nodiscard]] javelin::jmap::cache::QueryService& queryService();
+        [[nodiscard]] javelin::app::LongPollService& longPollService();
 
       private:
         std::unique_ptr<javelin::jmap::JmapCore> m_jmapCore;
@@ -57,6 +59,7 @@ namespace javelin::app
         std::unique_ptr<javelin::jmap::cache::AccountRepository> m_accountRepository;
         std::unique_ptr<javelin::jmap::cache::MessageViewService> m_messageViewService;
         std::unique_ptr<javelin::jmap::cache::QueryService> m_queryService;
+        std::unique_ptr<LongPollService> m_longPollService;
     };
 
 } // namespace javelin::app

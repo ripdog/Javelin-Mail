@@ -17,6 +17,11 @@ namespace javelin::jmap
     class JmapCore;
 }
 
+namespace javelin::app
+{
+    class LongPollService;
+}
+
 namespace javelin::jmap::cache
 {
     class AccountRepository;
@@ -51,6 +56,7 @@ namespace javelin::gui::shell
                             javelin::jmap::cache::AccountRepository& accountRepository,
                             javelin::jmap::cache::MessageViewService& messageViewService,
                             javelin::jmap::cache::QueryService& queryService,
+                            javelin::app::LongPollService& longPollService,
                             QWidget* parent = nullptr);
         ~MainWindow() override = default;
 
@@ -77,9 +83,12 @@ namespace javelin::gui::shell
         void reloadAccounts();
         void restoreSelection(std::optional<std::string> accountId,
                               std::optional<std::string> mailboxId,
+                              std::optional<std::string> threadId,
                               std::optional<std::string> emailId);
+        void refreshSelectionFromModels();
         void restorePersistentState();
         void savePersistentState() const;
+        void updateLongPollStatus();
         void updateEmptyStates();
         void updateMessageListHeader();
         void updateMessageActions();
@@ -89,6 +98,7 @@ namespace javelin::gui::shell
         javelin::jmap::cache::AccountRepository& m_accountRepository;
         javelin::jmap::cache::MessageViewService& m_messageViewService;
         javelin::jmap::cache::QueryService& m_queryService;
+        javelin::app::LongPollService& m_longPollService;
         QSplitter* m_mainSplitter = nullptr;
         javelin::gui::mailboxes::MailboxTreeModel* m_mailboxModel = nullptr;
         javelin::gui::messages::MessageListModel* m_messageModel = nullptr;
@@ -97,6 +107,7 @@ namespace javelin::gui::shell
         QListView* m_messageView = nullptr;
         QLabel* m_messageListTitleLabel = nullptr;
         QLabel* m_messageListMetaLabel = nullptr;
+        QLabel* m_longPollStatusLabel = nullptr;
         QToolButton* m_messageQuickFilterButton = nullptr;
         QLabel* m_messageEmptyState = nullptr;
         QAction* m_refreshAction = nullptr;
