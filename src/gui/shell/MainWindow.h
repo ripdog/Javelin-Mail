@@ -4,6 +4,10 @@
 #include <QModelIndex>
 #include <QTemporaryDir>
 
+#include <optional>
+#include <string>
+#include <utility>
+
 class QCloseEvent;
 class QLabel;
 class QListView;
@@ -136,6 +140,7 @@ namespace javelin::gui::shell
         QAction* m_moveAction = nullptr;
         QAction* m_viewSourceAction = nullptr;
         bool m_refreshInFlight = false;
+        std::optional<std::pair<std::string, std::string>> m_mailboxRefreshInFlight;
         QTemporaryDir m_openAttachmentDirectory;
     };
 

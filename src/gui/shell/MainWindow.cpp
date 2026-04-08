@@ -1131,6 +1131,13 @@ namespace javelin::gui::shell
             return;
         }
 
+        const auto refreshTarget = std::pair{accountId, mailboxId};
+        if (m_mailboxRefreshInFlight == refreshTarget)
+        {
+            return;
+        }
+
+        m_mailboxRefreshInFlight = refreshTarget;
         qInfo().noquote() << "GUI mailbox refresh requested" << QString::fromStdString(accountId)
                           << QString::fromStdString(mailboxId);
         auto task = m_jmapCore.refreshMailboxMessages(
@@ -1147,6 +1154,12 @@ namespace javelin::gui::shell
             [this, accountId = std::move(accountId),
              mailboxId = std::move(mailboxId)](javelin::jmap::MailboxMessagesRefreshResult result)
             {
+                const auto completedRefresh = std::pair{accountId, mailboxId};
+                if (m_mailboxRefreshInFlight == completedRefresh)
+                {
+                    m_mailboxRefreshInFlight.reset();
+                }
+
                 if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
                 {
                     qWarning().noquote() << "GUI mailbox refresh failed" << error->message;
@@ -1660,6 +1673,15 @@ namespace javelin::gui::shell
                                        : std::optional<std::string>{selectedThreadId.toStdString()},
             selectedEmailId.isEmpty() ? std::optional<std::string>{std::nullopt}
                                       : std::optional<std::string>{selectedEmailId.toStdString()});
+
+        const auto restoredAccountId = currentAccountId(*m_mailboxView);
+        const auto restoredMailboxId = currentMailboxId(*m_mailboxView);
+        m_messageModel->setMailboxContext(restoredAccountId, restoredMailboxId);
+        refreshSelectionFromModels();
+        if (restoredAccountId.has_value() && restoredMailboxId.has_value())
+        {
+            refreshSelectedMailboxMessages(*restoredAccountId, *restoredMailboxId);
+        }
     }
 
     void MainWindow::savePersistentState() const
