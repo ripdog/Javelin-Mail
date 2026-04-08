@@ -285,11 +285,6 @@ namespace javelin::jmap::sync
                 "Failed to expand the eventSourceUrl URI template.");
         }
 
-        qInfo().noquote() << "Long poll opening event source" << url->toString()
-                          << "lastEventId="
-                          << (request.lastState.empty() ? QStringLiteral("<none>")
-                                                        : QString::fromStdString(request.lastState));
-
         QNetworkRequest networkRequest{*url};
         networkRequest.setTransferTimeout(0);
         networkRequest.setRawHeader("Accept", "text/event-stream");
@@ -325,9 +320,6 @@ namespace javelin::jmap::sync
                                  reply->attribute(QNetworkRequest::HttpStatusCodeAttribute);
                              const int statusCode =
                                  statusAttribute.isValid() ? statusAttribute.toInt() : 0;
-                             qInfo().noquote()
-                                 << "Long poll metadata" << reply->url().toString() << statusCode
-                                 << reply->header(QNetworkRequest::ContentTypeHeader).toString();
                              if (statusCode >= 200 && statusCode < 400 && m_statusCallback)
                              {
                                  connectedReported = true;
@@ -374,8 +366,6 @@ namespace javelin::jmap::sync
             case ParsedEventStatus::Parsed:
                 if (parsed.response->newState == request.lastState)
                 {
-                    qInfo().noquote() << "Long poll ignoring duplicate state event"
-                                      << QString::fromStdString(parsed.response->newState);
                     return std::nullopt;
                 }
                 return *parsed.response;
@@ -457,13 +447,6 @@ namespace javelin::jmap::sync
                 {
                     if (const auto parsed = finalizeEvent(); parsed.has_value())
                     {
-                        if (const auto* response = std::get_if<LongPollResponse>(&*parsed))
-                        {
-                            qInfo().noquote()
-                                << "Long poll received state event" << reply->url().toString()
-                                << QString::fromStdString(response->newState)
-                                << static_cast<qulonglong>(response->changedTypes.size());
-                        }
                         co_return *parsed;
                     }
                     continue;
@@ -511,13 +494,6 @@ namespace javelin::jmap::sync
 
                 if (const auto parsed = finalizeEvent(); parsed.has_value())
                 {
-                    if (const auto* response = std::get_if<LongPollResponse>(&*parsed))
-                    {
-                        qInfo().noquote() << "Long poll parsed terminal state event"
-                                          << reply->url().toString()
-                                          << QString::fromStdString(response->newState)
-                                          << static_cast<qulonglong>(response->changedTypes.size());
-                    }
                     co_return *parsed;
                 }
 

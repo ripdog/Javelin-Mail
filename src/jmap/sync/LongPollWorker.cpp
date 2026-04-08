@@ -62,10 +62,6 @@ namespace javelin::jmap::sync
                 m_statusCallback(LongPollConnectionStatus::Connecting);
             }
 
-            qInfo().noquote() << "Long poll worker polling"
-                              << QString::fromStdString(request.accountId)
-                              << QString::fromStdString(request.lastState);
-
             const auto result = co_await m_channel.poll(request);
             if (std::holds_alternative<javelin::jmap::api::TransportError>(result))
             {
@@ -101,9 +97,6 @@ namespace javelin::jmap::sync
 
             consecutiveFailures = 0;
             const auto& response = std::get<LongPollResponse>(result);
-            qInfo().noquote() << "Long poll worker received response"
-                              << QString::fromStdString(response.newState)
-                              << static_cast<qulonglong>(response.changedTypes.size());
             request.lastState = response.newState;
             summary.lastState = response.newState;
             ++summary.successfulPolls;

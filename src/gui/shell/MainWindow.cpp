@@ -354,6 +354,36 @@ namespace javelin::gui::shell
         restorePersistentState();
     }
 
+    void MainWindow::openMessageFromNotification(const QString& accountId, const QString& mailboxId,
+                                                 const QString& threadId, const QString& emailId)
+    {
+        const auto account = accountId.toStdString();
+        const auto mailbox = mailboxId.toStdString();
+        const auto thread = threadId.isEmpty()
+                                ? std::optional<std::string>{std::nullopt}
+                                : std::optional<std::string>{threadId.toStdString()};
+        const auto email = emailId.isEmpty()
+                               ? std::optional<std::string>{std::nullopt}
+                               : std::optional<std::string>{emailId.toStdString()};
+
+        reloadAccounts();
+        m_messageModel->setMailboxContext(account, mailbox);
+        m_messageModel->refresh();
+        restoreSelection(std::optional<std::string>{account}, std::optional<std::string>{mailbox},
+                         thread, email);
+        if (email.has_value())
+        {
+            m_messageViewContainer->setSelection(m_messageViewService,
+                                                 std::optional<std::string>{account},
+                                                 std::optional<std::string>{mailbox}, email);
+            refreshSelectedMessageContent(account, *email);
+        }
+        else
+        {
+            refreshSelectionFromModels();
+        }
+    }
+
     void MainWindow::createActions()
     {
         m_refreshAction = new QAction(QIcon::fromTheme(QStringLiteral("view-refresh")),

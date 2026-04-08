@@ -54,7 +54,10 @@ namespace javelin::app
         void statusChanged(javelin::app::LongPollService::Status status);
         void mailboxRefreshed(const QString& accountId, const QString& mailboxId,
                              bool scrollToNewest);
-        void notificationRaised(const QString& title, const QString& message);
+        void notificationRaised(const QString& accountId, const QString& mailboxId,
+                                const QString& threadId, const QString& emailId,
+                                const QString& mailboxName, const QString& title,
+                                const QString& message);
 
       private:
         struct RunConfiguration

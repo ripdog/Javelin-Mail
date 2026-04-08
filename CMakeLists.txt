@@ -12,7 +12,7 @@ include(cmake/StaticAnalysis.cmake)
 include(cmake/Sanitizers.cmake)
 
 # 1. Find Qt6 FIRST
-find_package(Qt6 6.6 REQUIRED COMPONENTS Core Network Sql Widgets Concurrent LinguistTools WebEngineCore WebEngineWidgets Svg)
+find_package(Qt6 6.6 REQUIRED COMPONENTS Core DBus Network Sql Widgets Concurrent LinguistTools WebEngineCore WebEngineWidgets Svg)
 
 # 2. Fetch Dependencies BEFORE KDE is allowed to load
 javelin_configure_dependencies()
@@ -35,6 +35,8 @@ enable_testing()
 set(JAVELIN_FORMAT_FILES
     src/app/ApplicationBootstrap.cpp
     src/app/ApplicationBootstrap.h
+    src/app/DesktopNotificationController.cpp
+    src/app/DesktopNotificationController.h
     src/app/InlineMessageSchemeHandler.cpp
     src/app/InlineMessageSchemeHandler.h
     src/app/LongPollService.cpp
@@ -302,6 +304,8 @@ target_compile_options(javelin_gui PRIVATE -fexceptions)
 add_library(javelin_app STATIC
     src/app/ApplicationBootstrap.cpp
     src/app/ApplicationBootstrap.h
+    src/app/DesktopNotificationController.cpp
+    src/app/DesktopNotificationController.h
     src/app/InlineMessageSchemeHandler.cpp
     src/app/InlineMessageSchemeHandler.h
     src/app/LongPollService.cpp
@@ -321,6 +325,7 @@ target_include_directories(javelin_app PUBLIC
 target_link_libraries(javelin_app
     PUBLIC
         Qt::Core
+        Qt::DBus
         Qt::Widgets
         Qt::WebEngineCore
         Qt::Svg

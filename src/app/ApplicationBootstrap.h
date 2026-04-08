@@ -7,6 +7,7 @@ class QApplication;
 
 namespace javelin::app
 {
+    class DesktopNotificationController;
     class ProcessServices;
 }
 
@@ -35,12 +36,14 @@ namespace javelin::app
         [[nodiscard]] int run();
 
       private:
+        void restoreMainWindow(const QString& activationToken = {});
         void toggleMainWindow();
         void createMainWindow();
         void setupSystemTray();
 
         QApplication& m_application;
         std::unique_ptr<ProcessServices> m_processServices;
+        std::unique_ptr<DesktopNotificationController> m_notificationController;
         QPointer<javelin::gui::shell::MainWindow> m_mainWindow;
         std::unique_ptr<QSystemTrayIcon> m_trayIcon;
         std::unique_ptr<QMenu> m_trayMenu;

@@ -54,16 +54,12 @@ namespace javelin::app
 
     void LongPollService::applySettings(javelin::jmap::LiveConnectionSettings settings)
     {
-        qInfo().noquote() << "Long poll apply settings"
-                          << QString::fromStdString(settings.loginEmail)
-                          << QString::fromStdString(settings.sessionUrl);
         m_settings = std::move(settings);
         restart();
     }
 
     void LongPollService::stop()
     {
-        qInfo() << "Long poll stop requested";
         if (m_runContext != nullptr)
         {
             m_runContext->cancellation.cancel();
@@ -81,9 +77,6 @@ namespace javelin::app
     QCoro::Task<void> LongPollService::onUpdate(
         const javelin::jmap::sync::LongPollResponse& response)
     {
-        qInfo().noquote() << "Long poll observer update"
-                          << QString::fromStdString(response.newState)
-                          << static_cast<qulonglong>(response.changedTypes.size());
         m_lastEventId = response.newState;
         co_await refreshWatchedMailbox();
     }
@@ -169,10 +162,6 @@ namespace javelin::app
             co_return;
         }
 
-        qInfo().noquote() << "Long poll refreshing watched mailbox"
-                          << QString::fromStdString(m_runContext->configuration.accountId)
-                          << QString::fromStdString(m_runContext->configuration.mailboxId);
-
         javelin::jmap::api::MethodCaller methodCaller{m_transport};
         const javelin::jmap::api::ApiRequestContext apiRequestContext{
             .credentials =
@@ -198,9 +187,6 @@ namespace javelin::app
         if (const auto* summary =
                 std::get_if<javelin::jmap::sync::MailboxRefreshSummary>(&refreshResult))
         {
-            qInfo().noquote() << "Long poll mailbox refresh succeeded"
-                              << static_cast<qulonglong>(summary->representativeCount)
-                              << static_cast<qulonglong>(summary->notificationCandidates.size());
             Q_EMIT mailboxRefreshed(QString::fromStdString(m_runContext->configuration.accountId),
                                     QString::fromStdString(m_runContext->configuration.mailboxId),
                                     !summary->insertedEmailIds.empty());
@@ -216,7 +202,6 @@ namespace javelin::app
 
     void LongPollService::restart()
     {
-        qInfo() << "Long poll restart requested";
         const auto nextConfiguration = resolveConfiguration();
         if (!nextConfiguration.has_value())
         {
@@ -240,10 +225,6 @@ namespace javelin::app
         auto runContext = std::make_shared<RunContext>();
         runContext->generation = ++m_generation;
         runContext->configuration = *nextConfiguration;
-        qInfo().noquote() << "Long poll resolved configuration"
-                          << QString::fromStdString(runContext->configuration.accountId)
-                          << QString::fromStdString(runContext->configuration.mailboxId)
-                          << QString::fromStdString(runContext->configuration.eventSourceUrl);
         runContext->channel = std::make_unique<javelin::jmap::sync::EventSourceLongPollChannel>(
             m_networkAccessManager, nextConfiguration->settings.apiKey,
             [this, generation = runContext->generation](
@@ -254,7 +235,6 @@ namespace javelin::app
                     return;
                 }
 
-                qInfo() << "Long poll channel status callback" << static_cast<int>(status);
                 setStatus(toServiceStatus(status));
             });
         runContext->worker = std::make_unique<javelin::jmap::sync::LongPollWorker>(
@@ -273,7 +253,6 @@ namespace javelin::app
                     return;
                 }
 
-                qInfo() << "Long poll worker status callback" << static_cast<int>(status);
                 setStatus(toServiceStatus(status));
             });
 
@@ -289,7 +268,6 @@ namespace javelin::app
                     return;
                 }
 
-                qInfo() << "Long poll run loop ended";
                 setStatus(Status::Disconnected);
             });
     }
@@ -301,8 +279,6 @@ namespace javelin::app
             return;
         }
 
-        qInfo() << "Long poll service status" << static_cast<int>(m_status) << "->"
-                << static_cast<int>(status);
         m_status = status;
         Q_EMIT statusChanged(m_status);
     }
@@ -316,8 +292,7 @@ namespace javelin::app
             return;
         }
 
-        qInfo().noquote() << "Long poll publishing notifications"
-                          << static_cast<qulonglong>(candidates.size());
+        const auto& target = candidates.front();
 
         QString title;
         QString message;
@@ -336,7 +311,11 @@ namespace javelin::app
                 candidates.front().subject.value_or(std::string{"(no subject)"}));
         }
 
-        Q_EMIT notificationRaised(title, message);
+        Q_EMIT notificationRaised(
+            QString::fromStdString(m_runContext->configuration.accountId),
+            QString::fromStdString(m_runContext->configuration.mailboxId),
+            QString::fromStdString(target.threadId), QString::fromStdString(target.emailId),
+            QString::fromStdString(std::string{mailboxName}), title, message);
     }
 
 } // namespace javelin::app

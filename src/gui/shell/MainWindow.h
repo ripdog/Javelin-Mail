@@ -59,6 +59,8 @@ namespace javelin::gui::shell
                             javelin::app::LongPollService& longPollService,
                             QWidget* parent = nullptr);
         ~MainWindow() override = default;
+        void openMessageFromNotification(const QString& accountId, const QString& mailboxId,
+                                         const QString& threadId, const QString& emailId);
 
       private:
         void createActions();
