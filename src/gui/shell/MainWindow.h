@@ -118,6 +118,13 @@ namespace javelin::gui::shell
             std::variant<MailboxTabState, SearchTabState> content;
         };
 
+        struct MessageContentRequestState
+        {
+            std::string accountId;
+            std::string emailId;
+            std::uint64_t token = 0;
+        };
+
         void createActions();
         void setupUi();
         void connectSelection();
@@ -180,6 +187,7 @@ namespace javelin::gui::shell
                               std::optional<std::string> mailboxId,
                               std::optional<std::string> threadId,
                               std::optional<std::string> emailId);
+        void restoreActiveTabMessageSelection(std::optional<int> previousMessageRow);
         void restoreSelectionAfterMessageRefresh(std::optional<std::string> accountId,
                                                  std::optional<std::string> mailboxId,
                                                  std::optional<std::string> threadId,
@@ -230,6 +238,8 @@ namespace javelin::gui::shell
         QAction* m_moveAction = nullptr;
         QAction* m_viewSourceAction = nullptr;
         bool m_refreshInFlight = false;
+        std::uint64_t m_nextMessageContentRequestToken = 1;
+        std::optional<MessageContentRequestState> m_messageContentRequestInFlight;
         bool m_syncingNavigation = false;
         std::optional<int> m_activeTabIndex;
         std::vector<TabState> m_tabs;

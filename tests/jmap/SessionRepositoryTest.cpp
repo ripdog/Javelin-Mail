@@ -3,6 +3,7 @@
 #include "jmap/api/SessionParser.h"
 
 #include <QCoreApplication>
+#include <QSqlQuery>
 #include <QTemporaryDir>
 
 #include <catch2/catch_test_macros.hpp>
@@ -141,6 +142,58 @@ TEST_CASE("session repository replacement updates cached session rows", "[jmap][
     CHECK(loaded.accounts.at("u1").name == "Updated");
     REQUIRE(loaded.capabilities.coreDetails.has_value());
     CHECK(loaded.capabilities.coreDetails->maxConcurrentRequests == 42);
+}
+
+TEST_CASE("session repository replacement preserves cached mailboxes for retained accounts",
+          "[jmap][cache][repository]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    javelin::jmap::cache::SessionRepository repository{databaseContext.connection};
+    auto session = loadSessionFixture();
+
+    if (const auto error = repository.replace("u1", session))
+    {
+        FAIL(error->message.toStdString());
+    }
+
+    QSqlQuery mailboxQuery{databaseContext.connection.database()};
+    mailboxQuery.prepare(QStringLiteral(
+        "INSERT INTO mailboxes ("
+        "account_id, mailbox_id, parent_mailbox_id, name, role, sort_order, total_emails, "
+        "unread_emails, total_threads, unread_threads, is_subscribed, rights_json, state"
+        ") VALUES ("
+        ":account_id, :mailbox_id, :parent_mailbox_id, :name, :role, :sort_order, "
+        ":total_emails, :unread_emails, :total_threads, :unread_threads, :is_subscribed, "
+        ":rights_json, :state)"));
+    mailboxQuery.bindValue(QStringLiteral(":account_id"), QStringLiteral("u1"));
+    mailboxQuery.bindValue(QStringLiteral(":mailbox_id"), QStringLiteral("mbx-inbox"));
+    mailboxQuery.bindValue(QStringLiteral(":parent_mailbox_id"), QVariant{});
+    mailboxQuery.bindValue(QStringLiteral(":name"), QStringLiteral("Inbox"));
+    mailboxQuery.bindValue(QStringLiteral(":role"), QStringLiteral("inbox"));
+    mailboxQuery.bindValue(QStringLiteral(":sort_order"), 10);
+    mailboxQuery.bindValue(QStringLiteral(":total_emails"), 1);
+    mailboxQuery.bindValue(QStringLiteral(":unread_emails"), 1);
+    mailboxQuery.bindValue(QStringLiteral(":total_threads"), 1);
+    mailboxQuery.bindValue(QStringLiteral(":unread_threads"), 1);
+    mailboxQuery.bindValue(QStringLiteral(":is_subscribed"), 1);
+    mailboxQuery.bindValue(QStringLiteral(":rights_json"), QStringLiteral("{}"));
+    mailboxQuery.bindValue(QStringLiteral(":state"), QVariant{});
+    REQUIRE(mailboxQuery.exec());
+
+    session.state = "session-state-2";
+    if (const auto error = repository.replace("u1", session))
+    {
+        FAIL(error->message.toStdString());
+    }
+
+    QSqlQuery countQuery{databaseContext.connection.database()};
+    REQUIRE(countQuery.exec(
+        QStringLiteral("SELECT COUNT(*) FROM mailboxes WHERE account_id = 'u1'")));
+    REQUIRE(countQuery.next());
+    CHECK(countQuery.value(0).toInt() == 1);
 }
 
 TEST_CASE("session repository returns no value for missing owners", "[jmap][cache][repository]")

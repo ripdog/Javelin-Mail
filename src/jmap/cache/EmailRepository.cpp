@@ -4,6 +4,7 @@
 #include <QSqlQuery>
 
 #include <array>
+#include <unordered_set>
 
 namespace javelin::jmap::cache
 {
@@ -94,14 +95,13 @@ namespace javelin::jmap::cache
             return addresses;
         }
 
-        std::optional<DatabaseError> deleteEmailChildren(QSqlDatabase& database,
-                                                         const std::string_view accountId,
-                                                         const std::string_view emailId)
+        std::optional<DatabaseError> deleteEmailSummaryChildren(QSqlDatabase& database,
+                                                                const std::string_view accountId,
+                                                                const std::string_view emailId)
         {
             for (const QString& table :
                  {QStringLiteral("email_addresses"), QStringLiteral("email_keywords"),
-                  QStringLiteral("email_mailboxes"), QStringLiteral("email_body_values"),
-                  QStringLiteral("email_parts")})
+                  QStringLiteral("email_mailboxes")})
             {
                 QSqlQuery deleteQuery{database};
                 deleteQuery.prepare(
@@ -115,6 +115,32 @@ namespace javelin::jmap::cache
                 if (!deleteQuery.exec())
                 {
                     return makeQueryError(QStringLiteral("Delete email child rows"), deleteQuery);
+                }
+            }
+
+            return std::nullopt;
+        }
+
+        std::optional<DatabaseError> deleteEmailContent(QSqlDatabase& database,
+                                                        const std::string_view accountId,
+                                                        const std::string_view emailId)
+        {
+            for (const QString& table :
+                 {QStringLiteral("inline_part_payloads"), QStringLiteral("email_body_values"),
+                  QStringLiteral("email_parts")})
+            {
+                QSqlQuery deleteQuery{database};
+                deleteQuery.prepare(
+                    QStringLiteral(
+                        "DELETE FROM %1 WHERE account_id = :account_id AND email_id = :email_id")
+                        .arg(table));
+                deleteQuery.bindValue(QStringLiteral(":account_id"),
+                                      QString::fromStdString(std::string{accountId}));
+                deleteQuery.bindValue(QStringLiteral(":email_id"),
+                                      QString::fromStdString(std::string{emailId}));
+                if (!deleteQuery.exec())
+                {
+                    return makeQueryError(QStringLiteral("Delete email content rows"), deleteQuery);
                 }
             }
 
@@ -146,10 +172,47 @@ namespace javelin::jmap::cache
             };
         }
 
+        QSqlQuery existingIdsQuery{database};
+        existingIdsQuery.prepare(
+            QStringLiteral("SELECT email_id FROM emails WHERE account_id = :account_id"));
+        existingIdsQuery.bindValue(QStringLiteral(":account_id"),
+                                   QString::fromStdString(std::string{accountId}));
+        if (!existingIdsQuery.exec())
+        {
+            database.rollback();
+            return makeQueryError(QStringLiteral("Read cached email ids"), existingIdsQuery);
+        }
+
+        std::vector<std::string> existingIds;
+        while (existingIdsQuery.next())
+        {
+            existingIds.push_back(existingIdsQuery.value(0).toString().toStdString());
+        }
+
+        std::unordered_set<std::string> incomingIds;
+        incomingIds.reserve(emails.size());
+        for (const auto& email : emails)
+        {
+            incomingIds.insert(email.id);
+        }
+
+        for (const auto& existingId : existingIds)
+        {
+            if (incomingIds.contains(existingId))
+            {
+                continue;
+            }
+
+            if (const auto error = deleteEmailContent(database, accountId, existingId))
+            {
+                database.rollback();
+                return error;
+            }
+        }
+
         for (const QString& table :
              {QStringLiteral("email_addresses"), QStringLiteral("email_keywords"),
-              QStringLiteral("email_mailboxes"), QStringLiteral("email_body_values"),
-              QStringLiteral("email_parts"), QStringLiteral("emails")})
+              QStringLiteral("email_mailboxes"), QStringLiteral("emails")})
         {
             QSqlQuery deleteQuery{database};
             deleteQuery.prepare(
@@ -331,7 +394,7 @@ namespace javelin::jmap::cache
 
         for (const auto& email : emails)
         {
-            if (const auto error = deleteEmailChildren(database, accountId, email.id))
+            if (const auto error = deleteEmailSummaryChildren(database, accountId, email.id))
             {
                 database.rollback();
                 return error;
@@ -455,7 +518,13 @@ namespace javelin::jmap::cache
             "DELETE FROM emails WHERE account_id = :account_id AND email_id = :email_id"));
         for (const auto& emailId : emailIds)
         {
-            if (const auto error = deleteEmailChildren(database, accountId, emailId))
+            if (const auto error = deleteEmailSummaryChildren(database, accountId, emailId))
+            {
+                database.rollback();
+                return error;
+            }
+
+            if (const auto error = deleteEmailContent(database, accountId, emailId))
             {
                 database.rollback();
                 return error;

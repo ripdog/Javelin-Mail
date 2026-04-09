@@ -127,6 +127,17 @@ namespace javelin::gui::shell
                                       : std::optional<std::string>{threadId.toStdString()};
         }
 
+        [[nodiscard]] std::optional<int> currentMessageRow(const QListView& messageView)
+        {
+            const auto currentIndex = messageView.currentIndex();
+            if (!currentIndex.isValid())
+            {
+                return std::nullopt;
+            }
+
+            return currentIndex.row();
+        }
+
         [[nodiscard]] bool indexIsUnread(const QModelIndex& index)
         {
             return index.isValid() &&
@@ -1272,18 +1283,10 @@ namespace javelin::gui::shell
             }
         }
 
+        const auto previousMessageRow = currentMessageRow(*m_messageView);
         applyActiveTabPageToModel();
         m_messageView->clearSelection();
-
-        const auto& selection =
-            std::visit([](const auto& content) { return content.selection; }, tab->content);
-        const auto restoredIndex = restoreMessageSelection(selection.threadId, selection.emailId);
-        if (restoredIndex.isValid())
-        {
-            m_messageView->setCurrentIndex(restoredIndex);
-            m_messageView->scrollTo(restoredIndex);
-        }
-
+        restoreActiveTabMessageSelection(previousMessageRow);
         refreshSelectionFromModels();
     }
 
@@ -1376,7 +1379,9 @@ namespace javelin::gui::shell
                         activeMailboxId() == std::optional<std::string>{tabMailboxId} &&
                         mailboxTab->page.offset == tabOffset)
                     {
+                        const auto previousMessageRow = currentMessageRow(*m_messageView);
                         applyActiveTabPageToModel();
+                        restoreActiveTabMessageSelection(previousMessageRow);
                         refreshSelectionFromModels();
                     }
                     statusBar()->showMessage(
@@ -1447,7 +1452,9 @@ namespace javelin::gui::shell
                         std::get<SearchTabState>(activeTab()->content).query == tabQuery &&
                         searchTab->page.offset == tabOffset)
                     {
+                        const auto previousMessageRow = currentMessageRow(*m_messageView);
                         applyActiveTabPageToModel();
+                        restoreActiveTabMessageSelection(previousMessageRow);
                         refreshSelectionFromModels();
                     }
                     statusBar()->showMessage(
@@ -1731,6 +1738,22 @@ namespace javelin::gui::shell
         }
     }
 
+    void MainWindow::restoreActiveTabMessageSelection(const std::optional<int> previousMessageRow)
+    {
+        const auto* tab = activeTab();
+        if (tab == nullptr)
+        {
+            return;
+        }
+
+        const auto& selection =
+            std::visit([](const auto& content) -> const TabSelectionState& { return content.selection; },
+                       tab->content);
+        restoreSelectionAfterMessageRefresh(activeAccountId(), activeMailboxId(),
+                                            selection.threadId, selection.emailId,
+                                            previousMessageRow);
+    }
+
     void MainWindow::restoreSelectionAfterMessageRefresh(
         std::optional<std::string> accountId, std::optional<std::string> mailboxId,
         std::optional<std::string> threadId, std::optional<std::string> emailId,
@@ -1794,6 +1817,14 @@ namespace javelin::gui::shell
         updateEmptyStates();
         updateMessageListHeader();
         updateMessageActions();
+
+        if (accountId.has_value() && emailId.has_value() && !m_messageViewContainer->hasReadableBody())
+        {
+            m_messageViewContainer->setLoadingState(
+                true, QStringLiteral("Checking your saved copy, then downloading the message if "
+                                     "needed."));
+            refreshSelectedMessageContent(*accountId, *emailId);
+        }
     }
 
     void MainWindow::updateEmptyStates()
@@ -2264,6 +2295,22 @@ namespace javelin::gui::shell
             return;
         }
 
+        if (m_messageContentRequestInFlight.has_value() &&
+            m_messageContentRequestInFlight->accountId == accountId &&
+            m_messageContentRequestInFlight->emailId == emailId)
+        {
+            qInfo().noquote() << "GUI message content refresh already in flight"
+                              << QString::fromStdString(emailId);
+            return;
+        }
+
+        const auto requestToken = m_nextMessageContentRequestToken++;
+        m_messageContentRequestInFlight = MessageContentRequestState{
+            .accountId = accountId,
+            .emailId = emailId,
+            .token = requestToken,
+        };
+
         auto task = m_jmapCore.refreshMessageContent(
             toLiveConnectionSettings(settings), accountId, emailId,
             [this](const QString& message)
@@ -2275,12 +2322,25 @@ namespace javelin::gui::shell
             });
         QCoro::connect(
             std::move(task), this,
-            [this, accountId = std::move(accountId),
-             emailId = std::move(emailId)](javelin::jmap::MessageContentRefreshResult result)
+            [this, accountId = std::move(accountId), emailId = std::move(emailId),
+             requestToken](javelin::jmap::MessageContentRefreshResult result)
             {
-                m_messageViewContainer->setLoadingState(false);
+                const bool isCurrentRequest =
+                    m_messageContentRequestInFlight.has_value() &&
+                    m_messageContentRequestInFlight->token == requestToken &&
+                    m_messageContentRequestInFlight->accountId == accountId &&
+                    m_messageContentRequestInFlight->emailId == emailId;
+                if (!isCurrentRequest)
+                {
+                    qInfo().noquote() << "GUI message content refresh ignored stale completion"
+                                      << QString::fromStdString(emailId);
+                    return;
+                }
+
+                m_messageContentRequestInFlight.reset();
                 if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
                 {
+                    m_messageViewContainer->setLoadingState(false);
                     qWarning().noquote() << "GUI message content refresh failed" << error->message;
                     statusBar()->showMessage(error->message, 10000);
                     return;
@@ -2294,6 +2354,7 @@ namespace javelin::gui::shell
                     return;
                 }
 
+                m_messageViewContainer->setLoadingState(false);
                 m_messageViewContainer->refresh(m_messageViewService);
                 updateEmptyStates();
                 updateMessageListHeader();

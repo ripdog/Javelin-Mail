@@ -6,6 +6,7 @@
 #include <QSqlQuery>
 
 #include <string>
+#include <unordered_set>
 
 namespace javelin::jmap::cache
 {
@@ -159,14 +160,6 @@ namespace javelin::jmap::cache
             return makeQueryError(QStringLiteral("Delete session row"), deleteSession);
         }
 
-        QSqlQuery deleteAccounts{database};
-        deleteAccounts.prepare(QStringLiteral("DELETE FROM accounts"));
-        if (!deleteAccounts.exec())
-        {
-            database.rollback();
-            return makeQueryError(QStringLiteral("Delete cached accounts"), deleteAccounts);
-        }
-
         QSqlQuery insertAccount{database};
         insertAccount.prepare(QStringLiteral(
             "INSERT INTO accounts ("
@@ -175,9 +168,21 @@ namespace javelin::jmap::cache
             "cap_mail, cap_submission"
             ") VALUES ("
             ":account_id, :email_address, :session_url, :is_primary, :name, :is_personal, "
-            ":is_read_only, :cap_mail, :cap_submission)"));
+            ":is_read_only, :cap_mail, :cap_submission"
+            ") ON CONFLICT(account_id) DO UPDATE SET "
+            "email_address = excluded.email_address, "
+            "session_url = excluded.session_url, "
+            "is_primary = excluded.is_primary, "
+            "name = excluded.name, "
+            "is_personal = excluded.is_personal, "
+            "is_read_only = excluded.is_read_only, "
+            "cap_mail = excluded.cap_mail, "
+            "cap_submission = excluded.cap_submission"));
+        std::unordered_set<std::string> sessionAccountIds;
+        sessionAccountIds.reserve(session.accounts.size());
         for (const auto& [accountId, account] : session.accounts)
         {
+            sessionAccountIds.insert(accountId);
             auto storedAccount = account;
             storedAccount.id = accountId;
             bindAccount(insertAccount, storedAccount);
@@ -190,6 +195,41 @@ namespace javelin::jmap::cache
             {
                 database.rollback();
                 return makeQueryError(QStringLiteral("Insert cached account"), insertAccount);
+            }
+        }
+
+        QSqlQuery existingAccountsQuery{database};
+        if (!existingAccountsQuery.exec(QStringLiteral("SELECT account_id FROM accounts")))
+        {
+            database.rollback();
+            return makeQueryError(QStringLiteral("Read cached accounts"), existingAccountsQuery);
+        }
+
+        std::vector<std::string> obsoleteAccountIds;
+        while (existingAccountsQuery.next())
+        {
+            const auto existingAccountId = existingAccountsQuery.value(0).toString().toStdString();
+            if (!sessionAccountIds.contains(existingAccountId))
+            {
+                obsoleteAccountIds.push_back(std::move(existingAccountId));
+            }
+        }
+
+        if (!obsoleteAccountIds.empty())
+        {
+            QSqlQuery deleteAccount{database};
+            deleteAccount.prepare(
+                QStringLiteral("DELETE FROM accounts WHERE account_id = :account_id"));
+            for (const auto& obsoleteAccountId : obsoleteAccountIds)
+            {
+                deleteAccount.bindValue(QStringLiteral(":account_id"),
+                                        QString::fromStdString(obsoleteAccountId));
+                if (!deleteAccount.exec())
+                {
+                    database.rollback();
+                    return makeQueryError(QStringLiteral("Delete obsolete cached account"),
+                                          deleteAccount);
+                }
             }
         }
 

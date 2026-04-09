@@ -1,4 +1,6 @@
 #include "jmap/cache/EmailRepository.h"
+#include "jmap/cache/InlinePartPayloadRepository.h"
+#include "jmap/cache/MessageContentRepository.h"
 #include "FixtureReader.h"
 #include "jmap/domain/MailEntityParsers.h"
 
@@ -89,6 +91,49 @@ namespace
         return *parsed.value;
     }
 
+    void seedMessageContent(javelin::jmap::cache::DatabaseConnection& connection,
+                            const QString& emailId)
+    {
+        QSqlQuery partQuery{connection.database()};
+        partQuery.prepare(QStringLiteral(
+            "INSERT INTO email_parts ("
+            "account_id, email_id, part_id, parent_part_id, blob_id, kind, media_type, name, "
+            "charset, disposition, cid, size, is_inline_renderable, is_body_section"
+            ") VALUES ("
+            ":account_id, :email_id, :part_id, :parent_part_id, :blob_id, :kind, :media_type, "
+            ":name, :charset, :disposition, :cid, :size, :is_inline_renderable, "
+            ":is_body_section)"));
+        partQuery.bindValue(QStringLiteral(":account_id"), QStringLiteral("account-1"));
+        partQuery.bindValue(QStringLiteral(":email_id"), emailId);
+        partQuery.bindValue(QStringLiteral(":part_id"), QStringLiteral("1"));
+        partQuery.bindValue(QStringLiteral(":parent_part_id"), QVariant{});
+        partQuery.bindValue(QStringLiteral(":blob_id"), QStringLiteral("blob-html"));
+        partQuery.bindValue(QStringLiteral(":kind"), QStringLiteral("body"));
+        partQuery.bindValue(QStringLiteral(":media_type"), QStringLiteral("text/html"));
+        partQuery.bindValue(QStringLiteral(":name"), QVariant{});
+        partQuery.bindValue(QStringLiteral(":charset"), QStringLiteral("utf-8"));
+        partQuery.bindValue(QStringLiteral(":disposition"), QVariant{});
+        partQuery.bindValue(QStringLiteral(":cid"), QVariant{});
+        partQuery.bindValue(QStringLiteral(":size"), 128);
+        partQuery.bindValue(QStringLiteral(":is_inline_renderable"), 0);
+        partQuery.bindValue(QStringLiteral(":is_body_section"), 1);
+        REQUIRE(partQuery.exec());
+
+        QSqlQuery bodyQuery{connection.database()};
+        bodyQuery.prepare(
+            QStringLiteral("INSERT INTO email_body_values ("
+                           "account_id, email_id, part_id, blob_id, is_truncated, value"
+                           ") VALUES ("
+                           ":account_id, :email_id, :part_id, :blob_id, :is_truncated, :value)"));
+        bodyQuery.bindValue(QStringLiteral(":account_id"), QStringLiteral("account-1"));
+        bodyQuery.bindValue(QStringLiteral(":email_id"), emailId);
+        bodyQuery.bindValue(QStringLiteral(":part_id"), QStringLiteral("1"));
+        bodyQuery.bindValue(QStringLiteral(":blob_id"), QStringLiteral("blob-html"));
+        bodyQuery.bindValue(QStringLiteral(":is_truncated"), 0);
+        bodyQuery.bindValue(QStringLiteral(":value"), QStringLiteral("<p>Cached body</p>"));
+        REQUIRE(bodyQuery.exec());
+    }
+
 } // namespace
 
 TEST_CASE("email repository round-trips cached email summaries", "[jmap][cache][repository]")
@@ -140,6 +185,101 @@ TEST_CASE("email repository replacement removes stale email rows", "[jmap][cache
     const auto stale = repository.find("account-1", "eml-2");
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(stale));
     CHECK_FALSE(std::get<std::optional<javelin::jmap::domain::Email>>(stale).has_value());
+}
+
+TEST_CASE("email repository replacement preserves cached message content for retained emails",
+          "[jmap][cache][repository]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    javelin::jmap::cache::EmailRepository repository{databaseContext.connection};
+
+    auto first = loadEmailFixture();
+    auto second = first;
+    second.id = "eml-2";
+
+    REQUIRE_FALSE(repository.replaceAll("account-1", {first, second}).has_value());
+    seedMessageContent(databaseContext.connection, QStringLiteral("eml-1"));
+    seedMessageContent(databaseContext.connection, QStringLiteral("eml-2"));
+
+    REQUIRE_FALSE(repository.replaceAll("account-1", {first}).has_value());
+
+    javelin::jmap::cache::MessageContentRepository contentRepository{databaseContext.connection};
+    const auto retainedBodies = contentRepository.loadBodyValues("account-1", "eml-1");
+    REQUIRE(
+        std::holds_alternative<std::vector<javelin::jmap::cache::EmailBodyValue>>(retainedBodies));
+    CHECK(std::get<std::vector<javelin::jmap::cache::EmailBodyValue>>(retainedBodies).size() == 1);
+
+    const auto removedBodies = contentRepository.loadBodyValues("account-1", "eml-2");
+    REQUIRE(
+        std::holds_alternative<std::vector<javelin::jmap::cache::EmailBodyValue>>(removedBodies));
+    CHECK(std::get<std::vector<javelin::jmap::cache::EmailBodyValue>>(removedBodies).empty());
+}
+
+TEST_CASE("email repository upsert preserves cached message content for existing emails",
+          "[jmap][cache][repository]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    javelin::jmap::cache::EmailRepository repository{databaseContext.connection};
+
+    auto email = loadEmailFixture();
+    REQUIRE_FALSE(repository.replaceAll("account-1", {email}).has_value());
+    seedMessageContent(databaseContext.connection, QStringLiteral("eml-1"));
+
+    email.subject = "Updated subject";
+    REQUIRE_FALSE(repository.upsertMany("account-1", {email}).has_value());
+
+    javelin::jmap::cache::MessageContentRepository contentRepository{databaseContext.connection};
+    const auto bodies = contentRepository.loadBodyValues("account-1", "eml-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::EmailBodyValue>>(bodies));
+    CHECK(std::get<std::vector<javelin::jmap::cache::EmailBodyValue>>(bodies).size() == 1);
+}
+
+TEST_CASE("email repository removal clears cached message content and inline payloads",
+          "[jmap][cache][repository]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    javelin::jmap::cache::EmailRepository repository{databaseContext.connection};
+
+    auto email = loadEmailFixture();
+    REQUIRE_FALSE(repository.replaceAll("account-1", {email}).has_value());
+    seedMessageContent(databaseContext.connection, QStringLiteral("eml-1"));
+
+    javelin::jmap::cache::InlinePartPayloadRepository payloadRepository{databaseContext.connection};
+    REQUIRE_FALSE(payloadRepository
+                      .upsert("account-1",
+                              {
+                                  .emailId = "eml-1",
+                                  .partId = "2",
+                                  .blobId = "blob-inline",
+                                  .mediaType = "image/png",
+                                  .payload = QByteArrayLiteral("PNGDATA"),
+                              })
+                      .has_value());
+
+    const std::vector<std::string> emailIds{"eml-1"};
+    REQUIRE_FALSE(repository.removeMany("account-1", emailIds).has_value());
+
+    javelin::jmap::cache::MessageContentRepository contentRepository{databaseContext.connection};
+    const auto bodies = contentRepository.loadBodyValues("account-1", "eml-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::EmailBodyValue>>(bodies));
+    CHECK(std::get<std::vector<javelin::jmap::cache::EmailBodyValue>>(bodies).empty());
+
+    const auto payload = payloadRepository.find("account-1", "eml-1", "2");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::InlinePartPayload>>(payload));
+    CHECK_FALSE(
+        std::get<std::optional<javelin::jmap::cache::InlinePartPayload>>(payload).has_value());
 }
 
 TEST_CASE("email repository reports which email ids already exist", "[jmap][cache][repository]")

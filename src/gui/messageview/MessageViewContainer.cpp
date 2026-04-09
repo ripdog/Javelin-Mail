@@ -510,7 +510,7 @@ namespace javelin::gui::messageview
             return;
         }
 
-        if (!m_mailboxId.has_value())
+        if (!m_mailboxId.has_value() && !m_emailId.has_value())
         {
             m_titleLabel->setText(QStringLiteral("Choose a mailbox"));
             m_detailLabel->setText(
