@@ -92,6 +92,7 @@ namespace javelin::gui::shell
             std::vector<javelin::jmap::cache::MessageListItem> items;
             bool cacheLoaded = false;
             bool refreshInFlight = false;
+            bool stale = false;
         };
 
         struct MailboxTabState
@@ -124,6 +125,7 @@ namespace javelin::gui::shell
         void activateMailboxInHomeTab(std::string accountId, std::string mailboxId, QString title,
                                       std::optional<std::size_t> total, bool refreshRemote);
         void openMailboxSelectionInTab(bool refreshRemote);
+        void markTabsStaleForAccount(std::string_view accountId);
         void executeSearch(const QString& text);
         void clearSearch();
         void updateTabBar();
@@ -142,6 +144,7 @@ namespace javelin::gui::shell
         void refreshMailboxTabFromServer(MailboxTabState& tab);
         void refreshSearchTabFromServer(SearchTabState& tab);
         [[nodiscard]] bool shouldRefreshMailboxTabFromServer(const MailboxTabState& tab) const;
+        [[nodiscard]] bool shouldRefreshSearchTabFromServer(const SearchTabState& tab) const;
         [[nodiscard]] QString titleForTab(const TabState& tab) const;
         [[nodiscard]] bool activeTabIsMailbox() const;
         [[nodiscard]] bool activeTabIsSearch() const;

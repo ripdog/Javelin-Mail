@@ -362,6 +362,22 @@ namespace javelin::gui::shell
         connectSelection();
         connect(&m_longPollService, &javelin::app::LongPollService::statusChanged, this,
                 [this](const auto) { updateLongPollStatus(); });
+        connect(&m_longPollService, &javelin::app::LongPollService::mailStateChanged, this,
+                [this](const QString& accountId, const bool requiresCatchUpRefresh)
+                {
+                    const auto account = accountId.toStdString();
+                    markTabsStaleForAccount(account);
+                    if (requiresCatchUpRefresh)
+                    {
+                        refreshFromServer();
+                        return;
+                    }
+
+                    if (activeAccountId() == std::optional<std::string>{account})
+                    {
+                        refreshActiveTabFromServer();
+                    }
+                });
         connect(
             &m_longPollService, &javelin::app::LongPollService::mailboxRefreshed, this,
             [this](const QString& accountId, const QString& mailboxId, const bool scrollToNewest)
@@ -936,6 +952,8 @@ namespace javelin::gui::shell
                                 .total = total,
                                 .items = {},
                                 .cacheLoaded = false,
+                                .refreshInFlight = false,
+                                .stale = false,
                             },
                         .selection = {},
                     },
@@ -953,6 +971,8 @@ namespace javelin::gui::shell
                         .total = total,
                         .items = {},
                         .cacheLoaded = false,
+                        .refreshInFlight = false,
+                        .stale = false,
                     },
                 .selection = {},
             };
@@ -1244,7 +1264,12 @@ namespace javelin::gui::shell
         }
         else
         {
-            applySearchTabCachedPage(std::get<SearchTabState>(tab->content), forceReload);
+            auto& searchTab = std::get<SearchTabState>(tab->content);
+            applySearchTabCachedPage(searchTab, forceReload);
+            if (shouldRefreshSearchTabFromServer(searchTab))
+            {
+                refreshSearchTabFromServer(searchTab);
+            }
         }
 
         applyActiveTabPageToModel();
@@ -1345,6 +1370,7 @@ namespace javelin::gui::shell
                     mailboxTab->page.items = summary.results;
                     mailboxTab->page.cacheLoaded = true;
                     mailboxTab->page.refreshInFlight = false;
+                    mailboxTab->page.stale = false;
                     if (activeTabIsMailbox() &&
                         activeAccountId() == std::optional<std::string>{tabAccountId} &&
                         activeMailboxId() == std::optional<std::string>{tabMailboxId} &&
@@ -1415,6 +1441,7 @@ namespace javelin::gui::shell
                     searchTab->page.items = summary.results;
                     searchTab->page.cacheLoaded = true;
                     searchTab->page.refreshInFlight = false;
+                    searchTab->page.stale = false;
                     if (activeTabIsSearch() &&
                         activeAccountId() == std::optional<std::string>{tabAccountId} &&
                         std::get<SearchTabState>(activeTab()->content).query == tabQuery &&
@@ -1443,6 +1470,11 @@ namespace javelin::gui::shell
             return false;
         }
 
+        if (tab.page.stale)
+        {
+            return true;
+        }
+
         if (!tab.page.total.has_value())
         {
             return tab.page.items.empty();
@@ -1461,6 +1493,16 @@ namespace javelin::gui::shell
         const auto remainingRows = *tab.page.total - tab.page.offset;
         const auto expectedRows = std::min(pageSize, remainingRows);
         return tab.page.items.size() < expectedRows;
+    }
+
+    bool MainWindow::shouldRefreshSearchTabFromServer(const SearchTabState& tab) const
+    {
+        if (tab.page.refreshInFlight)
+        {
+            return false;
+        }
+
+        return tab.page.stale;
     }
 
     void MainWindow::activateMailboxSelection(const bool refreshRemote)
@@ -1487,6 +1529,22 @@ namespace javelin::gui::shell
         qInfo().noquote() << "GUI activate mailbox selection" << QString::fromStdString(*accountId)
                           << QString::fromStdString(*mailboxId) << "refreshRemote" << refreshRemote
                           << "ms" << timer.elapsed();
+    }
+
+    void MainWindow::markTabsStaleForAccount(const std::string_view accountId)
+    {
+        for (auto& tab : m_tabs)
+        {
+            std::visit(
+                [accountId](auto& content)
+                {
+                    if (content.accountId == accountId)
+                    {
+                        content.page.stale = true;
+                    }
+                },
+                tab.content);
+        }
     }
 
     void MainWindow::openMailboxSelectionInTab(const bool refreshRemote)
@@ -2702,6 +2760,8 @@ namespace javelin::gui::shell
                                     .total = std::nullopt,
                                     .items = {},
                                     .cacheLoaded = false,
+                                    .refreshInFlight = false,
+                                    .stale = false,
                                 },
                             .selection =
                                 TabSelectionState{
@@ -2771,6 +2831,8 @@ namespace javelin::gui::shell
                                                      : std::nullopt,
                                         .items = std::move(items),
                                         .cacheLoaded = true,
+                                        .refreshInFlight = false,
+                                        .stale = false,
                                     },
                                 .selection =
                                     TabSelectionState{

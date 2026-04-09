@@ -74,10 +74,15 @@ namespace javelin::app
         return m_status;
     }
 
-    QCoro::Task<void> LongPollService::onUpdate(
-        const javelin::jmap::sync::LongPollResponse& response)
+    QCoro::Task<void>
+    LongPollService::onUpdate(const javelin::jmap::sync::LongPollResponse& response)
     {
         m_lastEventId = response.newState;
+        if (m_runContext != nullptr)
+        {
+            Q_EMIT mailStateChanged(QString::fromStdString(m_runContext->configuration.accountId),
+                                    false);
+        }
         co_await refreshWatchedMailbox();
     }
 
@@ -102,8 +107,8 @@ namespace javelin::app
             return std::nullopt;
         }
 
-        const auto primaryIt = std::ranges::find_if(
-            *accounts, [](const auto& account) { return account.isPrimary; });
+        const auto primaryIt =
+            std::ranges::find_if(*accounts, [](const auto& account) { return account.isPrimary; });
         const auto& account = primaryIt != accounts->end() ? *primaryIt : accounts->front();
 
         javelin::jmap::cache::SessionRepository sessionRepository{m_databaseConnection};
@@ -112,7 +117,8 @@ namespace javelin::app
             std::get_if<std::optional<javelin::jmap::api::Session>>(&sessionResult);
         if (session == nullptr || !session->has_value() || !(*session)->eventSourceUrl.has_value())
         {
-            qWarning() << "Long poll configuration unavailable because the cached session has no eventSourceUrl";
+            qWarning() << "Long poll configuration unavailable because the cached session has no "
+                          "eventSourceUrl";
             return std::nullopt;
         }
 
@@ -126,11 +132,8 @@ namespace javelin::app
         }
 
         const auto inboxIt = std::ranges::find_if(
-            *mailboxTree,
-            [](const auto& mailbox)
-            {
-                return mailbox.role == std::optional<std::string>{std::string{"inbox"}};
-            });
+            *mailboxTree, [](const auto& mailbox)
+            { return mailbox.role == std::optional<std::string>{std::string{"inbox"}}; });
         const auto& mailbox = inboxIt != mailboxTree->end() ? *inboxIt : mailboxTree->front();
 
         return RunConfiguration{
@@ -181,9 +184,8 @@ namespace javelin::app
 
         javelin::jmap::sync::MailboxRefreshExecutor mailboxRefreshExecutor{
             m_databaseConnection, methodCaller, apiRequestContext};
-        const auto refreshResult =
-            co_await mailboxRefreshExecutor.refreshCollapsedMailbox(
-                m_runContext->configuration.accountId, m_runContext->configuration.mailboxId, {});
+        const auto refreshResult = co_await mailboxRefreshExecutor.refreshCollapsedMailbox(
+            m_runContext->configuration.accountId, m_runContext->configuration.mailboxId, {});
         if (const auto* summary =
                 std::get_if<javelin::jmap::sync::MailboxRefreshSummary>(&refreshResult))
         {
@@ -238,8 +240,7 @@ namespace javelin::app
                 setStatus(toServiceStatus(status));
             });
         runContext->worker = std::make_unique<javelin::jmap::sync::LongPollWorker>(
-            *runContext->channel, *this, runContext->sleeper,
-            javelin::jmap::sync::BackoffPolicy{},
+            *runContext->channel, *this, runContext->sleeper, javelin::jmap::sync::BackoffPolicy{},
             [this, generation = runContext->generation](
                 const javelin::jmap::sync::LongPollConnectionStatus status)
             {
@@ -259,17 +260,16 @@ namespace javelin::app
         m_runContext = runContext;
         setStatus(Status::Connecting);
         auto task = runLoop(runContext);
-        QCoro::connect(
-            std::move(task), this,
-            [this, generation = runContext->generation]()
-            {
-                if (m_runContext == nullptr || m_runContext->generation != generation)
-                {
-                    return;
-                }
+        QCoro::connect(std::move(task), this,
+                       [this, generation = runContext->generation]()
+                       {
+                           if (m_runContext == nullptr || m_runContext->generation != generation)
+                           {
+                               return;
+                           }
 
-                setStatus(Status::Disconnected);
-            });
+                           setStatus(Status::Disconnected);
+                       });
     }
 
     void LongPollService::setStatus(const Status status)
@@ -279,7 +279,19 @@ namespace javelin::app
             return;
         }
 
+        const auto previousStatus = m_status;
         m_status = status;
+        if (status == Status::Disconnected && previousStatus == Status::Connected)
+        {
+            m_shouldCatchUpRefreshOnReconnect = true;
+        }
+        if (status == Status::Connected && m_shouldCatchUpRefreshOnReconnect &&
+            m_runContext != nullptr)
+        {
+            m_shouldCatchUpRefreshOnReconnect = false;
+            Q_EMIT mailStateChanged(QString::fromStdString(m_runContext->configuration.accountId),
+                                    true);
+        }
         Q_EMIT statusChanged(m_status);
     }
 
@@ -298,7 +310,8 @@ namespace javelin::app
         QString message;
         if (candidates.size() == 1)
         {
-            title = QStringLiteral("New mail in %1").arg(QString::fromStdString(std::string{mailboxName}));
+            title = QStringLiteral("New mail in %1")
+                        .arg(QString::fromStdString(std::string{mailboxName}));
             message = QString::fromStdString(
                 candidates.front().subject.value_or(std::string{"(no subject)"}));
         }
@@ -311,11 +324,11 @@ namespace javelin::app
                 candidates.front().subject.value_or(std::string{"(no subject)"}));
         }
 
-        Q_EMIT notificationRaised(
-            QString::fromStdString(m_runContext->configuration.accountId),
-            QString::fromStdString(m_runContext->configuration.mailboxId),
-            QString::fromStdString(target.threadId), QString::fromStdString(target.emailId),
-            QString::fromStdString(std::string{mailboxName}), title, message);
+        Q_EMIT notificationRaised(QString::fromStdString(m_runContext->configuration.accountId),
+                                  QString::fromStdString(m_runContext->configuration.mailboxId),
+                                  QString::fromStdString(target.threadId),
+                                  QString::fromStdString(target.emailId),
+                                  QString::fromStdString(std::string{mailboxName}), title, message);
     }
 
 } // namespace javelin::app

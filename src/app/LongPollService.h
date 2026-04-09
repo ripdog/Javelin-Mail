@@ -22,7 +22,8 @@ class QNetworkAccessManager;
 namespace javelin::app
 {
 
-    class LongPollService final : public QObject, public javelin::jmap::sync::AbstractLongPollObserver
+    class LongPollService final : public QObject,
+                                  public javelin::jmap::sync::AbstractLongPollObserver
     {
         Q_OBJECT
 
@@ -47,13 +48,14 @@ namespace javelin::app
         void stop();
 
         [[nodiscard]] Status status() const;
-        [[nodiscard]] QCoro::Task<void> onUpdate(
-            const javelin::jmap::sync::LongPollResponse& response) override;
+        [[nodiscard]] QCoro::Task<void>
+        onUpdate(const javelin::jmap::sync::LongPollResponse& response) override;
 
       Q_SIGNALS:
         void statusChanged(javelin::app::LongPollService::Status status);
+        void mailStateChanged(const QString& accountId, bool requiresCatchUpRefresh);
         void mailboxRefreshed(const QString& accountId, const QString& mailboxId,
-                             bool scrollToNewest);
+                              bool scrollToNewest);
         void notificationRaised(const QString& accountId, const QString& mailboxId,
                                 const QString& threadId, const QString& emailId,
                                 const QString& mailboxName, const QString& title,
@@ -86,8 +88,9 @@ namespace javelin::app
         [[nodiscard]] QCoro::Task<void> refreshWatchedMailbox();
         void restart();
         void setStatus(Status status);
-        void publishNotifications(std::string_view mailboxName,
-                                  const std::vector<javelin::jmap::sync::RefreshNotificationCandidate>& candidates);
+        void publishNotifications(
+            std::string_view mailboxName,
+            const std::vector<javelin::jmap::sync::RefreshNotificationCandidate>& candidates);
 
         javelin::jmap::cache::DatabaseConnection& m_databaseConnection;
         javelin::jmap::api::AbstractTransport& m_transport;
@@ -99,6 +102,7 @@ namespace javelin::app
         std::string m_lastEventId;
         std::size_t m_generation = 0;
         Status m_status = Status::Disconnected;
+        bool m_shouldCatchUpRefreshOnReconnect = false;
     };
 
 } // namespace javelin::app
