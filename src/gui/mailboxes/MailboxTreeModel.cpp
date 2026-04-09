@@ -37,14 +37,12 @@ namespace javelin::gui::mailboxes
         }
 
         const auto* parentNode = static_cast<const Node*>(parentIndex.internalPointer());
-        if (parentNode == nullptr ||
-            static_cast<std::size_t>(row) >= parentNode->children.size())
+        if (parentNode == nullptr || static_cast<std::size_t>(row) >= parentNode->children.size())
         {
             return {};
         }
 
-        return createIndex(row, column,
-                           parentNode->children[static_cast<std::size_t>(row)].get());
+        return createIndex(row, column, parentNode->children[static_cast<std::size_t>(row)].get());
     }
 
     QModelIndex MailboxTreeModel::parent(const QModelIndex& child) const
@@ -137,6 +135,11 @@ namespace javelin::gui::mailboxes
             return QString::fromStdString(node->accountId);
         }
 
+        if (role == TotalThreadsRole)
+        {
+            return static_cast<qulonglong>(node->totalThreads);
+        }
+
         return {};
     }
 
@@ -179,13 +182,12 @@ namespace javelin::gui::mailboxes
             {
                 std::unordered_map<std::string, Node*> nodesById;
                 std::vector<javelin::jmap::cache::MailboxTreeItem> roots;
-                std::unordered_map<std::string,
-                                   std::vector<javelin::jmap::cache::MailboxTreeItem>>
+                std::unordered_map<std::string, std::vector<javelin::jmap::cache::MailboxTreeItem>>
                     deferredChildren;
 
                 auto attachChildren = [&nodesById, &deferredChildren,
                                        &accountId = account.accountId](const auto& self,
-                                                                        Node* parentNode) -> void
+                                                                       Node* parentNode) -> void
                 {
                     const auto deferredIt = deferredChildren.find(parentNode->mailboxId);
                     if (deferredIt == deferredChildren.end())
@@ -202,6 +204,7 @@ namespace javelin::gui::mailboxes
                         child->displayName = childItem.name;
                         child->mailboxId = childItem.id;
                         child->unreadEmails = childItem.unreadEmails;
+                        child->totalThreads = childItem.totalThreads;
                         child->parent = parentNode;
                         nodesById.emplace(child->mailboxId, child.get());
                         parentNode->children.push_back(std::move(child));
@@ -229,6 +232,7 @@ namespace javelin::gui::mailboxes
                     child->displayName = item.name;
                     child->mailboxId = item.id;
                     child->unreadEmails = item.unreadEmails;
+                    child->totalThreads = item.totalThreads;
                     child->parent = parentIt->second;
                     nodesById.emplace(child->mailboxId, child.get());
                     parentIt->second->children.push_back(std::move(child));
@@ -242,6 +246,7 @@ namespace javelin::gui::mailboxes
                     rootMailboxNode->displayName = rootItem.name;
                     rootMailboxNode->mailboxId = rootItem.id;
                     rootMailboxNode->unreadEmails = rootItem.unreadEmails;
+                    rootMailboxNode->totalThreads = rootItem.totalThreads;
                     rootMailboxNode->parent = accountNode.get();
                     nodesById.emplace(rootMailboxNode->mailboxId, rootMailboxNode.get());
                     accountNode->children.push_back(std::move(rootMailboxNode));

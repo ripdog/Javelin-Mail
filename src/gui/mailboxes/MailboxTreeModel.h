@@ -22,6 +22,7 @@ namespace javelin::gui::mailboxes
         {
             MailboxIdRole = Qt::UserRole + 1,
             AccountIdRole = Qt::UserRole + 2,
+            TotalThreadsRole = Qt::UserRole + 3,
         };
 
         explicit MailboxTreeModel(javelin::jmap::cache::AccountRepository& accountRepository,
@@ -47,6 +48,7 @@ namespace javelin::gui::mailboxes
             std::string displayName;
             std::string mailboxId; // empty for account-level nodes
             std::uint64_t unreadEmails = 0;
+            std::uint64_t totalThreads = 0;
             Node* parent = nullptr;
             std::vector<std::unique_ptr<Node>> children;
         };
