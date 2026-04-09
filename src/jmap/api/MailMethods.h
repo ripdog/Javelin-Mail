@@ -62,6 +62,7 @@ namespace javelin::jmap::api
     struct EmailQueryFilter
     {
         std::optional<std::string> inMailbox;
+        std::optional<std::string> text;
     };
 
     struct EmailQuerySort
@@ -218,7 +219,8 @@ namespace javelin::jmap::api
     serializeEmailQueryChangesRequest(const EmailQueryChangesRequest& request);
     [[nodiscard]] std::optional<std::string>
     serializeEmailContentGetRequest(const EmailContentGetRequest& request);
-    [[nodiscard]] std::optional<std::string> serializeEmailSetRequest(const EmailSetRequest& request);
+    [[nodiscard]] std::optional<std::string>
+    serializeEmailSetRequest(const EmailSetRequest& request);
 
     [[nodiscard]] ParsedEnvelope<MailboxGetResponse> parseMailboxGetResponse(std::string_view json);
     [[nodiscard]] ParsedEnvelope<EmailGetResponse> parseEmailGetResponse(std::string_view json);
@@ -230,7 +232,8 @@ namespace javelin::jmap::api
     parseEmailContentGetResponse(std::string_view json);
     [[nodiscard]] ParsedEnvelope<EmailSetResponse> parseEmailSetResponse(std::string_view json);
     [[nodiscard]] ParsedEnvelope<ChangesResponse> parseChangesResponse(std::string_view json);
-    [[nodiscard]] ParsedEnvelope<EmailChangesResponse> parseEmailChangesResponse(std::string_view json);
+    [[nodiscard]] ParsedEnvelope<EmailChangesResponse>
+    parseEmailChangesResponse(std::string_view json);
 
     [[nodiscard]] std::optional<MethodRequest<MailboxGetResponse>>
     mailboxGet(const GetRequest& request);
@@ -342,8 +345,8 @@ namespace javelin::jmap::api
     };
 
     template <typename Response>
-    [[nodiscard]] GetRequest::ResultReference
-    resultReference(const CallHandle<Response>& handle, std::string path)
+    [[nodiscard]] GetRequest::ResultReference resultReference(const CallHandle<Response>& handle,
+                                                              std::string path)
     {
         return GetRequest::ResultReference{
             .resultOf = handle.callId,
@@ -353,10 +356,9 @@ namespace javelin::jmap::api
     }
 
     template <typename Response>
-    [[nodiscard]] GetRequest getRequestFrom(std::string accountId, const CallHandle<Response>& handle,
-                                            std::string path,
-                                            std::optional<std::vector<std::string>> properties =
-                                                std::nullopt)
+    [[nodiscard]] GetRequest
+    getRequestFrom(std::string accountId, const CallHandle<Response>& handle, std::string path,
+                   std::optional<std::vector<std::string>> properties = std::nullopt)
     {
         return GetRequest{
             .accountId = std::move(accountId),

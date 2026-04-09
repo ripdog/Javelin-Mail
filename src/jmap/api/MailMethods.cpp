@@ -49,6 +49,7 @@ namespace
     struct RawEmailQueryFilter
     {
         std::optional<std::string> inMailbox;
+        std::optional<std::string> text;
     };
 
     struct RawEmailQuerySort
@@ -240,7 +241,7 @@ template <> struct glz::meta<RawEmailQueryFilter>
 {
     using T = RawEmailQueryFilter;
 
-    static constexpr auto value = glz::object("inMailbox", &T::inMailbox);
+    static constexpr auto value = glz::object("inMailbox", &T::inMailbox, "text", &T::text);
 };
 
 template <> struct glz::meta<RawEmailQuerySort>
@@ -265,10 +266,10 @@ template <> struct glz::meta<RawEmailQueryChangesRequest>
 {
     using T = RawEmailQueryChangesRequest;
 
-    static constexpr auto value = glz::object(
-        "accountId", &T::accountId, "sinceQueryState", &T::sinceQueryState, "maxChanges",
-        &T::maxChanges, "upToId", &T::upToId, "filter", &T::filter, "sort", &T::sort,
-        "collapseThreads", &T::collapseThreads);
+    static constexpr auto value =
+        glz::object("accountId", &T::accountId, "sinceQueryState", &T::sinceQueryState,
+                    "maxChanges", &T::maxChanges, "upToId", &T::upToId, "filter", &T::filter,
+                    "sort", &T::sort, "collapseThreads", &T::collapseThreads);
 };
 
 template <> struct glz::meta<RawEmailContentBodyPart>
@@ -335,9 +336,9 @@ template <> struct glz::meta<RawEmailSetResponse>
 {
     using T = RawEmailSetResponse;
 
-    static constexpr auto value = glz::object("accountId", &T::accountId, "oldState",
-                                              &T::oldState, "newState", &T::newState, "updated",
-                                              &T::updated, "notUpdated", &T::notUpdated);
+    static constexpr auto value =
+        glz::object("accountId", &T::accountId, "oldState", &T::oldState, "newState", &T::newState,
+                    "updated", &T::updated, "notUpdated", &T::notUpdated);
 };
 
 template <> struct glz::meta<RawChangesResponse>
@@ -370,10 +371,10 @@ template <> struct glz::meta<RawEmailQueryChangesResponse>
 {
     using T = RawEmailQueryChangesResponse;
 
-    static constexpr auto value = glz::object(
-        "accountId", &T::accountId, "oldQueryState", &T::oldQueryState, "newQueryState",
-        &T::newQueryState, "added", &T::added, "removed", &T::removed, "hasMoreChanges",
-        &T::hasMoreChanges, "total", &T::total);
+    static constexpr auto value =
+        glz::object("accountId", &T::accountId, "oldQueryState", &T::oldQueryState, "newQueryState",
+                    &T::newQueryState, "added", &T::added, "removed", &T::removed, "hasMoreChanges",
+                    &T::hasMoreChanges, "total", &T::total);
 };
 
 namespace javelin::jmap::api
@@ -543,7 +544,9 @@ namespace javelin::jmap::api
             .accountId = request.accountId,
             .filter = request.filter.has_value()
                           ? std::optional<RawEmailQueryFilter>{RawEmailQueryFilter{
-                                .inMailbox = request.filter->inMailbox}}
+                                .inMailbox = request.filter->inMailbox,
+                                .text = request.filter->text,
+                            }}
                           : std::nullopt,
             .sort = std::move(sort),
             .position = request.position,
@@ -573,7 +576,9 @@ namespace javelin::jmap::api
             .upToId = request.upToId,
             .filter = request.filter.has_value()
                           ? std::optional<RawEmailQueryFilter>{RawEmailQueryFilter{
-                                .inMailbox = request.filter->inMailbox}}
+                                .inMailbox = request.filter->inMailbox,
+                                .text = request.filter->text,
+                            }}
                           : std::nullopt,
             .sort = std::move(sort),
             .collapseThreads = request.collapseThreads,
@@ -740,8 +745,7 @@ namespace javelin::jmap::api
         };
     }
 
-    ParsedEnvelope<EmailQueryChangesResponse>
-    parseEmailQueryChangesResponse(std::string_view json)
+    ParsedEnvelope<EmailQueryChangesResponse> parseEmailQueryChangesResponse(std::string_view json)
     {
         const auto parsed = parseMethod<RawEmailQueryChangesResponse>(json);
         if (!parsed.ok())

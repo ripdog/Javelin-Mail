@@ -4,12 +4,14 @@
 #include <QModelIndex>
 #include <QTemporaryDir>
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <utility>
 
 class QCloseEvent;
 class QLabel;
+class QLineEdit;
 class QListView;
 class QPoint;
 class QSplitter;
@@ -71,6 +73,9 @@ namespace javelin::gui::shell
         void createActions();
         void setupUi();
         void connectSelection();
+        void updateMailboxSelectionState(bool refreshRemote);
+        void executeSearch(const QString& text);
+        void clearSearch();
         void refreshViewsFromCache();
         void refreshFromServer();
         void refreshSelectedMailboxMessages(std::string accountId, std::string mailboxId);
@@ -124,6 +129,7 @@ namespace javelin::gui::shell
         javelin::gui::mailboxes::MailboxTreeModel* m_mailboxModel = nullptr;
         javelin::gui::messages::MessageListModel* m_messageModel = nullptr;
         javelin::gui::messageview::MessageViewContainer* m_messageViewContainer = nullptr;
+        QLineEdit* m_mailboxSearchEdit = nullptr;
         QTreeView* m_mailboxView = nullptr;
         QListView* m_messageView = nullptr;
         QLabel* m_messageListTitleLabel = nullptr;
@@ -140,6 +146,8 @@ namespace javelin::gui::shell
         QAction* m_moveAction = nullptr;
         QAction* m_viewSourceAction = nullptr;
         bool m_refreshInFlight = false;
+        std::optional<std::size_t> m_searchTotalCount;
+        std::uint64_t m_searchGeneration = 0;
         std::optional<std::pair<std::string, std::string>> m_mailboxRefreshInFlight;
         QTemporaryDir m_openAttachmentDirectory;
     };

@@ -134,18 +134,59 @@ namespace javelin::gui::messages
     void MessageListModel::setMailboxContext(std::optional<std::string> accountId,
                                              std::optional<std::string> mailboxId)
     {
-        if (m_accountId == accountId && m_mailboxId == mailboxId)
+        if (m_accountId == accountId && m_mailboxId == mailboxId && !m_searchQuery.has_value())
         {
             return;
         }
 
         m_accountId = std::move(accountId);
         m_mailboxId = std::move(mailboxId);
+        m_searchQuery.reset();
+        reload();
+    }
+
+    void
+    MessageListModel::setSearchResults(std::string accountId, std::string query,
+                                       std::vector<javelin::jmap::cache::MessageListItem> results)
+    {
+        beginResetModel();
+        m_accountId = std::move(accountId);
+        m_mailboxId.reset();
+        m_searchQuery = std::move(query);
+        m_threads.clear();
+        m_threads.reserve(results.size());
+        for (auto& result : results)
+        {
+            m_threads.push_back(ThreadEntry{
+                .summary = std::move(result),
+                .members = {},
+                .membersLoaded = false,
+            });
+        }
+        rebuildVisibleRows();
+        endResetModel();
+    }
+
+    void MessageListModel::clearSearch()
+    {
+        if (!m_searchQuery.has_value())
+        {
+            return;
+        }
+
+        m_searchQuery.reset();
         reload();
     }
 
     void MessageListModel::refresh()
     {
+        if (m_searchQuery.has_value())
+        {
+            // Search results are an explicit server snapshot. Keep them stable until the user
+            // reruns or clears the search instead of collapsing back to an empty mailbox context.
+            return;
+        }
+
         reload();
     }
 
@@ -175,8 +216,7 @@ namespace javelin::gui::messages
                 return false;
             }
 
-            const int memberCount =
-                static_cast<int>(m_threads[*threadIndex].members.size());
+            const int memberCount = static_cast<int>(m_threads[*threadIndex].members.size());
             if (memberCount <= 0)
             {
                 return false;
@@ -209,8 +249,7 @@ namespace javelin::gui::messages
             return false;
         }
 
-        const int memberCount =
-            static_cast<int>(m_threads[*threadIndex].members.size());
+        const int memberCount = static_cast<int>(m_threads[*threadIndex].members.size());
         if (memberCount <= 0)
         {
             if (const auto existingSummaryRow = visibleSummaryRowForThread(*threadIndex);
@@ -253,6 +292,16 @@ namespace javelin::gui::messages
         }
 
         return m_threads[*threadIndex].summary.emailId;
+    }
+
+    bool MessageListModel::isSearchMode() const
+    {
+        return m_searchQuery.has_value();
+    }
+
+    const std::optional<std::string>& MessageListModel::searchQuery() const
+    {
+        return m_searchQuery;
     }
 
     const javelin::jmap::cache::MessageListItem&
@@ -365,7 +414,7 @@ namespace javelin::gui::messages
         std::vector<ThreadEntry> threads;
         std::vector<std::string> survivingExpandedThreadIds;
 
-        if (m_accountId.has_value() && m_mailboxId.has_value())
+        if (m_accountId.has_value() && m_mailboxId.has_value() && !m_searchQuery.has_value())
         {
             const auto result = m_queryService.listMailboxMessages(*m_accountId, *m_mailboxId, 100);
             if (const auto* items =

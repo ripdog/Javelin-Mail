@@ -31,8 +31,9 @@ TEST_CASE("get requests serialize result references for chained ids", "[jmap][me
     });
 
     REQUIRE(json.has_value());
-    CHECK(*json ==
-          R"({"accountId":"u1","#ids":{"resultOf":"mailbox-query","name":"Email/query","path":"/ids"},"properties":["threadId"]})");
+    CHECK(
+        *json ==
+        R"({"accountId":"u1","#ids":{"resultOf":"mailbox-query","name":"Email/query","path":"/ids"},"properties":["threadId"]})");
 }
 
 TEST_CASE("changes requests serialize typed state-token inputs", "[jmap][method][mail]")
@@ -54,6 +55,7 @@ TEST_CASE("email query requests serialize mailbox-scoped sort windows", "[jmap][
         .filter =
             javelin::jmap::api::EmailQueryFilter{
                 .inMailbox = "mbx-inbox",
+                .text = std::nullopt,
             },
         .sort =
             {
@@ -74,6 +76,34 @@ TEST_CASE("email query requests serialize mailbox-scoped sort windows", "[jmap][
         R"({"accountId":"u1","filter":{"inMailbox":"mbx-inbox"},"sort":[{"property":"receivedAt","isAscending":false}],"position":0,"limit":100,"collapseThreads":false,"calculateTotal":false})");
 }
 
+TEST_CASE("email query requests serialize text search filters", "[jmap][method][mail]")
+{
+    const auto json = javelin::jmap::api::serializeEmailQueryRequest({
+        .accountId = "u1",
+        .filter =
+            javelin::jmap::api::EmailQueryFilter{
+                .inMailbox = std::nullopt,
+                .text = "quarterly report",
+            },
+        .sort =
+            {
+                javelin::jmap::api::EmailQuerySort{
+                    .property = "receivedAt",
+                    .isAscending = false,
+                },
+            },
+        .position = 0,
+        .limit = 25,
+        .collapseThreads = true,
+        .calculateTotal = true,
+    });
+
+    REQUIRE(json.has_value());
+    CHECK(
+        *json ==
+        R"({"accountId":"u1","filter":{"text":"quarterly report"},"sort":[{"property":"receivedAt","isAscending":false}],"position":0,"limit":25,"collapseThreads":true,"calculateTotal":true})");
+}
+
 TEST_CASE("email queryChanges requests serialize incremental mailbox windows",
           "[jmap][method][mail]")
 {
@@ -85,6 +115,7 @@ TEST_CASE("email queryChanges requests serialize incremental mailbox windows",
         .filter =
             javelin::jmap::api::EmailQueryFilter{
                 .inMailbox = "mbx-inbox",
+                .text = std::nullopt,
             },
         .sort =
             {
@@ -283,8 +314,9 @@ TEST_CASE("email set requests serialize typed mailbox and keyword updates", "[jm
     });
 
     REQUIRE(json.has_value());
-    CHECK(*json ==
-          R"({"accountId":"u1","update":{"eml-1":{"mailboxIds":{"mbx-archive":true},"keywords":{"$seen":true}}}})");
+    CHECK(
+        *json ==
+        R"({"accountId":"u1","update":{"eml-1":{"mailboxIds":{"mbx-archive":true},"keywords":{"$seen":true}}}})");
 }
 
 TEST_CASE("email set responses parse updated and failed ids", "[jmap][method][mail]")

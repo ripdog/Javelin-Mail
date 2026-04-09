@@ -67,13 +67,15 @@ namespace javelin::jmap::cache
         {
             return DatabaseError{
                 .code = DatabaseErrorCode::QueryFailed,
-                .message = QStringLiteral("Begin thread replacement transaction: ") + database.lastError().text(),
+                .message = QStringLiteral("Begin thread replacement transaction: ") +
+                           database.lastError().text(),
             };
         }
 
         QSqlQuery deleteQuery{database};
         deleteQuery.prepare(QStringLiteral("DELETE FROM threads WHERE account_id = :account_id"));
-        deleteQuery.bindValue(QStringLiteral(":account_id"), QString::fromStdString(std::string{accountId}));
+        deleteQuery.bindValue(QStringLiteral(":account_id"),
+                              QString::fromStdString(std::string{accountId}));
         if (!deleteQuery.exec())
         {
             database.rollback();
@@ -81,11 +83,13 @@ namespace javelin::jmap::cache
         }
 
         QSqlQuery insertQuery{database};
-        insertQuery.prepare(QStringLiteral("INSERT INTO threads (account_id, thread_id, email_ids_json, state) "
-                            "VALUES (:account_id, :thread_id, :email_ids_json, :state)"));
+        insertQuery.prepare(
+            QStringLiteral("INSERT INTO threads (account_id, thread_id, email_ids_json, state) "
+                           "VALUES (:account_id, :thread_id, :email_ids_json, :state)"));
         for (const auto& thread : threads)
         {
-            insertQuery.bindValue(QStringLiteral(":account_id"), QString::fromStdString(std::string{accountId}));
+            insertQuery.bindValue(QStringLiteral(":account_id"),
+                                  QString::fromStdString(std::string{accountId}));
             insertQuery.bindValue(QStringLiteral(":thread_id"), QString::fromStdString(thread.id));
             insertQuery.bindValue(QStringLiteral(":email_ids_json"),
                                   QString::fromStdString(serializeEmailIds(thread.emailIds)));
@@ -102,7 +106,68 @@ namespace javelin::jmap::cache
             database.rollback();
             return DatabaseError{
                 .code = DatabaseErrorCode::QueryFailed,
-                .message = QStringLiteral("Commit thread replacement transaction: ") + database.lastError().text(),
+                .message = QStringLiteral("Commit thread replacement transaction: ") +
+                           database.lastError().text(),
+            };
+        }
+
+        return std::nullopt;
+    }
+
+    std::optional<DatabaseError>
+    ThreadRepository::upsertMany(const std::string_view accountId,
+                                 const std::vector<javelin::jmap::domain::Thread>& threads)
+    {
+        if (const auto error = m_connection.validate())
+        {
+            return error;
+        }
+
+        if (threads.empty())
+        {
+            return std::nullopt;
+        }
+
+        QSqlDatabase& database = m_connection.database();
+        if (!database.transaction())
+        {
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message = QStringLiteral("Begin thread upsert transaction: ") +
+                           database.lastError().text(),
+            };
+        }
+
+        QSqlQuery query{database};
+        query.prepare(
+            QStringLiteral("INSERT INTO threads (account_id, thread_id, email_ids_json, state) "
+                           "VALUES (:account_id, :thread_id, :email_ids_json, :state) "
+                           "ON CONFLICT(account_id, thread_id) DO UPDATE SET "
+                           "email_ids_json = excluded.email_ids_json, "
+                           "state = excluded.state"));
+
+        for (const auto& thread : threads)
+        {
+            query.bindValue(QStringLiteral(":account_id"),
+                            QString::fromStdString(std::string{accountId}));
+            query.bindValue(QStringLiteral(":thread_id"), QString::fromStdString(thread.id));
+            query.bindValue(QStringLiteral(":email_ids_json"),
+                            QString::fromStdString(serializeEmailIds(thread.emailIds)));
+            query.bindValue(QStringLiteral(":state"), QVariant{});
+            if (!query.exec())
+            {
+                database.rollback();
+                return makeQueryError(QStringLiteral("Upsert thread"), query);
+            }
+        }
+
+        if (!database.commit())
+        {
+            database.rollback();
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message = QStringLiteral("Commit thread upsert transaction: ") +
+                           database.lastError().text(),
             };
         }
 
@@ -119,10 +184,12 @@ namespace javelin::jmap::cache
 
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral("SELECT email_ids_json "
-                      "FROM threads "
-                      "WHERE account_id = :account_id AND thread_id = :thread_id"));
-        query.bindValue(QStringLiteral(":account_id"), QString::fromStdString(std::string{accountId}));
-        query.bindValue(QStringLiteral(":thread_id"), QString::fromStdString(std::string{threadId}));
+                                     "FROM threads "
+                                     "WHERE account_id = :account_id AND thread_id = :thread_id"));
+        query.bindValue(QStringLiteral(":account_id"),
+                        QString::fromStdString(std::string{accountId}));
+        query.bindValue(QStringLiteral(":thread_id"),
+                        QString::fromStdString(std::string{threadId}));
         if (!query.exec())
         {
             return makeQueryError(QStringLiteral("Read thread"), query);

@@ -16,6 +16,7 @@
 #include "jmap/cache/MessageContentRepository.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/cache/SyncStateRepository.h"
+#include "jmap/cache/ThreadRepository.h"
 #include "jmap/sync/MailboxRefreshExecutor.h"
 #include "jmap/sync/PendingActions.h"
 
@@ -261,10 +262,10 @@ namespace javelin::jmap
                 settings.apiKey.empty())
             {
                 return LiveRefreshError{
-                    .message = requireSessionUrl
-                                   ? QStringLiteral(
-                                         "Session URL, login email, and API key are required.")
-                                   : QStringLiteral("Login email and API key are required."),
+                    .message =
+                        requireSessionUrl
+                            ? QStringLiteral("Session URL, login email, and API key are required.")
+                            : QStringLiteral("Login email and API key are required."),
                 };
             }
 
@@ -277,16 +278,19 @@ namespace javelin::jmap
         {
             javelin::jmap::cache::SessionRepository sessionRepository{connection};
             const auto sessionResult = sessionRepository.load(accountId);
-            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&sessionResult))
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&sessionResult))
             {
                 return LiveRefreshError{.message = error->message};
             }
 
-            const auto& session = std::get<std::optional<javelin::jmap::api::Session>>(sessionResult);
+            const auto& session =
+                std::get<std::optional<javelin::jmap::api::Session>>(sessionResult);
             if (!session.has_value())
             {
                 return LiveRefreshError{
-                    .message = QStringLiteral("No cached JMAP session is available for this account."),
+                    .message =
+                        QStringLiteral("No cached JMAP session is available for this account."),
                 };
             }
 
@@ -337,16 +341,14 @@ namespace javelin::jmap
 
         [[nodiscard]] QCoro::Task<std::variant<QByteArray, LiveRefreshError>>
         downloadBlob(javelin::jmap::api::AbstractTransport& transport,
-                     const std::string_view downloadUrlTemplate,
-                     const std::string_view accountId,
-                     const javelin::jmap::cache::EmailPart& part,
-                     const std::string& accessToken, const QString& failurePrefix)
+                     const std::string_view downloadUrlTemplate, const std::string_view accountId,
+                     const javelin::jmap::cache::EmailPart& part, const std::string& accessToken,
+                     const QString& failurePrefix)
         {
-            const auto transportResult =
-                co_await transport.send(
-                    buildDownloadRequest(buildDownloadUrl(downloadUrlTemplate, accountId, part),
-                                         accessToken));
-            if (const auto* error = std::get_if<javelin::jmap::api::TransportError>(&transportResult))
+            const auto transportResult = co_await transport.send(buildDownloadRequest(
+                buildDownloadUrl(downloadUrlTemplate, accountId, part), accessToken));
+            if (const auto* error =
+                    std::get_if<javelin::jmap::api::TransportError>(&transportResult))
             {
                 co_return LiveRefreshError{.message = transportMessage(*error)};
             }
@@ -423,15 +425,14 @@ namespace javelin::jmap
                     co_return *error;
                 }
 
-                if (const auto error =
-                        payloadRepository.upsert(accountId, {
-                                                                .emailId = part.emailId,
-                                                                .partId = part.partId,
-                                                                .blobId = *part.blobId,
-                                                                .mediaType = part.mediaType,
-                                                                .payload = std::get<QByteArray>(
-                                                                    downloadResult),
-                                                            }))
+                if (const auto error = payloadRepository.upsert(
+                        accountId, {
+                                       .emailId = part.emailId,
+                                       .partId = part.partId,
+                                       .blobId = *part.blobId,
+                                       .mediaType = part.mediaType,
+                                       .payload = std::get<QByteArray>(downloadResult),
+                                   }))
                 {
                     co_return LiveRefreshError{.message = error->message};
                 }
@@ -569,8 +570,9 @@ namespace javelin::jmap
         }
 
         [[nodiscard]] QueuedEmailMutationResult
-        queueKeywordPatch(javelin::jmap::cache::DatabaseConnection& connection, std::string accountId,
-                          std::string emailId, std::string keyword, const bool enabled)
+        queueKeywordPatch(javelin::jmap::cache::DatabaseConnection& connection,
+                          std::string accountId, std::string emailId, std::string keyword,
+                          const bool enabled)
         {
             if (keyword.empty())
             {
@@ -656,6 +658,30 @@ namespace javelin::jmap
                 }
             }
             return filtered;
+        }
+
+        [[nodiscard]] javelin::jmap::cache::MessageListItem
+        messageListItemFromEmail(const javelin::jmap::domain::Email& email,
+                                 const std::size_t threadMessageCount)
+        {
+            return javelin::jmap::cache::MessageListItem{
+                .emailId = email.id,
+                .threadId = email.threadId,
+                .subject = email.subject,
+                .preview = email.preview,
+                .receivedAt = email.receivedAt,
+                .sentAt = email.sentAt,
+                .threadMessageCount = threadMessageCount,
+                .hasAttachment = email.hasAttachment,
+                .isUnread =
+                    std::ranges::find(email.keywords, std::string{"$seen"}) == email.keywords.end(),
+                .isFlagged = std::ranges::find(email.keywords, std::string{"$flagged"}) !=
+                             email.keywords.end(),
+                .from =
+                    email.from.empty()
+                        ? std::nullopt
+                        : std::optional<javelin::jmap::domain::EmailAddress>{email.from.front()},
+            };
         }
 
         [[nodiscard]] javelin::jmap::api::ApiRequestContext
@@ -772,11 +798,10 @@ namespace javelin::jmap
         qInfo() << "JMAP core method caller ready";
 
         qInfo() << "JMAP core serializing Mailbox/get request";
-        const auto mailboxRequest = javelin::jmap::api::mailboxGet(
-            {.accountId = accountId,
-             .ids = std::nullopt,
-             .idsReference = std::nullopt,
-             .properties = std::nullopt});
+        const auto mailboxRequest = javelin::jmap::api::mailboxGet({.accountId = accountId,
+                                                                    .ids = std::nullopt,
+                                                                    .idsReference = std::nullopt,
+                                                                    .properties = std::nullopt});
         if (!mailboxRequest.has_value())
         {
             co_return LiveRefreshError{
@@ -856,8 +881,8 @@ namespace javelin::jmap
                 co_return LiveRefreshError{.message = error->message};
             }
 
-            emailCount =
-                std::get<javelin::jmap::sync::MailboxRefreshSummary>(refreshResult).representativeCount;
+            emailCount = std::get<javelin::jmap::sync::MailboxRefreshSummary>(refreshResult)
+                             .representativeCount;
             reportProgress(QStringLiteral("Cached %1 threaded conversations.").arg(emailCount));
         }
 
@@ -868,8 +893,7 @@ namespace javelin::jmap
         qInfo().noquote() << "JMAP core refresh success" << m_impl->statusSummary;
 
         const auto pendingSubmit = co_await submitPendingEmailMutations(settings, accountId);
-        if (const auto* summary =
-                std::get_if<SubmittedEmailMutations>(&pendingSubmit);
+        if (const auto* summary = std::get_if<SubmittedEmailMutations>(&pendingSubmit);
             summary != nullptr && summary->updatedEmailCount > 0)
         {
             reportProgress(QStringLiteral("Submitted %1 queued mailbox updates.")
@@ -1022,16 +1046,14 @@ namespace javelin::jmap
         const auto& envelope = std::get<javelin::jmap::api::ResponseEnvelope>(envelopeResult);
         const javelin::jmap::api::ResponseReader reader{envelope};
         const auto parsedResult = reader.require(contentHandle);
-        if (const auto* error =
-                std::get_if<javelin::jmap::api::ResponseReaderError>(&parsedResult))
+        if (const auto* error = std::get_if<javelin::jmap::api::ResponseReaderError>(&parsedResult))
         {
             co_return LiveRefreshError{
                 .message = QStringLiteral("Failed to read Email/get content response: %1")
                                .arg(QString::fromStdString(error->message)),
             };
         }
-        const auto& parsed =
-            std::get<javelin::jmap::api::EmailContentGetResponse>(parsedResult);
+        const auto& parsed = std::get<javelin::jmap::api::EmailContentGetResponse>(parsedResult);
 
         const auto contentIt =
             std::ranges::find(parsed.list, emailId, &javelin::jmap::api::EmailContent::id);
@@ -1131,10 +1153,9 @@ namespace javelin::jmap
             co_return *error;
         }
         const auto& downloadContext = std::get<DownloadContext>(downloadContextResult);
-        const auto blobDownloadResult =
-            co_await downloadBlob(*m_impl->transport, downloadContext.session.downloadUrl,
-                                  accountId, *part, downloadContext.accessToken,
-                                  QStringLiteral("Attachment download"));
+        const auto blobDownloadResult = co_await downloadBlob(
+            *m_impl->transport, downloadContext.session.downloadUrl, accountId, *part,
+            downloadContext.accessToken, QStringLiteral("Attachment download"));
         if (const auto* error = std::get_if<LiveRefreshError>(&blobDownloadResult))
         {
             co_return *error;
@@ -1168,7 +1189,8 @@ namespace javelin::jmap
             co_return *validationError;
         }
 
-        const auto emailResult = findEmailForDownload(*m_impl->databaseConnection, accountId, emailId);
+        const auto emailResult =
+            findEmailForDownload(*m_impl->databaseConnection, accountId, emailId);
         if (const auto* error = std::get_if<LiveRefreshError>(&emailResult))
         {
             co_return *error;
@@ -1198,10 +1220,9 @@ namespace javelin::jmap
             .isInlineRenderable = false,
             .isBodySection = false,
         };
-        const auto payloadResult =
-            co_await downloadBlob(*m_impl->transport, downloadContext.session.downloadUrl,
-                                  accountId, messageBlob, downloadContext.accessToken,
-                                  QStringLiteral("Message source download"));
+        const auto payloadResult = co_await downloadBlob(
+            *m_impl->transport, downloadContext.session.downloadUrl, accountId, messageBlob,
+            downloadContext.accessToken, QStringLiteral("Message source download"));
         if (const auto* error = std::get_if<LiveRefreshError>(&payloadResult))
         {
             co_return *error;
@@ -1304,8 +1325,7 @@ namespace javelin::jmap
             *m_impl->databaseConnection};
         const auto pendingResult = pendingActionRepository.listByStatus(
             accountId, javelin::jmap::sync::PendingActionStatus::Pending, limit);
-        if (const auto* error =
-                std::get_if<javelin::jmap::cache::DatabaseError>(&pendingResult))
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&pendingResult))
         {
             co_return LiveRefreshError{.message = error->message};
         }
@@ -1351,7 +1371,8 @@ namespace javelin::jmap
                 };
             }
 
-            const auto allEmailActionsResult = pendingActionRepository.listForEmail(accountId, emailId);
+            const auto allEmailActionsResult =
+                pendingActionRepository.listForEmail(accountId, emailId);
             if (const auto* error =
                     std::get_if<javelin::jmap::cache::DatabaseError>(&allEmailActionsResult))
             {
@@ -1359,14 +1380,15 @@ namespace javelin::jmap
             }
 
             const auto allEmailActions = activePendingActions(
-                std::get<std::vector<javelin::jmap::sync::PendingActionRecord>>(allEmailActionsResult));
+                std::get<std::vector<javelin::jmap::sync::PendingActionRecord>>(
+                    allEmailActionsResult));
             if (allEmailActions.empty())
             {
                 continue;
             }
 
-            mergedEmails.emplace(emailId,
-                                 javelin::jmap::sync::mergePendingEmailPatch(*email, allEmailActions));
+            mergedEmails.emplace(
+                emailId, javelin::jmap::sync::mergePendingEmailPatch(*email, allEmailActions));
 
             auto& pendingIds = pendingActionIdsByEmailId[emailId];
             pendingIds.reserve(allEmailActions.size());
@@ -1425,8 +1447,7 @@ namespace javelin::jmap
         const auto& envelope = std::get<javelin::jmap::api::ResponseEnvelope>(envelopeResult);
         const javelin::jmap::api::ResponseReader reader{envelope};
         const auto parsedResult = reader.require(setHandle);
-        if (const auto* error =
-                std::get_if<javelin::jmap::api::ResponseReaderError>(&parsedResult))
+        if (const auto* error = std::get_if<javelin::jmap::api::ResponseReaderError>(&parsedResult))
         {
             co_return LiveRefreshError{
                 .message = QStringLiteral("Failed to read Email/set response: %1")
@@ -1435,7 +1456,8 @@ namespace javelin::jmap
         }
         const auto& parsed = std::get<javelin::jmap::api::EmailSetResponse>(parsedResult);
 
-        std::unordered_set<std::string> updatedEmailIds{parsed.updated.begin(), parsed.updated.end()};
+        std::unordered_set<std::string> updatedEmailIds{parsed.updated.begin(),
+                                                        parsed.updated.end()};
         std::unordered_set<std::string> failedEmailIds{parsed.notUpdated.begin(),
                                                        parsed.notUpdated.end()};
 
@@ -1469,7 +1491,8 @@ namespace javelin::jmap
                 const auto status = failedEmailIds.contains(emailId)
                                         ? javelin::jmap::sync::PendingActionStatus::Failed
                                         : javelin::jmap::sync::PendingActionStatus::Pending;
-                if (const auto error = pendingActionRepository.updateStatus(pendingActionId, status))
+                if (const auto error =
+                        pendingActionRepository.updateStatus(pendingActionId, status))
                 {
                     co_return LiveRefreshError{.message = error->message};
                 }
@@ -1536,8 +1559,7 @@ namespace javelin::jmap
             std::get<javelin::jmap::sync::MailboxRefreshSummary>(refreshResult).representativeCount;
 
         const auto pendingSubmit = co_await submitPendingEmailMutations(settings, accountId);
-        if (const auto* summary =
-                std::get_if<SubmittedEmailMutations>(&pendingSubmit);
+        if (const auto* summary = std::get_if<SubmittedEmailMutations>(&pendingSubmit);
             summary != nullptr && summary->updatedEmailCount > 0)
         {
             reportProgress(QStringLiteral("Submitted %1 queued mailbox updates.")
@@ -1548,6 +1570,246 @@ namespace javelin::jmap
             .accountId = std::move(accountId),
             .mailboxId = std::move(mailboxId),
             .emailCount = representativeCount,
+        };
+    }
+
+    QCoro::Task<MessageSearchResult>
+    JmapCore::searchMessages(LiveConnectionSettings settings, std::string accountId,
+                             std::string query, const std::size_t limit,
+                             std::function<void(const QString&)> progressCallback)
+    {
+        const auto reportProgress = [&progressCallback](const QString& message)
+        {
+            if (progressCallback)
+            {
+                progressCallback(message);
+            }
+        };
+
+        qInfo().noquote() << "JMAP core search start" << QString::fromStdString(accountId)
+                          << QString::fromStdString(query);
+        reportProgress(QStringLiteral("Searching the server..."));
+        if (m_impl->databaseConnection == nullptr || m_impl->transport == nullptr)
+        {
+            co_return LiveRefreshError{
+                .message = QStringLiteral("JMAP core is not wired to the cache and transport yet."),
+            };
+        }
+
+        if (query.empty())
+        {
+            co_return LiveRefreshError{
+                .message = QStringLiteral("Enter a search term before searching."),
+            };
+        }
+
+        if (const auto validationError = validateLoginSettings(settings, true))
+        {
+            co_return *validationError;
+        }
+
+        const auto sessionResult = loadCachedSession(*m_impl->databaseConnection, accountId);
+        if (const auto* error = std::get_if<LiveRefreshError>(&sessionResult))
+        {
+            co_return *error;
+        }
+        const auto& session = std::get<javelin::jmap::api::Session>(sessionResult);
+
+        javelin::jmap::api::MethodCaller methodCaller{*m_impl->transport};
+        const auto apiRequestContext = buildApiRequestContext(settings, accountId, session);
+
+        javelin::jmap::api::RequestBuilder builder;
+        builder.useCore().useMail();
+
+        const auto queryRequest = javelin::jmap::api::emailQuery({
+            .accountId = accountId,
+            .filter =
+                javelin::jmap::api::EmailQueryFilter{
+                    .inMailbox = std::nullopt,
+                    .text = query,
+                },
+            .sort =
+                {
+                    javelin::jmap::api::EmailQuerySort{
+                        .property = "receivedAt",
+                        .isAscending = false,
+                    },
+                },
+            .position = 0,
+            .limit = limit,
+            .collapseThreads = true,
+            .calculateTotal = true,
+        });
+        if (!queryRequest.has_value())
+        {
+            co_return LiveRefreshError{
+                .message = QStringLiteral("Failed to encode the Email/query search request."),
+            };
+        }
+        const auto queryHandle = builder.call(*queryRequest, "search-query");
+
+        const auto representativeRequest = javelin::jmap::api::emailGet(
+            javelin::jmap::api::getRequestFrom(accountId, queryHandle, "/ids"));
+        if (!representativeRequest.has_value())
+        {
+            co_return LiveRefreshError{
+                .message =
+                    QStringLiteral("Failed to encode the search representative Email/get request."),
+            };
+        }
+        const auto representativeHandle =
+            builder.call(*representativeRequest, "search-representatives-get");
+
+        const auto threadRequest = javelin::jmap::api::threadGet(javelin::jmap::api::getRequestFrom(
+            accountId, representativeHandle, "/list/*/threadId"));
+        if (!threadRequest.has_value())
+        {
+            co_return LiveRefreshError{
+                .message = QStringLiteral("Failed to encode the search Thread/get request."),
+            };
+        }
+        const auto threadHandle = builder.call(*threadRequest, "search-threads-get");
+
+        const auto emailRequest = javelin::jmap::api::emailGet(
+            javelin::jmap::api::getRequestFrom(accountId, threadHandle, "/list/*/emailIds"));
+        if (!emailRequest.has_value())
+        {
+            co_return LiveRefreshError{
+                .message = QStringLiteral("Failed to encode the search Email/get request."),
+            };
+        }
+        const auto emailHandle = builder.call(*emailRequest, "search-emails-get");
+
+        const auto envelopeResult = co_await methodCaller.call(apiRequestContext, builder);
+        if (const auto* error = std::get_if<javelin::jmap::api::TransportError>(&envelopeResult))
+        {
+            co_return LiveRefreshError{.message = transportMessage(*error)};
+        }
+        if (const auto* error = std::get_if<javelin::jmap::api::AuthError>(&envelopeResult))
+        {
+            co_return LiveRefreshError{.message = authMessage(*error)};
+        }
+        if (const auto* error = std::get_if<javelin::jmap::api::ProtocolError>(&envelopeResult))
+        {
+            co_return LiveRefreshError{.message = protocolMessage(*error)};
+        }
+
+        const auto& envelope = std::get<javelin::jmap::api::ResponseEnvelope>(envelopeResult);
+        const javelin::jmap::api::ResponseReader reader{envelope};
+
+        const auto queryResult = reader.require(queryHandle);
+        if (const auto* error = std::get_if<javelin::jmap::api::ResponseReaderError>(&queryResult))
+        {
+            co_return LiveRefreshError{
+                .message = QStringLiteral("Failed to read Email/query search response: %1")
+                               .arg(QString::fromStdString(error->message)),
+            };
+        }
+        const auto& parsedQuery = std::get<javelin::jmap::api::EmailQueryResponse>(queryResult);
+
+        if (parsedQuery.ids.empty())
+        {
+            co_return MessageSearchSummary{
+                .accountId = std::move(accountId),
+                .query = std::move(query),
+                .representativeCount = 0,
+                .total =
+                    parsedQuery.total.has_value()
+                        ? std::optional<std::size_t>{static_cast<std::size_t>(*parsedQuery.total)}
+                        : std::nullopt,
+                .results = {},
+            };
+        }
+
+        reportProgress(QStringLiteral("Fetched %1 matching conversations.")
+                           .arg(static_cast<qulonglong>(parsedQuery.ids.size())));
+
+        const auto representativeResult = reader.require(representativeHandle);
+        if (const auto* error =
+                std::get_if<javelin::jmap::api::ResponseReaderError>(&representativeResult))
+        {
+            co_return LiveRefreshError{
+                .message =
+                    QStringLiteral("Failed to read search representative Email/get response: %1")
+                        .arg(QString::fromStdString(error->message)),
+            };
+        }
+        const auto& parsedRepresentatives =
+            std::get<javelin::jmap::api::EmailGetResponse>(representativeResult);
+
+        const auto threadResult = reader.require(threadHandle);
+        if (const auto* error = std::get_if<javelin::jmap::api::ResponseReaderError>(&threadResult))
+        {
+            co_return LiveRefreshError{
+                .message = QStringLiteral("Failed to read search Thread/get response: %1")
+                               .arg(QString::fromStdString(error->message)),
+            };
+        }
+        const auto& parsedThreads = std::get<javelin::jmap::api::ThreadGetResponse>(threadResult);
+
+        const auto emailResult = reader.require(emailHandle);
+        if (const auto* error = std::get_if<javelin::jmap::api::ResponseReaderError>(&emailResult))
+        {
+            co_return LiveRefreshError{
+                .message = QStringLiteral("Failed to read search Email/get response: %1")
+                               .arg(QString::fromStdString(error->message)),
+            };
+        }
+        const auto& parsedEmails = std::get<javelin::jmap::api::EmailGetResponse>(emailResult);
+
+        javelin::jmap::cache::EmailRepository emailRepository{*m_impl->databaseConnection};
+        if (const auto error = emailRepository.upsertMany(accountId, parsedEmails.list))
+        {
+            co_return LiveRefreshError{.message = error->message};
+        }
+
+        javelin::jmap::cache::ThreadRepository threadRepository{*m_impl->databaseConnection};
+        if (const auto error = threadRepository.upsertMany(accountId, parsedThreads.list))
+        {
+            co_return LiveRefreshError{.message = error->message};
+        }
+
+        std::unordered_map<std::string, std::size_t> threadMessageCounts;
+        threadMessageCounts.reserve(parsedThreads.list.size());
+        for (const auto& thread : parsedThreads.list)
+        {
+            threadMessageCounts.emplace(thread.id, thread.emailIds.size());
+        }
+
+        std::unordered_map<std::string, const javelin::jmap::domain::Email*> representativesById;
+        representativesById.reserve(parsedRepresentatives.list.size());
+        for (const auto& email : parsedRepresentatives.list)
+        {
+            representativesById.emplace(email.id, &email);
+        }
+
+        std::vector<javelin::jmap::cache::MessageListItem> results;
+        results.reserve(parsedQuery.ids.size());
+        for (const auto& representativeId : parsedQuery.ids)
+        {
+            const auto representativeIt = representativesById.find(representativeId);
+            if (representativeIt == representativesById.end())
+            {
+                continue;
+            }
+
+            const auto* email = representativeIt->second;
+            const auto threadCountIt = threadMessageCounts.find(email->threadId);
+            results.push_back(messageListItemFromEmail(
+                *email, threadCountIt == threadMessageCounts.end() ? 1 : threadCountIt->second));
+        }
+
+        reportProgress(QStringLiteral("Loaded %1 matching messages into the local working set.")
+                           .arg(static_cast<qulonglong>(parsedEmails.list.size())));
+
+        co_return MessageSearchSummary{
+            .accountId = std::move(accountId),
+            .query = std::move(query),
+            .representativeCount = results.size(),
+            .total = parsedQuery.total.has_value()
+                         ? std::optional<std::size_t>{static_cast<std::size_t>(*parsedQuery.total)}
+                         : std::nullopt,
+            .results = std::move(results),
         };
     }
 
