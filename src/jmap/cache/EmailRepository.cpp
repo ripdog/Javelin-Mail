@@ -1,5 +1,7 @@
 #include "jmap/cache/EmailRepository.h"
 
+#include <QJsonArray>
+#include <QJsonDocument>
 #include <QSqlError>
 #include <QSqlQuery>
 
@@ -18,6 +20,32 @@ namespace javelin::jmap::cache
                 .code = DatabaseErrorCode::QueryFailed,
                 .message = operation + QStringLiteral(": ") + query.lastError().text(),
             };
+        }
+
+        [[nodiscard]] QString serializeStringList(const std::vector<std::string>& values)
+        {
+            QJsonArray array;
+            for (const auto& value : values)
+            {
+                array.push_back(QString::fromStdString(value));
+            }
+            return QString::fromUtf8(QJsonDocument{array}.toJson(QJsonDocument::Compact));
+        }
+
+        [[nodiscard]] std::vector<std::string> deserializeStringList(const QString& json)
+        {
+            const auto array = QJsonDocument::fromJson(json.toUtf8()).array();
+            std::vector<std::string> values;
+            values.reserve(static_cast<std::size_t>(array.size()));
+            for (const auto& value : array)
+            {
+                const auto stringValue = value.toString();
+                if (!stringValue.isEmpty())
+                {
+                    values.push_back(stringValue.toStdString());
+                }
+            }
+            return values;
         }
 
         std::optional<DatabaseError>
@@ -229,11 +257,12 @@ namespace javelin::jmap::cache
         QSqlQuery emailQuery{database};
         emailQuery.prepare(QStringLiteral(
             "INSERT INTO emails ("
-            "account_id, email_id, thread_id, blob_id, received_at, sent_at, subject, preview, "
-            "mailbox_ids_json, keywords_json, has_attachment, size, state"
+            "account_id, email_id, thread_id, blob_id, received_at, sent_at, message_id_json, "
+            "in_reply_to_json, references_json, subject, preview, mailbox_ids_json, "
+            "keywords_json, has_attachment, size, state"
             ") VALUES ("
-            ":account_id, :email_id, :thread_id, :blob_id, :received_at, :sent_at, :subject, "
-            ":preview, "
+            ":account_id, :email_id, :thread_id, :blob_id, :received_at, :sent_at, "
+            ":message_id_json, :in_reply_to_json, :references_json, :subject, :preview, "
             ":mailbox_ids_json, :keywords_json, :has_attachment, :size, :state)"));
 
         QSqlQuery mailboxQuery{database};
@@ -260,6 +289,12 @@ namespace javelin::jmap::cache
                                  email.sentAt.has_value()
                                      ? QVariant{QString::fromStdString(*email.sentAt)}
                                      : QVariant{});
+            emailQuery.bindValue(QStringLiteral(":message_id_json"),
+                                 serializeStringList(email.messageId));
+            emailQuery.bindValue(QStringLiteral(":in_reply_to_json"),
+                                 serializeStringList(email.inReplyTo));
+            emailQuery.bindValue(QStringLiteral(":references_json"),
+                                 serializeStringList(email.references));
             emailQuery.bindValue(QStringLiteral(":subject"),
                                  email.subject.has_value()
                                      ? QVariant{QString::fromStdString(*email.subject)}
@@ -364,16 +399,21 @@ namespace javelin::jmap::cache
         QSqlQuery emailQuery{database};
         emailQuery.prepare(QStringLiteral(
             "INSERT INTO emails ("
-            "account_id, email_id, thread_id, blob_id, received_at, sent_at, subject, preview, "
-            "mailbox_ids_json, keywords_json, has_attachment, size, state"
+            "account_id, email_id, thread_id, blob_id, received_at, sent_at, message_id_json, "
+            "in_reply_to_json, references_json, subject, preview, mailbox_ids_json, "
+            "keywords_json, has_attachment, size, state"
             ") VALUES ("
-            ":account_id, :email_id, :thread_id, :blob_id, :received_at, :sent_at, :subject, "
-            ":preview, :mailbox_ids_json, :keywords_json, :has_attachment, :size, :state"
+            ":account_id, :email_id, :thread_id, :blob_id, :received_at, :sent_at, "
+            ":message_id_json, :in_reply_to_json, :references_json, :subject, :preview, "
+            ":mailbox_ids_json, :keywords_json, :has_attachment, :size, :state"
             ") ON CONFLICT(account_id, email_id) DO UPDATE SET "
             "thread_id = excluded.thread_id, "
             "blob_id = excluded.blob_id, "
             "received_at = excluded.received_at, "
             "sent_at = excluded.sent_at, "
+            "message_id_json = excluded.message_id_json, "
+            "in_reply_to_json = excluded.in_reply_to_json, "
+            "references_json = excluded.references_json, "
             "subject = excluded.subject, "
             "preview = excluded.preview, "
             "mailbox_ids_json = excluded.mailbox_ids_json, "
@@ -412,6 +452,12 @@ namespace javelin::jmap::cache
                                  email.sentAt.has_value()
                                      ? QVariant{QString::fromStdString(*email.sentAt)}
                                      : QVariant{});
+            emailQuery.bindValue(QStringLiteral(":message_id_json"),
+                                 serializeStringList(email.messageId));
+            emailQuery.bindValue(QStringLiteral(":in_reply_to_json"),
+                                 serializeStringList(email.inReplyTo));
+            emailQuery.bindValue(QStringLiteral(":references_json"),
+                                 serializeStringList(email.references));
             emailQuery.bindValue(QStringLiteral(":subject"),
                                  email.subject.has_value()
                                      ? QVariant{QString::fromStdString(*email.subject)}
@@ -565,8 +611,9 @@ namespace javelin::jmap::cache
         QSqlDatabase& database = m_connection.database();
         QSqlQuery emailQuery{database};
         emailQuery.prepare(
-            QStringLiteral("SELECT blob_id, thread_id, size, received_at, sent_at, has_attachment, "
-                           "subject, preview "
+            QStringLiteral("SELECT blob_id, thread_id, size, received_at, sent_at, "
+                           "message_id_json, in_reply_to_json, references_json, "
+                           "has_attachment, subject, preview "
                            "FROM emails WHERE account_id = :account_id AND email_id = :email_id"));
         emailQuery.bindValue(QStringLiteral(":account_id"),
                              QString::fromStdString(std::string{accountId}));
@@ -658,18 +705,21 @@ namespace javelin::jmap::cache
             .sentAt = emailQuery.value(4).isNull()
                           ? std::nullopt
                           : std::optional{emailQuery.value(4).toString().toStdString()},
-            .hasAttachment = emailQuery.value(5).toInt() != 0,
-            .subject = emailQuery.value(6).isNull()
+            .messageId = deserializeStringList(emailQuery.value(5).toString()),
+            .inReplyTo = deserializeStringList(emailQuery.value(6).toString()),
+            .references = deserializeStringList(emailQuery.value(7).toString()),
+            .hasAttachment = emailQuery.value(8).toInt() != 0,
+            .subject = emailQuery.value(9).isNull()
                            ? std::nullopt
-                           : std::optional{emailQuery.value(6).toString().toStdString()},
+                           : std::optional{emailQuery.value(9).toString().toStdString()},
             .from = std::move(from),
             .to = std::move(to),
             .cc = std::move(cc),
             .bcc = std::move(bcc),
             .replyTo = std::move(replyTo),
-            .preview = emailQuery.value(7).isNull()
+            .preview = emailQuery.value(10).isNull()
                            ? std::nullopt
-                           : std::optional{emailQuery.value(7).toString().toStdString()},
+                           : std::optional{emailQuery.value(10).toString().toStdString()},
         }};
     }
 

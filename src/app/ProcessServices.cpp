@@ -6,9 +6,12 @@
 #include "jmap/JmapCore.h"
 #include "jmap/api/Transport.h"
 #include "jmap/cache/AccountRepository.h"
+#include "jmap/cache/IdentityRepository.h"
 #include "jmap/cache/MessageViewService.h"
 #include "jmap/cache/QueryService.h"
+#include "jmap/cache/SubmissionRepository.h"
 #include "jmap/render/InlineMessageUrl.h"
+#include "jmap/submission/ComposeService.h"
 
 #include <QDir>
 #include <QStandardPaths>
@@ -58,9 +61,15 @@ namespace javelin::app
         m_jmapCore = std::make_unique<javelin::jmap::JmapCore>(m_databaseConnection, *m_transport);
         m_accountRepository =
             std::make_unique<javelin::jmap::cache::AccountRepository>(m_databaseConnection);
+        m_identityRepository =
+            std::make_unique<javelin::jmap::cache::IdentityRepository>(m_databaseConnection);
         m_messageViewService =
             std::make_unique<javelin::jmap::cache::MessageViewService>(m_databaseConnection);
         m_queryService = std::make_unique<javelin::jmap::cache::QueryService>(m_databaseConnection);
+        m_submissionRepository =
+            std::make_unique<javelin::jmap::cache::SubmissionRepository>(m_databaseConnection);
+        m_composeService = std::make_unique<javelin::jmap::submission::ComposeService>(
+            m_databaseConnection, *m_transport, *m_jmapCore);
         m_longPollService = std::make_unique<LongPollService>(
             m_databaseConnection, *m_transport, *m_networkAccessManager, *m_accountRepository,
             *m_queryService);
@@ -83,6 +92,11 @@ namespace javelin::app
         return *m_accountRepository;
     }
 
+    javelin::jmap::cache::IdentityRepository& ProcessServices::identityRepository()
+    {
+        return *m_identityRepository;
+    }
+
     javelin::jmap::cache::MessageViewService& ProcessServices::messageViewService()
     {
         return *m_messageViewService;
@@ -91,6 +105,11 @@ namespace javelin::app
     javelin::jmap::cache::QueryService& ProcessServices::queryService()
     {
         return *m_queryService;
+    }
+
+    javelin::jmap::submission::ComposeService& ProcessServices::composeService()
+    {
+        return *m_composeService;
     }
 
     LongPollService& ProcessServices::longPollService()

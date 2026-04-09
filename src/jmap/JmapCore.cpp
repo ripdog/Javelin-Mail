@@ -1641,7 +1641,9 @@ namespace javelin::jmap
 
         const auto requestMethod = javelin::jmap::api::emailSet({
             .accountId = accountId,
+            .create = {},
             .update = std::move(updates),
+            .destroy = {},
         });
         if (!requestMethod.has_value())
         {

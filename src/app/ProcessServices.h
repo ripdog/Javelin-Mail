@@ -25,9 +25,16 @@ namespace javelin::jmap::api
 namespace javelin::jmap::cache
 {
     class AccountRepository;
+    class IdentityRepository;
     class MessageViewService;
     class QueryService;
+    class SubmissionRepository;
 } // namespace javelin::jmap::cache
+
+namespace javelin::jmap::submission
+{
+    class ComposeService;
+}
 
 namespace javelin::app
 {
@@ -46,8 +53,10 @@ namespace javelin::app
         [[nodiscard]] javelin::jmap::JmapCore& jmapCore();
         [[nodiscard]] const javelin::jmap::JmapCore& jmapCore() const;
         [[nodiscard]] javelin::jmap::cache::AccountRepository& accountRepository();
+        [[nodiscard]] javelin::jmap::cache::IdentityRepository& identityRepository();
         [[nodiscard]] javelin::jmap::cache::MessageViewService& messageViewService();
         [[nodiscard]] javelin::jmap::cache::QueryService& queryService();
+        [[nodiscard]] javelin::jmap::submission::ComposeService& composeService();
         [[nodiscard]] javelin::app::LongPollService& longPollService();
 
       private:
@@ -57,8 +66,11 @@ namespace javelin::app
         std::unique_ptr<javelin::jmap::api::QtNetworkTransport> m_transport;
         std::unique_ptr<InlineMessageSchemeHandler> m_inlineMessageSchemeHandler;
         std::unique_ptr<javelin::jmap::cache::AccountRepository> m_accountRepository;
+        std::unique_ptr<javelin::jmap::cache::IdentityRepository> m_identityRepository;
         std::unique_ptr<javelin::jmap::cache::MessageViewService> m_messageViewService;
         std::unique_ptr<javelin::jmap::cache::QueryService> m_queryService;
+        std::unique_ptr<javelin::jmap::cache::SubmissionRepository> m_submissionRepository;
+        std::unique_ptr<javelin::jmap::submission::ComposeService> m_composeService;
         std::unique_ptr<LongPollService> m_longPollService;
     };
 

@@ -36,6 +36,14 @@ namespace javelin::jmap::api
         std::vector<std::string> notFound;
     };
 
+    struct IdentityGetResponse
+    {
+        std::string accountId;
+        std::string state;
+        std::vector<javelin::jmap::domain::Identity> list;
+        std::vector<std::string> notFound;
+    };
+
     struct EmailGetResponse
     {
         std::string accountId;
@@ -174,10 +182,56 @@ namespace javelin::jmap::api
         std::unordered_map<std::string, bool> keywords;
     };
 
+    struct EmailBodyValueCreate
+    {
+        std::string value;
+        bool isTruncated = false;
+    };
+
+    struct EmailBodyPartCreate
+    {
+        std::optional<std::string> partId;
+        std::optional<std::string> blobId;
+        std::string type;
+        std::optional<std::string> name;
+        std::optional<std::string> disposition;
+        std::optional<std::string> cid;
+        std::optional<std::vector<EmailBodyPartCreate>> subParts;
+    };
+
+    struct EmailSetCreate
+    {
+        std::unordered_map<std::string, bool> mailboxIds;
+        std::unordered_map<std::string, bool> keywords;
+        std::optional<std::vector<javelin::jmap::domain::EmailAddress>> from;
+        std::optional<std::vector<javelin::jmap::domain::EmailAddress>> to;
+        std::optional<std::vector<javelin::jmap::domain::EmailAddress>> cc;
+        std::optional<std::vector<javelin::jmap::domain::EmailAddress>> bcc;
+        std::optional<std::vector<javelin::jmap::domain::EmailAddress>> replyTo;
+        std::optional<std::string> subject;
+        std::optional<std::string> receivedAt;
+        std::optional<std::string> sentAt;
+        std::optional<std::vector<std::string>> messageId;
+        std::optional<std::vector<std::string>> inReplyTo;
+        std::optional<std::vector<std::string>> references;
+        std::optional<EmailBodyPartCreate> bodyStructure;
+        std::unordered_map<std::string, EmailBodyValueCreate> bodyValues;
+    };
+
+    struct EmailSetCreated
+    {
+        std::string id;
+        std::string blobId;
+        std::string threadId;
+        std::uint64_t size = 0;
+    };
+
     struct EmailSetRequest
     {
         std::string accountId;
+        std::unordered_map<std::string, EmailSetCreate> create;
         std::unordered_map<std::string, EmailSetUpdate> update;
+        std::vector<std::string> destroy;
     };
 
     struct EmailSetResponse
@@ -185,8 +239,54 @@ namespace javelin::jmap::api
         std::string accountId;
         std::string oldState;
         std::string newState;
+        std::unordered_map<std::string, EmailSetCreated> created;
         std::vector<std::string> updated;
+        std::vector<std::string> destroyed;
+        std::vector<std::string> notCreated;
         std::vector<std::string> notUpdated;
+        std::vector<std::string> notDestroyed;
+    };
+
+    struct EnvelopeAddress
+    {
+        std::string email;
+    };
+
+    struct EmailSubmissionEnvelope
+    {
+        std::optional<EnvelopeAddress> mailFrom;
+        std::vector<EnvelopeAddress> rcptTo;
+    };
+
+    struct EmailSubmissionCreate
+    {
+        std::string identityId;
+        std::string emailId;
+        std::optional<EmailSubmissionEnvelope> envelope;
+    };
+
+    using EmailSubmissionPatchValue = std::optional<bool>;
+
+    struct EmailSubmissionSetRequest
+    {
+        std::string accountId;
+        std::unordered_map<std::string, EmailSubmissionCreate> create;
+        std::unordered_map<std::string, std::unordered_map<std::string, EmailSubmissionPatchValue>>
+            onSuccessUpdateEmail;
+    };
+
+    struct EmailSubmissionCreated
+    {
+        std::string id;
+    };
+
+    struct EmailSubmissionSetResponse
+    {
+        std::string accountId;
+        std::string oldState;
+        std::string newState;
+        std::unordered_map<std::string, EmailSubmissionCreated> created;
+        std::vector<std::string> notCreated;
     };
 
     struct ChangesResponse
@@ -221,7 +321,10 @@ namespace javelin::jmap::api
     serializeEmailContentGetRequest(const EmailContentGetRequest& request);
     [[nodiscard]] std::optional<std::string>
     serializeEmailSetRequest(const EmailSetRequest& request);
+    [[nodiscard]] std::optional<std::string>
+    serializeEmailSubmissionSetRequest(const EmailSubmissionSetRequest& request);
 
+    [[nodiscard]] ParsedEnvelope<IdentityGetResponse> parseIdentityGetResponse(std::string_view json);
     [[nodiscard]] ParsedEnvelope<MailboxGetResponse> parseMailboxGetResponse(std::string_view json);
     [[nodiscard]] ParsedEnvelope<EmailGetResponse> parseEmailGetResponse(std::string_view json);
     [[nodiscard]] ParsedEnvelope<ThreadGetResponse> parseThreadGetResponse(std::string_view json);
@@ -231,10 +334,14 @@ namespace javelin::jmap::api
     [[nodiscard]] ParsedEnvelope<EmailContentGetResponse>
     parseEmailContentGetResponse(std::string_view json);
     [[nodiscard]] ParsedEnvelope<EmailSetResponse> parseEmailSetResponse(std::string_view json);
+    [[nodiscard]] ParsedEnvelope<EmailSubmissionSetResponse>
+    parseEmailSubmissionSetResponse(std::string_view json);
     [[nodiscard]] ParsedEnvelope<ChangesResponse> parseChangesResponse(std::string_view json);
     [[nodiscard]] ParsedEnvelope<EmailChangesResponse>
     parseEmailChangesResponse(std::string_view json);
 
+    [[nodiscard]] std::optional<MethodRequest<IdentityGetResponse>>
+    identityGet(const GetRequest& request);
     [[nodiscard]] std::optional<MethodRequest<MailboxGetResponse>>
     mailboxGet(const GetRequest& request);
     [[nodiscard]] std::optional<MethodRequest<EmailGetResponse>>
@@ -251,8 +358,20 @@ namespace javelin::jmap::api
     emailContentGet(const EmailContentGetRequest& request);
     [[nodiscard]] std::optional<MethodRequest<EmailSetResponse>>
     emailSet(const EmailSetRequest& request);
+    [[nodiscard]] std::optional<MethodRequest<EmailSubmissionSetResponse>>
+    emailSubmissionSet(const EmailSubmissionSetRequest& request);
 
     template <typename Response> struct MethodResponseTraits;
+
+    template <> struct MethodResponseTraits<IdentityGetResponse>
+    {
+        static constexpr std::string_view methodName = "Identity/get";
+
+        [[nodiscard]] static ParsedEnvelope<IdentityGetResponse> parse(std::string_view json)
+        {
+            return parseIdentityGetResponse(json);
+        }
+    };
 
     template <> struct MethodResponseTraits<MailboxGetResponse>
     {
@@ -321,6 +440,16 @@ namespace javelin::jmap::api
         [[nodiscard]] static ParsedEnvelope<EmailSetResponse> parse(std::string_view json)
         {
             return parseEmailSetResponse(json);
+        }
+    };
+
+    template <> struct MethodResponseTraits<EmailSubmissionSetResponse>
+    {
+        static constexpr std::string_view methodName = "EmailSubmission/set";
+
+        [[nodiscard]] static ParsedEnvelope<EmailSubmissionSetResponse> parse(std::string_view json)
+        {
+            return parseEmailSubmissionSetResponse(json);
         }
     };
 

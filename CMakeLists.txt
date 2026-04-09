@@ -49,6 +49,8 @@ set(JAVELIN_FORMAT_FILES
     src/app/ProcessServices.h
     src/gui/mailboxes/MailboxTreeModel.cpp
     src/gui/mailboxes/MailboxTreeModel.h
+    src/gui/compose/ComposeTabWidget.cpp
+    src/gui/compose/ComposeTabWidget.h
     src/gui/messages/MessageListModel.cpp
     src/gui/messages/MessageListModel.h
     src/gui/messages/MessageListDelegate.cpp
@@ -85,10 +87,14 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/api/Transport.h
     src/jmap/cache/AccountRepository.cpp
     src/jmap/cache/AccountRepository.h
+    src/jmap/cache/ComposeSessionRepository.cpp
+    src/jmap/cache/ComposeSessionRepository.h
     src/jmap/cache/Database.cpp
     src/jmap/cache/Database.h
     src/jmap/cache/EmailRepository.cpp
     src/jmap/cache/EmailRepository.h
+    src/jmap/cache/IdentityRepository.cpp
+    src/jmap/cache/IdentityRepository.h
     src/jmap/cache/InlinePartPayloadRepository.cpp
     src/jmap/cache/InlinePartPayloadRepository.h
     src/jmap/cache/MailboxRepository.cpp
@@ -101,6 +107,8 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/cache/QueryService.h
     src/jmap/cache/SessionRepository.cpp
     src/jmap/cache/SessionRepository.h
+    src/jmap/cache/SubmissionRepository.cpp
+    src/jmap/cache/SubmissionRepository.h
     src/jmap/cache/SyncStateRepository.cpp
     src/jmap/cache/SyncStateRepository.h
     src/jmap/cache/ThreadRepository.cpp
@@ -140,6 +148,9 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/auth/Auth.h
     src/jmap/JmapCore.cpp
     src/jmap/JmapCore.h
+    src/jmap/submission/ComposeService.cpp
+    src/jmap/submission/ComposeService.h
+    src/jmap/submission/ComposeTypes.h
     tests/FixtureReader.cpp
     tests/FixtureReader.h
     tests/jmap/AccountRepositoryTest.cpp
@@ -196,10 +207,14 @@ add_library(javelin_jmap STATIC
     src/jmap/api/Transport.h
     src/jmap/cache/AccountRepository.cpp
     src/jmap/cache/AccountRepository.h
+    src/jmap/cache/ComposeSessionRepository.cpp
+    src/jmap/cache/ComposeSessionRepository.h
     src/jmap/cache/Database.cpp
     src/jmap/cache/Database.h
     src/jmap/cache/EmailRepository.cpp
     src/jmap/cache/EmailRepository.h
+    src/jmap/cache/IdentityRepository.cpp
+    src/jmap/cache/IdentityRepository.h
     src/jmap/cache/InlinePartPayloadRepository.cpp
     src/jmap/cache/InlinePartPayloadRepository.h
     src/jmap/cache/MailboxRepository.cpp
@@ -212,6 +227,8 @@ add_library(javelin_jmap STATIC
     src/jmap/cache/QueryService.h
     src/jmap/cache/SessionRepository.cpp
     src/jmap/cache/SessionRepository.h
+    src/jmap/cache/SubmissionRepository.cpp
+    src/jmap/cache/SubmissionRepository.h
     src/jmap/cache/SyncStateRepository.cpp
     src/jmap/cache/SyncStateRepository.h
     src/jmap/cache/ThreadRepository.cpp
@@ -251,6 +268,9 @@ add_library(javelin_jmap STATIC
     src/jmap/auth/Auth.h
     src/jmap/JmapCore.cpp
     src/jmap/JmapCore.h
+    src/jmap/submission/ComposeService.cpp
+    src/jmap/submission/ComposeService.h
+    src/jmap/submission/ComposeTypes.h
 )
 target_include_directories(javelin_jmap PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
@@ -271,6 +291,8 @@ javelin_enable_static_analysis(javelin_jmap)
 javelin_enable_sanitizers(javelin_jmap)
 
 add_library(javelin_gui STATIC
+    src/gui/compose/ComposeTabWidget.cpp
+    src/gui/compose/ComposeTabWidget.h
     src/gui/mailboxes/MailboxTreeModel.cpp
     src/gui/mailboxes/MailboxTreeModel.h
     src/gui/messages/MessageListModel.cpp

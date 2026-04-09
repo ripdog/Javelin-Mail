@@ -25,6 +25,9 @@ namespace
         std::optional<std::uint64_t> size;
         std::optional<std::string> receivedAt;
         std::optional<std::string> sentAt;
+        std::optional<std::vector<std::string>> messageId;
+        std::optional<std::vector<std::string>> inReplyTo;
+        std::optional<std::vector<std::string>> references;
         std::optional<bool> hasAttachment;
         std::optional<std::string> subject;
         std::optional<std::vector<javelin::jmap::domain::EmailAddress>> from;
@@ -118,8 +121,10 @@ template <> struct glz::meta<RawEmail>
     static constexpr auto value = glz::object(
         "id", &T::id, "blobId", &T::blobId, "threadId", &T::threadId, "mailboxIds", &T::mailboxIds,
         "keywords", &T::keywords, "size", &T::size, "receivedAt", &T::receivedAt, "sentAt",
-        &T::sentAt, "hasAttachment", &T::hasAttachment, "subject", &T::subject, "from", &T::from,
-        "to", &T::to, "cc", &T::cc, "bcc", &T::bcc, "replyTo", &T::replyTo, "preview", &T::preview);
+        &T::sentAt, "messageId", &T::messageId, "inReplyTo", &T::inReplyTo, "references",
+        &T::references, "hasAttachment", &T::hasAttachment, "subject", &T::subject, "from",
+        &T::from, "to", &T::to, "cc", &T::cc, "bcc", &T::bcc, "replyTo", &T::replyTo, "preview",
+        &T::preview);
 };
 
 template <> struct glz::meta<javelin::jmap::domain::Identity>
@@ -162,6 +167,9 @@ namespace javelin::jmap::domain
                     .size = rawEmail.size.value_or(0),
                     .receivedAt = rawEmail.receivedAt.value_or(std::string{}),
                     .sentAt = std::move(rawEmail.sentAt),
+                    .messageId = rawEmail.messageId.value_or(std::vector<std::string>{}),
+                    .inReplyTo = rawEmail.inReplyTo.value_or(std::vector<std::string>{}),
+                    .references = rawEmail.references.value_or(std::vector<std::string>{}),
                     .hasAttachment = rawEmail.hasAttachment.value_or(false),
                     .subject = std::move(rawEmail.subject),
                     .from =

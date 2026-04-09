@@ -303,6 +303,7 @@ TEST_CASE("email set requests serialize typed mailbox and keyword updates", "[jm
 {
     const auto json = javelin::jmap::api::serializeEmailSetRequest({
         .accountId = "u1",
+        .create = {},
         .update =
             {
                 {"eml-1",
@@ -311,6 +312,7 @@ TEST_CASE("email set requests serialize typed mailbox and keyword updates", "[jm
                      .keywords = {{"$seen", true}},
                  }},
             },
+        .destroy = {},
     });
 
     REQUIRE(json.has_value());

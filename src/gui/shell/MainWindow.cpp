@@ -1,6 +1,7 @@
 #include "gui/shell/MainWindow.h"
 
 #include "app/LongPollService.h"
+#include "gui/compose/ComposeTabWidget.h"
 #include "gui/mailboxes/MailboxTreeModel.h"
 #include "gui/messages/MessageListDelegate.h"
 #include "gui/messages/MessageListModel.h"
@@ -9,9 +10,11 @@
 #include "gui/shell/MessageFileUtils.h"
 #include "jmap/JmapCore.h"
 #include "jmap/cache/AccountRepository.h"
+#include "jmap/cache/IdentityRepository.h"
 #include "jmap/cache/MessageViewService.h"
 #include "jmap/cache/QueryService.h"
 #include "jmap/query/QueryDiff.h"
+#include "jmap/submission/ComposeService.h"
 
 #include <QCoroTask>
 
@@ -19,6 +22,7 @@
 #include <KStandardAction>
 
 #include <QAction>
+#include <QAbstractButton>
 #include <QCloseEvent>
 #include <QCoreApplication>
 #include <QDebug>
@@ -41,9 +45,12 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QMetaObject>
+#include <QMessageBox>
+#include <QPushButton>
 #include <QSettings>
 #include <QSignalBlocker>
 #include <QSplitter>
+#include <QStackedWidget>
 #include <QStatusBar>
 #include <QTabBar>
 #include <QToolButton>
@@ -357,11 +364,14 @@ namespace javelin::gui::shell
 
     MainWindow::MainWindow(javelin::jmap::JmapCore& jmapCore,
                            javelin::jmap::cache::AccountRepository& accountRepository,
+                           javelin::jmap::cache::IdentityRepository& identityRepository,
                            javelin::jmap::cache::MessageViewService& messageViewService,
                            javelin::jmap::cache::QueryService& queryService,
+                           javelin::jmap::submission::ComposeService& composeService,
                            javelin::app::LongPollService& longPollService, QWidget* parent)
         : KXmlGuiWindow(parent), m_jmapCore(jmapCore), m_accountRepository(accountRepository),
-          m_messageViewService(messageViewService), m_queryService(queryService),
+          m_identityRepository(identityRepository), m_messageViewService(messageViewService),
+          m_queryService(queryService), m_composeService(composeService),
           m_longPollService(longPollService)
     {
         setupUi();
@@ -474,6 +484,35 @@ namespace javelin::gui::shell
 
         m_preferencesAction =
             KStandardAction::preferences(this, &MainWindow::openPreferences, actionCollection());
+
+        m_newMessageAction = new QAction(QIcon::fromTheme(QStringLiteral("mail-message-new")),
+                                         QStringLiteral("&New Message"), this);
+        m_newMessageAction->setShortcut(QKeySequence::New);
+        connect(m_newMessageAction, &QAction::triggered, this, &MainWindow::composeNewMessage);
+        actionCollection()->addAction(QStringLiteral("compose_new_message"), m_newMessageAction);
+        actionCollection()->setDefaultShortcut(m_newMessageAction, QKeySequence::New);
+
+        m_replyAction = new QAction(QIcon::fromTheme(QStringLiteral("mail-reply-sender")),
+                                    QStringLiteral("&Reply"), this);
+        m_replyAction->setShortcut(QKeySequence{Qt::Key_R});
+        connect(m_replyAction, &QAction::triggered, this, &MainWindow::composeReply);
+        actionCollection()->addAction(QStringLiteral("compose_reply"), m_replyAction);
+        actionCollection()->setDefaultShortcut(m_replyAction, QKeySequence{Qt::Key_R});
+
+        m_replyAllAction = new QAction(QIcon::fromTheme(QStringLiteral("mail-reply-all")),
+                                       QStringLiteral("Reply &All"), this);
+        connect(m_replyAllAction, &QAction::triggered, this, &MainWindow::composeReplyAll);
+        actionCollection()->addAction(QStringLiteral("compose_reply_all"), m_replyAllAction);
+
+        m_forwardAction = new QAction(QIcon::fromTheme(QStringLiteral("mail-forward")),
+                                      QStringLiteral("&Forward"), this);
+        connect(m_forwardAction, &QAction::triggered, this, &MainWindow::composeForward);
+        actionCollection()->addAction(QStringLiteral("compose_forward"), m_forwardAction);
+
+        m_editDraftAction = new QAction(QIcon::fromTheme(QStringLiteral("document-edit")),
+                                        QStringLiteral("Edit &Draft"), this);
+        connect(m_editDraftAction, &QAction::triggered, this, &MainWindow::editSelectedDraft);
+        actionCollection()->addAction(QStringLiteral("compose_edit_draft"), m_editDraftAction);
 
         m_archiveAction = new QAction(QIcon::fromTheme(QStringLiteral("mail-archive")),
                                       QStringLiteral("&Archive"), this);
@@ -663,8 +702,10 @@ namespace javelin::gui::shell
         auto* centralLayout = new QVBoxLayout(centralContainer);
         centralLayout->setContentsMargins(0, 0, 0, 0);
         centralLayout->setSpacing(0);
+        m_contentStack = new QStackedWidget(centralContainer);
+        m_contentStack->addWidget(m_mainSplitter);
         centralLayout->addWidget(m_tabBar);
-        centralLayout->addWidget(m_mainSplitter);
+        centralLayout->addWidget(m_contentStack);
 
         setCentralWidget(centralContainer);
         statusBar()->showMessage(m_jmapCore.statusSummary());
@@ -785,6 +826,106 @@ namespace javelin::gui::shell
             });
     }
 
+    void MainWindow::composeNewMessage()
+    {
+        const auto accountId = activeAccountId().has_value() ? activeAccountId()
+                                                             : currentAccountId(*m_mailboxView);
+        if (!accountId.has_value())
+        {
+            statusBar()->showMessage(
+                QStringLiteral("Select an account before composing a message."), 5000);
+            return;
+        }
+
+        openComposeForRequest({
+            .accountId = *accountId,
+            .mode = javelin::jmap::submission::ComposeMode::NewMessage,
+            .referenceEmailId = std::nullopt,
+            .draftEmailId = std::nullopt,
+        });
+    }
+
+    void MainWindow::composeReply()
+    {
+        const auto accountId = activeAccountId();
+        const auto emailId = currentEmailId(*m_messageView);
+        if (!accountId.has_value() || !emailId.has_value())
+        {
+            statusBar()->showMessage(QStringLiteral("Select a message to reply to."), 5000);
+            return;
+        }
+
+        openComposeForRequest({
+            .accountId = *accountId,
+            .mode = javelin::jmap::submission::ComposeMode::Reply,
+            .referenceEmailId = *emailId,
+            .draftEmailId = std::nullopt,
+        });
+    }
+
+    void MainWindow::composeReplyAll()
+    {
+        const auto accountId = activeAccountId();
+        const auto emailId = currentEmailId(*m_messageView);
+        if (!accountId.has_value() || !emailId.has_value())
+        {
+            statusBar()->showMessage(QStringLiteral("Select a message to reply to."), 5000);
+            return;
+        }
+
+        openComposeForRequest({
+            .accountId = *accountId,
+            .mode = javelin::jmap::submission::ComposeMode::ReplyAll,
+            .referenceEmailId = *emailId,
+            .draftEmailId = std::nullopt,
+        });
+    }
+
+    void MainWindow::composeForward()
+    {
+        const auto accountId = activeAccountId();
+        const auto emailId = currentEmailId(*m_messageView);
+        if (!accountId.has_value() || !emailId.has_value())
+        {
+            statusBar()->showMessage(QStringLiteral("Select a message to forward."), 5000);
+            return;
+        }
+
+        openComposeForRequest({
+            .accountId = *accountId,
+            .mode = javelin::jmap::submission::ComposeMode::Forward,
+            .referenceEmailId = *emailId,
+            .draftEmailId = std::nullopt,
+        });
+    }
+
+    void MainWindow::editSelectedDraft()
+    {
+        const auto accountId = activeAccountId();
+        const auto emailId = currentEmailId(*m_messageView);
+        if (!accountId.has_value() || !emailId.has_value())
+        {
+            statusBar()->showMessage(QStringLiteral("Select a draft to edit."), 5000);
+            return;
+        }
+
+        const auto draftsMailbox = findMailboxByRole(m_queryService, *accountId, "drafts");
+        if (!activeMailboxId().has_value() || !draftsMailbox.has_value() ||
+            draftsMailbox->id != *activeMailboxId())
+        {
+            statusBar()->showMessage(QStringLiteral("Open a message from Drafts to edit it."),
+                                     5000);
+            return;
+        }
+
+        openComposeForRequest({
+            .accountId = *accountId,
+            .mode = javelin::jmap::submission::ComposeMode::EditDraft,
+            .referenceEmailId = std::nullopt,
+            .draftEmailId = *emailId,
+        });
+    }
+
     const MainWindow::TabState* MainWindow::activeTab() const
     {
         if (!m_activeTabIndex.has_value() || *m_activeTabIndex < 0 ||
@@ -819,6 +960,12 @@ namespace javelin::gui::shell
         return tab != nullptr && std::holds_alternative<SearchTabState>(tab->content);
     }
 
+    bool MainWindow::activeTabIsCompose() const
+    {
+        const auto* tab = activeTab();
+        return tab != nullptr && std::holds_alternative<ComposeTabState>(tab->content);
+    }
+
     std::optional<std::string> MainWindow::activeAccountId() const
     {
         const auto* tab = activeTab();
@@ -832,7 +979,12 @@ namespace javelin::gui::shell
             return mailboxTab->accountId;
         }
 
-        return std::get<SearchTabState>(tab->content).accountId;
+        if (const auto* searchTab = std::get_if<SearchTabState>(&tab->content))
+        {
+            return searchTab->accountId;
+        }
+
+        return std::get<ComposeTabState>(tab->content).accountId;
     }
 
     std::optional<std::string> MainWindow::activeMailboxId() const
@@ -858,7 +1010,12 @@ namespace javelin::gui::shell
             return mailboxTab->title;
         }
 
-        return std::get<SearchTabState>(tab.content).title;
+        if (const auto* searchTab = std::get_if<SearchTabState>(&tab.content))
+        {
+            return searchTab->title;
+        }
+
+        return std::get<ComposeTabState>(tab.content).title;
     }
 
     void MainWindow::updateTabBar()
@@ -880,10 +1037,18 @@ namespace javelin::gui::shell
             {
                 m_tabBar->setTabButton(index, QTabBar::RightSide, nullptr);
             }
-            if (m_tabBar->count() > 1)
+            if (m_tabBar->count() > 0)
             {
-                for (int index = 1; index < m_tabBar->count(); ++index)
+                for (int index = 0; index < m_tabBar->count(); ++index)
                 {
+                    const bool canClose =
+                        index != 0 ||
+                        std::holds_alternative<ComposeTabState>(
+                            m_tabs[static_cast<std::size_t>(index)].content);
+                    if (!canClose)
+                    {
+                        continue;
+                    }
                     auto* closeButton = new QToolButton(m_tabBar);
                     closeButton->setAutoRaise(true);
                     closeButton->setText(QStringLiteral("x"));
@@ -903,6 +1068,31 @@ namespace javelin::gui::shell
                     m_tabBar->setTabText(index, title);
                 }
             }
+        }
+
+        for (int index = 0; index < static_cast<int>(m_tabs.size()); ++index)
+        {
+            const bool canClose =
+                index != 0 ||
+                std::holds_alternative<ComposeTabState>(
+                    m_tabs[static_cast<std::size_t>(index)].content);
+            if (!canClose)
+            {
+                m_tabBar->setTabButton(index, QTabBar::RightSide, nullptr);
+                continue;
+            }
+
+            if (m_tabBar->tabButton(index, QTabBar::RightSide) != nullptr)
+            {
+                continue;
+            }
+
+            auto* closeButton = new QToolButton(m_tabBar);
+            closeButton->setAutoRaise(true);
+            closeButton->setText(QStringLiteral("x"));
+            connect(closeButton, &QToolButton::clicked, this,
+                    [this, index] { closeTab(index); });
+            m_tabBar->setTabButton(index, QTabBar::RightSide, closeButton);
         }
 
         if (m_activeTabIndex.has_value() && *m_activeTabIndex >= 0 &&
@@ -1036,6 +1226,10 @@ namespace javelin::gui::shell
             m_messageModel->clear();
             m_messageViewContainer->setSelection(m_messageViewService, std::nullopt, std::nullopt,
                                                  std::nullopt);
+            if (m_contentStack != nullptr)
+            {
+                m_contentStack->setCurrentIndex(0);
+            }
             updateTabBar();
             updateEmptyStates();
             updateMessageListHeader();
@@ -1048,6 +1242,15 @@ namespace javelin::gui::shell
         {
             QSignalBlocker blocker{m_tabBar};
             m_tabBar->setCurrentIndex(index);
+        }
+        if (const auto* composeTab = std::get_if<ComposeTabState>(&m_tabs[static_cast<std::size_t>(index)].content);
+            composeTab != nullptr && composeTab->widget != nullptr)
+        {
+            m_contentStack->setCurrentWidget(composeTab->widget);
+        }
+        else if (m_contentStack != nullptr)
+        {
+            m_contentStack->setCurrentIndex(0);
         }
         syncNavigationForActiveTab();
         loadActiveTabFromCache();
@@ -1066,7 +1269,13 @@ namespace javelin::gui::shell
         {
             return;
         }
-        if (index == 0)
+        if (index == 0 && !std::holds_alternative<ComposeTabState>(m_tabs[0].content))
+        {
+            return;
+        }
+
+        if (std::holds_alternative<ComposeTabState>(m_tabs[static_cast<std::size_t>(index)].content) &&
+            !closeComposeTab(index))
         {
             return;
         }
@@ -1101,14 +1310,20 @@ namespace javelin::gui::shell
 
         if (m_mailboxPane != nullptr)
         {
-            m_mailboxPane->setVisible(m_activeTabIndex == std::optional<int>{0});
+            m_mailboxPane->setVisible(m_activeTabIndex == std::optional<int>{0} &&
+                                      !activeTabIsCompose());
         }
 
         m_syncingNavigation = true;
         QSignalBlocker mailboxBlocker{m_mailboxView->selectionModel()};
         QSignalBlocker searchBlocker{m_mailboxSearchEdit};
 
-        if (const auto* mailboxTab = std::get_if<MailboxTabState>(&tab->content))
+        if (const auto* composeTab = std::get_if<ComposeTabState>(&tab->content))
+        {
+            Q_UNUSED(composeTab);
+            m_mailboxSearchEdit->clear();
+        }
+        else if (const auto* mailboxTab = std::get_if<MailboxTabState>(&tab->content))
         {
             const auto mailboxIndex = findMailboxIndexForSelection(
                 *m_mailboxModel, QString::fromStdString(mailboxTab->accountId),
@@ -1247,8 +1462,13 @@ namespace javelin::gui::shell
                 return;
             }
 
-            const auto& searchTab = std::get<SearchTabState>(tab->content);
-            m_messageModel->setPage(searchTab.accountId, searchTab.page.items);
+            if (const auto* searchTab = std::get_if<SearchTabState>(&tab->content))
+            {
+                m_messageModel->setPage(searchTab->accountId, searchTab->page.items);
+                return;
+            }
+
+            m_messageModel->clear();
             return;
         }
 
@@ -1273,14 +1493,18 @@ namespace javelin::gui::shell
                 refreshMailboxTabFromServer(*mailboxTab);
             }
         }
+        else if (auto* searchTab = std::get_if<SearchTabState>(&tab->content))
+        {
+            applySearchTabCachedPage(*searchTab, forceReload);
+            if (shouldRefreshSearchTabFromServer(*searchTab))
+            {
+                refreshSearchTabFromServer(*searchTab);
+            }
+        }
         else
         {
-            auto& searchTab = std::get<SearchTabState>(tab->content);
-            applySearchTabCachedPage(searchTab, forceReload);
-            if (shouldRefreshSearchTabFromServer(searchTab))
-            {
-                refreshSearchTabFromServer(searchTab);
-            }
+            updateMessageActions();
+            return;
         }
 
         const auto previousMessageRow = currentMessageRow(*m_messageView);
@@ -1315,7 +1539,10 @@ namespace javelin::gui::shell
             return;
         }
 
-        refreshSearchTabFromServer(std::get<SearchTabState>(tab.content));
+        if (auto* searchTab = std::get_if<SearchTabState>(&tab.content))
+        {
+            refreshSearchTabFromServer(*searchTab);
+        }
     }
 
     void MainWindow::refreshMailboxTabFromServer(MailboxTabState& tab)
@@ -1545,9 +1772,12 @@ namespace javelin::gui::shell
             std::visit(
                 [accountId](auto& content)
                 {
-                    if (content.accountId == accountId)
+                    if constexpr (!std::is_same_v<std::decay_t<decltype(content)>, ComposeTabState>)
                     {
-                        content.page.stale = true;
+                        if (content.accountId == accountId)
+                        {
+                            content.page.stale = true;
+                        }
                     }
                 },
                 tab.content);
@@ -1593,6 +1823,228 @@ namespace javelin::gui::shell
         activateTab(*m_activeTabIndex, refreshRemote);
     }
 
+    void MainWindow::openComposeForRequest(javelin::jmap::submission::OpenComposeRequest request)
+    {
+        const auto settings = javelin::gui::settings::PreferencesDialog::loadSettings();
+        if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
+            settings.apiKey.isEmpty())
+        {
+            statusBar()->showMessage(
+                QStringLiteral("Set Session URL, Login Email, and API Key in Preferences first."),
+                5000);
+            return;
+        }
+
+        statusBar()->showMessage(QStringLiteral("Preparing compose tab..."));
+        auto task = m_composeService.open(toLiveConnectionSettings(settings), std::move(request));
+        QCoro::connect(
+            std::move(task), this,
+            [this](std::variant<javelin::jmap::submission::DraftSnapshot,
+                                javelin::jmap::LiveRefreshError> result)
+            {
+                if (const auto* error =
+                        std::get_if<javelin::jmap::LiveRefreshError>(&result))
+                {
+                    statusBar()->showMessage(error->message, 10000);
+                    return;
+                }
+
+                openOrActivateComposeTab(
+                    std::get<javelin::jmap::submission::DraftSnapshot>(std::move(result)));
+                statusBar()->showMessage(QStringLiteral("Compose ready."), 3000);
+            });
+    }
+
+    void MainWindow::openOrActivateComposeTab(javelin::jmap::submission::DraftSnapshot snapshot)
+    {
+        for (std::size_t index = 0; index < m_tabs.size(); ++index)
+        {
+            if (auto* composeTab = std::get_if<ComposeTabState>(&m_tabs[index].content);
+                composeTab != nullptr && composeTab->composeSessionId == snapshot.composeSessionId)
+            {
+                composeTab->title = snapshot.subject.has_value()
+                                        ? QString::fromStdString(*snapshot.subject)
+                                        : composeTab->title;
+                m_activeTabIndex = static_cast<int>(index);
+                updateTabBar();
+                activateTab(*m_activeTabIndex, false);
+                return;
+            }
+        }
+
+        m_tabs.push_back(TabState{
+            .content =
+                ComposeTabState{
+                    .accountId = snapshot.accountId,
+                    .composeSessionId = snapshot.composeSessionId,
+                    .title = snapshot.subject.has_value()
+                                 ? QString::fromStdString(*snapshot.subject)
+                                 : QStringLiteral("Compose"),
+                    .widget = nullptr,
+                    .page = {},
+                    .selection = {},
+                },
+        });
+        const auto index = static_cast<int>(m_tabs.size() - 1);
+        auto* widget = new javelin::gui::compose::ComposeTabWidget(
+            m_composeService, m_identityRepository, std::move(snapshot), m_contentStack);
+        attachComposeWidget(widget, index);
+        m_activeTabIndex = index;
+        updateTabBar();
+        activateTab(index, false);
+    }
+
+    void MainWindow::attachComposeWidget(javelin::gui::compose::ComposeTabWidget* widget,
+                                         const int tabIndex)
+    {
+        if (widget == nullptr || tabIndex < 0 ||
+            static_cast<std::size_t>(tabIndex) >= m_tabs.size())
+        {
+            return;
+        }
+
+        auto* composeTab = std::get_if<ComposeTabState>(&m_tabs[static_cast<std::size_t>(tabIndex)].content);
+        if (composeTab == nullptr)
+        {
+            return;
+        }
+
+        composeTab->widget = widget;
+        composeTab->title = widget->tabTitle();
+        m_contentStack->addWidget(widget);
+        connect(widget, &javelin::gui::compose::ComposeTabWidget::titleChanged, this,
+                [this, widget](const QString& title)
+                {
+                    for (std::size_t index = 0; index < m_tabs.size(); ++index)
+                    {
+                        auto* matchingTab = std::get_if<ComposeTabState>(&m_tabs[index].content);
+                        if (matchingTab == nullptr || matchingTab->widget != widget)
+                        {
+                            continue;
+                        }
+
+                        matchingTab->title = title;
+                        updateTabBar();
+                        return;
+                    }
+                });
+        connect(widget, &javelin::gui::compose::ComposeTabWidget::statusMessageRequested, this,
+                [this](const QString& message, const int timeoutMs)
+                { statusBar()->showMessage(message, timeoutMs); });
+        connect(widget, &javelin::gui::compose::ComposeTabWidget::closeRequested, this,
+                [this, widget]
+                {
+                    for (std::size_t index = 0; index < m_tabs.size(); ++index)
+                    {
+                        auto* matchingTab = std::get_if<ComposeTabState>(&m_tabs[index].content);
+                        if (matchingTab != nullptr && matchingTab->widget == widget)
+                        {
+                            closeTab(static_cast<int>(index));
+                            return;
+                        }
+                    }
+                });
+    }
+
+    bool MainWindow::closeComposeTab(const int index)
+    {
+        if (index < 0 || static_cast<std::size_t>(index) >= m_tabs.size())
+        {
+            return false;
+        }
+
+        auto* composeTab = std::get_if<ComposeTabState>(&m_tabs[static_cast<std::size_t>(index)].content);
+        if (composeTab == nullptr || composeTab->widget == nullptr)
+        {
+            return false;
+        }
+
+        auto* widget = composeTab->widget;
+        if (widget->operationInFlight())
+        {
+            statusBar()->showMessage(
+                QStringLiteral("Wait for the current compose operation to finish first."), 5000);
+            return false;
+        }
+
+        if (widget->closeWithoutPrompt())
+        {
+            m_contentStack->removeWidget(widget);
+            widget->deleteLater();
+            composeTab->widget = nullptr;
+            return true;
+        }
+
+        if (widget->isEmptyDraft())
+        {
+            if (const auto error = m_composeService.discard(widget->composeSessionId()))
+            {
+                statusBar()->showMessage(error->message, 10000);
+                return false;
+            }
+            m_contentStack->removeWidget(widget);
+            widget->deleteLater();
+            composeTab->widget = nullptr;
+            return true;
+        }
+
+        if (widget->draftEmailId().has_value())
+        {
+            QMessageBox messageBox{this};
+            messageBox.setWindowTitle(QStringLiteral("Close Draft"));
+            messageBox.setText(
+                QStringLiteral("This message is already saved in Drafts. Close the tab and keep it there?"));
+            QAbstractButton* keepDraftButton =
+                messageBox.addButton(QStringLiteral("Keep Draft"), QMessageBox::AcceptRole);
+            messageBox.addButton(QMessageBox::Cancel);
+            messageBox.exec();
+            if (messageBox.clickedButton() != keepDraftButton)
+            {
+                return false;
+            }
+
+            if (const auto error = m_composeService.discard(widget->composeSessionId()))
+            {
+                statusBar()->showMessage(error->message, 10000);
+                return false;
+            }
+            m_contentStack->removeWidget(widget);
+            widget->deleteLater();
+            composeTab->widget = nullptr;
+            return true;
+        }
+
+        QMessageBox messageBox{this};
+        messageBox.setWindowTitle(QStringLiteral("Close Compose Tab"));
+        messageBox.setText(QStringLiteral("Save this message as a draft before closing?"));
+        QAbstractButton* saveButton =
+            messageBox.addButton(QStringLiteral("Save Draft"), QMessageBox::AcceptRole);
+        QAbstractButton* discardButton =
+            messageBox.addButton(QStringLiteral("Discard"), QMessageBox::DestructiveRole);
+        messageBox.addButton(QMessageBox::Cancel);
+        messageBox.exec();
+        if (messageBox.clickedButton() == saveButton)
+        {
+            widget->saveDraftAndClose();
+            return false;
+        }
+        if (messageBox.clickedButton() != discardButton)
+        {
+            return false;
+        }
+
+        if (const auto error = m_composeService.discard(widget->composeSessionId()))
+        {
+            statusBar()->showMessage(error->message, 10000);
+            return false;
+        }
+
+        m_contentStack->removeWidget(widget);
+        widget->deleteLater();
+        composeTab->widget = nullptr;
+        return true;
+    }
+
     void MainWindow::executeSearch(const QString& text)
     {
         const QString trimmed = text.trimmed();
@@ -1635,6 +2087,10 @@ namespace javelin::gui::shell
 
         auto moveToPrevious = [](auto& content)
         {
+            if constexpr (std::is_same_v<std::decay_t<decltype(content)>, ComposeTabState>)
+            {
+                return false;
+            }
             if (content.page.offset >= MainWindow::pageSize)
             {
                 content.page.offset -= MainWindow::pageSize;
@@ -1664,6 +2120,10 @@ namespace javelin::gui::shell
 
         auto moveToNext = [](auto& content)
         {
+            if constexpr (std::is_same_v<std::decay_t<decltype(content)>, ComposeTabState>)
+            {
+                return false;
+            }
             if (content.page.total.has_value() &&
                 content.page.offset + MainWindow::pageSize >= *content.page.total)
             {
@@ -1809,6 +2269,12 @@ namespace javelin::gui::shell
 
     void MainWindow::refreshSelectionFromModels()
     {
+        if (activeTabIsCompose())
+        {
+            updateMessageActions();
+            return;
+        }
+
         const auto accountId = activeAccountId();
         const auto mailboxId = activeMailboxId();
         const auto emailId = currentEmailId(*m_messageView);
@@ -1881,6 +2347,16 @@ namespace javelin::gui::shell
             return;
         }
 
+        if (const auto* composeTab = std::get_if<ComposeTabState>(&tab->content))
+        {
+            m_messageListTitleLabel->setText(composeTab->title);
+            m_messageListMetaLabel->setText(QStringLiteral("Compose"));
+            m_messagePageLabel->clear();
+            m_previousPageButton->setEnabled(false);
+            m_nextPageButton->setEnabled(false);
+            return;
+        }
+
         std::visit(
             [this](const auto& content)
             {
@@ -1933,7 +2409,20 @@ namespace javelin::gui::shell
         const bool hasMailboxSelection = activeTabIsMailbox() && activeAccountId().has_value() &&
                                          activeMailboxId().has_value() &&
                                          currentEmailId(*m_messageView).has_value();
+        const auto draftsMailbox =
+            activeAccountId().has_value()
+                ? findMailboxByRole(m_queryService, *activeAccountId(), "drafts")
+                : std::optional<javelin::jmap::cache::MailboxTreeItem>{std::nullopt};
+        const bool canEditDraft =
+            activeTabIsMailbox() && activeMailboxId().has_value() && draftsMailbox.has_value() &&
+            activeMailboxId() == std::optional<std::string>{draftsMailbox->id} &&
+            currentEmailId(*m_messageView).has_value();
         const bool isUnread = indexIsUnread(m_messageView->currentIndex());
+        m_newMessageAction->setEnabled(true);
+        m_replyAction->setEnabled(hasEmailSelection && !activeTabIsCompose());
+        m_replyAllAction->setEnabled(hasEmailSelection && !activeTabIsCompose());
+        m_forwardAction->setEnabled(hasEmailSelection && !activeTabIsCompose());
+        m_editDraftAction->setEnabled(canEditDraft);
         m_archiveAction->setEnabled(hasMailboxSelection);
         m_markUnreadAction->setEnabled(hasEmailSelection && !isUnread);
         m_deleteAction->setEnabled(hasMailboxSelection);
@@ -2927,6 +3416,50 @@ namespace javelin::gui::shell
                                     },
                             },
                     });
+                continue;
+            }
+
+            if (type == QStringLiteral("compose"))
+            {
+                const auto composeSessionId =
+                    settings.value(QStringLiteral("composeSessionId")).toString();
+                if (composeSessionId.isEmpty())
+                {
+                    continue;
+                }
+
+                const auto draftResult =
+                    m_composeService.loadWorkingCopy(composeSessionId.toStdString());
+                if (const auto* error =
+                        std::get_if<javelin::jmap::LiveRefreshError>(&draftResult))
+                {
+                    statusBar()->showMessage(error->message, 10000);
+                    continue;
+                }
+
+                const auto& snapshot =
+                    std::get<std::optional<javelin::jmap::submission::DraftSnapshot>>(draftResult);
+                if (!snapshot.has_value())
+                {
+                    continue;
+                }
+
+                m_tabs.push_back(TabState{
+                    .content =
+                        ComposeTabState{
+                            .accountId = snapshot->accountId,
+                            .composeSessionId = snapshot->composeSessionId,
+                            .title = settings
+                                         .value(QStringLiteral("title"), QStringLiteral("Compose"))
+                                         .toString(),
+                            .widget = nullptr,
+                            .page = {},
+                            .selection = {},
+                        },
+                });
+                auto* widget = new javelin::gui::compose::ComposeTabWidget(
+                    m_composeService, m_identityRepository, *snapshot, m_contentStack);
+                attachComposeWidget(widget, static_cast<int>(m_tabs.size() - 1));
             }
         }
         settings.endArray();
@@ -2998,7 +3531,8 @@ namespace javelin::gui::shell
                         settings.setValue(QStringLiteral("mailboxId"),
                                           QString::fromStdString(content.mailboxId));
                     }
-                    else
+                    else if constexpr (std::is_same_v<std::decay_t<decltype(content)>,
+                                                      SearchTabState>)
                     {
                         settings.setValue(QStringLiteral("type"), QStringLiteral("search"));
                         settings.setValue(QStringLiteral("query"),
@@ -3020,6 +3554,12 @@ namespace javelin::gui::shell
                         }
                         settings.setValue(QStringLiteral("cachedItems"),
                                           QJsonDocument{itemsArray}.toJson(QJsonDocument::Compact));
+                    }
+                    else
+                    {
+                        settings.setValue(QStringLiteral("type"), QStringLiteral("compose"));
+                        settings.setValue(QStringLiteral("composeSessionId"),
+                                          QString::fromStdString(content.composeSessionId));
                     }
                 },
                 tab.content);

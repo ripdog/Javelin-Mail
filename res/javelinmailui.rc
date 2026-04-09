@@ -1,13 +1,20 @@
 <!DOCTYPE gui SYSTEM "kpartgui.dtd">
-<gui name="javelinmail" version="4">
+<gui name="javelinmail" version="5">
   <MenuBar>
     <Menu name="file"><text>&amp;File</text>
+      <Action name="compose_new_message"/>
+      <Separator/>
       <Action name="quit_application"/>
     </Menu>
     <Menu name="account"><text>&amp;Account</text>
       <Action name="refresh_from_server"/>
     </Menu>
     <Menu name="message"><text>&amp;Message</text>
+      <Action name="compose_reply"/>
+      <Action name="compose_reply_all"/>
+      <Action name="compose_forward"/>
+      <Action name="compose_edit_draft"/>
+      <Separator/>
       <Action name="view_message_source"/>
       <Separator/>
       <Action name="archive_email"/>
@@ -20,6 +27,10 @@
     </Menu>
   </MenuBar>
   <ToolBar name="mainToolBar"><text>Main Toolbar</text>
+    <Action name="compose_new_message"/>
+    <Action name="compose_reply"/>
+    <Action name="compose_forward"/>
+    <Separator/>
     <Action name="archive_email"/>
     <Action name="delete_email"/>
     <Action name="move_email"/>

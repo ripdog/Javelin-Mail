@@ -40,6 +40,7 @@ This is the intended structure after the first major refactor:
 │   └── Warnings.cmake
 ├── docs/
 │   ├── DEVELOPMENT_PLAN.md
+│   ├── COMPOSE_AND_SEND_PLAN.md
 │   ├── ARCHITECTURE.md
 │   ├── DATABASE.md
 │   └── JMAP_NOTES.md
@@ -684,19 +685,6 @@ Exit criteria:
 - Hidden/tray mode memory profile is acceptably low.
 - The client survives long-poll, reconnect, and window recreation cycles.
 
-## Initial Implementation Order Within The Current Repo
-
-The immediate next changes after this plan should be:
-
-1. [x] Replace the current root-level sample files with the `src/app`, `src/gui`, and `src/jmap` split.
-2. [x] Restructure `CMakeLists.txt` into explicit library and executable targets.
-3. [x] Add tooling files for warnings, formatting, sanitizers, clazy, and `clang-tidy`.
-4. [x] Introduce Catch2 through `FetchContent`.
-5. [ ] Build the typed JMAP session/bootstrap path and fixture tests before touching the real GUI.
-6. [ ] Implement the database schema and migration runner before building mailbox/message models.
-7. [ ] Define auth/secret storage and capability negotiation before building feature-specific flows.
-
-This order keeps the project from growing another throwaway UI shell on top of the sample scaffold.
 
 ## Risks To Manage Early
 

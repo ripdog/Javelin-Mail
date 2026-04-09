@@ -23,6 +23,14 @@ namespace
         std::vector<std::string> notFound;
     };
 
+    struct RawIdentityGetResponse
+    {
+        std::string accountId;
+        std::string state;
+        std::vector<glz::generic> list;
+        std::vector<std::string> notFound;
+    };
+
     struct RawEmailGetResponse
     {
         std::string accountId;
@@ -134,10 +142,56 @@ namespace
         std::unordered_map<std::string, bool> keywords;
     };
 
+    struct RawEmailBodyValueCreate
+    {
+        std::string value;
+        bool isTruncated = false;
+    };
+
+    struct RawEmailBodyPartCreate
+    {
+        std::optional<std::string> partId;
+        std::optional<std::string> blobId;
+        std::string type;
+        std::optional<std::string> name;
+        std::optional<std::string> disposition;
+        std::optional<std::string> cid;
+        std::optional<std::vector<RawEmailBodyPartCreate>> subParts;
+    };
+
+    struct RawEmailSetCreate
+    {
+        std::unordered_map<std::string, bool> mailboxIds;
+        std::unordered_map<std::string, bool> keywords;
+        std::optional<std::vector<javelin::jmap::domain::EmailAddress>> from;
+        std::optional<std::vector<javelin::jmap::domain::EmailAddress>> to;
+        std::optional<std::vector<javelin::jmap::domain::EmailAddress>> cc;
+        std::optional<std::vector<javelin::jmap::domain::EmailAddress>> bcc;
+        std::optional<std::vector<javelin::jmap::domain::EmailAddress>> replyTo;
+        std::optional<std::string> subject;
+        std::optional<std::string> receivedAt;
+        std::optional<std::string> sentAt;
+        std::optional<std::vector<std::string>> messageId;
+        std::optional<std::vector<std::string>> inReplyTo;
+        std::optional<std::vector<std::string>> references;
+        std::optional<RawEmailBodyPartCreate> bodyStructure;
+        std::unordered_map<std::string, RawEmailBodyValueCreate> bodyValues;
+    };
+
+    struct RawEmailSetCreated
+    {
+        std::string id;
+        std::string blobId;
+        std::string threadId;
+        std::uint64_t size = 0;
+    };
+
     struct RawEmailSetRequest
     {
         std::string accountId;
+        std::optional<std::unordered_map<std::string, RawEmailSetCreate>> create;
         std::unordered_map<std::string, RawEmailSetUpdate> update;
+        std::optional<std::vector<std::string>> destroy;
     };
 
     struct RawEmailSetResponse
@@ -145,8 +199,53 @@ namespace
         std::string accountId;
         std::optional<std::string> oldState;
         std::string newState;
+        std::optional<std::unordered_map<std::string, RawEmailSetCreated>> created;
         std::optional<std::unordered_map<std::string, glz::generic>> updated;
+        std::optional<std::vector<std::string>> destroyed;
+        std::optional<std::unordered_map<std::string, glz::generic>> notCreated;
         std::optional<std::unordered_map<std::string, glz::generic>> notUpdated;
+        std::optional<std::unordered_map<std::string, glz::generic>> notDestroyed;
+    };
+
+    struct RawEnvelopeAddress
+    {
+        std::string email;
+    };
+
+    struct RawEmailSubmissionEnvelope
+    {
+        std::optional<RawEnvelopeAddress> mailFrom;
+        std::vector<RawEnvelopeAddress> rcptTo;
+    };
+
+    struct RawEmailSubmissionCreate
+    {
+        std::string identityId;
+        std::string emailId;
+        std::optional<RawEmailSubmissionEnvelope> envelope;
+    };
+
+    struct RawEmailSubmissionCreated
+    {
+        std::string id;
+    };
+
+    struct RawEmailSubmissionSetRequest
+    {
+        std::string accountId;
+        std::unordered_map<std::string, RawEmailSubmissionCreate> create;
+        std::optional<
+            std::unordered_map<std::string, std::unordered_map<std::string, std::optional<bool>>>>
+            onSuccessUpdateEmail;
+    };
+
+    struct RawEmailSubmissionSetResponse
+    {
+        std::string accountId;
+        std::optional<std::string> oldState;
+        std::string newState;
+        std::optional<std::unordered_map<std::string, RawEmailSubmissionCreated>> created;
+        std::optional<std::unordered_map<std::string, glz::generic>> notCreated;
     };
 
     struct RawChangesResponse
@@ -208,6 +307,14 @@ template <> struct glz::meta<javelin::jmap::api::GetRequest::ResultReference>
 template <> struct glz::meta<RawMailboxGetResponse>
 {
     using T = RawMailboxGetResponse;
+
+    static constexpr auto value = glz::object("accountId", &T::accountId, "state", &T::state,
+                                              "list", &T::list, "notFound", &T::notFound);
+};
+
+template <> struct glz::meta<RawIdentityGetResponse>
+{
+    using T = RawIdentityGetResponse;
 
     static constexpr auto value = glz::object("accountId", &T::accountId, "state", &T::state,
                                               "list", &T::list, "notFound", &T::notFound);
@@ -325,11 +432,52 @@ template <> struct glz::meta<RawEmailSetUpdate>
         glz::object("mailboxIds", &T::mailboxIds, "keywords", &T::keywords);
 };
 
+template <> struct glz::meta<RawEmailBodyValueCreate>
+{
+    using T = RawEmailBodyValueCreate;
+
+    static constexpr auto value = glz::object("value", &T::value, "isTruncated", &T::isTruncated);
+};
+
+template <> struct glz::meta<RawEmailBodyPartCreate>
+{
+    using T = RawEmailBodyPartCreate;
+
+    static constexpr auto value = glz::object("partId", &T::partId, "blobId", &T::blobId, "type",
+                                              &T::type, "name", &T::name, "disposition",
+                                              &T::disposition, "cid", &T::cid, "subParts",
+                                              &T::subParts);
+};
+
+template <> struct glz::meta<RawEmailSetCreate>
+{
+    using T = RawEmailSetCreate;
+
+    static constexpr auto value =
+        glz::object("mailboxIds", &T::mailboxIds, "keywords", &T::keywords, "from", &T::from,
+                    "to", &T::to, "cc", &T::cc, "bcc", &T::bcc, "replyTo", &T::replyTo,
+                    "subject", &T::subject, "receivedAt", &T::receivedAt, "sentAt", &T::sentAt,
+                    "messageId", &T::messageId, "inReplyTo", &T::inReplyTo, "references",
+                    &T::references, "bodyStructure", &T::bodyStructure, "bodyValues",
+                    &T::bodyValues);
+};
+
+template <> struct glz::meta<RawEmailSetCreated>
+{
+    using T = RawEmailSetCreated;
+
+    static constexpr auto value =
+        glz::object("id", &T::id, "blobId", &T::blobId, "threadId", &T::threadId, "size",
+                    &T::size);
+};
+
 template <> struct glz::meta<RawEmailSetRequest>
 {
     using T = RawEmailSetRequest;
 
-    static constexpr auto value = glz::object("accountId", &T::accountId, "update", &T::update);
+    static constexpr auto value =
+        glz::object("accountId", &T::accountId, "create", &T::create, "update", &T::update,
+                    "destroy", &T::destroy);
 };
 
 template <> struct glz::meta<RawEmailSetResponse>
@@ -338,7 +486,56 @@ template <> struct glz::meta<RawEmailSetResponse>
 
     static constexpr auto value =
         glz::object("accountId", &T::accountId, "oldState", &T::oldState, "newState", &T::newState,
-                    "updated", &T::updated, "notUpdated", &T::notUpdated);
+                    "created", &T::created, "updated", &T::updated, "destroyed", &T::destroyed,
+                    "notCreated", &T::notCreated, "notUpdated", &T::notUpdated, "notDestroyed",
+                    &T::notDestroyed);
+};
+
+template <> struct glz::meta<RawEnvelopeAddress>
+{
+    using T = RawEnvelopeAddress;
+
+    static constexpr auto value = glz::object("email", &T::email);
+};
+
+template <> struct glz::meta<RawEmailSubmissionEnvelope>
+{
+    using T = RawEmailSubmissionEnvelope;
+
+    static constexpr auto value = glz::object("mailFrom", &T::mailFrom, "rcptTo", &T::rcptTo);
+};
+
+template <> struct glz::meta<RawEmailSubmissionCreate>
+{
+    using T = RawEmailSubmissionCreate;
+
+    static constexpr auto value =
+        glz::object("identityId", &T::identityId, "emailId", &T::emailId, "envelope",
+                    &T::envelope);
+};
+
+template <> struct glz::meta<RawEmailSubmissionCreated>
+{
+    using T = RawEmailSubmissionCreated;
+
+    static constexpr auto value = glz::object("id", &T::id);
+};
+
+template <> struct glz::meta<RawEmailSubmissionSetRequest>
+{
+    using T = RawEmailSubmissionSetRequest;
+
+    static constexpr auto value = glz::object("accountId", &T::accountId, "create", &T::create,
+                                              "onSuccessUpdateEmail", &T::onSuccessUpdateEmail);
+};
+
+template <> struct glz::meta<RawEmailSubmissionSetResponse>
+{
+    using T = RawEmailSubmissionSetResponse;
+
+    static constexpr auto value =
+        glz::object("accountId", &T::accountId, "oldState", &T::oldState, "newState",
+                    &T::newState, "created", &T::created, "notCreated", &T::notCreated);
 };
 
 template <> struct glz::meta<RawChangesResponse>
@@ -507,6 +704,32 @@ namespace javelin::jmap::api
             return content;
         }
 
+        [[nodiscard]] RawEmailBodyPartCreate
+        convertEmailBodyPartCreate(const EmailBodyPartCreate& part)
+        {
+            std::optional<std::vector<RawEmailBodyPartCreate>> subParts = std::nullopt;
+            if (part.subParts.has_value())
+            {
+                std::vector<RawEmailBodyPartCreate> converted;
+                converted.reserve(part.subParts->size());
+                for (const auto& subPart : *part.subParts)
+                {
+                    converted.push_back(convertEmailBodyPartCreate(subPart));
+                }
+                subParts = std::move(converted);
+            }
+
+            return RawEmailBodyPartCreate{
+                .partId = part.partId,
+                .blobId = part.blobId,
+                .type = part.type,
+                .name = part.name,
+                .disposition = part.disposition,
+                .cid = part.cid,
+                .subParts = std::move(subParts),
+            };
+        }
+
     } // namespace
 
     std::optional<std::string> serializeGetRequest(const GetRequest& request)
@@ -602,6 +825,50 @@ namespace javelin::jmap::api
 
     std::optional<std::string> serializeEmailSetRequest(const EmailSetRequest& request)
     {
+        std::optional<std::unordered_map<std::string, RawEmailSetCreate>> rawCreate = std::nullopt;
+        if (!request.create.empty())
+        {
+            std::unordered_map<std::string, RawEmailSetCreate> converted;
+            converted.reserve(request.create.size());
+            for (const auto& [creationId, create] : request.create)
+            {
+                std::unordered_map<std::string, RawEmailBodyValueCreate> bodyValues;
+                bodyValues.reserve(create.bodyValues.size());
+                for (const auto& [partId, bodyValue] : create.bodyValues)
+                {
+                    bodyValues.emplace(partId, RawEmailBodyValueCreate{
+                                                   .value = bodyValue.value,
+                                                   .isTruncated = bodyValue.isTruncated,
+                                               });
+                }
+
+                converted.emplace(creationId, RawEmailSetCreate{
+                                                  .mailboxIds = create.mailboxIds,
+                                                  .keywords = create.keywords,
+                                                  .from = create.from,
+                                                  .to = create.to,
+                                                  .cc = create.cc,
+                                                  .bcc = create.bcc,
+                                                  .replyTo = create.replyTo,
+                                                  .subject = create.subject,
+                                                  .receivedAt = create.receivedAt,
+                                                  .sentAt = create.sentAt,
+                                                  .messageId = create.messageId,
+                                                  .inReplyTo = create.inReplyTo,
+                                                  .references = create.references,
+                                                  .bodyStructure = create.bodyStructure.has_value()
+                                                                       ? std::optional<
+                                                                             RawEmailBodyPartCreate>{
+                                                                             convertEmailBodyPartCreate(
+                                                                                 *create
+                                                                                      .bodyStructure)}
+                                                                       : std::nullopt,
+                                                  .bodyValues = std::move(bodyValues),
+                                              });
+            }
+            rawCreate = std::move(converted);
+        }
+
         std::unordered_map<std::string, RawEmailSetUpdate> rawUpdates;
         rawUpdates.reserve(request.update.size());
         for (const auto& [emailId, update] : request.update)
@@ -614,8 +881,102 @@ namespace javelin::jmap::api
 
         return serializeMethod(RawEmailSetRequest{
             .accountId = request.accountId,
+            .create = std::move(rawCreate),
             .update = std::move(rawUpdates),
+            .destroy = request.destroy.empty() ? std::nullopt
+                                               : std::optional<std::vector<std::string>>{
+                                                     request.destroy},
         });
+    }
+
+    std::optional<std::string>
+    serializeEmailSubmissionSetRequest(const EmailSubmissionSetRequest& request)
+    {
+        std::unordered_map<std::string, RawEmailSubmissionCreate> create;
+        create.reserve(request.create.size());
+        for (const auto& [creationId, submission] : request.create)
+        {
+            create.emplace(
+                creationId, RawEmailSubmissionCreate{
+                                .identityId = submission.identityId,
+                                .emailId = submission.emailId,
+                                .envelope =
+                                    submission.envelope.has_value()
+                                        ? std::optional<RawEmailSubmissionEnvelope>{
+                                              RawEmailSubmissionEnvelope{
+                                                  .mailFrom =
+                                                      submission.envelope->mailFrom.has_value()
+                                                          ? std::optional<RawEnvelopeAddress>{
+                                                                RawEnvelopeAddress{
+                                                                    .email = submission.envelope
+                                                                                 ->mailFrom->email,
+                                                                }}
+                                                          : std::nullopt,
+                                                  .rcptTo = [&submission]()
+                                                  {
+                                                      std::vector<RawEnvelopeAddress> recipients;
+                                                      recipients.reserve(
+                                                          submission.envelope->rcptTo.size());
+                                                      for (const auto& recipient :
+                                                           submission.envelope->rcptTo)
+                                                      {
+                                                          recipients.push_back(
+                                                              RawEnvelopeAddress{
+                                                                  .email = recipient.email,
+                                                              });
+                                                      }
+                                                      return recipients;
+                                                  }(),
+                                              }}
+                                        : std::nullopt,
+                            });
+        }
+
+        return serializeMethod(RawEmailSubmissionSetRequest{
+            .accountId = request.accountId,
+            .create = std::move(create),
+            .onSuccessUpdateEmail =
+                request.onSuccessUpdateEmail.empty()
+                    ? std::nullopt
+                    : std::optional<std::unordered_map<
+                          std::string,
+                          std::unordered_map<std::string, std::optional<bool>>>>{
+                          request.onSuccessUpdateEmail},
+        });
+    }
+
+    ParsedEnvelope<IdentityGetResponse> parseIdentityGetResponse(std::string_view json)
+    {
+        const auto parsed = parseMethod<RawIdentityGetResponse>(json);
+        if (!parsed.ok())
+        {
+            return {
+                .value = std::nullopt,
+                .error = parsed.error,
+            };
+        }
+
+        const auto list = convertEntities<javelin::jmap::domain::Identity>(
+            parsed.value->list, [](const std::string& entityJson)
+            { return javelin::jmap::domain::parseIdentity(entityJson); });
+        if (!list.ok())
+        {
+            return {
+                .value = std::nullopt,
+                .error = list.error,
+            };
+        }
+
+        return {
+            .value =
+                IdentityGetResponse{
+                    .accountId = std::move(parsed.value->accountId),
+                    .state = std::move(parsed.value->state),
+                    .list = std::move(*list.value),
+                    .notFound = std::move(parsed.value->notFound),
+                },
+            .error = std::nullopt,
+        };
     }
 
     ParsedEnvelope<MailboxGetResponse> parseMailboxGetResponse(std::string_view json)
@@ -821,6 +1182,19 @@ namespace javelin::jmap::api
             };
         }
 
+        std::unordered_map<std::string, EmailSetCreated> created;
+        const auto& rawCreated =
+            parsed.value->created.value_or(std::unordered_map<std::string, RawEmailSetCreated>{});
+        for (const auto& [creationId, value] : rawCreated)
+        {
+            created.emplace(creationId, EmailSetCreated{
+                                            .id = value.id,
+                                            .blobId = value.blobId,
+                                            .threadId = value.threadId,
+                                            .size = value.size,
+                                        });
+        }
+
         std::vector<std::string> updated;
         const auto& rawUpdated =
             parsed.value->updated.value_or(std::unordered_map<std::string, glz::generic>{});
@@ -829,6 +1203,19 @@ namespace javelin::jmap::api
         {
             static_cast<void>(ignored);
             updated.push_back(emailId);
+        }
+
+        std::vector<std::string> destroyed =
+            parsed.value->destroyed.value_or(std::vector<std::string>{});
+
+        std::vector<std::string> notCreated;
+        const auto& rawNotCreated =
+            parsed.value->notCreated.value_or(std::unordered_map<std::string, glz::generic>{});
+        notCreated.reserve(rawNotCreated.size());
+        for (const auto& [creationId, ignored] : rawNotCreated)
+        {
+            static_cast<void>(ignored);
+            notCreated.push_back(creationId);
         }
 
         std::vector<std::string> notUpdated;
@@ -841,14 +1228,71 @@ namespace javelin::jmap::api
             notUpdated.push_back(emailId);
         }
 
+        std::vector<std::string> notDestroyed;
+        const auto& rawNotDestroyed =
+            parsed.value->notDestroyed.value_or(std::unordered_map<std::string, glz::generic>{});
+        notDestroyed.reserve(rawNotDestroyed.size());
+        for (const auto& [emailId, ignored] : rawNotDestroyed)
+        {
+            static_cast<void>(ignored);
+            notDestroyed.push_back(emailId);
+        }
+
         return {
             .value =
                 EmailSetResponse{
                     .accountId = std::move(parsed.value->accountId),
                     .oldState = parsed.value->oldState.value_or(std::string{}),
                     .newState = std::move(parsed.value->newState),
+                    .created = std::move(created),
                     .updated = std::move(updated),
+                    .destroyed = std::move(destroyed),
+                    .notCreated = std::move(notCreated),
                     .notUpdated = std::move(notUpdated),
+                    .notDestroyed = std::move(notDestroyed),
+                },
+            .error = std::nullopt,
+        };
+    }
+
+    ParsedEnvelope<EmailSubmissionSetResponse> parseEmailSubmissionSetResponse(
+        std::string_view json)
+    {
+        const auto parsed = parseMethod<RawEmailSubmissionSetResponse>(json);
+        if (!parsed.ok())
+        {
+            return {
+                .value = std::nullopt,
+                .error = parsed.error,
+            };
+        }
+
+        std::unordered_map<std::string, EmailSubmissionCreated> created;
+        const auto& rawCreated = parsed.value->created.value_or(
+            std::unordered_map<std::string, RawEmailSubmissionCreated>{});
+        for (const auto& [creationId, value] : rawCreated)
+        {
+            created.emplace(creationId, EmailSubmissionCreated{.id = value.id});
+        }
+
+        std::vector<std::string> notCreated;
+        const auto& rawNotCreated =
+            parsed.value->notCreated.value_or(std::unordered_map<std::string, glz::generic>{});
+        notCreated.reserve(rawNotCreated.size());
+        for (const auto& [creationId, ignored] : rawNotCreated)
+        {
+            static_cast<void>(ignored);
+            notCreated.push_back(creationId);
+        }
+
+        return {
+            .value =
+                EmailSubmissionSetResponse{
+                    .accountId = std::move(parsed.value->accountId),
+                    .oldState = parsed.value->oldState.value_or(std::string{}),
+                    .newState = std::move(parsed.value->newState),
+                    .created = std::move(created),
+                    .notCreated = std::move(notCreated),
                 },
             .error = std::nullopt,
         };
@@ -903,6 +1347,20 @@ namespace javelin::jmap::api
                     .destroyed = std::move(parsed.value->destroyed),
                 },
             .error = std::nullopt,
+        };
+    }
+
+    std::optional<MethodRequest<IdentityGetResponse>> identityGet(const GetRequest& request)
+    {
+        const auto arguments = serializeGetRequest(request);
+        if (!arguments.has_value())
+        {
+            return std::nullopt;
+        }
+
+        return MethodRequest<IdentityGetResponse>{
+            .name = "Identity/get",
+            .arguments = *arguments,
         };
     }
 
@@ -1016,6 +1474,21 @@ namespace javelin::jmap::api
 
         return MethodRequest<EmailSetResponse>{
             .name = "Email/set",
+            .arguments = *arguments,
+        };
+    }
+
+    std::optional<MethodRequest<EmailSubmissionSetResponse>>
+    emailSubmissionSet(const EmailSubmissionSetRequest& request)
+    {
+        const auto arguments = serializeEmailSubmissionSetRequest(request);
+        if (!arguments.has_value())
+        {
+            return std::nullopt;
+        }
+
+        return MethodRequest<EmailSubmissionSetResponse>{
+            .name = "EmailSubmission/set",
             .arguments = *arguments,
         };
     }

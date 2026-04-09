@@ -58,6 +58,9 @@ namespace javelin::jmap::domain
         std::uint64_t size = 0;
         std::string receivedAt;
         std::optional<std::string> sentAt;
+        std::vector<std::string> messageId;
+        std::vector<std::string> inReplyTo;
+        std::vector<std::string> references;
         bool hasAttachment = false;
         std::optional<std::string> subject;
         std::vector<EmailAddress> from;

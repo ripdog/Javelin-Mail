@@ -37,6 +37,20 @@ namespace javelin::jmap::api
         {
         }
 
+        [[nodiscard]] std::vector<MethodInvocation> rawAll(std::string_view callId) const
+        {
+            std::vector<MethodInvocation> methods;
+            for (const auto& methodResponse : m_envelope.methodResponses)
+            {
+                if (methodResponse.callId == callId)
+                {
+                    methods.push_back(methodResponse);
+                }
+            }
+
+            return methods;
+        }
+
         [[nodiscard]] std::optional<MethodInvocation> raw(std::string_view callId) const
         {
             for (const auto& methodResponse : m_envelope.methodResponses)
@@ -53,8 +67,8 @@ namespace javelin::jmap::api
         template <typename Response>
         [[nodiscard]] ResponseReadResult<Response> get(const CallHandle<Response>& handle) const
         {
-            const auto method = raw(handle.callId);
-            if (!method.has_value())
+            const auto methods = rawAll(handle.callId);
+            if (methods.empty())
             {
                 return ResponseReaderError{
                     .code = ResponseReaderErrorCode::MissingMethodResponse,
@@ -63,9 +77,36 @@ namespace javelin::jmap::api
                 };
             }
 
-            if (method->name == "error")
+            const auto expectedName = std::string{MethodResponseTraits<Response>::methodName};
+            for (const auto& method : methods)
             {
-                const auto parsedError = parseMethodError(method->arguments);
+                if (method.name != expectedName)
+                {
+                    continue;
+                }
+
+                const auto parsed = MethodResponseTraits<Response>::parse(method.arguments);
+                if (!parsed.ok() || !parsed.value.has_value())
+                {
+                    return ResponseReaderError{
+                        .code = ResponseReaderErrorCode::ParseFailed,
+                        .message =
+                            parsed.error.value_or("Failed to parse the JMAP method response"),
+                        .methodError = std::nullopt,
+                    };
+                }
+
+                return *parsed.value;
+            }
+
+            for (const auto& method : methods)
+            {
+                if (method.name != "error")
+                {
+                    continue;
+                }
+
+                const auto parsedError = parseMethodError(method.arguments);
                 return ResponseReaderError{
                     .code = ResponseReaderErrorCode::MethodError,
                     .message = parsedError.ok() && parsedError.value.has_value()
@@ -75,26 +116,11 @@ namespace javelin::jmap::api
                 };
             }
 
-            if (method->name != std::string{MethodResponseTraits<Response>::methodName})
-            {
-                return ResponseReaderError{
-                    .code = ResponseReaderErrorCode::UnexpectedMethodName,
-                    .message = "The JMAP response method name did not match the expected type",
-                    .methodError = std::nullopt,
-                };
-            }
-
-            const auto parsed = MethodResponseTraits<Response>::parse(method->arguments);
-            if (!parsed.ok() || !parsed.value.has_value())
-            {
-                return ResponseReaderError{
-                    .code = ResponseReaderErrorCode::ParseFailed,
-                    .message = parsed.error.value_or("Failed to parse the JMAP method response"),
-                    .methodError = std::nullopt,
-                };
-            }
-
-            return *parsed.value;
+            return ResponseReaderError{
+                .code = ResponseReaderErrorCode::UnexpectedMethodName,
+                .message = "The JMAP response method name did not match the expected type",
+                .methodError = std::nullopt,
+            };
         }
 
         template <typename Response>

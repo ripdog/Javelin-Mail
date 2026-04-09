@@ -1,5 +1,6 @@
 #pragma once
 
+#include "jmap/submission/ComposeTypes.h"
 #include "jmap/cache/QueryService.h"
 
 #include <KXmlGuiWindow>
@@ -20,6 +21,7 @@ class QLineEdit;
 class QListView;
 class QPoint;
 class QSplitter;
+class QStackedWidget;
 class QTabBar;
 class QToolButton;
 class QTreeView;
@@ -31,6 +33,11 @@ namespace javelin::jmap
     class JmapCore;
 }
 
+namespace javelin::jmap::submission
+{
+    class ComposeService;
+}
+
 namespace javelin::app
 {
     class LongPollService;
@@ -39,6 +46,7 @@ namespace javelin::app
 namespace javelin::jmap::cache
 {
     class AccountRepository;
+    class IdentityRepository;
     class MessageViewService;
     class QueryService;
 } // namespace javelin::jmap::cache
@@ -58,6 +66,11 @@ namespace javelin::gui::messageview
     class MessageViewContainer;
 }
 
+namespace javelin::gui::compose
+{
+    class ComposeTabWidget;
+}
+
 namespace javelin::gui::shell
 {
 
@@ -68,8 +81,10 @@ namespace javelin::gui::shell
       public:
         explicit MainWindow(javelin::jmap::JmapCore& jmapCore,
                             javelin::jmap::cache::AccountRepository& accountRepository,
+                            javelin::jmap::cache::IdentityRepository& identityRepository,
                             javelin::jmap::cache::MessageViewService& messageViewService,
                             javelin::jmap::cache::QueryService& queryService,
+                            javelin::jmap::submission::ComposeService& composeService,
                             javelin::app::LongPollService& longPollService,
                             QWidget* parent = nullptr);
         ~MainWindow() override = default;
@@ -113,9 +128,19 @@ namespace javelin::gui::shell
             TabSelectionState selection;
         };
 
+        struct ComposeTabState
+        {
+            std::string accountId;
+            std::string composeSessionId;
+            QString title;
+            javelin::gui::compose::ComposeTabWidget* widget = nullptr;
+            PageState page;
+            TabSelectionState selection;
+        };
+
         struct TabState
         {
-            std::variant<MailboxTabState, SearchTabState> content;
+            std::variant<MailboxTabState, SearchTabState, ComposeTabState> content;
         };
 
         struct MessageContentRequestState
@@ -128,10 +153,19 @@ namespace javelin::gui::shell
         void createActions();
         void setupUi();
         void connectSelection();
+        void composeNewMessage();
+        void composeReply();
+        void composeReplyAll();
+        void composeForward();
+        void editSelectedDraft();
         void activateMailboxSelection(bool refreshRemote);
         void activateMailboxInHomeTab(std::string accountId, std::string mailboxId, QString title,
                                       std::optional<std::size_t> total, bool refreshRemote);
         void openMailboxSelectionInTab(bool refreshRemote);
+        void openComposeForRequest(javelin::jmap::submission::OpenComposeRequest request);
+        void openOrActivateComposeTab(javelin::jmap::submission::DraftSnapshot snapshot);
+        void attachComposeWidget(javelin::gui::compose::ComposeTabWidget* widget, int tabIndex);
+        [[nodiscard]] bool closeComposeTab(int index);
         void markTabsStaleForAccount(std::string_view accountId);
         void executeSearch(const QString& text);
         void clearSearch();
@@ -155,6 +189,7 @@ namespace javelin::gui::shell
         [[nodiscard]] QString titleForTab(const TabState& tab) const;
         [[nodiscard]] bool activeTabIsMailbox() const;
         [[nodiscard]] bool activeTabIsSearch() const;
+        [[nodiscard]] bool activeTabIsCompose() const;
         [[nodiscard]] std::optional<std::string> activeAccountId() const;
         [[nodiscard]] std::optional<std::string> activeMailboxId() const;
         [[nodiscard]] const TabState* activeTab() const;
@@ -209,10 +244,13 @@ namespace javelin::gui::shell
 
         javelin::jmap::JmapCore& m_jmapCore;
         javelin::jmap::cache::AccountRepository& m_accountRepository;
+        javelin::jmap::cache::IdentityRepository& m_identityRepository;
         javelin::jmap::cache::MessageViewService& m_messageViewService;
         javelin::jmap::cache::QueryService& m_queryService;
+        javelin::jmap::submission::ComposeService& m_composeService;
         javelin::app::LongPollService& m_longPollService;
         QSplitter* m_mainSplitter = nullptr;
+        QStackedWidget* m_contentStack = nullptr;
         QWidget* m_mailboxPane = nullptr;
         javelin::gui::mailboxes::MailboxTreeModel* m_mailboxModel = nullptr;
         javelin::gui::messages::MessageListModel* m_messageModel = nullptr;
@@ -232,6 +270,11 @@ namespace javelin::gui::shell
         QAction* m_refreshAction = nullptr;
         QAction* m_quitAction = nullptr;
         QAction* m_preferencesAction = nullptr;
+        QAction* m_newMessageAction = nullptr;
+        QAction* m_replyAction = nullptr;
+        QAction* m_replyAllAction = nullptr;
+        QAction* m_forwardAction = nullptr;
+        QAction* m_editDraftAction = nullptr;
         QAction* m_archiveAction = nullptr;
         QAction* m_markUnreadAction = nullptr;
         QAction* m_deleteAction = nullptr;

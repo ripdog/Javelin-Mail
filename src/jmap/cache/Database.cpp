@@ -752,6 +752,33 @@ namespace javelin::jmap::cache
                                 "inline_part_payloads (account_id, email_id, part_id)"),
                         },
                 },
+                MigrationStep{
+                    .version = 6,
+                    .name = QStringLiteral("compose_and_threading_metadata"),
+                    .statements =
+                        {
+                            QStringLiteral("ALTER TABLE emails ADD COLUMN message_id_json TEXT "
+                                           "NOT NULL DEFAULT '[]'"),
+                            QStringLiteral("ALTER TABLE emails ADD COLUMN in_reply_to_json TEXT "
+                                           "NOT NULL DEFAULT '[]'"),
+                            QStringLiteral("ALTER TABLE emails ADD COLUMN references_json TEXT "
+                                           "NOT NULL DEFAULT '[]'"),
+                            QStringLiteral("CREATE TABLE IF NOT EXISTS compose_sessions ("
+                                           "compose_session_id TEXT PRIMARY KEY,"
+                                           "account_id TEXT NOT NULL REFERENCES "
+                                           "accounts(account_id) ON DELETE CASCADE,"
+                                           "draft_email_id TEXT,"
+                                           "mode TEXT NOT NULL,"
+                                           "editor_mode TEXT NOT NULL,"
+                                           "snapshot_json TEXT NOT NULL,"
+                                           "last_saved_at TEXT,"
+                                           "updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                                           ") STRICT"),
+                            QStringLiteral(
+                                "CREATE INDEX IF NOT EXISTS idx_compose_sessions_account ON "
+                                "compose_sessions (account_id, updated_at DESC)"),
+                        },
+                },
             },
         };
     }
