@@ -30,6 +30,9 @@
 #include <QFutureWatcher>
 #include <QHBoxLayout>
 #include <QItemSelectionModel>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
@@ -41,12 +44,16 @@
 #include <QSignalBlocker>
 #include <QSplitter>
 #include <QStatusBar>
+#include <QTabBar>
 #include <QToolButton>
 #include <QTreeView>
 #include <QUrl>
 #include <QVBoxLayout>
 #include <QWidget>
 #include <QtConcurrent>
+
+#include <algorithm>
+#include <unordered_map>
 
 namespace javelin::gui::shell
 {
@@ -55,10 +62,8 @@ namespace javelin::gui::shell
         constexpr auto windowGroup = "mainWindow";
         constexpr auto geometryKey = "geometry";
         constexpr auto splitterKey = "splitterState";
-        constexpr auto accountIdKey = "selectedAccountId";
-        constexpr auto mailboxIdKey = "selectedMailboxId";
-        constexpr auto threadIdKey = "selectedThreadId";
-        constexpr auto emailIdKey = "selectedEmailId";
+        constexpr auto activeTabIndexKey = "activeTabIndex";
+        constexpr auto tabsKey = "tabs";
 
         /// Returns the account ID for the currently selected mailbox tree index.
         /// Works for both account-level nodes and mailbox nodes.
@@ -119,17 +124,6 @@ namespace javelin::gui::shell
                     .toString();
             return threadId.isEmpty() ? std::optional<std::string>{std::nullopt}
                                       : std::optional<std::string>{threadId.toStdString()};
-        }
-
-        [[nodiscard]] std::optional<int> currentMessageRow(const QListView& messageView)
-        {
-            const auto currentIndex = messageView.currentIndex();
-            if (!currentIndex.isValid())
-            {
-                return std::nullopt;
-            }
-
-            return currentIndex.row();
         }
 
         [[nodiscard]] bool indexIsUnread(const QModelIndex& index)
@@ -236,6 +230,117 @@ namespace javelin::gui::shell
             return std::nullopt;
         }
 
+        [[nodiscard]] QJsonObject
+        serializeEmailAddress(const javelin::jmap::domain::EmailAddress& address)
+        {
+            QJsonObject object;
+            if (address.name.has_value())
+            {
+                object.insert(QStringLiteral("name"), QString::fromStdString(*address.name));
+            }
+            object.insert(QStringLiteral("email"), QString::fromStdString(address.email));
+            return object;
+        }
+
+        [[nodiscard]] std::optional<javelin::jmap::domain::EmailAddress>
+        deserializeEmailAddress(const QJsonValue& value)
+        {
+            if (!value.isObject())
+            {
+                return std::nullopt;
+            }
+
+            const auto object = value.toObject();
+            const auto email = object.value(QStringLiteral("email")).toString();
+            if (email.isEmpty())
+            {
+                return std::nullopt;
+            }
+
+            const auto name = object.value(QStringLiteral("name")).toString();
+            return javelin::jmap::domain::EmailAddress{
+                .name =
+                    name.isEmpty() ? std::nullopt : std::optional<std::string>{name.toStdString()},
+                .email = email.toStdString(),
+            };
+        }
+
+        [[nodiscard]] QJsonObject
+        serializeMessageListItem(const javelin::jmap::cache::MessageListItem& item)
+        {
+            QJsonObject object;
+            object.insert(QStringLiteral("emailId"), QString::fromStdString(item.emailId));
+            object.insert(QStringLiteral("threadId"), QString::fromStdString(item.threadId));
+            if (item.subject.has_value())
+            {
+                object.insert(QStringLiteral("subject"), QString::fromStdString(*item.subject));
+            }
+            if (item.preview.has_value())
+            {
+                object.insert(QStringLiteral("preview"), QString::fromStdString(*item.preview));
+            }
+            object.insert(QStringLiteral("receivedAt"), QString::fromStdString(item.receivedAt));
+            if (item.sentAt.has_value())
+            {
+                object.insert(QStringLiteral("sentAt"), QString::fromStdString(*item.sentAt));
+            }
+            object.insert(QStringLiteral("threadMessageCount"),
+                          static_cast<qint64>(item.threadMessageCount));
+            object.insert(QStringLiteral("hasAttachment"), item.hasAttachment);
+            object.insert(QStringLiteral("isUnread"), item.isUnread);
+            object.insert(QStringLiteral("isFlagged"), item.isFlagged);
+            if (item.from.has_value())
+            {
+                object.insert(QStringLiteral("from"), serializeEmailAddress(*item.from));
+            }
+            return object;
+        }
+
+        [[nodiscard]] std::optional<javelin::jmap::cache::MessageListItem>
+        deserializeMessageListItem(const QJsonValue& value)
+        {
+            if (!value.isObject())
+            {
+                return std::nullopt;
+            }
+
+            const auto object = value.toObject();
+            const auto emailId = object.value(QStringLiteral("emailId")).toString();
+            const auto threadId = object.value(QStringLiteral("threadId")).toString();
+            const auto receivedAt = object.value(QStringLiteral("receivedAt")).toString();
+            if (emailId.isEmpty() || threadId.isEmpty() || receivedAt.isEmpty())
+            {
+                return std::nullopt;
+            }
+
+            return javelin::jmap::cache::MessageListItem{
+                .emailId = emailId.toStdString(),
+                .threadId = threadId.toStdString(),
+                .subject = object.value(QStringLiteral("subject")).isUndefined()
+                               ? std::nullopt
+                               : std::optional<std::string>{object.value(QStringLiteral("subject"))
+                                                                .toString()
+                                                                .toStdString()},
+                .preview = object.value(QStringLiteral("preview")).isUndefined()
+                               ? std::nullopt
+                               : std::optional<std::string>{object.value(QStringLiteral("preview"))
+                                                                .toString()
+                                                                .toStdString()},
+                .receivedAt = receivedAt.toStdString(),
+                .sentAt = object.value(QStringLiteral("sentAt")).isUndefined()
+                              ? std::nullopt
+                              : std::optional<std::string>{object.value(QStringLiteral("sentAt"))
+                                                               .toString()
+                                                               .toStdString()},
+                .threadMessageCount = static_cast<std::uint64_t>(
+                    object.value(QStringLiteral("threadMessageCount")).toInteger(1)),
+                .hasAttachment = object.value(QStringLiteral("hasAttachment")).toBool(false),
+                .isUnread = object.value(QStringLiteral("isUnread")).toBool(false),
+                .isFlagged = object.value(QStringLiteral("isFlagged")).toBool(false),
+                .from = deserializeEmailAddress(object.value(QStringLiteral("from"))),
+            };
+        }
+
     } // namespace
 
     MainWindow::MainWindow(javelin::jmap::JmapCore& jmapCore,
@@ -260,35 +365,21 @@ namespace javelin::gui::shell
             &m_longPollService, &javelin::app::LongPollService::mailboxRefreshed, this,
             [this](const QString& accountId, const QString& mailboxId, const bool scrollToNewest)
             {
-                const auto selectedAccountId = currentAccountId(*m_mailboxView);
-                const auto selectedMailboxId = currentMailboxId(*m_mailboxView);
-                const auto selectedThreadId = currentThreadId(*m_messageView);
-                const auto selectedEmailId = currentEmailId(*m_messageView);
-                const auto selectedMessageRow = currentMessageRow(*m_messageView);
-                const bool refreshedMailboxIsSelected =
-                    selectedAccountId == std::optional<std::string>{accountId.toStdString()} &&
-                    selectedMailboxId == std::optional<std::string>{mailboxId.toStdString()};
-
-                QSignalBlocker mailboxBlocker{m_mailboxView->selectionModel()};
-                QSignalBlocker messageBlocker{m_messageView->selectionModel()};
                 m_mailboxModel->refresh();
                 m_mailboxView->expandAll();
-                restoreSelection(selectedAccountId, selectedMailboxId, selectedThreadId,
-                                 selectedEmailId);
-
-                if (!refreshedMailboxIsSelected)
+                if (activeTabIsMailbox())
                 {
-                    return;
-                }
-
-                m_messageModel->refresh();
-                restoreSelectionAfterMessageRefresh(selectedAccountId, selectedMailboxId,
-                                                    selectedThreadId, selectedEmailId,
-                                                    selectedMessageRow);
-                refreshSelectionFromModels();
-                if (scrollToNewest && m_messageModel->rowCount() > 0)
-                {
-                    m_messageView->scrollTo(m_messageModel->index(0, 0));
+                    const auto mailbox = activeMailboxId();
+                    const auto account = activeAccountId();
+                    if (account == std::optional<std::string>{accountId.toStdString()} &&
+                        mailbox == std::optional<std::string>{mailboxId.toStdString()})
+                    {
+                        loadActiveTabFromCache();
+                        if (scrollToNewest && m_messageModel->rowCount() > 0)
+                        {
+                            m_messageView->scrollTo(m_messageModel->index(0, 0));
+                        }
+                    }
                 }
             });
         updateLongPollStatus();
@@ -306,10 +397,24 @@ namespace javelin::gui::shell
                                              : std::optional<std::string>{emailId.toStdString()};
 
         reloadAccounts();
-        m_messageModel->setMailboxContext(account, mailbox);
-        m_messageModel->refresh();
-        restoreSelection(std::optional<std::string>{account}, std::optional<std::string>{mailbox},
-                         thread, email);
+        QString mailboxTitle = mailboxId;
+        const auto mailboxIndex = findMailboxIndexForSelection(*m_mailboxModel, accountId,
+                                                               std::optional<QString>{mailboxId});
+        if (mailboxIndex.isValid())
+        {
+            mailboxTitle = mailboxIndex.data(Qt::DisplayRole).toString();
+        }
+
+        openOrActivateMailboxTab(account, mailbox, mailboxTitle, false);
+        if (auto* tab = activeTab())
+        {
+            if (auto* mailboxTab = std::get_if<MailboxTabState>(&tab->content))
+            {
+                mailboxTab->selection.threadId = thread;
+                mailboxTab->selection.emailId = email;
+            }
+        }
+        loadActiveTabFromCache();
         if (email.has_value())
         {
             m_messageViewContainer->setSelection(m_messageViewService,
@@ -387,14 +492,25 @@ namespace javelin::gui::shell
         m_mailboxSearchEdit->setPlaceholderText(
             QStringLiteral("Search this account on the server"));
 
+        m_tabBar = new QTabBar(this);
+        m_tabBar->setDocumentMode(true);
+        m_tabBar->setTabsClosable(true);
+        m_tabBar->setExpanding(false);
+        m_tabBar->setElideMode(Qt::ElideRight);
+        m_tabBar->setUsesScrollButtons(true);
+        m_tabBar->setStyleSheet(
+            QStringLiteral("QTabBar::tab { max-width: 220px; min-width: 120px; }"));
+        m_tabBar->hide();
+
         m_mailboxView = new QTreeView(this);
         m_mailboxView->setModel(m_mailboxModel);
         m_mailboxView->setHeaderHidden(true);
         m_mailboxView->setExpandsOnDoubleClick(false);
         m_mailboxView->expandAll();
+        m_mailboxView->setContextMenuPolicy(Qt::CustomContextMenu);
 
-        auto* mailboxPane = new QWidget(this);
-        auto* mailboxLayout = new QVBoxLayout(mailboxPane);
+        m_mailboxPane = new QWidget(this);
+        auto* mailboxLayout = new QVBoxLayout(m_mailboxPane);
         mailboxLayout->setContentsMargins(0, 0, 0, 0);
         mailboxLayout->setSpacing(6);
         mailboxLayout->addWidget(m_mailboxSearchEdit);
@@ -425,6 +541,11 @@ namespace javelin::gui::shell
         m_messageQuickFilterButton = new QToolButton(messageHeader);
         m_messageQuickFilterButton->setText(QStringLiteral("Quick Filter"));
         m_messageQuickFilterButton->setEnabled(false);
+        m_previousPageButton = new QToolButton(messageHeader);
+        m_previousPageButton->setText(QStringLiteral("Previous"));
+        m_nextPageButton = new QToolButton(messageHeader);
+        m_nextPageButton->setText(QStringLiteral("Next"));
+        m_messagePageLabel = new QLabel(messageHeader);
         auto titleFont = m_messageListTitleLabel->font();
         titleFont.setPointSize(titleFont.pointSize() + 4);
         titleFont.setBold(true);
@@ -432,6 +553,9 @@ namespace javelin::gui::shell
         messageHeaderLayout->addWidget(m_messageListTitleLabel);
         messageHeaderLayout->addWidget(m_messageListMetaLabel);
         messageHeaderLayout->addStretch(1);
+        messageHeaderLayout->addWidget(m_previousPageButton);
+        messageHeaderLayout->addWidget(m_messagePageLabel);
+        messageHeaderLayout->addWidget(m_nextPageButton);
         messageHeaderLayout->addWidget(m_messageQuickFilterButton);
         m_longPollStatusLabel = new QLabel(this);
         m_messageEmptyState = new QLabel(
@@ -467,6 +591,8 @@ namespace javelin::gui::shell
         m_messageView->setContextMenuPolicy(Qt::CustomContextMenu);
         connect(m_messageView, &QListView::customContextMenuRequested, this,
                 &MainWindow::showMessageListContextMenu);
+        connect(m_mailboxView, &QTreeView::customContextMenuRequested, this,
+                &MainWindow::showMailboxContextMenu);
         connect(
             messageListDelegate,
             &javelin::gui::messages::MessageListDelegate::threadExpansionToggled, this,
@@ -497,7 +623,7 @@ namespace javelin::gui::shell
             });
 
         m_mainSplitter = new QSplitter(Qt::Horizontal, this);
-        m_mainSplitter->addWidget(mailboxPane);
+        m_mainSplitter->addWidget(m_mailboxPane);
         m_mainSplitter->addWidget(messagePane);
         m_mainSplitter->addWidget(m_messageViewContainer);
         m_mainSplitter->setStretchFactor(0, 1);
@@ -505,7 +631,14 @@ namespace javelin::gui::shell
         m_mainSplitter->setStretchFactor(2, 3);
         m_mainSplitter->setSizes({240, 420, 780});
 
-        setCentralWidget(m_mainSplitter);
+        auto* centralContainer = new QWidget(this);
+        auto* centralLayout = new QVBoxLayout(centralContainer);
+        centralLayout->setContentsMargins(0, 0, 0, 0);
+        centralLayout->setSpacing(0);
+        centralLayout->addWidget(m_tabBar);
+        centralLayout->addWidget(m_mainSplitter);
+
+        setCentralWidget(centralContainer);
         statusBar()->showMessage(m_jmapCore.statusSummary());
         statusBar()->addPermanentWidget(m_longPollStatusLabel);
         updateEmptyStates();
@@ -515,6 +648,19 @@ namespace javelin::gui::shell
 
     void MainWindow::connectSelection()
     {
+        connect(m_tabBar, &QTabBar::currentChanged, this,
+                [this](const int index)
+                {
+                    if (m_syncingNavigation)
+                    {
+                        return;
+                    }
+
+                    activateTab(index, false);
+                });
+        connect(m_tabBar, &QTabBar::tabCloseRequested, this, &MainWindow::closeTab);
+        connect(m_previousPageButton, &QToolButton::clicked, this, &MainWindow::goToPreviousPage);
+        connect(m_nextPageButton, &QToolButton::clicked, this, &MainWindow::goToNextPage);
         connect(m_mailboxSearchEdit, &QLineEdit::returnPressed, this,
                 [this] { executeSearch(m_mailboxSearchEdit->text()); });
         connect(m_mailboxSearchEdit, &QLineEdit::textChanged, this,
@@ -529,29 +675,36 @@ namespace javelin::gui::shell
         connect(m_mailboxView->selectionModel(), &QItemSelectionModel::currentChanged, this,
                 [this](const QModelIndex& current, const QModelIndex&)
                 {
+                    if (m_syncingNavigation)
+                    {
+                        return;
+                    }
+
                     if (!current.isValid())
                     {
-                        updateMailboxSelectionState(false);
                         return;
                     }
 
-                    if (!m_mailboxSearchEdit->text().trimmed().isEmpty())
+                    activateMailboxSelection(true);
+                });
+        connect(m_mailboxView, &QTreeView::doubleClicked, this,
+                [this](const QModelIndex& index)
+                {
+                    if (!index.isValid())
                     {
-                        executeSearch(m_mailboxSearchEdit->text());
                         return;
                     }
 
-                    updateMailboxSelectionState(true);
+                    openMailboxSelectionInTab(true);
                 });
 
         connect(
             m_messageView->selectionModel(), &QItemSelectionModel::currentChanged, this,
             [this](const QModelIndex& current, const QModelIndex&)
             {
-                const auto accountId = currentAccountId(*m_mailboxView);
-                const auto mailboxId = currentMailboxId(*m_mailboxView);
-                const bool allowSearchSelection =
-                    m_messageModel->isSearchMode() && accountId.has_value();
+                const auto accountId = activeAccountId();
+                const auto mailboxId = activeMailboxId();
+                const bool allowSearchSelection = activeTabIsSearch() && accountId.has_value();
                 if (!accountId.has_value() || (!mailboxId.has_value() && !allowSearchSelection))
                 {
                     m_messageViewContainer->setSelection(m_messageViewService, accountId, mailboxId,
@@ -599,47 +752,634 @@ namespace javelin::gui::shell
                         queueMarkEmailRead(*accountId, emailId.toStdString());
                     }
                 }
+
+                syncActiveTabSelectionFromViews();
             });
     }
 
-    void MainWindow::updateMailboxSelectionState(const bool refreshRemote)
+    const MainWindow::TabState* MainWindow::activeTab() const
+    {
+        if (!m_activeTabIndex.has_value() || *m_activeTabIndex < 0 ||
+            static_cast<std::size_t>(*m_activeTabIndex) >= m_tabs.size())
+        {
+            return nullptr;
+        }
+
+        return &m_tabs[static_cast<std::size_t>(*m_activeTabIndex)];
+    }
+
+    MainWindow::TabState* MainWindow::activeTab()
+    {
+        if (!m_activeTabIndex.has_value() || *m_activeTabIndex < 0 ||
+            static_cast<std::size_t>(*m_activeTabIndex) >= m_tabs.size())
+        {
+            return nullptr;
+        }
+
+        return &m_tabs[static_cast<std::size_t>(*m_activeTabIndex)];
+    }
+
+    bool MainWindow::activeTabIsMailbox() const
+    {
+        const auto* tab = activeTab();
+        return tab != nullptr && std::holds_alternative<MailboxTabState>(tab->content);
+    }
+
+    bool MainWindow::activeTabIsSearch() const
+    {
+        const auto* tab = activeTab();
+        return tab != nullptr && std::holds_alternative<SearchTabState>(tab->content);
+    }
+
+    std::optional<std::string> MainWindow::activeAccountId() const
+    {
+        const auto* tab = activeTab();
+        if (tab == nullptr)
+        {
+            return std::nullopt;
+        }
+
+        if (const auto* mailboxTab = std::get_if<MailboxTabState>(&tab->content))
+        {
+            return mailboxTab->accountId;
+        }
+
+        return std::get<SearchTabState>(tab->content).accountId;
+    }
+
+    std::optional<std::string> MainWindow::activeMailboxId() const
+    {
+        const auto* tab = activeTab();
+        if (tab == nullptr)
+        {
+            return std::nullopt;
+        }
+
+        if (const auto* mailboxTab = std::get_if<MailboxTabState>(&tab->content))
+        {
+            return mailboxTab->mailboxId;
+        }
+
+        return std::nullopt;
+    }
+
+    QString MainWindow::titleForTab(const TabState& tab) const
+    {
+        if (const auto* mailboxTab = std::get_if<MailboxTabState>(&tab.content))
+        {
+            return mailboxTab->title;
+        }
+
+        return std::get<SearchTabState>(tab.content).title;
+    }
+
+    void MainWindow::updateTabBar()
+    {
+        QSignalBlocker blocker{m_tabBar};
+        while (m_tabBar->count() > 0)
+        {
+            m_tabBar->removeTab(0);
+        }
+
+        for (const auto& tab : m_tabs)
+        {
+            m_tabBar->addTab(titleForTab(tab));
+        }
+
+        for (int index = 0; index < m_tabBar->count(); ++index)
+        {
+            m_tabBar->setTabButton(index, QTabBar::RightSide, nullptr);
+        }
+        if (m_tabBar->count() > 1)
+        {
+            for (int index = 1; index < m_tabBar->count(); ++index)
+            {
+                auto* closeButton = new QToolButton(m_tabBar);
+                closeButton->setAutoRaise(true);
+                closeButton->setText(QStringLiteral("x"));
+                connect(closeButton, &QToolButton::clicked, this,
+                        [this, index] { closeTab(index); });
+                m_tabBar->setTabButton(index, QTabBar::RightSide, closeButton);
+            }
+        }
+
+        if (m_activeTabIndex.has_value() && *m_activeTabIndex >= 0 &&
+            *m_activeTabIndex < m_tabBar->count())
+        {
+            m_tabBar->setCurrentIndex(*m_activeTabIndex);
+        }
+        m_tabBar->setVisible(m_tabs.size() > 1);
+    }
+
+    void MainWindow::openOrActivateMailboxTab(std::string accountId, std::string mailboxId,
+                                              const QString title, const bool refreshRemote)
+    {
+        for (std::size_t index = 0; index < m_tabs.size(); ++index)
+        {
+            if (auto* mailboxTab = std::get_if<MailboxTabState>(&m_tabs[index].content);
+                mailboxTab != nullptr && mailboxTab->accountId == accountId &&
+                mailboxTab->mailboxId == mailboxId)
+            {
+                mailboxTab->title = title;
+                m_activeTabIndex = static_cast<int>(index);
+                updateTabBar();
+                activateTab(*m_activeTabIndex, refreshRemote);
+                return;
+            }
+        }
+
+        m_tabs.push_back(TabState{
+            .content =
+                MailboxTabState{
+                    .accountId = std::move(accountId),
+                    .mailboxId = std::move(mailboxId),
+                    .title = title,
+                    .page = {},
+                    .selection = {},
+                },
+        });
+        m_activeTabIndex = static_cast<int>(m_tabs.size() - 1);
+        updateTabBar();
+        activateTab(*m_activeTabIndex, refreshRemote);
+    }
+
+    void MainWindow::activateMailboxInHomeTab(std::string accountId, std::string mailboxId,
+                                              QString title, const bool refreshRemote)
+    {
+        if (m_tabs.empty())
+        {
+            m_tabs.push_back(TabState{
+                .content =
+                    MailboxTabState{
+                        .accountId = std::move(accountId),
+                        .mailboxId = std::move(mailboxId),
+                        .title = std::move(title),
+                        .page = {},
+                        .selection = {},
+                    },
+            });
+        }
+        else
+        {
+            m_tabs[0].content = MailboxTabState{
+                .accountId = std::move(accountId),
+                .mailboxId = std::move(mailboxId),
+                .title = std::move(title),
+                .page = {},
+                .selection = {},
+            };
+        }
+
+        m_activeTabIndex = 0;
+        updateTabBar();
+        activateTab(0, refreshRemote);
+    }
+
+    void MainWindow::openOrActivateSearchTab(std::string accountId, QString query,
+                                             const bool refreshRemote)
+    {
+        const auto queryString = query.toStdString();
+        for (std::size_t index = 0; index < m_tabs.size(); ++index)
+        {
+            if (auto* searchTab = std::get_if<SearchTabState>(&m_tabs[index].content);
+                searchTab != nullptr && searchTab->accountId == accountId &&
+                searchTab->query == queryString)
+            {
+                m_activeTabIndex = static_cast<int>(index);
+                updateTabBar();
+                activateTab(*m_activeTabIndex, refreshRemote);
+                return;
+            }
+        }
+
+        m_tabs.push_back(TabState{
+            .content =
+                SearchTabState{
+                    .accountId = std::move(accountId),
+                    .query = queryString,
+                    .title = QStringLiteral("Search: %1").arg(query),
+                    .page = {},
+                    .selection = {},
+                },
+        });
+        m_activeTabIndex = static_cast<int>(m_tabs.size() - 1);
+        updateTabBar();
+        activateTab(*m_activeTabIndex, refreshRemote);
+    }
+
+    void MainWindow::activateTab(const int index, const bool refreshRemote)
+    {
+        if (index < 0 || static_cast<std::size_t>(index) >= m_tabs.size())
+        {
+            m_activeTabIndex.reset();
+            m_messageModel->clear();
+            m_messageViewContainer->setSelection(m_messageViewService, std::nullopt, std::nullopt,
+                                                 std::nullopt);
+            updateTabBar();
+            updateEmptyStates();
+            updateMessageListHeader();
+            updateMessageActions();
+            return;
+        }
+
+        m_activeTabIndex = index;
+        updateTabBar();
+        syncNavigationForActiveTab();
+        loadActiveTabFromCache();
+        if (refreshRemote)
+        {
+            refreshActiveTabFromServer();
+        }
+    }
+
+    void MainWindow::closeTab(const int index)
+    {
+        if (index < 0 || static_cast<std::size_t>(index) >= m_tabs.size())
+        {
+            return;
+        }
+        if (index == 0)
+        {
+            return;
+        }
+
+        m_tabs.erase(m_tabs.begin() + index);
+        if (m_tabs.empty())
+        {
+            m_activeTabIndex.reset();
+            activateTab(-1, false);
+            return;
+        }
+
+        if (!m_activeTabIndex.has_value() || *m_activeTabIndex >= index)
+        {
+            m_activeTabIndex = std::max(0, index - 1);
+        }
+        updateTabBar();
+        activateTab(*m_activeTabIndex, false);
+    }
+
+    void MainWindow::syncNavigationForActiveTab()
+    {
+        const auto* tab = activeTab();
+        if (tab == nullptr)
+        {
+            if (m_mailboxPane != nullptr)
+            {
+                m_mailboxPane->setVisible(true);
+            }
+            return;
+        }
+
+        if (m_mailboxPane != nullptr)
+        {
+            m_mailboxPane->setVisible(!std::holds_alternative<SearchTabState>(tab->content));
+        }
+
+        m_syncingNavigation = true;
+        QSignalBlocker mailboxBlocker{m_mailboxView->selectionModel()};
+        QSignalBlocker searchBlocker{m_mailboxSearchEdit};
+
+        if (const auto* mailboxTab = std::get_if<MailboxTabState>(&tab->content))
+        {
+            const auto mailboxIndex = findMailboxIndexForSelection(
+                *m_mailboxModel, QString::fromStdString(mailboxTab->accountId),
+                std::optional<QString>{QString::fromStdString(mailboxTab->mailboxId)});
+            if (mailboxIndex.isValid())
+            {
+                m_mailboxView->setCurrentIndex(mailboxIndex);
+                m_mailboxView->scrollTo(mailboxIndex);
+            }
+            m_mailboxSearchEdit->clear();
+        }
+        else
+        {
+            const auto& searchTab = std::get<SearchTabState>(tab->content);
+            const auto accountIndex = findMailboxIndexForSelection(
+                *m_mailboxModel, QString::fromStdString(searchTab.accountId), std::nullopt);
+            if (accountIndex.isValid())
+            {
+                m_mailboxView->setCurrentIndex(accountIndex);
+                m_mailboxView->scrollTo(accountIndex);
+            }
+            m_mailboxSearchEdit->setText(QString::fromStdString(searchTab.query));
+        }
+
+        m_syncingNavigation = false;
+    }
+
+    void MainWindow::loadMailboxTabPageFromCache(MailboxTabState& tab)
+    {
+        const auto pageResult = m_queryService.listMailboxMessages(tab.accountId, tab.mailboxId,
+                                                                   pageSize, tab.page.offset);
+        if (const auto* items =
+                std::get_if<std::vector<javelin::jmap::cache::MessageListItem>>(&pageResult))
+        {
+            tab.page.items = *items;
+        }
+        else
+        {
+            tab.page.items.clear();
+        }
+
+        const auto totalResult = m_queryService.countMailboxMessages(tab.accountId, tab.mailboxId);
+        if (const auto* total = std::get_if<std::size_t>(&totalResult))
+        {
+            tab.page.total = *total;
+        }
+        else
+        {
+            tab.page.total.reset();
+        }
+    }
+
+    void MainWindow::applySearchTabCachedPage(SearchTabState& tab)
+    {
+        if (tab.page.items.empty())
+        {
+            return;
+        }
+
+        std::vector<std::string> emailIds;
+        emailIds.reserve(tab.page.items.size());
+        for (const auto& item : tab.page.items)
+        {
+            emailIds.push_back(item.emailId);
+        }
+
+        const auto refreshedResult = m_queryService.listMessagesByEmailIds(tab.accountId, emailIds);
+        const auto* refreshedItems =
+            std::get_if<std::vector<javelin::jmap::cache::MessageListItem>>(&refreshedResult);
+        if (refreshedItems == nullptr)
+        {
+            return;
+        }
+
+        std::unordered_map<std::string, javelin::jmap::cache::MessageListItem> refreshedByEmailId;
+        refreshedByEmailId.reserve(refreshedItems->size());
+        for (auto item : *refreshedItems)
+        {
+            refreshedByEmailId.insert_or_assign(item.emailId, std::move(item));
+        }
+
+        std::vector<javelin::jmap::cache::MessageListItem> mergedItems;
+        mergedItems.reserve(tab.page.items.size());
+        for (const auto& cachedItem : tab.page.items)
+        {
+            if (const auto iterator = refreshedByEmailId.find(cachedItem.emailId);
+                iterator != refreshedByEmailId.end())
+            {
+                mergedItems.push_back(std::move(iterator->second));
+            }
+            else
+            {
+                mergedItems.push_back(cachedItem);
+            }
+        }
+
+        tab.page.items = std::move(mergedItems);
+    }
+
+    void MainWindow::applyActiveTabPageToModel()
+    {
+        if (const auto* tab = activeTab())
+        {
+            if (const auto* mailboxTab = std::get_if<MailboxTabState>(&tab->content))
+            {
+                m_messageModel->setPage(mailboxTab->accountId, mailboxTab->page.items);
+                return;
+            }
+
+            const auto& searchTab = std::get<SearchTabState>(tab->content);
+            m_messageModel->setPage(searchTab.accountId, searchTab.page.items);
+            return;
+        }
+
+        m_messageModel->clear();
+    }
+
+    void MainWindow::loadActiveTabFromCache()
+    {
+        auto* tab = activeTab();
+        if (tab == nullptr)
+        {
+            applyActiveTabPageToModel();
+            refreshSelectionFromModels();
+            return;
+        }
+
+        if (auto* mailboxTab = std::get_if<MailboxTabState>(&tab->content))
+        {
+            loadMailboxTabPageFromCache(*mailboxTab);
+        }
+        else
+        {
+            applySearchTabCachedPage(std::get<SearchTabState>(tab->content));
+        }
+
+        applyActiveTabPageToModel();
+        m_messageView->clearSelection();
+
+        const auto& selection =
+            std::visit([](const auto& content) { return content.selection; }, tab->content);
+        const auto restoredIndex = restoreMessageSelection(selection.threadId, selection.emailId);
+        if (restoredIndex.isValid())
+        {
+            m_messageView->setCurrentIndex(restoredIndex);
+            m_messageView->scrollTo(restoredIndex);
+        }
+
+        refreshSelectionFromModels();
+    }
+
+    void MainWindow::refreshActiveTabFromServer()
+    {
+        if (!m_activeTabIndex.has_value() || *m_activeTabIndex < 0 ||
+            static_cast<std::size_t>(*m_activeTabIndex) >= m_tabs.size())
+        {
+            return;
+        }
+
+        refreshTabFromServer(static_cast<std::size_t>(*m_activeTabIndex));
+    }
+
+    void MainWindow::refreshTabFromServer(const std::size_t tabIndex)
+    {
+        if (tabIndex >= m_tabs.size())
+        {
+            return;
+        }
+
+        auto& tab = m_tabs[tabIndex];
+        if (auto* mailboxTab = std::get_if<MailboxTabState>(&tab.content))
+        {
+            refreshMailboxTabFromServer(*mailboxTab);
+            return;
+        }
+
+        refreshSearchTabFromServer(std::get<SearchTabState>(tab.content));
+    }
+
+    void MainWindow::refreshMailboxTabFromServer(MailboxTabState& tab)
+    {
+        const auto tabAccountId = tab.accountId;
+        const auto tabMailboxId = tab.mailboxId;
+        const auto tabOffset = tab.page.offset;
+        auto task = m_jmapCore.queryMailboxPage(
+            toLiveConnectionSettings(javelin::gui::settings::PreferencesDialog::loadSettings()),
+            tab.accountId, tab.mailboxId, tab.page.offset, pageSize,
+            [this](const QString& message)
+            {
+                qInfo().noquote() << "GUI mailbox page progress" << message;
+                statusBar()->showMessage(message);
+            });
+        QCoro::connect(
+            std::move(task), this,
+            [this, tabAccountId, tabMailboxId, tabOffset](javelin::jmap::MailboxPageResult result)
+            {
+                if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+                {
+                    statusBar()->showMessage(error->message, 10000);
+                    return;
+                }
+
+                for (auto& tabState : m_tabs)
+                {
+                    auto* mailboxTab = std::get_if<MailboxTabState>(&tabState.content);
+                    if (mailboxTab == nullptr || mailboxTab->accountId != tabAccountId ||
+                        mailboxTab->mailboxId != tabMailboxId ||
+                        mailboxTab->page.offset != tabOffset)
+                    {
+                        continue;
+                    }
+
+                    const auto& summary = std::get<javelin::jmap::MailboxPageSummary>(result);
+                    mailboxTab->page.total = summary.total;
+                    mailboxTab->page.items = summary.results;
+                    if (activeTabIsMailbox() &&
+                        activeAccountId() == std::optional<std::string>{tabAccountId} &&
+                        activeMailboxId() == std::optional<std::string>{tabMailboxId} &&
+                        mailboxTab->page.offset == tabOffset)
+                    {
+                        applyActiveTabPageToModel();
+                        refreshSelectionFromModels();
+                    }
+                    statusBar()->showMessage(
+                        QStringLiteral("Loaded %1 mailbox conversations.")
+                            .arg(static_cast<qulonglong>(summary.representativeCount)),
+                        5000);
+                    return;
+                }
+            });
+    }
+
+    void MainWindow::refreshSearchTabFromServer(SearchTabState& tab)
+    {
+        const auto tabAccountId = tab.accountId;
+        const auto tabQuery = tab.query;
+        const auto tabOffset = tab.page.offset;
+        auto task = m_jmapCore.searchMessages(
+            toLiveConnectionSettings(javelin::gui::settings::PreferencesDialog::loadSettings()),
+            tab.accountId, tab.query, tab.page.offset, pageSize,
+            [this](const QString& message)
+            {
+                qInfo().noquote() << "GUI search progress" << message;
+                statusBar()->showMessage(message);
+            });
+        QCoro::connect(
+            std::move(task), this,
+            [this, tabAccountId, tabQuery, tabOffset](javelin::jmap::MessageSearchResult result)
+            {
+                if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+                {
+                    statusBar()->showMessage(error->message, 10000);
+                    return;
+                }
+
+                for (auto& tabState : m_tabs)
+                {
+                    auto* searchTab = std::get_if<SearchTabState>(&tabState.content);
+                    if (searchTab == nullptr || searchTab->accountId != tabAccountId ||
+                        searchTab->query != tabQuery || searchTab->page.offset != tabOffset)
+                    {
+                        continue;
+                    }
+
+                    const auto& summary = std::get<javelin::jmap::MessageSearchSummary>(result);
+                    searchTab->page.total = summary.total;
+                    searchTab->page.items = summary.results;
+                    if (activeTabIsSearch() &&
+                        activeAccountId() == std::optional<std::string>{tabAccountId} &&
+                        std::get<SearchTabState>(activeTab()->content).query == tabQuery &&
+                        searchTab->page.offset == tabOffset)
+                    {
+                        applyActiveTabPageToModel();
+                        refreshSelectionFromModels();
+                    }
+                    statusBar()->showMessage(
+                        summary.total.has_value() && *summary.total > summary.representativeCount
+                            ? QStringLiteral("Showing the first %1 of %2 server matches.")
+                                  .arg(static_cast<qulonglong>(summary.representativeCount))
+                                  .arg(static_cast<qulonglong>(*summary.total))
+                            : QStringLiteral("Loaded %1 server search matches.")
+                                  .arg(static_cast<qulonglong>(summary.representativeCount)),
+                        5000);
+                    return;
+                }
+            });
+    }
+
+    void MainWindow::activateMailboxSelection(const bool refreshRemote)
     {
         const auto accountId = currentAccountId(*m_mailboxView);
         const auto mailboxId = currentMailboxId(*m_mailboxView);
-
-        m_messageView->clearSelection();
-        if (!m_mailboxView->currentIndex().isValid() || !accountId.has_value())
+        if (!accountId.has_value() || !mailboxId.has_value())
         {
-            m_messageModel->setMailboxContext(std::nullopt, std::nullopt);
-            m_messageViewContainer->setSelection(m_messageViewService, std::nullopt, std::nullopt,
-                                                 std::nullopt);
-            updateEmptyStates();
-            updateMessageListHeader();
-            updateMessageActions();
             return;
         }
 
-        if (!mailboxId.has_value())
+        const auto currentIndex = m_mailboxView->currentIndex();
+        activateMailboxInHomeTab(*accountId, *mailboxId,
+                                 currentIndex.data(Qt::DisplayRole).toString(), refreshRemote);
+    }
+
+    void MainWindow::openMailboxSelectionInTab(const bool refreshRemote)
+    {
+        const auto accountId = currentAccountId(*m_mailboxView);
+        const auto mailboxId = currentMailboxId(*m_mailboxView);
+        if (!accountId.has_value() || !mailboxId.has_value())
         {
-            m_messageModel->setMailboxContext(accountId, std::nullopt);
-            m_messageViewContainer->setSelection(m_messageViewService, accountId, std::nullopt,
-                                                 std::nullopt);
-            updateEmptyStates();
-            updateMessageListHeader();
-            updateMessageActions();
             return;
         }
 
-        m_messageModel->setMailboxContext(*accountId, *mailboxId);
-        m_messageViewContainer->setSelection(m_messageViewService, accountId, *mailboxId,
-                                             std::nullopt);
-        updateEmptyStates();
-        updateMessageListHeader();
-        updateMessageActions();
-        if (refreshRemote)
+        const auto currentIndex = m_mailboxView->currentIndex();
+        const auto title = currentIndex.data(Qt::DisplayRole).toString();
+        for (std::size_t index = 1; index < m_tabs.size(); ++index)
         {
-            refreshSelectedMailboxMessages(*accountId, *mailboxId);
+            if (const auto* mailboxTab = std::get_if<MailboxTabState>(&m_tabs[index].content);
+                mailboxTab != nullptr && mailboxTab->accountId == *accountId &&
+                mailboxTab->mailboxId == *mailboxId)
+            {
+                m_activeTabIndex = static_cast<int>(index);
+                updateTabBar();
+                activateTab(*m_activeTabIndex, refreshRemote);
+                return;
+            }
         }
+
+        m_tabs.push_back(TabState{
+            .content =
+                MailboxTabState{
+                    .accountId = *accountId,
+                    .mailboxId = *mailboxId,
+                    .title = title,
+                    .page = {},
+                    .selection = {},
+                },
+        });
+        m_activeTabIndex = static_cast<int>(m_tabs.size() - 1);
+        updateTabBar();
+        activateTab(*m_activeTabIndex, refreshRemote);
     }
 
     void MainWindow::executeSearch(const QString& text)
@@ -658,79 +1398,89 @@ namespace javelin::gui::shell
             return;
         }
 
-        const auto selectedThreadId = currentThreadId(*m_messageView);
-        const auto selectedEmailId = currentEmailId(*m_messageView);
-        const std::uint64_t searchGeneration = ++m_searchGeneration;
-        statusBar()->showMessage(QStringLiteral("Searching the server..."));
-
-        auto task = m_jmapCore.searchMessages(
-            toLiveConnectionSettings(javelin::gui::settings::PreferencesDialog::loadSettings()),
-            *accountId, trimmed.toStdString(), 100,
-            [this](const QString& message)
-            {
-                qInfo().noquote() << "GUI search progress" << message;
-                statusBar()->showMessage(message);
-            });
-        QCoro::connect(
-            std::move(task), this,
-            [this, searchGeneration, selectedThreadId = std::move(selectedThreadId),
-             selectedEmailId =
-                 std::move(selectedEmailId)](javelin::jmap::MessageSearchResult result)
-            {
-                if (searchGeneration != m_searchGeneration)
-                {
-                    return;
-                }
-
-                if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
-                {
-                    statusBar()->showMessage(error->message, 10000);
-                    return;
-                }
-
-                const auto& summary = std::get<javelin::jmap::MessageSearchSummary>(result);
-                m_searchTotalCount = summary.total;
-                m_messageView->clearSelection();
-                m_messageModel->setSearchResults(summary.accountId, summary.query, summary.results);
-                m_messageViewContainer->setSelection(m_messageViewService,
-                                                     std::optional<std::string>{summary.accountId},
-                                                     std::nullopt, std::nullopt);
-
-                const QModelIndex restoredMessageIndex =
-                    restoreMessageSelection(selectedThreadId, selectedEmailId);
-                if (restoredMessageIndex.isValid())
-                {
-                    m_messageView->setCurrentIndex(restoredMessageIndex);
-                    m_messageView->scrollTo(restoredMessageIndex);
-                }
-
-                updateEmptyStates();
-                updateMessageListHeader();
-                updateMessageActions();
-
-                if (summary.total.has_value() && *summary.total > summary.representativeCount)
-                {
-                    statusBar()->showMessage(
-                        QStringLiteral("Showing the first %1 of %2 server matches.")
-                            .arg(static_cast<qulonglong>(summary.representativeCount))
-                            .arg(static_cast<qulonglong>(*summary.total)),
-                        7000);
-                    return;
-                }
-
-                statusBar()->showMessage(
-                    QStringLiteral("Loaded %1 server search matches.")
-                        .arg(static_cast<qulonglong>(summary.representativeCount)),
-                    5000);
-            });
+        openOrActivateSearchTab(*accountId, trimmed, true);
     }
 
     void MainWindow::clearSearch()
     {
-        ++m_searchGeneration;
-        m_searchTotalCount.reset();
-        m_messageModel->clearSearch();
-        updateMailboxSelectionState(false);
+        const auto* tab = activeTab();
+        if (tab != nullptr && std::holds_alternative<SearchTabState>(tab->content))
+        {
+            closeTab(*m_activeTabIndex);
+        }
+        else
+        {
+            m_mailboxSearchEdit->clear();
+        }
+    }
+
+    void MainWindow::goToPreviousPage()
+    {
+        auto* tab = activeTab();
+        if (tab == nullptr)
+        {
+            return;
+        }
+
+        auto moveToPrevious = [](auto& content)
+        {
+            if (content.page.offset >= MainWindow::pageSize)
+            {
+                content.page.offset -= MainWindow::pageSize;
+                content.selection = {};
+                return true;
+            }
+            return false;
+        };
+        if (!std::visit(moveToPrevious, tab->content))
+        {
+            return;
+        }
+
+        loadActiveTabFromCache();
+        refreshActiveTabFromServer();
+    }
+
+    void MainWindow::goToNextPage()
+    {
+        auto* tab = activeTab();
+        if (tab == nullptr)
+        {
+            return;
+        }
+
+        auto moveToNext = [](auto& content)
+        {
+            if (content.page.total.has_value() &&
+                content.page.offset + MainWindow::pageSize >= *content.page.total)
+            {
+                return false;
+            }
+
+            content.page.offset += MainWindow::pageSize;
+            content.selection = {};
+            return true;
+        };
+        if (!std::visit(moveToNext, tab->content))
+        {
+            return;
+        }
+
+        loadActiveTabFromCache();
+        refreshActiveTabFromServer();
+    }
+
+    void MainWindow::syncActiveTabSelectionFromViews()
+    {
+        if (auto* tab = activeTab())
+        {
+            auto selection = TabSelectionState{
+                .threadId = currentThreadId(*m_messageView),
+                .emailId = currentEmailId(*m_messageView),
+            };
+            std::visit([&selection](auto& content) { content.selection = selection; },
+                       tab->content);
+        }
     }
 
     void MainWindow::reloadAccounts()
@@ -743,12 +1493,7 @@ namespace javelin::gui::shell
     {
         m_mailboxModel->refresh();
         m_mailboxView->expandAll();
-        if (!m_messageModel->isSearchMode())
-        {
-            m_messageModel->refresh();
-        }
-        updateEmptyStates();
-        updateMessageListHeader();
+        loadActiveTabFromCache();
     }
 
     void MainWindow::restoreSelection(std::optional<std::string> accountId,
@@ -833,10 +1578,11 @@ namespace javelin::gui::shell
 
     void MainWindow::refreshSelectionFromModels()
     {
-        const auto accountId = currentAccountId(*m_mailboxView);
-        const auto mailboxId = currentMailboxId(*m_mailboxView);
+        const auto accountId = activeAccountId();
+        const auto mailboxId = activeMailboxId();
         const auto emailId = currentEmailId(*m_messageView);
         m_messageViewContainer->setSelection(m_messageViewService, accountId, mailboxId, emailId);
+        syncActiveTabSelectionFromViews();
         updateEmptyStates();
         updateMessageListHeader();
         updateMessageActions();
@@ -845,7 +1591,7 @@ namespace javelin::gui::shell
     void MainWindow::updateEmptyStates()
     {
         const bool hasMessages = m_messageModel->rowCount() > 0;
-        if (m_messageModel->isSearchMode())
+        if (activeTabIsSearch())
         {
             m_messageEmptyState->setText(
                 QStringLiteral("No server results matched your search in this account."));
@@ -885,52 +1631,75 @@ namespace javelin::gui::shell
 
     void MainWindow::updateMessageListHeader()
     {
-        if (m_messageModel->isSearchMode() && m_messageModel->searchQuery().has_value())
+        const auto* tab = activeTab();
+        if (tab == nullptr)
         {
-            m_messageListTitleLabel->setText(
-                QStringLiteral("Search: %1")
-                    .arg(QString::fromStdString(*m_messageModel->searchQuery())));
-            if (m_searchTotalCount.has_value() &&
-                *m_searchTotalCount > static_cast<std::size_t>(m_messageModel->rowCount()))
-            {
-                m_messageListMetaLabel->setText(
-                    QStringLiteral("Showing %1 of %2 matches")
-                        .arg(m_messageModel->rowCount())
-                        .arg(static_cast<qulonglong>(*m_searchTotalCount)));
-            }
-            else if (m_searchTotalCount.has_value())
-            {
-                m_messageListMetaLabel->setText(
-                    QStringLiteral("%1 Matches").arg(static_cast<qulonglong>(*m_searchTotalCount)));
-            }
-            else
-            {
-                m_messageListMetaLabel->setText(
-                    QStringLiteral("%1 Matches").arg(m_messageModel->rowCount()));
-            }
+            m_messageListTitleLabel->setText(QStringLiteral("Messages"));
+            m_messageListMetaLabel->clear();
+            m_messagePageLabel->clear();
+            m_previousPageButton->setEnabled(false);
+            m_nextPageButton->setEnabled(false);
             return;
         }
 
-        const auto mailboxIndex = m_mailboxView->currentIndex();
-        const auto mailboxName = mailboxIndex.isValid()
-                                     ? mailboxIndex.data(Qt::DisplayRole).toString()
-                                     : QStringLiteral("Messages");
-        m_messageListTitleLabel->setText(mailboxName);
-        m_messageListMetaLabel->setText(
-            QStringLiteral("%1 Messages").arg(m_messageModel->rowCount()));
+        std::visit(
+            [this](const auto& content)
+            {
+                m_messageListTitleLabel->setText(content.title);
+                if (content.page.total.has_value())
+                {
+                    m_messageListMetaLabel->setText(
+                        activeTabIsSearch()
+                            ? QStringLiteral("%1 Matches")
+                                  .arg(static_cast<qulonglong>(*content.page.total))
+                            : QStringLiteral("%1 Messages")
+                                  .arg(static_cast<qulonglong>(*content.page.total)));
+                    if (*content.page.total == 0)
+                    {
+                        m_messagePageLabel->setText(QStringLiteral("0-0"));
+                    }
+                    else
+                    {
+                        const auto start = content.page.offset + 1;
+                        const auto end =
+                            std::min(content.page.offset +
+                                         static_cast<std::size_t>(m_messageModel->rowCount()),
+                                     *content.page.total);
+                        m_messagePageLabel->setText(QStringLiteral("%1-%2")
+                                                        .arg(static_cast<qulonglong>(start))
+                                                        .arg(static_cast<qulonglong>(end)));
+                    }
+                    m_previousPageButton->setEnabled(content.page.offset > 0);
+                    m_nextPageButton->setEnabled(content.page.offset + pageSize <
+                                                 *content.page.total);
+                }
+                else
+                {
+                    m_messageListMetaLabel->setText(
+                        activeTabIsSearch()
+                            ? QStringLiteral("%1 Matches").arg(m_messageModel->rowCount())
+                            : QStringLiteral("%1 Messages").arg(m_messageModel->rowCount()));
+                    m_messagePageLabel->clear();
+                    m_previousPageButton->setEnabled(content.page.offset > 0);
+                    m_nextPageButton->setEnabled(false);
+                }
+            },
+            tab->content);
     }
 
     void MainWindow::updateMessageActions()
     {
-        const bool hasSelection = currentAccountId(*m_mailboxView).has_value() &&
-                                  currentMailboxId(*m_mailboxView).has_value() &&
-                                  currentEmailId(*m_messageView).has_value();
+        const bool hasEmailSelection =
+            activeAccountId().has_value() && currentEmailId(*m_messageView).has_value();
+        const bool hasMailboxSelection = activeTabIsMailbox() && activeAccountId().has_value() &&
+                                         activeMailboxId().has_value() &&
+                                         currentEmailId(*m_messageView).has_value();
         const bool isUnread = indexIsUnread(m_messageView->currentIndex());
-        m_archiveAction->setEnabled(hasSelection);
-        m_markUnreadAction->setEnabled(hasSelection && !isUnread);
-        m_deleteAction->setEnabled(hasSelection);
-        m_moveAction->setEnabled(hasSelection);
-        m_viewSourceAction->setEnabled(hasSelection);
+        m_archiveAction->setEnabled(hasMailboxSelection);
+        m_markUnreadAction->setEnabled(hasEmailSelection && !isUnread);
+        m_deleteAction->setEnabled(hasMailboxSelection);
+        m_moveAction->setEnabled(hasMailboxSelection);
+        m_viewSourceAction->setEnabled(hasEmailSelection);
     }
 
     bool MainWindow::eventFilter(QObject* watched, QEvent* event)
@@ -968,9 +1737,9 @@ namespace javelin::gui::shell
                         m_messageModel->summaryEmailIdForThread(threadId.toStdString());
                     if (summaryEmailId.has_value())
                     {
-                        restoreSelection(
-                            currentAccountId(*m_mailboxView), currentMailboxId(*m_mailboxView),
-                            std::optional<std::string>{threadId.toStdString()}, summaryEmailId);
+                        restoreSelection(activeAccountId(), activeMailboxId(),
+                                         std::optional<std::string>{threadId.toStdString()},
+                                         summaryEmailId);
                     }
                     return true;
                 }
@@ -1261,23 +2030,13 @@ namespace javelin::gui::shell
                 }
 
                 const auto& summary = std::get<javelin::jmap::LiveRefreshSummary>(result);
-                const auto accountId = currentAccountId(*m_mailboxView).has_value()
-                                           ? currentAccountId(*m_mailboxView)
-                                           : std::optional<std::string>{summary.accountId};
-                const auto mailboxId = currentMailboxId(*m_mailboxView).has_value()
-                                           ? currentMailboxId(*m_mailboxView)
-                                           : summary.selectedMailboxId;
-                const auto threadId = currentThreadId(*m_messageView);
-                const auto emailId = currentEmailId(*m_messageView);
-                const auto messageRow = currentMessageRow(*m_messageView);
                 qInfo().noquote() << "GUI refresh succeeded"
                                   << QString::fromStdString(summary.accountId)
                                   << static_cast<qulonglong>(summary.mailboxCount)
                                   << static_cast<qulonglong>(summary.emailCount);
                 reloadAccounts();
                 refreshViewsFromCache();
-                restoreSelectionAfterMessageRefresh(accountId, mailboxId, threadId, emailId,
-                                                    messageRow);
+                refreshActiveTabFromServer();
                 statusBar()->showMessage(
                     QStringLiteral("Synced %1 mailboxes and %2 messages for %3.")
                         .arg(summary.mailboxCount)
@@ -1285,81 +2044,6 @@ namespace javelin::gui::shell
                         .arg(QString::fromStdString(summary.accountId)),
                     10000);
                 m_longPollService.applySettings(toLiveConnectionSettings(settings));
-            });
-    }
-
-    void MainWindow::refreshSelectedMailboxMessages(std::string accountId, std::string mailboxId)
-    {
-        const auto settings = javelin::gui::settings::PreferencesDialog::loadSettings();
-        if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
-            settings.apiKey.isEmpty())
-        {
-            return;
-        }
-
-        const auto refreshTarget = std::pair{accountId, mailboxId};
-        if (m_mailboxRefreshInFlight == refreshTarget)
-        {
-            return;
-        }
-
-        m_mailboxRefreshInFlight = refreshTarget;
-        qInfo().noquote() << "GUI mailbox refresh requested" << QString::fromStdString(accountId)
-                          << QString::fromStdString(mailboxId);
-        auto task = m_jmapCore.refreshMailboxMessages(
-            toLiveConnectionSettings(settings), accountId, mailboxId,
-            [this](const QString& message)
-            {
-                qInfo().noquote() << "GUI mailbox refresh progress" << message;
-                QMetaObject::invokeMethod(
-                    this, [this, message] { statusBar()->showMessage(message, 5000); },
-                    Qt::QueuedConnection);
-            });
-        QCoro::connect(
-            std::move(task), this,
-            [this, accountId = std::move(accountId),
-             mailboxId = std::move(mailboxId)](javelin::jmap::MailboxMessagesRefreshResult result)
-            {
-                const auto completedRefresh = std::pair{accountId, mailboxId};
-                if (m_mailboxRefreshInFlight == completedRefresh)
-                {
-                    m_mailboxRefreshInFlight.reset();
-                }
-
-                if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
-                {
-                    qWarning().noquote() << "GUI mailbox refresh failed" << error->message;
-                    statusBar()->showMessage(error->message, 10000);
-                    return;
-                }
-
-                const auto currentAccount = currentAccountId(*m_mailboxView);
-                const auto currentMailbox = currentMailboxId(*m_mailboxView);
-                if (currentAccount != std::optional<std::string>{accountId} ||
-                    currentMailbox != std::optional<std::string>{mailboxId})
-                {
-                    return;
-                }
-
-                const auto selectedThread = currentThreadId(*m_messageView);
-                const auto selectedEmail = currentEmailId(*m_messageView);
-                const auto selectedMessageRow = currentMessageRow(*m_messageView);
-                m_messageModel->refresh();
-                restoreSelectionAfterMessageRefresh(
-                    std::optional<std::string>{accountId}, std::optional<std::string>{mailboxId},
-                    selectedThread, selectedEmail, selectedMessageRow);
-                refreshSelectionFromModels();
-
-                const auto& summary =
-                    std::get<javelin::jmap::MailboxMessagesRefreshSummary>(result);
-                qInfo().noquote() << "GUI mailbox refresh succeeded"
-                                  << QString::fromStdString(summary.accountId)
-                                  << QString::fromStdString(summary.mailboxId)
-                                  << static_cast<qulonglong>(summary.emailCount);
-                statusBar()->showMessage(
-                    QStringLiteral("Loaded %1 messages for the selected mailbox.")
-                        .arg(summary.emailCount),
-                    5000);
             });
     }
 
@@ -1394,7 +2078,7 @@ namespace javelin::gui::shell
                     return;
                 }
 
-                const auto currentAccount = currentAccountId(*m_mailboxView);
+                const auto currentAccount = activeAccountId();
                 const auto selectedEmail = currentEmailId(*m_messageView);
                 if (currentAccount != std::optional<std::string>{accountId} ||
                     selectedEmail != std::optional<std::string>{emailId})
@@ -1422,8 +2106,8 @@ namespace javelin::gui::shell
 
     void MainWindow::archiveSelectedEmail()
     {
-        const auto accountId = currentAccountId(*m_mailboxView);
-        const auto mailboxId = currentMailboxId(*m_mailboxView);
+        const auto accountId = activeAccountId();
+        const auto mailboxId = activeMailboxId();
         const auto emailId = currentEmailId(*m_messageView);
         if (!accountId.has_value() || !mailboxId.has_value() || !emailId.has_value())
         {
@@ -1436,8 +2120,8 @@ namespace javelin::gui::shell
 
     void MainWindow::deleteSelectedEmail()
     {
-        const auto accountId = currentAccountId(*m_mailboxView);
-        const auto mailboxId = currentMailboxId(*m_mailboxView);
+        const auto accountId = activeAccountId();
+        const auto mailboxId = activeMailboxId();
         const auto emailId = currentEmailId(*m_messageView);
         if (!accountId.has_value() || !mailboxId.has_value() || !emailId.has_value())
         {
@@ -1450,8 +2134,8 @@ namespace javelin::gui::shell
 
     void MainWindow::showMoveMenu()
     {
-        const auto accountId = currentAccountId(*m_mailboxView);
-        const auto sourceMailboxId = currentMailboxId(*m_mailboxView);
+        const auto accountId = activeAccountId();
+        const auto sourceMailboxId = activeMailboxId();
         const auto emailId = currentEmailId(*m_messageView);
         if (!accountId.has_value() || !sourceMailboxId.has_value() || !emailId.has_value())
         {
@@ -1533,14 +2217,7 @@ namespace javelin::gui::shell
             return;
         }
 
-        const auto currentAccount = currentAccountId(*m_mailboxView);
-        const auto currentMailbox = currentMailboxId(*m_mailboxView);
-        const auto currentThread = currentThreadId(*m_messageView);
-        const auto currentEmail = currentEmailId(*m_messageView);
-        const auto currentMessageRowValue = currentMessageRow(*m_messageView);
-        m_messageModel->refresh();
-        restoreSelectionAfterMessageRefresh(currentAccount, currentMailbox, currentThread,
-                                            currentEmail, currentMessageRowValue);
+        refreshMessageListPreservingSelection();
         refreshSelectionFromModels();
         updateEmptyStates();
         updateMessageListHeader();
@@ -1555,32 +2232,24 @@ namespace javelin::gui::shell
 
         auto task =
             m_jmapCore.submitPendingEmailMutations(toLiveConnectionSettings(settings), accountId);
-        QCoro::connect(
-            std::move(task), this,
-            [this](javelin::jmap::SubmittedEmailMutationsResult submitResult)
-            {
-                if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&submitResult))
-                {
-                    statusBar()->showMessage(error->message, 10000);
-                    return;
-                }
+        QCoro::connect(std::move(task), this,
+                       [this](javelin::jmap::SubmittedEmailMutationsResult submitResult)
+                       {
+                           if (const auto* error =
+                                   std::get_if<javelin::jmap::LiveRefreshError>(&submitResult))
+                           {
+                               statusBar()->showMessage(error->message, 10000);
+                               return;
+                           }
 
-                const auto& summary =
-                    std::get<javelin::jmap::SubmittedEmailMutations>(submitResult);
-                if (summary.updatedEmailCount > 0)
-                {
-                    const auto selectedAccountId = currentAccountId(*m_mailboxView);
-                    const auto selectedMailboxId = currentMailboxId(*m_mailboxView);
-                    const auto selectedThreadId = currentThreadId(*m_messageView);
-                    const auto selectedEmailId = currentEmailId(*m_messageView);
-                    const auto selectedMessageRow = currentMessageRow(*m_messageView);
-                    m_messageModel->refresh();
-                    restoreSelectionAfterMessageRefresh(selectedAccountId, selectedMailboxId,
-                                                        selectedThreadId, selectedEmailId,
-                                                        selectedMessageRow);
-                    refreshSelectionFromModels();
-                }
-            });
+                           const auto& summary =
+                               std::get<javelin::jmap::SubmittedEmailMutations>(submitResult);
+                           if (summary.updatedEmailCount > 0)
+                           {
+                               refreshMessageListPreservingSelection();
+                               refreshSelectionFromModels();
+                           }
+                       });
     }
 
     void MainWindow::queueMarkEmailRead(std::string accountId, std::string emailId)
@@ -1599,7 +2268,7 @@ namespace javelin::gui::shell
 
     void MainWindow::markSelectedEmailUnread()
     {
-        const auto accountId = currentAccountId(*m_mailboxView);
+        const auto accountId = activeAccountId();
         const auto emailId = currentEmailId(*m_messageView);
         if (!accountId.has_value() || !emailId.has_value())
         {
@@ -1633,12 +2302,12 @@ namespace javelin::gui::shell
             return;
         }
 
-        const auto accountId = currentAccountId(*m_mailboxView);
-        const auto sourceMailboxId = currentMailboxId(*m_mailboxView);
+        const auto accountId = activeAccountId();
+        const auto sourceMailboxId = activeMailboxId();
         const auto emailId = index.data(javelin::gui::messages::MessageListModel::EmailIdRole)
                                  .toString()
                                  .toStdString();
-        if (!accountId.has_value() || !sourceMailboxId.has_value() || emailId.empty())
+        if (!accountId.has_value() || emailId.empty())
         {
             return;
         }
@@ -1647,53 +2316,78 @@ namespace javelin::gui::shell
 
         QMenu menu{this};
         menu.addAction(m_viewSourceAction);
-        menu.addSeparator();
-        menu.addAction(m_archiveAction);
         menu.addAction(m_markUnreadAction);
-        menu.addAction(m_deleteAction);
-        menu.addSeparator();
-        auto* moveMenu = menu.addMenu(QStringLiteral("Move to"));
-
-        const auto mailboxesResult = m_queryService.listMailboxTree(*accountId);
-        const auto* mailboxes =
-            std::get_if<std::vector<javelin::jmap::cache::MailboxTreeItem>>(&mailboxesResult);
-        if (mailboxes != nullptr)
+        if (sourceMailboxId.has_value())
         {
-            for (const auto& mailbox : *mailboxes)
+            menu.addSeparator();
+            menu.addAction(m_archiveAction);
+            menu.addAction(m_deleteAction);
+            menu.addSeparator();
+            auto* moveMenu = menu.addMenu(QStringLiteral("Move to"));
+
+            const auto mailboxesResult = m_queryService.listMailboxTree(*accountId);
+            const auto* mailboxes =
+                std::get_if<std::vector<javelin::jmap::cache::MailboxTreeItem>>(&mailboxesResult);
+            if (mailboxes != nullptr)
             {
-                if (mailbox.id == *sourceMailboxId)
+                for (const auto& mailbox : *mailboxes)
                 {
-                    continue;
-                }
+                    if (mailbox.id == *sourceMailboxId)
+                    {
+                        continue;
+                    }
 
-                auto* action = moveMenu->addAction(QString::fromStdString(mailbox.name));
-                connect(action, &QAction::triggered, this,
-                        [this, accountId = *accountId, sourceMailboxId = *sourceMailboxId,
-                         destinationMailboxId = mailbox.id, emailId]
-                        {
-                            queueMoveEmail(accountId, sourceMailboxId, destinationMailboxId,
-                                           emailId, QStringLiteral("Queued move."));
-                        });
+                    auto* action = moveMenu->addAction(QString::fromStdString(mailbox.name));
+                    connect(action, &QAction::triggered, this,
+                            [this, accountId = *accountId, sourceMailboxId = *sourceMailboxId,
+                             destinationMailboxId = mailbox.id, emailId]
+                            {
+                                queueMoveEmail(accountId, sourceMailboxId, destinationMailboxId,
+                                               emailId, QStringLiteral("Queued move."));
+                            });
+                }
             }
-        }
-        if (moveMenu->actions().empty())
-        {
-            moveMenu->setEnabled(false);
+            if (moveMenu->actions().empty())
+            {
+                moveMenu->setEnabled(false);
+            }
         }
 
         menu.exec(m_messageView->viewport()->mapToGlobal(position));
     }
 
+    void MainWindow::showMailboxContextMenu(const QPoint& position)
+    {
+        const QModelIndex index = m_mailboxView->indexAt(position);
+        if (!index.isValid())
+        {
+            return;
+        }
+
+        const auto accountId =
+            index.data(javelin::gui::mailboxes::MailboxTreeModel::AccountIdRole).toString();
+        const auto mailboxId =
+            index.data(javelin::gui::mailboxes::MailboxTreeModel::MailboxIdRole).toString();
+        if (accountId.isEmpty() || mailboxId.isEmpty())
+        {
+            return;
+        }
+
+        m_mailboxView->setCurrentIndex(index);
+
+        QMenu menu{this};
+        auto* openAsTabAction = menu.addAction(QStringLiteral("Open as Tab"));
+        connect(openAsTabAction, &QAction::triggered, this,
+                [this] { openMailboxSelectionInTab(true); });
+        menu.exec(m_mailboxView->viewport()->mapToGlobal(position));
+    }
+
     void MainWindow::refreshMessageListPreservingSelection()
     {
-        const auto currentAccount = currentAccountId(*m_mailboxView);
-        const auto currentMailbox = currentMailboxId(*m_mailboxView);
-        const auto currentThread = currentThreadId(*m_messageView);
-        const auto currentEmail = currentEmailId(*m_messageView);
+        syncActiveTabSelectionFromViews();
 
         QSignalBlocker blocker{m_messageView->selectionModel()};
-        m_messageModel->refresh();
-        restoreSelection(currentAccount, currentMailbox, currentThread, currentEmail);
+        loadActiveTabFromCache();
     }
 
     void MainWindow::submitQueuedEmailMutations(std::string accountId)
@@ -1731,7 +2425,7 @@ namespace javelin::gui::shell
 
     void MainWindow::viewSelectedMessageSource()
     {
-        const auto accountId = currentAccountId(*m_mailboxView);
+        const auto accountId = activeAccountId();
         const auto emailId = currentEmailId(*m_messageView);
         if (!accountId.has_value() || !emailId.has_value())
         {
@@ -1822,31 +2516,176 @@ namespace javelin::gui::shell
             m_mainSplitter->restoreState(splitterState);
         }
 
-        const auto selectedAccountId = settings.value(QLatin1StringView{accountIdKey}).toString();
-        const auto selectedMailboxId = settings.value(QLatin1StringView{mailboxIdKey}).toString();
-        const auto selectedThreadId = settings.value(QLatin1StringView{threadIdKey}).toString();
-        const auto selectedEmailId = settings.value(QLatin1StringView{emailIdKey}).toString();
+        const auto activeTabIndexValue =
+            settings.value(QLatin1StringView{activeTabIndexKey}, 0).toInt();
+        const auto tabCount = settings.beginReadArray(QLatin1StringView{tabsKey});
+        m_tabs.clear();
+        m_tabs.reserve(static_cast<std::size_t>(std::max(0, tabCount)));
+        for (int tabIndex = 0; tabIndex < tabCount; ++tabIndex)
+        {
+            settings.setArrayIndex(tabIndex);
+            const auto type = settings.value(QStringLiteral("type")).toString();
+            const auto accountId = settings.value(QStringLiteral("accountId")).toString();
+            if (type.isEmpty() || accountId.isEmpty())
+            {
+                continue;
+            }
+
+            if (type == QStringLiteral("mailbox"))
+            {
+                const auto mailboxId = settings.value(QStringLiteral("mailboxId")).toString();
+                if (mailboxId.isEmpty())
+                {
+                    continue;
+                }
+
+                m_tabs.push_back(TabState{
+                    .content =
+                        MailboxTabState{
+                            .accountId = accountId.toStdString(),
+                            .mailboxId = mailboxId.toStdString(),
+                            .title = settings.value(QStringLiteral("title"), mailboxId).toString(),
+                            .page =
+                                PageState{
+                                    .offset = static_cast<std::size_t>(
+                                        settings.value(QStringLiteral("offset"), 0).toULongLong()),
+                                    .total = std::nullopt,
+                                    .items = {},
+                                },
+                            .selection =
+                                TabSelectionState{
+                                    .threadId =
+                                        settings.value(QStringLiteral("threadId"))
+                                                .toString()
+                                                .isEmpty()
+                                            ? std::nullopt
+                                            : std::optional<std::string>{settings
+                                                                             .value(QStringLiteral(
+                                                                                 "threadId"))
+                                                                             .toString()
+                                                                             .toStdString()},
+                                    .emailId =
+                                        settings.value(QStringLiteral("emailId"))
+                                                .toString()
+                                                .isEmpty()
+                                            ? std::nullopt
+                                            : std::optional<std::string>{settings
+                                                                             .value(QStringLiteral(
+                                                                                 "emailId"))
+                                                                             .toString()
+                                                                             .toStdString()},
+                                },
+                        },
+                });
+                continue;
+            }
+
+            if (type == QStringLiteral("search"))
+            {
+                const auto query = settings.value(QStringLiteral("query")).toString();
+                const auto cachedItems =
+                    QJsonDocument::fromJson(
+                        settings.value(QStringLiteral("cachedItems")).toByteArray())
+                        .array();
+                std::vector<javelin::jmap::cache::MessageListItem> items;
+                items.reserve(static_cast<std::size_t>(cachedItems.size()));
+                for (const auto& itemValue : cachedItems)
+                {
+                    if (const auto item = deserializeMessageListItem(itemValue))
+                    {
+                        items.push_back(*item);
+                    }
+                }
+
+                m_tabs.push_back(
+                    TabState{
+                        .content =
+                            SearchTabState{
+                                .accountId = accountId.toStdString(),
+                                .query = query.toStdString(),
+                                .title = settings
+                                             .value(QStringLiteral("title"),
+                                                    QStringLiteral("Search: %1").arg(query))
+                                             .toString(),
+                                .page =
+                                    PageState{
+                                        .offset = static_cast<std::size_t>(
+                                            settings.value(QStringLiteral("offset"), 0)
+                                                .toULongLong()),
+                                        .total = settings.value(QStringLiteral("total")).isValid()
+                                                     ? std::optional<
+                                                           std::size_t>{static_cast<std::size_t>(
+                                                           settings.value(QStringLiteral("total"))
+                                                               .toULongLong())}
+                                                     : std::nullopt,
+                                        .items = std::move(items),
+                                    },
+                                .selection =
+                                    TabSelectionState{
+                                        .threadId = settings.value(QStringLiteral("threadId"))
+                                                            .toString()
+                                                            .isEmpty()
+                                                        ? std::nullopt
+                                                        : std::optional<std::string>{settings
+                                                                                         .value(
+                                                                                             QStringLiteral("t"
+                                                                                                            "h"
+                                                                                                            "r"
+                                                                                                            "e"
+                                                                                                            "a"
+                                                                                                            "d"
+                                                                                                            "I"
+                                                                                                            "d"))
+                                                                                         .toString()
+                                                                                         .toStdString()},
+                                        .emailId =
+                                            settings.value(QStringLiteral("emailId"))
+                                                    .toString()
+                                                    .isEmpty()
+                                                ? std::nullopt
+                                                : std::optional<std::string>{settings
+                                                                                 .value(
+                                                                                     QStringLiteral(
+                                                                                         "emailId"))
+                                                                                 .toString()
+                                                                                 .toStdString()},
+                                    },
+                            },
+                    });
+            }
+        }
+        settings.endArray();
 
         settings.endGroup();
-        restoreSelection(
-            selectedAccountId.isEmpty()
-                ? std::optional<std::string>{std::nullopt}
-                : std::optional<std::string>{selectedAccountId.toStdString()},
-            selectedMailboxId.isEmpty()
-                ? std::optional<std::string>{std::nullopt}
-                : std::optional<std::string>{selectedMailboxId.toStdString()},
-            selectedThreadId.isEmpty() ? std::optional<std::string>{std::nullopt}
-                                       : std::optional<std::string>{selectedThreadId.toStdString()},
-            selectedEmailId.isEmpty() ? std::optional<std::string>{std::nullopt}
-                                      : std::optional<std::string>{selectedEmailId.toStdString()});
-
-        const auto restoredAccountId = currentAccountId(*m_mailboxView);
-        const auto restoredMailboxId = currentMailboxId(*m_mailboxView);
-        m_messageModel->setMailboxContext(restoredAccountId, restoredMailboxId);
-        refreshSelectionFromModels();
-        if (restoredAccountId.has_value() && restoredMailboxId.has_value())
+        if (m_tabs.empty())
         {
-            refreshSelectedMailboxMessages(*restoredAccountId, *restoredMailboxId);
+            for (int rootRow = 0; rootRow < m_mailboxModel->rowCount(); ++rootRow)
+            {
+                const auto rootIndex = m_mailboxModel->index(rootRow, 0);
+                if (!rootIndex.isValid() || m_mailboxModel->rowCount(rootIndex) <= 0)
+                {
+                    continue;
+                }
+
+                const auto mailboxIndex = m_mailboxModel->index(0, 0, rootIndex);
+                if (!mailboxIndex.isValid())
+                {
+                    continue;
+                }
+
+                m_mailboxView->setCurrentIndex(mailboxIndex);
+                activateMailboxSelection(true);
+                break;
+            }
+            return;
+        }
+
+        m_activeTabIndex = std::clamp(activeTabIndexValue, 0, static_cast<int>(m_tabs.size() - 1));
+        updateTabBar();
+        activateTab(*m_activeTabIndex, false);
+        for (std::size_t index = 0; index < m_tabs.size(); ++index)
+        {
+            refreshTabFromServer(index);
         }
     }
 
@@ -1854,24 +2693,63 @@ namespace javelin::gui::shell
     {
         QSettings settings;
         settings.beginGroup(QLatin1StringView{windowGroup});
-        const auto selectedAccountId = currentAccountId(*m_mailboxView);
-        const auto selectedMailboxId = currentMailboxId(*m_mailboxView);
-        const auto selectedThreadId = currentThreadId(*m_messageView);
-        const auto selectedEmailId = currentEmailId(*m_messageView);
         settings.setValue(QLatin1StringView{geometryKey}, saveGeometry());
         settings.setValue(QLatin1StringView{splitterKey}, m_mainSplitter->saveState());
-        settings.setValue(QLatin1StringView{accountIdKey},
-                          selectedAccountId.has_value() ? QString::fromStdString(*selectedAccountId)
-                                                        : QString{});
-        settings.setValue(QLatin1StringView{mailboxIdKey},
-                          selectedMailboxId.has_value() ? QString::fromStdString(*selectedMailboxId)
-                                                        : QString{});
-        settings.setValue(QLatin1StringView{threadIdKey},
-                          selectedThreadId.has_value() ? QString::fromStdString(*selectedThreadId)
-                                                       : QString{});
-        settings.setValue(QLatin1StringView{emailIdKey},
-                          selectedEmailId.has_value() ? QString::fromStdString(*selectedEmailId)
-                                                      : QString{});
+        settings.setValue(QLatin1StringView{activeTabIndexKey}, m_activeTabIndex.value_or(0));
+        settings.beginWriteArray(QLatin1StringView{tabsKey});
+        for (int tabIndex = 0; tabIndex < static_cast<int>(m_tabs.size()); ++tabIndex)
+        {
+            settings.setArrayIndex(tabIndex);
+            const auto& tab = m_tabs[static_cast<std::size_t>(tabIndex)];
+            std::visit(
+                [&settings](const auto& content)
+                {
+                    settings.setValue(QStringLiteral("accountId"),
+                                      QString::fromStdString(content.accountId));
+                    settings.setValue(QStringLiteral("title"), content.title);
+                    settings.setValue(QStringLiteral("offset"),
+                                      static_cast<qulonglong>(content.page.offset));
+                    settings.setValue(QStringLiteral("threadId"),
+                                      content.selection.threadId.has_value()
+                                          ? QString::fromStdString(*content.selection.threadId)
+                                          : QString{});
+                    settings.setValue(QStringLiteral("emailId"),
+                                      content.selection.emailId.has_value()
+                                          ? QString::fromStdString(*content.selection.emailId)
+                                          : QString{});
+                    if constexpr (std::is_same_v<std::decay_t<decltype(content)>, MailboxTabState>)
+                    {
+                        settings.setValue(QStringLiteral("type"), QStringLiteral("mailbox"));
+                        settings.setValue(QStringLiteral("mailboxId"),
+                                          QString::fromStdString(content.mailboxId));
+                    }
+                    else
+                    {
+                        settings.setValue(QStringLiteral("type"), QStringLiteral("search"));
+                        settings.setValue(QStringLiteral("query"),
+                                          QString::fromStdString(content.query));
+                        if (content.page.total.has_value())
+                        {
+                            settings.setValue(QStringLiteral("total"),
+                                              static_cast<qulonglong>(*content.page.total));
+                        }
+                        else
+                        {
+                            settings.remove(QStringLiteral("total"));
+                        }
+
+                        QJsonArray itemsArray;
+                        for (const auto& item : content.page.items)
+                        {
+                            itemsArray.push_back(serializeMessageListItem(item));
+                        }
+                        settings.setValue(QStringLiteral("cachedItems"),
+                                          QJsonDocument{itemsArray}.toJson(QJsonDocument::Compact));
+                    }
+                },
+                tab.content);
+        }
+        settings.endArray();
         settings.endGroup();
         settings.sync();
     }

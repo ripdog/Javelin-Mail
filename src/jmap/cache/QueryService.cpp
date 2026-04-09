@@ -1,5 +1,7 @@
 #include "jmap/cache/QueryService.h"
 
+#include <glaze/glaze.hpp>
+
 #include <QSqlError>
 #include <QSqlQuery>
 
@@ -183,6 +185,132 @@ namespace javelin::jmap::cache
     }
 
     std::variant<std::vector<MessageListItem>, DatabaseError>
+    QueryService::listMessagesByEmailIds(const std::string_view accountId,
+                                         const std::vector<std::string>& emailIds) const
+    {
+        if (const auto error = m_connection.validate())
+        {
+            return *error;
+        }
+
+        if (emailIds.empty())
+        {
+            return std::vector<MessageListItem>{};
+        }
+
+        std::string emailIdsJson;
+        if (const auto writeError = glz::write_json(emailIds, emailIdsJson))
+        {
+            Q_UNUSED(writeError);
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message = QStringLiteral("Serialize message id list for cache query failed."),
+            };
+        }
+
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "WITH requested AS ("
+            "  SELECT value AS email_id, CAST(key AS INTEGER) AS sort_index "
+            "  FROM json_each(:email_ids_json)"
+            ") "
+            "SELECT e.email_id, e.thread_id, e.subject, e.preview, e.received_at, e.sent_at, "
+            "       COALESCE(thread_size.thread_message_count, 1) AS thread_message_count, "
+            "       COALESCE(thread_flags.thread_has_attachment, e.has_attachment) AS "
+            "thread_has_attachment, "
+            "       COALESCE(thread_flags.thread_has_unread, CASE WHEN seen.email_id IS NULL THEN "
+            "1 "
+            "ELSE 0 END) AS thread_has_unread, "
+            "       COALESCE(thread_flags.thread_has_flagged, CASE WHEN flagged.email_id IS NULL "
+            "THEN 0 ELSE 1 END) AS thread_has_flagged, "
+            "       ("
+            "         SELECT a.display_name FROM email_addresses a "
+            "         WHERE a.account_id = :account_id AND a.email_id = e.email_id "
+            "           AND a.field_name = 'from' "
+            "         ORDER BY a.position LIMIT 1"
+            "       ) AS from_name, "
+            "       ("
+            "         SELECT a.address FROM email_addresses a "
+            "         WHERE a.account_id = :account_id AND a.email_id = e.email_id "
+            "           AND a.field_name = 'from' "
+            "         ORDER BY a.position LIMIT 1"
+            "       ) AS from_email "
+            "FROM requested r "
+            "INNER JOIN emails e ON e.account_id = :account_id AND e.email_id = r.email_id "
+            "LEFT JOIN ("
+            "  SELECT e2.thread_id, COUNT(*) AS thread_message_count "
+            "  FROM emails e2 "
+            "  WHERE e2.account_id = :account_id "
+            "  GROUP BY e2.thread_id"
+            ") AS thread_size ON thread_size.thread_id = e.thread_id "
+            "LEFT JOIN ("
+            "  SELECT e3.thread_id, MAX(e3.has_attachment) AS thread_has_attachment, "
+            "         MAX(CASE WHEN seen3.email_id IS NULL THEN 1 ELSE 0 END) AS "
+            "thread_has_unread, "
+            "         MAX(CASE WHEN flagged3.email_id IS NULL THEN 0 ELSE 1 END) AS "
+            "thread_has_flagged "
+            "  FROM emails e3 "
+            "  LEFT JOIN email_keywords seen3 ON seen3.account_id = e3.account_id "
+            "       AND seen3.email_id = e3.email_id AND seen3.keyword = '$seen' "
+            "  LEFT JOIN email_keywords flagged3 ON flagged3.account_id = e3.account_id "
+            "       AND flagged3.email_id = e3.email_id AND flagged3.keyword = '$flagged' "
+            "  WHERE e3.account_id = :account_id "
+            "  GROUP BY e3.thread_id"
+            ") AS thread_flags ON thread_flags.thread_id = e.thread_id "
+            "LEFT JOIN email_keywords seen ON seen.account_id = e.account_id "
+            "     AND seen.email_id = e.email_id AND seen.keyword = '$seen' "
+            "LEFT JOIN email_keywords flagged ON flagged.account_id = e.account_id "
+            "     AND flagged.email_id = e.email_id AND flagged.keyword = '$flagged' "
+            "ORDER BY r.sort_index ASC"));
+        query.bindValue(QStringLiteral(":account_id"),
+                        QString::fromStdString(std::string{accountId}));
+        query.bindValue(QStringLiteral(":email_ids_json"), QString::fromStdString(emailIdsJson));
+        if (!query.exec())
+        {
+            return makeQueryError(QStringLiteral("Read message list by email ids"), query);
+        }
+
+        std::vector<MessageListItem> items;
+        items.reserve(emailIds.size());
+        while (query.next())
+        {
+            MessageListItem item{
+                .emailId = query.value(0).toString().toStdString(),
+                .threadId = query.value(1).toString().toStdString(),
+                .subject = query.value(2).isNull()
+                               ? std::nullopt
+                               : std::optional{query.value(2).toString().toStdString()},
+                .preview = query.value(3).isNull()
+                               ? std::nullopt
+                               : std::optional{query.value(3).toString().toStdString()},
+                .receivedAt = query.value(4).toString().toStdString(),
+                .sentAt = query.value(5).isNull()
+                              ? std::nullopt
+                              : std::optional{query.value(5).toString().toStdString()},
+                .threadMessageCount = query.value(6).toULongLong(),
+                .hasAttachment = query.value(7).toInt() != 0,
+                .isUnread = query.value(8).toInt() != 0,
+                .isFlagged = query.value(9).toInt() != 0,
+                .from = std::nullopt,
+            };
+
+            if (!query.value(11).isNull())
+            {
+                item.from = javelin::jmap::domain::EmailAddress{
+                    .name = query.value(10).isNull()
+                                ? std::nullopt
+                                : std::optional{query.value(10).toString().toStdString()},
+                    .email = query.value(11).toString().toStdString(),
+                };
+            }
+
+            items.push_back(std::move(item));
+        }
+
+        return items;
+    }
+
+    std::variant<std::vector<MessageListItem>, DatabaseError>
     QueryService::listThreadMessages(const std::string_view accountId,
                                      const std::string_view threadId) const
     {
@@ -265,6 +393,39 @@ namespace javelin::jmap::cache
         }
 
         return items;
+    }
+
+    std::variant<std::size_t, DatabaseError>
+    QueryService::countMailboxMessages(const std::string_view accountId,
+                                       const std::string_view mailboxId) const
+    {
+        if (const auto error = m_connection.validate())
+        {
+            return *error;
+        }
+
+        QSqlQuery query{m_connection.database()};
+        query.prepare(
+            QStringLiteral("SELECT COUNT(DISTINCT e.thread_id) "
+                           "FROM emails e "
+                           "INNER JOIN email_mailboxes em ON em.account_id = e.account_id "
+                           "    AND em.email_id = e.email_id "
+                           "WHERE e.account_id = :account_id AND em.mailbox_id = :mailbox_id"));
+        query.bindValue(QStringLiteral(":account_id"),
+                        QString::fromStdString(std::string{accountId}));
+        query.bindValue(QStringLiteral(":mailbox_id"),
+                        QString::fromStdString(std::string{mailboxId}));
+        if (!query.exec())
+        {
+            return makeQueryError(QStringLiteral("Count mailbox message list"), query);
+        }
+
+        if (!query.next())
+        {
+            return static_cast<std::size_t>(0);
+        }
+
+        return static_cast<std::size_t>(query.value(0).toULongLong());
     }
 
 } // namespace javelin::jmap::cache

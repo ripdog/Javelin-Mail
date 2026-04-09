@@ -694,6 +694,232 @@ namespace javelin::jmap
             };
         }
 
+        struct CollapsedQueryPage
+        {
+            std::size_t representativeCount = 0;
+            std::optional<std::size_t> total;
+            std::vector<javelin::jmap::cache::MessageListItem> results;
+        };
+
+        [[nodiscard]] QCoro::Task<std::variant<CollapsedQueryPage, LiveRefreshError>>
+        performCollapsedQueryPage(javelin::jmap::cache::DatabaseConnection& databaseConnection,
+                                  javelin::jmap::api::AbstractTransport& transport,
+                                  const LiveConnectionSettings& settings,
+                                  const std::string& accountId,
+                                  const javelin::jmap::api::EmailQueryFilter& filter,
+                                  const std::size_t offset, const std::size_t limit,
+                                  const std::function<void(const QString&)>& reportProgress)
+        {
+            if (const auto validationError = validateLoginSettings(settings, true))
+            {
+                co_return *validationError;
+            }
+
+            const auto sessionResult = loadCachedSession(databaseConnection, accountId);
+            if (const auto* error = std::get_if<LiveRefreshError>(&sessionResult))
+            {
+                co_return *error;
+            }
+            const auto& session = std::get<javelin::jmap::api::Session>(sessionResult);
+
+            javelin::jmap::api::MethodCaller methodCaller{transport};
+            const auto apiRequestContext = buildApiRequestContext(settings, accountId, session);
+
+            javelin::jmap::api::RequestBuilder builder;
+            builder.useCore().useMail();
+
+            const auto queryRequest = javelin::jmap::api::emailQuery({
+                .accountId = accountId,
+                .filter = filter,
+                .sort =
+                    {
+                        javelin::jmap::api::EmailQuerySort{
+                            .property = "receivedAt",
+                            .isAscending = false,
+                        },
+                    },
+                .position = static_cast<std::uint64_t>(offset),
+                .limit = static_cast<std::uint64_t>(limit),
+                .collapseThreads = true,
+                .calculateTotal = true,
+            });
+            if (!queryRequest.has_value())
+            {
+                co_return LiveRefreshError{
+                    .message = QStringLiteral("Failed to encode the Email/query request."),
+                };
+            }
+            const auto queryHandle = builder.call(*queryRequest, "page-query");
+
+            const auto representativeRequest = javelin::jmap::api::emailGet(
+                javelin::jmap::api::getRequestFrom(accountId, queryHandle, "/ids"));
+            if (!representativeRequest.has_value())
+            {
+                co_return LiveRefreshError{
+                    .message =
+                        QStringLiteral("Failed to encode the representative Email/get request."),
+                };
+            }
+            const auto representativeHandle =
+                builder.call(*representativeRequest, "page-representatives-get");
+
+            const auto threadRequest =
+                javelin::jmap::api::threadGet(javelin::jmap::api::getRequestFrom(
+                    accountId, representativeHandle, "/list/*/threadId"));
+            if (!threadRequest.has_value())
+            {
+                co_return LiveRefreshError{
+                    .message = QStringLiteral("Failed to encode the Thread/get request."),
+                };
+            }
+            const auto threadHandle = builder.call(*threadRequest, "page-threads-get");
+
+            const auto emailRequest = javelin::jmap::api::emailGet(
+                javelin::jmap::api::getRequestFrom(accountId, threadHandle, "/list/*/emailIds"));
+            if (!emailRequest.has_value())
+            {
+                co_return LiveRefreshError{
+                    .message = QStringLiteral("Failed to encode the page Email/get request."),
+                };
+            }
+            const auto emailHandle = builder.call(*emailRequest, "page-emails-get");
+
+            const auto envelopeResult = co_await methodCaller.call(apiRequestContext, builder);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::api::TransportError>(&envelopeResult))
+            {
+                co_return LiveRefreshError{.message = transportMessage(*error)};
+            }
+            if (const auto* error = std::get_if<javelin::jmap::api::AuthError>(&envelopeResult))
+            {
+                co_return LiveRefreshError{.message = authMessage(*error)};
+            }
+            if (const auto* error = std::get_if<javelin::jmap::api::ProtocolError>(&envelopeResult))
+            {
+                co_return LiveRefreshError{.message = protocolMessage(*error)};
+            }
+
+            const auto& envelope = std::get<javelin::jmap::api::ResponseEnvelope>(envelopeResult);
+            const javelin::jmap::api::ResponseReader reader{envelope};
+
+            const auto queryResult = reader.require(queryHandle);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::api::ResponseReaderError>(&queryResult))
+            {
+                co_return LiveRefreshError{
+                    .message = QStringLiteral("Failed to read Email/query response: %1")
+                                   .arg(QString::fromStdString(error->message)),
+                };
+            }
+            const auto& parsedQuery = std::get<javelin::jmap::api::EmailQueryResponse>(queryResult);
+            if (reportProgress)
+            {
+                reportProgress(QStringLiteral("Fetched %1 matching conversations.")
+                                   .arg(static_cast<qulonglong>(parsedQuery.ids.size())));
+            }
+
+            if (parsedQuery.ids.empty())
+            {
+                co_return CollapsedQueryPage{
+                    .representativeCount = 0,
+                    .total = parsedQuery.total.has_value()
+                                 ? std::optional<std::size_t>{static_cast<std::size_t>(
+                                       *parsedQuery.total)}
+                                 : std::nullopt,
+                    .results = {},
+                };
+            }
+
+            const auto representativeResult = reader.require(representativeHandle);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::api::ResponseReaderError>(&representativeResult))
+            {
+                co_return LiveRefreshError{
+                    .message =
+                        QStringLiteral("Failed to read representative Email/get response: %1")
+                            .arg(QString::fromStdString(error->message)),
+                };
+            }
+            const auto& parsedRepresentatives =
+                std::get<javelin::jmap::api::EmailGetResponse>(representativeResult);
+
+            const auto threadResult = reader.require(threadHandle);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::api::ResponseReaderError>(&threadResult))
+            {
+                co_return LiveRefreshError{
+                    .message = QStringLiteral("Failed to read Thread/get response: %1")
+                                   .arg(QString::fromStdString(error->message)),
+                };
+            }
+            const auto& parsedThreads =
+                std::get<javelin::jmap::api::ThreadGetResponse>(threadResult);
+
+            const auto emailResult = reader.require(emailHandle);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::api::ResponseReaderError>(&emailResult))
+            {
+                co_return LiveRefreshError{
+                    .message = QStringLiteral("Failed to read Email/get response: %1")
+                                   .arg(QString::fromStdString(error->message)),
+                };
+            }
+            const auto& parsedEmails = std::get<javelin::jmap::api::EmailGetResponse>(emailResult);
+
+            javelin::jmap::cache::EmailRepository emailRepository{databaseConnection};
+            if (const auto error = emailRepository.upsertMany(accountId, parsedEmails.list))
+            {
+                co_return LiveRefreshError{.message = error->message};
+            }
+
+            javelin::jmap::cache::ThreadRepository threadRepository{databaseConnection};
+            if (const auto error = threadRepository.upsertMany(accountId, parsedThreads.list))
+            {
+                co_return LiveRefreshError{.message = error->message};
+            }
+
+            std::unordered_map<std::string, std::size_t> threadMessageCounts;
+            threadMessageCounts.reserve(parsedThreads.list.size());
+            for (const auto& thread : parsedThreads.list)
+            {
+                threadMessageCounts.emplace(thread.id, thread.emailIds.size());
+            }
+
+            std::unordered_map<std::string, const javelin::jmap::domain::Email*>
+                representativesById;
+            representativesById.reserve(parsedRepresentatives.list.size());
+            for (const auto& email : parsedRepresentatives.list)
+            {
+                representativesById.emplace(email.id, &email);
+            }
+
+            std::vector<javelin::jmap::cache::MessageListItem> results;
+            results.reserve(parsedQuery.ids.size());
+            for (const auto& representativeId : parsedQuery.ids)
+            {
+                const auto representativeIt = representativesById.find(representativeId);
+                if (representativeIt == representativesById.end())
+                {
+                    continue;
+                }
+
+                const auto* email = representativeIt->second;
+                const auto threadCountIt = threadMessageCounts.find(email->threadId);
+                results.push_back(messageListItemFromEmail(
+                    *email,
+                    threadCountIt == threadMessageCounts.end() ? 1 : threadCountIt->second));
+            }
+
+            co_return CollapsedQueryPage{
+                .representativeCount = results.size(),
+                .total =
+                    parsedQuery.total.has_value()
+                        ? std::optional<std::size_t>{static_cast<std::size_t>(*parsedQuery.total)}
+                        : std::nullopt,
+                .results = std::move(results),
+            };
+        }
+
     } // namespace
 
     JmapCore::JmapCore() : m_impl(std::make_unique<Impl>())
@@ -1575,7 +1801,7 @@ namespace javelin::jmap
 
     QCoro::Task<MessageSearchResult>
     JmapCore::searchMessages(LiveConnectionSettings settings, std::string accountId,
-                             std::string query, const std::size_t limit,
+                             std::string query, const std::size_t offset, const std::size_t limit,
                              std::function<void(const QString&)> progressCallback)
     {
         const auto reportProgress = [&progressCallback](const QString& message)
@@ -1603,213 +1829,76 @@ namespace javelin::jmap
             };
         }
 
-        if (const auto validationError = validateLoginSettings(settings, true))
-        {
-            co_return *validationError;
-        }
-
-        const auto sessionResult = loadCachedSession(*m_impl->databaseConnection, accountId);
-        if (const auto* error = std::get_if<LiveRefreshError>(&sessionResult))
+        const auto pageResult = co_await performCollapsedQueryPage(
+            *m_impl->databaseConnection, *m_impl->transport, settings, accountId,
+            javelin::jmap::api::EmailQueryFilter{
+                .inMailbox = std::nullopt,
+                .text = query,
+            },
+            offset, limit, reportProgress);
+        if (const auto* error = std::get_if<LiveRefreshError>(&pageResult))
         {
             co_return *error;
         }
-        const auto& session = std::get<javelin::jmap::api::Session>(sessionResult);
 
-        javelin::jmap::api::MethodCaller methodCaller{*m_impl->transport};
-        const auto apiRequestContext = buildApiRequestContext(settings, accountId, session);
-
-        javelin::jmap::api::RequestBuilder builder;
-        builder.useCore().useMail();
-
-        const auto queryRequest = javelin::jmap::api::emailQuery({
-            .accountId = accountId,
-            .filter =
-                javelin::jmap::api::EmailQueryFilter{
-                    .inMailbox = std::nullopt,
-                    .text = query,
-                },
-            .sort =
-                {
-                    javelin::jmap::api::EmailQuerySort{
-                        .property = "receivedAt",
-                        .isAscending = false,
-                    },
-                },
-            .position = 0,
-            .limit = limit,
-            .collapseThreads = true,
-            .calculateTotal = true,
-        });
-        if (!queryRequest.has_value())
-        {
-            co_return LiveRefreshError{
-                .message = QStringLiteral("Failed to encode the Email/query search request."),
-            };
-        }
-        const auto queryHandle = builder.call(*queryRequest, "search-query");
-
-        const auto representativeRequest = javelin::jmap::api::emailGet(
-            javelin::jmap::api::getRequestFrom(accountId, queryHandle, "/ids"));
-        if (!representativeRequest.has_value())
-        {
-            co_return LiveRefreshError{
-                .message =
-                    QStringLiteral("Failed to encode the search representative Email/get request."),
-            };
-        }
-        const auto representativeHandle =
-            builder.call(*representativeRequest, "search-representatives-get");
-
-        const auto threadRequest = javelin::jmap::api::threadGet(javelin::jmap::api::getRequestFrom(
-            accountId, representativeHandle, "/list/*/threadId"));
-        if (!threadRequest.has_value())
-        {
-            co_return LiveRefreshError{
-                .message = QStringLiteral("Failed to encode the search Thread/get request."),
-            };
-        }
-        const auto threadHandle = builder.call(*threadRequest, "search-threads-get");
-
-        const auto emailRequest = javelin::jmap::api::emailGet(
-            javelin::jmap::api::getRequestFrom(accountId, threadHandle, "/list/*/emailIds"));
-        if (!emailRequest.has_value())
-        {
-            co_return LiveRefreshError{
-                .message = QStringLiteral("Failed to encode the search Email/get request."),
-            };
-        }
-        const auto emailHandle = builder.call(*emailRequest, "search-emails-get");
-
-        const auto envelopeResult = co_await methodCaller.call(apiRequestContext, builder);
-        if (const auto* error = std::get_if<javelin::jmap::api::TransportError>(&envelopeResult))
-        {
-            co_return LiveRefreshError{.message = transportMessage(*error)};
-        }
-        if (const auto* error = std::get_if<javelin::jmap::api::AuthError>(&envelopeResult))
-        {
-            co_return LiveRefreshError{.message = authMessage(*error)};
-        }
-        if (const auto* error = std::get_if<javelin::jmap::api::ProtocolError>(&envelopeResult))
-        {
-            co_return LiveRefreshError{.message = protocolMessage(*error)};
-        }
-
-        const auto& envelope = std::get<javelin::jmap::api::ResponseEnvelope>(envelopeResult);
-        const javelin::jmap::api::ResponseReader reader{envelope};
-
-        const auto queryResult = reader.require(queryHandle);
-        if (const auto* error = std::get_if<javelin::jmap::api::ResponseReaderError>(&queryResult))
-        {
-            co_return LiveRefreshError{
-                .message = QStringLiteral("Failed to read Email/query search response: %1")
-                               .arg(QString::fromStdString(error->message)),
-            };
-        }
-        const auto& parsedQuery = std::get<javelin::jmap::api::EmailQueryResponse>(queryResult);
-
-        if (parsedQuery.ids.empty())
-        {
-            co_return MessageSearchSummary{
-                .accountId = std::move(accountId),
-                .query = std::move(query),
-                .representativeCount = 0,
-                .total =
-                    parsedQuery.total.has_value()
-                        ? std::optional<std::size_t>{static_cast<std::size_t>(*parsedQuery.total)}
-                        : std::nullopt,
-                .results = {},
-            };
-        }
-
-        reportProgress(QStringLiteral("Fetched %1 matching conversations.")
-                           .arg(static_cast<qulonglong>(parsedQuery.ids.size())));
-
-        const auto representativeResult = reader.require(representativeHandle);
-        if (const auto* error =
-                std::get_if<javelin::jmap::api::ResponseReaderError>(&representativeResult))
-        {
-            co_return LiveRefreshError{
-                .message =
-                    QStringLiteral("Failed to read search representative Email/get response: %1")
-                        .arg(QString::fromStdString(error->message)),
-            };
-        }
-        const auto& parsedRepresentatives =
-            std::get<javelin::jmap::api::EmailGetResponse>(representativeResult);
-
-        const auto threadResult = reader.require(threadHandle);
-        if (const auto* error = std::get_if<javelin::jmap::api::ResponseReaderError>(&threadResult))
-        {
-            co_return LiveRefreshError{
-                .message = QStringLiteral("Failed to read search Thread/get response: %1")
-                               .arg(QString::fromStdString(error->message)),
-            };
-        }
-        const auto& parsedThreads = std::get<javelin::jmap::api::ThreadGetResponse>(threadResult);
-
-        const auto emailResult = reader.require(emailHandle);
-        if (const auto* error = std::get_if<javelin::jmap::api::ResponseReaderError>(&emailResult))
-        {
-            co_return LiveRefreshError{
-                .message = QStringLiteral("Failed to read search Email/get response: %1")
-                               .arg(QString::fromStdString(error->message)),
-            };
-        }
-        const auto& parsedEmails = std::get<javelin::jmap::api::EmailGetResponse>(emailResult);
-
-        javelin::jmap::cache::EmailRepository emailRepository{*m_impl->databaseConnection};
-        if (const auto error = emailRepository.upsertMany(accountId, parsedEmails.list))
-        {
-            co_return LiveRefreshError{.message = error->message};
-        }
-
-        javelin::jmap::cache::ThreadRepository threadRepository{*m_impl->databaseConnection};
-        if (const auto error = threadRepository.upsertMany(accountId, parsedThreads.list))
-        {
-            co_return LiveRefreshError{.message = error->message};
-        }
-
-        std::unordered_map<std::string, std::size_t> threadMessageCounts;
-        threadMessageCounts.reserve(parsedThreads.list.size());
-        for (const auto& thread : parsedThreads.list)
-        {
-            threadMessageCounts.emplace(thread.id, thread.emailIds.size());
-        }
-
-        std::unordered_map<std::string, const javelin::jmap::domain::Email*> representativesById;
-        representativesById.reserve(parsedRepresentatives.list.size());
-        for (const auto& email : parsedRepresentatives.list)
-        {
-            representativesById.emplace(email.id, &email);
-        }
-
-        std::vector<javelin::jmap::cache::MessageListItem> results;
-        results.reserve(parsedQuery.ids.size());
-        for (const auto& representativeId : parsedQuery.ids)
-        {
-            const auto representativeIt = representativesById.find(representativeId);
-            if (representativeIt == representativesById.end())
-            {
-                continue;
-            }
-
-            const auto* email = representativeIt->second;
-            const auto threadCountIt = threadMessageCounts.find(email->threadId);
-            results.push_back(messageListItemFromEmail(
-                *email, threadCountIt == threadMessageCounts.end() ? 1 : threadCountIt->second));
-        }
-
-        reportProgress(QStringLiteral("Loaded %1 matching messages into the local working set.")
-                           .arg(static_cast<qulonglong>(parsedEmails.list.size())));
-
+        auto page = std::get<CollapsedQueryPage>(std::move(pageResult));
         co_return MessageSearchSummary{
             .accountId = std::move(accountId),
             .query = std::move(query),
-            .representativeCount = results.size(),
-            .total = parsedQuery.total.has_value()
-                         ? std::optional<std::size_t>{static_cast<std::size_t>(*parsedQuery.total)}
-                         : std::nullopt,
-            .results = std::move(results),
+            .offset = offset,
+            .limit = limit,
+            .representativeCount = page.representativeCount,
+            .total = page.total,
+            .results = std::move(page.results),
+        };
+    }
+
+    QCoro::Task<MailboxPageResult>
+    JmapCore::queryMailboxPage(LiveConnectionSettings settings, std::string accountId,
+                               std::string mailboxId, const std::size_t offset,
+                               const std::size_t limit,
+                               std::function<void(const QString&)> progressCallback)
+    {
+        const auto reportProgress = [&progressCallback](const QString& message)
+        {
+            if (progressCallback)
+            {
+                progressCallback(message);
+            }
+        };
+
+        qInfo().noquote() << "JMAP core mailbox page query" << QString::fromStdString(accountId)
+                          << QString::fromStdString(mailboxId) << static_cast<qulonglong>(offset)
+                          << static_cast<qulonglong>(limit);
+        reportProgress(QStringLiteral("Fetching mailbox page from the server..."));
+        if (m_impl->databaseConnection == nullptr || m_impl->transport == nullptr)
+        {
+            co_return LiveRefreshError{
+                .message = QStringLiteral("JMAP core is not wired to the cache and transport yet."),
+            };
+        }
+
+        const auto pageResult = co_await performCollapsedQueryPage(
+            *m_impl->databaseConnection, *m_impl->transport, settings, accountId,
+            javelin::jmap::api::EmailQueryFilter{
+                .inMailbox = mailboxId,
+                .text = std::nullopt,
+            },
+            offset, limit, reportProgress);
+        if (const auto* error = std::get_if<LiveRefreshError>(&pageResult))
+        {
+            co_return *error;
+        }
+
+        auto page = std::get<CollapsedQueryPage>(std::move(pageResult));
+        co_return MailboxPageSummary{
+            .accountId = std::move(accountId),
+            .mailboxId = std::move(mailboxId),
+            .offset = offset,
+            .limit = limit,
+            .representativeCount = page.representativeCount,
+            .total = page.total,
+            .results = std::move(page.results),
         };
     }
 

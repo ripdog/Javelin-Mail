@@ -131,63 +131,37 @@ namespace javelin::gui::messages
         return {};
     }
 
-    void MessageListModel::setMailboxContext(std::optional<std::string> accountId,
-                                             std::optional<std::string> mailboxId)
-    {
-        if (m_accountId == accountId && m_mailboxId == mailboxId && !m_searchQuery.has_value())
-        {
-            return;
-        }
-
-        m_accountId = std::move(accountId);
-        m_mailboxId = std::move(mailboxId);
-        m_searchQuery.reset();
-        reload();
-    }
-
-    void
-    MessageListModel::setSearchResults(std::string accountId, std::string query,
-                                       std::vector<javelin::jmap::cache::MessageListItem> results)
+    void MessageListModel::setPage(std::optional<std::string> accountId,
+                                   std::vector<javelin::jmap::cache::MessageListItem> items)
     {
         beginResetModel();
         m_accountId = std::move(accountId);
-        m_mailboxId.reset();
-        m_searchQuery = std::move(query);
         m_threads.clear();
-        m_threads.reserve(results.size());
-        for (auto& result : results)
+        m_threads.reserve(items.size());
+
+        std::vector<std::string> survivingExpandedThreadIds;
+        survivingExpandedThreadIds.reserve(m_expandedThreadIds.size());
+        for (auto& item : items)
         {
+            if (containsThreadId(m_expandedThreadIds, item.threadId))
+            {
+                survivingExpandedThreadIds.push_back(item.threadId);
+            }
+
             m_threads.push_back(ThreadEntry{
-                .summary = std::move(result),
+                .summary = std::move(item),
                 .members = {},
                 .membersLoaded = false,
             });
         }
+        m_expandedThreadIds = std::move(survivingExpandedThreadIds);
         rebuildVisibleRows();
         endResetModel();
     }
 
-    void MessageListModel::clearSearch()
+    void MessageListModel::clear()
     {
-        if (!m_searchQuery.has_value())
-        {
-            return;
-        }
-
-        m_searchQuery.reset();
-        reload();
-    }
-
-    void MessageListModel::refresh()
-    {
-        if (m_searchQuery.has_value())
-        {
-            // Search results are an explicit server snapshot. Keep them stable until the user
-            // reruns or clears the search instead of collapsing back to an empty mailbox context.
-            return;
-        }
-
-        reload();
+        setPage(std::nullopt, {});
     }
 
     bool MessageListModel::setThreadExpanded(const std::string_view threadId, const bool expanded)
@@ -294,16 +268,6 @@ namespace javelin::gui::messages
         return m_threads[*threadIndex].summary.emailId;
     }
 
-    bool MessageListModel::isSearchMode() const
-    {
-        return m_searchQuery.has_value();
-    }
-
-    const std::optional<std::string>& MessageListModel::searchQuery() const
-    {
-        return m_searchQuery;
-    }
-
     const javelin::jmap::cache::MessageListItem&
     MessageListModel::itemForRow(const VisibleRow& row) const
     {
@@ -407,41 +371,6 @@ namespace javelin::gui::messages
                 });
             }
         }
-    }
-
-    void MessageListModel::reload()
-    {
-        std::vector<ThreadEntry> threads;
-        std::vector<std::string> survivingExpandedThreadIds;
-
-        if (m_accountId.has_value() && m_mailboxId.has_value() && !m_searchQuery.has_value())
-        {
-            const auto result = m_queryService.listMailboxMessages(*m_accountId, *m_mailboxId, 100);
-            if (const auto* items =
-                    std::get_if<std::vector<javelin::jmap::cache::MessageListItem>>(&result))
-            {
-                threads.reserve(items->size());
-                for (const auto& item : *items)
-                {
-                    ThreadEntry entry{
-                        .summary = item,
-                        .members = {},
-                        .membersLoaded = false,
-                    };
-                    if (containsThreadId(m_expandedThreadIds, item.threadId))
-                    {
-                        survivingExpandedThreadIds.push_back(item.threadId);
-                    }
-                    threads.push_back(std::move(entry));
-                }
-            }
-        }
-
-        beginResetModel();
-        m_threads = std::move(threads);
-        m_expandedThreadIds = std::move(survivingExpandedThreadIds);
-        rebuildVisibleRows();
-        endResetModel();
     }
 
 } // namespace javelin::gui::messages

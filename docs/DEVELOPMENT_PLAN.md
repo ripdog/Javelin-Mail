@@ -614,6 +614,11 @@ Goals:
 
 - Use JMAP server-side search for corpus-wide discovery instead of building local full-text indexing.
 
+Status:
+
+- Implemented with generic paged tabs for both mailbox and search contexts.
+- Search tabs persist their cached page locally for immediate restore, then refresh from the server on launch.
+
 Tasks:
 
 - Implement typed search query building for the supported JMAP mail query features.

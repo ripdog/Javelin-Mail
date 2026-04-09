@@ -47,19 +47,14 @@ namespace javelin::gui::messages
         [[nodiscard]] int rowCount(const QModelIndex& parent = QModelIndex{}) const override;
         [[nodiscard]] QVariant data(const QModelIndex& index, int role) const override;
 
-        void setMailboxContext(std::optional<std::string> accountId,
-                               std::optional<std::string> mailboxId);
-        void setSearchResults(std::string accountId, std::string query,
-                              std::vector<javelin::jmap::cache::MessageListItem> results);
-        void clearSearch();
-        void refresh();
+        void setPage(std::optional<std::string> accountId,
+                     std::vector<javelin::jmap::cache::MessageListItem> items);
+        void clear();
         [[nodiscard]] bool setThreadExpanded(std::string_view threadId, bool expanded);
         [[nodiscard]] bool toggleThreadExpanded(std::string_view threadId);
         [[nodiscard]] bool isThreadExpanded(std::string_view threadId) const;
         [[nodiscard]] std::optional<std::string>
         summaryEmailIdForThread(std::string_view threadId) const;
-        [[nodiscard]] bool isSearchMode() const;
-        [[nodiscard]] const std::optional<std::string>& searchQuery() const;
 
       private:
         struct ThreadEntry
@@ -82,12 +77,9 @@ namespace javelin::gui::messages
         [[nodiscard]] std::optional<int> visibleSummaryRowForThread(std::size_t threadIndex) const;
         [[nodiscard]] bool loadThreadMembers(std::size_t threadIndex);
         void rebuildVisibleRows();
-        void reload();
 
         javelin::jmap::cache::QueryService& m_queryService;
         std::optional<std::string> m_accountId;
-        std::optional<std::string> m_mailboxId;
-        std::optional<std::string> m_searchQuery;
         std::vector<ThreadEntry> m_threads;
         std::vector<VisibleRow> m_rows;
         std::vector<std::string> m_expandedThreadIds;

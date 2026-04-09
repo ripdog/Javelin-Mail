@@ -262,6 +262,56 @@ TEST_CASE("query service returns thread messages in cached thread order", "[jmap
     CHECK(items[2].emailId == "eml-3");
 }
 
+TEST_CASE("query service rehydrates cached representative rows by email id order",
+          "[jmap][cache][query]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+
+    auto first = loadEmailFixture();
+    first.id = "eml-1";
+    first.threadId = "thr-1";
+    first.receivedAt = "2026-04-05T11:22:33Z";
+    first.keywords = {"$seen"};
+
+    auto second = first;
+    second.id = "eml-2";
+    second.threadId = "thr-1";
+    second.receivedAt = "2026-04-06T11:22:33Z";
+    second.subject = "Later message";
+    second.keywords = {"$flagged"};
+
+    auto third = first;
+    third.id = "eml-3";
+    third.threadId = "thr-2";
+    third.receivedAt = "2026-04-04T11:22:33Z";
+    third.subject = "Other thread";
+    third.keywords.clear();
+
+    javelin::jmap::cache::EmailRepository emailRepository{databaseContext.connection};
+    REQUIRE_FALSE(emailRepository.replaceAll("account-1", {first, second, third}).has_value());
+
+    javelin::jmap::cache::QueryService queryService{databaseContext.connection};
+    const auto result = queryService.listMessagesByEmailIds("account-1", {"eml-3", "eml-2"});
+
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MessageListItem>>(result));
+    const auto& items = std::get<std::vector<javelin::jmap::cache::MessageListItem>>(result);
+    REQUIRE(items.size() == 2);
+    CHECK(items[0].emailId == "eml-3");
+    CHECK(items[0].threadId == "thr-2");
+    CHECK(items[0].threadMessageCount == 1);
+    CHECK(items[0].isUnread);
+    CHECK_FALSE(items[0].isFlagged);
+    CHECK(items[1].emailId == "eml-2");
+    CHECK(items[1].threadId == "thr-1");
+    CHECK(items[1].threadMessageCount == 2);
+    CHECK(items[1].isUnread);
+    CHECK(items[1].isFlagged);
+}
+
 TEST_CASE("query service SQL plans use the intended cache indexes", "[jmap][cache][query]")
 {
     ApplicationGuard application;

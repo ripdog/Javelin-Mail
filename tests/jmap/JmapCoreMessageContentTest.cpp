@@ -1,5 +1,6 @@
 #include "FixtureReader.h"
 #include "jmap/JmapCore.h"
+#include "jmap/api/MethodEnvelope.h"
 #include "jmap/api/SessionParser.h"
 #include "jmap/api/Transport.h"
 #include "jmap/cache/EmailRepository.h"
@@ -19,8 +20,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <functional>
 #include <memory>
 #include <optional>
+#include <unordered_map>
 #include <variant>
 #include <vector>
 
@@ -52,11 +55,17 @@ namespace
       public:
         std::vector<javelin::jmap::api::HttpRequest> requests;
         std::vector<javelin::jmap::api::TransportResult> queuedResults;
+        std::function<javelin::jmap::api::TransportResult(const javelin::jmap::api::HttpRequest&)>
+            responseFactory;
 
         [[nodiscard]] QCoro::Task<javelin::jmap::api::TransportResult>
         send(const javelin::jmap::api::HttpRequest& request) override
         {
             requests.push_back(request);
+            if (responseFactory)
+            {
+                co_return responseFactory(request);
+            }
             REQUIRE_FALSE(queuedResults.empty());
             auto result = std::move(queuedResults.front());
             queuedResults.erase(queuedResults.begin());
@@ -231,11 +240,51 @@ TEST_CASE("JmapCore searchMessages uses Email/query text filters and caches thre
     REQUIRE_FALSE(sessionRepository.replace("u1", session).has_value());
 
     FakeTransport transport;
-    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
-        .statusCode = 200,
-        .body =
-            R"({"methodResponses":[["Email/query",{"accountId":"u1","queryState":"query-state-1","canCalculateChanges":true,"position":0,"ids":["eml-2"],"total":1},"search-query"],["Email/get",{"accountId":"u1","state":"email-state-1","list":[{"id":"eml-2","blobId":"blob-2","threadId":"thr-1","mailboxIds":{"mbx-inbox":true},"keywords":{"$flagged":true},"size":4096,"receivedAt":"2026-04-06T11:22:33Z","sentAt":"2026-04-06T11:21:00Z","hasAttachment":true,"subject":"Quarterly update","from":[{"name":"Alice Sender","email":"alice@example.com"}],"to":[{"name":"Bob Recipient","email":"bob@example.com"}],"cc":[],"bcc":[],"replyTo":[],"preview":"Quarterly preview"}],"notFound":[]},"search-representatives-get"],["Thread/get",{"accountId":"u1","state":"thread-state-1","list":[{"id":"thr-1","emailIds":["eml-1","eml-2"]}],"notFound":[]},"search-threads-get"],["Email/get",{"accountId":"u1","state":"email-state-1","list":[{"id":"eml-1","blobId":"blob-1","threadId":"thr-1","mailboxIds":{"mbx-inbox":true},"keywords":{"$seen":true},"size":1024,"receivedAt":"2026-04-05T11:22:33Z","sentAt":"2026-04-05T11:21:00Z","hasAttachment":false,"subject":"Earlier note","from":[{"name":"Alice Sender","email":"alice@example.com"}],"to":[{"name":"Bob Recipient","email":"bob@example.com"}],"cc":[],"bcc":[],"replyTo":[],"preview":"Earlier preview"},{"id":"eml-2","blobId":"blob-2","threadId":"thr-1","mailboxIds":{"mbx-inbox":true},"keywords":{"$flagged":true},"size":4096,"receivedAt":"2026-04-06T11:22:33Z","sentAt":"2026-04-06T11:21:00Z","hasAttachment":true,"subject":"Quarterly update","from":[{"name":"Alice Sender","email":"alice@example.com"}],"to":[{"name":"Bob Recipient","email":"bob@example.com"}],"cc":[],"bcc":[],"replyTo":[],"preview":"Quarterly preview"}],"notFound":[]},"search-emails-get"]],"createdIds":{},"sessionState":"session-state-2"})",
-    });
+    transport.responseFactory = [](const javelin::jmap::api::HttpRequest& request)
+    {
+        const auto envelope = javelin::jmap::api::parseRequestEnvelope(request.body.toStdString());
+        REQUIRE(envelope.ok());
+        REQUIRE(envelope.value.has_value());
+        REQUIRE(envelope.value->methodCalls.size() == 4);
+
+        javelin::jmap::api::ResponseEnvelope response{
+            .methodResponses =
+                {
+                    javelin::jmap::api::MethodInvocation{
+                        .name = "Email/query",
+                        .arguments =
+                            R"({"accountId":"u1","queryState":"query-state-1","canCalculateChanges":true,"position":0,"ids":["eml-2"],"total":1})",
+                        .callId = envelope.value->methodCalls[0].callId,
+                    },
+                    javelin::jmap::api::MethodInvocation{
+                        .name = "Email/get",
+                        .arguments =
+                            R"({"accountId":"u1","state":"email-state-1","list":[{"id":"eml-2","blobId":"blob-2","threadId":"thr-1","mailboxIds":{"mbx-inbox":true},"keywords":{"$flagged":true},"size":4096,"receivedAt":"2026-04-06T11:22:33Z","sentAt":"2026-04-06T11:21:00Z","hasAttachment":true,"subject":"Quarterly update","from":[{"name":"Alice Sender","email":"alice@example.com"}],"to":[{"name":"Bob Recipient","email":"bob@example.com"}],"cc":[],"bcc":[],"replyTo":[],"preview":"Quarterly preview"}],"notFound":[]})",
+                        .callId = envelope.value->methodCalls[1].callId,
+                    },
+                    javelin::jmap::api::MethodInvocation{
+                        .name = "Thread/get",
+                        .arguments =
+                            R"({"accountId":"u1","state":"thread-state-1","list":[{"id":"thr-1","emailIds":["eml-1","eml-2"]}],"notFound":[]})",
+                        .callId = envelope.value->methodCalls[2].callId,
+                    },
+                    javelin::jmap::api::MethodInvocation{
+                        .name = "Email/get",
+                        .arguments =
+                            R"({"accountId":"u1","state":"email-state-1","list":[{"id":"eml-1","blobId":"blob-1","threadId":"thr-1","mailboxIds":{"mbx-inbox":true},"keywords":{"$seen":true},"size":1024,"receivedAt":"2026-04-05T11:22:33Z","sentAt":"2026-04-05T11:21:00Z","hasAttachment":false,"subject":"Earlier note","from":[{"name":"Alice Sender","email":"alice@example.com"}],"to":[{"name":"Bob Recipient","email":"bob@example.com"}],"cc":[],"bcc":[],"replyTo":[],"preview":"Earlier preview"},{"id":"eml-2","blobId":"blob-2","threadId":"thr-1","mailboxIds":{"mbx-inbox":true},"keywords":{"$flagged":true},"size":4096,"receivedAt":"2026-04-06T11:22:33Z","sentAt":"2026-04-06T11:21:00Z","hasAttachment":true,"subject":"Quarterly update","from":[{"name":"Alice Sender","email":"alice@example.com"}],"to":[{"name":"Bob Recipient","email":"bob@example.com"}],"cc":[],"bcc":[],"replyTo":[],"preview":"Quarterly preview"}],"notFound":[]})",
+                        .callId = envelope.value->methodCalls[3].callId,
+                    },
+                },
+            .createdIds = std::unordered_map<std::string, std::string>{},
+            .sessionState = "session-state-2",
+        };
+        const auto body = javelin::jmap::api::serializeResponseEnvelope(response);
+        REQUIRE(body.has_value());
+        return javelin::jmap::api::TransportResult{javelin::jmap::api::HttpResponse{
+            .statusCode = 200,
+            .body = QByteArray::fromStdString(*body),
+        }};
+    };
 
     javelin::jmap::JmapCore core{databaseContext.connection, transport};
     const auto result = QCoro::waitFor(core.searchMessages(
@@ -244,7 +293,7 @@ TEST_CASE("JmapCore searchMessages uses Email/query text filters and caches thre
             .loginEmail = "alice@example.com",
             .apiKey = "access-token",
         },
-        "u1", "quarterly"));
+        "u1", "quarterly", 0));
 
     if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
     {

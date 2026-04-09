@@ -75,12 +75,27 @@ namespace javelin::jmap
     {
         std::string accountId;
         std::string query;
+        std::size_t offset = 0;
+        std::size_t limit = 0;
         std::size_t representativeCount = 0;
         std::optional<std::size_t> total;
         std::vector<javelin::jmap::cache::MessageListItem> results;
     };
 
     using MessageSearchResult = std::variant<MessageSearchSummary, LiveRefreshError>;
+
+    struct MailboxPageSummary
+    {
+        std::string accountId;
+        std::string mailboxId;
+        std::size_t offset = 0;
+        std::size_t limit = 0;
+        std::size_t representativeCount = 0;
+        std::optional<std::size_t> total;
+        std::vector<javelin::jmap::cache::MessageListItem> results;
+    };
+
+    using MailboxPageResult = std::variant<MailboxPageSummary, LiveRefreshError>;
 
     struct QueuedEmailMutation
     {
@@ -150,9 +165,13 @@ namespace javelin::jmap
         refreshMailboxMessages(LiveConnectionSettings settings, std::string accountId,
                                std::string mailboxId,
                                std::function<void(const QString&)> progressCallback = {});
+        [[nodiscard]] QCoro::Task<MailboxPageResult>
+        queryMailboxPage(LiveConnectionSettings settings, std::string accountId,
+                         std::string mailboxId, std::size_t offset = 0, std::size_t limit = 100,
+                         std::function<void(const QString&)> progressCallback = {});
         [[nodiscard]] QCoro::Task<MessageSearchResult>
         searchMessages(LiveConnectionSettings settings, std::string accountId, std::string query,
-                       std::size_t limit = 100,
+                       std::size_t offset = 0, std::size_t limit = 100,
                        std::function<void(const QString&)> progressCallback = {});
         [[nodiscard]] QCoro::Task<AttachmentDownloadResult>
         downloadAttachment(LiveConnectionSettings settings, std::string accountId,
