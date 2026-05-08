@@ -63,6 +63,7 @@ namespace javelin::app
         std::unique_ptr<javelin::jmap::JmapCore> m_jmapCore;
         javelin::jmap::cache::DatabaseConnection m_databaseConnection;
         std::unique_ptr<QNetworkAccessManager> m_networkAccessManager;
+        std::unique_ptr<QNetworkAccessManager> m_longPollNetworkAccessManager;
         std::unique_ptr<javelin::jmap::api::QtNetworkTransport> m_transport;
         std::unique_ptr<InlineMessageSchemeHandler> m_inlineMessageSchemeHandler;
         std::unique_ptr<javelin::jmap::cache::AccountRepository> m_accountRepository;

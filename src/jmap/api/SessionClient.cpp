@@ -48,10 +48,6 @@ namespace javelin::jmap::api
     QCoro::Task<SessionClientResult>
     SessionClient::discover(const javelin::jmap::auth::SessionRequestContext& requestContext) const
     {
-        qInfo().noquote() << "JMAP session discovery start"
-                          << QString::fromStdString(requestContext.credentials.sessionUrl)
-                          << QString::fromStdString(requestContext.credentials.emailAddress);
-
         const javelin::jmap::auth::AccessTokenResolver accessTokenResolver{m_tokenRefresher,
                                                                            m_secretStore};
         const auto tokenResult = accessTokenResolver.resolve(requestContext.credentials);
@@ -91,8 +87,6 @@ namespace javelin::jmap::api
             };
         }
 
-        qInfo().noquote() << "JMAP session discovery success"
-                          << QString::fromStdString(parseResult.session->apiUrl);
         co_return *parseResult.session;
     }
 

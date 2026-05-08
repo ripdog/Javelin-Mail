@@ -101,8 +101,7 @@ namespace javelin::jmap::api
         const auto statusCodeAttribute = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute);
         const int statusCode = statusCodeAttribute.isValid() ? statusCodeAttribute.toInt() : 0;
         const QByteArray responseBody = reply->readAll();
-        qInfo().noquote() << "JMAP transport response" << request.url.toString() << statusCode
-                          << summarizeBody(responseBody);
+        qInfo().noquote() << "JMAP transport response" << request.url.toString() << statusCode;
         if (statusCode >= 400)
         {
             qWarning().noquote() << "JMAP transport HTTP failure" << request.url.toString()

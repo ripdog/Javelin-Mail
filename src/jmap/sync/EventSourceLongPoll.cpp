@@ -273,6 +273,23 @@ namespace javelin::jmap::sync
     {
     }
 
+    EventSourceLongPollChannel::~EventSourceLongPollChannel()
+    {
+        cancel();
+    }
+
+    void EventSourceLongPollChannel::cancel()
+    {
+        if (m_activeReply.isNull())
+        {
+            return;
+        }
+
+        qInfo().noquote() << "Long poll aborting active event-source request"
+                          << m_activeReply->url().toString();
+        m_activeReply->abort();
+    }
+
     QCoro::Task<LongPollResult> EventSourceLongPollChannel::poll(const LongPollRequest& request)
     {
         const auto url = buildEventSourceUrl(request);
@@ -298,9 +315,14 @@ namespace javelin::jmap::sync
         }
 
         QNetworkReply* reply = m_networkAccessManager.get(networkRequest);
+        m_activeReply = reply;
         const auto deleteReply = qScopeGuard(
-            [reply]()
+            [this, reply]()
             {
+                if (m_activeReply == reply)
+                {
+                    m_activeReply.clear();
+                }
                 if (reply != nullptr)
                 {
                     reply->deleteLater();
@@ -308,6 +330,14 @@ namespace javelin::jmap::sync
             });
 
         bool connectedReported = false;
+        QObject::connect(reply, &QObject::destroyed, reply,
+                         [this, reply]()
+                         {
+                             if (m_activeReply == reply)
+                             {
+                                 m_activeReply.clear();
+                             }
+                         });
         QObject::connect(reply, &QNetworkReply::metaDataChanged, reply,
                          [this, reply, &connectedReported]()
                          {

@@ -4,9 +4,12 @@
 
 #include <QCoroTask>
 
+#include <QPointer>
+
 #include <string>
 
 class QNetworkAccessManager;
+class QNetworkReply;
 
 namespace javelin::jmap::sync
 {
@@ -23,13 +26,16 @@ namespace javelin::jmap::sync
         EventSourceLongPollChannel(QNetworkAccessManager& networkAccessManager,
                                    std::string accessToken,
                                    LongPollStatusCallback statusCallback = {});
+        ~EventSourceLongPollChannel() override;
 
         [[nodiscard]] QCoro::Task<LongPollResult> poll(const LongPollRequest& request) override;
+        void cancel();
 
       private:
         QNetworkAccessManager& m_networkAccessManager;
         std::string m_accessToken;
         LongPollStatusCallback m_statusCallback;
+        QPointer<QNetworkReply> m_activeReply;
     };
 
 } // namespace javelin::jmap::sync

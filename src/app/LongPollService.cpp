@@ -62,6 +62,10 @@ namespace javelin::app
     {
         if (m_runContext != nullptr)
         {
+            if (m_runContext->channel != nullptr)
+            {
+                m_runContext->channel->cancel();
+            }
             m_runContext->cancellation.cancel();
             m_runContext.reset();
         }

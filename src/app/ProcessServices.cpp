@@ -51,6 +51,7 @@ namespace javelin::app
         m_databaseConnection =
             std::get<javelin::jmap::cache::DatabaseConnection>(std::move(databaseResult));
         m_networkAccessManager = std::make_unique<QNetworkAccessManager>();
+        m_longPollNetworkAccessManager = std::make_unique<QNetworkAccessManager>();
         m_transport =
             std::make_unique<javelin::jmap::api::QtNetworkTransport>(*m_networkAccessManager);
         m_inlineMessageSchemeHandler =
@@ -71,7 +72,8 @@ namespace javelin::app
         m_composeService = std::make_unique<javelin::jmap::submission::ComposeService>(
             m_databaseConnection, *m_transport, *m_jmapCore);
         m_longPollService = std::make_unique<LongPollService>(
-            m_databaseConnection, *m_transport, *m_networkAccessManager, *m_accountRepository,
+            m_databaseConnection, *m_transport, *m_longPollNetworkAccessManager,
+            *m_accountRepository,
             *m_queryService);
     }
 

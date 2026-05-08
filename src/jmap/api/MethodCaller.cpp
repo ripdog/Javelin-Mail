@@ -52,9 +52,6 @@ namespace javelin::jmap::api
     QCoro::Task<MethodCallerResult> MethodCaller::call(const ApiRequestContext& requestContext,
                                                        const RequestEnvelope& request) const
     {
-        qInfo().noquote() << "JMAP method call start"
-                          << QString::fromStdString(requestContext.apiUrl)
-                          << static_cast<int>(request.methodCalls.size());
         const auto serializedRequest = serializeRequestEnvelope(request);
         if (!serializedRequest.has_value())
         {
@@ -99,8 +96,6 @@ namespace javelin::jmap::api
             };
         }
 
-        qInfo() << "JMAP method call success"
-                << static_cast<int>(parseResult.value->methodResponses.size());
         co_return *parseResult.value;
     }
 

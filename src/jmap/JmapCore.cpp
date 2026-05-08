@@ -1019,11 +1019,7 @@ namespace javelin::jmap
         qInfo().noquote() << "JMAP core mailbox request context ready"
                           << QString::fromStdString(apiRequestContext.apiUrl);
 
-        qInfo() << "JMAP core before method caller construction";
         javelin::jmap::api::MethodCaller methodCaller{*m_impl->transport};
-        qInfo() << "JMAP core method caller ready";
-
-        qInfo() << "JMAP core serializing Mailbox/get request";
         const auto mailboxRequest = javelin::jmap::api::mailboxGet({.accountId = accountId,
                                                                     .ids = std::nullopt,
                                                                     .idsReference = std::nullopt,
@@ -1040,8 +1036,6 @@ namespace javelin::jmap
         javelin::jmap::api::RequestBuilder mailboxRequestBuilder;
         mailboxRequestBuilder.useCore().useMail();
         const auto mailboxHandle = mailboxRequestBuilder.call(*mailboxRequest, "mailboxes");
-        qInfo() << "JMAP core Mailbox/get envelope ready";
-        qInfo() << "JMAP core before Mailbox/get await";
 
         const auto mailboxEnvelopeResult =
             co_await methodCaller.call(apiRequestContext, mailboxRequestBuilder);
