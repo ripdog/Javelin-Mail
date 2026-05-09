@@ -1,7 +1,7 @@
 #pragma once
 
-#include "jmap/submission/ComposeTypes.h"
 #include "jmap/cache/QueryService.h"
+#include "jmap/submission/ComposeTypes.h"
 
 #include <KXmlGuiWindow>
 #include <QModelIndex>
@@ -200,8 +200,19 @@ namespace javelin::gui::shell
         void refreshViewsFromCache();
         void refreshFromServer();
         void refreshSelectedMessageContent(std::string accountId, std::string emailId);
+        [[nodiscard]] std::vector<std::string> selectedEmailIds() const;
+        [[nodiscard]] std::vector<javelin::jmap::cache::MessageListItem>
+        selectedMessageSummaries() const;
+        void selectMessageAlone(const QString& emailId);
         void queueArchiveEmail(std::string accountId, std::string mailboxId, std::string emailId);
         void queueDeleteEmail(std::string accountId, std::string mailboxId, std::string emailId);
+        void queueArchiveEmails(std::string accountId, std::string mailboxId,
+                                std::vector<std::string> emailIds);
+        void queueDeleteEmails(std::string accountId, std::string mailboxId,
+                               std::vector<std::string> emailIds);
+        void queueMoveEmails(std::string accountId, std::string sourceMailboxId,
+                             std::string destinationMailboxId, std::vector<std::string> emailIds,
+                             QString successMessage);
         void queueMoveEmail(std::string accountId, std::string sourceMailboxId,
                             std::string destinationMailboxId, std::string emailId,
                             QString successMessage);

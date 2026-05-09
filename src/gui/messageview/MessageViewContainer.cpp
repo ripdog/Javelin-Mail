@@ -2,9 +2,9 @@
 #include "gui/messageview/HtmlMessageView.h"
 
 #include <QApplication>
-#include <QFrame>
 #include <QFileIconProvider>
 #include <QFileInfo>
+#include <QFrame>
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -14,10 +14,11 @@
 #include <QMouseEvent>
 #include <QPlainTextEdit>
 #include <QProgressBar>
+#include <QScrollArea>
 #include <QSizePolicy>
 #include <QStackedWidget>
-#include <QStyle>
 #include <QStringList>
+#include <QStyle>
 #include <QToolButton>
 #include <QVBoxLayout>
 
@@ -30,13 +31,14 @@ namespace javelin::gui::messageview
     namespace
     {
 
-        [[nodiscard]] QString attachmentName(const javelin::jmap::cache::MessageAttachment& attachment)
+        [[nodiscard]] QString
+        attachmentName(const javelin::jmap::cache::MessageAttachment& attachment)
         {
             return QString::fromStdString(attachment.name.value_or(attachment.partId));
         }
 
-        [[nodiscard]] QString attachmentSizeLabel(
-            const javelin::jmap::cache::MessageAttachment& attachment)
+        [[nodiscard]] QString
+        attachmentSizeLabel(const javelin::jmap::cache::MessageAttachment& attachment)
         {
             return QLocale{}.formattedDataSize(static_cast<qint64>(attachment.size));
         }
@@ -49,7 +51,8 @@ namespace javelin::gui::messageview
             label->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
         }
 
-        [[nodiscard]] QIcon attachmentIcon(const javelin::jmap::cache::MessageAttachment& attachment)
+        [[nodiscard]] QIcon
+        attachmentIcon(const javelin::jmap::cache::MessageAttachment& attachment)
         {
             const auto fileName = attachmentName(attachment);
             const QFileInfo fileInfo(fileName);
@@ -159,6 +162,67 @@ namespace javelin::gui::messageview
             std::function<void()> m_saveAction;
         };
 
+        class MessagePreviewTile : public QFrame
+        {
+          public:
+            MessagePreviewTile(const javelin::jmap::cache::MessageListItem& message,
+                               std::function<void()> activateAction, QWidget* parent = nullptr)
+                : QFrame(parent), m_activateAction(std::move(activateAction))
+            {
+                setCursor(Qt::PointingHandCursor);
+                setFrameStyle(QFrame::NoFrame);
+                setObjectName(QStringLiteral("messagePreviewTile"));
+                setStyleSheet(QStringLiteral(
+                    "#messagePreviewTile { background: transparent; border: none; }"
+                    "#messagePreviewTile:hover { background: rgba(255, 255, 255, 0.06); }"));
+
+                auto* layout = new QVBoxLayout(this);
+                layout->setContentsMargins(8, 8, 8, 8);
+                layout->setSpacing(4);
+
+                const auto subject = message.subject.has_value()
+                                         ? QString::fromStdString(*message.subject)
+                                         : QStringLiteral("(no subject)");
+                auto* subjectLabel = new QLabel(subject, this);
+                subjectLabel->setWordWrap(true);
+                auto subjectFont = subjectLabel->font();
+                subjectFont.setBold(true);
+                subjectFont.setPointSize(subjectFont.pointSize() + 1);
+                subjectLabel->setFont(subjectFont);
+
+                const auto preview = message.preview.has_value()
+                                         ? QString::fromStdString(*message.preview)
+                                         : QStringLiteral("(no preview available)");
+                auto* previewLabel = new QLabel(preview, this);
+                previewLabel->setWordWrap(true);
+                previewLabel->setMaximumHeight(previewLabel->fontMetrics().lineSpacing() * 2 + 6);
+                previewLabel->setStyleSheet(QStringLiteral("color: #c5cad3;"));
+
+                layout->addWidget(subjectLabel);
+                layout->addWidget(previewLabel);
+            }
+
+          protected:
+            void mouseReleaseEvent(QMouseEvent* event) override
+            {
+                if (event->button() == Qt::LeftButton &&
+                    rect().contains(event->position().toPoint()))
+                {
+                    if (m_activateAction)
+                    {
+                        m_activateAction();
+                    }
+                    event->accept();
+                    return;
+                }
+
+                QFrame::mouseReleaseEvent(event);
+            }
+
+          private:
+            std::function<void()> m_activateAction;
+        };
+
         [[nodiscard]] std::vector<const javelin::jmap::cache::MessageAttachment*>
         visibleAttachments(const std::optional<javelin::jmap::cache::MessageViewSnapshot>& snapshot)
         {
@@ -253,15 +317,14 @@ namespace javelin::gui::messageview
         placeholderCard->setMinimumWidth(280);
         placeholderCard->setMaximumWidth(520);
         placeholderCard->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
-        placeholderCard->setStyleSheet(QStringLiteral(
-            "#messagePlaceholderCard {"
-            " background: #1f2126;"
-            " border: 1px solid #393d46;"
-            " border-radius: 16px;"
-            "}"
-            "#messagePlaceholderCard QLabel {"
-            " color: #e6e9ef;"
-            "}"));
+        placeholderCard->setStyleSheet(QStringLiteral("#messagePlaceholderCard {"
+                                                      " background: #1f2126;"
+                                                      " border: 1px solid #393d46;"
+                                                      " border-radius: 16px;"
+                                                      "}"
+                                                      "#messagePlaceholderCard QLabel {"
+                                                      " color: #e6e9ef;"
+                                                      "}"));
 
         auto* placeholderCardLayout = new QVBoxLayout(placeholderCard);
         placeholderCardLayout->setContentsMargins(24, 22, 24, 22);
@@ -285,16 +348,15 @@ namespace javelin::gui::messageview
         m_loadingIndicator->setTextVisible(false);
         m_loadingIndicator->setFixedHeight(8);
         m_loadingIndicator->setVisible(false);
-        m_loadingIndicator->setStyleSheet(QStringLiteral(
-            "QProgressBar {"
-            " background: #2a2d34;"
-            " border: 1px solid #393d46;"
-            " border-radius: 4px;"
-            "}"
-            "QProgressBar::chunk {"
-            " background: #7fb0ff;"
-            " border-radius: 4px;"
-            "}"));
+        m_loadingIndicator->setStyleSheet(QStringLiteral("QProgressBar {"
+                                                         " background: #2a2d34;"
+                                                         " border: 1px solid #393d46;"
+                                                         " border-radius: 4px;"
+                                                         "}"
+                                                         "QProgressBar::chunk {"
+                                                         " background: #7fb0ff;"
+                                                         " border-radius: 4px;"
+                                                         "}"));
 
         placeholderCardLayout->addWidget(m_placeholderTitleLabel);
         placeholderCardLayout->addWidget(m_placeholderDetailLabel);
@@ -307,12 +369,24 @@ namespace javelin::gui::messageview
         m_plainTextView->setReadOnly(true);
         m_plainTextView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
+        m_multipleSelectionScrollArea = new QScrollArea(this);
+        m_multipleSelectionScrollArea->setWidgetResizable(true);
+        m_multipleSelectionScrollArea->setFrameShape(QFrame::NoFrame);
+        m_multipleSelectionScrollArea->setSizePolicy(QSizePolicy::Expanding,
+                                                     QSizePolicy::Expanding);
+        m_multipleSelectionWidget = new QWidget(m_multipleSelectionScrollArea);
+        m_multipleSelectionLayout = new QVBoxLayout(m_multipleSelectionWidget);
+        m_multipleSelectionLayout->setContentsMargins(0, 0, 0, 0);
+        m_multipleSelectionLayout->setSpacing(0);
+        m_multipleSelectionScrollArea->setWidget(m_multipleSelectionWidget);
+
         m_htmlView = new HtmlMessageView(this);
         m_htmlView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
         connect(m_htmlView, &HtmlMessageView::viewSourceRequested, this,
                 &MessageViewContainer::viewSourceRequested);
 
         m_bodyStack->addWidget(m_placeholderPanel);
+        m_bodyStack->addWidget(m_multipleSelectionScrollArea);
         m_bodyStack->addWidget(m_plainTextView);
         m_bodyStack->addWidget(m_htmlView);
 
@@ -387,6 +461,7 @@ namespace javelin::gui::messageview
         m_accountId = std::move(accountId);
         m_mailboxId = std::move(mailboxId);
         m_emailId = std::move(emailId);
+        m_multipleMessages.clear();
         m_attachmentsExpanded = false;
         m_loading = false;
 
@@ -401,6 +476,20 @@ namespace javelin::gui::messageview
             }
         }
 
+        updatePresentation();
+    }
+
+    void MessageViewContainer::setMultipleSelection(
+        std::optional<std::string> accountId, std::optional<std::string> mailboxId,
+        std::vector<javelin::jmap::cache::MessageListItem> messages)
+    {
+        m_accountId = std::move(accountId);
+        m_mailboxId = std::move(mailboxId);
+        m_emailId = std::nullopt;
+        m_multipleMessages = std::move(messages);
+        m_attachmentsExpanded = false;
+        m_loading = false;
+        m_snapshot = std::nullopt;
         updatePresentation();
     }
 
@@ -430,6 +519,9 @@ namespace javelin::gui::messageview
         {
         case ActiveView::Placeholder:
             m_bodyStack->setCurrentWidget(m_placeholderPanel);
+            break;
+        case ActiveView::Multiple:
+            m_bodyStack->setCurrentWidget(m_multipleSelectionScrollArea);
             break;
         case ActiveView::PlainText:
             m_bodyStack->setCurrentWidget(m_plainTextView);
@@ -494,6 +586,7 @@ namespace javelin::gui::messageview
         m_htmlView->clearDocument();
         m_attachmentStatusLabel->clear();
         rebuildAttachmentRows();
+        rebuildMultipleSelectionRows();
         updateAttachmentSection();
         updateRemoteContentButton();
         m_loadingIndicator->setVisible(false);
@@ -522,14 +615,23 @@ namespace javelin::gui::messageview
             return;
         }
 
+        if (!m_multipleMessages.empty())
+        {
+            m_titleLabel->setText(QStringLiteral("%1 messages selected")
+                                      .arg(static_cast<qulonglong>(m_multipleMessages.size())));
+            m_detailLabel->clear();
+            m_bodyControlsWidget->setVisible(false);
+            setActiveView(ActiveView::Multiple);
+            return;
+        }
+
         if (!m_emailId.has_value())
         {
             m_titleLabel->setText(QStringLiteral("Choose a message"));
             m_detailLabel->setText(
                 QStringLiteral("Select a message in the center pane to open it here."));
             m_placeholderTitleLabel->setText(QStringLiteral("Choose a message"));
-            m_placeholderDetailLabel->setText(
-                QStringLiteral("Select a message to read it here."));
+            m_placeholderDetailLabel->setText(QStringLiteral("Select a message to read it here."));
             setActiveView(ActiveView::Placeholder);
             return;
         }
@@ -643,8 +745,8 @@ namespace javelin::gui::messageview
         constexpr int targetTileWidth = 220;
         constexpr int tileSpacing = 6;
         const int availableWidth = std::max(width(), m_attachmentListWidget->width());
-        const int columnCount = std::max(1, (availableWidth + tileSpacing) /
-                                                (targetTileWidth + tileSpacing));
+        const int columnCount =
+            std::max(1, (availableWidth + tileSpacing) / (targetTileWidth + tileSpacing));
 
         for (std::size_t index = 0; index < attachments.size(); ++index)
         {
@@ -675,6 +777,38 @@ namespace javelin::gui::messageview
         }
     }
 
+    void MessageViewContainer::rebuildMultipleSelectionRows()
+    {
+        while (QLayoutItem* item = m_multipleSelectionLayout->takeAt(0))
+        {
+            if (QWidget* widget = item->widget())
+            {
+                widget->deleteLater();
+            }
+            delete item;
+        }
+
+        for (std::size_t index = 0; index < m_multipleMessages.size(); ++index)
+        {
+            const auto& message = m_multipleMessages[index];
+            auto* tile = new MessagePreviewTile(
+                message, [this, emailId = QString::fromStdString(message.emailId)]
+                { Q_EMIT messageActivated(emailId); }, m_multipleSelectionWidget);
+            m_multipleSelectionLayout->addWidget(tile);
+
+            if (index + 1 < m_multipleMessages.size())
+            {
+                auto* separator = new QFrame(m_multipleSelectionWidget);
+                separator->setFrameShape(QFrame::HLine);
+                separator->setFrameShadow(QFrame::Plain);
+                separator->setStyleSheet(QStringLiteral("color: #393d46;"));
+                m_multipleSelectionLayout->addWidget(separator);
+            }
+        }
+
+        m_multipleSelectionLayout->addStretch(1);
+    }
+
     QString MessageViewContainer::attachmentStatusText() const
     {
         if (!m_snapshot.has_value())
@@ -703,8 +837,7 @@ namespace javelin::gui::messageview
             m_snapshot->htmlRenderDocument->inlineResourceCount > 0)
         {
             return QStringLiteral("Inline resources: %1")
-                .arg(static_cast<qulonglong>(
-                    m_snapshot->htmlRenderDocument->inlineResourceCount));
+                .arg(static_cast<qulonglong>(m_snapshot->htmlRenderDocument->inlineResourceCount));
         }
 
         return {};

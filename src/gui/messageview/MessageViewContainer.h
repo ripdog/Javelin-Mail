@@ -1,6 +1,7 @@
 #pragma once
 
 #include "jmap/cache/MessageViewService.h"
+#include "jmap/cache/QueryService.h"
 
 #include <QString>
 #include <QWidget>
@@ -13,9 +14,11 @@ class QLabel;
 class QPlainTextEdit;
 class QProgressBar;
 class QGridLayout;
+class QScrollArea;
 class QResizeEvent;
 class QStackedWidget;
 class QToolButton;
+class QVBoxLayout;
 class QWidget;
 
 namespace javelin::gui::messageview
@@ -33,6 +36,9 @@ namespace javelin::gui::messageview
         void setSelection(javelin::jmap::cache::MessageViewService& messageViewService,
                           std::optional<std::string> accountId,
                           std::optional<std::string> mailboxId, std::optional<std::string> emailId);
+        void setMultipleSelection(std::optional<std::string> accountId,
+                                  std::optional<std::string> mailboxId,
+                                  std::vector<javelin::jmap::cache::MessageListItem> messages);
         void refresh(javelin::jmap::cache::MessageViewService& messageViewService);
         void setLoadingState(bool loading, const QString& detailText = QString{});
         [[nodiscard]] bool hasContentSnapshot() const;
@@ -43,11 +49,13 @@ namespace javelin::gui::messageview
         void openAttachmentRequested(QString accountId, QString emailId, QString partId);
         void saveAllAttachmentsRequested(QString accountId, QString emailId);
         void viewSourceRequested();
+        void messageActivated(QString emailId);
 
       private:
         enum class ActiveView
         {
             Placeholder,
+            Multiple,
             PlainText,
             Html,
         };
@@ -57,12 +65,14 @@ namespace javelin::gui::messageview
         void updateRemoteContentButton();
         void updateAttachmentSection();
         void rebuildAttachmentRows();
+        void rebuildMultipleSelectionRows();
         [[nodiscard]] QString attachmentStatusText() const;
         void resizeEvent(QResizeEvent* event) override;
 
         std::optional<std::string> m_accountId;
         std::optional<std::string> m_mailboxId;
         std::optional<std::string> m_emailId;
+        std::vector<javelin::jmap::cache::MessageListItem> m_multipleMessages;
         std::optional<javelin::jmap::cache::MessageViewSnapshot> m_snapshot;
         bool m_loading = false;
         QLabel* m_titleLabel = nullptr;
@@ -79,6 +89,9 @@ namespace javelin::gui::messageview
         QWidget* m_bodyControlsWidget = nullptr;
         QStackedWidget* m_bodyStack = nullptr;
         QProgressBar* m_loadingIndicator = nullptr;
+        QScrollArea* m_multipleSelectionScrollArea = nullptr;
+        QWidget* m_multipleSelectionWidget = nullptr;
+        QVBoxLayout* m_multipleSelectionLayout = nullptr;
         QPlainTextEdit* m_plainTextView = nullptr;
         HtmlMessageView* m_htmlView = nullptr;
         QWidget* m_attachmentListWidget = nullptr;
