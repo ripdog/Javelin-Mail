@@ -363,6 +363,46 @@ namespace javelin::gui::shell
             };
         }
 
+        [[nodiscard]] std::optional<std::string> optionalStringSetting(const QSettings& settings,
+                                                                       const QString& key)
+        {
+            const auto value = settings.value(key).toString();
+            return value.isEmpty() ? std::nullopt : std::optional<std::string>{value.toStdString()};
+        }
+
+        [[nodiscard]] std::vector<javelin::jmap::cache::MessageListItem>
+        cachedSearchItems(const QSettings& settings)
+        {
+            const auto cachedItems =
+                QJsonDocument::fromJson(settings.value(QStringLiteral("cachedItems")).toByteArray())
+                    .array();
+
+            std::vector<javelin::jmap::cache::MessageListItem> items;
+            items.reserve(static_cast<std::size_t>(cachedItems.size()));
+            for (const auto& itemValue : cachedItems)
+            {
+                if (const auto item = deserializeMessageListItem(itemValue))
+                {
+                    items.push_back(*item);
+                }
+            }
+            return items;
+        }
+
+        void writeCommonTabSettings(QSettings& settings, const std::string& accountId,
+                                    const QString& title, const std::size_t offset,
+                                    const std::optional<std::string>& threadId,
+                                    const std::optional<std::string>& emailId)
+        {
+            settings.setValue(QStringLiteral("accountId"), QString::fromStdString(accountId));
+            settings.setValue(QStringLiteral("title"), title);
+            settings.setValue(QStringLiteral("offset"), static_cast<qulonglong>(offset));
+            settings.setValue(QStringLiteral("threadId"),
+                              threadId.has_value() ? QString::fromStdString(*threadId) : QString{});
+            settings.setValue(QStringLiteral("emailId"),
+                              emailId.has_value() ? QString::fromStdString(*emailId) : QString{});
+        }
+
     } // namespace
 
     MainWindow::MainWindow(javelin::jmap::JmapCore& jmapCore,
@@ -3505,174 +3545,19 @@ namespace javelin::gui::shell
 
             if (type == QStringLiteral("mailbox"))
             {
-                const auto mailboxId = settings.value(QStringLiteral("mailboxId")).toString();
-                if (mailboxId.isEmpty())
-                {
-                    continue;
-                }
-
-                m_tabs.push_back(TabState{
-                    .content =
-                        MailboxTabState{
-                            .accountId = accountId.toStdString(),
-                            .mailboxId = mailboxId.toStdString(),
-                            .title = settings.value(QStringLiteral("title"), mailboxId).toString(),
-                            .page =
-                                PageState{
-                                    .offset = static_cast<std::size_t>(
-                                        settings.value(QStringLiteral("offset"), 0).toULongLong()),
-                                    .total = std::nullopt,
-                                    .items = {},
-                                    .cacheLoaded = false,
-                                    .refreshInFlight = false,
-                                    .stale = false,
-                                },
-                            .selection =
-                                TabSelectionState{
-                                    .threadId =
-                                        settings.value(QStringLiteral("threadId"))
-                                                .toString()
-                                                .isEmpty()
-                                            ? std::nullopt
-                                            : std::optional<std::string>{settings
-                                                                             .value(QStringLiteral(
-                                                                                 "threadId"))
-                                                                             .toString()
-                                                                             .toStdString()},
-                                    .emailId =
-                                        settings.value(QStringLiteral("emailId"))
-                                                .toString()
-                                                .isEmpty()
-                                            ? std::nullopt
-                                            : std::optional<std::string>{settings
-                                                                             .value(QStringLiteral(
-                                                                                 "emailId"))
-                                                                             .toString()
-                                                                             .toStdString()},
-                                },
-                        },
-                });
+                restoreMailboxTab(settings, accountId);
                 continue;
             }
 
             if (type == QStringLiteral("search"))
             {
-                const auto query = settings.value(QStringLiteral("query")).toString();
-                const auto cachedItems =
-                    QJsonDocument::fromJson(
-                        settings.value(QStringLiteral("cachedItems")).toByteArray())
-                        .array();
-                std::vector<javelin::jmap::cache::MessageListItem> items;
-                items.reserve(static_cast<std::size_t>(cachedItems.size()));
-                for (const auto& itemValue : cachedItems)
-                {
-                    if (const auto item = deserializeMessageListItem(itemValue))
-                    {
-                        items.push_back(*item);
-                    }
-                }
-
-                m_tabs.push_back(
-                    TabState{
-                        .content =
-                            SearchTabState{
-                                .accountId = accountId.toStdString(),
-                                .query = query.toStdString(),
-                                .title = settings
-                                             .value(QStringLiteral("title"),
-                                                    QStringLiteral("Search: %1").arg(query))
-                                             .toString(),
-                                .page =
-                                    PageState{
-                                        .offset = static_cast<std::size_t>(
-                                            settings.value(QStringLiteral("offset"), 0)
-                                                .toULongLong()),
-                                        .total = settings.value(QStringLiteral("total")).isValid()
-                                                     ? std::optional<
-                                                           std::size_t>{static_cast<std::size_t>(
-                                                           settings.value(QStringLiteral("total"))
-                                                               .toULongLong())}
-                                                     : std::nullopt,
-                                        .items = std::move(items),
-                                        .cacheLoaded = true,
-                                        .refreshInFlight = false,
-                                        .stale = false,
-                                    },
-                                .selection =
-                                    TabSelectionState{
-                                        .threadId = settings.value(QStringLiteral("threadId"))
-                                                            .toString()
-                                                            .isEmpty()
-                                                        ? std::nullopt
-                                                        : std::optional<std::string>{settings
-                                                                                         .value(
-                                                                                             QStringLiteral("t"
-                                                                                                            "h"
-                                                                                                            "r"
-                                                                                                            "e"
-                                                                                                            "a"
-                                                                                                            "d"
-                                                                                                            "I"
-                                                                                                            "d"))
-                                                                                         .toString()
-                                                                                         .toStdString()},
-                                        .emailId =
-                                            settings.value(QStringLiteral("emailId"))
-                                                    .toString()
-                                                    .isEmpty()
-                                                ? std::nullopt
-                                                : std::optional<std::string>{settings
-                                                                                 .value(
-                                                                                     QStringLiteral(
-                                                                                         "emailId"))
-                                                                                 .toString()
-                                                                                 .toStdString()},
-                                    },
-                            },
-                    });
+                restoreSearchTab(settings, accountId);
                 continue;
             }
 
             if (type == QStringLiteral("compose"))
             {
-                const auto composeSessionId =
-                    settings.value(QStringLiteral("composeSessionId")).toString();
-                if (composeSessionId.isEmpty())
-                {
-                    continue;
-                }
-
-                const auto draftResult =
-                    m_composeService.loadWorkingCopy(composeSessionId.toStdString());
-                if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&draftResult))
-                {
-                    statusBar()->showMessage(error->message, 10000);
-                    continue;
-                }
-
-                const auto& snapshot =
-                    std::get<std::optional<javelin::jmap::submission::DraftSnapshot>>(draftResult);
-                if (!snapshot.has_value())
-                {
-                    continue;
-                }
-
-                m_tabs.push_back(TabState{
-                    .content =
-                        ComposeTabState{
-                            .accountId = snapshot->accountId,
-                            .composeSessionId = snapshot->composeSessionId,
-                            .title =
-                                settings.value(QStringLiteral("title"), QStringLiteral("Compose"))
-                                    .toString(),
-                            .widget = nullptr,
-                            .page = {},
-                            .selection = {},
-                        },
-                });
-                auto* widget = new javelin::gui::compose::ComposeTabWidget(
-                    m_composeService, m_identityRepository, *snapshot, m_contentStack);
-                attachComposeWidget(widget, static_cast<int>(m_tabs.size() - 1));
+                restoreComposeTab(settings);
             }
         }
         settings.endArray();
@@ -3710,6 +3595,115 @@ namespace javelin::gui::shell
         }
     }
 
+    void MainWindow::restoreMailboxTab(const QSettings& settings, const QString& accountId)
+    {
+        const auto mailboxId = settings.value(QStringLiteral("mailboxId")).toString();
+        if (mailboxId.isEmpty())
+        {
+            return;
+        }
+
+        m_tabs.push_back(TabState{
+            .content =
+                MailboxTabState{
+                    .accountId = accountId.toStdString(),
+                    .mailboxId = mailboxId.toStdString(),
+                    .title = settings.value(QStringLiteral("title"), mailboxId).toString(),
+                    .page =
+                        PageState{
+                            .offset = static_cast<std::size_t>(
+                                settings.value(QStringLiteral("offset"), 0).toULongLong()),
+                            .total = std::nullopt,
+                            .items = {},
+                            .cacheLoaded = false,
+                            .refreshInFlight = false,
+                            .stale = false,
+                        },
+                    .selection =
+                        TabSelectionState{
+                            .threadId = optionalStringSetting(settings, QStringLiteral("threadId")),
+                            .emailId = optionalStringSetting(settings, QStringLiteral("emailId")),
+                        },
+                },
+        });
+    }
+
+    void MainWindow::restoreSearchTab(const QSettings& settings, const QString& accountId)
+    {
+        const auto query = settings.value(QStringLiteral("query")).toString();
+        auto items = cachedSearchItems(settings);
+
+        m_tabs.push_back(TabState{
+            .content =
+                SearchTabState{
+                    .accountId = accountId.toStdString(),
+                    .query = query.toStdString(),
+                    .title =
+                        settings
+                            .value(QStringLiteral("title"), QStringLiteral("Search: %1").arg(query))
+                            .toString(),
+                    .page =
+                        PageState{
+                            .offset = static_cast<std::size_t>(
+                                settings.value(QStringLiteral("offset"), 0).toULongLong()),
+                            .total =
+                                settings.value(QStringLiteral("total")).isValid()
+                                    ? std::optional<std::size_t>{static_cast<std::size_t>(
+                                          settings.value(QStringLiteral("total")).toULongLong())}
+                                    : std::nullopt,
+                            .items = std::move(items),
+                            .cacheLoaded = true,
+                            .refreshInFlight = false,
+                            .stale = false,
+                        },
+                    .selection =
+                        TabSelectionState{
+                            .threadId = optionalStringSetting(settings, QStringLiteral("threadId")),
+                            .emailId = optionalStringSetting(settings, QStringLiteral("emailId")),
+                        },
+                },
+        });
+    }
+
+    void MainWindow::restoreComposeTab(const QSettings& settings)
+    {
+        const auto composeSessionId = settings.value(QStringLiteral("composeSessionId")).toString();
+        if (composeSessionId.isEmpty())
+        {
+            return;
+        }
+
+        const auto draftResult = m_composeService.loadWorkingCopy(composeSessionId.toStdString());
+        if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&draftResult))
+        {
+            statusBar()->showMessage(error->message, 10000);
+            return;
+        }
+
+        const auto& snapshot =
+            std::get<std::optional<javelin::jmap::submission::DraftSnapshot>>(draftResult);
+        if (!snapshot.has_value())
+        {
+            return;
+        }
+
+        m_tabs.push_back(TabState{
+            .content =
+                ComposeTabState{
+                    .accountId = snapshot->accountId,
+                    .composeSessionId = snapshot->composeSessionId,
+                    .title = settings.value(QStringLiteral("title"), QStringLiteral("Compose"))
+                                 .toString(),
+                    .widget = nullptr,
+                    .page = {},
+                    .selection = {},
+                },
+        });
+        auto* widget = new javelin::gui::compose::ComposeTabWidget(
+            m_composeService, m_identityRepository, *snapshot, m_contentStack);
+        attachComposeWidget(widget, static_cast<int>(m_tabs.size() - 1));
+    }
+
     void MainWindow::savePersistentState() const
     {
         QSettings settings;
@@ -3722,64 +3716,58 @@ namespace javelin::gui::shell
         {
             settings.setArrayIndex(tabIndex);
             const auto& tab = m_tabs[static_cast<std::size_t>(tabIndex)];
-            std::visit(
-                [&settings](const auto& content)
-                {
-                    settings.setValue(QStringLiteral("accountId"),
-                                      QString::fromStdString(content.accountId));
-                    settings.setValue(QStringLiteral("title"), content.title);
-                    settings.setValue(QStringLiteral("offset"),
-                                      static_cast<qulonglong>(content.page.offset));
-                    settings.setValue(QStringLiteral("threadId"),
-                                      content.selection.threadId.has_value()
-                                          ? QString::fromStdString(*content.selection.threadId)
-                                          : QString{});
-                    settings.setValue(QStringLiteral("emailId"),
-                                      content.selection.emailId.has_value()
-                                          ? QString::fromStdString(*content.selection.emailId)
-                                          : QString{});
-                    if constexpr (std::is_same_v<std::decay_t<decltype(content)>, MailboxTabState>)
-                    {
-                        settings.setValue(QStringLiteral("type"), QStringLiteral("mailbox"));
-                        settings.setValue(QStringLiteral("mailboxId"),
-                                          QString::fromStdString(content.mailboxId));
-                    }
-                    else if constexpr (std::is_same_v<std::decay_t<decltype(content)>,
-                                                      SearchTabState>)
-                    {
-                        settings.setValue(QStringLiteral("type"), QStringLiteral("search"));
-                        settings.setValue(QStringLiteral("query"),
-                                          QString::fromStdString(content.query));
-                        if (content.page.total.has_value())
-                        {
-                            settings.setValue(QStringLiteral("total"),
-                                              static_cast<qulonglong>(*content.page.total));
-                        }
-                        else
-                        {
-                            settings.remove(QStringLiteral("total"));
-                        }
-
-                        QJsonArray itemsArray;
-                        for (const auto& item : content.page.items)
-                        {
-                            itemsArray.push_back(serializeMessageListItem(item));
-                        }
-                        settings.setValue(QStringLiteral("cachedItems"),
-                                          QJsonDocument{itemsArray}.toJson(QJsonDocument::Compact));
-                    }
-                    else
-                    {
-                        settings.setValue(QStringLiteral("type"), QStringLiteral("compose"));
-                        settings.setValue(QStringLiteral("composeSessionId"),
-                                          QString::fromStdString(content.composeSessionId));
-                    }
-                },
-                tab.content);
+            writePersistentTab(settings, tab);
         }
         settings.endArray();
         settings.endGroup();
         settings.sync();
+    }
+
+    void MainWindow::writePersistentTab(QSettings& settings, const TabState& tab) const
+    {
+        std::visit(
+            [&settings](const auto& content)
+            {
+                writeCommonTabSettings(settings, content.accountId, content.title,
+                                       content.page.offset, content.selection.threadId,
+                                       content.selection.emailId);
+                if constexpr (std::is_same_v<std::decay_t<decltype(content)>, MailboxTabState>)
+                {
+                    settings.setValue(QStringLiteral("type"), QStringLiteral("mailbox"));
+                    settings.setValue(QStringLiteral("mailboxId"),
+                                      QString::fromStdString(content.mailboxId));
+                }
+                else if constexpr (std::is_same_v<std::decay_t<decltype(content)>, SearchTabState>)
+                {
+                    settings.setValue(QStringLiteral("type"), QStringLiteral("search"));
+                    settings.setValue(QStringLiteral("query"),
+                                      QString::fromStdString(content.query));
+                    if (content.page.total.has_value())
+                    {
+                        settings.setValue(QStringLiteral("total"),
+                                          static_cast<qulonglong>(*content.page.total));
+                    }
+                    else
+                    {
+                        settings.remove(QStringLiteral("total"));
+                    }
+
+                    QJsonArray itemsArray;
+                    for (const auto& item : content.page.items)
+                    {
+                        itemsArray.push_back(serializeMessageListItem(item));
+                    }
+                    settings.setValue(QStringLiteral("cachedItems"),
+                                      QJsonDocument{itemsArray}.toJson(QJsonDocument::Compact));
+                }
+                else
+                {
+                    settings.setValue(QStringLiteral("type"), QStringLiteral("compose"));
+                    settings.setValue(QStringLiteral("composeSessionId"),
+                                      QString::fromStdString(content.composeSessionId));
+                }
+            },
+            tab.content);
     }
 
     void MainWindow::closeEvent(QCloseEvent* event)
