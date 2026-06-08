@@ -81,7 +81,7 @@ TEST_CASE("database connection creates the initial cache schema", "[jmap][cache]
         migrationsResult));
     const auto& migrations =
         std::get<std::vector<javelin::jmap::cache::AppliedMigration>>(migrationsResult);
-    REQUIRE(migrations.size() == 6);
+    REQUIRE(migrations.size() == 5);
     CHECK(migrations.front().version == 1);
     CHECK(migrations.front().name == QStringLiteral("initial_cache_schema"));
     CHECK(migrations.at(1).version == 2);
@@ -89,17 +89,16 @@ TEST_CASE("database connection creates the initial cache schema", "[jmap][cache]
     CHECK(migrations.at(2).version == 3);
     CHECK(migrations.at(2).name == QStringLiteral("session_and_account_metadata"));
     CHECK(migrations.at(3).version == 4);
-    CHECK(migrations.at(3).name == QStringLiteral("email_parts_metadata"));
-    CHECK(migrations.at(4).version == 5);
-    CHECK(migrations.at(4).name == QStringLiteral("inline_part_payloads"));
-    CHECK(migrations.back().version == 6);
-    CHECK(migrations.back().name == QStringLiteral("compose_and_threading_metadata"));
+    CHECK(migrations.at(3).name == QStringLiteral("compose_and_threading_metadata"));
+    CHECK(migrations.back().version == 5);
+    CHECK(migrations.back().name == QStringLiteral("raw_message_sources"));
 
     QSqlQuery tableQuery{connection.database()};
     REQUIRE(tableQuery.exec(
         QStringLiteral("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN "
-                       "('accounts', 'compose_sessions', 'inline_part_payloads', 'mailboxes', "
-                       "'emails', 'email_parts', 'schema_migrations', 'sync_state') "
+                       "('accounts', 'compose_sessions', 'mailboxes', "
+                       "'emails', 'raw_message_sources', 'schema_migrations', "
+                       "'sync_state') "
                        "ORDER BY name")));
 
     QStringList tableNames;
@@ -108,11 +107,11 @@ TEST_CASE("database connection creates the initial cache schema", "[jmap][cache]
         tableNames.push_back(tableQuery.value(0).toString());
     }
 
-    CHECK(tableNames ==
-          QStringList{QStringLiteral("accounts"), QStringLiteral("compose_sessions"),
-                      QStringLiteral("email_parts"), QStringLiteral("emails"),
-                      QStringLiteral("inline_part_payloads"), QStringLiteral("mailboxes"),
-                      QStringLiteral("schema_migrations"), QStringLiteral("sync_state")});
+    CHECK(tableNames == QStringList{QStringLiteral("accounts"), QStringLiteral("compose_sessions"),
+                                    QStringLiteral("emails"), QStringLiteral("mailboxes"),
+                                    QStringLiteral("raw_message_sources"),
+                                    QStringLiteral("schema_migrations"),
+                                    QStringLiteral("sync_state")});
     CHECK(pragmaValue(connection.database(), QStringLiteral("foreign_keys")) ==
           QStringLiteral("1"));
     CHECK(pragmaValue(connection.database(), QStringLiteral("journal_mode"))
@@ -155,12 +154,12 @@ TEST_CASE("database migrations are repeatable when reopening an existing cache",
         migrationsResult));
     const auto& migrations =
         std::get<std::vector<javelin::jmap::cache::AppliedMigration>>(migrationsResult);
-    REQUIRE(migrations.size() == 6);
+    REQUIRE(migrations.size() == 5);
     CHECK(migrations.front().version == 1);
     CHECK(migrations.at(1).version == 2);
     CHECK(migrations.at(2).version == 3);
-    CHECK(migrations.back().version == 6);
-    CHECK(connection.schemaVersion() == 6);
+    CHECK(migrations.back().version == 5);
+    CHECK(connection.schemaVersion() == 5);
 }
 
 TEST_CASE("thread connection factory encodes owner tag and current thread in connection names",
@@ -202,5 +201,6 @@ TEST_CASE("thread connection factory encodes owner tag and current thread in con
     auto secondConnection =
         std::get<javelin::jmap::cache::DatabaseConnection>(std::move(secondOpen));
     CHECK(secondConnection.connectionName() == expectedName);
-    CHECK(secondConnection.schemaVersion() == 6);
+    CHECK(secondConnection.schemaVersion() ==
+          javelin::jmap::cache::createDefaultMigrationRunner().latestVersion());
 }

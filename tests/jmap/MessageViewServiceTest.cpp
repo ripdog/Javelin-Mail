@@ -140,77 +140,39 @@ namespace
 
     void seedMessageContent(javelin::jmap::cache::DatabaseConnection& connection)
     {
-        QSqlQuery partQuery{connection.database()};
-        partQuery.prepare(QStringLiteral(
-            "INSERT INTO email_parts ("
-            "account_id, email_id, part_id, parent_part_id, blob_id, kind, media_type, name, "
-            "charset, disposition, cid, size, is_inline_renderable, is_body_section"
-            ") VALUES ("
-            ":account_id, :email_id, :part_id, :parent_part_id, :blob_id, :kind, :media_type, "
-            ":name, :charset, :disposition, :cid, :size, :is_inline_renderable, "
-            ":is_body_section)"));
-
-        auto insertPart = [&partQuery](const QString& partId, const QVariant& parentPartId,
-                                       const QVariant& blobId, const QString& kind,
-                                       const QString& mediaType, const QVariant& name,
-                                       const QVariant& disposition, const QVariant& cid,
-                                       const qulonglong size, const int isInlineRenderable,
-                                       const int isBodySection)
-        {
-            partQuery.bindValue(QStringLiteral(":account_id"), QStringLiteral("account-1"));
-            partQuery.bindValue(QStringLiteral(":email_id"), QStringLiteral("eml-1"));
-            partQuery.bindValue(QStringLiteral(":part_id"), partId);
-            partQuery.bindValue(QStringLiteral(":parent_part_id"), parentPartId);
-            partQuery.bindValue(QStringLiteral(":blob_id"), blobId);
-            partQuery.bindValue(QStringLiteral(":kind"), kind);
-            partQuery.bindValue(QStringLiteral(":media_type"), mediaType);
-            partQuery.bindValue(QStringLiteral(":name"), name);
-            partQuery.bindValue(QStringLiteral(":charset"), QStringLiteral("utf-8"));
-            partQuery.bindValue(QStringLiteral(":disposition"), disposition);
-            partQuery.bindValue(QStringLiteral(":cid"), cid);
-            partQuery.bindValue(QStringLiteral(":size"), size);
-            partQuery.bindValue(QStringLiteral(":is_inline_renderable"), isInlineRenderable);
-            partQuery.bindValue(QStringLiteral(":is_body_section"), isBodySection);
-            REQUIRE(partQuery.exec());
-        };
-
-        insertPart(QStringLiteral("1"), QVariant{}, QVariant{}, QStringLiteral("body"),
-                   QStringLiteral("text/plain"), QVariant{}, QVariant{}, QVariant{}, 44, 0, 1);
-        insertPart(QStringLiteral("2"), QVariant{}, QStringLiteral("blob-html"),
-                   QStringLiteral("body"), QStringLiteral("text/html"), QVariant{},
-                   QStringLiteral("inline"), QVariant{}, 88, 0, 1);
-        insertPart(QStringLiteral("3"), QVariant{}, QStringLiteral("blob-inline"),
-                   QStringLiteral("attachment"), QStringLiteral("image/png"),
-                   QStringLiteral("chart.png"), QStringLiteral("inline"),
-                   QStringLiteral("chart@cid"), 2048, 1, 0);
-
-        QSqlQuery bodyQuery{connection.database()};
-        bodyQuery.prepare(
-            QStringLiteral("INSERT INTO email_body_values ("
-                           "account_id, email_id, part_id, blob_id, is_truncated, value"
-                           ") VALUES ("
-                           ":account_id, :email_id, :part_id, :blob_id, :is_truncated, :value)"));
-
-        auto insertBody = [&bodyQuery](const QString& partId, const QVariant& blobId,
-                                       const bool isTruncated, const QString& value)
-        {
-            bodyQuery.bindValue(QStringLiteral(":account_id"), QStringLiteral("account-1"));
-            bodyQuery.bindValue(QStringLiteral(":email_id"), QStringLiteral("eml-1"));
-            bodyQuery.bindValue(QStringLiteral(":part_id"), partId);
-            bodyQuery.bindValue(QStringLiteral(":blob_id"), blobId);
-            bodyQuery.bindValue(QStringLiteral(":is_truncated"), isTruncated ? 1 : 0);
-            bodyQuery.bindValue(QStringLiteral(":value"), value);
-            REQUIRE(bodyQuery.exec());
-        };
-
-        insertBody(QStringLiteral("1"), QVariant{}, false, QStringLiteral("Plain body"));
-        insertBody(QStringLiteral("2"), QStringLiteral("blob-html"), true,
-                   QStringLiteral("<p>HTML body</p>"));
+        QSqlQuery query{connection.database()};
+        query.prepare(QStringLiteral("INSERT INTO raw_message_sources ("
+                                     "account_id, email_id, blob_id, payload"
+                                     ") VALUES ("
+                                     ":account_id, :email_id, :blob_id, :payload)"));
+        query.bindValue(QStringLiteral(":account_id"), QStringLiteral("account-1"));
+        query.bindValue(QStringLiteral(":email_id"), QStringLiteral("eml-1"));
+        query.bindValue(QStringLiteral(":blob_id"), QStringLiteral("blob-root"));
+        query.bindValue(QStringLiteral(":payload"),
+                        QByteArrayLiteral("Subject: Quarterly update\r\n"
+                                          "Content-Type: multipart/related; boundary=\"b\"\r\n"
+                                          "\r\n"
+                                          "--b\r\n"
+                                          "Content-Type: text/plain; charset=utf-8\r\n"
+                                          "\r\n"
+                                          "Plain body\r\n"
+                                          "--b\r\n"
+                                          "Content-Type: text/html; charset=utf-8\r\n"
+                                          "\r\n"
+                                          "<p>HTML body</p>\r\n"
+                                          "--b\r\n"
+                                          "Content-Type: image/png; name=\"chart.png\"\r\n"
+                                          "Content-Disposition: inline; filename=\"chart.png\"\r\n"
+                                          "Content-ID: <chart@cid>\r\n"
+                                          "\r\n"
+                                          "PNGDATA\r\n"
+                                          "--b--\r\n"));
+        REQUIRE(query.exec());
     }
 
 } // namespace
 
-TEST_CASE("message view service loads cached email headers bodies and attachments",
+TEST_CASE("message view service loads cached raw email bodies and attachments",
           "[jmap][cache][message-view]")
 {
     ApplicationGuard application;
@@ -235,7 +197,7 @@ TEST_CASE("message view service loads cached email headers bodies and attachment
     CHECK(snapshot->plainTextBody->value == "Plain body");
     REQUIRE(snapshot->htmlBody.has_value());
     CHECK(snapshot->htmlBody->kind == javelin::jmap::cache::MessageBodyKind::Html);
-    CHECK(snapshot->htmlBody->isTruncated);
+    CHECK_FALSE(snapshot->htmlBody->isTruncated);
     CHECK(snapshot->htmlBody->value == "<p>HTML body</p>");
     REQUIRE(snapshot->htmlRenderDocument.has_value());
     CHECK(snapshot->htmlRenderDocument->html.find("<!doctype html>") != std::string::npos);

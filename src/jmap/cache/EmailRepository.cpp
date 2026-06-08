@@ -6,7 +6,6 @@
 #include <QSqlQuery>
 
 #include <array>
-#include <unordered_set>
 
 namespace javelin::jmap::cache
 {
@@ -153,9 +152,7 @@ namespace javelin::jmap::cache
                                                         const std::string_view accountId,
                                                         const std::string_view emailId)
         {
-            for (const QString& table :
-                 {QStringLiteral("inline_part_payloads"), QStringLiteral("email_body_values"),
-                  QStringLiteral("email_parts")})
+            for (const QString& table : {QStringLiteral("raw_message_sources")})
             {
                 QSqlQuery deleteQuery{database};
                 deleteQuery.prepare(
@@ -198,44 +195,6 @@ namespace javelin::jmap::cache
                 .message = QStringLiteral("Begin email replacement transaction: ") +
                            database.lastError().text(),
             };
-        }
-
-        QSqlQuery existingIdsQuery{database};
-        existingIdsQuery.prepare(
-            QStringLiteral("SELECT email_id FROM emails WHERE account_id = :account_id"));
-        existingIdsQuery.bindValue(QStringLiteral(":account_id"),
-                                   QString::fromStdString(std::string{accountId}));
-        if (!existingIdsQuery.exec())
-        {
-            database.rollback();
-            return makeQueryError(QStringLiteral("Read cached email ids"), existingIdsQuery);
-        }
-
-        std::vector<std::string> existingIds;
-        while (existingIdsQuery.next())
-        {
-            existingIds.push_back(existingIdsQuery.value(0).toString().toStdString());
-        }
-
-        std::unordered_set<std::string> incomingIds;
-        incomingIds.reserve(emails.size());
-        for (const auto& email : emails)
-        {
-            incomingIds.insert(email.id);
-        }
-
-        for (const auto& existingId : existingIds)
-        {
-            if (incomingIds.contains(existingId))
-            {
-                continue;
-            }
-
-            if (const auto error = deleteEmailContent(database, accountId, existingId))
-            {
-                database.rollback();
-                return error;
-            }
         }
 
         for (const QString& table :
@@ -770,11 +729,11 @@ namespace javelin::jmap::cache
         }
 
         QSqlQuery query{m_connection.database()};
-        query.prepare(QStringLiteral(
-            "SELECT em.email_id "
-            "FROM email_mailboxes em "
-            "WHERE em.account_id = :account_id AND em.mailbox_id = :mailbox_id "
-            "ORDER BY em.email_id"));
+        query.prepare(
+            QStringLiteral("SELECT em.email_id "
+                           "FROM email_mailboxes em "
+                           "WHERE em.account_id = :account_id AND em.mailbox_id = :mailbox_id "
+                           "ORDER BY em.email_id"));
         query.bindValue(QStringLiteral(":account_id"),
                         QString::fromStdString(std::string{accountId}));
         query.bindValue(QStringLiteral(":mailbox_id"),

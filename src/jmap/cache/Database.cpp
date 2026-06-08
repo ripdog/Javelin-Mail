@@ -513,48 +513,6 @@ namespace javelin::jmap::cache
                                 "address TEXT NOT NULL,"
                                 "PRIMARY KEY (account_id, email_id, field_name, position)"
                                 ") STRICT"),
-                            QStringLiteral("CREATE TABLE IF NOT EXISTS email_body_values ("
-                                           "account_id TEXT NOT NULL REFERENCES "
-                                           "accounts(account_id) ON DELETE "
-                                           "CASCADE,"
-                                           "email_id TEXT NOT NULL,"
-                                           "part_id TEXT NOT NULL,"
-                                           "blob_id TEXT,"
-                                           "is_truncated INTEGER NOT NULL DEFAULT 0,"
-                                           "value TEXT NOT NULL,"
-                                           "PRIMARY KEY (account_id, email_id, part_id)"
-                                           ") STRICT"),
-                            QStringLiteral("CREATE TABLE IF NOT EXISTS email_parts ("
-                                           "account_id TEXT NOT NULL REFERENCES "
-                                           "accounts(account_id) ON DELETE "
-                                           "CASCADE,"
-                                           "email_id TEXT NOT NULL,"
-                                           "part_id TEXT NOT NULL,"
-                                           "parent_part_id TEXT,"
-                                           "blob_id TEXT,"
-                                           "kind TEXT NOT NULL,"
-                                           "media_type TEXT NOT NULL,"
-                                           "name TEXT,"
-                                           "charset TEXT,"
-                                           "disposition TEXT,"
-                                           "cid TEXT,"
-                                           "size INTEGER NOT NULL DEFAULT 0,"
-                                           "is_inline_renderable INTEGER NOT NULL DEFAULT 0,"
-                                           "is_body_section INTEGER NOT NULL DEFAULT 0,"
-                                           "PRIMARY KEY (account_id, email_id, part_id)"
-                                           ") STRICT"),
-                            QStringLiteral("CREATE TABLE IF NOT EXISTS inline_part_payloads ("
-                                           "account_id TEXT NOT NULL REFERENCES "
-                                           "accounts(account_id) ON DELETE "
-                                           "CASCADE,"
-                                           "email_id TEXT NOT NULL,"
-                                           "part_id TEXT NOT NULL,"
-                                           "blob_id TEXT NOT NULL,"
-                                           "media_type TEXT NOT NULL,"
-                                           "payload BLOB NOT NULL,"
-                                           "fetched_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
-                                           "PRIMARY KEY (account_id, email_id, part_id)"
-                                           ") STRICT"),
                             QStringLiteral("CREATE TABLE IF NOT EXISTS identities ("
                                            "account_id TEXT NOT NULL REFERENCES "
                                            "accounts(account_id) ON DELETE "
@@ -641,15 +599,6 @@ namespace javelin::jmap::cache
                             QStringLiteral(
                                 "CREATE INDEX IF NOT EXISTS idx_pending_actions_status ON "
                                 "pending_actions (account_id, status, created_at)"),
-                            QStringLiteral(
-                                "CREATE INDEX IF NOT EXISTS idx_email_parts_email ON email_parts "
-                                "(account_id, email_id, part_id)"),
-                            QStringLiteral(
-                                "CREATE INDEX IF NOT EXISTS idx_email_parts_blob ON email_parts "
-                                "(account_id, blob_id)"),
-                            QStringLiteral(
-                                "CREATE INDEX IF NOT EXISTS idx_inline_part_payloads_email ON "
-                                "inline_part_payloads (account_id, email_id, part_id)"),
                         },
                 },
                 MigrationStep{
@@ -700,60 +649,6 @@ namespace javelin::jmap::cache
                 },
                 MigrationStep{
                     .version = 4,
-                    .name = QStringLiteral("email_parts_metadata"),
-                    .statements =
-                        {
-                            QStringLiteral("CREATE TABLE IF NOT EXISTS email_parts ("
-                                           "account_id TEXT NOT NULL REFERENCES "
-                                           "accounts(account_id) ON DELETE "
-                                           "CASCADE,"
-                                           "email_id TEXT NOT NULL,"
-                                           "part_id TEXT NOT NULL,"
-                                           "parent_part_id TEXT,"
-                                           "blob_id TEXT,"
-                                           "kind TEXT NOT NULL,"
-                                           "media_type TEXT NOT NULL,"
-                                           "name TEXT,"
-                                           "charset TEXT,"
-                                           "disposition TEXT,"
-                                           "cid TEXT,"
-                                           "size INTEGER NOT NULL DEFAULT 0,"
-                                           "is_inline_renderable INTEGER NOT NULL DEFAULT 0,"
-                                           "is_body_section INTEGER NOT NULL DEFAULT 0,"
-                                           "PRIMARY KEY (account_id, email_id, part_id)"
-                                           ") STRICT"),
-                            QStringLiteral(
-                                "CREATE INDEX IF NOT EXISTS idx_email_parts_email ON email_parts "
-                                "(account_id, email_id, part_id)"),
-                            QStringLiteral(
-                                "CREATE INDEX IF NOT EXISTS idx_email_parts_blob ON email_parts "
-                                "(account_id, blob_id)"),
-                        },
-                },
-                MigrationStep{
-                    .version = 5,
-                    .name = QStringLiteral("inline_part_payloads"),
-                    .statements =
-                        {
-                            QStringLiteral("CREATE TABLE IF NOT EXISTS inline_part_payloads ("
-                                           "account_id TEXT NOT NULL REFERENCES "
-                                           "accounts(account_id) ON DELETE "
-                                           "CASCADE,"
-                                           "email_id TEXT NOT NULL,"
-                                           "part_id TEXT NOT NULL,"
-                                           "blob_id TEXT NOT NULL,"
-                                           "media_type TEXT NOT NULL,"
-                                           "payload BLOB NOT NULL,"
-                                           "fetched_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
-                                           "PRIMARY KEY (account_id, email_id, part_id)"
-                                           ") STRICT"),
-                            QStringLiteral(
-                                "CREATE INDEX IF NOT EXISTS idx_inline_part_payloads_email ON "
-                                "inline_part_payloads (account_id, email_id, part_id)"),
-                        },
-                },
-                MigrationStep{
-                    .version = 6,
                     .name = QStringLiteral("compose_and_threading_metadata"),
                     .statements =
                         {
@@ -777,6 +672,25 @@ namespace javelin::jmap::cache
                             QStringLiteral(
                                 "CREATE INDEX IF NOT EXISTS idx_compose_sessions_account ON "
                                 "compose_sessions (account_id, updated_at DESC)"),
+                        },
+                },
+                MigrationStep{
+                    .version = 5,
+                    .name = QStringLiteral("raw_message_sources"),
+                    .statements =
+                        {
+                            QStringLiteral("CREATE TABLE IF NOT EXISTS raw_message_sources ("
+                                           "account_id TEXT NOT NULL REFERENCES "
+                                           "accounts(account_id) ON DELETE CASCADE,"
+                                           "email_id TEXT NOT NULL,"
+                                           "blob_id TEXT NOT NULL,"
+                                           "payload BLOB NOT NULL,"
+                                           "fetched_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+                                           "PRIMARY KEY (account_id, email_id)"
+                                           ") STRICT"),
+                            QStringLiteral(
+                                "CREATE INDEX IF NOT EXISTS idx_raw_message_sources_blob ON "
+                                "raw_message_sources (account_id, blob_id)"),
                         },
                 },
             },

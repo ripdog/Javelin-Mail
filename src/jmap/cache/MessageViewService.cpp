@@ -1,10 +1,9 @@
 #include "jmap/cache/MessageViewService.h"
 
 #include "jmap/cache/EmailRepository.h"
-#include "jmap/cache/MessageContentRepository.h"
+#include "jmap/cache/MimeMessageParser.h"
+#include "jmap/cache/RawMessageSourceRepository.h"
 #include "jmap/render/HtmlMessageDocumentBuilder.h"
-
-#include <unordered_map>
 
 namespace javelin::jmap::cache
 {
@@ -18,7 +17,7 @@ namespace javelin::jmap::cache
     MessageViewService::load(const std::string_view accountId, const std::string_view emailId) const
     {
         EmailRepository emailRepository{m_connection};
-        MessageContentRepository contentRepository{m_connection};
+        RawMessageSourceRepository sourceRepository{m_connection};
 
         const auto emailResult = emailRepository.find(accountId, emailId);
         if (const auto* error = std::get_if<DatabaseError>(&emailResult))
@@ -32,93 +31,32 @@ namespace javelin::jmap::cache
             return std::optional<MessageViewSnapshot>{std::nullopt};
         }
 
-        const auto partsResult = contentRepository.loadParts(accountId, emailId);
-        if (const auto* error = std::get_if<DatabaseError>(&partsResult))
+        const auto sourceResult = sourceRepository.find(accountId, emailId);
+        if (const auto* error = std::get_if<DatabaseError>(&sourceResult))
         {
             return *error;
         }
 
-        const auto bodyValuesResult = contentRepository.loadBodyValues(accountId, emailId);
-        if (const auto* error = std::get_if<DatabaseError>(&bodyValuesResult))
+        const auto& source = std::get<std::optional<RawMessageSource>>(sourceResult);
+        if (!source.has_value() || source->blobId != email->blobId)
         {
-            return *error;
+            return std::optional<MessageViewSnapshot>{std::nullopt};
         }
 
+        const auto parsed = parseMessageSource(emailId, source->payload);
         MessageViewSnapshot snapshot{
             .email = *email,
-            .plainTextBody = std::nullopt,
-            .htmlBody = std::nullopt,
+            .plainTextBody = parsed.plainTextBody,
+            .htmlBody = parsed.htmlBody,
             .htmlRenderDocument = std::nullopt,
-            .attachments = {},
+            .attachments = parsed.attachments,
         };
-
-        const auto& parts = std::get<std::vector<EmailPart>>(partsResult);
-        const auto& bodyValues = std::get<std::vector<EmailBodyValue>>(bodyValuesResult);
-
-        std::unordered_map<std::string, const EmailPart*> partsById;
-        partsById.reserve(parts.size());
-        for (const auto& part : parts)
-        {
-            partsById.emplace(part.partId, &part);
-
-            const bool isAttachment =
-                !part.isBodySection &&
-                (part.kind == "attachment" || part.name.has_value() || part.blobId.has_value() ||
-                 part.disposition.has_value() || part.cid.has_value());
-            if (!isAttachment)
-            {
-                continue;
-            }
-
-            snapshot.attachments.push_back(MessageAttachment{
-                .partId = part.partId,
-                .blobId = part.blobId,
-                .mediaType = part.mediaType,
-                .name = part.name,
-                .disposition = part.disposition,
-                .cid = part.cid,
-                .size = part.size,
-                .isInlineRenderable = part.isInlineRenderable,
-            });
-        }
-
-        for (const auto& bodyValue : bodyValues)
-        {
-            const auto partIt = partsById.find(bodyValue.partId);
-            if (partIt == partsById.end())
-            {
-                continue;
-            }
-
-            const auto* part = partIt->second;
-            if (!part->isBodySection)
-            {
-                continue;
-            }
-
-            const MessageBody body{
-                .kind = part->mediaType == "text/html" ? MessageBodyKind::Html
-                                                       : MessageBodyKind::PlainText,
-                .partId = bodyValue.partId,
-                .isTruncated = bodyValue.isTruncated,
-                .value = bodyValue.value,
-            };
-
-            if (part->mediaType == "text/plain" && !snapshot.plainTextBody.has_value())
-            {
-                snapshot.plainTextBody = body;
-            }
-            else if (part->mediaType == "text/html" && !snapshot.htmlBody.has_value())
-            {
-                snapshot.htmlBody = body;
-            }
-        }
 
         if (snapshot.htmlBody.has_value())
         {
             javelin::jmap::render::HtmlMessageDocumentBuilder builder;
             snapshot.htmlRenderDocument =
-                builder.build(accountId, emailId, snapshot.htmlBody->value, parts);
+                builder.build(accountId, emailId, snapshot.htmlBody->value, parsed.renderParts);
         }
 
         return std::optional<MessageViewSnapshot>{std::move(snapshot)};

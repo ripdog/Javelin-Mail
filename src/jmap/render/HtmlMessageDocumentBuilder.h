@@ -1,6 +1,6 @@
 #pragma once
 
-#include "jmap/cache/MessageContentRepository.h"
+#include "jmap/cache/MessageContentTypes.h"
 
 #include <cstddef>
 #include <optional>

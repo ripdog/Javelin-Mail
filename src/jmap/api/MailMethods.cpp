@@ -125,7 +125,7 @@ namespace
         bool fetchTextBodyValues = false;
         bool fetchHTMLBodyValues = false;
         bool fetchAllBodyValues = false;
-        std::uint64_t maxBodyValueBytes = 0;
+        std::optional<std::uint64_t> maxBodyValueBytes;
     };
 
     struct RawEmailContentGetResponse
@@ -443,10 +443,9 @@ template <> struct glz::meta<RawEmailBodyPartCreate>
 {
     using T = RawEmailBodyPartCreate;
 
-    static constexpr auto value = glz::object("partId", &T::partId, "blobId", &T::blobId, "type",
-                                              &T::type, "name", &T::name, "disposition",
-                                              &T::disposition, "cid", &T::cid, "subParts",
-                                              &T::subParts);
+    static constexpr auto value =
+        glz::object("partId", &T::partId, "blobId", &T::blobId, "type", &T::type, "name", &T::name,
+                    "disposition", &T::disposition, "cid", &T::cid, "subParts", &T::subParts);
 };
 
 template <> struct glz::meta<RawEmailSetCreate>
@@ -454,12 +453,11 @@ template <> struct glz::meta<RawEmailSetCreate>
     using T = RawEmailSetCreate;
 
     static constexpr auto value =
-        glz::object("mailboxIds", &T::mailboxIds, "keywords", &T::keywords, "from", &T::from,
-                    "to", &T::to, "cc", &T::cc, "bcc", &T::bcc, "replyTo", &T::replyTo,
-                    "subject", &T::subject, "receivedAt", &T::receivedAt, "sentAt", &T::sentAt,
-                    "messageId", &T::messageId, "inReplyTo", &T::inReplyTo, "references",
-                    &T::references, "bodyStructure", &T::bodyStructure, "bodyValues",
-                    &T::bodyValues);
+        glz::object("mailboxIds", &T::mailboxIds, "keywords", &T::keywords, "from", &T::from, "to",
+                    &T::to, "cc", &T::cc, "bcc", &T::bcc, "replyTo", &T::replyTo, "subject",
+                    &T::subject, "receivedAt", &T::receivedAt, "sentAt", &T::sentAt, "messageId",
+                    &T::messageId, "inReplyTo", &T::inReplyTo, "references", &T::references,
+                    "bodyStructure", &T::bodyStructure, "bodyValues", &T::bodyValues);
 };
 
 template <> struct glz::meta<RawEmailSetCreated>
@@ -467,28 +465,25 @@ template <> struct glz::meta<RawEmailSetCreated>
     using T = RawEmailSetCreated;
 
     static constexpr auto value =
-        glz::object("id", &T::id, "blobId", &T::blobId, "threadId", &T::threadId, "size",
-                    &T::size);
+        glz::object("id", &T::id, "blobId", &T::blobId, "threadId", &T::threadId, "size", &T::size);
 };
 
 template <> struct glz::meta<RawEmailSetRequest>
 {
     using T = RawEmailSetRequest;
 
-    static constexpr auto value =
-        glz::object("accountId", &T::accountId, "create", &T::create, "update", &T::update,
-                    "destroy", &T::destroy);
+    static constexpr auto value = glz::object("accountId", &T::accountId, "create", &T::create,
+                                              "update", &T::update, "destroy", &T::destroy);
 };
 
 template <> struct glz::meta<RawEmailSetResponse>
 {
     using T = RawEmailSetResponse;
 
-    static constexpr auto value =
-        glz::object("accountId", &T::accountId, "oldState", &T::oldState, "newState", &T::newState,
-                    "created", &T::created, "updated", &T::updated, "destroyed", &T::destroyed,
-                    "notCreated", &T::notCreated, "notUpdated", &T::notUpdated, "notDestroyed",
-                    &T::notDestroyed);
+    static constexpr auto value = glz::object(
+        "accountId", &T::accountId, "oldState", &T::oldState, "newState", &T::newState, "created",
+        &T::created, "updated", &T::updated, "destroyed", &T::destroyed, "notCreated",
+        &T::notCreated, "notUpdated", &T::notUpdated, "notDestroyed", &T::notDestroyed);
 };
 
 template <> struct glz::meta<RawEnvelopeAddress>
@@ -510,8 +505,7 @@ template <> struct glz::meta<RawEmailSubmissionCreate>
     using T = RawEmailSubmissionCreate;
 
     static constexpr auto value =
-        glz::object("identityId", &T::identityId, "emailId", &T::emailId, "envelope",
-                    &T::envelope);
+        glz::object("identityId", &T::identityId, "emailId", &T::emailId, "envelope", &T::envelope);
 };
 
 template <> struct glz::meta<RawEmailSubmissionCreated>
@@ -534,8 +528,8 @@ template <> struct glz::meta<RawEmailSubmissionSetResponse>
     using T = RawEmailSubmissionSetResponse;
 
     static constexpr auto value =
-        glz::object("accountId", &T::accountId, "oldState", &T::oldState, "newState",
-                    &T::newState, "created", &T::created, "notCreated", &T::notCreated);
+        glz::object("accountId", &T::accountId, "oldState", &T::oldState, "newState", &T::newState,
+                    "created", &T::created, "notCreated", &T::notCreated);
 };
 
 template <> struct glz::meta<RawChangesResponse>
@@ -842,29 +836,29 @@ namespace javelin::jmap::api
                                                });
                 }
 
-                converted.emplace(creationId, RawEmailSetCreate{
-                                                  .mailboxIds = create.mailboxIds,
-                                                  .keywords = create.keywords,
-                                                  .from = create.from,
-                                                  .to = create.to,
-                                                  .cc = create.cc,
-                                                  .bcc = create.bcc,
-                                                  .replyTo = create.replyTo,
-                                                  .subject = create.subject,
-                                                  .receivedAt = create.receivedAt,
-                                                  .sentAt = create.sentAt,
-                                                  .messageId = create.messageId,
-                                                  .inReplyTo = create.inReplyTo,
-                                                  .references = create.references,
-                                                  .bodyStructure = create.bodyStructure.has_value()
-                                                                       ? std::optional<
-                                                                             RawEmailBodyPartCreate>{
-                                                                             convertEmailBodyPartCreate(
-                                                                                 *create
-                                                                                      .bodyStructure)}
-                                                                       : std::nullopt,
-                                                  .bodyValues = std::move(bodyValues),
-                                              });
+                converted.emplace(
+                    creationId,
+                    RawEmailSetCreate{
+                        .mailboxIds = create.mailboxIds,
+                        .keywords = create.keywords,
+                        .from = create.from,
+                        .to = create.to,
+                        .cc = create.cc,
+                        .bcc = create.bcc,
+                        .replyTo = create.replyTo,
+                        .subject = create.subject,
+                        .receivedAt = create.receivedAt,
+                        .sentAt = create.sentAt,
+                        .messageId = create.messageId,
+                        .inReplyTo = create.inReplyTo,
+                        .references = create.references,
+                        .bodyStructure =
+                            create.bodyStructure.has_value()
+                                ? std::optional<RawEmailBodyPartCreate>{convertEmailBodyPartCreate(
+                                      *create.bodyStructure)}
+                                : std::nullopt,
+                        .bodyValues = std::move(bodyValues),
+                    });
             }
             rawCreate = std::move(converted);
         }
@@ -883,9 +877,9 @@ namespace javelin::jmap::api
             .accountId = request.accountId,
             .create = std::move(rawCreate),
             .update = std::move(rawUpdates),
-            .destroy = request.destroy.empty() ? std::nullopt
-                                               : std::optional<std::vector<std::string>>{
-                                                     request.destroy},
+            .destroy = request.destroy.empty()
+                           ? std::nullopt
+                           : std::optional<std::vector<std::string>>{request.destroy},
         });
     }
 
@@ -897,39 +891,35 @@ namespace javelin::jmap::api
         for (const auto& [creationId, submission] : request.create)
         {
             create.emplace(
-                creationId, RawEmailSubmissionCreate{
-                                .identityId = submission.identityId,
-                                .emailId = submission.emailId,
-                                .envelope =
-                                    submission.envelope.has_value()
-                                        ? std::optional<RawEmailSubmissionEnvelope>{
-                                              RawEmailSubmissionEnvelope{
-                                                  .mailFrom =
-                                                      submission.envelope->mailFrom.has_value()
-                                                          ? std::optional<RawEnvelopeAddress>{
-                                                                RawEnvelopeAddress{
-                                                                    .email = submission.envelope
-                                                                                 ->mailFrom->email,
-                                                                }}
-                                                          : std::nullopt,
-                                                  .rcptTo = [&submission]()
-                                                  {
-                                                      std::vector<RawEnvelopeAddress> recipients;
-                                                      recipients.reserve(
-                                                          submission.envelope->rcptTo.size());
-                                                      for (const auto& recipient :
-                                                           submission.envelope->rcptTo)
-                                                      {
-                                                          recipients.push_back(
-                                                              RawEnvelopeAddress{
-                                                                  .email = recipient.email,
-                                                              });
-                                                      }
-                                                      return recipients;
-                                                  }(),
-                                              }}
-                                        : std::nullopt,
-                            });
+                creationId,
+                RawEmailSubmissionCreate{
+                    .identityId = submission.identityId,
+                    .emailId = submission.emailId,
+                    .envelope =
+                        submission.envelope.has_value()
+                            ? std::optional<RawEmailSubmissionEnvelope>{RawEmailSubmissionEnvelope{
+                                  .mailFrom =
+                                      submission.envelope->mailFrom.has_value()
+                                          ? std::optional<RawEnvelopeAddress>{RawEnvelopeAddress{
+                                                .email = submission.envelope->mailFrom->email,
+                                            }}
+                                          : std::nullopt,
+                                  .rcptTo =
+                                      [&submission]()
+                                  {
+                                      std::vector<RawEnvelopeAddress> recipients;
+                                      recipients.reserve(submission.envelope->rcptTo.size());
+                                      for (const auto& recipient : submission.envelope->rcptTo)
+                                      {
+                                          recipients.push_back(RawEnvelopeAddress{
+                                              .email = recipient.email,
+                                          });
+                                      }
+                                      return recipients;
+                                  }(),
+                              }}
+                            : std::nullopt,
+                });
         }
 
         return serializeMethod(RawEmailSubmissionSetRequest{
@@ -940,8 +930,8 @@ namespace javelin::jmap::api
                     ? std::nullopt
                     : std::optional<std::unordered_map<
                           std::string,
-                          std::unordered_map<std::string, std::optional<bool>>>>{
-                          request.onSuccessUpdateEmail},
+                          std::unordered_map<std::string,
+                                             std::optional<bool>>>>{request.onSuccessUpdateEmail},
         });
     }
 
@@ -1255,8 +1245,8 @@ namespace javelin::jmap::api
         };
     }
 
-    ParsedEnvelope<EmailSubmissionSetResponse> parseEmailSubmissionSetResponse(
-        std::string_view json)
+    ParsedEnvelope<EmailSubmissionSetResponse>
+    parseEmailSubmissionSetResponse(std::string_view json)
     {
         const auto parsed = parseMethod<RawEmailSubmissionSetResponse>(json);
         if (!parsed.ok())

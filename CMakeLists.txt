@@ -31,6 +31,7 @@ include(KDECompilerSettings NO_POLICY_SCOPE)
 include(FeatureSummary)
 
 find_package(KF6 REQUIRED COMPONENTS XmlGui CoreAddons)
+find_package(KPim6Mime REQUIRED)
 
 qt_standard_project_setup()
 
@@ -95,16 +96,17 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/cache/EmailRepository.h
     src/jmap/cache/IdentityRepository.cpp
     src/jmap/cache/IdentityRepository.h
-    src/jmap/cache/InlinePartPayloadRepository.cpp
-    src/jmap/cache/InlinePartPayloadRepository.h
     src/jmap/cache/MailboxRepository.cpp
     src/jmap/cache/MailboxRepository.h
-    src/jmap/cache/MessageContentRepository.cpp
-    src/jmap/cache/MessageContentRepository.h
+    src/jmap/cache/MessageContentTypes.h
     src/jmap/cache/MessageViewService.cpp
     src/jmap/cache/MessageViewService.h
+    src/jmap/cache/MimeMessageParser.cpp
+    src/jmap/cache/MimeMessageParser.h
     src/jmap/cache/QueryService.cpp
     src/jmap/cache/QueryService.h
+    src/jmap/cache/RawMessageSourceRepository.cpp
+    src/jmap/cache/RawMessageSourceRepository.h
     src/jmap/cache/SessionRepository.cpp
     src/jmap/cache/SessionRepository.h
     src/jmap/cache/SubmissionRepository.cpp
@@ -158,7 +160,6 @@ set(JAVELIN_FORMAT_FILES
     tests/jmap/DatabaseTest.cpp
     tests/jmap/EmailRepositoryTest.cpp
     tests/jmap/HtmlMessageDocumentBuilderTest.cpp
-    tests/jmap/InlinePartPayloadRepositoryTest.cpp
     tests/jmap/InlineMessageUrlTest.cpp
     tests/jmap/JmapCoreMessageContentTest.cpp
     tests/jmap/JmapCoreTest.cpp
@@ -168,7 +169,6 @@ set(JAVELIN_FORMAT_FILES
     tests/jmap/MailboxRepositoryTest.cpp
     tests/jmap/MailboxRefreshExecutorTest.cpp
     tests/jmap/MessageGroupingTest.cpp
-    tests/jmap/MessageContentRepositoryTest.cpp
     tests/jmap/MessageViewServiceTest.cpp
     tests/jmap/MethodCallerTest.cpp
     tests/jmap/MethodEnvelopeTest.cpp
@@ -215,16 +215,17 @@ add_library(javelin_jmap STATIC
     src/jmap/cache/EmailRepository.h
     src/jmap/cache/IdentityRepository.cpp
     src/jmap/cache/IdentityRepository.h
-    src/jmap/cache/InlinePartPayloadRepository.cpp
-    src/jmap/cache/InlinePartPayloadRepository.h
     src/jmap/cache/MailboxRepository.cpp
     src/jmap/cache/MailboxRepository.h
-    src/jmap/cache/MessageContentRepository.cpp
-    src/jmap/cache/MessageContentRepository.h
+    src/jmap/cache/MessageContentTypes.h
     src/jmap/cache/MessageViewService.cpp
     src/jmap/cache/MessageViewService.h
+    src/jmap/cache/MimeMessageParser.cpp
+    src/jmap/cache/MimeMessageParser.h
     src/jmap/cache/QueryService.cpp
     src/jmap/cache/QueryService.h
+    src/jmap/cache/RawMessageSourceRepository.cpp
+    src/jmap/cache/RawMessageSourceRepository.h
     src/jmap/cache/SessionRepository.cpp
     src/jmap/cache/SessionRepository.h
     src/jmap/cache/SubmissionRepository.cpp
@@ -282,6 +283,7 @@ target_link_libraries(javelin_jmap
         Qt::Network
         Qt::Sql
         Qt::WebEngineCore
+        KPim6::Mime
     PRIVATE
         QCoro6::Network
         glaze::glaze
@@ -380,8 +382,8 @@ if(NOT KDE_INSTALL_KXMLGUIDIR)
 endif()
 
 # Install data files (KXMLGUI .rc, etc.) into the local install prefix so
-# KXmlGuiWindow can find them at runtime.  We copy only our own files rather
-# than running `cmake --install` (which would also try to install
+# KXmlGuiWindow can find them at runtime.  We copy only our own files
+# rather than running `cmake --install` (which would also try to install
 # FetchContent dependencies).
 set(_local_kxmlgui_dir "${CMAKE_INSTALL_PREFIX}/${KDE_INSTALL_KXMLGUIDIR}/javelinmail")
 if(JAVELIN_ENABLE_LOCAL_DATA_INSTALL)

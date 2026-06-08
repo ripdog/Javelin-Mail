@@ -165,7 +165,7 @@ namespace javelin::jmap::api
         bool fetchTextBodyValues = false;
         bool fetchHTMLBodyValues = false;
         bool fetchAllBodyValues = false;
-        std::uint64_t maxBodyValueBytes = 0;
+        std::optional<std::uint64_t> maxBodyValueBytes;
     };
 
     struct EmailContentGetResponse
@@ -324,7 +324,8 @@ namespace javelin::jmap::api
     [[nodiscard]] std::optional<std::string>
     serializeEmailSubmissionSetRequest(const EmailSubmissionSetRequest& request);
 
-    [[nodiscard]] ParsedEnvelope<IdentityGetResponse> parseIdentityGetResponse(std::string_view json);
+    [[nodiscard]] ParsedEnvelope<IdentityGetResponse>
+    parseIdentityGetResponse(std::string_view json);
     [[nodiscard]] ParsedEnvelope<MailboxGetResponse> parseMailboxGetResponse(std::string_view json);
     [[nodiscard]] ParsedEnvelope<EmailGetResponse> parseEmailGetResponse(std::string_view json);
     [[nodiscard]] ParsedEnvelope<ThreadGetResponse> parseThreadGetResponse(std::string_view json);

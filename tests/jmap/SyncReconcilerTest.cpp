@@ -1,7 +1,6 @@
 #include "jmap/sync/SyncReconciler.h"
 
 #include "FixtureReader.h"
-#include "jmap/cache/MessageContentRepository.h"
 #include "jmap/domain/MailEntityParsers.h"
 
 #include <QCoreApplication>
@@ -170,7 +169,6 @@ TEST_CASE("sync reconciler deletes stale email rows and their cached MIME conten
     javelin::jmap::cache::MailboxRepository mailboxRepository{databaseContext.connection};
     javelin::jmap::cache::EmailRepository emailRepository{databaseContext.connection};
     javelin::jmap::cache::SyncStateRepository syncStateRepository{databaseContext.connection};
-    javelin::jmap::cache::MessageContentRepository contentRepository{databaseContext.connection};
     const javelin::jmap::sync::SyncReconciler reconciler{mailboxRepository, emailRepository,
                                                          syncStateRepository};
 
@@ -178,31 +176,17 @@ TEST_CASE("sync reconciler deletes stale email rows and their cached MIME conten
     staleEmail.id = "eml-stale";
     staleEmail.subject = "Old subject";
     REQUIRE_FALSE(emailRepository.replaceAll("account-1", {staleEmail}).has_value());
-    REQUIRE_FALSE(contentRepository
-                      .replaceForEmail("account-1", "eml-stale",
-                                       {javelin::jmap::cache::EmailPart{
-                                           .emailId = "eml-stale",
-                                           .partId = "1",
-                                           .parentPartId = std::nullopt,
-                                           .blobId = "blob-stale",
-                                           .kind = "attachment",
-                                           .mediaType = "image/png",
-                                           .name = "stale.png",
-                                           .charset = std::nullopt,
-                                           .disposition = std::optional<std::string>{"attachment"},
-                                           .cid = std::nullopt,
-                                           .size = 123,
-                                           .isInlineRenderable = false,
-                                           .isBodySection = false,
-                                       }},
-                                       {javelin::jmap::cache::EmailBodyValue{
-                                           .emailId = "eml-stale",
-                                           .partId = "1.1",
-                                           .blobId = std::nullopt,
-                                           .isTruncated = false,
-                                           .value = "stale body",
-                                       }})
-                      .has_value());
+    QSqlQuery sourceQuery{databaseContext.connection.database()};
+    sourceQuery.prepare(QStringLiteral("INSERT INTO raw_message_sources ("
+                                       "account_id, email_id, blob_id, payload"
+                                       ") VALUES ("
+                                       ":account_id, :email_id, :blob_id, :payload)"));
+    sourceQuery.bindValue(QStringLiteral(":account_id"), QStringLiteral("account-1"));
+    sourceQuery.bindValue(QStringLiteral(":email_id"), QStringLiteral("eml-stale"));
+    sourceQuery.bindValue(QStringLiteral(":blob_id"), QStringLiteral("blob-stale"));
+    sourceQuery.bindValue(QStringLiteral(":payload"),
+                          QByteArrayLiteral("Subject: Stale\r\n\r\nBody"));
+    REQUIRE(sourceQuery.exec());
 
     auto updatedEmail = loadEmailFixture();
     updatedEmail.subject = "Updated subject";
@@ -238,13 +222,15 @@ TEST_CASE("sync reconciler deletes stale email rows and their cached MIME conten
     const auto stale = emailRepository.find("account-1", "eml-stale");
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(stale));
     CHECK_FALSE(std::get<std::optional<javelin::jmap::domain::Email>>(stale).has_value());
-    const auto parts = contentRepository.loadParts("account-1", "eml-stale");
-    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::EmailPart>>(parts));
-    CHECK(std::get<std::vector<javelin::jmap::cache::EmailPart>>(parts).empty());
-
-    const auto bodyValues = contentRepository.loadBodyValues("account-1", "eml-stale");
-    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::EmailBodyValue>>(bodyValues));
-    CHECK(std::get<std::vector<javelin::jmap::cache::EmailBodyValue>>(bodyValues).empty());
+    QSqlQuery removedSourceQuery{databaseContext.connection.database()};
+    removedSourceQuery.prepare(QStringLiteral(
+        "SELECT COUNT(*) FROM raw_message_sources WHERE account_id = :account_id AND "
+        "email_id = :email_id"));
+    removedSourceQuery.bindValue(QStringLiteral(":account_id"), QStringLiteral("account-1"));
+    removedSourceQuery.bindValue(QStringLiteral(":email_id"), QStringLiteral("eml-stale"));
+    REQUIRE(removedSourceQuery.exec());
+    REQUIRE(removedSourceQuery.next());
+    CHECK(removedSourceQuery.value(0).toInt() == 0);
 
     const auto state = syncStateRepository.find(key);
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::SyncStateRecord>>(state));

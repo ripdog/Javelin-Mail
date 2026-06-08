@@ -6,7 +6,6 @@ add_executable(javelin_jmap_tests
     jmap/DatabaseTest.cpp
     jmap/EmailRepositoryTest.cpp
     jmap/HtmlMessageDocumentBuilderTest.cpp
-    jmap/InlinePartPayloadRepositoryTest.cpp
     jmap/InlineMessageUrlTest.cpp
     jmap/JmapCoreMessageContentTest.cpp
     jmap/JmapCoreTest.cpp
@@ -17,7 +16,6 @@ add_executable(javelin_jmap_tests
     jmap/MailboxRefreshExecutorTest.cpp
     jmap/MailboxQueryDescriptorTest.cpp
     jmap/MessageGroupingTest.cpp
-    jmap/MessageContentRepositoryTest.cpp
     jmap/MessageViewServiceTest.cpp
     jmap/MethodCallerTest.cpp
     jmap/MethodEnvelopeTest.cpp

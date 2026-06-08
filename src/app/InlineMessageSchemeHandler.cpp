@@ -1,16 +1,14 @@
 #include "app/InlineMessageSchemeHandler.h"
 #include "app/WebEngineSetup.h"
 
-#include "jmap/cache/InlinePartPayloadRepository.h"
-#include "jmap/cache/MessageContentRepository.h"
+#include "jmap/cache/MimeMessageParser.h"
+#include "jmap/cache/RawMessageSourceRepository.h"
 #include "jmap/render/InlineMessageUrl.h"
 
 #include <QBuffer>
 #include <QUrl>
 #include <QWebEngineUrlRequestJob>
 #include <QWebEngineUrlScheme>
-
-#include <algorithm>
 
 namespace javelin::app
 {
@@ -66,52 +64,43 @@ namespace javelin::app
             return std::nullopt;
         }
 
-        javelin::jmap::cache::MessageContentRepository repository{m_connection};
-        const auto loadResult = repository.loadParts(parts->accountId, parts->emailId);
-        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&loadResult))
+        javelin::jmap::cache::RawMessageSourceRepository repository{m_connection};
+        const auto sourceResult = repository.find(parts->accountId, parts->emailId);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&sourceResult))
         {
             Q_UNUSED(error);
             return std::nullopt;
         }
 
-        const auto& cachedParts =
-            std::get<std::vector<javelin::jmap::cache::EmailPart>>(loadResult);
-        const auto it =
-            std::find_if(cachedParts.begin(), cachedParts.end(),
-                         [&parts](const auto& part)
-                         {
-                             return part.partId == parts->partId &&
-                                    part.blobId == std::optional<std::string>{parts->blobId} &&
-                                    part.isInlineRenderable;
-                         });
-        if (it == cachedParts.end())
+        const auto& source =
+            std::get<std::optional<javelin::jmap::cache::RawMessageSource>>(sourceResult);
+        if (!source.has_value())
         {
             return std::nullopt;
         }
 
-        javelin::jmap::cache::InlinePartPayloadRepository payloadRepository{m_connection};
-        const auto payloadResult =
-            payloadRepository.find(parts->accountId, parts->emailId, parts->partId);
-        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&payloadResult))
+        const auto parsedPart = javelin::jmap::cache::findMessageSourcePart(
+            parts->emailId, source->payload, parts->partId);
+        if (!parsedPart.has_value() ||
+            parsedPart->part.blobId != std::optional<std::string>{parts->blobId} ||
+            !parsedPart->part.isInlineRenderable)
         {
-            Q_UNUSED(error);
             return std::nullopt;
         }
 
-        const auto& payload =
-            std::get<std::optional<javelin::jmap::cache::InlinePartPayload>>(payloadResult);
-        if (payload.has_value() && payload->blobId == parts->blobId)
+        if (!parsedPart->payload.isEmpty())
         {
             return ReplyPayload{
-                .mimeType = QByteArray::fromStdString(payload->mediaType),
-                .body = payload->payload,
+                .mimeType = QByteArray::fromStdString(parsedPart->part.mediaType),
+                .body = parsedPart->payload,
             };
         }
 
-        if (it->mediaType.rfind("image/", 0) == 0)
+        if (parsedPart->part.mediaType.rfind("image/", 0) == 0)
         {
-            const QString label = it->name.has_value() ? QString::fromStdString(*it->name)
-                                                       : QString::fromStdString(it->partId);
+            const QString label = parsedPart->part.name.has_value()
+                                      ? QString::fromStdString(*parsedPart->part.name)
+                                      : QString::fromStdString(parsedPart->part.partId);
             return ReplyPayload{
                 .mimeType = QByteArrayLiteral("image/svg+xml"),
                 .body = unavailableInlineImageSvg(label),
