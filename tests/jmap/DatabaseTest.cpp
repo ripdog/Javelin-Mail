@@ -92,7 +92,7 @@ TEST_CASE("database connection creates the initial cache schema", "[jmap][cache]
     CHECK(migrations.at(3).name == QStringLiteral("compose_and_threading_metadata"));
     CHECK(migrations.at(4).version == 5);
     CHECK(migrations.at(4).name == QStringLiteral("raw_message_sources"));
-    CHECK(migrations.back().version == 6);
+    CHECK(migrations.back().version == 8);
     CHECK(migrations.back().name == QStringLiteral("account_session_ownership"));
 
     QSqlQuery tableQuery{connection.database()};
@@ -160,8 +160,8 @@ TEST_CASE("database migrations are repeatable when reopening an existing cache",
     CHECK(migrations.front().version == 1);
     CHECK(migrations.at(1).version == 2);
     CHECK(migrations.at(2).version == 3);
-    CHECK(migrations.back().version == 6);
-    CHECK(connection.schemaVersion() == 6);
+    CHECK(migrations.back().version == 8);
+    CHECK(connection.schemaVersion() == 8);
 }
 
 TEST_CASE("thread connection factory encodes owner tag and current thread in connection names",

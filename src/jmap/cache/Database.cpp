@@ -694,7 +694,7 @@ namespace javelin::jmap::cache
                         },
                 },
                 MigrationStep{
-                    .version = 6,
+                    .version = 8,
                     .name = QStringLiteral("account_session_ownership"),
                     .statements =
                         {
