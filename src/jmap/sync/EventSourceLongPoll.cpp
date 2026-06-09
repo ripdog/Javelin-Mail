@@ -64,13 +64,29 @@ namespace javelin::jmap::sync
 
         [[nodiscard]] QByteArray summarizeBody(const QByteArray& body)
         {
-            constexpr qsizetype maxBytes = 512;
+            constexpr qsizetype maxBytes = 4096;
             if (body.size() <= maxBytes)
             {
                 return body;
             }
 
             return body.first(maxBytes) + "...";
+        }
+
+        [[nodiscard]] const char* parsedEventStatusName(const ParsedEventStatus status)
+        {
+            switch (status)
+            {
+            case ParsedEventStatus::NeedMoreData:
+                return "need-more-data";
+            case ParsedEventStatus::Ignored:
+                return "ignored";
+            case ParsedEventStatus::Parsed:
+                return "parsed";
+            case ParsedEventStatus::Invalid:
+                return "invalid";
+            }
+            return "unknown";
         }
 
         struct ParsedEvent
@@ -379,6 +395,11 @@ namespace javelin::jmap::sync
 
             const auto parsed =
                 parseStateEvent(request.accountId, request.lastState, eventName, eventId, eventData);
+            qInfo().noquote() << "Long poll received SSE event"
+                              << "status" << parsedEventStatusName(parsed.status) << "event"
+                              << QString::fromStdString(eventName) << "id"
+                              << QString::fromStdString(eventId) << "data"
+                              << summarizeBody(QByteArray::fromStdString(eventData));
             if (parsed.status == ParsedEventStatus::Invalid)
             {
                 qWarning().noquote() << "Long poll invalid event payload"
@@ -394,10 +415,6 @@ namespace javelin::jmap::sync
             case ParsedEventStatus::Ignored:
                 return std::nullopt;
             case ParsedEventStatus::Parsed:
-                if (parsed.response->newState == request.lastState)
-                {
-                    return std::nullopt;
-                }
                 return *parsed.response;
             case ParsedEventStatus::Invalid:
                 return makeTransportError(
@@ -446,16 +463,28 @@ namespace javelin::jmap::sync
 
                 if (!ready && reply->isFinished())
                 {
-                    pendingBuffer += reply->readAll();
+                    const QByteArray chunk = reply->readAll();
+                    qInfo().noquote() << "Long poll received raw event-source bytes"
+                                      << reply->url().toString() << chunk.size()
+                                      << summarizeBody(chunk);
+                    pendingBuffer += chunk;
                 }
                 else if (ready)
                 {
-                    pendingBuffer += reply->readAll();
+                    const QByteArray chunk = reply->readAll();
+                    qInfo().noquote() << "Long poll received raw event-source bytes"
+                                      << reply->url().toString() << chunk.size()
+                                      << summarizeBody(chunk);
+                    pendingBuffer += chunk;
                 }
             }
             else
             {
-                pendingBuffer += reply->readAll();
+                const QByteArray chunk = reply->readAll();
+                qInfo().noquote() << "Long poll received raw event-source bytes"
+                                  << reply->url().toString() << chunk.size()
+                                  << summarizeBody(chunk);
+                pendingBuffer += chunk;
             }
 
             while (true)
