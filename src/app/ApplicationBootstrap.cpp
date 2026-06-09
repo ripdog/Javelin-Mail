@@ -105,7 +105,8 @@ namespace javelin::app
         if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
             settings.apiKey.isEmpty())
         {
-            javelin::gui::settings::PreferencesDialog dialog{m_mainWindow};
+            javelin::gui::settings::PreferencesDialog dialog{
+                m_processServices->accountRepository(), m_mainWindow};
             dialog.exec();
         }
         else

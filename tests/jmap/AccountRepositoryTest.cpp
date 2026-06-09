@@ -111,3 +111,35 @@ TEST_CASE("account repository lists cached accounts with primary accounts first"
     CHECK(accounts.front().isPrimary);
     CHECK(accounts.back().accountId == "account-2");
 }
+
+TEST_CASE("removing cached accounts cascades all account-owned data", "[jmap][cache]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection, QStringLiteral("account-1"), QStringLiteral("Personal"),
+                true);
+
+    QSqlQuery mailbox{databaseContext.connection.database()};
+    mailbox.prepare(QStringLiteral(
+        "INSERT INTO mailboxes (account_id, mailbox_id, name) VALUES (:account_id, :mailbox_id, "
+        ":name)"));
+    mailbox.bindValue(QStringLiteral(":account_id"), QStringLiteral("account-1"));
+    mailbox.bindValue(QStringLiteral(":mailbox_id"), QStringLiteral("inbox"));
+    mailbox.bindValue(QStringLiteral(":name"), QStringLiteral("Inbox"));
+    REQUIRE(mailbox.exec());
+
+    javelin::jmap::cache::AccountRepository repository{databaseContext.connection};
+    REQUIRE_FALSE(repository.removeMany({QStringLiteral("account-1")}).has_value());
+
+    QSqlQuery accountCount{databaseContext.connection.database()};
+    REQUIRE(accountCount.exec(QStringLiteral("SELECT COUNT(*) FROM accounts")));
+    REQUIRE(accountCount.next());
+    CHECK(accountCount.value(0).toInt() == 0);
+
+    QSqlQuery mailboxCount{databaseContext.connection.database()};
+    REQUIRE(mailboxCount.exec(QStringLiteral("SELECT COUNT(*) FROM mailboxes")));
+    REQUIRE(mailboxCount.next());
+    CHECK(mailboxCount.value(0).toInt() == 0);
+}

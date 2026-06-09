@@ -693,6 +693,18 @@ namespace javelin::jmap::cache
                                 "raw_message_sources (account_id, blob_id)"),
                         },
                 },
+                MigrationStep{
+                    .version = 6,
+                    .name = QStringLiteral("account_session_ownership"),
+                    .statements =
+                        {
+                            QStringLiteral("ALTER TABLE accounts ADD COLUMN owner_account_id TEXT"),
+                            QStringLiteral("UPDATE accounts SET owner_account_id = account_id"),
+                            QStringLiteral(
+                                "CREATE INDEX IF NOT EXISTS idx_accounts_owner ON accounts "
+                                "(owner_account_id, account_id)"),
+                        },
+                },
             },
         };
     }

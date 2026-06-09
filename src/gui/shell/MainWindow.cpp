@@ -2791,7 +2791,7 @@ namespace javelin::gui::shell
 
     void MainWindow::openPreferences()
     {
-        javelin::gui::settings::PreferencesDialog dialog{this};
+        javelin::gui::settings::PreferencesDialog dialog{m_accountRepository, this};
         if (dialog.exec() == QDialog::Accepted)
         {
             statusBar()->showMessage(QStringLiteral("Saved connection preferences."), 3000);
@@ -2856,6 +2856,17 @@ namespace javelin::gui::shell
                 }
 
                 const auto& summary = std::get<javelin::jmap::LiveRefreshSummary>(result);
+                const auto ownedAccounts = m_accountRepository.listOwnedBy(summary.accountId);
+                if (const auto* accounts =
+                        std::get_if<std::vector<javelin::jmap::cache::CachedAccount>>(
+                            &ownedAccounts))
+                {
+                    for (const auto& account : *accounts)
+                    {
+                        javelin::gui::settings::PreferencesDialog::associateCachedAccount(
+                            settings.id, QString::fromStdString(account.accountId));
+                    }
+                }
                 qInfo().noquote() << "GUI refresh succeeded"
                                   << QString::fromStdString(summary.accountId)
                                   << static_cast<qulonglong>(summary.mailboxCount)

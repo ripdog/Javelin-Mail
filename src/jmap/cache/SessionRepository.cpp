@@ -164,11 +164,11 @@ namespace javelin::jmap::cache
         insertAccount.prepare(QStringLiteral(
             "INSERT INTO accounts ("
             "account_id, email_address, session_url, is_primary, name, is_personal, "
-            "is_read_only, "
+            "is_read_only, owner_account_id, "
             "cap_mail, cap_submission"
             ") VALUES ("
             ":account_id, :email_address, :session_url, :is_primary, :name, :is_personal, "
-            ":is_read_only, :cap_mail, :cap_submission"
+            ":is_read_only, :owner_account_id, :cap_mail, :cap_submission"
             ") ON CONFLICT(account_id) DO UPDATE SET "
             "email_address = excluded.email_address, "
             "session_url = excluded.session_url, "
@@ -176,6 +176,7 @@ namespace javelin::jmap::cache
             "name = excluded.name, "
             "is_personal = excluded.is_personal, "
             "is_read_only = excluded.is_read_only, "
+            "owner_account_id = excluded.owner_account_id, "
             "cap_mail = excluded.cap_mail, "
             "cap_submission = excluded.cap_submission"));
         std::unordered_set<std::string> sessionAccountIds;
@@ -191,45 +192,12 @@ namespace javelin::jmap::cache
                                      session.primaryAccounts.submissionAccountId == accountId)
                                         ? 1
                                         : 0);
+            insertAccount.bindValue(QStringLiteral(":owner_account_id"),
+                                    QString::fromStdString(std::string{ownerAccountId}));
             if (!insertAccount.exec())
             {
                 database.rollback();
                 return makeQueryError(QStringLiteral("Insert cached account"), insertAccount);
-            }
-        }
-
-        QSqlQuery existingAccountsQuery{database};
-        if (!existingAccountsQuery.exec(QStringLiteral("SELECT account_id FROM accounts")))
-        {
-            database.rollback();
-            return makeQueryError(QStringLiteral("Read cached accounts"), existingAccountsQuery);
-        }
-
-        std::vector<std::string> obsoleteAccountIds;
-        while (existingAccountsQuery.next())
-        {
-            const auto existingAccountId = existingAccountsQuery.value(0).toString().toStdString();
-            if (!sessionAccountIds.contains(existingAccountId))
-            {
-                obsoleteAccountIds.push_back(std::move(existingAccountId));
-            }
-        }
-
-        if (!obsoleteAccountIds.empty())
-        {
-            QSqlQuery deleteAccount{database};
-            deleteAccount.prepare(
-                QStringLiteral("DELETE FROM accounts WHERE account_id = :account_id"));
-            for (const auto& obsoleteAccountId : obsoleteAccountIds)
-            {
-                deleteAccount.bindValue(QStringLiteral(":account_id"),
-                                        QString::fromStdString(obsoleteAccountId));
-                if (!deleteAccount.exec())
-                {
-                    database.rollback();
-                    return makeQueryError(QStringLiteral("Delete obsolete cached account"),
-                                          deleteAccount);
-                }
             }
         }
 
@@ -354,9 +322,12 @@ namespace javelin::jmap::cache
         };
 
         QSqlQuery accountQuery{m_connection.database()};
-        if (!accountQuery.exec(QStringLiteral(
-                "SELECT account_id, name, is_personal, is_read_only, cap_mail, cap_submission "
-                "FROM accounts ORDER BY account_id")))
+        accountQuery.prepare(QStringLiteral(
+            "SELECT account_id, name, is_personal, is_read_only, cap_mail, cap_submission "
+            "FROM accounts WHERE owner_account_id = :owner_account_id ORDER BY account_id"));
+        accountQuery.bindValue(QStringLiteral(":owner_account_id"),
+                               QString::fromStdString(std::string{ownerAccountId}));
+        if (!accountQuery.exec())
         {
             return makeQueryError(QStringLiteral("Read cached accounts"), accountQuery);
         }
