@@ -30,10 +30,10 @@ namespace javelin::jmap::api
                      const javelin::jmap::auth::TokenRefresher* tokenRefresher = nullptr,
                      javelin::jmap::auth::SecretStore* secretStore = nullptr);
 
-        [[nodiscard]] QCoro::Task<MethodCallerResult> call(const ApiRequestContext& requestContext,
-                                                           const RequestEnvelope& request) const;
-        [[nodiscard]] QCoro::Task<MethodCallerResult> call(const ApiRequestContext& requestContext,
-                                                           const RequestBuilder& request) const;
+        [[nodiscard]] QCoro::Task<MethodCallerResult> call(ApiRequestContext requestContext,
+                                                           RequestEnvelope request) const;
+        [[nodiscard]] QCoro::Task<MethodCallerResult> call(ApiRequestContext requestContext,
+                                                           RequestBuilder request) const;
 
       private:
         AbstractTransport& m_transport;

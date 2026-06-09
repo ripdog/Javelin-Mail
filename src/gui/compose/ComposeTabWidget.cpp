@@ -224,9 +224,11 @@ namespace javelin::gui::compose
         }
 
         [[nodiscard]] std::optional<javelin::jmap::LiveConnectionSettings>
-        liveSettings(QString* errorMessage = nullptr)
+        liveSettings(const std::string_view accountId, QString* errorMessage = nullptr)
         {
-            const auto settings = javelin::gui::settings::PreferencesDialog::loadSettings();
+            const auto settings =
+                javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
+                    QString::fromStdString(std::string{accountId}));
             if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
                 settings.apiKey.isEmpty())
             {
@@ -863,7 +865,7 @@ namespace javelin::gui::compose
         }
 
         QString errorMessage;
-        const auto settings = liveSettings(&errorMessage);
+        const auto settings = liveSettings(m_snapshot.accountId, &errorMessage);
         if (!settings.has_value())
         {
             Q_EMIT statusMessageRequested(errorMessage, 10000);
@@ -933,7 +935,7 @@ namespace javelin::gui::compose
         }
 
         QString errorMessage;
-        const auto settings = liveSettings(&errorMessage);
+        const auto settings = liveSettings(m_snapshot.accountId, &errorMessage);
         if (!settings.has_value())
         {
             Q_EMIT statusMessageRequested(errorMessage, 10000);

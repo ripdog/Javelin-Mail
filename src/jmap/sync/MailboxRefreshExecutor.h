@@ -44,8 +44,8 @@ namespace javelin::jmap::sync
                                javelin::jmap::api::ApiRequestContext apiRequestContext);
 
         [[nodiscard]] QCoro::Task<MailboxRefreshResult>
-        refreshCollapsedMailbox(std::string_view accountId, std::string_view mailboxId,
-                                const std::function<void(const QString&)>& reportProgress) const;
+        refreshCollapsedMailbox(std::string accountId, std::string mailboxId,
+                                std::function<void(const QString&)> reportProgress) const;
 
       private:
         javelin::jmap::cache::DatabaseConnection& m_databaseConnection;

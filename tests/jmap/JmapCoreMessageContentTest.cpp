@@ -58,7 +58,7 @@ namespace
             responseFactory;
 
         [[nodiscard]] QCoro::Task<javelin::jmap::api::TransportResult>
-        send(const javelin::jmap::api::HttpRequest& request) override
+        send(javelin::jmap::api::HttpRequest request) override
         {
             requests.push_back(request);
             if (responseFactory)

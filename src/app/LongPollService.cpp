@@ -88,7 +88,7 @@ namespace javelin::app
     }
 
     QCoro::Task<void>
-    LongPollService::onUpdate(const javelin::jmap::sync::LongPollResponse& response)
+    LongPollService::onUpdate(javelin::jmap::sync::LongPollResponse response)
     {
         m_lastEventId = response.newState;
         if (m_runContext != nullptr)

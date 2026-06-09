@@ -136,9 +136,9 @@ namespace javelin::gui::shell
 
     QCoro::Task<SaveAllDownloadResult>
     downloadAttachments(javelin::jmap::JmapCore& jmapCore,
-                        const javelin::jmap::LiveConnectionSettings& settings,
-                        const std::string& accountId, const std::string& emailId,
-                        const std::vector<javelin::jmap::cache::MessageAttachment>& attachments)
+                        javelin::jmap::LiveConnectionSettings settings, std::string accountId,
+                        std::string emailId,
+                        std::vector<javelin::jmap::cache::MessageAttachment> attachments)
     {
         SaveAllDownloadResult result;
         result.files.reserve(attachments.size());

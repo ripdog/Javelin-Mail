@@ -59,7 +59,7 @@ namespace javelin::jmap::api
     {
     }
 
-    QCoro::Task<TransportResult> QtNetworkTransport::send(const HttpRequest& request)
+    QCoro::Task<TransportResult> QtNetworkTransport::send(HttpRequest request)
     {
         QNetworkRequest networkRequest{request.url};
         networkRequest.setTransferTimeout(requestTimeoutMs);

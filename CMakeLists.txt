@@ -420,6 +420,8 @@ javelin_enable_sanitizers(Javelin-Mail)
 
 javelin_add_format_targets(${JAVELIN_FORMAT_FILES})
 
+include(cmake/CheckCoroutineOwnership.cmake)
+
 if(BUILD_TESTING)
     add_subdirectory(tests)
 endif()

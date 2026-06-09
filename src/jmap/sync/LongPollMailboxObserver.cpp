@@ -14,7 +14,7 @@ namespace javelin::jmap::sync
     {
     }
 
-    QCoro::Task<void> LongPollMailboxObserver::onUpdate(const LongPollResponse& response)
+    QCoro::Task<void> LongPollMailboxObserver::onUpdate(LongPollResponse response)
     {
         const bool affectsMail =
             std::ranges::find(response.changedTypes, std::string{"Email"}) !=

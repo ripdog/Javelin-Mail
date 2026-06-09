@@ -19,7 +19,7 @@ namespace javelin::jmap::sync
         virtual ~AbstractLongPollMailboxRefresher() = default;
 
         [[nodiscard]] virtual QCoro::Task<MailboxRefreshResult>
-        refreshMailbox(std::string_view accountId, std::string_view mailboxId) = 0;
+        refreshMailbox(std::string accountId, std::string mailboxId) = 0;
     };
 
     class AbstractRefreshNotificationSink
@@ -38,7 +38,7 @@ namespace javelin::jmap::sync
                                 AbstractRefreshNotificationSink& notificationSink,
                                 std::string accountId, std::string mailboxId);
 
-        [[nodiscard]] QCoro::Task<void> onUpdate(const LongPollResponse& response) override;
+        [[nodiscard]] QCoro::Task<void> onUpdate(LongPollResponse response) override;
 
       private:
         AbstractLongPollMailboxRefresher& m_refresher;

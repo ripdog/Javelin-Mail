@@ -39,7 +39,7 @@ namespace
         std::vector<javelin::jmap::sync::MailboxRefreshResult> queuedResults;
 
         [[nodiscard]] QCoro::Task<javelin::jmap::sync::MailboxRefreshResult>
-        refreshMailbox(const std::string_view accountId, const std::string_view mailboxId) override
+        refreshMailbox(std::string accountId, std::string mailboxId) override
         {
             requests.push_back(Request{
                 .accountId = std::string{accountId},

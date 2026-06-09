@@ -33,7 +33,7 @@ namespace
         std::vector<javelin::jmap::sync::LongPollResult> queuedResults;
 
         [[nodiscard]] QCoro::Task<javelin::jmap::sync::LongPollResult>
-        poll(const javelin::jmap::sync::LongPollRequest& request) override
+        poll(javelin::jmap::sync::LongPollRequest request) override
         {
             requests.push_back(request);
             REQUIRE_FALSE(queuedResults.empty());
@@ -52,7 +52,7 @@ namespace
         std::optional<std::size_t> cancelAfterUpdates;
 
         [[nodiscard]] QCoro::Task<void>
-        onUpdate(const javelin::jmap::sync::LongPollResponse& response) override
+        onUpdate(javelin::jmap::sync::LongPollResponse response) override
         {
             updates.push_back(response);
             if (cancellation != nullptr && cancelAfterUpdates.has_value() &&

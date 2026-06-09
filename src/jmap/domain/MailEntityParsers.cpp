@@ -38,6 +38,18 @@ namespace
         std::optional<std::string> preview;
     };
 
+    struct RawIdentity
+    {
+        std::string id;
+        std::string name;
+        std::string email;
+        std::optional<std::vector<javelin::jmap::domain::EmailAddress>> replyTo;
+        std::optional<std::vector<javelin::jmap::domain::EmailAddress>> bcc;
+        std::optional<std::string> textSignature;
+        std::optional<std::string> htmlSignature;
+        bool mayDelete = false;
+    };
+
     [[nodiscard]] std::vector<std::string>
     enabledKeys(const std::unordered_map<std::string, bool>& values)
     {
@@ -127,9 +139,9 @@ template <> struct glz::meta<RawEmail>
         &T::preview);
 };
 
-template <> struct glz::meta<javelin::jmap::domain::Identity>
+template <> struct glz::meta<RawIdentity>
 {
-    using T = javelin::jmap::domain::Identity;
+    using T = RawIdentity;
 
     static constexpr auto value =
         glz::object("id", &T::id, "name", &T::name, "email", &T::email, "replyTo", &T::replyTo,
@@ -187,7 +199,21 @@ namespace javelin::jmap::domain
 
     ParsedObject<Identity> parseIdentity(std::string_view json)
     {
-        return parseWithGlaze<Identity, Identity>(json, [](Identity identity) { return identity; });
+        return parseWithGlaze<RawIdentity, Identity>(
+            json,
+            [](RawIdentity identity)
+            {
+                return Identity{
+                    .id = std::move(identity.id),
+                    .name = std::move(identity.name),
+                    .email = std::move(identity.email),
+                    .replyTo = identity.replyTo.value_or(std::vector<EmailAddress>{}),
+                    .bcc = identity.bcc.value_or(std::vector<EmailAddress>{}),
+                    .textSignature = std::move(identity.textSignature),
+                    .htmlSignature = std::move(identity.htmlSignature),
+                    .mayDelete = identity.mayDelete,
+                };
+            });
     }
 
 } // namespace javelin::jmap::domain

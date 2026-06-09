@@ -49,7 +49,7 @@ namespace javelin::app
 
         [[nodiscard]] Status status() const;
         [[nodiscard]] QCoro::Task<void>
-        onUpdate(const javelin::jmap::sync::LongPollResponse& response) override;
+        onUpdate(javelin::jmap::sync::LongPollResponse response) override;
 
       Q_SIGNALS:
         void statusChanged(javelin::app::LongPollService::Status status);

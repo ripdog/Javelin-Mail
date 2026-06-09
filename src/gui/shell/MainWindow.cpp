@@ -1891,7 +1891,8 @@ namespace javelin::gui::shell
 
     void MainWindow::openComposeForRequest(javelin::jmap::submission::OpenComposeRequest request)
     {
-        const auto settings = javelin::gui::settings::PreferencesDialog::loadSettings();
+        const auto settings = javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
+            QString::fromStdString(request.accountId));
         if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
             settings.apiKey.isEmpty())
         {
@@ -1911,6 +1912,7 @@ namespace javelin::gui::shell
             {
                 if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
                 {
+                    qWarning().noquote() << "GUI compose open failed" << error->message;
                     statusBar()->showMessage(error->message, 10000);
                     return;
                 }

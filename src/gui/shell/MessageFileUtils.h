@@ -49,9 +49,9 @@ namespace javelin::gui::shell
     visibleDownloadableAttachments(const javelin::jmap::cache::MessageViewSnapshot& snapshot);
     [[nodiscard]] QCoro::Task<SaveAllDownloadResult>
     downloadAttachments(javelin::jmap::JmapCore& jmapCore,
-                        const javelin::jmap::LiveConnectionSettings& settings,
-                        const std::string& accountId, const std::string& emailId,
-                        const std::vector<javelin::jmap::cache::MessageAttachment>& attachments);
+                        javelin::jmap::LiveConnectionSettings settings, std::string accountId,
+                        std::string emailId,
+                        std::vector<javelin::jmap::cache::MessageAttachment> attachments);
     [[nodiscard]] QString tempAttachmentPath(QTemporaryDir& directory,
                                              const javelin::jmap::AttachmentDownload& download);
     [[nodiscard]] QString suggestedSourceFileName(

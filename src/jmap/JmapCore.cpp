@@ -235,9 +235,9 @@ namespace javelin::jmap
 
         [[nodiscard]] QCoro::Task<std::variant<QByteArray, LiveRefreshError>>
         downloadBlob(javelin::jmap::api::AbstractTransport& transport,
-                     const std::string_view downloadUrlTemplate, const std::string_view accountId,
-                     const javelin::jmap::cache::EmailPart& part, const std::string& accessToken,
-                     const QString& failurePrefix)
+                     std::string downloadUrlTemplate, std::string accountId,
+                     javelin::jmap::cache::EmailPart part, std::string accessToken,
+                     QString failurePrefix)
         {
             const auto transportResult = co_await transport.send(buildDownloadRequest(
                 buildDownloadUrl(downloadUrlTemplate, accountId, part), accessToken));
@@ -493,11 +493,10 @@ namespace javelin::jmap
         [[nodiscard]] QCoro::Task<std::variant<CollapsedQueryPage, LiveRefreshError>>
         performCollapsedQueryPage(javelin::jmap::cache::DatabaseConnection& databaseConnection,
                                   javelin::jmap::api::AbstractTransport& transport,
-                                  const LiveConnectionSettings& settings,
-                                  const std::string& accountId,
-                                  const javelin::jmap::api::EmailQueryFilter& filter,
+                                  LiveConnectionSettings settings, std::string accountId,
+                                  javelin::jmap::api::EmailQueryFilter filter,
                                   const std::size_t offset, const std::size_t limit,
-                                  const std::function<void(const QString&)>& reportProgress)
+                                  std::function<void(const QString&)> reportProgress)
         {
             if (const auto validationError = validateLoginSettings(settings, true))
             {

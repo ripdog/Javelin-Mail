@@ -30,11 +30,11 @@ namespace javelin::jmap::submission
                        javelin::jmap::JmapCore& jmapCore);
 
         [[nodiscard]] QCoro::Task<std::variant<DraftSnapshot, javelin::jmap::LiveRefreshError>>
-        open(const javelin::jmap::LiveConnectionSettings& settings, OpenComposeRequest request);
+        open(javelin::jmap::LiveConnectionSettings settings, OpenComposeRequest request);
         [[nodiscard]] QCoro::Task<std::variant<DraftSaveSummary, javelin::jmap::LiveRefreshError>>
-        saveDraft(const javelin::jmap::LiveConnectionSettings& settings, DraftSnapshot snapshot);
+        saveDraft(javelin::jmap::LiveConnectionSettings settings, DraftSnapshot snapshot);
         [[nodiscard]] QCoro::Task<std::variant<SendSummary, javelin::jmap::LiveRefreshError>>
-        send(const javelin::jmap::LiveConnectionSettings& settings, DraftSnapshot snapshot);
+        send(javelin::jmap::LiveConnectionSettings settings, DraftSnapshot snapshot);
         [[nodiscard]] std::variant<std::optional<DraftSnapshot>, javelin::jmap::LiveRefreshError>
         loadWorkingCopy(std::string_view composeSessionId) const;
         [[nodiscard]] std::optional<javelin::jmap::LiveRefreshError>

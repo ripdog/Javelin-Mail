@@ -64,7 +64,7 @@ namespace javelin::jmap::sync
       public:
         virtual ~AbstractLongPollChannel() = default;
 
-        [[nodiscard]] virtual QCoro::Task<LongPollResult> poll(const LongPollRequest& request) = 0;
+        [[nodiscard]] virtual QCoro::Task<LongPollResult> poll(LongPollRequest request) = 0;
     };
 
     class AbstractLongPollObserver
@@ -72,7 +72,7 @@ namespace javelin::jmap::sync
       public:
         virtual ~AbstractLongPollObserver() = default;
 
-        [[nodiscard]] virtual QCoro::Task<void> onUpdate(const LongPollResponse& response) = 0;
+        [[nodiscard]] virtual QCoro::Task<void> onUpdate(LongPollResponse response) = 0;
     };
 
     class AbstractLongPollSleeper

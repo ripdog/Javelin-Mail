@@ -54,7 +54,7 @@ namespace
         std::vector<javelin::jmap::api::TransportResult> queuedResults;
 
         [[nodiscard]] QCoro::Task<javelin::jmap::api::TransportResult>
-        send(const javelin::jmap::api::HttpRequest& request) override
+        send(javelin::jmap::api::HttpRequest request) override
         {
             requests.push_back(request);
             REQUIRE_FALSE(queuedResults.empty());

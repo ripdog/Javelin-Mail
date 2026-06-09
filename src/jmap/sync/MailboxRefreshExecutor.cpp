@@ -236,10 +236,9 @@ namespace javelin::jmap::sync
 
         [[nodiscard]] QCoro::Task<std::variant<CollapsedMailboxFetch, MailboxRefreshError>>
         fetchCollapsedMailboxThreads(javelin::jmap::api::MethodCaller& methodCaller,
-                                     const javelin::jmap::api::ApiRequestContext& apiRequestContext,
-                                     const std::string_view accountId,
-                                     const std::string_view mailboxId,
-                                     const std::function<void(const QString&)>& reportProgress)
+                                     javelin::jmap::api::ApiRequestContext apiRequestContext,
+                                     std::string accountId, std::string mailboxId,
+                                     std::function<void(const QString&)> reportProgress)
         {
             const auto emitProgress = [&reportProgress](const QString& message)
             {
@@ -416,10 +415,9 @@ namespace javelin::jmap::sync
         refreshCollapsedMailboxThreadsIncrementally(
             javelin::jmap::cache::DatabaseConnection& databaseConnection,
             javelin::jmap::api::MethodCaller& methodCaller,
-            const javelin::jmap::api::ApiRequestContext& apiRequestContext,
-            const std::string_view accountId, const std::string_view mailboxId,
-            const std::string_view sinceQueryState, const std::string_view sinceEmailState,
-            const std::function<void(const QString&)>& reportProgress)
+            javelin::jmap::api::ApiRequestContext apiRequestContext, std::string accountId,
+            std::string mailboxId, std::string sinceQueryState, std::string sinceEmailState,
+            std::function<void(const QString&)> reportProgress)
         {
             const auto emitProgress = [&reportProgress](const QString& message)
             {
@@ -688,8 +686,8 @@ namespace javelin::jmap::sync
     }
 
     QCoro::Task<MailboxRefreshResult> MailboxRefreshExecutor::refreshCollapsedMailbox(
-        const std::string_view accountId, const std::string_view mailboxId,
-        const std::function<void(const QString&)>& reportProgress) const
+        std::string accountId, std::string mailboxId,
+        std::function<void(const QString&)> reportProgress) const
     {
         const auto emitProgress = [&reportProgress](const QString& message)
         {

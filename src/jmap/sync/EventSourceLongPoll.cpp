@@ -306,7 +306,7 @@ namespace javelin::jmap::sync
         m_activeReply->abort();
     }
 
-    QCoro::Task<LongPollResult> EventSourceLongPollChannel::poll(const LongPollRequest& request)
+    QCoro::Task<LongPollResult> EventSourceLongPollChannel::poll(LongPollRequest request)
     {
         const auto url = buildEventSourceUrl(request);
         if (!url.has_value())

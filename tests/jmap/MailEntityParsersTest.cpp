@@ -94,3 +94,15 @@ TEST_CASE("identity fixtures parse into typed identity entities", "[jmap][domain
     CHECK(result.value->htmlSignature == "<p>Regards,<br>Alice</p>");
     CHECK_FALSE(result.value->mayDelete);
 }
+
+TEST_CASE("identity parser accepts nullable reply-to and bcc lists", "[jmap][domain]")
+{
+    const auto result = javelin::jmap::domain::parseIdentity(
+        R"({"id":"b","name":"System administrator","email":"admin@mail.example.com","replyTo":null,"bcc":null,"textSignature":"","htmlSignature":"","mayDelete":true})");
+
+    REQUIRE(result.ok());
+    REQUIRE(result.value.has_value());
+    CHECK(result.value->replyTo.empty());
+    CHECK(result.value->bcc.empty());
+    CHECK(result.value->mayDelete);
+}

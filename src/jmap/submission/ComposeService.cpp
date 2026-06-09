@@ -344,8 +344,7 @@ namespace javelin::jmap::submission
                                                javelin::jmap::LiveRefreshError>>
         ensureIdentities(javelin::jmap::cache::DatabaseConnection& connection,
                          javelin::jmap::api::AbstractTransport& transport,
-                         const javelin::jmap::LiveConnectionSettings& settings,
-                         const std::string& accountId)
+                         javelin::jmap::LiveConnectionSettings settings, std::string accountId)
         {
             javelin::jmap::cache::IdentityRepository identityRepository{connection};
             const auto cachedResult = identityRepository.listByAccount(accountId);
@@ -413,6 +412,15 @@ namespace javelin::jmap::submission
             if (const auto* error =
                     std::get_if<javelin::jmap::api::ResponseReaderError>(&identityResult))
             {
+                const auto rawResponses = reader.rawAll(handle.callId);
+                for (const auto& response : rawResponses)
+                {
+                    qWarning().noquote()
+                        << "JMAP Identity/get failed"
+                        << "method" << QString::fromStdString(response.name)
+                        << "callId" << QString::fromStdString(response.callId)
+                        << "arguments" << QString::fromStdString(response.arguments);
+                }
                 co_return javelin::jmap::LiveRefreshError{
                     .message = QStringLiteral("Failed to read Identity/get response: %1")
                                    .arg(QString::fromStdString(error->message)),
@@ -449,9 +457,9 @@ namespace javelin::jmap::submission
 
         [[nodiscard]] QCoro::Task<std::variant<UploadSummary, javelin::jmap::LiveRefreshError>>
         uploadAttachment(javelin::jmap::api::AbstractTransport& transport,
-                         const javelin::jmap::LiveConnectionSettings& settings,
-                         const javelin::jmap::api::Session& session, const std::string& accountId,
-                         const DraftAttachment& attachment)
+                         javelin::jmap::LiveConnectionSettings settings,
+                         javelin::jmap::api::Session session, std::string accountId,
+                         DraftAttachment attachment)
         {
             QFile file{QString::fromStdString(attachment.localFilePath)};
             if (!file.open(QIODevice::ReadOnly))
@@ -708,7 +716,7 @@ namespace javelin::jmap::submission
     }
 
     QCoro::Task<std::variant<DraftSnapshot, javelin::jmap::LiveRefreshError>>
-    ComposeService::open(const javelin::jmap::LiveConnectionSettings& settings,
+    ComposeService::open(javelin::jmap::LiveConnectionSettings settings,
                          OpenComposeRequest request)
     {
         if (const auto validationError = validateSettings(settings))
@@ -913,7 +921,7 @@ namespace javelin::jmap::submission
     }
 
     QCoro::Task<std::variant<DraftSaveSummary, javelin::jmap::LiveRefreshError>>
-    ComposeService::saveDraft(const javelin::jmap::LiveConnectionSettings& settings,
+    ComposeService::saveDraft(javelin::jmap::LiveConnectionSettings settings,
                               DraftSnapshot snapshot)
     {
         if (const auto validationError = validateSettings(settings))
@@ -1149,7 +1157,7 @@ namespace javelin::jmap::submission
     }
 
     QCoro::Task<std::variant<SendSummary, javelin::jmap::LiveRefreshError>>
-    ComposeService::send(const javelin::jmap::LiveConnectionSettings& settings,
+    ComposeService::send(javelin::jmap::LiveConnectionSettings settings,
                          DraftSnapshot snapshot)
     {
         const auto draftSaveResult = co_await saveDraft(settings, std::move(snapshot));

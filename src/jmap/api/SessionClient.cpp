@@ -46,7 +46,7 @@ namespace javelin::jmap::api
     }
 
     QCoro::Task<SessionClientResult>
-    SessionClient::discover(const javelin::jmap::auth::SessionRequestContext& requestContext) const
+    SessionClient::discover(javelin::jmap::auth::SessionRequestContext requestContext) const
     {
         const javelin::jmap::auth::AccessTokenResolver accessTokenResolver{m_tokenRefresher,
                                                                            m_secretStore};

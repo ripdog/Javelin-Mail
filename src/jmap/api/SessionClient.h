@@ -23,7 +23,7 @@ namespace javelin::jmap::api
                       javelin::jmap::auth::SecretStore* secretStore = nullptr);
 
         [[nodiscard]] QCoro::Task<SessionClientResult>
-        discover(const javelin::jmap::auth::SessionRequestContext& requestContext) const;
+        discover(javelin::jmap::auth::SessionRequestContext requestContext) const;
 
       private:
         AbstractTransport& m_transport;

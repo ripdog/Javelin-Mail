@@ -48,7 +48,7 @@ namespace javelin::jmap::api
       public:
         virtual ~AbstractTransport() = default;
 
-        [[nodiscard]] virtual QCoro::Task<TransportResult> send(const HttpRequest& request) = 0;
+        [[nodiscard]] virtual QCoro::Task<TransportResult> send(HttpRequest request) = 0;
     };
 
     class QtNetworkTransport : public AbstractTransport
@@ -57,7 +57,7 @@ namespace javelin::jmap::api
         explicit QtNetworkTransport(QNetworkAccessManager& networkAccessManager);
         ~QtNetworkTransport() override = default;
 
-        [[nodiscard]] QCoro::Task<TransportResult> send(const HttpRequest& request) override;
+        [[nodiscard]] QCoro::Task<TransportResult> send(HttpRequest request) override;
 
       private:
         QNetworkAccessManager& m_networkAccessManager;

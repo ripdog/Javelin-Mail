@@ -49,8 +49,8 @@ namespace javelin::jmap::api
     {
     }
 
-    QCoro::Task<MethodCallerResult> MethodCaller::call(const ApiRequestContext& requestContext,
-                                                       const RequestEnvelope& request) const
+    QCoro::Task<MethodCallerResult> MethodCaller::call(ApiRequestContext requestContext,
+                                                       RequestEnvelope request) const
     {
         const auto serializedRequest = serializeRequestEnvelope(request);
         if (!serializedRequest.has_value())
@@ -99,8 +99,8 @@ namespace javelin::jmap::api
         co_return *parseResult.value;
     }
 
-    QCoro::Task<MethodCallerResult> MethodCaller::call(const ApiRequestContext& requestContext,
-                                                       const RequestBuilder& request) const
+    QCoro::Task<MethodCallerResult> MethodCaller::call(ApiRequestContext requestContext,
+                                                       RequestBuilder request) const
     {
         co_return co_await call(requestContext, request.build());
     }
