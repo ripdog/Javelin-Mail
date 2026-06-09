@@ -28,6 +28,9 @@ namespace javelin::jmap::cache
         [[nodiscard]] std::variant<std::vector<CachedAccount>, DatabaseError>
         listOwnedBy(std::string_view ownerAccountId) const;
         [[nodiscard]] std::optional<DatabaseError> removeMany(const QStringList& accountIds);
+        [[nodiscard]] std::optional<DatabaseError>
+        removeConfiguredAccount(const QString& loginEmail, const QString& sessionUrl,
+                                const QStringList& knownAccountIds);
 
       private:
         DatabaseConnection& m_connection;

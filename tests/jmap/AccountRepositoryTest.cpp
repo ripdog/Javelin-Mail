@@ -64,16 +64,18 @@ namespace
     }
 
     void seedAccount(javelin::jmap::cache::DatabaseConnection& connection, const QString& accountId,
-                     const QString& name, const bool isPrimary)
+                     const QString& name, const bool isPrimary,
+                     const QString& ownerAccountId = QString{})
     {
         QSqlQuery query{connection.database()};
         query.prepare(
             QStringLiteral("INSERT INTO accounts ("
                            "account_id, email_address, session_url, is_primary, name, is_personal, "
-                           "is_read_only, cap_mail, cap_submission"
+                           "is_read_only, cap_mail, cap_submission, owner_account_id"
                            ") VALUES ("
                            ":account_id, :email_address, :session_url, :is_primary, :name, "
-                           ":is_personal, :is_read_only, :cap_mail, :cap_submission)"));
+                           ":is_personal, :is_read_only, :cap_mail, :cap_submission, "
+                           ":owner_account_id)"));
         query.bindValue(QStringLiteral(":account_id"), accountId);
         query.bindValue(QStringLiteral(":email_address"),
                         QStringLiteral("%1@example.com").arg(accountId));
@@ -85,6 +87,22 @@ namespace
         query.bindValue(QStringLiteral(":is_read_only"), 0);
         query.bindValue(QStringLiteral(":cap_mail"), 1);
         query.bindValue(QStringLiteral(":cap_submission"), 0);
+        query.bindValue(QStringLiteral(":owner_account_id"),
+                        ownerAccountId.isEmpty() ? accountId : ownerAccountId);
+        REQUIRE(query.exec());
+    }
+
+    void seedSession(javelin::jmap::cache::DatabaseConnection& connection, const QString& accountId,
+                     const QString& username, const QString& apiUrl)
+    {
+        QSqlQuery query{connection.database()};
+        query.prepare(QStringLiteral(
+            "INSERT INTO sessions (account_id, api_url, state, username) "
+            "VALUES (:account_id, :api_url, :state, :username)"));
+        query.bindValue(QStringLiteral(":account_id"), accountId);
+        query.bindValue(QStringLiteral(":api_url"), apiUrl);
+        query.bindValue(QStringLiteral(":state"), QStringLiteral("state"));
+        query.bindValue(QStringLiteral(":username"), username);
         REQUIRE(query.exec());
     }
 
@@ -137,6 +155,52 @@ TEST_CASE("removing cached accounts cascades all account-owned data", "[jmap][ca
     REQUIRE(accountCount.exec(QStringLiteral("SELECT COUNT(*) FROM accounts")));
     REQUIRE(accountCount.next());
     CHECK(accountCount.value(0).toInt() == 0);
+
+    QSqlQuery mailboxCount{databaseContext.connection.database()};
+    REQUIRE(mailboxCount.exec(QStringLiteral("SELECT COUNT(*) FROM mailboxes")));
+    REQUIRE(mailboxCount.next());
+    CHECK(mailboxCount.value(0).toInt() == 0);
+}
+
+TEST_CASE("removing a configured login resolves session ownership without saved account ids",
+          "[jmap][cache]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection, QStringLiteral("stalwart-owner"),
+                QStringLiteral("Stalwart"), true);
+    seedAccount(databaseContext.connection, QStringLiteral("stalwart-shared"),
+                QStringLiteral("Shared"), false, QStringLiteral("stalwart-owner"));
+    seedAccount(databaseContext.connection, QStringLiteral("other-owner"), QStringLiteral("Other"),
+                true);
+    seedSession(databaseContext.connection, QStringLiteral("stalwart-owner"),
+                QStringLiteral("admin@example.com"), QStringLiteral("https://mail.example.com/jmap/"));
+    seedSession(databaseContext.connection, QStringLiteral("other-owner"),
+                QStringLiteral("admin@example.com"), QStringLiteral("https://other.example.com/jmap/"));
+
+    QSqlQuery mailbox{databaseContext.connection.database()};
+    mailbox.prepare(QStringLiteral(
+        "INSERT INTO mailboxes (account_id, mailbox_id, name) VALUES (:account_id, :mailbox_id, "
+        ":name)"));
+    mailbox.bindValue(QStringLiteral(":account_id"), QStringLiteral("stalwart-shared"));
+    mailbox.bindValue(QStringLiteral(":mailbox_id"), QStringLiteral("inbox"));
+    mailbox.bindValue(QStringLiteral(":name"), QStringLiteral("Inbox"));
+    REQUIRE(mailbox.exec());
+
+    javelin::jmap::cache::AccountRepository repository{databaseContext.connection};
+    REQUIRE_FALSE(repository
+                      .removeConfiguredAccount(QStringLiteral("admin@example.com"),
+                                               QStringLiteral("https://mail.example.com/jmap/session"),
+                                               {})
+                      .has_value());
+
+    QSqlQuery accounts{databaseContext.connection.database()};
+    REQUIRE(accounts.exec(QStringLiteral("SELECT account_id FROM accounts ORDER BY account_id")));
+    REQUIRE(accounts.next());
+    CHECK(accounts.value(0).toString() == QStringLiteral("other-owner"));
+    CHECK_FALSE(accounts.next());
 
     QSqlQuery mailboxCount{databaseContext.connection.database()};
     REQUIRE(mailboxCount.exec(QStringLiteral("SELECT COUNT(*) FROM mailboxes")));

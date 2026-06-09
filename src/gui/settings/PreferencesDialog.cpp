@@ -297,7 +297,8 @@ namespace javelin::gui::settings
             return;
         }
 
-        if (const auto error = m_accountRepository.removeMany(account.cachedAccountIds))
+        if (const auto error = m_accountRepository.removeConfiguredAccount(
+                account.loginEmail, account.sessionUrl, account.cachedAccountIds))
         {
             QMessageBox::critical(this, QStringLiteral("Could not remove account"), error->message);
             return;

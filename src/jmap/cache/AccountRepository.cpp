@@ -2,6 +2,9 @@
 
 #include <QSqlError>
 #include <QSqlQuery>
+#include <QUrl>
+
+#include <QSet>
 
 namespace javelin::jmap::cache
 {
@@ -118,6 +121,81 @@ namespace javelin::jmap::cache
                 return makeQueryError(QStringLiteral("Remove cached account"), query);
             }
         }
+        if (!database.commit())
+        {
+            database.rollback();
+            return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
+                                 .message = QStringLiteral("Commit account removal: ") +
+                                            database.lastError().text()};
+        }
+        return std::nullopt;
+    }
+
+    std::optional<DatabaseError>
+    AccountRepository::removeConfiguredAccount(const QString& loginEmail, const QString& sessionUrl,
+                                               const QStringList& knownAccountIds)
+    {
+        if (const auto error = m_connection.validate())
+        {
+            return error;
+        }
+
+        QSet<QString> ownerAccountIds{knownAccountIds.begin(), knownAccountIds.end()};
+        const QUrl configuredUrl{sessionUrl};
+        QSqlQuery sessions{m_connection.database()};
+        sessions.prepare(QStringLiteral(
+            "SELECT account_id, api_url FROM sessions WHERE username = :username"));
+        sessions.bindValue(QStringLiteral(":username"), loginEmail);
+        if (!sessions.exec())
+        {
+            return makeQueryError(QStringLiteral("Resolve configured account sessions"), sessions);
+        }
+        while (sessions.next())
+        {
+            const QUrl apiUrl{sessions.value(1).toString()};
+            const bool sameServer =
+                configuredUrl.isValid() && apiUrl.isValid() &&
+                configuredUrl.scheme().compare(apiUrl.scheme(), Qt::CaseInsensitive) == 0 &&
+                configuredUrl.host().compare(apiUrl.host(), Qt::CaseInsensitive) == 0 &&
+                configuredUrl.port() == apiUrl.port();
+            if (sameServer)
+            {
+                ownerAccountIds.insert(sessions.value(0).toString());
+            }
+        }
+
+        if (ownerAccountIds.empty())
+        {
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message = QStringLiteral(
+                    "No cached account data matched this configured login. Nothing was removed."),
+            };
+        }
+
+        auto& database = m_connection.database();
+        if (!database.transaction())
+        {
+            return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
+                                 .message = QStringLiteral("Begin account removal transaction: ") +
+                                            database.lastError().text()};
+        }
+
+        QSqlQuery deleteOwnedAccounts{database};
+        deleteOwnedAccounts.prepare(
+            QStringLiteral("DELETE FROM accounts WHERE owner_account_id = :owner_account_id "
+                           "OR account_id = :owner_account_id"));
+        for (const auto& ownerAccountId : ownerAccountIds)
+        {
+            deleteOwnedAccounts.bindValue(QStringLiteral(":owner_account_id"), ownerAccountId);
+            if (!deleteOwnedAccounts.exec())
+            {
+                database.rollback();
+                return makeQueryError(QStringLiteral("Remove configured account cache"),
+                                      deleteOwnedAccounts);
+            }
+        }
+
         if (!database.commit())
         {
             database.rollback();
