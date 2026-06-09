@@ -76,8 +76,8 @@ namespace javelin::gui::messages
         painter->setRenderHint(QPainter::TextAntialiasing, true);
 
         const auto outerRect = insetRect(option.rect, 1);
-        const auto rowKind =
-            static_cast<MessageListModel::RowKind>(index.data(MessageListModel::RowKindRole).toInt());
+        const auto rowKind = static_cast<MessageListModel::RowKind>(
+            index.data(MessageListModel::RowKindRole).toInt());
         const bool isMemberRow = rowKind == MessageListModel::RowKind::ThreadMember;
         const auto cardRect = isMemberRow ? insetRect(outerRect.adjusted(memberIndent, 0, 0, 0), 1)
                                           : insetRect(outerRect, 1);
@@ -89,15 +89,23 @@ namespace javelin::gui::messages
         const bool canExpand = index.data(MessageListModel::CanExpandRole).toBool();
         const bool isExpanded = index.data(MessageListModel::IsExpandedRole).toBool();
 
-        const QColor background = isSelected ? QColor{37, 29, 45}
-                                             : (isMemberRow ? QColor{30, 31, 36} : QColor{27, 28, 32});
-        const QColor border = isSelected ? QColor{102, 72, 122}
-                                         : (isMemberRow ? QColor{70, 72, 80} : QColor{58, 60, 68});
-        const QColor senderColor = isUnread ? QColor{235, 236, 240} : QColor{214, 215, 220};
-        const QColor textColor = QColor{214, 215, 220};
-        const QColor mutedColor = QColor{154, 156, 164};
-        const QColor accentColor = QColor{166, 117, 214};
-        const QColor alertColor = QColor{230, 87, 87};
+        const auto& palette = option.palette;
+        const QColor background =
+            palette.color(isSelected ? QPalette::Highlight
+                                     : (isMemberRow ? QPalette::AlternateBase : QPalette::Base));
+        const QColor border =
+            palette.color(isSelected ? QPalette::HighlightedText
+                                     : (isMemberRow ? QPalette::Midlight : QPalette::Mid));
+        const QColor textColor =
+            palette.color(isSelected ? QPalette::HighlightedText : QPalette::Text);
+        const QColor senderColor =
+            palette.color(isSelected ? QPalette::HighlightedText
+                                     : (isUnread ? QPalette::Text : QPalette::WindowText));
+        const QColor mutedColor =
+            palette.color(isSelected ? QPalette::HighlightedText : QPalette::PlaceholderText);
+        const QColor accentColor = palette.color(QPalette::Highlight);
+        const QColor alertColor =
+            palette.color(isSelected ? QPalette::HighlightedText : QPalette::Link);
 
         painter->setPen(Qt::NoPen);
         painter->setBrush(background);
@@ -113,8 +121,8 @@ namespace javelin::gui::messages
         if (canExpand)
         {
             const QRect arrowRect = disclosureRect(contentRect, isMemberRow);
-            const auto primitive = isExpanded ? QStyle::PE_IndicatorArrowDown
-                                              : QStyle::PE_IndicatorArrowRight;
+            const auto primitive =
+                isExpanded ? QStyle::PE_IndicatorArrowDown : QStyle::PE_IndicatorArrowRight;
             QStyleOption arrowOption;
             arrowOption.rect = arrowRect;
             arrowOption.palette = option.palette;
@@ -145,15 +153,15 @@ namespace javelin::gui::messages
             timestampWidth,
             24,
         };
-        const QRect leftHeaderRect{contentRect.left() + unreadDotReserve, contentRect.top(),
-                                   std::max(0, contentRect.width() - timestampWidth - 10 -
-                                                   unreadDotReserve),
-                                   24};
+        const QRect leftHeaderRect{
+            contentRect.left() + unreadDotReserve, contentRect.top(),
+            std::max(0, contentRect.width() - timestampWidth - 10 - unreadDotReserve), 24};
 
         if (isUnread)
         {
             const QRect dotRect{contentRect.left(),
-                                contentRect.top() + (leftHeaderRect.height() - unreadDotDiameter) / 2,
+                                contentRect.top() +
+                                    ((leftHeaderRect.height() - unreadDotDiameter) / 2),
                                 unreadDotDiameter, unreadDotDiameter};
             painter->setPen(Qt::NoPen);
             painter->setBrush(accentColor);
@@ -191,8 +199,8 @@ namespace javelin::gui::messages
         constexpr int attachmentWidth = 18;
         constexpr int attachmentGap = 8;
         const int attachmentReserve = hasAttachment ? attachmentWidth + attachmentGap : 0;
-        const QRect previewRect{contentRect.left(), contentRect.top() + 58,
-                                std::max(0, contentRect.width() - attachmentReserve), 22};
+        const QRect previewRect{contentRect.left(), contentRect.top() + 60,
+                                std::max(0, contentRect.width() - attachmentReserve), 28};
         painter->drawText(
             previewRect, Qt::AlignLeft | Qt::AlignVCenter,
             previewMetrics.elidedText(lowerLine, Qt::ElideRight, previewRect.width()));
@@ -226,8 +234,8 @@ namespace javelin::gui::messages
                                         const QModelIndex& index) const
     {
         Q_UNUSED(option);
-        const auto rowKind =
-            static_cast<MessageListModel::RowKind>(index.data(MessageListModel::RowKindRole).toInt());
+        const auto rowKind = static_cast<MessageListModel::RowKind>(
+            index.data(MessageListModel::RowKindRole).toInt());
         return {
             0,
             rowKind == MessageListModel::RowKind::ThreadMember ? 98 : 112,
@@ -253,9 +261,9 @@ namespace javelin::gui::messages
 
         const auto* mouseEvent = static_cast<QMouseEvent*>(event);
         QRect contentRect = insetRect(insetRect(option.rect, 1), 15);
-        const bool isMemberRow =
-            static_cast<MessageListModel::RowKind>(index.data(MessageListModel::RowKindRole).toInt()) ==
-            MessageListModel::RowKind::ThreadMember;
+        const bool isMemberRow = static_cast<MessageListModel::RowKind>(
+                                     index.data(MessageListModel::RowKindRole).toInt()) ==
+                                 MessageListModel::RowKind::ThreadMember;
         if (disclosureRect(contentRect, isMemberRow).contains(mouseEvent->position().toPoint()))
         {
             if (event->type() == QEvent::MouseButtonRelease &&

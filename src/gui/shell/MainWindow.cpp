@@ -634,8 +634,7 @@ namespace javelin::gui::shell
         m_messageView->setFrameShape(QFrame::NoFrame);
         m_messageView->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
         m_messageView->setSelectionMode(QAbstractItemView::ExtendedSelection);
-        m_messageView->setStyleSheet(
-            QStringLiteral("QListView { background: #26272c; border: none; padding: 3px; }"));
+        m_messageView->setStyleSheet(QStringLiteral("QListView { border: none; padding: 3px; }"));
         m_messageView->installEventFilter(this);
         m_messageView->viewport()->installEventFilter(this);
 
@@ -2406,8 +2405,8 @@ namespace javelin::gui::shell
                 QStringLiteral("No messages are available for the selected mailbox yet."));
             m_messageEmptyState->setStyleSheet(QString{});
         }
-        m_messageEmptyState->setVisible(
-            !hasMessages || (page != nullptr && !page->refreshError.isEmpty()));
+        m_messageEmptyState->setVisible(!hasMessages ||
+                                        (page != nullptr && !page->refreshError.isEmpty()));
         m_messageView->setVisible(hasMessages);
     }
 
