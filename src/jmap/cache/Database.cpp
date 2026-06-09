@@ -705,6 +705,25 @@ namespace javelin::jmap::cache
                                 "(owner_account_id, account_id)"),
                         },
                 },
+                MigrationStep{
+                    .version = 9,
+                    .name = QStringLiteral("ensure_raw_message_sources"),
+                    .statements =
+                        {
+                            QStringLiteral("CREATE TABLE IF NOT EXISTS raw_message_sources ("
+                                           "account_id TEXT NOT NULL REFERENCES "
+                                           "accounts(account_id) ON DELETE CASCADE,"
+                                           "email_id TEXT NOT NULL,"
+                                           "blob_id TEXT NOT NULL,"
+                                           "payload BLOB NOT NULL,"
+                                           "fetched_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+                                           "PRIMARY KEY (account_id, email_id)"
+                                           ") STRICT"),
+                            QStringLiteral(
+                                "CREATE INDEX IF NOT EXISTS idx_raw_message_sources_blob ON "
+                                "raw_message_sources (account_id, blob_id)"),
+                        },
+                },
             },
         };
     }

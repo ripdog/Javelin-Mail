@@ -2873,7 +2873,6 @@ namespace javelin::gui::shell
                                   << static_cast<qulonglong>(summary.emailCount);
                 reloadAccounts();
                 refreshViewsFromCache();
-                refreshActiveTabFromServer();
                 statusBar()->showMessage(
                     QStringLiteral("Synced %1 mailboxes and %2 messages for %3.")
                         .arg(summary.mailboxCount)
@@ -2886,7 +2885,8 @@ namespace javelin::gui::shell
 
     void MainWindow::refreshSelectedMessageContent(std::string accountId, std::string emailId)
     {
-        const auto settings = javelin::gui::settings::PreferencesDialog::loadSettings();
+        const auto settings = javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
+            QString::fromStdString(accountId));
         if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
             settings.apiKey.isEmpty())
         {

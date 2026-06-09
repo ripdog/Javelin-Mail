@@ -54,6 +54,14 @@ namespace javelin::app
 
     void LongPollService::applySettings(javelin::jmap::LiveConnectionSettings settings)
     {
+        if (m_settings.has_value() && m_runContext != nullptr &&
+            m_settings->sessionUrl == settings.sessionUrl &&
+            m_settings->loginEmail == settings.loginEmail &&
+            m_settings->apiKey == settings.apiKey)
+        {
+            return;
+        }
+
         m_settings = std::move(settings);
         restart();
     }
@@ -71,6 +79,7 @@ namespace javelin::app
         }
 
         setStatus(Status::Disconnected);
+        m_shouldCatchUpRefreshOnReconnect = false;
     }
 
     LongPollService::Status LongPollService::status() const
