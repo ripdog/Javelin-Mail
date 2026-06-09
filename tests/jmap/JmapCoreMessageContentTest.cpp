@@ -232,6 +232,69 @@ TEST_CASE("JmapCore refreshMessageContent caches raw message sources",
     CHECK(source->payload.contains(QByteArrayLiteral("<img src=\"cid:chart@cid\">")));
 }
 
+TEST_CASE("JmapCore caches message content from junk and trash mailboxes",
+          "[jmap][core][message-content]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    javelin::jmap::cache::SessionRepository sessionRepository{databaseContext.connection};
+    const auto session = loadSessionFixture();
+    REQUIRE_FALSE(sessionRepository.replace("u1", session).has_value());
+    seedEmail(databaseContext.connection);
+
+    QSqlQuery mailbox{databaseContext.connection.database()};
+    mailbox.prepare(QStringLiteral(
+        "INSERT INTO mailboxes (account_id, mailbox_id, name, role) "
+        "VALUES (:account_id, :mailbox_id, :name, :role)"));
+    mailbox.bindValue(QStringLiteral(":account_id"), QStringLiteral("u1"));
+    mailbox.bindValue(QStringLiteral(":mailbox_id"), QStringLiteral("mbx-junk"));
+    mailbox.bindValue(QStringLiteral(":name"), QStringLiteral("Junk"));
+    mailbox.bindValue(QStringLiteral(":role"), QStringLiteral("junk"));
+    REQUIRE(mailbox.exec());
+    mailbox.bindValue(QStringLiteral(":account_id"), QStringLiteral("u1"));
+    mailbox.bindValue(QStringLiteral(":mailbox_id"), QStringLiteral("mbx-trash"));
+    mailbox.bindValue(QStringLiteral(":name"), QStringLiteral("Trash"));
+    mailbox.bindValue(QStringLiteral(":role"), QStringLiteral("trash"));
+    REQUIRE(mailbox.exec());
+
+    QSqlQuery assignMailbox{databaseContext.connection.database()};
+    assignMailbox.prepare(QStringLiteral(
+        "UPDATE emails SET mailbox_ids_json = :mailbox_ids WHERE account_id = :account_id "
+        "AND email_id = :email_id"));
+    assignMailbox.bindValue(QStringLiteral(":mailbox_ids"),
+                            QStringLiteral("[\"mbx-junk\",\"mbx-trash\"]"));
+    assignMailbox.bindValue(QStringLiteral(":account_id"), QStringLiteral("u1"));
+    assignMailbox.bindValue(QStringLiteral(":email_id"), QStringLiteral("eml-1"));
+    REQUIRE(assignMailbox.exec());
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body = QByteArrayLiteral("Subject: Junk message\r\n"
+                                  "Content-Type: text/plain; charset=utf-8\r\n"
+                                  "\r\n"
+                                  "Readable junk body\r\n"),
+    });
+
+    javelin::jmap::JmapCore core{databaseContext.connection, transport};
+    const auto result = QCoro::waitFor(core.refreshMessageContent(
+        {
+            .sessionUrl = "https://mail.example.com/.well-known/jmap",
+            .loginEmail = "alice@example.com",
+            .apiKey = "access-token",
+        },
+        "u1", "eml-1"));
+    REQUIRE(std::holds_alternative<javelin::jmap::MessageContentRefreshSummary>(result));
+
+    javelin::jmap::cache::RawMessageSourceRepository sourceRepository{databaseContext.connection};
+    const auto sourceResult = sourceRepository.find("u1", "eml-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::RawMessageSource>>(
+        sourceResult));
+    CHECK(std::get<std::optional<javelin::jmap::cache::RawMessageSource>>(sourceResult).has_value());
+}
+
 TEST_CASE("JmapCore searchMessages uses Email/query text filters and caches thread results",
           "[jmap][core][search]")
 {

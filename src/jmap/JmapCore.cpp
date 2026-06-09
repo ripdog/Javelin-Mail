@@ -92,56 +92,6 @@ namespace javelin::jmap
             return std::nullopt;
         }
 
-        [[nodiscard]] std::variant<bool, LiveRefreshError>
-        isMessageInDiscardedMailbox(javelin::jmap::cache::DatabaseConnection& connection,
-                                    const std::string_view accountId,
-                                    const std::string_view emailId)
-        {
-            javelin::jmap::cache::EmailRepository emailRepository{connection};
-            const auto emailResult = emailRepository.find(accountId, emailId);
-            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&emailResult))
-            {
-                return LiveRefreshError{.message = error->message};
-            }
-
-            const auto& email = std::get<std::optional<javelin::jmap::domain::Email>>(emailResult);
-            if (!email.has_value())
-            {
-                return LiveRefreshError{
-                    .message = QStringLiteral("The selected message is not cached locally."),
-                };
-            }
-
-            QSqlQuery query{connection.database()};
-            query.prepare(QStringLiteral("SELECT role FROM mailboxes "
-                                         "WHERE account_id = :account_id AND mailbox_id = "
-                                         ":mailbox_id"));
-            for (const auto& mailboxId : email->mailboxIds)
-            {
-                query.bindValue(QStringLiteral(":account_id"),
-                                QString::fromStdString(std::string{accountId}));
-                query.bindValue(QStringLiteral(":mailbox_id"), QString::fromStdString(mailboxId));
-                if (!query.exec())
-                {
-                    return LiveRefreshError{
-                        .message = QStringLiteral("Read message mailbox roles: ") +
-                                   query.lastError().text(),
-                    };
-                }
-
-                while (query.next())
-                {
-                    const auto role = query.value(0).toString().toStdString();
-                    if (role == "trash" || role == "junk" || role == "spam")
-                    {
-                        return true;
-                    }
-                }
-            }
-
-            return false;
-        }
-
         [[nodiscard]] QString encodedTemplateValue(const std::string_view value)
         {
             return QString::fromUtf8(
@@ -998,22 +948,6 @@ namespace javelin::jmap
 
         javelin::jmap::cache::RawMessageSourceRepository sourceRepository{
             *m_impl->databaseConnection};
-        const auto discardedMailboxResult =
-            isMessageInDiscardedMailbox(*m_impl->databaseConnection, accountId, emailId);
-        if (const auto* error = std::get_if<LiveRefreshError>(&discardedMailboxResult))
-        {
-            co_return *error;
-        }
-
-        const bool isDiscardedMessage = std::get<bool>(discardedMailboxResult);
-        if (isDiscardedMessage)
-        {
-            if (const auto error = sourceRepository.remove(accountId, emailId))
-            {
-                co_return LiveRefreshError{.message = error->message};
-            }
-        }
-
         const auto emailResult =
             findEmailForDownload(*m_impl->databaseConnection, accountId, emailId);
         if (const auto* error = std::get_if<LiveRefreshError>(&emailResult))
@@ -1029,7 +963,7 @@ namespace javelin::jmap
         }
         const auto& source =
             std::get<std::optional<javelin::jmap::cache::RawMessageSource>>(cachedSource);
-        if (!isDiscardedMessage && source.has_value() && source->blobId == email.blobId)
+        if (source.has_value() && source->blobId == email.blobId)
         {
             qInfo().noquote() << "JMAP core message source using cached data"
                               << QString::fromStdString(emailId);
@@ -1078,16 +1012,13 @@ namespace javelin::jmap
         }
 
         const auto payload = std::get<QByteArray>(downloadResult);
-        if (!isDiscardedMessage)
+        if (const auto error = sourceRepository.upsert(accountId, {
+                                                                      .emailId = email.id,
+                                                                      .blobId = email.blobId,
+                                                                      .payload = payload,
+                                                                  }))
         {
-            if (const auto error = sourceRepository.upsert(accountId, {
-                                                                          .emailId = email.id,
-                                                                          .blobId = email.blobId,
-                                                                          .payload = payload,
-                                                                      }))
-            {
-                co_return LiveRefreshError{.message = error->message};
-            }
+            co_return LiveRefreshError{.message = error->message};
         }
 
         qInfo().noquote() << "JMAP core message source refresh success"
