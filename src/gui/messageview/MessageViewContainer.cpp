@@ -464,6 +464,7 @@ namespace javelin::gui::messageview
         m_multipleMessages.clear();
         m_attachmentsExpanded = false;
         m_loading = false;
+        m_errorMessage.clear();
 
         m_snapshot = std::nullopt;
         if (m_accountId.has_value() && m_emailId.has_value())
@@ -489,6 +490,7 @@ namespace javelin::gui::messageview
         m_multipleMessages = std::move(messages);
         m_attachmentsExpanded = false;
         m_loading = false;
+        m_errorMessage.clear();
         m_snapshot = std::nullopt;
         updatePresentation();
     }
@@ -496,6 +498,7 @@ namespace javelin::gui::messageview
     void MessageViewContainer::refresh(javelin::jmap::cache::MessageViewService& messageViewService)
     {
         m_loading = false;
+        m_errorMessage.clear();
         m_snapshot = std::nullopt;
         if (m_accountId.has_value() && m_emailId.has_value())
         {
@@ -535,10 +538,21 @@ namespace javelin::gui::messageview
     void MessageViewContainer::setLoadingState(const bool loading, const QString& detailText)
     {
         m_loading = loading;
+        if (loading)
+        {
+            m_errorMessage.clear();
+        }
         if (!detailText.isEmpty())
         {
             m_placeholderDetailLabel->setText(detailText);
         }
+        updatePresentation();
+    }
+
+    void MessageViewContainer::setErrorState(const QString& errorMessage)
+    {
+        m_loading = false;
+        m_errorMessage = errorMessage;
         updatePresentation();
     }
 
@@ -638,7 +652,14 @@ namespace javelin::gui::messageview
 
         if (!m_snapshot.has_value())
         {
-            if (m_loading)
+            if (!m_errorMessage.isEmpty())
+            {
+                m_titleLabel->setText(QStringLiteral("Could not load message"));
+                m_detailLabel->setText(m_errorMessage);
+                m_placeholderTitleLabel->setText(QStringLiteral("Message retrieval failed"));
+                m_placeholderDetailLabel->setText(m_errorMessage);
+            }
+            else if (m_loading)
             {
                 m_titleLabel->setText(QStringLiteral("Loading message"));
                 m_detailLabel->setText(QStringLiteral("Downloading the selected message now."));

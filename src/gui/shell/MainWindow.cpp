@@ -1202,6 +1202,7 @@ namespace javelin::gui::shell
                                 .cacheLoaded = false,
                                 .refreshInFlight = false,
                                 .stale = false,
+                                .refreshError = {},
                             },
                         .selection = {},
                     },
@@ -1221,6 +1222,7 @@ namespace javelin::gui::shell
                         .cacheLoaded = false,
                         .refreshInFlight = false,
                         .stale = false,
+                        .refreshError = {},
                     },
                 .selection = {},
             };
@@ -1602,11 +1604,15 @@ namespace javelin::gui::shell
         }
 
         tab.page.refreshInFlight = true;
+        tab.page.refreshError.clear();
+        updateEmptyStates();
         const auto tabAccountId = tab.accountId;
         const auto tabMailboxId = tab.mailboxId;
         const auto tabOffset = tab.page.offset;
         auto task = m_jmapCore.queryMailboxPage(
-            toLiveConnectionSettings(javelin::gui::settings::PreferencesDialog::loadSettings()),
+            toLiveConnectionSettings(
+                javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
+                    QString::fromStdString(tab.accountId))),
             tab.accountId, tab.mailboxId, tab.page.offset, pageSize,
             [this](const QString& message)
             {
@@ -1627,10 +1633,12 @@ namespace javelin::gui::shell
                             mailboxTab->page.offset == tabOffset)
                         {
                             mailboxTab->page.refreshInFlight = false;
+                            mailboxTab->page.refreshError = error->message;
                             break;
                         }
                     }
                     statusBar()->showMessage(error->message, 10000);
+                    updateEmptyStates();
                     return;
                 }
 
@@ -1650,6 +1658,7 @@ namespace javelin::gui::shell
                     mailboxTab->page.cacheLoaded = true;
                     mailboxTab->page.refreshInFlight = false;
                     mailboxTab->page.stale = false;
+                    mailboxTab->page.refreshError.clear();
                     if (activeTabIsMailbox() &&
                         activeAccountId() == std::optional<std::string>{tabAccountId} &&
                         activeMailboxId() == std::optional<std::string>{tabMailboxId} &&
@@ -1660,6 +1669,7 @@ namespace javelin::gui::shell
                         restoreActiveTabMessageSelection(previousMessageRow);
                         refreshSelectionFromModels();
                     }
+                    updateEmptyStates();
                     statusBar()->showMessage(
                         QStringLiteral("Loaded %1 mailbox conversations.")
                             .arg(static_cast<qulonglong>(summary.representativeCount)),
@@ -1677,11 +1687,15 @@ namespace javelin::gui::shell
         }
 
         tab.page.refreshInFlight = true;
+        tab.page.refreshError.clear();
+        updateEmptyStates();
         const auto tabAccountId = tab.accountId;
         const auto tabQuery = tab.query;
         const auto tabOffset = tab.page.offset;
         auto task = m_jmapCore.searchMessages(
-            toLiveConnectionSettings(javelin::gui::settings::PreferencesDialog::loadSettings()),
+            toLiveConnectionSettings(
+                javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
+                    QString::fromStdString(tab.accountId))),
             tab.accountId, tab.query, tab.page.offset, pageSize,
             [this](const QString& message)
             {
@@ -1701,10 +1715,12 @@ namespace javelin::gui::shell
                             searchTab->query == tabQuery && searchTab->page.offset == tabOffset)
                         {
                             searchTab->page.refreshInFlight = false;
+                            searchTab->page.refreshError = error->message;
                             break;
                         }
                     }
                     statusBar()->showMessage(error->message, 10000);
+                    updateEmptyStates();
                     return;
                 }
 
@@ -1723,6 +1739,7 @@ namespace javelin::gui::shell
                     searchTab->page.cacheLoaded = true;
                     searchTab->page.refreshInFlight = false;
                     searchTab->page.stale = false;
+                    searchTab->page.refreshError.clear();
                     if (activeTabIsSearch() &&
                         activeAccountId() == std::optional<std::string>{tabAccountId} &&
                         std::get<SearchTabState>(activeTab()->content).query == tabQuery &&
@@ -1733,6 +1750,7 @@ namespace javelin::gui::shell
                         restoreActiveTabMessageSelection(previousMessageRow);
                         refreshSelectionFromModels();
                     }
+                    updateEmptyStates();
                     statusBar()->showMessage(
                         summary.total.has_value() && *summary.total > summary.representativeCount
                             ? QStringLiteral("Showing the first %1 of %2 server matches.")
@@ -2359,17 +2377,37 @@ namespace javelin::gui::shell
     void MainWindow::updateEmptyStates()
     {
         const bool hasMessages = m_messageModel->rowCount() > 0;
-        if (activeTabIsSearch())
+        const PageState* page = nullptr;
+        if (const auto* tab = activeTab())
+        {
+            page = std::visit([](const auto& content) { return &content.page; }, tab->content);
+        }
+
+        if (page != nullptr && !page->refreshError.isEmpty())
+        {
+            m_messageEmptyState->setText(
+                QStringLiteral("Could not refresh the message list.\n%1").arg(page->refreshError));
+            m_messageEmptyState->setStyleSheet(QStringLiteral("color: #e58b8b;"));
+        }
+        else if (page != nullptr && page->refreshInFlight && !hasMessages)
+        {
+            m_messageEmptyState->setText(QStringLiteral("Loading messages..."));
+            m_messageEmptyState->setStyleSheet(QString{});
+        }
+        else if (activeTabIsSearch())
         {
             m_messageEmptyState->setText(
                 QStringLiteral("No server results matched your search in this account."));
+            m_messageEmptyState->setStyleSheet(QString{});
         }
         else
         {
             m_messageEmptyState->setText(
                 QStringLiteral("No messages are available for the selected mailbox yet."));
+            m_messageEmptyState->setStyleSheet(QString{});
         }
-        m_messageEmptyState->setVisible(!hasMessages);
+        m_messageEmptyState->setVisible(
+            !hasMessages || (page != nullptr && !page->refreshError.isEmpty()));
         m_messageView->setVisible(hasMessages);
     }
 
@@ -2890,6 +2928,8 @@ namespace javelin::gui::shell
         if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
             settings.apiKey.isEmpty())
         {
+            m_messageViewContainer->setErrorState(
+                QStringLiteral("No connection settings are associated with this account."));
             return;
         }
 
@@ -2938,7 +2978,7 @@ namespace javelin::gui::shell
                 m_messageContentRequestInFlight.reset();
                 if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
                 {
-                    m_messageViewContainer->setLoadingState(false);
+                    m_messageViewContainer->setErrorState(error->message);
                     qWarning().noquote() << "GUI message content refresh failed" << error->message;
                     statusBar()->showMessage(error->message, 10000);
                     return;
@@ -3629,6 +3669,7 @@ namespace javelin::gui::shell
                             .cacheLoaded = false,
                             .refreshInFlight = false,
                             .stale = false,
+                            .refreshError = {},
                         },
                     .selection =
                         TabSelectionState{
@@ -3666,6 +3707,7 @@ namespace javelin::gui::shell
                             .cacheLoaded = true,
                             .refreshInFlight = false,
                             .stale = false,
+                            .refreshError = {},
                         },
                     .selection =
                         TabSelectionState{

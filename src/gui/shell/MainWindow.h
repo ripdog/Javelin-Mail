@@ -109,6 +109,7 @@ namespace javelin::gui::shell
             bool cacheLoaded = false;
             bool refreshInFlight = false;
             bool stale = false;
+            QString refreshError;
         };
 
         struct MailboxTabState

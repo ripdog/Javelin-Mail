@@ -41,6 +41,7 @@ namespace javelin::gui::messageview
                                   std::vector<javelin::jmap::cache::MessageListItem> messages);
         void refresh(javelin::jmap::cache::MessageViewService& messageViewService);
         void setLoadingState(bool loading, const QString& detailText = QString{});
+        void setErrorState(const QString& errorMessage);
         [[nodiscard]] bool hasContentSnapshot() const;
         [[nodiscard]] bool hasReadableBody() const;
 
@@ -75,6 +76,7 @@ namespace javelin::gui::messageview
         std::vector<javelin::jmap::cache::MessageListItem> m_multipleMessages;
         std::optional<javelin::jmap::cache::MessageViewSnapshot> m_snapshot;
         bool m_loading = false;
+        QString m_errorMessage;
         QLabel* m_titleLabel = nullptr;
         QLabel* m_detailLabel = nullptr;
         QWidget* m_placeholderPanel = nullptr;
