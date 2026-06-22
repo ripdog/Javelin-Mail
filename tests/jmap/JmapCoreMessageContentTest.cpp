@@ -153,7 +153,8 @@ namespace
         query.bindValue(QStringLiteral(":thread_id"), QStringLiteral("thr-1"));
         query.bindValue(QStringLiteral(":blob_id"), QStringLiteral("blob-root"));
         query.bindValue(QStringLiteral(":received_at"), QStringLiteral("2026-04-05T11:22:33Z"));
-        query.bindValue(QStringLiteral(":subject"), QStringLiteral("Inline image"));
+        query.bindValue(QStringLiteral(":subject"),
+                        QStringLiteral("Re: [libsdl-org/SDL] Android: save dialog"));
         query.bindValue(QStringLiteral(":preview"), QStringLiteral("Preview"));
         query.bindValue(QStringLiteral(":mailbox_ids_json"), QStringLiteral("[]"));
         query.bindValue(QStringLiteral(":keywords_json"), QStringLiteral("{}"));
@@ -214,7 +215,8 @@ TEST_CASE("JmapCore refreshMessageContent caches raw message sources",
     CHECK(transport.requests.front().url.scheme() == QStringLiteral("https"));
     CHECK(transport.requests.front().url.host() == QStringLiteral("mail.example.com"));
     CHECK(transport.requests.front().url.path() ==
-          QStringLiteral("/jmap/download/u1/blob-root/Inline image.eml"));
+          QStringLiteral("/jmap/download/u1/blob-root/eml-1.eml"));
+    CHECK_FALSE(transport.requests.front().url.toString().contains(QStringLiteral("libsdl")));
     const QUrlQuery downloadQuery{transport.requests.front().url};
     const auto downloadType = downloadQuery.queryItemValue(QStringLiteral("type"));
     CHECK_FALSE(downloadType.isEmpty());

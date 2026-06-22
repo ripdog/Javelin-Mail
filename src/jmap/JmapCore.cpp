@@ -992,9 +992,7 @@ namespace javelin::jmap
             .blobId = email.blobId,
             .kind = "message",
             .mediaType = "message/rfc822",
-            .name = email.subject.has_value() && !email.subject->empty()
-                        ? std::optional<std::string>{*email.subject + ".eml"}
-                        : std::optional<std::string>{email.id + ".eml"},
+            .name = std::optional<std::string>{email.id + ".eml"},
             .charset = std::nullopt,
             .disposition = std::nullopt,
             .cid = std::nullopt,
