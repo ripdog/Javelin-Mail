@@ -116,7 +116,7 @@ namespace javelin::gui::messageview
                 return rawValue;
             }
 
-            return QLocale{}.toString(dateTime.toLocalTime(), QLocale::LongFormat);
+            return QLocale{}.toString(dateTime.toLocalTime(), QLocale::ShortFormat);
         }
 
         void makeLabelSelectable(QLabel* label)
