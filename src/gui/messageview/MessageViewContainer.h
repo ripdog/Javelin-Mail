@@ -62,7 +62,7 @@ namespace javelin::gui::messageview
         };
 
         void setActiveView(ActiveView view);
-        void updatePresentation();
+        void updatePresentation(bool reloadBody = true);
         void updateRemoteContentButton();
         void updateAttachmentSection();
         void rebuildAttachmentRows();

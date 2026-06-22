@@ -234,7 +234,8 @@ namespace javelin::gui::shell
         void restoreSelection(std::optional<std::string> accountId,
                               std::optional<std::string> mailboxId,
                               std::optional<std::string> threadId,
-                              std::optional<std::string> emailId);
+                              std::optional<std::string> emailId,
+                              bool scrollToSelection = true);
         void restoreActiveTabMessageSelection(std::optional<int> previousMessageRow);
         void restoreSelectionAfterMessageRefresh(std::optional<std::string> accountId,
                                                  std::optional<std::string> mailboxId,

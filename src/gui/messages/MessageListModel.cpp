@@ -15,6 +15,34 @@ namespace javelin::gui::messages
             return std::ranges::find(threadIds, threadId) != threadIds.end();
         }
 
+        [[nodiscard]] bool
+        sameAddress(const std::optional<javelin::jmap::domain::EmailAddress>& left,
+                    const std::optional<javelin::jmap::domain::EmailAddress>& right)
+        {
+            if (left.has_value() != right.has_value())
+            {
+                return false;
+            }
+
+            if (!left.has_value())
+            {
+                return true;
+            }
+
+            return left->name == right->name && left->email == right->email;
+        }
+
+        [[nodiscard]] bool sameItem(const javelin::jmap::cache::MessageListItem& left,
+                                    const javelin::jmap::cache::MessageListItem& right)
+        {
+            return left.emailId == right.emailId && left.threadId == right.threadId &&
+                   left.subject == right.subject && left.preview == right.preview &&
+                   left.receivedAt == right.receivedAt && left.sentAt == right.sentAt &&
+                   left.threadMessageCount == right.threadMessageCount &&
+                   left.hasAttachment == right.hasAttachment && left.isUnread == right.isUnread &&
+                   left.isFlagged == right.isFlagged && sameAddress(left.from, right.from);
+        }
+
     } // namespace
 
     MessageListModel::MessageListModel(javelin::jmap::cache::QueryService& queryService,
@@ -134,29 +162,109 @@ namespace javelin::gui::messages
     void MessageListModel::setPage(std::optional<std::string> accountId,
                                    std::vector<javelin::jmap::cache::MessageListItem> items)
     {
-        beginResetModel();
-        m_accountId = std::move(accountId);
-        m_threads.clear();
-        m_threads.reserve(items.size());
-
-        std::vector<std::string> survivingExpandedThreadIds;
-        survivingExpandedThreadIds.reserve(m_expandedThreadIds.size());
-        for (auto& item : items)
+        if (m_accountId != accountId || !m_expandedThreadIds.empty())
         {
-            if (containsThreadId(m_expandedThreadIds, item.threadId))
+            beginResetModel();
+            m_accountId = std::move(accountId);
+            m_threads.clear();
+            m_threads.reserve(items.size());
+
+            std::vector<std::string> survivingExpandedThreadIds;
+            survivingExpandedThreadIds.reserve(m_expandedThreadIds.size());
+            for (auto& item : items)
             {
-                survivingExpandedThreadIds.push_back(item.threadId);
+                if (containsThreadId(m_expandedThreadIds, item.threadId))
+                {
+                    survivingExpandedThreadIds.push_back(item.threadId);
+                }
+
+                m_threads.push_back(ThreadEntry{
+                    .summary = std::move(item),
+                    .members = {},
+                    .membersLoaded = false,
+                });
+            }
+            m_expandedThreadIds = std::move(survivingExpandedThreadIds);
+            rebuildVisibleRows();
+            endResetModel();
+            return;
+        }
+
+        m_accountId = std::move(accountId);
+
+        for (int threadIndex = static_cast<int>(m_threads.size()) - 1; threadIndex >= 0;
+             --threadIndex)
+        {
+            const auto threadIndexValue = static_cast<std::size_t>(threadIndex);
+            const auto existsInNewPage =
+                std::ranges::any_of(items, [threadId = m_threads[threadIndexValue].summary.threadId](
+                                               const auto& item)
+                                    { return item.threadId == threadId; });
+            if (existsInNewPage)
+            {
+                continue;
             }
 
-            m_threads.push_back(ThreadEntry{
-                .summary = std::move(item),
-                .members = {},
-                .membersLoaded = false,
-            });
+            const int blockStart =
+                visibleBlockStartForThread(static_cast<std::size_t>(threadIndex));
+            const int blockSize = visibleBlockSizeForThread(static_cast<std::size_t>(threadIndex));
+            beginRemoveRows(QModelIndex{}, blockStart, blockStart + blockSize - 1);
+            m_rows.erase(m_rows.begin() + blockStart, m_rows.begin() + blockStart + blockSize);
+            m_threads.erase(m_threads.begin() + threadIndex);
+            reindexVisibleRows();
+            endRemoveRows();
         }
-        m_expandedThreadIds = std::move(survivingExpandedThreadIds);
-        rebuildVisibleRows();
-        endResetModel();
+
+        for (std::size_t targetIndex = 0; targetIndex < items.size(); ++targetIndex)
+        {
+            auto existingIndex = findThreadIndex(items[targetIndex].threadId);
+            if (!existingIndex.has_value())
+            {
+                beginInsertRows(QModelIndex{}, static_cast<int>(targetIndex),
+                                static_cast<int>(targetIndex));
+                m_threads.insert(m_threads.begin() + static_cast<std::ptrdiff_t>(targetIndex),
+                                 ThreadEntry{
+                                     .summary = std::move(items[targetIndex]),
+                                     .members = {},
+                                     .membersLoaded = false,
+                                 });
+                m_rows.insert(m_rows.begin() + static_cast<std::ptrdiff_t>(targetIndex),
+                              VisibleRow{
+                                  .kind = RowKind::ThreadSummary,
+                                  .threadIndex = targetIndex,
+                                  .memberIndex = std::nullopt,
+                              });
+                reindexVisibleRows();
+                endInsertRows();
+                continue;
+            }
+
+            if (*existingIndex != targetIndex)
+            {
+                beginMoveRows(QModelIndex{}, static_cast<int>(*existingIndex),
+                              static_cast<int>(*existingIndex), QModelIndex{},
+                              *existingIndex < targetIndex ? static_cast<int>(targetIndex + 1)
+                                                           : static_cast<int>(targetIndex));
+                auto thread = std::move(m_threads[*existingIndex]);
+                m_threads.erase(m_threads.begin() + static_cast<std::ptrdiff_t>(*existingIndex));
+                m_threads.insert(m_threads.begin() + static_cast<std::ptrdiff_t>(targetIndex),
+                                 std::move(thread));
+                auto row = std::move(m_rows[*existingIndex]);
+                m_rows.erase(m_rows.begin() + static_cast<std::ptrdiff_t>(*existingIndex));
+                m_rows.insert(m_rows.begin() + static_cast<std::ptrdiff_t>(targetIndex),
+                              std::move(row));
+                reindexVisibleRows();
+                endMoveRows();
+                existingIndex = targetIndex;
+            }
+
+            if (!sameItem(m_threads[*existingIndex].summary, items[targetIndex]))
+            {
+                m_threads[*existingIndex].summary = std::move(items[targetIndex]);
+                const QModelIndex changed = index(static_cast<int>(*existingIndex), 0);
+                Q_EMIT dataChanged(changed, changed);
+            }
+        }
     }
 
     void MessageListModel::clear()
@@ -338,6 +446,30 @@ namespace javelin::gui::messages
         }
         thread.membersLoaded = true;
         return true;
+    }
+
+    int MessageListModel::visibleBlockStartForThread(const std::size_t threadIndex) const
+    {
+        const auto summaryRow = visibleSummaryRowForThread(threadIndex);
+        return summaryRow.value_or(static_cast<int>(threadIndex));
+    }
+
+    int MessageListModel::visibleBlockSizeForThread(const std::size_t threadIndex) const
+    {
+        if (!isThreadExpanded(m_threads[threadIndex].summary.threadId))
+        {
+            return 1;
+        }
+
+        return 1 + static_cast<int>(m_threads[threadIndex].members.size());
+    }
+
+    void MessageListModel::reindexVisibleRows()
+    {
+        for (std::size_t rowIndex = 0; rowIndex < m_rows.size(); ++rowIndex)
+        {
+            m_rows[rowIndex].threadIndex = rowIndex;
+        }
     }
 
     void MessageListModel::rebuildVisibleRows()

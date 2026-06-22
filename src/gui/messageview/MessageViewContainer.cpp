@@ -37,6 +37,32 @@ namespace javelin::gui::messageview
             return QString::fromStdString(attachment.name.value_or(attachment.partId));
         }
 
+        [[nodiscard]] std::optional<std::string> renderedBodyKey(
+            const std::optional<javelin::jmap::cache::MessageViewSnapshot>& snapshot)
+        {
+            if (!snapshot.has_value())
+            {
+                return std::nullopt;
+            }
+
+            if (snapshot->htmlBody.has_value())
+            {
+                if (snapshot->htmlRenderDocument.has_value())
+                {
+                    return snapshot->htmlRenderDocument->html;
+                }
+
+                return snapshot->htmlBody->value;
+            }
+
+            if (snapshot->plainTextBody.has_value())
+            {
+                return snapshot->plainTextBody->value;
+            }
+
+            return std::nullopt;
+        }
+
         [[nodiscard]] QString
         attachmentSizeLabel(const javelin::jmap::cache::MessageAttachment& attachment)
         {
@@ -497,6 +523,7 @@ namespace javelin::gui::messageview
 
     void MessageViewContainer::refresh(javelin::jmap::cache::MessageViewService& messageViewService)
     {
+        const auto previousRenderedBody = renderedBodyKey(m_snapshot);
         m_loading = false;
         m_errorMessage.clear();
         m_snapshot = std::nullopt;
@@ -510,7 +537,7 @@ namespace javelin::gui::messageview
             }
         }
 
-        updatePresentation();
+        updatePresentation(previousRenderedBody != renderedBodyKey(m_snapshot));
     }
 
     void MessageViewContainer::setActiveView(const ActiveView view)
@@ -594,10 +621,13 @@ namespace javelin::gui::messageview
                                            : QStringLiteral("Load remote content"));
     }
 
-    void MessageViewContainer::updatePresentation()
+    void MessageViewContainer::updatePresentation(const bool reloadBody)
     {
-        m_plainTextView->clear();
-        m_htmlView->clearDocument();
+        if (reloadBody)
+        {
+            m_plainTextView->clear();
+            m_htmlView->clearDocument();
+        }
         m_attachmentStatusLabel->clear();
         rebuildAttachmentRows();
         rebuildMultipleSelectionRows();
@@ -696,12 +726,12 @@ namespace javelin::gui::messageview
             QStringLiteral("From %1\nReceived %2")
                 .arg(sender, QString::fromStdString(m_snapshot->email.receivedAt)));
 
-        if (m_snapshot->plainTextBody.has_value())
+        if (reloadBody && m_snapshot->plainTextBody.has_value())
         {
             m_plainTextView->setPlainText(QString::fromStdString(m_snapshot->plainTextBody->value));
         }
 
-        if (m_snapshot->htmlBody.has_value())
+        if (reloadBody && m_snapshot->htmlBody.has_value())
         {
             const auto renderDocument =
                 m_snapshot->htmlRenderDocument.has_value()

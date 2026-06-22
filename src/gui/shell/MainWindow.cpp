@@ -1558,9 +1558,11 @@ namespace javelin::gui::shell
         }
 
         const auto previousMessageRow = currentMessageRow(*m_messageView);
-        applyActiveTabPageToModel();
-        m_messageView->clearSelection();
-        restoreActiveTabMessageSelection(previousMessageRow);
+        {
+            QSignalBlocker messageSelectionBlocker{m_messageView->selectionModel()};
+            applyActiveTabPageToModel();
+            restoreActiveTabMessageSelection(previousMessageRow);
+        }
         refreshSelectionFromModels();
     }
 
@@ -1664,8 +1666,11 @@ namespace javelin::gui::shell
                         mailboxTab->page.offset == tabOffset)
                     {
                         const auto previousMessageRow = currentMessageRow(*m_messageView);
-                        applyActiveTabPageToModel();
-                        restoreActiveTabMessageSelection(previousMessageRow);
+                        {
+                            QSignalBlocker messageSelectionBlocker{m_messageView->selectionModel()};
+                            applyActiveTabPageToModel();
+                            restoreActiveTabMessageSelection(previousMessageRow);
+                        }
                         refreshSelectionFromModels();
                     }
                     updateEmptyStates();
@@ -1745,8 +1750,11 @@ namespace javelin::gui::shell
                         searchTab->page.offset == tabOffset)
                     {
                         const auto previousMessageRow = currentMessageRow(*m_messageView);
-                        applyActiveTabPageToModel();
-                        restoreActiveTabMessageSelection(previousMessageRow);
+                        {
+                            QSignalBlocker messageSelectionBlocker{m_messageView->selectionModel()};
+                            applyActiveTabPageToModel();
+                            restoreActiveTabMessageSelection(previousMessageRow);
+                        }
                         refreshSelectionFromModels();
                     }
                     updateEmptyStates();
@@ -2244,7 +2252,8 @@ namespace javelin::gui::shell
     void MainWindow::restoreSelection(std::optional<std::string> accountId,
                                       std::optional<std::string> mailboxId,
                                       std::optional<std::string> threadId,
-                                      std::optional<std::string> emailId)
+                                      std::optional<std::string> emailId,
+                                      const bool scrollToSelection)
     {
         if (accountId.has_value())
         {
@@ -2256,7 +2265,10 @@ namespace javelin::gui::shell
             if (mailboxIndex.isValid())
             {
                 m_mailboxView->setCurrentIndex(mailboxIndex);
-                m_mailboxView->scrollTo(mailboxIndex);
+                if (scrollToSelection)
+                {
+                    m_mailboxView->scrollTo(mailboxIndex);
+                }
             }
         }
 
@@ -2264,7 +2276,10 @@ namespace javelin::gui::shell
         if (selectedMessageIndex.isValid())
         {
             m_messageView->setCurrentIndex(selectedMessageIndex);
-            m_messageView->scrollTo(selectedMessageIndex);
+            if (scrollToSelection)
+            {
+                m_messageView->scrollTo(selectedMessageIndex);
+            }
         }
     }
 
@@ -2288,7 +2303,7 @@ namespace javelin::gui::shell
         std::optional<std::string> threadId, std::optional<std::string> emailId,
         const std::optional<int> previousMessageRow)
     {
-        restoreSelection(accountId, mailboxId, threadId, emailId);
+        restoreSelection(accountId, mailboxId, threadId, emailId, false);
         if (m_messageView->currentIndex().isValid() || !previousMessageRow.has_value())
         {
             return;
