@@ -915,7 +915,9 @@ namespace javelin::gui::messageview
 
         const auto attachments = visibleAttachments(m_snapshot);
         const bool hasAttachments = !attachments.empty();
-        m_attachmentListWidget->setVisible(hasAttachments && m_attachmentsExpanded);
+        m_attachmentListWidget->setVisible(hasAttachments &&
+                                           (!m_attachmentsCollapsed || m_attachmentsExpanded));
+        m_attachmentsCollapsed = false;
         if (!hasAttachments || !m_accountId.has_value() || !m_emailId.has_value())
         {
             return;
@@ -923,9 +925,9 @@ namespace javelin::gui::messageview
 
         constexpr int targetTileWidth = 220;
         constexpr int tileSpacing = 6;
-        const int availableWidth = std::max(width(), m_attachmentListWidget->width());
-        const int columnCount =
-            std::max(1, (availableWidth + tileSpacing) / (targetTileWidth + tileSpacing));
+        std::vector<AttachmentTile*> tiles;
+        tiles.reserve(attachments.size());
+        int requiredSingleRowWidth = 0;
 
         for (std::size_t index = 0; index < attachments.size(); ++index)
         {
@@ -944,9 +946,30 @@ namespace javelin::gui::messageview
                 },
                 m_attachmentListWidget);
             tile->setMinimumWidth(targetTileWidth);
+            tiles.push_back(tile);
+            requiredSingleRowWidth += tile->sizeHint().width();
+            if (index > 0)
+            {
+                requiredSingleRowWidth += tileSpacing;
+            }
+        }
 
-            const int row = static_cast<int>(index) / columnCount;
-            const int column = static_cast<int>(index) % columnCount;
+        const int availableWidth =
+            std::max(m_attachmentListWidget->contentsRect().width(), width());
+        m_attachmentsCollapsed = requiredSingleRowWidth > availableWidth;
+        const int columnCount =
+            m_attachmentsCollapsed
+                ? std::max(1, (availableWidth + tileSpacing) / (targetTileWidth + tileSpacing))
+                : static_cast<int>(tiles.size());
+
+        for (std::size_t index = 0; index < tiles.size(); ++index)
+        {
+            auto* tile = tiles.at(index);
+
+            const int row = m_attachmentsCollapsed ? static_cast<int>(index) / columnCount : 0;
+            const int column =
+                m_attachmentsCollapsed ? static_cast<int>(index) % columnCount
+                                       : static_cast<int>(index);
             m_attachmentListLayout->addWidget(tile, row, column);
         }
 
@@ -1027,20 +1050,22 @@ namespace javelin::gui::messageview
         const bool hasAttachments = !visibleAttachments(m_snapshot).empty();
         m_attachmentHeaderWidget->setVisible(hasAttachments);
         m_attachmentStatusLabel->setVisible(hasAttachments);
-        m_attachmentExpanderButton->setVisible(hasAttachments);
+        m_attachmentExpanderButton->setVisible(hasAttachments && m_attachmentsCollapsed);
         m_saveAllAttachmentsButton->setVisible(hasAttachments);
         m_saveAllAttachmentsButton->setEnabled(hasAttachments);
         m_attachmentExpanderButton->setArrowType(m_attachmentsExpanded ? Qt::DownArrow
                                                                        : Qt::RightArrow);
-        m_attachmentListWidget->setVisible(hasAttachments && m_attachmentsExpanded);
+        m_attachmentListWidget->setVisible(hasAttachments &&
+                                           (!m_attachmentsCollapsed || m_attachmentsExpanded));
     }
 
     void MessageViewContainer::resizeEvent(QResizeEvent* event)
     {
         QWidget::resizeEvent(event);
-        if (m_attachmentsExpanded && !visibleAttachments(m_snapshot).empty())
+        if (!visibleAttachments(m_snapshot).empty())
         {
             rebuildAttachmentRows();
+            updateAttachmentSection();
         }
     }
 

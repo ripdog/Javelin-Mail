@@ -107,6 +107,7 @@ namespace javelin::gui::messageview
         QGridLayout* m_attachmentListLayout = nullptr;
         ActiveView m_activeView = ActiveView::Placeholder;
         bool m_attachmentsExpanded = false;
+        bool m_attachmentsCollapsed = false;
     };
 
 } // namespace javelin::gui::messageview
