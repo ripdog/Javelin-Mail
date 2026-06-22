@@ -15,6 +15,7 @@
 #include <QPlainTextEdit>
 #include <QProgressBar>
 #include <QScrollArea>
+#include <QSettings>
 #include <QSizePolicy>
 #include <QStackedWidget>
 #include <QStringList>
@@ -30,6 +31,9 @@ namespace javelin::gui::messageview
 {
     namespace
     {
+        constexpr auto remoteContentGroup = "remoteContent";
+        constexpr auto allowedSendersKey = "allowedSenders";
+        constexpr auto allowedDomainsKey = "allowedDomains";
 
         [[nodiscard]] QString
         attachmentName(const javelin::jmap::cache::MessageAttachment& attachment)
@@ -75,6 +79,47 @@ namespace javelin::gui::messageview
             label->setCursor(Qt::IBeamCursor);
             label->setFocusPolicy(Qt::NoFocus);
             label->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        }
+
+        [[nodiscard]] QStringList remoteContentAllowList(const QLatin1StringView key)
+        {
+            QSettings settings;
+            settings.beginGroup(QLatin1StringView{remoteContentGroup});
+            auto values = settings.value(key).toStringList();
+            settings.endGroup();
+            values.removeAll(QString{});
+            values.removeDuplicates();
+            values.sort(Qt::CaseInsensitive);
+            return values;
+        }
+
+        void saveRemoteContentAllowList(const QLatin1StringView key, QStringList values)
+        {
+            values.removeAll(QString{});
+            values.removeDuplicates();
+            values.sort(Qt::CaseInsensitive);
+
+            QSettings settings;
+            settings.beginGroup(QLatin1StringView{remoteContentGroup});
+            settings.setValue(key, values);
+            settings.endGroup();
+            settings.sync();
+        }
+
+        void addRemoteContentAllowListValue(const QLatin1StringView key, QString value)
+        {
+            value = value.trimmed().toLower();
+            if (value.isEmpty())
+            {
+                return;
+            }
+
+            auto values = remoteContentAllowList(key);
+            if (!values.contains(value, Qt::CaseInsensitive))
+            {
+                values.push_back(value);
+                saveRemoteContentAllowList(key, values);
+            }
         }
 
         [[nodiscard]] QIcon
@@ -317,6 +362,16 @@ namespace javelin::gui::messageview
         m_remoteContentStatusLabel->setWordWrap(true);
         makeLabelSelectable(m_remoteContentStatusLabel);
 
+        m_permitSenderRemoteContentButton = new QToolButton(m_bodyControlsWidget);
+        m_permitSenderRemoteContentButton->setText(QStringLiteral("Always load sender"));
+        connect(m_permitSenderRemoteContentButton, &QToolButton::clicked, this,
+                &MessageViewContainer::permitRemoteContentForCurrentSender);
+
+        m_permitDomainRemoteContentButton = new QToolButton(m_bodyControlsWidget);
+        m_permitDomainRemoteContentButton->setText(QStringLiteral("Always load domain"));
+        connect(m_permitDomainRemoteContentButton, &QToolButton::clicked, this,
+                &MessageViewContainer::permitRemoteContentForCurrentDomain);
+
         m_remoteContentButton = new QToolButton(m_bodyControlsWidget);
         m_remoteContentButton->setText(QStringLiteral("Load remote content"));
         m_remoteContentButton->setCheckable(true);
@@ -328,6 +383,8 @@ namespace javelin::gui::messageview
                 });
 
         buttonLayout->addWidget(m_remoteContentStatusLabel, 1);
+        buttonLayout->addWidget(m_permitSenderRemoteContentButton);
+        buttonLayout->addWidget(m_permitDomainRemoteContentButton);
         buttonLayout->addWidget(m_remoteContentButton);
 
         m_bodyStack = new QStackedWidget(this);
@@ -543,6 +600,7 @@ namespace javelin::gui::messageview
     void MessageViewContainer::setActiveView(const ActiveView view)
     {
         m_activeView = view;
+        updateSenderRemoteContentPermit();
         updateRemoteContentButton();
 
         switch (m_activeView)
@@ -594,6 +652,25 @@ namespace javelin::gui::messageview
                (m_snapshot->htmlBody.has_value() || m_snapshot->plainTextBody.has_value());
     }
 
+    void MessageViewContainer::updateSenderRemoteContentPermit()
+    {
+        const auto sender = currentSenderAddress();
+        const auto domain = currentSenderDomain();
+        const bool permittedSender =
+            !sender.isEmpty() &&
+            remoteContentAllowList(QLatin1StringView{allowedSendersKey})
+                .contains(sender, Qt::CaseInsensitive);
+        const bool permittedDomain =
+            !domain.isEmpty() &&
+            remoteContentAllowList(QLatin1StringView{allowedDomainsKey})
+                .contains(domain, Qt::CaseInsensitive);
+        const bool shouldAllow = permittedSender || permittedDomain;
+        if (m_htmlView->remoteContentEnabled() != shouldAllow)
+        {
+            m_htmlView->setRemoteContentEnabled(shouldAllow);
+        }
+    }
+
     void MessageViewContainer::updateRemoteContentButton()
     {
         const bool hasBlockedRemoteContent =
@@ -601,6 +678,12 @@ namespace javelin::gui::messageview
             m_snapshot->htmlRenderDocument->blockedRemoteResourceCount > 0;
         m_bodyControlsWidget->setVisible(hasBlockedRemoteContent);
         m_remoteContentStatusLabel->setVisible(hasBlockedRemoteContent);
+        m_permitSenderRemoteContentButton->setVisible(hasBlockedRemoteContent);
+        m_permitDomainRemoteContentButton->setVisible(hasBlockedRemoteContent);
+        m_permitSenderRemoteContentButton->setEnabled(hasBlockedRemoteContent &&
+                                                      !currentSenderAddress().isEmpty());
+        m_permitDomainRemoteContentButton->setEnabled(hasBlockedRemoteContent &&
+                                                      !currentSenderDomain().isEmpty());
         m_remoteContentButton->setVisible(hasBlockedRemoteContent);
         m_remoteContentButton->setEnabled(hasBlockedRemoteContent);
         m_remoteContentButton->setChecked(hasBlockedRemoteContent &&
@@ -616,6 +699,14 @@ namespace javelin::gui::messageview
         {
             m_remoteContentStatusLabel->clear();
         }
+        m_permitSenderRemoteContentButton->setToolTip(
+            currentSenderAddress().isEmpty()
+                ? QStringLiteral("No sender address is available")
+                : QStringLiteral("Always load remote content from this sender"));
+        m_permitDomainRemoteContentButton->setToolTip(
+            currentSenderDomain().isEmpty()
+                ? QStringLiteral("No sender domain is available")
+                : QStringLiteral("Always load remote content from this sender domain"));
         m_remoteContentButton->setText(m_htmlView->remoteContentEnabled()
                                            ? QStringLiteral("Hide remote content")
                                            : QStringLiteral("Load remote content"));
@@ -739,6 +830,7 @@ namespace javelin::gui::messageview
                     : QString::fromStdString(m_snapshot->htmlBody->value);
             m_htmlView->setDocumentHtml(renderDocument.toStdString());
         }
+        updateSenderRemoteContentPermit();
 
         m_attachmentStatusLabel->setText(attachmentStatusText());
         rebuildAttachmentRows();
@@ -772,6 +864,42 @@ namespace javelin::gui::messageview
             }
             setActiveView(ActiveView::Placeholder);
         }
+    }
+
+    void MessageViewContainer::permitRemoteContentForCurrentSender()
+    {
+        addRemoteContentAllowListValue(QLatin1StringView{allowedSendersKey},
+                                       currentSenderAddress());
+        updateSenderRemoteContentPermit();
+        updateRemoteContentButton();
+    }
+
+    void MessageViewContainer::permitRemoteContentForCurrentDomain()
+    {
+        addRemoteContentAllowListValue(QLatin1StringView{allowedDomainsKey},
+                                       currentSenderDomain());
+        updateSenderRemoteContentPermit();
+        updateRemoteContentButton();
+    }
+
+    QString MessageViewContainer::currentSenderAddress() const
+    {
+        if (!m_snapshot.has_value() || m_snapshot->email.from.empty())
+        {
+            return {};
+        }
+        return QString::fromStdString(m_snapshot->email.from.front().email).trimmed().toLower();
+    }
+
+    QString MessageViewContainer::currentSenderDomain() const
+    {
+        const auto sender = currentSenderAddress();
+        const auto atIndex = sender.lastIndexOf(QLatin1Char('@'));
+        if (atIndex < 0 || atIndex + 1 >= sender.size())
+        {
+            return {};
+        }
+        return sender.sliced(atIndex + 1).trimmed().toLower();
     }
 
     void MessageViewContainer::rebuildAttachmentRows()

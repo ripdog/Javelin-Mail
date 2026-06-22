@@ -13,6 +13,7 @@
 #include <QPushButton>
 #include <QSettings>
 #include <QSplitter>
+#include <QStackedWidget>
 #include <QUuid>
 #include <QVBoxLayout>
 
@@ -32,6 +33,17 @@ namespace javelin::gui::settings
         constexpr auto loginEmailKey = "loginEmail";
         constexpr auto apiKeyKey = "apiKey";
         constexpr auto cachedAccountIdsKey = "cachedAccountIds";
+        constexpr auto remoteContentGroup = "remoteContent";
+        constexpr auto allowedSendersKey = "allowedSenders";
+        constexpr auto allowedDomainsKey = "allowedDomains";
+        constexpr int remoteContentKindRole = Qt::UserRole + 1;
+        constexpr int remoteContentValueRole = Qt::UserRole + 2;
+
+        enum class RemoteContentPermitKind
+        {
+            Sender,
+            Domain,
+        };
 
         [[nodiscard]] ConnectionSettings newAccount()
         {
@@ -65,6 +77,31 @@ namespace javelin::gui::settings
             }
             return account;
         }
+
+        [[nodiscard]] QStringList remoteContentAllowList(const QLatin1StringView key)
+        {
+            QSettings settings;
+            settings.beginGroup(QLatin1StringView{remoteContentGroup});
+            auto values = settings.value(key).toStringList();
+            settings.endGroup();
+            values.removeAll(QString{});
+            values.removeDuplicates();
+            values.sort(Qt::CaseInsensitive);
+            return values;
+        }
+
+        void saveRemoteContentAllowList(const QLatin1StringView key, QStringList values)
+        {
+            values.removeAll(QString{});
+            values.removeDuplicates();
+            values.sort(Qt::CaseInsensitive);
+
+            QSettings settings;
+            settings.beginGroup(QLatin1StringView{remoteContentGroup});
+            settings.setValue(key, values);
+            settings.endGroup();
+            settings.sync();
+        }
     } // namespace
 
     PreferencesDialog::PreferencesDialog(
@@ -75,7 +112,19 @@ namespace javelin::gui::settings
         resize(760, 420);
 
         auto* outerLayout = new QVBoxLayout(this);
-        auto* splitter = new QSplitter(this);
+        auto* contentLayout = new QHBoxLayout();
+
+        m_pageList = new QListWidget(this);
+        m_pageList->setFixedWidth(150);
+        m_pageList->addItem(QStringLiteral("Accounts"));
+        m_pageList->addItem(QStringLiteral("Remote Content"));
+        contentLayout->addWidget(m_pageList);
+
+        m_pageStack = new QStackedWidget(this);
+
+        auto* accountsPage = new QWidget(m_pageStack);
+        auto* accountsPageLayout = new QVBoxLayout(accountsPage);
+        auto* splitter = new QSplitter(accountsPage);
         auto* accountPanel = new QWidget(splitter);
         auto* accountLayout = new QVBoxLayout(accountPanel);
         accountLayout->addWidget(new QLabel(QStringLiteral("Accounts"), accountPanel));
@@ -109,7 +158,25 @@ namespace javelin::gui::settings
         splitter->addWidget(accountPanel);
         splitter->addWidget(detailsPanel);
         splitter->setStretchFactor(1, 1);
-        outerLayout->addWidget(splitter, 1);
+        accountsPageLayout->addWidget(splitter, 1);
+        m_pageStack->addWidget(accountsPage);
+
+        auto* remoteContentPage = new QWidget(m_pageStack);
+        auto* remoteContentLayout = new QVBoxLayout(remoteContentPage);
+        remoteContentLayout->addWidget(new QLabel(QStringLiteral("Allowed Remote Content"),
+                                                  remoteContentPage));
+        m_remoteContentList = new QListWidget(remoteContentPage);
+        m_remoteContentList->setSelectionMode(QAbstractItemView::ExtendedSelection);
+        remoteContentLayout->addWidget(m_remoteContentList, 1);
+        auto* remoteContentButtons = new QHBoxLayout();
+        remoteContentButtons->addStretch(1);
+        m_removeRemoteContentButton = new QPushButton(QStringLiteral("Remove"), remoteContentPage);
+        remoteContentButtons->addWidget(m_removeRemoteContentButton);
+        remoteContentLayout->addLayout(remoteContentButtons);
+        m_pageStack->addWidget(remoteContentPage);
+
+        contentLayout->addWidget(m_pageStack, 1);
+        outerLayout->addLayout(contentLayout, 1);
 
         auto* buttonBox =
             new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
@@ -131,6 +198,16 @@ namespace javelin::gui::settings
                 &PreferencesDialog::removeCurrentAccount);
         connect(m_accountList, &QListWidget::currentRowChanged, this,
                 &PreferencesDialog::selectAccount);
+        connect(m_pageList, &QListWidget::currentRowChanged, m_pageStack,
+                &QStackedWidget::setCurrentIndex);
+        connect(m_removeRemoteContentButton, &QPushButton::clicked, this,
+                &PreferencesDialog::removeSelectedRemoteContentPermits);
+        connect(m_remoteContentList, &QListWidget::itemSelectionChanged, this,
+                [this]
+                {
+                    m_removeRemoteContentButton->setEnabled(
+                        !m_remoteContentList->selectedItems().empty());
+                });
         outerLayout->addWidget(buttonBox);
 
         if (m_accounts.empty())
@@ -138,6 +215,8 @@ namespace javelin::gui::settings
             m_accounts.push_back(newAccount());
         }
         refreshAccountList();
+        refreshRemoteContentList();
+        m_pageList->setCurrentRow(0);
         m_accountList->setCurrentRow(0);
     }
 
@@ -366,6 +445,58 @@ namespace javelin::gui::settings
             m_accountList->addItem(account.loginEmail.isEmpty() ? QStringLiteral("New account")
                                                                 : account.loginEmail);
         }
+    }
+
+    void PreferencesDialog::refreshRemoteContentList()
+    {
+        m_remoteContentList->clear();
+
+        const auto senders = remoteContentAllowList(QLatin1StringView{allowedSendersKey});
+        for (const auto& sender : senders)
+        {
+            auto* item = new QListWidgetItem(QStringLiteral("Sender: %1").arg(sender),
+                                             m_remoteContentList);
+            item->setData(remoteContentKindRole,
+                          static_cast<int>(RemoteContentPermitKind::Sender));
+            item->setData(remoteContentValueRole, sender);
+        }
+
+        const auto domains = remoteContentAllowList(QLatin1StringView{allowedDomainsKey});
+        for (const auto& domain : domains)
+        {
+            auto* item = new QListWidgetItem(QStringLiteral("Domain: %1").arg(domain),
+                                             m_remoteContentList);
+            item->setData(remoteContentKindRole,
+                          static_cast<int>(RemoteContentPermitKind::Domain));
+            item->setData(remoteContentValueRole, domain);
+        }
+
+        m_removeRemoteContentButton->setEnabled(false);
+    }
+
+    void PreferencesDialog::removeSelectedRemoteContentPermits()
+    {
+        auto senders = remoteContentAllowList(QLatin1StringView{allowedSendersKey});
+        auto domains = remoteContentAllowList(QLatin1StringView{allowedDomainsKey});
+
+        for (const auto* item : m_remoteContentList->selectedItems())
+        {
+            const auto kind =
+                static_cast<RemoteContentPermitKind>(item->data(remoteContentKindRole).toInt());
+            const auto value = item->data(remoteContentValueRole).toString();
+            if (kind == RemoteContentPermitKind::Sender)
+            {
+                senders.removeAll(value);
+            }
+            else
+            {
+                domains.removeAll(value);
+            }
+        }
+
+        saveRemoteContentAllowList(QLatin1StringView{allowedSendersKey}, senders);
+        saveRemoteContentAllowList(QLatin1StringView{allowedDomainsKey}, domains);
+        refreshRemoteContentList();
     }
 
 } // namespace javelin::gui::settings

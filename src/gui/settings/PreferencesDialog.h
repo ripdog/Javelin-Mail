@@ -7,6 +7,7 @@
 class QLineEdit;
 class QListWidget;
 class QPushButton;
+class QStackedWidget;
 
 namespace javelin::jmap::cache
 {
@@ -49,15 +50,21 @@ namespace javelin::gui::settings
         void selectAccount(int row);
         void storeCurrentEdits();
         void refreshAccountList();
+        void refreshRemoteContentList();
+        void removeSelectedRemoteContentPermits();
 
         javelin::jmap::cache::AccountRepository& m_accountRepository;
         std::vector<ConnectionSettings> m_accounts;
         int m_currentRow = -1;
+        QListWidget* m_pageList = nullptr;
         QListWidget* m_accountList = nullptr;
         QPushButton* m_removeButton = nullptr;
         QLineEdit* m_sessionUrlEdit = nullptr;
         QLineEdit* m_loginEmailEdit = nullptr;
         QLineEdit* m_apiKeyEdit = nullptr;
+        QStackedWidget* m_pageStack = nullptr;
+        QListWidget* m_remoteContentList = nullptr;
+        QPushButton* m_removeRemoteContentButton = nullptr;
     };
 
 } // namespace javelin::gui::settings

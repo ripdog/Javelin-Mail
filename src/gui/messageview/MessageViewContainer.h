@@ -11,9 +11,9 @@
 #include <string>
 
 class QLabel;
+class QGridLayout;
 class QPlainTextEdit;
 class QProgressBar;
-class QGridLayout;
 class QScrollArea;
 class QResizeEvent;
 class QStackedWidget;
@@ -63,11 +63,16 @@ namespace javelin::gui::messageview
 
         void setActiveView(ActiveView view);
         void updatePresentation(bool reloadBody = true);
+        void updateSenderRemoteContentPermit();
         void updateRemoteContentButton();
         void updateAttachmentSection();
         void rebuildAttachmentRows();
         void rebuildMultipleSelectionRows();
+        void permitRemoteContentForCurrentSender();
+        void permitRemoteContentForCurrentDomain();
         [[nodiscard]] QString attachmentStatusText() const;
+        [[nodiscard]] QString currentSenderAddress() const;
+        [[nodiscard]] QString currentSenderDomain() const;
         void resizeEvent(QResizeEvent* event) override;
 
         std::optional<std::string> m_accountId;
@@ -87,6 +92,8 @@ namespace javelin::gui::messageview
         QToolButton* m_attachmentExpanderButton = nullptr;
         QWidget* m_attachmentHeaderWidget = nullptr;
         QToolButton* m_saveAllAttachmentsButton = nullptr;
+        QToolButton* m_permitSenderRemoteContentButton = nullptr;
+        QToolButton* m_permitDomainRemoteContentButton = nullptr;
         QToolButton* m_remoteContentButton = nullptr;
         QWidget* m_bodyControlsWidget = nullptr;
         QStackedWidget* m_bodyStack = nullptr;
