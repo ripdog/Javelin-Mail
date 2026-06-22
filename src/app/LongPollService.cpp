@@ -91,11 +91,6 @@ namespace javelin::app
     LongPollService::onUpdate(javelin::jmap::sync::LongPollResponse response)
     {
         m_lastEventId = response.newState;
-        if (m_runContext != nullptr)
-        {
-            Q_EMIT mailStateChanged(QString::fromStdString(m_runContext->configuration.accountId),
-                                    false);
-        }
         co_await refreshWatchedMailbox();
     }
 

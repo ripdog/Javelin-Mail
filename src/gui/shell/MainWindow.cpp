@@ -51,6 +51,7 @@
 #include <QPushButton>
 #include <QSettings>
 #include <QSignalBlocker>
+#include <QScrollBar>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QStatusBar>
@@ -446,8 +447,11 @@ namespace javelin::gui::shell
             &m_longPollService, &javelin::app::LongPollService::mailboxRefreshed, this,
             [this](const QString& accountId, const QString& mailboxId, const bool scrollToNewest)
             {
-                m_mailboxModel->refresh();
-                m_mailboxView->expandAll();
+                {
+                    QSignalBlocker mailboxSelectionBlocker{m_mailboxView->selectionModel()};
+                    m_mailboxModel->refresh();
+                    m_mailboxView->expandAll();
+                }
                 if (activeTabIsMailbox())
                 {
                     const auto mailbox = activeMailboxId();
@@ -456,7 +460,8 @@ namespace javelin::gui::shell
                         mailbox == std::optional<std::string>{mailboxId.toStdString()})
                     {
                         loadActiveTabFromCache();
-                        if (scrollToNewest && m_messageModel->rowCount() > 0)
+                        if (scrollToNewest && m_messageModel->rowCount() > 0 &&
+                            m_messageView->verticalScrollBar()->value() == 0)
                         {
                             m_messageView->scrollTo(m_messageModel->index(0, 0));
                         }
@@ -2303,7 +2308,13 @@ namespace javelin::gui::shell
         std::optional<std::string> threadId, std::optional<std::string> emailId,
         const std::optional<int> previousMessageRow)
     {
-        restoreSelection(accountId, mailboxId, threadId, emailId, false);
+        Q_UNUSED(accountId);
+        Q_UNUSED(mailboxId);
+        const QModelIndex selectedMessageIndex = restoreMessageSelection(threadId, emailId);
+        if (selectedMessageIndex.isValid())
+        {
+            m_messageView->setCurrentIndex(selectedMessageIndex);
+        }
         if (m_messageView->currentIndex().isValid() || !previousMessageRow.has_value())
         {
             return;
