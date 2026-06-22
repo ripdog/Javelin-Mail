@@ -62,7 +62,7 @@ namespace javelin::jmap::sync
                 m_statusCallback(LongPollConnectionStatus::Connecting);
             }
 
-            const auto result = co_await m_channel.poll(request);
+            const auto result = co_await m_channel.poll(request, m_observer, cancellation);
             if (std::holds_alternative<javelin::jmap::api::TransportError>(result))
             {
                 const auto& error = std::get<javelin::jmap::api::TransportError>(result);
@@ -96,11 +96,10 @@ namespace javelin::jmap::sync
             }
 
             consecutiveFailures = 0;
-            const auto& response = std::get<LongPollResponse>(result);
-            request.lastState = response.newState;
-            summary.lastState = response.newState;
-            ++summary.successfulPolls;
-            co_await m_observer.onUpdate(response);
+            const auto& streamSummary = std::get<LongPollStreamSummary>(result);
+            request.lastState = streamSummary.lastState;
+            summary.lastState = streamSummary.lastState;
+            summary.successfulPolls += streamSummary.updateCount;
         }
 
         if (cancellation.isCancelled())

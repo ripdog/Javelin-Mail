@@ -28,7 +28,9 @@ namespace javelin::jmap::sync
                                    LongPollStatusCallback statusCallback = {});
         ~EventSourceLongPollChannel() override;
 
-        [[nodiscard]] QCoro::Task<LongPollResult> poll(LongPollRequest request) override;
+        [[nodiscard]] QCoro::Task<LongPollResult>
+        poll(LongPollRequest request, AbstractLongPollObserver& observer,
+             LongPollCancellation& cancellation) override;
         void cancel();
 
       private:

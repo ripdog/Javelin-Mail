@@ -44,7 +44,7 @@ template <> struct glz::meta<javelin::jmap::sync::RawStateChange>
 {
     using T = javelin::jmap::sync::RawStateChange;
 
-    static constexpr auto value = glz::object("@type", &T::type, "changed", &T::changed);
+    static constexpr auto value = glz::object("type", &T::type, "changed", &T::changed);
 };
 
 namespace javelin::jmap::sync
@@ -95,6 +95,9 @@ namespace javelin::jmap::sync
             std::optional<LongPollResponse> response;
             std::optional<std::string> errorMessage;
         };
+
+        using ParsedStreamEvent =
+            std::variant<LongPollResponse, javelin::jmap::api::TransportError>;
 
         [[nodiscard]] javelin::jmap::api::TransportError makeTransportError(
             const javelin::jmap::api::TransportErrorCode code, std::string message,
@@ -222,6 +225,21 @@ namespace javelin::jmap::sync
                 };
             }
 
+            if (stateChange.type == std::optional<std::string>{"connect"})
+            {
+                return ParsedEvent{
+                    .status = ParsedEventStatus::Parsed,
+                    .response =
+                        LongPollResponse{
+                            .newState = eventId.empty() ? std::string{fallbackState}
+                                                        : std::string{eventId},
+                            .changedTypes = {},
+                            .notifyObserver = false,
+                        },
+                    .errorMessage = std::nullopt,
+                };
+            }
+
             if (stateChange.type.has_value() && *stateChange.type != "StateChange")
             {
                 return ParsedEvent{
@@ -306,7 +324,9 @@ namespace javelin::jmap::sync
         m_activeReply->abort();
     }
 
-    QCoro::Task<LongPollResult> EventSourceLongPollChannel::poll(LongPollRequest request)
+    QCoro::Task<LongPollResult>
+    EventSourceLongPollChannel::poll(LongPollRequest request, AbstractLongPollObserver& observer,
+                                     LongPollCancellation& cancellation)
     {
         const auto url = buildEventSourceUrl(request);
         if (!url.has_value())
@@ -386,7 +406,12 @@ namespace javelin::jmap::sync
                 eventData.clear();
             };
 
-        const auto finalizeEvent = [&]() -> std::optional<LongPollResult>
+        LongPollStreamSummary streamSummary{
+            .lastState = request.lastState,
+            .updateCount = 0,
+        };
+
+        const auto finalizeEvent = [&]() -> std::optional<ParsedStreamEvent>
         {
             if (eventName.empty() && eventId.empty() && eventData.empty())
             {
@@ -415,6 +440,12 @@ namespace javelin::jmap::sync
             case ParsedEventStatus::Ignored:
                 return std::nullopt;
             case ParsedEventStatus::Parsed:
+                if (parsed.response.has_value() && !parsed.response->notifyObserver)
+                {
+                    request.lastState = parsed.response->newState;
+                    streamSummary.lastState = parsed.response->newState;
+                    return std::nullopt;
+                }
                 return *parsed.response;
             case ParsedEventStatus::Invalid:
                 return makeTransportError(
@@ -427,6 +458,11 @@ namespace javelin::jmap::sync
 
         while (true)
         {
+            if (cancellation.isCancelled())
+            {
+                co_return streamSummary;
+            }
+
             if (reply->error() != QNetworkReply::NoError && reply->isFinished())
             {
                 qWarning().noquote() << "Long poll network error" << reply->url().toString()
@@ -506,7 +542,17 @@ namespace javelin::jmap::sync
                 {
                     if (const auto parsed = finalizeEvent(); parsed.has_value())
                     {
-                        co_return *parsed;
+                        if (const auto* error =
+                                std::get_if<javelin::jmap::api::TransportError>(&*parsed))
+                        {
+                            co_return *error;
+                        }
+
+                        auto response = std::get<LongPollResponse>(*parsed);
+                        request.lastState = response.newState;
+                        streamSummary.lastState = response.newState;
+                        ++streamSummary.updateCount;
+                        co_await observer.onUpdate(std::move(response));
                     }
                     continue;
                 }
@@ -553,7 +599,23 @@ namespace javelin::jmap::sync
 
                 if (const auto parsed = finalizeEvent(); parsed.has_value())
                 {
-                    co_return *parsed;
+                    if (const auto* error =
+                            std::get_if<javelin::jmap::api::TransportError>(&*parsed))
+                    {
+                        co_return *error;
+                    }
+
+                    auto response = std::get<LongPollResponse>(*parsed);
+                    request.lastState = response.newState;
+                    streamSummary.lastState = response.newState;
+                    ++streamSummary.updateCount;
+                    co_await observer.onUpdate(std::move(response));
+                    co_return streamSummary;
+                }
+
+                if (streamSummary.updateCount > 0)
+                {
+                    co_return streamSummary;
                 }
 
                 qWarning().noquote()

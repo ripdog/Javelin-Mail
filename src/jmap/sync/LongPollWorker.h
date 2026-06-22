@@ -27,6 +27,13 @@ namespace javelin::jmap::sync
     {
         std::string newState;
         std::vector<std::string> changedTypes;
+        bool notifyObserver = true;
+    };
+
+    struct LongPollStreamSummary
+    {
+        std::string lastState;
+        std::size_t updateCount = 0;
     };
 
     class LongPollCancellation
@@ -48,7 +55,8 @@ namespace javelin::jmap::sync
         delayForAttempt(std::size_t consecutiveFailures) const;
     };
 
-    using LongPollResult = std::variant<LongPollResponse, javelin::jmap::api::TransportError>;
+    using LongPollResult =
+        std::variant<LongPollStreamSummary, javelin::jmap::api::TransportError>;
 
     enum class LongPollConnectionStatus
     {
@@ -59,20 +67,22 @@ namespace javelin::jmap::sync
 
     using LongPollStatusCallback = std::function<void(LongPollConnectionStatus)>;
 
-    class AbstractLongPollChannel
-    {
-      public:
-        virtual ~AbstractLongPollChannel() = default;
-
-        [[nodiscard]] virtual QCoro::Task<LongPollResult> poll(LongPollRequest request) = 0;
-    };
-
     class AbstractLongPollObserver
     {
       public:
         virtual ~AbstractLongPollObserver() = default;
 
         [[nodiscard]] virtual QCoro::Task<void> onUpdate(LongPollResponse response) = 0;
+    };
+
+    class AbstractLongPollChannel
+    {
+      public:
+        virtual ~AbstractLongPollChannel() = default;
+
+        [[nodiscard]] virtual QCoro::Task<LongPollResult>
+        poll(LongPollRequest request, AbstractLongPollObserver& observer,
+             LongPollCancellation& cancellation) = 0;
     };
 
     class AbstractLongPollSleeper

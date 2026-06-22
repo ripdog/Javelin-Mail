@@ -30,17 +30,41 @@ namespace
     {
       public:
         std::vector<javelin::jmap::sync::LongPollRequest> requests;
-        std::vector<javelin::jmap::sync::LongPollResult> queuedResults;
+        std::vector<std::variant<javelin::jmap::sync::LongPollResponse,
+                                 javelin::jmap::api::TransportError>>
+            queuedResults;
 
         [[nodiscard]] QCoro::Task<javelin::jmap::sync::LongPollResult>
-        poll(javelin::jmap::sync::LongPollRequest request) override
+        poll(javelin::jmap::sync::LongPollRequest request,
+             javelin::jmap::sync::AbstractLongPollObserver& observer,
+             javelin::jmap::sync::LongPollCancellation& cancellation) override
         {
             requests.push_back(request);
             REQUIRE_FALSE(queuedResults.empty());
 
-            auto result = std::move(queuedResults.front());
-            queuedResults.erase(queuedResults.begin());
-            co_return result;
+            javelin::jmap::sync::LongPollStreamSummary summary{
+                .lastState = request.lastState,
+                .updateCount = 0,
+            };
+            while (!queuedResults.empty() && !cancellation.isCancelled())
+            {
+                auto result = std::move(queuedResults.front());
+                queuedResults.erase(queuedResults.begin());
+                if (const auto* error = std::get_if<javelin::jmap::api::TransportError>(&result))
+                {
+                    co_return *error;
+                }
+
+                auto response = std::get<javelin::jmap::sync::LongPollResponse>(std::move(result));
+                summary.lastState = response.newState;
+                if (response.notifyObserver)
+                {
+                    ++summary.updateCount;
+                    co_await observer.onUpdate(std::move(response));
+                }
+            }
+
+            co_return summary;
         }
     };
 
@@ -133,9 +157,42 @@ TEST_CASE("long poll worker resumes from the latest state and stops on cancellat
     CHECK(summary.successfulPolls == 2);
     CHECK(summary.transientFailures == 0);
     CHECK(summary.cancelled);
-    REQUIRE(channel.requests.size() == 2);
+    REQUIRE(channel.requests.size() == 1);
     CHECK(channel.requests.front().lastState == "state-1");
-    CHECK(channel.requests.back().lastState == "state-2");
+}
+
+TEST_CASE("long poll worker advances state without notifying for connect events", "[jmap][sync]")
+{
+    ensureApplication();
+
+    FakeLongPollChannel channel;
+    channel.queuedResults = {
+        javelin::jmap::sync::LongPollResponse{
+            .newState = "state-2",
+            .changedTypes = {},
+            .notifyObserver = false,
+        },
+        javelin::jmap::sync::LongPollResponse{
+            .newState = "state-3",
+            .changedTypes = {"Email"},
+        },
+    };
+
+    javelin::jmap::sync::LongPollCancellation cancellation;
+    FakeLongPollObserver observer;
+    observer.cancellation = &cancellation;
+    observer.cancelAfterUpdates = 1;
+    FakeLongPollSleeper sleeper;
+
+    const javelin::jmap::sync::LongPollWorker worker{channel, observer, sleeper};
+    const auto summary = QCoro::waitFor(worker.run(makeRequest(), cancellation));
+
+    CHECK(summary.lastState == "state-3");
+    CHECK(summary.successfulPolls == 1);
+    REQUIRE(observer.updates.size() == 1);
+    CHECK(observer.updates.front().newState == "state-3");
+    REQUIRE(channel.requests.size() == 1);
+    CHECK(channel.requests.front().lastState == "state-1");
 }
 
 TEST_CASE("long poll worker backs off and retries after transient transport failures",

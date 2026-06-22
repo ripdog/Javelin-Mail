@@ -1,6 +1,6 @@
 pkgname=javelin-mail-git
 _project_name=Javelin-Mail
-pkgver=0.1.0.r63.g0f267b5
+pkgver=0.1.0.r85.g96e643b
 pkgrel=1
 pkgdesc='A Qt Widgets JMAP email client'
 arch=('x86_64')
