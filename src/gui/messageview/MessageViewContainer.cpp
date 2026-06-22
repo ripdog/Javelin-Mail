@@ -127,6 +127,13 @@ namespace javelin::gui::messageview
             label->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
         }
 
+        void makeMetadataLabelSelectable(QLabel* label)
+        {
+            label->setTextInteractionFlags(Qt::TextSelectableByMouse);
+            label->setCursor(Qt::IBeamCursor);
+            label->setFocusPolicy(Qt::NoFocus);
+        }
+
         [[nodiscard]] QStringList remoteContentAllowList(const QLatin1StringView key)
         {
             QSettings settings;
@@ -403,18 +410,20 @@ namespace javelin::gui::messageview
         metadataLayout->setVerticalSpacing(2);
 
         m_fromLabel = new QLabel(m_metadataWidget);
-        m_fromLabel->setWordWrap(true);
-        makeLabelSelectable(m_fromLabel);
+        m_fromLabel->setWordWrap(false);
+        m_fromLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        makeMetadataLabelSelectable(m_fromLabel);
 
         m_toLabel = new QLabel(m_metadataWidget);
         m_toLabel->setWordWrap(true);
-        makeLabelSelectable(m_toLabel);
+        m_toLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+        makeMetadataLabelSelectable(m_toLabel);
 
         m_receivedLabel = new QLabel(m_metadataWidget);
         m_receivedLabel->setAlignment(Qt::AlignRight | Qt::AlignTop);
-        m_receivedLabel->setWordWrap(true);
+        m_receivedLabel->setWordWrap(false);
         m_receivedLabel->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
-        makeLabelSelectable(m_receivedLabel);
+        makeMetadataLabelSelectable(m_receivedLabel);
 
         metadataLayout->addWidget(m_fromLabel, 0, 0);
         metadataLayout->addWidget(m_receivedLabel, 0, 1);
@@ -898,7 +907,8 @@ namespace javelin::gui::messageview
         m_fromLabel->setText(
             QStringLiteral("From: %1").arg(addressListLabel(m_snapshot->email.from)));
         m_toLabel->setText(QStringLiteral("To: %1").arg(addressListLabel(m_snapshot->email.to)));
-        m_receivedLabel->setText(formatReceivedDateTime(m_snapshot->email.receivedAt));
+        m_receivedLabel->setText(QStringLiteral("Received: %1")
+                                     .arg(formatReceivedDateTime(m_snapshot->email.receivedAt)));
 
         if (reloadBody && m_snapshot->plainTextBody.has_value())
         {
