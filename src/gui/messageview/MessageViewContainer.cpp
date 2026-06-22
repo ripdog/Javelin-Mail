@@ -2,6 +2,7 @@
 #include "gui/messageview/HtmlMessageView.h"
 
 #include <QApplication>
+#include <QDateTime>
 #include <QFileIconProvider>
 #include <QFileInfo>
 #include <QFrame>
@@ -41,8 +42,8 @@ namespace javelin::gui::messageview
             return QString::fromStdString(attachment.name.value_or(attachment.partId));
         }
 
-        [[nodiscard]] std::optional<std::string> renderedBodyKey(
-            const std::optional<javelin::jmap::cache::MessageViewSnapshot>& snapshot)
+        [[nodiscard]] std::optional<std::string>
+        renderedBodyKey(const std::optional<javelin::jmap::cache::MessageViewSnapshot>& snapshot)
         {
             if (!snapshot.has_value())
             {
@@ -71,6 +72,51 @@ namespace javelin::gui::messageview
         attachmentSizeLabel(const javelin::jmap::cache::MessageAttachment& attachment)
         {
             return QLocale{}.formattedDataSize(static_cast<qint64>(attachment.size));
+        }
+
+        [[nodiscard]] QString addressLabel(const javelin::jmap::domain::EmailAddress& address)
+        {
+            const auto email = QString::fromStdString(address.email);
+            if (!address.name.has_value() || address.name->empty())
+            {
+                return email;
+            }
+
+            const auto name = QString::fromStdString(*address.name);
+            return QStringLiteral("%1 <%2>").arg(name, email);
+        }
+
+        [[nodiscard]] QString
+        addressListLabel(const std::vector<javelin::jmap::domain::EmailAddress>& addresses)
+        {
+            if (addresses.empty())
+            {
+                return QStringLiteral("(none)");
+            }
+
+            QStringList labels;
+            labels.reserve(static_cast<qsizetype>(addresses.size()));
+            for (const auto& address : addresses)
+            {
+                labels.push_back(addressLabel(address));
+            }
+            return labels.join(QStringLiteral(", "));
+        }
+
+        [[nodiscard]] QString formatReceivedDateTime(const std::string& receivedAt)
+        {
+            const auto rawValue = QString::fromStdString(receivedAt);
+            auto dateTime = QDateTime::fromString(rawValue, Qt::ISODateWithMs);
+            if (!dateTime.isValid())
+            {
+                dateTime = QDateTime::fromString(rawValue, Qt::ISODate);
+            }
+            if (!dateTime.isValid())
+            {
+                return rawValue;
+            }
+
+            return QLocale{}.toString(dateTime.toLocalTime(), QLocale::LongFormat);
         }
 
         void makeLabelSelectable(QLabel* label)
@@ -350,8 +396,36 @@ namespace javelin::gui::messageview
         m_detailLabel->setWordWrap(true);
         makeLabelSelectable(m_detailLabel);
 
+        m_metadataWidget = new QWidget(headerWidget);
+        auto* metadataLayout = new QGridLayout(m_metadataWidget);
+        metadataLayout->setContentsMargins(0, 0, 0, 0);
+        metadataLayout->setHorizontalSpacing(14);
+        metadataLayout->setVerticalSpacing(2);
+
+        m_fromLabel = new QLabel(m_metadataWidget);
+        m_fromLabel->setWordWrap(true);
+        makeLabelSelectable(m_fromLabel);
+
+        m_toLabel = new QLabel(m_metadataWidget);
+        m_toLabel->setWordWrap(true);
+        makeLabelSelectable(m_toLabel);
+
+        m_receivedLabel = new QLabel(m_metadataWidget);
+        m_receivedLabel->setAlignment(Qt::AlignRight | Qt::AlignTop);
+        m_receivedLabel->setWordWrap(true);
+        m_receivedLabel->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
+        makeLabelSelectable(m_receivedLabel);
+
+        metadataLayout->addWidget(m_fromLabel, 0, 0);
+        metadataLayout->addWidget(m_receivedLabel, 0, 1);
+        metadataLayout->addWidget(m_toLabel, 1, 0, 1, 2);
+        metadataLayout->setColumnStretch(0, 1);
+        metadataLayout->setColumnStretch(1, 0);
+        m_metadataWidget->setVisible(false);
+
         headerLayout->addWidget(m_titleLabel);
         headerLayout->addWidget(m_detailLabel);
+        headerLayout->addWidget(m_metadataWidget);
 
         m_bodyControlsWidget = new QWidget(this);
         auto* buttonLayout = new QHBoxLayout(m_bodyControlsWidget);
@@ -657,13 +731,11 @@ namespace javelin::gui::messageview
         const auto sender = currentSenderAddress();
         const auto domain = currentSenderDomain();
         const bool permittedSender =
-            !sender.isEmpty() &&
-            remoteContentAllowList(QLatin1StringView{allowedSendersKey})
-                .contains(sender, Qt::CaseInsensitive);
+            !sender.isEmpty() && remoteContentAllowList(QLatin1StringView{allowedSendersKey})
+                                     .contains(sender, Qt::CaseInsensitive);
         const bool permittedDomain =
-            !domain.isEmpty() &&
-            remoteContentAllowList(QLatin1StringView{allowedDomainsKey})
-                .contains(domain, Qt::CaseInsensitive);
+            !domain.isEmpty() && remoteContentAllowList(QLatin1StringView{allowedDomainsKey})
+                                     .contains(domain, Qt::CaseInsensitive);
         const bool shouldAllow = permittedSender || permittedDomain;
         if (m_htmlView->remoteContentEnabled() != shouldAllow)
         {
@@ -728,6 +800,8 @@ namespace javelin::gui::messageview
 
         if (!m_accountId.has_value())
         {
+            m_detailLabel->setVisible(true);
+            m_metadataWidget->setVisible(false);
             m_titleLabel->setText(QStringLiteral("Choose an account"));
             m_detailLabel->setText(QStringLiteral("Select an account to browse your mail."));
             m_placeholderTitleLabel->setText(QStringLiteral("Ready when you are"));
@@ -740,6 +814,8 @@ namespace javelin::gui::messageview
 
         if (!m_mailboxId.has_value() && !m_emailId.has_value())
         {
+            m_detailLabel->setVisible(true);
+            m_metadataWidget->setVisible(false);
             m_titleLabel->setText(QStringLiteral("Choose a mailbox"));
             m_detailLabel->setText(
                 QStringLiteral("Select a mailbox in the left pane to populate the message list."));
@@ -752,6 +828,8 @@ namespace javelin::gui::messageview
 
         if (!m_multipleMessages.empty())
         {
+            m_detailLabel->setVisible(true);
+            m_metadataWidget->setVisible(false);
             m_titleLabel->setText(QStringLiteral("%1 messages selected")
                                       .arg(static_cast<qulonglong>(m_multipleMessages.size())));
             m_detailLabel->clear();
@@ -762,6 +840,8 @@ namespace javelin::gui::messageview
 
         if (!m_emailId.has_value())
         {
+            m_detailLabel->setVisible(true);
+            m_metadataWidget->setVisible(false);
             m_titleLabel->setText(QStringLiteral("Choose a message"));
             m_detailLabel->setText(
                 QStringLiteral("Select a message in the center pane to open it here."));
@@ -773,6 +853,8 @@ namespace javelin::gui::messageview
 
         if (!m_snapshot.has_value())
         {
+            m_detailLabel->setVisible(true);
+            m_metadataWidget->setVisible(false);
             if (!m_errorMessage.isEmpty())
             {
                 m_titleLabel->setText(QStringLiteral("Could not load message"));
@@ -805,17 +887,18 @@ namespace javelin::gui::messageview
             return;
         }
 
-        const auto sender = !m_snapshot->email.from.empty()
-                                ? QString::fromStdString(m_snapshot->email.from.front().email)
-                                : QStringLiteral("(unknown sender)");
         const auto subject = m_snapshot->email.subject.has_value()
                                  ? QString::fromStdString(*m_snapshot->email.subject)
                                  : QStringLiteral("(no subject)");
 
         m_titleLabel->setText(subject);
-        m_detailLabel->setText(
-            QStringLiteral("From %1\nReceived %2")
-                .arg(sender, QString::fromStdString(m_snapshot->email.receivedAt)));
+        m_detailLabel->clear();
+        m_detailLabel->setVisible(false);
+        m_metadataWidget->setVisible(true);
+        m_fromLabel->setText(
+            QStringLiteral("From: %1").arg(addressListLabel(m_snapshot->email.from)));
+        m_toLabel->setText(QStringLiteral("To: %1").arg(addressListLabel(m_snapshot->email.to)));
+        m_receivedLabel->setText(formatReceivedDateTime(m_snapshot->email.receivedAt));
 
         if (reloadBody && m_snapshot->plainTextBody.has_value())
         {
@@ -876,8 +959,7 @@ namespace javelin::gui::messageview
 
     void MessageViewContainer::permitRemoteContentForCurrentDomain()
     {
-        addRemoteContentAllowListValue(QLatin1StringView{allowedDomainsKey},
-                                       currentSenderDomain());
+        addRemoteContentAllowListValue(QLatin1StringView{allowedDomainsKey}, currentSenderDomain());
         updateSenderRemoteContentPermit();
         updateRemoteContentButton();
     }
@@ -967,9 +1049,8 @@ namespace javelin::gui::messageview
             auto* tile = tiles.at(index);
 
             const int row = m_attachmentsCollapsed ? static_cast<int>(index) / columnCount : 0;
-            const int column =
-                m_attachmentsCollapsed ? static_cast<int>(index) % columnCount
-                                       : static_cast<int>(index);
+            const int column = m_attachmentsCollapsed ? static_cast<int>(index) % columnCount
+                                                      : static_cast<int>(index);
             m_attachmentListLayout->addWidget(tile, row, column);
         }
 

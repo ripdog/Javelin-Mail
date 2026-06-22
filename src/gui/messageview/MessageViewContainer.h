@@ -84,6 +84,10 @@ namespace javelin::gui::messageview
         QString m_errorMessage;
         QLabel* m_titleLabel = nullptr;
         QLabel* m_detailLabel = nullptr;
+        QWidget* m_metadataWidget = nullptr;
+        QLabel* m_fromLabel = nullptr;
+        QLabel* m_toLabel = nullptr;
+        QLabel* m_receivedLabel = nullptr;
         QWidget* m_placeholderPanel = nullptr;
         QLabel* m_placeholderTitleLabel = nullptr;
         QLabel* m_placeholderDetailLabel = nullptr;
