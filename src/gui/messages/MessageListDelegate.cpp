@@ -20,6 +20,26 @@ namespace javelin::gui::messages
         constexpr int memberIndent = 22;
         const QColor starredColor{245, 181, 42};
 
+        constexpr int cardMargin = 1;
+        constexpr int cardBorderWidth = 1;
+        constexpr int cardCornerRadius = 10;
+        constexpr int contentInset = 14;
+        constexpr int headerHeight = 24;
+        constexpr int headerGap = 10;
+        constexpr int timestampPadding = 12;
+        constexpr int subjectOffset = 26;
+        constexpr int subjectHeight = 28;
+        constexpr int senderFontSizeIncreaseParent = 1;
+        constexpr int subjectFontSizeIncreaseMember = 1;
+        constexpr int subjectFontSizeIncreaseParent = 2;
+        constexpr int repliesButtonWidth = 116;
+        constexpr int buttonSize = 28;
+        constexpr int buttonMargin = 29;
+        constexpr int buttonGap = 6;
+        constexpr int buttonIconSize = 16;
+        constexpr int memberRowHeight = 92;
+        constexpr int parentRowHeight = 104;
+
         [[nodiscard]] QWidget* tooltipWidget(const QStyleOptionViewItem& option)
         {
             return const_cast<QWidget*>(option.widget);
@@ -44,14 +64,14 @@ namespace javelin::gui::messages
         [[nodiscard]] QRect cardRectForOption(const QStyleOptionViewItem& option,
                                               const bool isMemberRow)
         {
-            const auto outerRect = insetRect(option.rect, 1);
-            return isMemberRow ? insetRect(outerRect.adjusted(memberIndent, 0, 0, 0), 1)
-                               : insetRect(outerRect, 1);
+            const auto outerRect = insetRect(option.rect, cardMargin);
+            return isMemberRow ? insetRect(outerRect.adjusted(memberIndent, 0, 0, 0), cardMargin)
+                                : insetRect(outerRect, cardMargin);
         }
 
         [[nodiscard]] QRect contentRectForCard(const QRect& cardRect)
         {
-            return insetRect(cardRect, 14);
+            return insetRect(cardRect, contentInset);
         }
 
         [[nodiscard]] QRect repliesButtonRect(const QRect& contentRect, const bool canExpand)
@@ -60,12 +80,14 @@ namespace javelin::gui::messages
             {
                 return {};
             }
-            return QRect{contentRect.left(), contentRect.bottom() - 29, 116, 28};
+            return QRect{contentRect.left(), contentRect.bottom() - buttonMargin,
+                         repliesButtonWidth, buttonSize};
         }
 
         [[nodiscard]] QRect starButtonRect(const QRect& contentRect)
         {
-            return QRect{contentRect.right() - 29, contentRect.bottom() - 29, 28, 28};
+            return QRect{contentRect.right() - buttonMargin, contentRect.bottom() - buttonMargin,
+                         buttonSize, buttonSize};
         }
 
         [[nodiscard]] QRect attachmentButtonRect(const QRect& contentRect, const bool hasAttachment)
@@ -74,8 +96,8 @@ namespace javelin::gui::messages
             {
                 return {};
             }
-            return QRect{starButtonRect(contentRect).left() - 34, contentRect.bottom() - 29, 28,
-                         28};
+            return QRect{starButtonRect(contentRect).left() - buttonSize - buttonGap,
+                         contentRect.bottom() - buttonMargin, buttonSize, buttonSize};
         }
 
         void drawButton(QPainter* painter, const QStyleOptionViewItem& option, const QRect& rect,
@@ -92,7 +114,7 @@ namespace javelin::gui::messages
             buttonOption.palette = option.palette;
             buttonOption.fontMetrics = option.fontMetrics;
             buttonOption.icon = icon;
-            buttonOption.iconSize = QSize{16, 16};
+            buttonOption.iconSize = QSize{buttonIconSize, buttonIconSize};
             buttonOption.text = text;
             buttonOption.state = QStyle::State_Enabled;
             if (hovered)
@@ -148,13 +170,13 @@ namespace javelin::gui::messages
 
         painter->setPen(Qt::NoPen);
         painter->setBrush(background);
-        painter->drawRoundedRect(cardRect, 10, 10);
+        painter->drawRoundedRect(cardRect, cardCornerRadius, cardCornerRadius);
 
         QPen borderPen{border};
-        borderPen.setWidth(1);
+        borderPen.setWidth(cardBorderWidth);
         painter->setPen(borderPen);
         painter->setBrush(Qt::NoBrush);
-        painter->drawRoundedRect(cardRect, 10, 10);
+        painter->drawRoundedRect(cardRect, cardCornerRadius, cardCornerRadius);
 
         QRect contentRect = contentRectForCard(cardRect);
 
@@ -164,24 +186,24 @@ namespace javelin::gui::messages
             formattedTimestamp(index.data(MessageListModel::ReceivedAtRole).toString());
 
         auto senderFont = option.font;
-        senderFont.setPointSize(senderFont.pointSize() + (isMemberRow ? 0 : 1));
+        senderFont.setPointSize(senderFont.pointSize() + (isMemberRow ? 0 : senderFontSizeIncreaseParent));
         senderFont.setBold(true);
         painter->setFont(senderFont);
         painter->setPen(senderColor);
 
         const auto senderMetrics = QFontMetrics{senderFont};
         const auto timestampMetrics = QFontMetrics{option.font};
-        const int timestampWidth = timestampMetrics.boundingRect(timestamp).width() + 12;
+        const int timestampWidth = timestampMetrics.boundingRect(timestamp).width() + timestampPadding;
         const int unreadDotReserve = isUnread ? unreadDotDiameter + unreadDotGap : 0;
         const QRect rightHeaderRect{
             contentRect.left() + contentRect.width() - timestampWidth,
             contentRect.top(),
             timestampWidth,
-            24,
+            headerHeight,
         };
         const QRect leftHeaderRect{
             contentRect.left() + unreadDotReserve, contentRect.top(),
-            std::max(0, contentRect.width() - timestampWidth - 10 - unreadDotReserve), 24};
+            std::max(0, contentRect.width() - timestampWidth - headerGap - unreadDotReserve), headerHeight};
 
         if (isUnread)
         {
@@ -203,12 +225,13 @@ namespace javelin::gui::messages
         painter->drawText(rightHeaderRect, Qt::AlignRight | Qt::AlignVCenter, timestamp);
 
         auto subjectFont = option.font;
-        subjectFont.setPointSize(subjectFont.pointSize() + (isMemberRow ? 1 : 2));
+        subjectFont.setPointSize(subjectFont.pointSize() + (isMemberRow ? subjectFontSizeIncreaseMember
+                                                                        : subjectFontSizeIncreaseParent));
         painter->setFont(subjectFont);
         painter->setPen(textColor);
         const auto subjectMetrics = QFontMetrics{subjectFont};
-        const QRect subjectRect{contentRect.left(), contentRect.top() + 26, contentRect.width(),
-                                28};
+        const QRect subjectRect{contentRect.left(), contentRect.top() + subjectOffset, contentRect.width(),
+                                subjectHeight};
         painter->drawText(subjectRect, Qt::AlignLeft | Qt::AlignVCenter,
                           subjectMetrics.elidedText(subject, Qt::ElideRight, subjectRect.width()));
 
@@ -253,7 +276,7 @@ namespace javelin::gui::messages
             index.data(MessageListModel::RowKindRole).toInt());
         return {
             0,
-            rowKind == MessageListModel::RowKind::ThreadMember ? 92 : 104,
+            rowKind == MessageListModel::RowKind::ThreadMember ? memberRowHeight : parentRowHeight,
         };
     }
 
