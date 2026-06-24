@@ -810,6 +810,8 @@ namespace javelin::gui::shell
         m_messageView->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
         m_messageView->setSelectionMode(QAbstractItemView::ExtendedSelection);
         m_messageView->setStyleSheet(QStringLiteral("QListView { border: none; padding: 3px; }"));
+        m_messageView->setMouseTracking(true);
+        m_messageView->viewport()->setMouseTracking(true);
         m_messageView->installEventFilter(this);
         m_messageView->viewport()->installEventFilter(this);
 
@@ -925,6 +927,19 @@ namespace javelin::gui::shell
                 static_cast<void>(
                     m_messageModel->setThreadExpanded(threadId.toStdString(), !isExpanded));
             });
+        connect(messageListDelegate,
+                &javelin::gui::messages::MessageListDelegate::attachmentButtonClicked, this,
+                [this](const QModelIndex& index)
+                {
+                    if (!index.isValid())
+                    {
+                        return;
+                    }
+                    m_messageView->setCurrentIndex(index);
+                    refreshSelectionFromModels();
+                });
+        connect(messageListDelegate, &javelin::gui::messages::MessageListDelegate::flaggedToggled,
+                this, &MainWindow::toggleMessageFlagged);
 
         m_mainSplitter = new QSplitter(Qt::Horizontal, this);
         m_mainSplitter->addWidget(m_mailboxPane);
@@ -3791,6 +3806,39 @@ namespace javelin::gui::shell
         refreshMessageListPreservingSelection();
         refreshSelectionFromModels();
         submitQueuedEmailMutations(std::move(accountId));
+    }
+
+    void MainWindow::toggleMessageFlagged(const QModelIndex& index)
+    {
+        const auto accountId = activeAccountId();
+        if (!accountId.has_value() || !index.isValid())
+        {
+            return;
+        }
+
+        const auto emailId =
+            index.data(javelin::gui::messages::MessageListModel::EmailIdRole).toString();
+        if (emailId.isEmpty())
+        {
+            return;
+        }
+
+        const bool isFlagged =
+            index.data(javelin::gui::messages::MessageListModel::IsFlaggedRole).toBool();
+        const auto result =
+            m_jmapCore.queueSetEmailFlagged(*accountId, emailId.toStdString(), !isFlagged);
+        if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+        {
+            statusBar()->showMessage(error->message, 10000);
+            return;
+        }
+
+        m_messageView->setCurrentIndex(index);
+        refreshMessageListPreservingSelection();
+        refreshSelectionFromModels();
+        statusBar()->showMessage(
+            isFlagged ? QStringLiteral("Removed star.") : QStringLiteral("Added star."), 5000);
+        submitQueuedEmailMutations(*accountId);
     }
 
     void MainWindow::markSelectedEmailUnread()

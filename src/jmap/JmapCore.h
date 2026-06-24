@@ -204,6 +204,8 @@ namespace javelin::jmap
                                                                    std::string emailId);
         [[nodiscard]] QueuedEmailMutationResult queueMarkEmailUnread(std::string accountId,
                                                                      std::string emailId);
+        [[nodiscard]] QueuedEmailMutationResult
+        queueSetEmailFlagged(std::string accountId, std::string emailId, bool flagged);
         [[nodiscard]] QCoro::Task<SubmittedEmailMutationsResult>
         submitPendingEmailMutations(LiveConnectionSettings settings, std::string accountId,
                                     std::size_t limit = 25);

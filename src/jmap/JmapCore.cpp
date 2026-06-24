@@ -1224,6 +1224,20 @@ namespace javelin::jmap
                                  std::move(emailId), "$seen", false);
     }
 
+    QueuedEmailMutationResult
+    JmapCore::queueSetEmailFlagged(std::string accountId, std::string emailId, const bool flagged)
+    {
+        if (m_impl->databaseConnection == nullptr)
+        {
+            return LiveRefreshError{
+                .message = QStringLiteral("Queued mutations are unavailable in this process."),
+            };
+        }
+
+        return queueKeywordPatch(*m_impl->databaseConnection, std::move(accountId),
+                                 std::move(emailId), "$flagged", flagged);
+    }
+
     QCoro::Task<SubmittedEmailMutationsResult>
     JmapCore::submitPendingEmailMutations(LiveConnectionSettings settings, std::string accountId,
                                           const std::size_t limit)

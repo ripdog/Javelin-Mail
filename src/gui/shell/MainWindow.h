@@ -235,6 +235,7 @@ namespace javelin::gui::shell
                             std::string destinationMailboxId, std::string emailId,
                             QString successMessage);
         void queueMarkEmailRead(std::string accountId, std::string emailId);
+        void toggleMessageFlagged(const QModelIndex& index);
         void markSelectedEmailUnread();
         void archiveSelectedEmail();
         void deleteSelectedEmail();
