@@ -1,6 +1,7 @@
 #pragma once
 
 #include "jmap/cache/QueryService.h"
+#include "jmap/search/EmailSearch.h"
 
 #include <QCoroTask>
 
@@ -172,6 +173,11 @@ namespace javelin::jmap
         [[nodiscard]] QCoro::Task<MessageSearchResult>
         searchMessages(LiveConnectionSettings settings, std::string accountId, std::string query,
                        std::size_t offset = 0, std::size_t limit = 100,
+                       std::function<void(const QString&)> progressCallback = {});
+        [[nodiscard]] QCoro::Task<MessageSearchResult>
+        searchMessages(LiveConnectionSettings settings, std::string accountId,
+                       javelin::jmap::search::EmailSearchCriteria criteria, std::size_t offset = 0,
+                       std::size_t limit = 100,
                        std::function<void(const QString&)> progressCallback = {});
         [[nodiscard]] QCoro::Task<AttachmentDownloadResult>
         downloadAttachment(LiveConnectionSettings settings, std::string accountId,

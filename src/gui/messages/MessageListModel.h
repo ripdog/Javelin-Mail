@@ -28,6 +28,8 @@ namespace javelin::gui::messages
             EmailIdRole = Qt::UserRole + 1,
             ThreadIdRole,
             SenderDisplayRole,
+            SenderEmailRole,
+            SenderNameRole,
             SubjectRole,
             PreviewRole,
             ReceivedAtRole,

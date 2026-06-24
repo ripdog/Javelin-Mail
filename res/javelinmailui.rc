@@ -8,6 +8,7 @@
     </Menu>
     <Menu name="account"><text>&amp;Account</text>
       <Action name="refresh_from_server"/>
+      <Action name="advanced_search"/>
     </Menu>
     <Menu name="message"><text>&amp;Message</text>
       <Action name="compose_reply"/>
@@ -36,6 +37,7 @@
     <Action name="move_email"/>
     <Separator/>
     <Action name="refresh_from_server"/>
+    <Action name="advanced_search"/>
     <Separator/>
     <Action name="options_configure"/>
   </ToolBar>

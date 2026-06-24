@@ -1511,6 +1511,18 @@ namespace javelin::jmap
                              std::string query, const std::size_t offset, const std::size_t limit,
                              std::function<void(const QString&)> progressCallback)
     {
+        co_return co_await searchMessages(
+            std::move(settings), std::move(accountId),
+            javelin::jmap::search::EmailSearchCriteria{.text = std::move(query)}, offset, limit,
+            std::move(progressCallback));
+    }
+
+    QCoro::Task<MessageSearchResult>
+    JmapCore::searchMessages(LiveConnectionSettings settings, std::string accountId,
+                             javelin::jmap::search::EmailSearchCriteria criteria,
+                             const std::size_t offset, const std::size_t limit,
+                             std::function<void(const QString&)> progressCallback)
+    {
         const auto reportProgress = [&progressCallback](const QString& message)
         {
             if (progressCallback)
@@ -1519,6 +1531,7 @@ namespace javelin::jmap
             }
         };
 
+        auto query = javelin::jmap::search::displayString(criteria);
         qInfo().noquote() << "JMAP core search start" << QString::fromStdString(accountId)
                           << QString::fromStdString(query);
         reportProgress(QStringLiteral("Searching the server..."));
@@ -1529,7 +1542,7 @@ namespace javelin::jmap
             };
         }
 
-        if (query.empty())
+        if (javelin::jmap::search::isEmpty(criteria))
         {
             co_return LiveRefreshError{
                 .message = QStringLiteral("Enter a search term before searching."),
@@ -1538,11 +1551,7 @@ namespace javelin::jmap
 
         const auto pageResult = co_await performCollapsedQueryPage(
             *m_impl->databaseConnection, *m_impl->transport, settings, accountId,
-            javelin::jmap::api::EmailQueryFilter{
-                .inMailbox = std::nullopt,
-                .text = query,
-            },
-            offset, limit, reportProgress);
+            javelin::jmap::search::toEmailQueryFilter(criteria), offset, limit, reportProgress);
         if (const auto* error = std::get_if<LiveRefreshError>(&pageResult))
         {
             co_return *error;

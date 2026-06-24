@@ -104,6 +104,40 @@ TEST_CASE("email query requests serialize text search filters", "[jmap][method][
         R"({"accountId":"u1","filter":{"text":"quarterly report"},"sort":[{"property":"receivedAt","isAscending":false}],"position":0,"limit":25,"collapseThreads":true,"calculateTotal":true})");
 }
 
+TEST_CASE("email query requests serialize nested address search filters", "[jmap][method][mail]")
+{
+    const auto json = javelin::jmap::api::serializeEmailQueryRequest({
+        .accountId = "u1",
+        .filter =
+            javelin::jmap::api::EmailQueryFilter{
+                .operatorName = "OR",
+                .conditions =
+                    {
+                        javelin::jmap::api::EmailQueryFilter{.from = "alice@example.com"},
+                        javelin::jmap::api::EmailQueryFilter{.to = "alice@example.com"},
+                        javelin::jmap::api::EmailQueryFilter{.cc = "alice@example.com"},
+                        javelin::jmap::api::EmailQueryFilter{.bcc = "alice@example.com"},
+                    },
+            },
+        .sort =
+            {
+                javelin::jmap::api::EmailQuerySort{
+                    .property = "receivedAt",
+                    .isAscending = false,
+                },
+            },
+        .position = 0,
+        .limit = 25,
+        .collapseThreads = true,
+        .calculateTotal = true,
+    });
+
+    REQUIRE(json.has_value());
+    CHECK(
+        *json ==
+        R"({"accountId":"u1","filter":{"operator":"OR","conditions":[{"from":"alice@example.com"},{"to":"alice@example.com"},{"cc":"alice@example.com"},{"bcc":"alice@example.com"}]},"sort":[{"property":"receivedAt","isAscending":false}],"position":0,"limit":25,"collapseThreads":true,"calculateTotal":true})");
+}
+
 TEST_CASE("email queryChanges requests serialize incremental mailbox windows",
           "[jmap][method][mail]")
 {

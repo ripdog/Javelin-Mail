@@ -62,6 +62,8 @@ set(JAVELIN_FORMAT_FILES
     src/gui/messageview/HtmlMessageView.h
     src/gui/messageview/MessageViewContainer.cpp
     src/gui/messageview/MessageViewContainer.h
+    src/gui/search/AdvancedSearchDialog.cpp
+    src/gui/search/AdvancedSearchDialog.h
     src/gui/settings/PreferencesDialog.cpp
     src/gui/settings/PreferencesDialog.h
     src/gui/shell/MessageFileUtils.cpp
@@ -126,6 +128,8 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/render/HtmlMessageDocumentBuilder.h
     src/jmap/render/InlineMessageUrl.cpp
     src/jmap/render/InlineMessageUrl.h
+    src/jmap/search/EmailSearch.cpp
+    src/jmap/search/EmailSearch.h
     src/jmap/sync/LongPollWorker.cpp
     src/jmap/sync/LongPollWorker.h
     src/jmap/sync/EventSourceLongPoll.cpp
@@ -245,6 +249,8 @@ add_library(javelin_jmap STATIC
     src/jmap/render/HtmlMessageDocumentBuilder.h
     src/jmap/render/InlineMessageUrl.cpp
     src/jmap/render/InlineMessageUrl.h
+    src/jmap/search/EmailSearch.cpp
+    src/jmap/search/EmailSearch.h
     src/jmap/sync/LongPollWorker.cpp
     src/jmap/sync/LongPollWorker.h
     src/jmap/sync/EventSourceLongPoll.cpp
@@ -305,6 +311,8 @@ add_library(javelin_gui STATIC
     src/gui/messageview/HtmlMessageView.h
     src/gui/messageview/MessageViewContainer.cpp
     src/gui/messageview/MessageViewContainer.h
+    src/gui/search/AdvancedSearchDialog.cpp
+    src/gui/search/AdvancedSearchDialog.h
     src/gui/settings/PreferencesDialog.cpp
     src/gui/settings/PreferencesDialog.h
     src/gui/shell/MessageFileUtils.cpp

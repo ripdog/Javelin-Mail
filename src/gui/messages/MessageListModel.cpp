@@ -106,6 +106,18 @@ namespace javelin::gui::messages
             return sender;
         }
 
+        if (role == SenderEmailRole)
+        {
+            return item.from.has_value() ? QString::fromStdString(item.from->email) : QString{};
+        }
+
+        if (role == SenderNameRole)
+        {
+            return item.from.has_value() && item.from->name.has_value()
+                       ? QString::fromStdString(*item.from->name)
+                       : QString{};
+        }
+
         if (role == SubjectRole)
         {
             return subject;
@@ -196,10 +208,9 @@ namespace javelin::gui::messages
              --threadIndex)
         {
             const auto threadIndexValue = static_cast<std::size_t>(threadIndex);
-            const auto existsInNewPage =
-                std::ranges::any_of(items, [threadId = m_threads[threadIndexValue].summary.threadId](
-                                               const auto& item)
-                                    { return item.threadId == threadId; });
+            const auto existsInNewPage = std::ranges::any_of(
+                items, [threadId = m_threads[threadIndexValue].summary.threadId](const auto& item)
+                { return item.threadId == threadId; });
             if (existsInNewPage)
             {
                 continue;

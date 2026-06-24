@@ -1,6 +1,7 @@
 #pragma once
 
 #include "jmap/cache/QueryService.h"
+#include "jmap/search/EmailSearch.h"
 #include "jmap/submission/ComposeTypes.h"
 
 #include <KXmlGuiWindow>
@@ -126,6 +127,7 @@ namespace javelin::gui::shell
         {
             std::string accountId;
             std::string query;
+            javelin::jmap::search::EmailSearchCriteria criteria;
             QString title;
             PageState page;
             TabSelectionState selection;
@@ -171,12 +173,16 @@ namespace javelin::gui::shell
         [[nodiscard]] bool closeComposeTab(int index);
         void markTabsStaleForAccount(std::string_view accountId);
         void executeSearch(const QString& text);
+        void showAdvancedSearch();
         void clearSearch();
         void updateTabBar();
         void activateTab(int index, bool refreshRemote = false);
         void openOrActivateMailboxTab(std::string accountId, std::string mailboxId, QString title,
                                       bool refreshRemote);
         void openOrActivateSearchTab(std::string accountId, QString query, bool refreshRemote);
+        void openOrActivateSearchTab(std::string accountId,
+                                     javelin::jmap::search::EmailSearchCriteria criteria,
+                                     bool refreshRemote);
         void closeTab(int index);
         void syncNavigationForActiveTab();
         void syncActiveTabSelectionFromViews();
@@ -226,6 +232,7 @@ namespace javelin::gui::shell
         void archiveSelectedEmail();
         void deleteSelectedEmail();
         void showMoveMenu();
+        void findConversationsWithSender(const QModelIndex& index);
         void showMailboxContextMenu(const QPoint& position);
         void showMessageListContextMenu(const QPoint& position);
         void viewSelectedMessageSource();
@@ -301,6 +308,7 @@ namespace javelin::gui::shell
         QAction* m_deleteAction = nullptr;
         QAction* m_moveAction = nullptr;
         QAction* m_viewSourceAction = nullptr;
+        QAction* m_advancedSearchAction = nullptr;
         bool m_refreshInFlight = false;
         std::uint64_t m_nextMessageContentRequestToken = 1;
         std::optional<MessageContentRequestState> m_messageContentRequestInFlight;

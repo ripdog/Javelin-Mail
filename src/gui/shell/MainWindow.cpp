@@ -6,6 +6,7 @@
 #include "gui/messages/MessageListDelegate.h"
 #include "gui/messages/MessageListModel.h"
 #include "gui/messageview/MessageViewContainer.h"
+#include "gui/search/AdvancedSearchDialog.h"
 #include "gui/settings/PreferencesDialog.h"
 #include "gui/shell/MessageFileUtils.h"
 #include "jmap/JmapCore.h"
@@ -27,6 +28,7 @@
 #include <QCoreApplication>
 #include <QDebug>
 #include <QDesktopServices>
+#include <QDialog>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QEvent>
@@ -372,6 +374,28 @@ namespace javelin::gui::shell
             return value.isEmpty() ? std::nullopt : std::optional<std::string>{value.toStdString()};
         }
 
+        [[nodiscard]] javelin::jmap::search::EmailSearchCriteria
+        searchCriteriaFromSettings(const QSettings& settings)
+        {
+            auto text = optionalStringSetting(settings, QStringLiteral("searchText"));
+            const auto query = optionalStringSetting(settings, QStringLiteral("query"));
+            if (!text.has_value())
+            {
+                text = query;
+            }
+
+            return javelin::jmap::search::EmailSearchCriteria{
+                .text = std::move(text),
+                .with = optionalStringSetting(settings, QStringLiteral("searchWith")),
+                .from = optionalStringSetting(settings, QStringLiteral("searchFrom")),
+                .to = optionalStringSetting(settings, QStringLiteral("searchTo")),
+                .cc = optionalStringSetting(settings, QStringLiteral("searchCc")),
+                .bcc = optionalStringSetting(settings, QStringLiteral("searchBcc")),
+                .subject = optionalStringSetting(settings, QStringLiteral("searchSubject")),
+                .body = optionalStringSetting(settings, QStringLiteral("searchBody")),
+            };
+        }
+
         [[nodiscard]] std::vector<javelin::jmap::cache::MessageListItem>
         cachedSearchItems(const QSettings& settings)
         {
@@ -403,6 +427,19 @@ namespace javelin::gui::shell
                               threadId.has_value() ? QString::fromStdString(*threadId) : QString{});
             settings.setValue(QStringLiteral("emailId"),
                               emailId.has_value() ? QString::fromStdString(*emailId) : QString{});
+        }
+
+        void writeOptionalSearchField(QSettings& settings, const QString& key,
+                                      const std::optional<std::string>& value)
+        {
+            if (value.has_value())
+            {
+                settings.setValue(key, QString::fromStdString(*value));
+            }
+            else
+            {
+                settings.remove(key);
+            }
         }
 
     } // namespace
@@ -594,6 +631,11 @@ namespace javelin::gui::shell
         connect(m_viewSourceAction, &QAction::triggered, this,
                 &MainWindow::viewSelectedMessageSource);
         actionCollection()->addAction(QStringLiteral("view_message_source"), m_viewSourceAction);
+
+        m_advancedSearchAction = new QAction(QIcon::fromTheme(QStringLiteral("edit-find")),
+                                             QStringLiteral("Advanced Search"), this);
+        connect(m_advancedSearchAction, &QAction::triggered, this, &MainWindow::showAdvancedSearch);
+        actionCollection()->addAction(QStringLiteral("advanced_search"), m_advancedSearchAction);
     }
 
     void MainWindow::setupUi()
@@ -680,7 +722,7 @@ namespace javelin::gui::shell
         m_messageEmptyState->setWordWrap(true);
         messageLayout->addWidget(messageHeader);
         messageLayout->addWidget(m_messageEmptyState);
-        messageLayout->addWidget(m_messageView);
+        messageLayout->addWidget(m_messageView, 1);
 
         m_messageViewContainer = new javelin::gui::messageview::MessageViewContainer(this);
         connect(m_messageViewContainer,
@@ -1250,7 +1292,17 @@ namespace javelin::gui::shell
     void MainWindow::openOrActivateSearchTab(std::string accountId, QString query,
                                              const bool refreshRemote)
     {
-        const auto queryString = query.toStdString();
+        openOrActivateSearchTab(
+            std::move(accountId),
+            javelin::jmap::search::EmailSearchCriteria{.text = query.toStdString()}, refreshRemote);
+    }
+
+    void MainWindow::openOrActivateSearchTab(std::string accountId,
+                                             javelin::jmap::search::EmailSearchCriteria criteria,
+                                             const bool refreshRemote)
+    {
+        const auto queryString = javelin::jmap::search::displayString(criteria);
+        const auto query = QString::fromStdString(queryString);
         for (std::size_t index = 0; index < m_tabs.size(); ++index)
         {
             if (auto* searchTab = std::get_if<SearchTabState>(&m_tabs[index].content);
@@ -1269,6 +1321,7 @@ namespace javelin::gui::shell
                 SearchTabState{
                     .accountId = std::move(accountId),
                     .query = queryString,
+                    .criteria = std::move(criteria),
                     .title = QStringLiteral("Search: %1").arg(query),
                     .page = {},
                     .selection = {},
@@ -1742,12 +1795,13 @@ namespace javelin::gui::shell
         updateEmptyStates();
         const auto tabAccountId = tab.accountId;
         const auto tabQuery = tab.query;
+        const auto tabCriteria = tab.criteria;
         const auto tabOffset = tab.page.offset;
         auto task = m_jmapCore.searchMessages(
             toLiveConnectionSettings(
                 javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
                     QString::fromStdString(tab.accountId))),
-            tab.accountId, tab.query, tab.page.offset, pageSize,
+            tab.accountId, tabCriteria, tab.page.offset, pageSize,
             [this](const QString& message)
             {
                 qInfo().noquote() << "GUI search progress" << message;
@@ -2189,6 +2243,31 @@ namespace javelin::gui::shell
         openOrActivateSearchTab(*accountId, trimmed, true);
     }
 
+    void MainWindow::showAdvancedSearch()
+    {
+        const auto accountId = currentAccountId(*m_mailboxView);
+        if (!accountId.has_value())
+        {
+            statusBar()->showMessage(QStringLiteral("Select an account before searching."), 5000);
+            return;
+        }
+
+        javelin::gui::search::AdvancedSearchDialog dialog{this};
+        if (dialog.exec() != QDialog::Accepted)
+        {
+            return;
+        }
+
+        auto criteria = dialog.criteria();
+        if (javelin::jmap::search::isEmpty(criteria))
+        {
+            statusBar()->showMessage(QStringLiteral("Enter at least one search field."), 5000);
+            return;
+        }
+
+        openOrActivateSearchTab(*accountId, std::move(criteria), true);
+    }
+
     void MainWindow::clearSearch()
     {
         const auto* tab = activeTab();
@@ -2515,7 +2594,7 @@ namespace javelin::gui::shell
         }
         m_messageEmptyState->setVisible(!hasMessages ||
                                         (page != nullptr && !page->refreshError.isEmpty()));
-        m_messageView->setVisible(hasMessages);
+        m_messageView->setVisible(true);
     }
 
     void MainWindow::updateLongPollStatus()
@@ -3456,6 +3535,24 @@ namespace javelin::gui::shell
         submitQueuedEmailMutations(*accountId);
     }
 
+    void MainWindow::findConversationsWithSender(const QModelIndex& index)
+    {
+        const auto accountId = activeAccountId();
+        const auto senderEmail =
+            index.data(javelin::gui::messages::MessageListModel::SenderEmailRole)
+                .toString()
+                .trimmed();
+        if (!accountId.has_value() || senderEmail.isEmpty())
+        {
+            statusBar()->showMessage(QStringLiteral("No sender address is available."), 5000);
+            return;
+        }
+
+        openOrActivateSearchTab(
+            *accountId,
+            javelin::jmap::search::EmailSearchCriteria{.with = senderEmail.toStdString()}, true);
+    }
+
     void MainWindow::showMessageListContextMenu(const QPoint& position)
     {
         const QModelIndex index = m_messageView->indexAt(position);
@@ -3486,6 +3583,17 @@ namespace javelin::gui::shell
         QMenu menu{this};
         menu.addAction(m_viewSourceAction);
         menu.addAction(m_markUnreadAction);
+        const auto senderEmail =
+            index.data(javelin::gui::messages::MessageListModel::SenderEmailRole)
+                .toString()
+                .trimmed();
+        if (!senderEmail.isEmpty())
+        {
+            auto* findSenderAction =
+                menu.addAction(QStringLiteral("Find all conversations with %1").arg(senderEmail));
+            connect(findSenderAction, &QAction::triggered, this,
+                    [this, index] { findConversationsWithSender(index); });
+        }
         if (sourceMailboxId.has_value())
         {
             menu.addSeparator();
@@ -3790,6 +3898,7 @@ namespace javelin::gui::shell
     void MainWindow::restoreSearchTab(const QSettings& settings, const QString& accountId)
     {
         const auto query = settings.value(QStringLiteral("query")).toString();
+        auto criteria = searchCriteriaFromSettings(settings);
         auto items = cachedSearchItems(settings);
 
         m_tabs.push_back(
@@ -3798,6 +3907,7 @@ namespace javelin::gui::shell
                     SearchTabState{
                         .accountId = accountId.toStdString(),
                         .query = query.toStdString(),
+                        .criteria = std::move(criteria),
                         .title = settings
                                      .value(QStringLiteral("title"),
                                             QStringLiteral("Search: %1").arg(query))
@@ -3906,6 +4016,22 @@ namespace javelin::gui::shell
                     settings.setValue(QStringLiteral("type"), QStringLiteral("search"));
                     settings.setValue(QStringLiteral("query"),
                                       QString::fromStdString(content.query));
+                    writeOptionalSearchField(settings, QStringLiteral("searchText"),
+                                             content.criteria.text);
+                    writeOptionalSearchField(settings, QStringLiteral("searchWith"),
+                                             content.criteria.with);
+                    writeOptionalSearchField(settings, QStringLiteral("searchFrom"),
+                                             content.criteria.from);
+                    writeOptionalSearchField(settings, QStringLiteral("searchTo"),
+                                             content.criteria.to);
+                    writeOptionalSearchField(settings, QStringLiteral("searchCc"),
+                                             content.criteria.cc);
+                    writeOptionalSearchField(settings, QStringLiteral("searchBcc"),
+                                             content.criteria.bcc);
+                    writeOptionalSearchField(settings, QStringLiteral("searchSubject"),
+                                             content.criteria.subject);
+                    writeOptionalSearchField(settings, QStringLiteral("searchBody"),
+                                             content.criteria.body);
                     if (content.page.total.has_value())
                     {
                         settings.setValue(QStringLiteral("total"),

@@ -69,8 +69,16 @@ namespace javelin::jmap::api
 
     struct EmailQueryFilter
     {
-        std::optional<std::string> inMailbox;
-        std::optional<std::string> text;
+        std::optional<std::string> operatorName = std::nullopt;
+        std::vector<EmailQueryFilter> conditions = {};
+        std::optional<std::string> inMailbox = std::nullopt;
+        std::optional<std::string> text = std::nullopt;
+        std::optional<std::string> from = std::nullopt;
+        std::optional<std::string> to = std::nullopt;
+        std::optional<std::string> cc = std::nullopt;
+        std::optional<std::string> bcc = std::nullopt;
+        std::optional<std::string> subject = std::nullopt;
+        std::optional<std::string> body = std::nullopt;
     };
 
     struct EmailQuerySort

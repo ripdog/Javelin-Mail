@@ -56,8 +56,16 @@ namespace
 
     struct RawEmailQueryFilter
     {
-        std::optional<std::string> inMailbox;
-        std::optional<std::string> text;
+        std::optional<std::string> operatorName = std::nullopt;
+        std::optional<std::vector<RawEmailQueryFilter>> conditions = std::nullopt;
+        std::optional<std::string> inMailbox = std::nullopt;
+        std::optional<std::string> text = std::nullopt;
+        std::optional<std::string> from = std::nullopt;
+        std::optional<std::string> to = std::nullopt;
+        std::optional<std::string> cc = std::nullopt;
+        std::optional<std::string> bcc = std::nullopt;
+        std::optional<std::string> subject = std::nullopt;
+        std::optional<std::string> body = std::nullopt;
     };
 
     struct RawEmailQuerySort
@@ -348,7 +356,10 @@ template <> struct glz::meta<RawEmailQueryFilter>
 {
     using T = RawEmailQueryFilter;
 
-    static constexpr auto value = glz::object("inMailbox", &T::inMailbox, "text", &T::text);
+    static constexpr auto value =
+        glz::object("operator", &T::operatorName, "conditions", &T::conditions, "inMailbox",
+                    &T::inMailbox, "text", &T::text, "from", &T::from, "to", &T::to, "cc", &T::cc,
+                    "bcc", &T::bcc, "subject", &T::subject, "body", &T::body);
 };
 
 template <> struct glz::meta<RawEmailQuerySort>
@@ -745,6 +756,29 @@ namespace javelin::jmap::api
         });
     }
 
+    [[nodiscard]] RawEmailQueryFilter toRawEmailQueryFilter(const EmailQueryFilter& filter)
+    {
+        std::vector<RawEmailQueryFilter> conditions;
+        conditions.reserve(filter.conditions.size());
+        for (const auto& condition : filter.conditions)
+        {
+            conditions.push_back(toRawEmailQueryFilter(condition));
+        }
+
+        return RawEmailQueryFilter{
+            .operatorName = filter.operatorName,
+            .conditions = conditions.empty() ? std::nullopt : std::optional{std::move(conditions)},
+            .inMailbox = filter.inMailbox,
+            .text = filter.text,
+            .from = filter.from,
+            .to = filter.to,
+            .cc = filter.cc,
+            .bcc = filter.bcc,
+            .subject = filter.subject,
+            .body = filter.body,
+        };
+    }
+
     std::optional<std::string> serializeEmailQueryRequest(const EmailQueryRequest& request)
     {
         std::vector<RawEmailQuerySort> sort;
@@ -759,12 +793,10 @@ namespace javelin::jmap::api
 
         return serializeMethod(RawEmailQueryRequest{
             .accountId = request.accountId,
-            .filter = request.filter.has_value()
-                          ? std::optional<RawEmailQueryFilter>{RawEmailQueryFilter{
-                                .inMailbox = request.filter->inMailbox,
-                                .text = request.filter->text,
-                            }}
-                          : std::nullopt,
+            .filter =
+                request.filter.has_value()
+                    ? std::optional<RawEmailQueryFilter>{toRawEmailQueryFilter(*request.filter)}
+                    : std::nullopt,
             .sort = std::move(sort),
             .position = request.position,
             .limit = request.limit,
@@ -791,12 +823,10 @@ namespace javelin::jmap::api
             .sinceQueryState = request.sinceQueryState,
             .maxChanges = request.maxChanges,
             .upToId = request.upToId,
-            .filter = request.filter.has_value()
-                          ? std::optional<RawEmailQueryFilter>{RawEmailQueryFilter{
-                                .inMailbox = request.filter->inMailbox,
-                                .text = request.filter->text,
-                            }}
-                          : std::nullopt,
+            .filter =
+                request.filter.has_value()
+                    ? std::optional<RawEmailQueryFilter>{toRawEmailQueryFilter(*request.filter)}
+                    : std::nullopt,
             .sort = std::move(sort),
             .collapseThreads = request.collapseThreads,
         });
