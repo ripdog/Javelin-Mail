@@ -99,6 +99,7 @@ namespace javelin::gui::shell
         {
             std::optional<std::string> threadId;
             std::optional<std::string> emailId;
+            std::vector<std::string> selectedEmailIds;
         };
 
         struct PageState
@@ -236,13 +237,13 @@ namespace javelin::gui::shell
         void restoreSelection(std::optional<std::string> accountId,
                               std::optional<std::string> mailboxId,
                               std::optional<std::string> threadId,
-                              std::optional<std::string> emailId,
-                              bool scrollToSelection = true);
+                              std::optional<std::string> emailId, bool scrollToSelection = true);
         void restoreActiveTabMessageSelection(std::optional<int> previousMessageRow);
         void restoreSelectionAfterMessageRefresh(std::optional<std::string> accountId,
                                                  std::optional<std::string> mailboxId,
                                                  std::optional<std::string> threadId,
                                                  std::optional<std::string> emailId,
+                                                 const std::vector<std::string>& selectedEmailIds,
                                                  std::optional<int> previousMessageRow);
         [[nodiscard]] QModelIndex restoreMessageSelection(std::optional<std::string> threadId,
                                                           std::optional<std::string> emailId);

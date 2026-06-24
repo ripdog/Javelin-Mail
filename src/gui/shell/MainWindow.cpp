@@ -49,13 +49,14 @@
 #include <QMetaObject>
 #include <QMouseEvent>
 #include <QPushButton>
+#include <QScrollBar>
 #include <QSettings>
 #include <QSignalBlocker>
-#include <QScrollBar>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QStatusBar>
 #include <QTabBar>
+#include <QTimer>
 #include <QToolButton>
 #include <QTreeView>
 #include <QUrl>
@@ -849,8 +850,16 @@ namespace javelin::gui::shell
                 const bool isUnread = indexIsUnread(current);
                 if (!threadId.isEmpty())
                 {
-                    static_cast<void>(
-                        m_messageModel->setThreadExpanded(threadId.toStdString(), true));
+                    QTimer::singleShot(0, this,
+                                       [this, threadId = threadId.toStdString()]
+                                       {
+                                           if (currentThreadId(*m_messageView) ==
+                                               std::optional<std::string>{threadId})
+                                           {
+                                               static_cast<void>(m_messageModel->setThreadExpanded(
+                                                   threadId, true));
+                                           }
+                                       });
                 }
                 m_messageViewContainer->setSelection(
                     m_messageViewService, accountId, mailboxId,
@@ -2268,6 +2277,7 @@ namespace javelin::gui::shell
             auto selection = TabSelectionState{
                 .threadId = currentThreadId(*m_messageView),
                 .emailId = currentEmailId(*m_messageView),
+                .selectedEmailIds = selectedEmailIds(),
             };
             std::visit([&selection](auto& content) { content.selection = selection; },
                        tab->content);
@@ -2333,16 +2343,53 @@ namespace javelin::gui::shell
                                            { return content.selection; }, tab->content);
         restoreSelectionAfterMessageRefresh(activeAccountId(), activeMailboxId(),
                                             selection.threadId, selection.emailId,
-                                            previousMessageRow);
+                                            selection.selectedEmailIds, previousMessageRow);
     }
 
     void MainWindow::restoreSelectionAfterMessageRefresh(
         std::optional<std::string> accountId, std::optional<std::string> mailboxId,
         std::optional<std::string> threadId, std::optional<std::string> emailId,
+        const std::vector<std::string>& selectedEmailIds,
         const std::optional<int> previousMessageRow)
     {
         Q_UNUSED(accountId);
         Q_UNUSED(mailboxId);
+        auto* selectionModel = m_messageView->selectionModel();
+        if (selectionModel != nullptr && !selectedEmailIds.empty())
+        {
+            QItemSelection restoredSelection;
+            QModelIndex currentSelectionIndex;
+            for (const auto& selectedEmailId : selectedEmailIds)
+            {
+                const QModelIndex index = findIndexByRole(
+                    *m_messageModel, javelin::gui::messages::MessageListModel::EmailIdRole,
+                    QString::fromStdString(selectedEmailId));
+                if (!index.isValid())
+                {
+                    continue;
+                }
+
+                restoredSelection.select(index, index);
+                if (emailId == std::optional<std::string>{selectedEmailId})
+                {
+                    currentSelectionIndex = index;
+                }
+            }
+
+            if (!restoredSelection.isEmpty())
+            {
+                selectionModel->select(restoredSelection, QItemSelectionModel::ClearAndSelect |
+                                                              QItemSelectionModel::Rows);
+                if (!currentSelectionIndex.isValid())
+                {
+                    currentSelectionIndex = restoredSelection.indexes().constLast();
+                }
+                selectionModel->setCurrentIndex(currentSelectionIndex,
+                                                QItemSelectionModel::NoUpdate);
+                return;
+            }
+        }
+
         const QModelIndex selectedMessageIndex = restoreMessageSelection(threadId, emailId);
         if (selectedMessageIndex.isValid())
         {
@@ -3734,6 +3781,7 @@ namespace javelin::gui::shell
                         TabSelectionState{
                             .threadId = optionalStringSetting(settings, QStringLiteral("threadId")),
                             .emailId = optionalStringSetting(settings, QStringLiteral("emailId")),
+                            .selectedEmailIds = {},
                         },
                 },
         });
@@ -3744,37 +3792,41 @@ namespace javelin::gui::shell
         const auto query = settings.value(QStringLiteral("query")).toString();
         auto items = cachedSearchItems(settings);
 
-        m_tabs.push_back(TabState{
-            .content =
-                SearchTabState{
-                    .accountId = accountId.toStdString(),
-                    .query = query.toStdString(),
-                    .title =
-                        settings
-                            .value(QStringLiteral("title"), QStringLiteral("Search: %1").arg(query))
-                            .toString(),
-                    .page =
-                        PageState{
-                            .offset = static_cast<std::size_t>(
-                                settings.value(QStringLiteral("offset"), 0).toULongLong()),
-                            .total =
-                                settings.value(QStringLiteral("total")).isValid()
-                                    ? std::optional<std::size_t>{static_cast<std::size_t>(
-                                          settings.value(QStringLiteral("total")).toULongLong())}
-                                    : std::nullopt,
-                            .items = std::move(items),
-                            .cacheLoaded = true,
-                            .refreshInFlight = false,
-                            .stale = false,
-                            .refreshError = {},
-                        },
-                    .selection =
-                        TabSelectionState{
-                            .threadId = optionalStringSetting(settings, QStringLiteral("threadId")),
-                            .emailId = optionalStringSetting(settings, QStringLiteral("emailId")),
-                        },
-                },
-        });
+        m_tabs.push_back(
+            TabState{
+                .content =
+                    SearchTabState{
+                        .accountId = accountId.toStdString(),
+                        .query = query.toStdString(),
+                        .title = settings
+                                     .value(QStringLiteral("title"),
+                                            QStringLiteral("Search: %1").arg(query))
+                                     .toString(),
+                        .page =
+                            PageState{
+                                .offset = static_cast<std::size_t>(
+                                    settings.value(QStringLiteral("offset"), 0).toULongLong()),
+                                .total = settings.value(QStringLiteral("total")).isValid()
+                                             ? std::optional<std::size_t>{static_cast<std::size_t>(
+                                                   settings.value(QStringLiteral("total"))
+                                                       .toULongLong())}
+                                             : std::nullopt,
+                                .items = std::move(items),
+                                .cacheLoaded = true,
+                                .refreshInFlight = false,
+                                .stale = false,
+                                .refreshError = {},
+                            },
+                        .selection =
+                            TabSelectionState{
+                                .threadId = optionalStringSetting(settings,
+                                                                  QStringLiteral("threadId")),
+                                .emailId =
+                                    optionalStringSetting(settings, QStringLiteral("emailId")),
+                                .selectedEmailIds = {},
+                            },
+                    },
+            });
     }
 
     void MainWindow::restoreComposeTab(const QSettings& settings)
