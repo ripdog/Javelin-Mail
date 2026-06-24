@@ -16,6 +16,7 @@ namespace javelin::app
 
     namespace
     {
+        constexpr std::size_t maxRecentNotificationKeys = 512;
 
         [[nodiscard]] LongPollService::Status
         toServiceStatus(const javelin::jmap::sync::LongPollConnectionStatus status)
@@ -78,6 +79,8 @@ namespace javelin::app
             m_runContext.reset();
         }
 
+        m_recentNotificationKeys.clear();
+        m_notifiedEmailKeys.clear();
         setStatus(Status::Disconnected);
         m_shouldCatchUpRefreshOnReconnect = false;
     }
@@ -312,24 +315,50 @@ namespace javelin::app
             return;
         }
 
-        const auto& target = candidates.front();
+        std::vector<javelin::jmap::sync::RefreshNotificationCandidate> newCandidates;
+        newCandidates.reserve(candidates.size());
+        for (const auto& candidate : candidates)
+        {
+            const auto key = m_runContext->configuration.accountId + '\n' +
+                             m_runContext->configuration.mailboxId + '\n' + candidate.emailId;
+            if (m_notifiedEmailKeys.contains(key))
+            {
+                continue;
+            }
+
+            m_notifiedEmailKeys.insert(key);
+            m_recentNotificationKeys.push_back(key);
+            if (m_recentNotificationKeys.size() > maxRecentNotificationKeys)
+            {
+                m_notifiedEmailKeys.erase(m_recentNotificationKeys.front());
+                m_recentNotificationKeys.pop_front();
+            }
+            newCandidates.push_back(candidate);
+        }
+
+        if (newCandidates.empty())
+        {
+            return;
+        }
+
+        const auto& target = newCandidates.front();
 
         QString title;
         QString message;
-        if (candidates.size() == 1)
+        if (newCandidates.size() == 1)
         {
             title = QStringLiteral("New mail in %1")
                         .arg(QString::fromStdString(std::string{mailboxName}));
             message = QString::fromStdString(
-                candidates.front().subject.value_or(std::string{"(no subject)"}));
+                newCandidates.front().subject.value_or(std::string{"(no subject)"}));
         }
         else
         {
             title = QStringLiteral("%1 new messages in %2")
-                        .arg(candidates.size())
+                        .arg(newCandidates.size())
                         .arg(QString::fromStdString(std::string{mailboxName}));
             message = QString::fromStdString(
-                candidates.front().subject.value_or(std::string{"(no subject)"}));
+                newCandidates.front().subject.value_or(std::string{"(no subject)"}));
         }
 
         Q_EMIT notificationRaised(QString::fromStdString(m_runContext->configuration.accountId),

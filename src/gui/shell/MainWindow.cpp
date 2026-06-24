@@ -459,7 +459,8 @@ namespace javelin::gui::shell
                     if (account == std::optional<std::string>{accountId.toStdString()} &&
                         mailbox == std::optional<std::string>{mailboxId.toStdString()})
                     {
-                        loadActiveTabFromCache();
+                        loadMailboxTabFromCache(accountId.toStdString(), mailboxId.toStdString(),
+                                                true);
                         if (scrollToNewest && m_messageModel->rowCount() > 0 &&
                             m_messageView->verticalScrollBar()->value() == 0)
                         {
@@ -500,7 +501,7 @@ namespace javelin::gui::shell
                 mailboxTab->selection.emailId = email;
             }
         }
-        loadActiveTabFromCache();
+        loadMailboxTabFromCache(account, mailbox, true);
         if (email.has_value())
         {
             m_messageViewContainer->setSelection(m_messageViewService,
@@ -1528,6 +1529,38 @@ namespace javelin::gui::shell
         }
 
         m_messageModel->clear();
+    }
+
+    void MainWindow::loadMailboxTabFromCache(const std::string_view accountId,
+                                             const std::string_view mailboxId,
+                                             const bool applyIfActive)
+    {
+        for (auto& tabState : m_tabs)
+        {
+            auto* mailboxTab = std::get_if<MailboxTabState>(&tabState.content);
+            if (mailboxTab == nullptr || mailboxTab->accountId != accountId ||
+                mailboxTab->mailboxId != mailboxId)
+            {
+                continue;
+            }
+
+            loadMailboxTabPageFromCache(*mailboxTab, true);
+            if (!applyIfActive || !activeTabIsMailbox() ||
+                activeAccountId() != std::optional<std::string>{std::string{accountId}} ||
+                activeMailboxId() != std::optional<std::string>{std::string{mailboxId}})
+            {
+                return;
+            }
+
+            const auto previousMessageRow = currentMessageRow(*m_messageView);
+            {
+                QSignalBlocker messageSelectionBlocker{m_messageView->selectionModel()};
+                applyActiveTabPageToModel();
+                restoreActiveTabMessageSelection(previousMessageRow);
+            }
+            refreshSelectionFromModels();
+            return;
+        }
     }
 
     void MainWindow::loadActiveTabFromCache(const bool forceReload)
@@ -2567,7 +2600,6 @@ namespace javelin::gui::shell
                 const QModelIndex index = m_messageView->indexAt(mouseEvent->position().toPoint());
                 if (index.isValid() && m_messageView->selectionModel()->isSelected(index))
                 {
-                    m_messageView->setCurrentIndex(index);
                     return true;
                 }
             }
@@ -3400,8 +3432,8 @@ namespace javelin::gui::shell
         {
             m_messageView->selectionModel()->select(index, QItemSelectionModel::ClearAndSelect |
                                                                QItemSelectionModel::Rows);
+            m_messageView->setCurrentIndex(index);
         }
-        m_messageView->setCurrentIndex(index);
         const auto emailIds = selectedEmailIds();
 
         QMenu menu{this};

@@ -13,9 +13,12 @@
 
 #include <QObject>
 
+#include <deque>
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_set>
+#include <vector>
 
 class QNetworkAccessManager;
 
@@ -100,6 +103,8 @@ namespace javelin::app
         std::optional<javelin::jmap::LiveConnectionSettings> m_settings;
         std::shared_ptr<RunContext> m_runContext;
         std::string m_lastEventId;
+        std::deque<std::string> m_recentNotificationKeys;
+        std::unordered_set<std::string> m_notifiedEmailKeys;
         std::size_t m_generation = 0;
         Status m_status = Status::Disconnected;
         bool m_shouldCatchUpRefreshOnReconnect = false;

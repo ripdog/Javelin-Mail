@@ -1,5 +1,7 @@
 #include "jmap/api/Transport.h"
 
+#include "jmap/api/MethodEnvelope.h"
+
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wnon-virtual-dtor"
@@ -13,6 +15,7 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QScopeGuard>
+#include <QStringList>
 
 namespace javelin::jmap::api
 {
@@ -30,6 +33,45 @@ namespace javelin::jmap::api
             }
 
             return body.first(maxBytes) + "...";
+        }
+
+        [[nodiscard]] QString summarizeInvocations(
+            const std::vector<javelin::jmap::api::MethodInvocation>& invocations)
+        {
+            QStringList methods;
+            methods.reserve(static_cast<qsizetype>(invocations.size()));
+            for (const auto& invocation : invocations)
+            {
+                methods.push_back(QStringLiteral("%1#%2")
+                                      .arg(QString::fromStdString(invocation.name),
+                                           QString::fromStdString(invocation.callId)));
+            }
+            return methods.join(QStringLiteral(","));
+        }
+
+        [[nodiscard]] QString summarizeJmapRequest(const QByteArray& body)
+        {
+            const auto parsed = javelin::jmap::api::parseRequestEnvelope(body.toStdString());
+            if (!parsed.value.has_value())
+            {
+                return {};
+            }
+
+            return QStringLiteral("methods %1")
+                .arg(summarizeInvocations(parsed.value->methodCalls));
+        }
+
+        [[nodiscard]] QString summarizeJmapResponse(const QByteArray& body)
+        {
+            const auto parsed = javelin::jmap::api::parseResponseEnvelope(body.toStdString());
+            if (!parsed.value.has_value())
+            {
+                return {};
+            }
+
+            return QStringLiteral("methods %1 session %2")
+                .arg(summarizeInvocations(parsed.value->methodResponses),
+                     QString::fromStdString(parsed.value->sessionState));
         }
 
         [[nodiscard]] TransportError mapReplyError(QNetworkReply& reply)
@@ -68,8 +110,12 @@ namespace javelin::jmap::api
             networkRequest.setRawHeader(header.name, header.value);
         }
 
+        const auto requestSummary = request.method == HttpMethod::Post
+                                        ? summarizeJmapRequest(request.body)
+                                        : QString{};
         qInfo().noquote() << "JMAP transport request" << request.url.toString()
-                          << (request.method == HttpMethod::Get ? "GET" : "POST");
+                          << (request.method == HttpMethod::Get ? "GET" : "POST")
+                          << requestSummary;
 
         QNetworkReply* reply = nullptr;
         switch (request.method)
@@ -101,7 +147,11 @@ namespace javelin::jmap::api
         const auto statusCodeAttribute = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute);
         const int statusCode = statusCodeAttribute.isValid() ? statusCodeAttribute.toInt() : 0;
         const QByteArray responseBody = reply->readAll();
-        qInfo().noquote() << "JMAP transport response" << request.url.toString() << statusCode;
+        const auto responseSummary = request.method == HttpMethod::Post
+                                         ? summarizeJmapResponse(responseBody)
+                                         : QString{};
+        qInfo().noquote() << "JMAP transport response" << request.url.toString() << statusCode
+                          << responseSummary;
         if (statusCode >= 400)
         {
             qWarning().noquote() << "JMAP transport HTTP failure" << request.url.toString()
