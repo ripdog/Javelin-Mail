@@ -38,14 +38,17 @@ namespace javelin::gui::messages
         constexpr int senderFontSizeIncreaseParent = 1;
         constexpr int subjectFontSizeIncreaseMember = 1;
         constexpr int subjectFontSizeIncreaseParent = 2;
-        // The replies button's internal padding is negotiated by the active style via
-        // CE_PushButton, so we cannot shrink it from here. Widen the button instead so
-        // the "N replies" label is not clipped on either side.
-        constexpr int repliesButtonWidth = 126;
+        constexpr int repliesButtonWidth = 116;
         constexpr int buttonSize = 28;
         constexpr int buttonMargin = 29;
         constexpr int buttonGap = 6;
         constexpr int buttonIconSize = 16;
+        // Tight internal horizontal padding for the icon+text inside our buttons.
+        // We draw only CE_PushButtonBevel (the frame) and position the label
+        // ourselves, so these values — not the style's PM_ButtonMargin — define the
+        // visible left/right inset and keep "N replies" from being clipped.
+        constexpr int buttonContentHPadding = 6;
+        constexpr int buttonIconTextGap = 4;
         constexpr int memberRowHeight = 100;
         constexpr int parentRowHeight = 104;
 
@@ -109,9 +112,9 @@ namespace javelin::gui::messages
                          contentRect.bottom() - buttonMargin, buttonSize, buttonSize};
         }
 
-        void drawButton(QPainter* painter, const QStyleOptionViewItem& option, const QRect& rect,
-                        const QIcon& icon, const QString& text, const bool hovered,
-                        const bool pressed)
+void drawButton(QPainter* painter, const QStyleOptionViewItem& option, const QRect& rect,
+                    const QIcon& icon, const QString& text, const bool hovered,
+                    const bool pressed)
         {
             if (rect.isEmpty())
             {
@@ -122,9 +125,6 @@ namespace javelin::gui::messages
             buttonOption.rect = rect;
             buttonOption.palette = option.palette;
             buttonOption.fontMetrics = option.fontMetrics;
-            buttonOption.icon = icon;
-            buttonOption.iconSize = QSize{buttonIconSize, buttonIconSize};
-            buttonOption.text = text;
             buttonOption.state = QStyle::State_Enabled;
             if (hovered)
             {
@@ -135,7 +135,52 @@ namespace javelin::gui::messages
                 buttonOption.state |= QStyle::State_Sunken;
             }
 
-            QApplication::style()->drawControl(QStyle::CE_PushButton, &buttonOption, painter);
+            const auto* style = QApplication::style();
+            // Draw only the frame; icon and text are laid out manually below so we
+            // control the internal horizontal padding. The style's CE_PushButton
+            // reserves ~10-12px per side via PM_ButtonMargin / SE_PushButtonContents,
+            // which clipped the "N replies" label.
+            buttonOption.icon = QIcon{};
+            buttonOption.text = QString{};
+            style->drawControl(QStyle::CE_PushButtonBevel, &buttonOption, painter);
+
+            // A sunken button shifts its label slightly; mirror the style's metric so
+            // our manually placed content stays visually consistent with the bevel.
+            const int shiftH =
+                pressed ? style->pixelMetric(QStyle::PM_ButtonShiftHorizontal, &buttonOption) : 0;
+            const int shiftV =
+                pressed ? style->pixelMetric(QStyle::PM_ButtonShiftVertical, &buttonOption) : 0;
+
+            painter->save();
+            painter->translate(shiftH, shiftV);
+
+            const QRect contentRect =
+                rect.adjusted(buttonContentHPadding, 0, -buttonContentHPadding, 0);
+            const int iconY = contentRect.center().y() - buttonIconSize / 2;
+
+            QRect textRect = contentRect;
+            if (!icon.isNull())
+            {
+                // Center horizontally when there is no text (icon-only buttons);
+                // otherwise anchor the icon at the left edge and reserve room for
+                // the trailing label.
+                const int iconX = text.isEmpty() ? contentRect.center().x() - buttonIconSize / 2
+                                                 : contentRect.left();
+                icon.paint(painter, QRect{QPoint{iconX, iconY}, QSize{buttonIconSize, buttonIconSize}});
+                if (!text.isEmpty())
+                {
+                    textRect.setLeft(iconX + buttonIconSize + buttonIconTextGap);
+                }
+            }
+
+            if (!text.isEmpty())
+            {
+                painter->setFont(option.font);
+                painter->setPen(option.palette.color(QPalette::ButtonText));
+                painter->drawText(textRect, Qt::AlignLeft | Qt::AlignVCenter, text);
+            }
+
+            painter->restore();
         }
 
     } // namespace
