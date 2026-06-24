@@ -1,7 +1,9 @@
 #include "gui/shell/MainWindow.h"
 
 #include "app/LongPollService.h"
+#include "gui/IconUtils.h"
 #include "gui/compose/ComposeTabWidget.h"
+#include "gui/mailboxes/MailboxIconUtils.h"
 #include "gui/mailboxes/MailboxTreeModel.h"
 #include "gui/messages/MessageListDelegate.h"
 #include "gui/messages/MessageListModel.h"
@@ -112,6 +114,21 @@ namespace javelin::gui::shell
             // Empty mailbox id means an account-level node is selected.
             return mailboxId.isEmpty() ? std::optional<std::string>{std::nullopt}
                                        : std::optional<std::string>{mailboxId.toStdString()};
+        }
+
+        [[nodiscard]] std::optional<std::string> currentMailboxRole(const QTreeView& mailboxView)
+        {
+            const auto currentIndex = mailboxView.currentIndex();
+            if (!currentIndex.isValid())
+            {
+                return std::nullopt;
+            }
+
+            const auto role =
+                currentIndex.data(javelin::gui::mailboxes::MailboxTreeModel::MailboxRoleRole)
+                    .toString();
+            return role.isEmpty() ? std::optional<std::string>{std::nullopt}
+                                  : std::optional<std::string>{role.toStdString()};
         }
 
         [[nodiscard]] std::optional<std::string> currentEmailId(const QListView& messageView)
@@ -607,14 +624,22 @@ namespace javelin::gui::shell
 
         reloadAccounts();
         QString mailboxTitle = mailboxId;
+        std::optional<std::string> mailboxRole;
         const auto mailboxIndex = findMailboxIndexForSelection(*m_mailboxModel, accountId,
                                                                std::optional<QString>{mailboxId});
         if (mailboxIndex.isValid())
         {
             mailboxTitle = mailboxIndex.data(Qt::DisplayRole).toString();
+            const auto role =
+                mailboxIndex.data(javelin::gui::mailboxes::MailboxTreeModel::MailboxRoleRole)
+                    .toString();
+            if (!role.isEmpty())
+            {
+                mailboxRole = role.toStdString();
+            }
         }
 
-        openOrActivateMailboxTab(account, mailbox, mailboxTitle, false);
+        openOrActivateMailboxTab(account, mailbox, mailboxTitle, mailboxRole, false);
         if (auto* tab = activeTab())
         {
             if (auto* mailboxTab = std::get_if<MailboxTabState>(&tab->content))
@@ -639,8 +664,13 @@ namespace javelin::gui::shell
 
     void MainWindow::createActions()
     {
-        m_refreshAction = new QAction(QIcon::fromTheme(QStringLiteral("view-refresh")),
-                                      QStringLiteral("Refresh From Server"), this);
+        const auto iconColor = palette().color(QPalette::Text);
+        auto thunderbirdIcon = [iconColor](const QString& resourcePath)
+        { return javelin::gui::themedSvgIcon(resourcePath, iconColor); };
+
+        m_refreshAction = new QAction(
+            thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/cloud-download.svg")),
+            QStringLiteral("Refresh From Server"), this);
         m_refreshAction->setShortcut(QKeySequence::Refresh);
         connect(m_refreshAction, &QAction::triggered, this, &MainWindow::refreshFromServer);
         actionCollection()->addAction(QStringLiteral("refresh_from_server"), m_refreshAction);
@@ -655,51 +685,61 @@ namespace javelin::gui::shell
 
         m_preferencesAction =
             KStandardAction::preferences(this, &MainWindow::openPreferences, actionCollection());
+        m_preferencesAction->setIcon(
+            thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/settings.svg")));
 
-        m_newMessageAction = new QAction(QIcon::fromTheme(QStringLiteral("mail-message-new")),
-                                         QStringLiteral("&New Message"), this);
+        m_newMessageAction =
+            new QAction(thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/new-mail.svg")),
+                        QStringLiteral("&New Message"), this);
         m_newMessageAction->setShortcut(QKeySequence::New);
         connect(m_newMessageAction, &QAction::triggered, this, &MainWindow::composeNewMessage);
         actionCollection()->addAction(QStringLiteral("compose_new_message"), m_newMessageAction);
         actionCollection()->setDefaultShortcut(m_newMessageAction, QKeySequence::New);
 
-        m_replyAction = new QAction(QIcon::fromTheme(QStringLiteral("mail-reply-sender")),
-                                    QStringLiteral("&Reply"), this);
+        m_replyAction =
+            new QAction(thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/reply.svg")),
+                        QStringLiteral("&Reply"), this);
         m_replyAction->setShortcut(QKeySequence{Qt::Key_R});
         connect(m_replyAction, &QAction::triggered, this, &MainWindow::composeReply);
         actionCollection()->addAction(QStringLiteral("compose_reply"), m_replyAction);
         actionCollection()->setDefaultShortcut(m_replyAction, QKeySequence{Qt::Key_R});
 
-        m_replyAllAction = new QAction(QIcon::fromTheme(QStringLiteral("mail-reply-all")),
-                                       QStringLiteral("Reply &All"), this);
+        m_replyAllAction =
+            new QAction(thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/reply-all.svg")),
+                        QStringLiteral("Reply &All"), this);
         connect(m_replyAllAction, &QAction::triggered, this, &MainWindow::composeReplyAll);
         actionCollection()->addAction(QStringLiteral("compose_reply_all"), m_replyAllAction);
 
-        m_forwardAction = new QAction(QIcon::fromTheme(QStringLiteral("mail-forward")),
-                                      QStringLiteral("&Forward"), this);
+        m_forwardAction =
+            new QAction(thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/forward.svg")),
+                        QStringLiteral("&Forward"), this);
         connect(m_forwardAction, &QAction::triggered, this, &MainWindow::composeForward);
         actionCollection()->addAction(QStringLiteral("compose_forward"), m_forwardAction);
 
-        m_editDraftAction = new QAction(QIcon::fromTheme(QStringLiteral("document-edit")),
-                                        QStringLiteral("Edit &Draft"), this);
+        m_editDraftAction =
+            new QAction(thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/draft.svg")),
+                        QStringLiteral("Edit &Draft"), this);
         connect(m_editDraftAction, &QAction::triggered, this, &MainWindow::editSelectedDraft);
         actionCollection()->addAction(QStringLiteral("compose_edit_draft"), m_editDraftAction);
 
-        m_archiveAction = new QAction(QIcon::fromTheme(QStringLiteral("mail-archive")),
-                                      QStringLiteral("&Archive"), this);
+        m_archiveAction =
+            new QAction(thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/archive.svg")),
+                        QStringLiteral("&Archive"), this);
         m_archiveAction->setShortcut(QKeySequence{Qt::Key_A});
         connect(m_archiveAction, &QAction::triggered, this, &MainWindow::archiveSelectedEmail);
         actionCollection()->addAction(QStringLiteral("archive_email"), m_archiveAction);
         actionCollection()->setDefaultShortcut(m_archiveAction, QKeySequence{Qt::Key_A});
 
-        m_markUnreadAction = new QAction(QIcon::fromTheme(QStringLiteral("mail-mark-unread")),
-                                         QStringLiteral("Mark &Unread"), this);
+        m_markUnreadAction =
+            new QAction(thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/unread.svg")),
+                        QStringLiteral("Mark &Unread"), this);
         connect(m_markUnreadAction, &QAction::triggered, this,
                 &MainWindow::markSelectedEmailUnread);
         actionCollection()->addAction(QStringLiteral("mark_email_unread"), m_markUnreadAction);
 
-        m_deleteAction = new QAction(QIcon::fromTheme(QStringLiteral("mail-delete")),
-                                     QStringLiteral("&Delete"), this);
+        m_deleteAction =
+            new QAction(thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/delete.svg")),
+                        QStringLiteral("&Delete"), this);
         m_deleteAction->setShortcut(QKeySequence::Delete);
         connect(m_deleteAction, &QAction::triggered, this, &MainWindow::deleteSelectedEmail);
         actionCollection()->addAction(QStringLiteral("delete_email"), m_deleteAction);
@@ -716,8 +756,9 @@ namespace javelin::gui::shell
                 &MainWindow::viewSelectedMessageSource);
         actionCollection()->addAction(QStringLiteral("view_message_source"), m_viewSourceAction);
 
-        m_advancedSearchAction = new QAction(QIcon::fromTheme(QStringLiteral("edit-find")),
-                                             QStringLiteral("Advanced Search"), this);
+        m_advancedSearchAction =
+            new QAction(thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/search.svg")),
+                        QStringLiteral("Advanced Search"), this);
         connect(m_advancedSearchAction, &QAction::triggered, this, &MainWindow::showAdvancedSearch);
         actionCollection()->addAction(QStringLiteral("advanced_search"), m_advancedSearchAction);
     }
@@ -747,6 +788,7 @@ namespace javelin::gui::shell
 
         m_mailboxView = new QTreeView(this);
         m_mailboxView->setModel(m_mailboxModel);
+        m_mailboxView->setIconSize(QSize{20, 20});
         m_mailboxView->setHeaderHidden(true);
         m_mailboxView->setExpandsOnDoubleClick(false);
         m_mailboxView->expandAll();
@@ -782,15 +824,27 @@ namespace javelin::gui::shell
         m_messageListTitleLabel = new QLabel(messageHeader);
         m_messageListMetaLabel = new QLabel(messageHeader);
         m_messageQuickFilterButton = new QToolButton(messageHeader);
+        m_messageQuickFilterButton->setIcon(
+            javelin::gui::themedSvgIcon(QStringLiteral(":/icons/thunderbird-icons/filter.svg"),
+                                        palette().color(QPalette::Text)));
         m_messageQuickFilterButton->setText(QStringLiteral("Quick Filter"));
+        m_messageQuickFilterButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
         m_messageQuickFilterButton->setEnabled(false);
         m_messageSortButton = new QToolButton(messageHeader);
-        m_messageSortButton->setText(QStringLiteral("..."));
+        m_messageSortButton->setIcon(javelin::gui::themedSvgIcon(
+            QStringLiteral(":/icons/thunderbird-icons/display-options.svg"),
+            palette().color(QPalette::Text)));
         m_messageSortButton->setToolTip(QStringLiteral("Sort messages"));
         m_previousPageButton = new QToolButton(messageHeader);
-        m_previousPageButton->setText(QStringLiteral("Previous"));
+        m_previousPageButton->setIcon(
+            javelin::gui::themedSvgIcon(QStringLiteral(":/icons/thunderbird-icons/nav-left.svg"),
+                                        palette().color(QPalette::Text)));
+        m_previousPageButton->setToolTip(QStringLiteral("Previous page"));
         m_nextPageButton = new QToolButton(messageHeader);
-        m_nextPageButton->setText(QStringLiteral("Next"));
+        m_nextPageButton->setIcon(
+            javelin::gui::themedSvgIcon(QStringLiteral(":/icons/thunderbird-icons/nav-right.svg"),
+                                        palette().color(QPalette::Text)));
+        m_nextPageButton->setToolTip(QStringLiteral("Next page"));
         m_messagePageLabel = new QLabel(messageHeader);
         auto titleFont = m_messageListTitleLabel->font();
         titleFont.setPointSize(titleFont.pointSize() + 4);
@@ -1213,6 +1267,24 @@ namespace javelin::gui::shell
         return std::get<ComposeTabState>(tab.content).title;
     }
 
+    QIcon MainWindow::iconForTab(const TabState& tab) const
+    {
+        const auto color = palette().color(QPalette::Text);
+        if (const auto* mailboxTab = std::get_if<MailboxTabState>(&tab.content))
+        {
+            return javelin::gui::mailboxes::mailboxIcon(mailboxTab->role, color);
+        }
+
+        if (std::holds_alternative<SearchTabState>(tab.content))
+        {
+            return javelin::gui::themedSvgIcon(
+                QStringLiteral(":/icons/thunderbird-icons/search.svg"), color);
+        }
+
+        return javelin::gui::themedSvgIcon(QStringLiteral(":/icons/thunderbird-icons/new-mail.svg"),
+                                           color);
+    }
+
     void MainWindow::updateTabBar()
     {
         QSignalBlocker blocker{m_tabBar};
@@ -1225,7 +1297,7 @@ namespace javelin::gui::shell
 
             for (const auto& tab : m_tabs)
             {
-                m_tabBar->addTab(titleForTab(tab));
+                m_tabBar->addTab(iconForTab(tab), titleForTab(tab));
             }
 
             for (int index = 0; index < m_tabBar->count(); ++index)
@@ -1261,6 +1333,8 @@ namespace javelin::gui::shell
                 {
                     m_tabBar->setTabText(index, title);
                 }
+                const auto icon = iconForTab(m_tabs[static_cast<std::size_t>(index)]);
+                m_tabBar->setTabIcon(index, icon);
             }
         }
 
@@ -1296,7 +1370,8 @@ namespace javelin::gui::shell
     }
 
     void MainWindow::openOrActivateMailboxTab(std::string accountId, std::string mailboxId,
-                                              const QString title, const bool refreshRemote)
+                                              const QString title, std::optional<std::string> role,
+                                              const bool refreshRemote)
     {
         for (std::size_t index = 0; index < m_tabs.size(); ++index)
         {
@@ -1305,6 +1380,7 @@ namespace javelin::gui::shell
                 mailboxTab->mailboxId == mailboxId)
             {
                 mailboxTab->title = title;
+                mailboxTab->role = std::move(role);
                 m_activeTabIndex = static_cast<int>(index);
                 updateTabBar();
                 activateTab(*m_activeTabIndex, refreshRemote);
@@ -1318,6 +1394,7 @@ namespace javelin::gui::shell
                     .accountId = std::move(accountId),
                     .mailboxId = std::move(mailboxId),
                     .title = title,
+                    .role = std::move(role),
                     .page = {},
                     .selection = {},
                 },
@@ -1328,7 +1405,8 @@ namespace javelin::gui::shell
     }
 
     void MainWindow::activateMailboxInHomeTab(std::string accountId, std::string mailboxId,
-                                              QString title, const std::optional<std::size_t> total,
+                                              QString title, std::optional<std::string> role,
+                                              const std::optional<std::size_t> total,
                                               const bool refreshRemote)
     {
         if (m_tabs.empty())
@@ -1339,6 +1417,7 @@ namespace javelin::gui::shell
                         .accountId = std::move(accountId),
                         .mailboxId = std::move(mailboxId),
                         .title = std::move(title),
+                        .role = std::move(role),
                         .page =
                             PageState{
                                 .offset = 0,
@@ -1359,6 +1438,7 @@ namespace javelin::gui::shell
                 .accountId = std::move(accountId),
                 .mailboxId = std::move(mailboxId),
                 .title = std::move(title),
+                .role = std::move(role),
                 .page =
                     PageState{
                         .offset = 0,
@@ -2022,8 +2102,8 @@ namespace javelin::gui::shell
                                             totalThreadsValue.toULongLong())}
                                       : std::nullopt;
         activateMailboxInHomeTab(*accountId, *mailboxId,
-                                 currentIndex.data(Qt::DisplayRole).toString(), totalThreads,
-                                 refreshRemote);
+                                 currentIndex.data(Qt::DisplayRole).toString(),
+                                 currentMailboxRole(*m_mailboxView), totalThreads, refreshRemote);
         qInfo().noquote() << "GUI activate mailbox selection" << QString::fromStdString(*accountId)
                           << QString::fromStdString(*mailboxId) << "refreshRemote" << refreshRemote
                           << "ms" << timer.elapsed();
@@ -2059,12 +2139,14 @@ namespace javelin::gui::shell
 
         const auto currentIndex = m_mailboxView->currentIndex();
         const auto title = currentIndex.data(Qt::DisplayRole).toString();
+        const auto role = currentMailboxRole(*m_mailboxView);
         for (std::size_t index = 1; index < m_tabs.size(); ++index)
         {
-            if (const auto* mailboxTab = std::get_if<MailboxTabState>(&m_tabs[index].content);
+            if (auto* mailboxTab = std::get_if<MailboxTabState>(&m_tabs[index].content);
                 mailboxTab != nullptr && mailboxTab->accountId == *accountId &&
                 mailboxTab->mailboxId == *mailboxId)
             {
+                mailboxTab->role = role;
                 m_activeTabIndex = static_cast<int>(index);
                 updateTabBar();
                 activateTab(*m_activeTabIndex, refreshRemote);
@@ -2078,6 +2160,7 @@ namespace javelin::gui::shell
                     .accountId = *accountId,
                     .mailboxId = *mailboxId,
                     .title = title,
+                    .role = role,
                     .page = {},
                     .selection = {},
                 },
@@ -4089,6 +4172,7 @@ namespace javelin::gui::shell
                     .accountId = accountId.toStdString(),
                     .mailboxId = mailboxId.toStdString(),
                     .title = settings.value(QStringLiteral("title"), mailboxId).toString(),
+                    .role = optionalStringSetting(settings, QStringLiteral("mailboxRole")),
                     .page =
                         PageState{
                             .offset = static_cast<std::size_t>(
@@ -4229,6 +4313,10 @@ namespace javelin::gui::shell
                     settings.setValue(QStringLiteral("type"), QStringLiteral("mailbox"));
                     settings.setValue(QStringLiteral("mailboxId"),
                                       QString::fromStdString(content.mailboxId));
+                    settings.setValue(QStringLiteral("mailboxRole"),
+                                      content.role.has_value()
+                                          ? QString::fromStdString(*content.role)
+                                          : QString{});
                 }
                 else if constexpr (std::is_same_v<std::decay_t<decltype(content)>, SearchTabState>)
                 {

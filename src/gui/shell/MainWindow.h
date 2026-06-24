@@ -6,6 +6,7 @@
 #include "jmap/submission/ComposeTypes.h"
 
 #include <KXmlGuiWindow>
+#include <QIcon>
 #include <QModelIndex>
 #include <QTemporaryDir>
 
@@ -120,6 +121,7 @@ namespace javelin::gui::shell
             std::string accountId;
             std::string mailboxId;
             QString title;
+            std::optional<std::string> role;
             PageState page;
             TabSelectionState selection;
         };
@@ -166,6 +168,7 @@ namespace javelin::gui::shell
         void editSelectedDraft();
         void activateMailboxSelection(bool refreshRemote);
         void activateMailboxInHomeTab(std::string accountId, std::string mailboxId, QString title,
+                                      std::optional<std::string> role,
                                       std::optional<std::size_t> total, bool refreshRemote);
         void openMailboxSelectionInTab(bool refreshRemote);
         void openComposeForRequest(javelin::jmap::submission::OpenComposeRequest request);
@@ -181,7 +184,7 @@ namespace javelin::gui::shell
         void updateTabBar();
         void activateTab(int index, bool refreshRemote = false);
         void openOrActivateMailboxTab(std::string accountId, std::string mailboxId, QString title,
-                                      bool refreshRemote);
+                                      std::optional<std::string> role, bool refreshRemote);
         void openOrActivateSearchTab(std::string accountId, QString query, bool refreshRemote);
         void openOrActivateSearchTab(std::string accountId,
                                      javelin::jmap::search::EmailSearchCriteria criteria,
@@ -201,6 +204,7 @@ namespace javelin::gui::shell
         [[nodiscard]] bool shouldRefreshMailboxTabFromServer(const MailboxTabState& tab) const;
         [[nodiscard]] bool shouldRefreshSearchTabFromServer(const SearchTabState& tab) const;
         [[nodiscard]] QString titleForTab(const TabState& tab) const;
+        [[nodiscard]] QIcon iconForTab(const TabState& tab) const;
         [[nodiscard]] bool activeTabIsMailbox() const;
         [[nodiscard]] bool activeTabIsSearch() const;
         [[nodiscard]] bool activeTabIsCompose() const;

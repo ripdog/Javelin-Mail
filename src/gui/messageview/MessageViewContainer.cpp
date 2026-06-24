@@ -1,4 +1,5 @@
 #include "gui/messageview/MessageViewContainer.h"
+#include "gui/IconUtils.h"
 #include "gui/messageview/HtmlMessageView.h"
 
 #include <QApplication>
@@ -441,6 +442,13 @@ namespace javelin::gui::messageview
         buttonLayout->setContentsMargins(0, 0, 0, 0);
         buttonLayout->setSpacing(6);
 
+        m_remoteContentIconLabel = new QLabel(m_bodyControlsWidget);
+        m_remoteContentIconLabel->setPixmap(javelin::gui::themedSvgPixmap(
+            QStringLiteral(":/icons/thunderbird-icons/remote-blocked.svg"),
+            palette().color(QPalette::HighlightedText), 18));
+        m_remoteContentIconLabel->setFixedSize(20, 20);
+        m_remoteContentIconLabel->setAlignment(Qt::AlignCenter);
+
         m_remoteContentStatusLabel = new QLabel(m_bodyControlsWidget);
         m_remoteContentStatusLabel->setWordWrap(true);
         makeLabelSelectable(m_remoteContentStatusLabel);
@@ -465,6 +473,7 @@ namespace javelin::gui::messageview
                     updateRemoteContentButton();
                 });
 
+        buttonLayout->addWidget(m_remoteContentIconLabel);
         buttonLayout->addWidget(m_remoteContentStatusLabel, 1);
         buttonLayout->addWidget(m_permitSenderRemoteContentButton);
         buttonLayout->addWidget(m_permitDomainRemoteContentButton);
@@ -758,6 +767,7 @@ namespace javelin::gui::messageview
             m_snapshot.has_value() && m_snapshot->htmlRenderDocument.has_value() &&
             m_snapshot->htmlRenderDocument->blockedRemoteResourceCount > 0;
         m_bodyControlsWidget->setVisible(hasBlockedRemoteContent);
+        m_remoteContentIconLabel->setVisible(hasBlockedRemoteContent);
         m_remoteContentStatusLabel->setVisible(hasBlockedRemoteContent);
         m_permitSenderRemoteContentButton->setVisible(hasBlockedRemoteContent);
         m_permitDomainRemoteContentButton->setVisible(hasBlockedRemoteContent);

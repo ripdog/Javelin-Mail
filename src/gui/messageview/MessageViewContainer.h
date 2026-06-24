@@ -91,6 +91,7 @@ namespace javelin::gui::messageview
         QWidget* m_placeholderPanel = nullptr;
         QLabel* m_placeholderTitleLabel = nullptr;
         QLabel* m_placeholderDetailLabel = nullptr;
+        QLabel* m_remoteContentIconLabel = nullptr;
         QLabel* m_remoteContentStatusLabel = nullptr;
         QLabel* m_attachmentStatusLabel = nullptr;
         QToolButton* m_attachmentExpanderButton = nullptr;

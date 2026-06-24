@@ -1,6 +1,10 @@
 #include "gui/mailboxes/MailboxTreeModel.h"
 
+#include "gui/mailboxes/MailboxIconUtils.h"
+
+#include <QApplication>
 #include <QIcon>
+#include <QPalette>
 
 #include <unordered_map>
 
@@ -123,6 +127,11 @@ namespace javelin::gui::mailboxes
             return QString::fromStdString(node->displayName);
         }
 
+        if (role == Qt::DecorationRole)
+        {
+            return mailboxIcon(node->role, QApplication::palette().color(QPalette::Text));
+        }
+
         if (role == MailboxIdRole)
         {
             // Returns empty string for account-level nodes (selecting an account is not a
@@ -138,6 +147,11 @@ namespace javelin::gui::mailboxes
         if (role == TotalThreadsRole)
         {
             return static_cast<qulonglong>(node->totalThreads);
+        }
+
+        if (role == MailboxRoleRole)
+        {
+            return node->role.has_value() ? QString::fromStdString(*node->role) : QVariant{};
         }
 
         return {};
@@ -203,6 +217,7 @@ namespace javelin::gui::mailboxes
                         child->accountId = accountId;
                         child->displayName = childItem.name;
                         child->mailboxId = childItem.id;
+                        child->role = childItem.role;
                         child->unreadEmails = childItem.unreadEmails;
                         child->totalThreads = childItem.totalThreads;
                         child->parent = parentNode;
@@ -231,6 +246,7 @@ namespace javelin::gui::mailboxes
                     child->accountId = account.accountId;
                     child->displayName = item.name;
                     child->mailboxId = item.id;
+                    child->role = item.role;
                     child->unreadEmails = item.unreadEmails;
                     child->totalThreads = item.totalThreads;
                     child->parent = parentIt->second;
@@ -245,6 +261,7 @@ namespace javelin::gui::mailboxes
                     rootMailboxNode->accountId = account.accountId;
                     rootMailboxNode->displayName = rootItem.name;
                     rootMailboxNode->mailboxId = rootItem.id;
+                    rootMailboxNode->role = rootItem.role;
                     rootMailboxNode->unreadEmails = rootItem.unreadEmails;
                     rootMailboxNode->totalThreads = rootItem.totalThreads;
                     rootMailboxNode->parent = accountNode.get();

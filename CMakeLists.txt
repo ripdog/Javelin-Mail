@@ -48,6 +48,10 @@ set(JAVELIN_FORMAT_FILES
     src/app/main.cpp
     src/app/ProcessServices.cpp
     src/app/ProcessServices.h
+    src/gui/IconUtils.cpp
+    src/gui/IconUtils.h
+    src/gui/mailboxes/MailboxIconUtils.cpp
+    src/gui/mailboxes/MailboxIconUtils.h
     src/gui/mailboxes/MailboxTreeModel.cpp
     src/gui/mailboxes/MailboxTreeModel.h
     src/gui/compose/ComposeTabWidget.cpp
@@ -301,6 +305,10 @@ javelin_enable_static_analysis(javelin_jmap)
 javelin_enable_sanitizers(javelin_jmap)
 
 add_library(javelin_gui STATIC
+    src/gui/IconUtils.cpp
+    src/gui/IconUtils.h
+    src/gui/mailboxes/MailboxIconUtils.cpp
+    src/gui/mailboxes/MailboxIconUtils.h
     src/gui/compose/ComposeTabWidget.cpp
     src/gui/compose/ComposeTabWidget.h
     src/gui/mailboxes/MailboxTreeModel.cpp
@@ -328,6 +336,7 @@ target_include_directories(javelin_gui PUBLIC
 target_link_libraries(javelin_gui
     PUBLIC
         Qt::Core
+        Qt::Svg
         Qt::Widgets
         Qt::WebEngineWidgets
         KF6::XmlGui
@@ -357,7 +366,32 @@ add_library(javelin_app STATIC
 qt_add_resources(javelin_app "javelin_icons"
     PREFIX "/icons"
     BASE "res"
-    FILES "res/icon.svg"
+    FILES
+        "res/icon.svg"
+        "res/thunderbird-icons/archive.svg"
+        "res/thunderbird-icons/cloud-download.svg"
+        "res/thunderbird-icons/delete.svg"
+        "res/thunderbird-icons/display-options.svg"
+        "res/thunderbird-icons/draft.svg"
+        "res/thunderbird-icons/filter.svg"
+        "res/thunderbird-icons/folder.svg"
+        "res/thunderbird-icons/forward.svg"
+        "res/thunderbird-icons/inbox.svg"
+        "res/thunderbird-icons/more.svg"
+        "res/thunderbird-icons/nav-left.svg"
+        "res/thunderbird-icons/nav-right.svg"
+        "res/thunderbird-icons/new-mail.svg"
+        "res/thunderbird-icons/remote-blocked.svg"
+        "res/thunderbird-icons/reply-all.svg"
+        "res/thunderbird-icons/reply.svg"
+        "res/thunderbird-icons/search.svg"
+        "res/thunderbird-icons/sent.svg"
+        "res/thunderbird-icons/settings.svg"
+        "res/thunderbird-icons/spam.svg"
+        "res/thunderbird-icons/star.svg"
+        "res/thunderbird-icons/starred.svg"
+        "res/thunderbird-icons/trash.svg"
+        "res/thunderbird-icons/unread.svg"
 )
 target_include_directories(javelin_app PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
