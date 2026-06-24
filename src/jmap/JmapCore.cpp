@@ -496,6 +496,7 @@ namespace javelin::jmap
                                   LiveConnectionSettings settings, std::string accountId,
                                   javelin::jmap::api::EmailQueryFilter filter,
                                   const std::size_t offset, const std::size_t limit,
+                                  javelin::jmap::query::EmailListSort sort,
                                   std::function<void(const QString&)> reportProgress)
         {
             if (const auto validationError = validateLoginSettings(settings, true))
@@ -519,13 +520,7 @@ namespace javelin::jmap
             const auto queryRequest = javelin::jmap::api::emailQuery({
                 .accountId = accountId,
                 .filter = filter,
-                .sort =
-                    {
-                        javelin::jmap::api::EmailQuerySort{
-                            .property = "receivedAt",
-                            .isAscending = false,
-                        },
-                    },
+                .sort = {javelin::jmap::query::toEmailQuerySort(sort)},
                 .position = static_cast<std::uint64_t>(offset),
                 .limit = static_cast<std::uint64_t>(limit),
                 .collapseThreads = true,
@@ -1509,18 +1504,20 @@ namespace javelin::jmap
     QCoro::Task<MessageSearchResult>
     JmapCore::searchMessages(LiveConnectionSettings settings, std::string accountId,
                              std::string query, const std::size_t offset, const std::size_t limit,
+                             javelin::jmap::query::EmailListSort sort,
                              std::function<void(const QString&)> progressCallback)
     {
         co_return co_await searchMessages(
             std::move(settings), std::move(accountId),
             javelin::jmap::search::EmailSearchCriteria{.text = std::move(query)}, offset, limit,
-            std::move(progressCallback));
+            std::move(sort), std::move(progressCallback));
     }
 
     QCoro::Task<MessageSearchResult>
     JmapCore::searchMessages(LiveConnectionSettings settings, std::string accountId,
                              javelin::jmap::search::EmailSearchCriteria criteria,
                              const std::size_t offset, const std::size_t limit,
+                             javelin::jmap::query::EmailListSort sort,
                              std::function<void(const QString&)> progressCallback)
     {
         const auto reportProgress = [&progressCallback](const QString& message)
@@ -1551,7 +1548,8 @@ namespace javelin::jmap
 
         const auto pageResult = co_await performCollapsedQueryPage(
             *m_impl->databaseConnection, *m_impl->transport, settings, accountId,
-            javelin::jmap::search::toEmailQueryFilter(criteria), offset, limit, reportProgress);
+            javelin::jmap::search::toEmailQueryFilter(criteria), offset, limit, std::move(sort),
+            reportProgress);
         if (const auto* error = std::get_if<LiveRefreshError>(&pageResult))
         {
             co_return *error;
@@ -1572,7 +1570,7 @@ namespace javelin::jmap
     QCoro::Task<MailboxPageResult>
     JmapCore::queryMailboxPage(LiveConnectionSettings settings, std::string accountId,
                                std::string mailboxId, const std::size_t offset,
-                               const std::size_t limit,
+                               const std::size_t limit, javelin::jmap::query::EmailListSort sort,
                                std::function<void(const QString&)> progressCallback)
     {
         const auto reportProgress = [&progressCallback](const QString& message)
@@ -1600,7 +1598,7 @@ namespace javelin::jmap
                 .inMailbox = mailboxId,
                 .text = std::nullopt,
             },
-            offset, limit, reportProgress);
+            offset, limit, std::move(sort), reportProgress);
         if (const auto* error = std::get_if<LiveRefreshError>(&pageResult))
         {
             co_return *error;

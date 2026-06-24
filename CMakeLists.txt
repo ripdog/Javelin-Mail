@@ -122,6 +122,7 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/domain/MailEntityParsers.h
     src/jmap/query/MessageGrouping.cpp
     src/jmap/query/MessageGrouping.h
+    src/jmap/query/EmailListSort.h
     src/jmap/query/QueryDiff.cpp
     src/jmap/query/QueryDiff.h
     src/jmap/render/HtmlMessageDocumentBuilder.cpp
@@ -243,6 +244,7 @@ add_library(javelin_jmap STATIC
     src/jmap/domain/MailEntityParsers.h
     src/jmap/query/MessageGrouping.cpp
     src/jmap/query/MessageGrouping.h
+    src/jmap/query/EmailListSort.h
     src/jmap/query/QueryDiff.cpp
     src/jmap/query/QueryDiff.h
     src/jmap/render/HtmlMessageDocumentBuilder.cpp

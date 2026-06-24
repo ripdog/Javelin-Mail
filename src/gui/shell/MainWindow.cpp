@@ -78,6 +78,8 @@ namespace javelin::gui::shell
         constexpr auto geometryKey = "geometry";
         constexpr auto splitterKey = "splitterState";
         constexpr auto activeTabIndexKey = "activeTabIndex";
+        constexpr auto emailListSortPropertyKey = "emailListSortProperty";
+        constexpr auto emailListSortDirectionKey = "emailListSortDirection";
         constexpr auto tabsKey = "tabs";
 
         /// Returns the account ID for the currently selected mailbox tree index.
@@ -442,6 +444,88 @@ namespace javelin::gui::shell
             }
         }
 
+        [[nodiscard]] javelin::jmap::query::EmailListSortProperty
+        sortPropertyFromSetting(const QString& value)
+        {
+            if (value == QStringLiteral("sentAt"))
+            {
+                return javelin::jmap::query::EmailListSortProperty::SentAt;
+            }
+            if (value == QStringLiteral("from"))
+            {
+                return javelin::jmap::query::EmailListSortProperty::From;
+            }
+            if (value == QStringLiteral("to"))
+            {
+                return javelin::jmap::query::EmailListSortProperty::To;
+            }
+            if (value == QStringLiteral("subject"))
+            {
+                return javelin::jmap::query::EmailListSortProperty::Subject;
+            }
+            if (value == QStringLiteral("size"))
+            {
+                return javelin::jmap::query::EmailListSortProperty::Size;
+            }
+
+            return javelin::jmap::query::EmailListSortProperty::ReceivedAt;
+        }
+
+        [[nodiscard]] QString
+        sortPropertySetting(const javelin::jmap::query::EmailListSortProperty property)
+        {
+            return QString::fromStdString(javelin::jmap::query::propertyName(property));
+        }
+
+        [[nodiscard]] javelin::jmap::query::EmailListSortDirection
+        sortDirectionFromSetting(const QString& value)
+        {
+            if (value == QStringLiteral("ascending"))
+            {
+                return javelin::jmap::query::EmailListSortDirection::Ascending;
+            }
+
+            return javelin::jmap::query::EmailListSortDirection::Descending;
+        }
+
+        [[nodiscard]] QString
+        sortDirectionSetting(const javelin::jmap::query::EmailListSortDirection direction)
+        {
+            return direction == javelin::jmap::query::EmailListSortDirection::Ascending
+                       ? QStringLiteral("ascending")
+                       : QStringLiteral("descending");
+        }
+
+        [[nodiscard]] QString
+        sortPropertyLabel(const javelin::jmap::query::EmailListSortProperty property)
+        {
+            switch (property)
+            {
+            case javelin::jmap::query::EmailListSortProperty::ReceivedAt:
+                return QStringLiteral("Date received");
+            case javelin::jmap::query::EmailListSortProperty::SentAt:
+                return QStringLiteral("Date sent");
+            case javelin::jmap::query::EmailListSortProperty::From:
+                return QStringLiteral("From");
+            case javelin::jmap::query::EmailListSortProperty::To:
+                return QStringLiteral("To");
+            case javelin::jmap::query::EmailListSortProperty::Subject:
+                return QStringLiteral("Subject");
+            case javelin::jmap::query::EmailListSortProperty::Size:
+                return QStringLiteral("Size");
+            }
+
+            return QStringLiteral("Date received");
+        }
+
+        [[nodiscard]] QString
+        sortDirectionLabel(const javelin::jmap::query::EmailListSortDirection direction)
+        {
+            return direction == javelin::jmap::query::EmailListSortDirection::Ascending
+                       ? QStringLiteral("ascending")
+                       : QStringLiteral("descending");
+        }
+
     } // namespace
 
     MainWindow::MainWindow(javelin::jmap::JmapCore& jmapCore,
@@ -700,6 +784,9 @@ namespace javelin::gui::shell
         m_messageQuickFilterButton = new QToolButton(messageHeader);
         m_messageQuickFilterButton->setText(QStringLiteral("Quick Filter"));
         m_messageQuickFilterButton->setEnabled(false);
+        m_messageSortButton = new QToolButton(messageHeader);
+        m_messageSortButton->setText(QStringLiteral("..."));
+        m_messageSortButton->setToolTip(QStringLiteral("Sort messages"));
         m_previousPageButton = new QToolButton(messageHeader);
         m_previousPageButton->setText(QStringLiteral("Previous"));
         m_nextPageButton = new QToolButton(messageHeader);
@@ -715,6 +802,7 @@ namespace javelin::gui::shell
         messageHeaderLayout->addWidget(m_previousPageButton);
         messageHeaderLayout->addWidget(m_messagePageLabel);
         messageHeaderLayout->addWidget(m_nextPageButton);
+        messageHeaderLayout->addWidget(m_messageSortButton);
         messageHeaderLayout->addWidget(m_messageQuickFilterButton);
         m_longPollStatusLabel = new QLabel(this);
         m_messageEmptyState = new QLabel(
@@ -825,6 +913,7 @@ namespace javelin::gui::shell
         connect(m_tabBar, &QTabBar::tabCloseRequested, this, &MainWindow::closeTab);
         connect(m_previousPageButton, &QToolButton::clicked, this, &MainWindow::goToPreviousPage);
         connect(m_nextPageButton, &QToolButton::clicked, this, &MainWindow::goToNextPage);
+        connect(m_messageSortButton, &QToolButton::clicked, this, &MainWindow::showSortMenu);
         connect(m_mailboxSearchEdit, &QLineEdit::returnPressed, this,
                 [this] { executeSearch(m_mailboxSearchEdit->text()); });
         connect(m_mailboxSearchEdit, &QLineEdit::textChanged, this,
@@ -1481,8 +1570,8 @@ namespace javelin::gui::shell
             return;
         }
 
-        const auto pageResult = m_queryService.listMailboxMessages(tab.accountId, tab.mailboxId,
-                                                                   pageSize, tab.page.offset);
+        const auto pageResult = m_queryService.listMailboxMessages(
+            tab.accountId, tab.mailboxId, pageSize, tab.page.offset, m_emailListSort);
         if (const auto* items =
                 std::get_if<std::vector<javelin::jmap::cache::MessageListItem>>(&pageResult))
         {
@@ -1714,7 +1803,7 @@ namespace javelin::gui::shell
             toLiveConnectionSettings(
                 javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
                     QString::fromStdString(tab.accountId))),
-            tab.accountId, tab.mailboxId, tab.page.offset, pageSize,
+            tab.accountId, tab.mailboxId, tab.page.offset, pageSize, m_emailListSort,
             [this](const QString& message)
             {
                 qInfo().noquote() << "GUI mailbox page progress" << message;
@@ -1801,7 +1890,7 @@ namespace javelin::gui::shell
             toLiveConnectionSettings(
                 javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
                     QString::fromStdString(tab.accountId))),
-            tab.accountId, tabCriteria, tab.page.offset, pageSize,
+            tab.accountId, tabCriteria, tab.page.offset, pageSize, m_emailListSort,
             [this](const QString& message)
             {
                 qInfo().noquote() << "GUI search progress" << message;
@@ -2281,6 +2370,108 @@ namespace javelin::gui::shell
         }
     }
 
+    void MainWindow::showSortMenu()
+    {
+        QMenu menu{this};
+        const auto addPropertyAction =
+            [this, &menu](const QString& label,
+                          const javelin::jmap::query::EmailListSortProperty property)
+        {
+            auto* action = menu.addAction(label);
+            action->setCheckable(true);
+            action->setChecked(m_emailListSort.property == property);
+            connect(action, &QAction::triggered, this,
+                    [this, property]
+                    {
+                        setEmailListSort(javelin::jmap::query::EmailListSort{
+                            .property = property,
+                            .direction = m_emailListSort.direction,
+                        });
+                    });
+        };
+
+        addPropertyAction(QStringLiteral("Date received"),
+                          javelin::jmap::query::EmailListSortProperty::ReceivedAt);
+        addPropertyAction(QStringLiteral("Date sent"),
+                          javelin::jmap::query::EmailListSortProperty::SentAt);
+        addPropertyAction(QStringLiteral("From"),
+                          javelin::jmap::query::EmailListSortProperty::From);
+        addPropertyAction(QStringLiteral("To"), javelin::jmap::query::EmailListSortProperty::To);
+        addPropertyAction(QStringLiteral("Subject"),
+                          javelin::jmap::query::EmailListSortProperty::Subject);
+        addPropertyAction(QStringLiteral("Size"),
+                          javelin::jmap::query::EmailListSortProperty::Size);
+        menu.addSeparator();
+
+        const auto addDirectionAction =
+            [this, &menu](const QString& label,
+                          const javelin::jmap::query::EmailListSortDirection direction)
+        {
+            auto* action = menu.addAction(label);
+            action->setCheckable(true);
+            action->setChecked(m_emailListSort.direction == direction);
+            connect(action, &QAction::triggered, this,
+                    [this, direction]
+                    {
+                        setEmailListSort(javelin::jmap::query::EmailListSort{
+                            .property = m_emailListSort.property,
+                            .direction = direction,
+                        });
+                    });
+        };
+
+        addDirectionAction(QStringLiteral("Descending"),
+                           javelin::jmap::query::EmailListSortDirection::Descending);
+        addDirectionAction(QStringLiteral("Ascending"),
+                           javelin::jmap::query::EmailListSortDirection::Ascending);
+
+        menu.exec(m_messageSortButton->mapToGlobal(QPoint{0, m_messageSortButton->height()}));
+    }
+
+    void MainWindow::setEmailListSort(javelin::jmap::query::EmailListSort sort)
+    {
+        if (m_emailListSort.property == sort.property &&
+            m_emailListSort.direction == sort.direction)
+        {
+            return;
+        }
+
+        m_emailListSort = std::move(sort);
+        for (auto& tabState : m_tabs)
+        {
+            std::visit(
+                [](auto& content)
+                {
+                    if constexpr (!std::is_same_v<std::decay_t<decltype(content)>, ComposeTabState>)
+                    {
+                        content.page.offset = 0;
+                        content.page.total.reset();
+                        content.page.items.clear();
+                        content.page.cacheLoaded = false;
+                        content.page.stale = true;
+                    }
+                },
+                tabState.content);
+        }
+
+        QSettings settings;
+        settings.beginGroup(QLatin1StringView{windowGroup});
+        settings.setValue(QLatin1StringView{emailListSortPropertyKey},
+                          sortPropertySetting(m_emailListSort.property));
+        settings.setValue(QLatin1StringView{emailListSortDirectionKey},
+                          sortDirectionSetting(m_emailListSort.direction));
+        settings.endGroup();
+        settings.sync();
+
+        updateSortButton();
+        loadActiveTabFromCache(true);
+        updateMessageListHeader();
+        statusBar()->showMessage(QStringLiteral("Sorting by %1, %2.")
+                                     .arg(sortPropertyLabel(m_emailListSort.property),
+                                          sortDirectionLabel(m_emailListSort.direction)),
+                                 5000);
+    }
+
     void MainWindow::goToPreviousPage()
     {
         auto* tab = activeTab();
@@ -2714,6 +2905,18 @@ namespace javelin::gui::shell
         m_deleteAction->setEnabled(hasMailboxSelection);
         m_moveAction->setEnabled(hasMailboxSelection);
         m_viewSourceAction->setEnabled(hasEmailSelection);
+    }
+
+    void MainWindow::updateSortButton()
+    {
+        if (m_messageSortButton == nullptr)
+        {
+            return;
+        }
+
+        m_messageSortButton->setToolTip(QStringLiteral("Sort messages: %1, %2")
+                                            .arg(sortPropertyLabel(m_emailListSort.property),
+                                                 sortDirectionLabel(m_emailListSort.direction)));
     }
 
     bool MainWindow::eventFilter(QObject* watched, QEvent* event)
@@ -3793,6 +3996,18 @@ namespace javelin::gui::shell
             m_mainSplitter->restoreState(splitterState);
         }
 
+        m_emailListSort.property =
+            sortPropertyFromSetting(settings
+                                        .value(QLatin1StringView{emailListSortPropertyKey},
+                                               sortPropertySetting(m_emailListSort.property))
+                                        .toString());
+        m_emailListSort.direction =
+            sortDirectionFromSetting(settings
+                                         .value(QLatin1StringView{emailListSortDirectionKey},
+                                                sortDirectionSetting(m_emailListSort.direction))
+                                         .toString());
+        updateSortButton();
+
         const auto activeTabIndexValue =
             settings.value(QLatin1StringView{activeTabIndexKey}, 0).toInt();
         const auto tabCount = settings.beginReadArray(QLatin1StringView{tabsKey});
@@ -3985,6 +4200,10 @@ namespace javelin::gui::shell
         settings.setValue(QLatin1StringView{geometryKey}, saveGeometry());
         settings.setValue(QLatin1StringView{splitterKey}, m_mainSplitter->saveState());
         settings.setValue(QLatin1StringView{activeTabIndexKey}, m_activeTabIndex.value_or(0));
+        settings.setValue(QLatin1StringView{emailListSortPropertyKey},
+                          sortPropertySetting(m_emailListSort.property));
+        settings.setValue(QLatin1StringView{emailListSortDirectionKey},
+                          sortDirectionSetting(m_emailListSort.direction));
         settings.beginWriteArray(QLatin1StringView{tabsKey});
         for (int tabIndex = 0; tabIndex < static_cast<int>(m_tabs.size()); ++tabIndex)
         {

@@ -170,18 +170,19 @@ TEST_CASE("query service returns paged compact message list rows", "[jmap][cache
 
     auto first = loadEmailFixture();
     first.threadId = "thr-1";
+    first.subject = "Alpha thread";
     first.keywords = {"$flagged"};
     auto second = first;
     second.id = "eml-2";
     second.threadId = "thr-1";
     second.receivedAt = "2026-04-06T11:22:33Z";
-    second.subject = "Later message";
+    second.subject = "Beta thread";
     second.keywords = {"$seen"};
     auto third = first;
     third.id = "eml-3";
     third.threadId = "thr-2";
     third.receivedAt = "2026-04-04T11:22:33Z";
-    third.subject = "Other thread";
+    third.subject = "Gamma thread";
     third.keywords = {"$seen"};
 
     javelin::jmap::cache::EmailRepository emailRepository{databaseContext.connection};
@@ -211,6 +212,33 @@ TEST_CASE("query service returns paged compact message list rows", "[jmap][cache
     CHECK_FALSE(secondItems.front().isFlagged);
     REQUIRE(secondItems.front().from.has_value());
     CHECK(secondItems.front().from->email == "alice@example.com");
+
+    const auto oldestFirst = queryService.listMailboxMessages(
+        "account-1", "mbx-inbox", 2, 0,
+        javelin::jmap::query::EmailListSort{
+            .direction = javelin::jmap::query::EmailListSortDirection::Ascending,
+        });
+    REQUIRE(
+        std::holds_alternative<std::vector<javelin::jmap::cache::MessageListItem>>(oldestFirst));
+    const auto& oldestItems =
+        std::get<std::vector<javelin::jmap::cache::MessageListItem>>(oldestFirst);
+    REQUIRE(oldestItems.size() == 2);
+    CHECK(oldestItems[0].emailId == "eml-3");
+    CHECK(oldestItems[1].emailId == "eml-1");
+
+    const auto subjectDescending = queryService.listMailboxMessages(
+        "account-1", "mbx-inbox", 2, 0,
+        javelin::jmap::query::EmailListSort{
+            .property = javelin::jmap::query::EmailListSortProperty::Subject,
+            .direction = javelin::jmap::query::EmailListSortDirection::Descending,
+        });
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MessageListItem>>(
+        subjectDescending));
+    const auto& subjectItems =
+        std::get<std::vector<javelin::jmap::cache::MessageListItem>>(subjectDescending);
+    REQUIRE(subjectItems.size() == 2);
+    CHECK(subjectItems[0].emailId == "eml-3");
+    CHECK(subjectItems[1].emailId == "eml-2");
 }
 
 TEST_CASE("query service returns thread messages in cached thread order", "[jmap][cache][query]")

@@ -2,6 +2,7 @@
 
 #include "jmap/cache/Database.h"
 #include "jmap/domain/MailEntities.h"
+#include "jmap/query/EmailListSort.h"
 
 #include <cstdint>
 #include <optional>
@@ -52,7 +53,8 @@ namespace javelin::jmap::cache
         listMailboxTree(std::string_view accountId) const;
         [[nodiscard]] std::variant<std::vector<MessageListItem>, DatabaseError>
         listMailboxMessages(std::string_view accountId, std::string_view mailboxId,
-                            std::size_t limit, std::size_t offset = 0) const;
+                            std::size_t limit, std::size_t offset = 0,
+                            javelin::jmap::query::EmailListSort sort = {}) const;
         [[nodiscard]] std::variant<std::size_t, DatabaseError>
         countMailboxMessages(std::string_view accountId, std::string_view mailboxId) const;
         [[nodiscard]] std::variant<std::vector<MessageListItem>, DatabaseError>

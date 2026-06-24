@@ -1,6 +1,7 @@
 #pragma once
 
 #include "jmap/cache/QueryService.h"
+#include "jmap/query/EmailListSort.h"
 #include "jmap/search/EmailSearch.h"
 #include "jmap/submission/ComposeTypes.h"
 
@@ -175,6 +176,8 @@ namespace javelin::gui::shell
         void executeSearch(const QString& text);
         void showAdvancedSearch();
         void clearSearch();
+        void showSortMenu();
+        void setEmailListSort(javelin::jmap::query::EmailListSort sort);
         void updateTabBar();
         void activateTab(int index, bool refreshRemote = false);
         void openOrActivateMailboxTab(std::string accountId, std::string mailboxId, QString title,
@@ -267,6 +270,7 @@ namespace javelin::gui::shell
         void updateEmptyStates();
         void updateMessageListHeader();
         void updateMessageActions();
+        void updateSortButton();
         void closeEvent(QCloseEvent* event) override;
         bool eventFilter(QObject* watched, QEvent* event) override;
 
@@ -292,6 +296,7 @@ namespace javelin::gui::shell
         QLabel* m_longPollStatusLabel = nullptr;
         QLabel* m_messagePageLabel = nullptr;
         QToolButton* m_messageQuickFilterButton = nullptr;
+        QToolButton* m_messageSortButton = nullptr;
         QToolButton* m_previousPageButton = nullptr;
         QToolButton* m_nextPageButton = nullptr;
         QLabel* m_messageEmptyState = nullptr;
@@ -309,6 +314,7 @@ namespace javelin::gui::shell
         QAction* m_moveAction = nullptr;
         QAction* m_viewSourceAction = nullptr;
         QAction* m_advancedSearchAction = nullptr;
+        javelin::jmap::query::EmailListSort m_emailListSort;
         bool m_refreshInFlight = false;
         std::uint64_t m_nextMessageContentRequestToken = 1;
         std::optional<MessageContentRequestState> m_messageContentRequestInFlight;

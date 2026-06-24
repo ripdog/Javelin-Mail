@@ -19,6 +19,34 @@ namespace javelin::jmap::cache
             };
         }
 
+        [[nodiscard]] QString
+        sortKeyExpression(const javelin::jmap::query::EmailListSortProperty property)
+        {
+            switch (property)
+            {
+            case javelin::jmap::query::EmailListSortProperty::ReceivedAt:
+                return QStringLiteral("e.received_at");
+            case javelin::jmap::query::EmailListSortProperty::SentAt:
+                return QStringLiteral("COALESCE(e.sent_at, e.received_at)");
+            case javelin::jmap::query::EmailListSortProperty::From:
+                return QStringLiteral(
+                    "LOWER(COALESCE((SELECT a.address FROM email_addresses a "
+                    "WHERE a.account_id = e.account_id AND a.email_id = e.email_id "
+                    "AND a.field_name = 'from' ORDER BY a.position LIMIT 1), ''))");
+            case javelin::jmap::query::EmailListSortProperty::To:
+                return QStringLiteral(
+                    "LOWER(COALESCE((SELECT a.address FROM email_addresses a "
+                    "WHERE a.account_id = e.account_id AND a.email_id = e.email_id "
+                    "AND a.field_name = 'to' ORDER BY a.position LIMIT 1), ''))");
+            case javelin::jmap::query::EmailListSortProperty::Subject:
+                return QStringLiteral("LOWER(COALESCE(e.subject, ''))");
+            case javelin::jmap::query::EmailListSortProperty::Size:
+                return QStringLiteral("e.size");
+            }
+
+            return QStringLiteral("e.received_at");
+        }
+
     } // namespace
 
     QueryService::QueryService(DatabaseConnection& connection) : m_connection(connection)
@@ -77,63 +105,72 @@ namespace javelin::jmap::cache
         return items;
     }
 
-    std::variant<std::vector<MessageListItem>, DatabaseError>
-    QueryService::listMailboxMessages(const std::string_view accountId,
-                                      const std::string_view mailboxId, const std::size_t limit,
-                                      const std::size_t offset) const
+    std::variant<std::vector<MessageListItem>, DatabaseError> QueryService::listMailboxMessages(
+        const std::string_view accountId, const std::string_view mailboxId, const std::size_t limit,
+        const std::size_t offset, javelin::jmap::query::EmailListSort sort) const
     {
         if (const auto error = m_connection.validate())
         {
             return *error;
         }
 
+        const auto orderDirection = javelin::jmap::query::isAscending(sort)
+                                        ? QStringLiteral("ASC")
+                                        : QStringLiteral("DESC");
+        const auto sortKey = sortKeyExpression(sort.property);
         QSqlQuery query{m_connection.database()};
-        query.prepare(QStringLiteral(
-            "WITH mailbox_threads AS ("
-            "  SELECT DISTINCT e.thread_id "
-            "  FROM emails e "
-            "  INNER JOIN email_mailboxes em ON em.account_id = e.account_id AND em.email_id = "
-            "e.email_id "
-            "  WHERE e.account_id = :account_id AND em.mailbox_id = :mailbox_id"
-            "), ranked_threads AS ("
-            "  SELECT e.email_id, e.thread_id, e.subject, e.preview, e.received_at, e.sent_at, "
-            "         ROW_NUMBER() OVER (PARTITION BY e.thread_id "
-            "                            ORDER BY e.received_at DESC, e.email_id DESC) AS "
-            "thread_rank, "
-            "         COUNT(*) OVER (PARTITION BY e.thread_id) AS thread_message_count, "
-            "         MAX(e.has_attachment) OVER (PARTITION BY e.thread_id) AS "
-            "thread_has_attachment, "
-            "         MAX(CASE WHEN seen.email_id IS NULL THEN 1 ELSE 0 END) OVER "
-            "             (PARTITION BY e.thread_id) AS thread_has_unread, "
-            "         MAX(CASE WHEN flagged.email_id IS NULL THEN 0 ELSE 1 END) OVER "
-            "             (PARTITION BY e.thread_id) AS thread_has_flagged "
-            "  FROM emails e "
-            "  INNER JOIN mailbox_threads mt ON mt.thread_id = e.thread_id "
-            "  LEFT JOIN email_keywords seen ON seen.account_id = e.account_id "
-            "       AND seen.email_id = e.email_id AND seen.keyword = '$seen' "
-            "  LEFT JOIN email_keywords flagged ON flagged.account_id = e.account_id "
-            "       AND flagged.email_id = e.email_id AND flagged.keyword = '$flagged' "
-            "  WHERE e.account_id = :account_id"
-            ") "
-            "SELECT rt.email_id, rt.thread_id, rt.subject, rt.preview, rt.received_at, rt.sent_at, "
-            "rt.thread_message_count, rt.thread_has_attachment, rt.thread_has_unread, "
-            "rt.thread_has_flagged, "
-            "("
-            "  SELECT a.display_name FROM email_addresses a "
-            "  WHERE a.account_id = :account_id AND a.email_id = rt.email_id AND a.field_name = "
-            "'from' "
-            "  ORDER BY a.position LIMIT 1"
-            ") AS from_name, "
-            "("
-            "  SELECT a.address FROM email_addresses a "
-            "  WHERE a.account_id = :account_id AND a.email_id = rt.email_id AND a.field_name = "
-            "'from' "
-            "  ORDER BY a.position LIMIT 1"
-            ") AS from_email "
-            "FROM ranked_threads rt "
-            "WHERE rt.thread_rank = 1 "
-            "ORDER BY rt.received_at DESC, rt.email_id DESC "
-            "LIMIT :limit OFFSET :offset"));
+        query.prepare(
+            QStringLiteral(
+                "WITH mailbox_threads AS ("
+                "  SELECT DISTINCT e.thread_id "
+                "  FROM emails e "
+                "  INNER JOIN email_mailboxes em ON em.account_id = e.account_id AND em.email_id = "
+                "e.email_id "
+                "  WHERE e.account_id = :account_id AND em.mailbox_id = :mailbox_id"
+                "), ranked_threads AS ("
+                "  SELECT e.email_id, e.thread_id, e.subject, e.preview, e.received_at, e.sent_at, "
+                "         %2 AS sort_key, "
+                "         ROW_NUMBER() OVER (PARTITION BY e.thread_id "
+                "                            ORDER BY %2 %1, e.email_id %1) AS "
+                "thread_rank, "
+                "         COUNT(*) OVER (PARTITION BY e.thread_id) AS thread_message_count, "
+                "         MAX(e.has_attachment) OVER (PARTITION BY e.thread_id) AS "
+                "thread_has_attachment, "
+                "         MAX(CASE WHEN seen.email_id IS NULL THEN 1 ELSE 0 END) OVER "
+                "             (PARTITION BY e.thread_id) AS thread_has_unread, "
+                "         MAX(CASE WHEN flagged.email_id IS NULL THEN 0 ELSE 1 END) OVER "
+                "             (PARTITION BY e.thread_id) AS thread_has_flagged "
+                "  FROM emails e "
+                "  INNER JOIN mailbox_threads mt ON mt.thread_id = e.thread_id "
+                "  LEFT JOIN email_keywords seen ON seen.account_id = e.account_id "
+                "       AND seen.email_id = e.email_id AND seen.keyword = '$seen' "
+                "  LEFT JOIN email_keywords flagged ON flagged.account_id = e.account_id "
+                "       AND flagged.email_id = e.email_id AND flagged.keyword = '$flagged' "
+                "  WHERE e.account_id = :account_id"
+                ") "
+                "SELECT rt.email_id, rt.thread_id, rt.subject, rt.preview, rt.received_at, "
+                "rt.sent_at, "
+                "rt.thread_message_count, rt.thread_has_attachment, rt.thread_has_unread, "
+                "rt.thread_has_flagged, "
+                "("
+                "  SELECT a.display_name FROM email_addresses a "
+                "  WHERE a.account_id = :account_id AND a.email_id = rt.email_id AND a.field_name "
+                "= "
+                "'from' "
+                "  ORDER BY a.position LIMIT 1"
+                ") AS from_name, "
+                "("
+                "  SELECT a.address FROM email_addresses a "
+                "  WHERE a.account_id = :account_id AND a.email_id = rt.email_id AND a.field_name "
+                "= "
+                "'from' "
+                "  ORDER BY a.position LIMIT 1"
+                ") AS from_email "
+                "FROM ranked_threads rt "
+                "WHERE rt.thread_rank = 1 "
+                "ORDER BY rt.sort_key %1, rt.email_id %1 "
+                "LIMIT :limit OFFSET :offset")
+                .arg(orderDirection, sortKey));
         query.bindValue(QStringLiteral(":account_id"),
                         QString::fromStdString(std::string{accountId}));
         query.bindValue(QStringLiteral(":mailbox_id"),
