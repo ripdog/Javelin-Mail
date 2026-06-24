@@ -34,6 +34,19 @@ namespace javelin::gui
                 QStringLiteral("fill-opacity=\"1\" fill=\"%1\"").arg(themeColor));
             svg.replace(QStringLiteral("fill-opacity=\"context-fill-opacity\""),
                         QStringLiteral("fill-opacity=\"1\""));
+            // Handle stroke-trigger variants BEFORE the standalone fill="context-stroke"
+            // replacement below; otherwise the original fill-opacity="context-stroke-opacity"
+            // would survive and the element would end up with two fill-opacity attributes,
+            // which QXmlStreamReader treats as a fatal parse error (the path silently fails to
+            // render — see Thunderbird replies.svg's second <path>).
+            svg.replace(
+                QStringLiteral("fill=\"context-stroke\" fill-opacity=\"context-stroke-opacity\""),
+                QStringLiteral("fill=\"%1\" fill-opacity=\"1\"").arg(themeColor));
+            svg.replace(
+                QStringLiteral("fill-opacity=\"context-stroke-opacity\" fill=\"context-stroke\""),
+                QStringLiteral("fill-opacity=\"1\" fill=\"%1\"").arg(themeColor));
+            svg.replace(QStringLiteral("fill-opacity=\"context-stroke-opacity\""),
+                        QStringLiteral("fill-opacity=\"1\""));
             svg.replace(QStringLiteral("fill=\"context-fill transparent\""),
                         QStringLiteral("fill=\"%1\" fill-opacity=\"0.2\"").arg(themeColor));
             svg.replace(QStringLiteral("fill=\"context-stroke transparent\""),

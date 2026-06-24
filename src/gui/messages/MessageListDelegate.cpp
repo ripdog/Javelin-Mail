@@ -23,21 +23,30 @@ namespace javelin::gui::messages
         constexpr int cardMargin = 1;
         constexpr int cardBorderWidth = 1;
         constexpr int cardCornerRadius = 10;
-        constexpr int contentInset = 14;
+        // Horizontal inset between card border and content. Vertical padding is split
+        // out below so the header text can sit closer to the top of the card and the
+        // button row closer to the bottom, halving the visual padding the previous
+        // uniform 14px inset produced.
+        constexpr int contentHInset = 14;
+        constexpr int contentTopInset = 7;
+        constexpr int contentBottomInset = 7;
         constexpr int headerHeight = 24;
         constexpr int headerGap = 10;
-        constexpr int timestampPadding = 12;
+        constexpr int timestampPadding = 16;
         constexpr int subjectOffset = 26;
-        constexpr int subjectHeight = 28;
+        constexpr int subjectHeight = 24;
         constexpr int senderFontSizeIncreaseParent = 1;
         constexpr int subjectFontSizeIncreaseMember = 1;
         constexpr int subjectFontSizeIncreaseParent = 2;
-        constexpr int repliesButtonWidth = 116;
+        // The replies button's internal padding is negotiated by the active style via
+        // CE_PushButton, so we cannot shrink it from here. Widen the button instead so
+        // the "N replies" label is not clipped on either side.
+        constexpr int repliesButtonWidth = 126;
         constexpr int buttonSize = 28;
         constexpr int buttonMargin = 29;
         constexpr int buttonGap = 6;
         constexpr int buttonIconSize = 16;
-        constexpr int memberRowHeight = 92;
+        constexpr int memberRowHeight = 100;
         constexpr int parentRowHeight = 104;
 
         [[nodiscard]] QWidget* tooltipWidget(const QStyleOptionViewItem& option)
@@ -71,7 +80,7 @@ namespace javelin::gui::messages
 
         [[nodiscard]] QRect contentRectForCard(const QRect& cardRect)
         {
-            return insetRect(cardRect, contentInset);
+            return cardRect.adjusted(contentHInset, contentTopInset, -contentHInset, -contentBottomInset);
         }
 
         [[nodiscard]] QRect repliesButtonRect(const QRect& contentRect, const bool canExpand)
