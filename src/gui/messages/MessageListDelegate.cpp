@@ -38,7 +38,6 @@ namespace javelin::gui::messages
         constexpr int senderFontSizeIncreaseParent = 1;
         constexpr int subjectFontSizeIncreaseMember = 1;
         constexpr int subjectFontSizeIncreaseParent = 2;
-        constexpr int repliesButtonWidth = 116;
         constexpr int buttonSize = 28;
         constexpr int buttonMargin = 29;
         constexpr int buttonGap = 6;
@@ -49,6 +48,12 @@ namespace javelin::gui::messages
         // visible left/right inset and keep "N replies" from being clipped.
         constexpr int buttonContentHPadding = 6;
         constexpr int buttonIconTextGap = 4;
+        // Trailing chevron shown on the replies button to indicate the open/close
+        // state of the thread (arrow-down-12.svg when expanded, arrow-right-12.svg
+        // when collapsed). Smaller than the leading icon so it visually reads as
+        // an indicator rather than another action.
+        constexpr int buttonChevronSize = 12;
+        constexpr int buttonTextChevronGap = 6;
         constexpr int memberRowHeight = 100;
         constexpr int parentRowHeight = 104;
 
@@ -86,14 +91,61 @@ namespace javelin::gui::messages
             return cardRect.adjusted(contentHInset, contentTopInset, -contentHInset, -contentBottomInset);
         }
 
-        [[nodiscard]] QRect repliesButtonRect(const QRect& contentRect, const bool canExpand)
+        [[nodiscard]] QString repliesLabelForIndex(const QModelIndex& index)
         {
-            if (!canExpand)
+            if (!index.data(MessageListModel::CanExpandRole).toBool())
             {
                 return {};
             }
-            return QRect{contentRect.left(), contentRect.bottom() - buttonMargin,
-                         repliesButtonWidth, buttonSize};
+            const auto threadCount =
+                index.data(MessageListModel::ThreadMessageCountRole).toULongLong();
+            // threadCount includes the parent summary row itself; replies are the rest.
+            const auto replyCount =
+                threadCount > 0 ? static_cast<qulonglong>(threadCount - 1) : qulonglong{0};
+            return QStringLiteral("%1 replies").arg(replyCount);
+        }
+
+        // Horizontal extent a button needs to display its leading icon, label and
+        // optional trailing chevron without clipping. Used both for layout (so the
+        // button grows with the reply count) and for hit-testing.
+        [[nodiscard]] int buttonNaturalWidth(const QFontMetrics& metrics, const bool hasLeadingIcon,
+                                             const QString& text, const bool hasTrailingIcon)
+        {
+            int width = 2 * buttonContentHPadding;
+            if (hasLeadingIcon)
+            {
+                width += buttonIconSize;
+                if (!text.isEmpty())
+                {
+                    width += buttonIconTextGap;
+                }
+            }
+            if (!text.isEmpty())
+            {
+                width += metrics.horizontalAdvance(text);
+            }
+            if (hasTrailingIcon)
+            {
+                if (!text.isEmpty())
+                {
+                    width += buttonTextChevronGap;
+                }
+                width += buttonChevronSize;
+            }
+            return width;
+        }
+
+        [[nodiscard]] QRect repliesButtonRect(const QRect& contentRect,
+                                              const QStyleOptionViewItem& option,
+                                              const QString& label, const bool hasTrailingIcon)
+        {
+            if (label.isEmpty())
+            {
+                return {};
+            }
+            const int width =
+                buttonNaturalWidth(option.fontMetrics, true, label, hasTrailingIcon);
+            return QRect{contentRect.left(), contentRect.bottom() - buttonMargin, width, buttonSize};
         }
 
         [[nodiscard]] QRect starButtonRect(const QRect& contentRect)
@@ -113,8 +165,8 @@ namespace javelin::gui::messages
         }
 
 void drawButton(QPainter* painter, const QStyleOptionViewItem& option, const QRect& rect,
-                    const QIcon& icon, const QString& text, const bool hovered,
-                    const bool pressed)
+                       const QIcon& icon, const QString& text, const bool hovered,
+                       const bool pressed, const QIcon& trailingIcon = {})
         {
             if (rect.isEmpty())
             {
@@ -136,10 +188,10 @@ void drawButton(QPainter* painter, const QStyleOptionViewItem& option, const QRe
             }
 
             const auto* style = QApplication::style();
-            // Draw only the frame; icon and text are laid out manually below so we
-            // control the internal horizontal padding. The style's CE_PushButton
-            // reserves ~10-12px per side via PM_ButtonMargin / SE_PushButtonContents,
-            // which clipped the "N replies" label.
+            // Draw only the frame; icon, text and trailing chevron are laid out
+            // manually below so we control the internal horizontal padding. The
+            // style's CE_PushButton reserves ~10-12px per side via PM_ButtonMargin /
+            // SE_PushButtonContents, which clipped the "N replies" label.
             buttonOption.icon = QIcon{};
             buttonOption.text = QString{};
             style->drawControl(QStyle::CE_PushButtonBevel, &buttonOption, painter);
@@ -154,11 +206,21 @@ void drawButton(QPainter* painter, const QStyleOptionViewItem& option, const QRe
             painter->save();
             painter->translate(shiftH, shiftV);
 
+            const bool hasTrailing = !trailingIcon.isNull();
             const QRect contentRect =
                 rect.adjusted(buttonContentHPadding, 0, -buttonContentHPadding, 0);
-            const int iconY = contentRect.center().y() - buttonIconSize / 2;
 
+            // Trailing chevron is anchored to the right edge; everything else flows
+            // left-to-right from the leading icon.
             QRect textRect = contentRect;
+            int chevronX = 0;
+            if (hasTrailing)
+            {
+                chevronX = contentRect.right() - buttonChevronSize + 1;
+                textRect.setRight(chevronX - buttonTextChevronGap);
+            }
+
+            const int iconY = contentRect.center().y() - buttonIconSize / 2;
             if (!icon.isNull())
             {
                 // Center horizontally when there is no text (icon-only buttons);
@@ -178,6 +240,14 @@ void drawButton(QPainter* painter, const QStyleOptionViewItem& option, const QRe
                 painter->setFont(option.font);
                 painter->setPen(option.palette.color(QPalette::ButtonText));
                 painter->drawText(textRect, Qt::AlignLeft | Qt::AlignVCenter, text);
+            }
+
+            if (hasTrailing)
+            {
+                const int chevronY = contentRect.center().y() - buttonChevronSize / 2;
+                trailingIcon.paint(
+                    painter,
+                    QRect{QPoint{chevronX, chevronY}, QSize{buttonChevronSize, buttonChevronSize}});
             }
 
             painter->restore();
@@ -206,7 +276,6 @@ void drawButton(QPainter* painter, const QStyleOptionViewItem& option, const QRe
         const bool isUnread = index.data(MessageListModel::IsUnreadRole).toBool();
         const bool isFlagged = index.data(MessageListModel::IsFlaggedRole).toBool();
         const bool hasAttachment = index.data(MessageListModel::HasAttachmentRole).toBool();
-        const auto threadCount = index.data(MessageListModel::ThreadMessageCountRole).toULongLong();
         const bool canExpand = index.data(MessageListModel::CanExpandRole).toBool();
         const auto& palette = option.palette;
         const QColor background =
@@ -298,6 +367,15 @@ void drawButton(QPainter* painter, const QStyleOptionViewItem& option, const QRe
             isFlagged ? QStringLiteral(":/icons/thunderbird-icons/starred.svg")
                       : QStringLiteral(":/icons/thunderbird-icons/star.svg"),
             isFlagged ? starredColor : buttonColor);
+        // Trailing chevron communicates the open/close state of the thread.
+        const auto isExpanded = index.data(MessageListModel::IsExpandedRole).toBool();
+        const auto chevronIcon =
+            canExpand ? javelin::gui::themedSvgIcon(
+                           isExpanded
+                               ? QStringLiteral(":/icons/thunderbird-icons/arrow-down-12.svg")
+                               : QStringLiteral(":/icons/thunderbird-icons/arrow-right-12.svg"),
+                           buttonColor)
+                     : QIcon{};
         const bool repliesHovered =
             m_hoveredIndex == index && m_hoveredButton == ButtonKind::Replies;
         const bool attachmentHovered =
@@ -309,11 +387,10 @@ void drawButton(QPainter* painter, const QStyleOptionViewItem& option, const QRe
             m_pressedIndex == index && m_pressedButton == ButtonKind::Attachment;
         const bool starPressed = m_pressedIndex == index && m_pressedButton == ButtonKind::Star;
 
-        const auto repliesLabel =
-            canExpand ? QStringLiteral("%1 replies").arg(static_cast<qulonglong>(threadCount - 1))
-                      : QString{};
-        drawButton(painter, option, repliesButtonRect(contentRect, canExpand), repliesIcon,
-                   repliesLabel, repliesHovered, repliesPressed);
+        const auto repliesLabel = repliesLabelForIndex(index);
+        drawButton(painter, option,
+                   repliesButtonRect(contentRect, option, repliesLabel, !chevronIcon.isNull()),
+                   repliesIcon, repliesLabel, repliesHovered, repliesPressed, chevronIcon);
         drawButton(painter, option, attachmentButtonRect(contentRect, hasAttachment),
                    attachmentIcon, QString{}, attachmentHovered, attachmentPressed);
         drawButton(painter, option, starButtonRect(contentRect), starIcon, QString{}, starHovered,
@@ -357,8 +434,10 @@ void drawButton(QPainter* painter, const QStyleOptionViewItem& option, const QRe
         {
             return ButtonKind::Attachment;
         }
-        if (repliesButtonRect(contentRect, index.data(MessageListModel::CanExpandRole).toBool())
-                .contains(position))
+        const auto repliesLabel = repliesLabelForIndex(index);
+        // The chevron always accompanies the replies button, so reserve its width
+        // here too — otherwise hit-testing would miss the trailing chevron area.
+        if (repliesButtonRect(contentRect, option, repliesLabel, true).contains(position))
         {
             return ButtonKind::Replies;
         }

@@ -368,6 +368,8 @@ qt_add_resources(javelin_app "javelin_icons"
     BASE "res"
     FILES
         "res/icon.svg"
+        "res/thunderbird-icons/arrow-down-12.svg"
+        "res/thunderbird-icons/arrow-right-12.svg"
         "res/thunderbird-icons/archive.svg"
         "res/thunderbird-icons/attachment.svg"
         "res/thunderbird-icons/cloud-download.svg"
