@@ -201,7 +201,7 @@ Suggested behavior:
 
 ## Implementation Phases
 
-### Phase 1: Guard live refresh lifetime
+### Phase 1: Guard live refresh lifetime - done
 
 - Snapshot `RunContext` in `LongPollService::refreshWatchedMailbox()`.
 - Gate post-await signal emission by generation.
@@ -209,7 +209,7 @@ Suggested behavior:
 - Add tests for restart/stop during in-flight refresh if practical with the
   existing long-poll test harness.
 
-### Phase 2: Coalesce live refreshes
+### Phase 2: Coalesce live refreshes - done
 
 - Add single-flight state to `LongPollService`.
 - Coalesce multiple `onUpdate()` calls into one active refresh plus one pending
@@ -217,7 +217,7 @@ Suggested behavior:
 - Ensure cancellation/restart clears in-flight bookkeeping safely.
 - Test that two rapid updates do not run two overlapping mailbox refreshes.
 
-### Phase 3: Remove destructive mailbox fallback writes
+### Phase 3: Remove destructive mailbox fallback writes - done
 
 - Add repository methods with mailbox/window-scoped names.
 - Replace `replaceAll()` calls in `MailboxRefreshExecutor` fallback with
@@ -226,22 +226,23 @@ Suggested behavior:
 - Add regression tests proving a full fallback refresh for Inbox does not delete
   cached Archive/Sent emails or unrelated thread rows.
 
-### Phase 4: Make refresh reconciliation atomic
+### Phase 4: Make refresh reconciliation atomic - partially done
 
-- Introduce a transaction boundary that spans thread/email writes and sync-state
-  updates.
-- Move query/email sync-state updates to the end of the transaction.
+- Moved query/email sync-state updates to the end of the fallback path so state
+  does not advance before cache writes and mailbox membership reconciliation.
+- Still consider a transaction boundary that spans thread/email writes and
+  sync-state updates.
 - Add a failure-injection-style unit test if the existing database test helpers
   make that reasonable.
 
-### Phase 5: Recover from local cache drift
+### Phase 5: Recover from local cache drift - done
 
 - Detect `Email/changes.updated` ids missing from the local cache.
 - Fetch missing ids or force a mailbox-window rebuild before advancing state.
 - Add a regression test where an updated email is missing locally and verify the
   cache/state do not silently skip it.
 
-### Phase 6: Broaden UI invalidation
+### Phase 6: Broaden UI invalidation - done
 
 - Extend live refresh signals or add a dedicated account/mailbox invalidation
   signal.
@@ -252,7 +253,7 @@ Suggested behavior:
 - Add focused UI-level tests only if there is already a suitable harness;
   otherwise verify manually and keep the logic small.
 
-### Phase 7: Revisit notification de-duplication
+### Phase 7: Revisit notification de-duplication - done for current evidence
 
 - After cache reconciliation is fixed, decide whether in-memory suppression is
   enough.
@@ -263,12 +264,11 @@ Suggested behavior:
 - Avoid suppressing genuinely new unread mail that shares a thread with an older
   notification.
 
-### Phase 8: Remove duplicate observer drift
+### Phase 8: Remove duplicate observer drift - done
 
-- Either route app live refresh through `LongPollMailboxObserver`, or remove the
-  observer if `LongPollService` is the real app path.
-- Keep one notification publishing policy and one refresh result interpretation.
-- Update or delete tests accordingly.
+- Removed the unused `LongPollMailboxObserver` path and its dedicated tests.
+- The app live path now owns refresh result interpretation and notification
+  publishing.
 
 ## Testing Checklist
 

@@ -853,11 +853,6 @@ namespace javelin::jmap::sync
             }
 
             auto fetch = std::get<CollapsedMailboxFetch>(std::move(fetchResult));
-            if (const auto error = syncStateRepository.upsert(queryKey, fetch.queryState))
-            {
-                co_return MailboxRefreshError{.message = error->message};
-            }
-
             const auto currentFetchedMailboxEmailIds =
                 fetchedMailboxEmailIds(fetch.emails, mailboxId);
 
@@ -882,14 +877,6 @@ namespace javelin::jmap::sync
                                                               std::move(fetchedEmailIds)))
             {
                 co_return *error;
-            }
-
-            if (!fetch.emailState.empty())
-            {
-                if (const auto error = syncStateRepository.upsert(emailKey, fetch.emailState))
-                {
-                    co_return MailboxRefreshError{.message = error->message};
-                }
             }
 
             representativeCount = fetch.representativeCount;
@@ -943,6 +930,19 @@ namespace javelin::jmap::sync
                         co_return MailboxRefreshError{.message = error->message};
                     }
                     removedEmailIds = deduplicatedIds(std::move(removedAfterFullFetch));
+                }
+            }
+
+            if (const auto error = syncStateRepository.upsert(queryKey, fetch.queryState))
+            {
+                co_return MailboxRefreshError{.message = error->message};
+            }
+
+            if (!fetch.emailState.empty())
+            {
+                if (const auto error = syncStateRepository.upsert(emailKey, fetch.emailState))
+                {
+                    co_return MailboxRefreshError{.message = error->message};
                 }
             }
         }
