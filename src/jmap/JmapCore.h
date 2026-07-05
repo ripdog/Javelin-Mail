@@ -192,6 +192,10 @@ namespace javelin::jmap
                                                                std::string emailId,
                                                                std::string sourceMailboxId,
                                                                std::string destinationMailboxId);
+        [[nodiscard]] QueuedEmailMutationResult queueCopyEmail(std::string accountId,
+                                                               std::string emailId,
+                                                               std::string sourceMailboxId,
+                                                               std::string destinationMailboxId);
         [[nodiscard]] QueuedEmailMutationResult queueArchiveEmail(std::string accountId,
                                                                   std::string emailId,
                                                                   std::string sourceMailboxId,

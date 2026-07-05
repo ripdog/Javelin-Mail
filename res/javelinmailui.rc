@@ -22,6 +22,7 @@
       <Action name="mark_email_unread"/>
       <Action name="delete_email"/>
       <Action name="move_email"/>
+      <Action name="copy_email"/>
     </Menu>
     <Menu name="settings"><text>&amp;Settings</text>
       <Action name="options_configure"/>
@@ -35,6 +36,7 @@
     <Action name="archive_email"/>
     <Action name="delete_email"/>
     <Action name="move_email"/>
+    <Action name="copy_email"/>
     <Separator/>
     <Action name="refresh_from_server"/>
     <Action name="advanced_search"/>

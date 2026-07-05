@@ -750,6 +750,11 @@ namespace javelin::gui::shell
         connect(m_moveAction, &QAction::triggered, this, &MainWindow::showMoveMenu);
         actionCollection()->addAction(QStringLiteral("move_email"), m_moveAction);
 
+        m_copyAction = new QAction(QIcon::fromTheme(QStringLiteral("edit-copy")),
+                                   QStringLiteral("&Copy to…"), this);
+        connect(m_copyAction, &QAction::triggered, this, &MainWindow::showCopyMenu);
+        actionCollection()->addAction(QStringLiteral("copy_email"), m_copyAction);
+
         m_viewSourceAction = new QAction(QIcon::fromTheme(QStringLiteral("document-open")),
                                          QStringLiteral("View &Source"), this);
         connect(m_viewSourceAction, &QAction::triggered, this,
@@ -3002,6 +3007,7 @@ namespace javelin::gui::shell
         m_markUnreadAction->setEnabled(hasEmailSelection && !isUnread);
         m_deleteAction->setEnabled(hasMailboxSelection);
         m_moveAction->setEnabled(hasMailboxSelection);
+        m_copyAction->setEnabled(hasMailboxSelection);
         m_viewSourceAction->setEnabled(hasEmailSelection);
     }
 
@@ -3692,6 +3698,51 @@ namespace javelin::gui::shell
         menu.exec(QCursor::pos());
     }
 
+    void MainWindow::showCopyMenu()
+    {
+        const auto accountId = activeAccountId();
+        const auto sourceMailboxId = activeMailboxId();
+        auto emailIds = selectedEmailIds();
+        if (!accountId.has_value() || !sourceMailboxId.has_value() || emailIds.empty())
+        {
+            statusBar()->showMessage(QStringLiteral("Select a message to copy."), 3000);
+            return;
+        }
+
+        QMenu menu{this};
+        menu.setTitle(QStringLiteral("Copy to"));
+
+        const auto mailboxesResult = m_queryService.listMailboxTree(*accountId);
+        const auto* mailboxes =
+            std::get_if<std::vector<javelin::jmap::cache::MailboxTreeItem>>(&mailboxesResult);
+        if (mailboxes != nullptr)
+        {
+            for (const auto& mailbox : *mailboxes)
+            {
+                if (mailbox.id == *sourceMailboxId)
+                {
+                    continue;
+                }
+
+                auto* action = menu.addAction(QString::fromStdString(mailbox.name));
+                connect(action, &QAction::triggered, this,
+                        [this, accountId = *accountId, sourceMailboxId = *sourceMailboxId,
+                         destinationMailboxId = mailbox.id, emailIds]
+                        {
+                            queueCopyEmails(accountId, sourceMailboxId, destinationMailboxId,
+                                            emailIds, QStringLiteral("Queued copy."));
+                        });
+            }
+        }
+        if (menu.actions().empty())
+        {
+            statusBar()->showMessage(QStringLiteral("No destination mailboxes available."), 3000);
+            return;
+        }
+
+        menu.exec(QCursor::pos());
+    }
+
     void MainWindow::queueArchiveEmail(std::string accountId, std::string mailboxId,
                                        std::string emailId)
     {
@@ -3756,6 +3807,43 @@ namespace javelin::gui::shell
         for (const auto& emailId : emailIds)
         {
             const auto result = m_jmapCore.queueMoveEmail(accountId, emailId, sourceMailboxId,
+                                                          destinationMailboxId);
+            if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+            {
+                statusBar()->showMessage(error->message, 10000);
+                return;
+            }
+        }
+
+        refreshMessageListPreservingSelection();
+        refreshSelectionFromModels();
+        updateEmptyStates();
+        updateMessageListHeader();
+        if (selectedCount > 1)
+        {
+            if (successMessage.endsWith(QLatin1Char('.')))
+            {
+                successMessage.chop(1);
+            }
+            statusBar()->showMessage(
+                QStringLiteral("%1 for %2 messages.").arg(successMessage).arg(selectedCount), 5000);
+        }
+        else
+        {
+            statusBar()->showMessage(std::move(successMessage), 5000);
+        }
+
+        submitQueuedEmailMutations(std::move(accountId));
+    }
+
+    void MainWindow::queueCopyEmails(std::string accountId, std::string sourceMailboxId,
+                                     std::string destinationMailboxId,
+                                     std::vector<std::string> emailIds, QString successMessage)
+    {
+        const auto selectedCount = emailIds.size();
+        for (const auto& emailId : emailIds)
+        {
+            const auto result = m_jmapCore.queueCopyEmail(accountId, emailId, sourceMailboxId,
                                                           destinationMailboxId);
             if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
             {
@@ -3935,6 +4023,7 @@ namespace javelin::gui::shell
             menu.addAction(m_deleteAction);
             menu.addSeparator();
             auto* moveMenu = menu.addMenu(QStringLiteral("Move to"));
+            auto* copyMenu = menu.addMenu(QStringLiteral("Copy to"));
 
             const auto mailboxesResult = m_queryService.listMailboxTree(*accountId);
             const auto* mailboxes =
@@ -3956,11 +4045,23 @@ namespace javelin::gui::shell
                                 queueMoveEmails(accountId, sourceMailboxId, destinationMailboxId,
                                                 emailIds, QStringLiteral("Queued move."));
                             });
+                    auto* copyAction = copyMenu->addAction(QString::fromStdString(mailbox.name));
+                    connect(copyAction, &QAction::triggered, this,
+                            [this, accountId = *accountId, sourceMailboxId = *sourceMailboxId,
+                             destinationMailboxId = mailbox.id, emailIds]
+                            {
+                                queueCopyEmails(accountId, sourceMailboxId, destinationMailboxId,
+                                                emailIds, QStringLiteral("Queued copy."));
+                            });
                 }
             }
             if (moveMenu->actions().empty())
             {
                 moveMenu->setEnabled(false);
+            }
+            if (copyMenu->actions().empty())
+            {
+                copyMenu->setEnabled(false);
             }
         }
 

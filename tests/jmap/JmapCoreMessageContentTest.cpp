@@ -247,9 +247,8 @@ TEST_CASE("JmapCore caches message content from junk and trash mailboxes",
     seedEmail(databaseContext.connection);
 
     QSqlQuery mailbox{databaseContext.connection.database()};
-    mailbox.prepare(QStringLiteral(
-        "INSERT INTO mailboxes (account_id, mailbox_id, name, role) "
-        "VALUES (:account_id, :mailbox_id, :name, :role)"));
+    mailbox.prepare(QStringLiteral("INSERT INTO mailboxes (account_id, mailbox_id, name, role) "
+                                   "VALUES (:account_id, :mailbox_id, :name, :role)"));
     mailbox.bindValue(QStringLiteral(":account_id"), QStringLiteral("u1"));
     mailbox.bindValue(QStringLiteral(":mailbox_id"), QStringLiteral("mbx-junk"));
     mailbox.bindValue(QStringLiteral(":name"), QStringLiteral("Junk"));
@@ -294,7 +293,8 @@ TEST_CASE("JmapCore caches message content from junk and trash mailboxes",
     const auto sourceResult = sourceRepository.find("u1", "eml-1");
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::RawMessageSource>>(
         sourceResult));
-    CHECK(std::get<std::optional<javelin::jmap::cache::RawMessageSource>>(sourceResult).has_value());
+    CHECK(
+        std::get<std::optional<javelin::jmap::cache::RawMessageSource>>(sourceResult).has_value());
 }
 
 TEST_CASE("JmapCore searchMessages uses Email/query text filters and caches thread results",
@@ -469,6 +469,47 @@ TEST_CASE("JmapCore queues archive and delete mailbox moves as pending actions",
                                  record.emailPatch.removeMailboxIds ==
                                      std::vector<std::string>{"mbx-archive"};
                       }));
+}
+
+TEST_CASE("JmapCore queues mailbox copies as pending actions", "[jmap][core][pending-actions]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    auto email = loadEmailFixture();
+    email.id = "eml-1";
+    email.threadId = "thr-1";
+    email.mailboxIds = {"mbx-inbox"};
+    email.keywords = {};
+
+    javelin::jmap::cache::EmailRepository emailRepository{databaseContext.connection};
+    REQUIRE_FALSE(emailRepository.replaceAll("account-1", {email}).has_value());
+
+    FakeTransport transport;
+    javelin::jmap::JmapCore core{databaseContext.connection, transport};
+
+    const auto copyResult = core.queueCopyEmail("account-1", "eml-1", "mbx-inbox", "mbx-projects");
+    REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(copyResult));
+
+    const auto copiedEmailResult = emailRepository.find("account-1", "eml-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(copiedEmailResult));
+    const auto& copiedEmail =
+        std::get<std::optional<javelin::jmap::domain::Email>>(copiedEmailResult);
+    REQUIRE(copiedEmail.has_value());
+    CHECK(copiedEmail->mailboxIds == std::vector<std::string>{"mbx-inbox", "mbx-projects"});
+
+    javelin::jmap::sync::PendingActionRepository pendingActionRepository{
+        databaseContext.connection};
+    const auto pendingResult = pendingActionRepository.listForEmail("account-1", "eml-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::PendingActionRecord>>(
+        pendingResult));
+    const auto& records =
+        std::get<std::vector<javelin::jmap::sync::PendingActionRecord>>(pendingResult);
+    REQUIRE(records.size() == 1);
+    CHECK(records.front().emailPatch.addMailboxIds == std::vector<std::string>{"mbx-projects"});
+    CHECK(records.front().emailPatch.removeMailboxIds.empty());
 }
 
 TEST_CASE("JmapCore queues read keyword mutations as pending actions",

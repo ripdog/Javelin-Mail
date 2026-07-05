@@ -292,7 +292,7 @@ namespace javelin::jmap
         [[nodiscard]] QueuedEmailMutationResult
         queueMailboxPatch(javelin::jmap::cache::DatabaseConnection& connection,
                           std::string accountId, std::string emailId, std::string sourceMailboxId,
-                          std::string destinationMailboxId)
+                          std::string destinationMailboxId, const bool removeSourceMailbox)
         {
             if (sourceMailboxId.empty() || destinationMailboxId.empty())
             {
@@ -332,7 +332,9 @@ namespace javelin::jmap
                     {
                         .emailId = emailId,
                         .addMailboxIds = {destinationMailboxId},
-                        .removeMailboxIds = {sourceMailboxId},
+                        .removeMailboxIds = removeSourceMailbox
+                                                ? std::vector<std::string>{sourceMailboxId}
+                                                : std::vector<std::string>{},
                         .addKeywords = {},
                         .removeKeywords = {},
                     },
@@ -1176,7 +1178,23 @@ namespace javelin::jmap
 
         return queueMailboxPatch(*m_impl->databaseConnection, std::move(accountId),
                                  std::move(emailId), std::move(sourceMailboxId),
-                                 std::move(destinationMailboxId));
+                                 std::move(destinationMailboxId), true);
+    }
+
+    QueuedEmailMutationResult JmapCore::queueCopyEmail(std::string accountId, std::string emailId,
+                                                       std::string sourceMailboxId,
+                                                       std::string destinationMailboxId)
+    {
+        if (m_impl->databaseConnection == nullptr)
+        {
+            return LiveRefreshError{
+                .message = QStringLiteral("Queued mutations are unavailable in this process."),
+            };
+        }
+
+        return queueMailboxPatch(*m_impl->databaseConnection, std::move(accountId),
+                                 std::move(emailId), std::move(sourceMailboxId),
+                                 std::move(destinationMailboxId), false);
     }
 
     QueuedEmailMutationResult JmapCore::queueArchiveEmail(std::string accountId,

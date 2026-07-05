@@ -766,16 +766,19 @@ namespace javelin::gui::messageview
         const bool hasBlockedRemoteContent =
             m_snapshot.has_value() && m_snapshot->htmlRenderDocument.has_value() &&
             m_snapshot->htmlRenderDocument->blockedRemoteResourceCount > 0;
-        m_bodyControlsWidget->setVisible(hasBlockedRemoteContent);
-        m_remoteContentIconLabel->setVisible(hasBlockedRemoteContent);
-        m_remoteContentStatusLabel->setVisible(hasBlockedRemoteContent);
-        m_permitSenderRemoteContentButton->setVisible(hasBlockedRemoteContent);
-        m_permitDomainRemoteContentButton->setVisible(hasBlockedRemoteContent);
+        const bool remoteContentAllowed =
+            hasBlockedRemoteContent && m_htmlView->remoteContentEnabled();
+        const bool showRemoteContentControls = hasBlockedRemoteContent && !remoteContentAllowed;
+        m_bodyControlsWidget->setVisible(showRemoteContentControls);
+        m_remoteContentIconLabel->setVisible(showRemoteContentControls);
+        m_remoteContentStatusLabel->setVisible(showRemoteContentControls);
+        m_permitSenderRemoteContentButton->setVisible(showRemoteContentControls);
+        m_permitDomainRemoteContentButton->setVisible(showRemoteContentControls);
         m_permitSenderRemoteContentButton->setEnabled(hasBlockedRemoteContent &&
                                                       !currentSenderAddress().isEmpty());
         m_permitDomainRemoteContentButton->setEnabled(hasBlockedRemoteContent &&
                                                       !currentSenderDomain().isEmpty());
-        m_remoteContentButton->setVisible(hasBlockedRemoteContent);
+        m_remoteContentButton->setVisible(showRemoteContentControls);
         m_remoteContentButton->setEnabled(hasBlockedRemoteContent);
         m_remoteContentButton->setChecked(hasBlockedRemoteContent &&
                                           m_htmlView->remoteContentEnabled());
