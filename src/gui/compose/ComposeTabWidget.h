@@ -10,11 +10,12 @@
 
 class QAction;
 class QComboBox;
+class QHBoxLayout;
 class QLabel;
 class QLineEdit;
-class QListWidget;
 class QPlainTextEdit;
 class QPushButton;
+class QScrollArea;
 class QTabWidget;
 class QTextEdit;
 class QTimer;
@@ -81,7 +82,7 @@ namespace javelin::gui::compose
         void updateEditorModeUi();
         void updateTabTitle();
         void addAttachments();
-        void removeSelectedAttachment();
+        void removeAttachmentAt(std::size_t index);
         void requestClose();
         void startSaveDraft(bool closeAfterSave);
         void startSend();
@@ -116,11 +117,11 @@ namespace javelin::gui::compose
         QPlainTextEdit* m_htmlSourceEdit = nullptr;
         javelin::gui::messageview::HtmlMessageView* m_previewView = nullptr;
         QTabWidget* m_editorTabs = nullptr;
-        QListWidget* m_attachmentList = nullptr;
-        QLabel* m_attachmentMetaLabel = nullptr;
         QLabel* m_modeHintLabel = nullptr;
         QPushButton* m_addAttachmentButton = nullptr;
-        QPushButton* m_removeAttachmentButton = nullptr;
+        QScrollArea* m_attachmentScrollArea = nullptr;
+        QWidget* m_attachmentStrip = nullptr;
+        QHBoxLayout* m_attachmentStripLayout = nullptr;
         QPushButton* m_saveDraftButton = nullptr;
         QPushButton* m_sendButton = nullptr;
         QPushButton* m_closeButton = nullptr;

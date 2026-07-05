@@ -8,9 +8,11 @@
 #include <QCoroTask>
 
 #include <QAction>
+#include <QApplication>
 #include <QComboBox>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFileIconProvider>
 #include <QFrame>
 #include <QFont>
 #include <QHBoxLayout>
@@ -18,10 +20,15 @@
 #include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
-#include <QListWidget>
+#include <QMimeData>
+#include <QMimeDatabase>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QRegularExpression>
+#include <QScrollArea>
 #include <QSignalBlocker>
+#include <QSizePolicy>
+#include <QStyle>
 #include <QTabWidget>
 #include <QTextBlockFormat>
 #include <QTextCharFormat>
@@ -29,11 +36,14 @@
 #include <QTextDocument>
 #include <QTextEdit>
 #include <QTextListFormat>
+#include <QToolButton>
 #include <QTimer>
 #include <QToolBar>
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <cstddef>
+#include <functional>
 
 namespace javelin::gui::compose
 {
@@ -203,6 +213,156 @@ namespace javelin::gui::compose
                 .arg(displayName, mediaType, attachmentSizeLabel(attachment.size));
         }
 
+        [[nodiscard]] QString attachmentDisplayName(
+            const javelin::jmap::submission::DraftAttachment& attachment)
+        {
+            if (!attachment.displayName.empty())
+            {
+                return QString::fromStdString(attachment.displayName);
+            }
+            if (!attachment.localFilePath.empty())
+            {
+                return QFileInfo{QString::fromStdString(attachment.localFilePath)}.fileName();
+            }
+            return QStringLiteral("Attachment");
+        }
+
+        [[nodiscard]] QIcon attachmentIcon(
+            const javelin::jmap::submission::DraftAttachment& attachment)
+        {
+            QFileIconProvider iconProvider;
+            auto icon = iconProvider.icon(QFileInfo{attachmentDisplayName(attachment)});
+            if (!icon.isNull())
+            {
+                return icon;
+            }
+
+            const QMimeDatabase mimeDatabase;
+            const auto mimeType =
+                mimeDatabase.mimeTypeForName(QString::fromStdString(attachment.mediaType));
+            icon = QIcon::fromTheme(mimeType.iconName());
+            if (icon.isNull())
+            {
+                icon = QIcon::fromTheme(mimeType.genericIconName());
+            }
+            if (icon.isNull())
+            {
+                icon = QIcon::fromTheme(QStringLiteral("mail-attachment"));
+            }
+            if (icon.isNull())
+            {
+                icon = QApplication::style()->standardIcon(QStyle::SP_FileIcon);
+            }
+            return icon;
+        }
+
+        [[nodiscard]] QString sanitizedPastedHtml(QString html)
+        {
+            static const QRegularExpression styleElement{
+                QStringLiteral("<style\\b[^>]*>.*?</style>"),
+                QRegularExpression::CaseInsensitiveOption |
+                    QRegularExpression::DotMatchesEverythingOption};
+            static const QRegularExpression styleAttribute{
+                QStringLiteral("\\sstyle\\s*=\\s*(\"[^\"]*\"|'[^']*'|[^\\s>]+)"),
+                QRegularExpression::CaseInsensitiveOption};
+            static const QRegularExpression classAttribute{
+                QStringLiteral("\\sclass\\s*=\\s*(\"[^\"]*\"|'[^']*'|[^\\s>]+)"),
+                QRegularExpression::CaseInsensitiveOption};
+            static const QRegularExpression fontAttribute{
+                QStringLiteral("\\s(?:face|color|size)\\s*=\\s*(\"[^\"]*\"|'[^']*'|[^\\s>]+)"),
+                QRegularExpression::CaseInsensitiveOption};
+            static const QRegularExpression fontOpenTag{
+                QStringLiteral("<font\\b[^>]*>"), QRegularExpression::CaseInsensitiveOption};
+            static const QRegularExpression fontCloseTag{
+                QStringLiteral("</font\\s*>"), QRegularExpression::CaseInsensitiveOption};
+
+            html.remove(styleElement);
+            html.remove(styleAttribute);
+            html.remove(classAttribute);
+            html.remove(fontAttribute);
+            html.remove(fontOpenTag);
+            html.remove(fontCloseTag);
+            return html;
+        }
+
+        class RichTextComposeEdit : public QTextEdit
+        {
+          public:
+            using QTextEdit::QTextEdit;
+
+          protected:
+            void insertFromMimeData(const QMimeData* source) override
+            {
+                if (source->hasHtml())
+                {
+                    QMimeData sanitized;
+                    sanitized.setHtml(sanitizedPastedHtml(source->html()));
+                    if (source->hasText())
+                    {
+                        sanitized.setText(source->text());
+                    }
+                    QTextEdit::insertFromMimeData(&sanitized);
+                    return;
+                }
+
+                QTextEdit::insertFromMimeData(source);
+            }
+        };
+
+        class DraftAttachmentChip : public QFrame
+        {
+          public:
+            DraftAttachmentChip(const javelin::jmap::submission::DraftAttachment& attachment,
+                                std::function<void()> removeAction, QWidget* parent = nullptr)
+                : QFrame(parent), m_removeAction(std::move(removeAction))
+            {
+                setObjectName(QStringLiteral("draftAttachmentChip"));
+                setToolTip(attachmentItemText(attachment));
+                setStyleSheet(QStringLiteral(
+                    "#draftAttachmentChip { background: rgba(255, 255, 255, 0.06); border: 1px "
+                    "solid rgba(255, 255, 255, 0.08); border-radius: 6px; }"));
+
+                auto* layout = new QHBoxLayout(this);
+                layout->setContentsMargins(8, 4, 5, 4);
+                layout->setSpacing(6);
+
+                auto* iconLabel = new QLabel(this);
+                iconLabel->setPixmap(attachmentIcon(attachment).pixmap(16, 16));
+                iconLabel->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+
+                auto* nameLabel = new QLabel(attachmentDisplayName(attachment), this);
+                nameLabel->setMinimumWidth(80);
+                nameLabel->setMaximumWidth(220);
+                nameLabel->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
+
+                auto* sizeLabel = new QLabel(attachmentSizeLabel(attachment.size), this);
+                sizeLabel->setStyleSheet(QStringLiteral("color: #c2c6cf;"));
+                sizeLabel->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
+
+                auto* removeButton = new QToolButton(this);
+                removeButton->setText(QStringLiteral("x"));
+                removeButton->setToolTip(QStringLiteral("Remove attachment"));
+                removeButton->setAutoRaise(true);
+                removeButton->setFixedSize(22, 22);
+                connect(removeButton, &QToolButton::clicked, this,
+                        [this]
+                        {
+                            if (m_removeAction)
+                            {
+                                m_removeAction();
+                            }
+                        });
+
+                layout->addWidget(iconLabel);
+                layout->addWidget(nameLabel);
+                layout->addWidget(sizeLabel);
+                layout->addWidget(removeButton);
+            }
+
+          private:
+            std::function<void()> m_removeAction;
+        };
+
         [[nodiscard]] std::string plainTextFromHtml(const QString& html)
         {
             QTextDocument document;
@@ -351,8 +511,6 @@ namespace javelin::gui::compose
 
         connect(m_addAttachmentButton, &QPushButton::clicked, this,
                 &ComposeTabWidget::addAttachments);
-        connect(m_removeAttachmentButton, &QPushButton::clicked, this,
-                &ComposeTabWidget::removeSelectedAttachment);
         connect(m_saveDraftButton, &QPushButton::clicked, this,
                 [this] { startSaveDraft(false); });
         connect(m_sendButton, &QPushButton::clicked, this, &ComposeTabWidget::startSend);
@@ -420,7 +578,7 @@ namespace javelin::gui::compose
         setStyleSheet(QStringLiteral(
             "#composeTab { background: #1d2026; }"
             "#composeHeader { background: #232833; border: 1px solid #333c4b; border-radius: 14px; }"
-            "QLineEdit, QComboBox, QPlainTextEdit, QTextEdit, QListWidget {"
+            "QLineEdit, QComboBox, QPlainTextEdit, QTextEdit {"
             "  background: #161a20; color: #eef2f7; border: 1px solid #394354; border-radius: 8px;"
             "}"
             "QLineEdit, QComboBox { padding: 6px 8px; }"
@@ -506,7 +664,7 @@ namespace javelin::gui::compose
         rootLayout->addWidget(m_formatToolbar);
 
         m_editorTabs = new QTabWidget(this);
-        m_richTextEdit = new QTextEdit(m_editorTabs);
+        m_richTextEdit = new RichTextComposeEdit(m_editorTabs);
         m_richTextEdit->setAcceptRichText(true);
         m_richTextEdit->document()->setDocumentMargin(14);
         m_htmlSourceEdit = new QPlainTextEdit(m_editorTabs);
@@ -518,36 +676,27 @@ namespace javelin::gui::compose
         m_editorTabs->addTab(m_previewView, QStringLiteral("Preview"));
         rootLayout->addWidget(m_editorTabs, 1);
 
-        auto* attachmentFrame = new QFrame(this);
-        attachmentFrame->setObjectName(QStringLiteral("composeHeader"));
-        auto* attachmentLayout = new QVBoxLayout(attachmentFrame);
-        attachmentLayout->setContentsMargins(14, 14, 14, 14);
-        attachmentLayout->setSpacing(10);
-        auto* attachmentHeaderRow = new QHBoxLayout();
-        auto* attachmentTitle = new QLabel(QStringLiteral("Attachments"), attachmentFrame);
-        auto attachmentTitleFont = attachmentTitle->font();
-        attachmentTitleFont.setBold(true);
-        attachmentTitle->setFont(attachmentTitleFont);
-        m_attachmentMetaLabel = new QLabel(QStringLiteral("No attachments yet"), attachmentFrame);
-        m_attachmentMetaLabel->setStyleSheet(QStringLiteral("color: #9fb2cf;"));
-        attachmentHeaderRow->addWidget(attachmentTitle);
-        attachmentHeaderRow->addStretch(1);
-        attachmentHeaderRow->addWidget(m_attachmentMetaLabel);
-        attachmentLayout->addLayout(attachmentHeaderRow);
+        auto* attachmentRow = new QHBoxLayout();
+        attachmentRow->setSpacing(8);
+        m_addAttachmentButton = new QPushButton(QStringLiteral("Attach File"), this);
+        m_addAttachmentButton->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+        attachmentRow->addWidget(m_addAttachmentButton);
 
-        m_attachmentList = new QListWidget(attachmentFrame);
-        attachmentLayout->addWidget(m_attachmentList);
-
-        auto* attachmentButtons = new QHBoxLayout();
-        m_addAttachmentButton = new QPushButton(QStringLiteral("Attach Files"), attachmentFrame);
-        m_removeAttachmentButton =
-            new QPushButton(QStringLiteral("Remove Selected"), attachmentFrame);
-        attachmentButtons->addWidget(m_addAttachmentButton);
-        attachmentButtons->addWidget(m_removeAttachmentButton);
-        attachmentButtons->addStretch(1);
-        attachmentLayout->addLayout(attachmentButtons);
-
-        rootLayout->addWidget(attachmentFrame);
+        m_attachmentScrollArea = new QScrollArea(this);
+        m_attachmentScrollArea->setFrameShape(QFrame::NoFrame);
+        m_attachmentScrollArea->setWidgetResizable(true);
+        m_attachmentScrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        m_attachmentScrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+        m_attachmentScrollArea->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        m_attachmentStrip = new QWidget(m_attachmentScrollArea);
+        m_attachmentStripLayout = new QHBoxLayout(m_attachmentStrip);
+        m_attachmentStripLayout->setContentsMargins(0, 0, 0, 0);
+        m_attachmentStripLayout->setSpacing(6);
+        m_attachmentStripLayout->addStretch(1);
+        m_attachmentScrollArea->setWidget(m_attachmentStrip);
+        m_attachmentScrollArea->setFixedHeight(m_addAttachmentButton->sizeHint().height() + 4);
+        attachmentRow->addWidget(m_attachmentScrollArea, 1);
+        rootLayout->addLayout(attachmentRow);
 
         auto* footerRow = new QHBoxLayout();
         auto* helperLabel = new QLabel(
@@ -688,19 +837,25 @@ namespace javelin::gui::compose
 
     void ComposeTabWidget::populateAttachments()
     {
-        m_attachmentList->clear();
-        for (const auto& attachment : m_snapshot.attachments)
+        while (m_attachmentStripLayout->count() > 0)
         {
-            m_attachmentList->addItem(attachmentItemText(attachment));
+            auto* item = m_attachmentStripLayout->takeAt(0);
+            if (auto* widget = item->widget())
+            {
+                widget->deleteLater();
+            }
+            delete item;
         }
 
-        m_attachmentMetaLabel->setText(
-            m_snapshot.attachments.empty()
-                ? QStringLiteral("No attachments yet")
-                : QStringLiteral("%1 file%2")
-                      .arg(static_cast<qulonglong>(m_snapshot.attachments.size()))
-                      .arg(m_snapshot.attachments.size() == 1 ? QString{} : QStringLiteral("s")));
-        m_removeAttachmentButton->setEnabled(!m_snapshot.attachments.empty());
+        for (std::size_t index = 0; index < m_snapshot.attachments.size(); ++index)
+        {
+            auto* chip = new DraftAttachmentChip(
+                m_snapshot.attachments[index], [this, index] { removeAttachmentAt(index); },
+                m_attachmentStrip);
+            chip->setEnabled(!m_operationInFlight);
+            m_attachmentStripLayout->addWidget(chip);
+        }
+        m_attachmentStripLayout->addStretch(1);
     }
 
     void ComposeTabWidget::refreshPreview()
@@ -789,7 +944,7 @@ namespace javelin::gui::compose
         m_editorTabs->setEnabled(!busy);
         m_formatToolbar->setEnabled(!busy && m_editorTabs->currentIndex() == richEditorTabIndex);
         m_addAttachmentButton->setEnabled(!busy);
-        m_removeAttachmentButton->setEnabled(!busy && !m_snapshot.attachments.empty());
+        populateAttachments();
         m_saveDraftButton->setEnabled(!busy);
         m_sendButton->setEnabled(!busy);
         m_closeButton->setEnabled(!busy);
@@ -839,15 +994,15 @@ namespace javelin::gui::compose
         scheduleWorkingCopySave();
     }
 
-    void ComposeTabWidget::removeSelectedAttachment()
+    void ComposeTabWidget::removeAttachmentAt(const std::size_t index)
     {
-        const auto row = m_attachmentList->currentRow();
-        if (row < 0 || static_cast<std::size_t>(row) >= m_snapshot.attachments.size())
+        if (index >= m_snapshot.attachments.size())
         {
             return;
         }
 
-        m_snapshot.attachments.erase(m_snapshot.attachments.begin() + row);
+        m_snapshot.attachments.erase(m_snapshot.attachments.begin() +
+                                     static_cast<std::ptrdiff_t>(index));
         populateAttachments();
         scheduleWorkingCopySave();
     }
