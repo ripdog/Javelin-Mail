@@ -586,7 +586,11 @@ namespace javelin::gui::shell
                 [this](const QString& accountId, const QString& refreshedMailboxId)
                 {
                     const auto account = accountId.toStdString();
-                    markTabsStaleForAccount(account);
+                    const auto refreshedMailbox = refreshedMailboxId.toStdString();
+                    markTabsStaleForAccount(
+                        account, refreshedMailboxId.isEmpty()
+                                     ? std::optional<std::string_view>{std::nullopt}
+                                     : std::optional<std::string_view>{refreshedMailbox});
                     {
                         QSignalBlocker mailboxSelectionBlocker{m_mailboxView->selectionModel()};
                         m_mailboxModel->refresh();
@@ -676,6 +680,13 @@ namespace javelin::gui::shell
             }
         }
         loadMailboxTabFromCache(account, mailbox, true);
+        const QModelIndex notificationIndex = restoreMessageSelection(thread, email);
+        if (notificationIndex.isValid())
+        {
+            m_messageView->setCurrentIndex(notificationIndex);
+            m_messageView->scrollTo(notificationIndex);
+            syncActiveTabSelectionFromViews();
+        }
         if (email.has_value())
         {
             m_messageViewContainer->setSelection(m_messageViewService,
@@ -2156,17 +2167,28 @@ namespace javelin::gui::shell
                           << "ms" << timer.elapsed();
     }
 
-    void MainWindow::markTabsStaleForAccount(const std::string_view accountId)
+    void
+    MainWindow::markTabsStaleForAccount(const std::string_view accountId,
+                                        const std::optional<std::string_view> refreshedMailboxId)
     {
         for (auto& tab : m_tabs)
         {
             std::visit(
-                [accountId](auto& content)
+                [accountId, refreshedMailboxId](auto& content)
                 {
                     if constexpr (!std::is_same_v<std::decay_t<decltype(content)>, ComposeTabState>)
                     {
                         if (content.accountId == accountId)
                         {
+                            if constexpr (std::is_same_v<std::decay_t<decltype(content)>,
+                                                         MailboxTabState>)
+                            {
+                                if (refreshedMailboxId.has_value() &&
+                                    content.mailboxId == *refreshedMailboxId)
+                                {
+                                    return;
+                                }
+                            }
                             content.page.stale = true;
                         }
                     }

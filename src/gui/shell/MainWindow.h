@@ -175,7 +175,9 @@ namespace javelin::gui::shell
         void openOrActivateComposeTab(javelin::jmap::submission::DraftSnapshot snapshot);
         void attachComposeWidget(javelin::gui::compose::ComposeTabWidget* widget, int tabIndex);
         [[nodiscard]] bool closeComposeTab(int index);
-        void markTabsStaleForAccount(std::string_view accountId);
+        void
+        markTabsStaleForAccount(std::string_view accountId,
+                                std::optional<std::string_view> refreshedMailboxId = std::nullopt);
         void executeSearch(const QString& text);
         void showAdvancedSearch();
         void clearSearch();
