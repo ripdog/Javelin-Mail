@@ -15,6 +15,7 @@ add_executable(javelin_jmap_tests
     jmap/MailboxRepositoryTest.cpp
     jmap/MailboxRefreshExecutorTest.cpp
     jmap/MailboxQueryDescriptorTest.cpp
+    jmap/MailboxStateRefreshExecutorTest.cpp
     jmap/MessageGroupingTest.cpp
     jmap/MessageViewServiceTest.cpp
     jmap/MethodCallerTest.cpp

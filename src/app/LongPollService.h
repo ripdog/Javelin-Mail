@@ -57,6 +57,7 @@ namespace javelin::app
       Q_SIGNALS:
         void statusChanged(javelin::app::LongPollService::Status status);
         void mailStateChanged(const QString& accountId, bool requiresCatchUpRefresh);
+        void accountMailStateChanged(const QString& accountId, const QString& refreshedMailboxId);
         void mailboxRefreshed(const QString& accountId, const QString& mailboxId,
                               bool scrollToNewest);
         void notificationRaised(const QString& accountId, const QString& mailboxId,
@@ -91,6 +92,8 @@ namespace javelin::app
         [[nodiscard]] QCoro::Task<void> refreshWatchedMailbox();
         [[nodiscard]] QCoro::Task<void>
         refreshWatchedMailboxOnce(std::shared_ptr<RunContext> runContext);
+        [[nodiscard]] QCoro::Task<bool>
+        refreshMailboxStateOnce(std::shared_ptr<RunContext> runContext);
         void restart();
         void setStatus(Status status);
         void publishNotifications(

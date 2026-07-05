@@ -4,6 +4,7 @@
 #include "jmap/api/Session.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/sync/MailboxRefreshExecutor.h"
+#include "jmap/sync/MailboxStateRefreshExecutor.h"
 
 #include <QDebug>
 #include <QMetaObject>
@@ -209,6 +210,13 @@ namespace javelin::app
             co_return;
         }
 
+        const bool mailboxStateRefreshed = co_await refreshMailboxStateOnce(runContext);
+        if (m_runContext == nullptr || m_runContext->generation != runContext->generation ||
+            runContext->cancellation.isCancelled())
+        {
+            co_return;
+        }
+
         javelin::jmap::api::MethodCaller methodCaller{m_transport};
         const javelin::jmap::api::ApiRequestContext apiRequestContext{
             .credentials =
@@ -236,9 +244,11 @@ namespace javelin::app
             co_return;
         }
 
+        bool watchedMailboxRefreshed = false;
         if (const auto* summary =
                 std::get_if<javelin::jmap::sync::MailboxRefreshSummary>(&refreshResult))
         {
+            watchedMailboxRefreshed = true;
             Q_EMIT mailboxRefreshed(QString::fromStdString(runContext->configuration.accountId),
                                     QString::fromStdString(runContext->configuration.mailboxId),
                                     !summary->insertedEmailIds.empty());
@@ -250,6 +260,61 @@ namespace javelin::app
         {
             qWarning().noquote() << "Long poll mailbox refresh failed" << error->message;
         }
+
+        if (mailboxStateRefreshed || watchedMailboxRefreshed)
+        {
+            Q_EMIT accountMailStateChanged(
+                QString::fromStdString(runContext->configuration.accountId),
+                watchedMailboxRefreshed
+                    ? QString::fromStdString(runContext->configuration.mailboxId)
+                    : QString{});
+        }
+    }
+
+    QCoro::Task<bool>
+    LongPollService::refreshMailboxStateOnce(std::shared_ptr<RunContext> runContext)
+    {
+        if (runContext == nullptr || !hasValidSettings() ||
+            runContext->cancellation.isCancelled() || m_runContext == nullptr ||
+            m_runContext->generation != runContext->generation)
+        {
+            co_return false;
+        }
+
+        javelin::jmap::api::MethodCaller methodCaller{m_transport};
+        const javelin::jmap::api::ApiRequestContext apiRequestContext{
+            .credentials =
+                {
+                    .accountId = runContext->configuration.accountId,
+                    .emailAddress = runContext->configuration.settings.loginEmail,
+                    .sessionUrl = runContext->configuration.settings.sessionUrl,
+                    .token =
+                        {
+                            .accessToken = runContext->configuration.settings.apiKey,
+                            .refreshToken = std::nullopt,
+                            .expiry = std::nullopt,
+                        },
+                },
+            .apiUrl = runContext->configuration.apiUrl,
+        };
+
+        javelin::jmap::sync::MailboxStateRefreshExecutor executor{m_databaseConnection,
+                                                                  methodCaller, apiRequestContext};
+        const auto refreshResult = co_await executor.refresh(runContext->configuration.accountId);
+        if (m_runContext == nullptr || m_runContext->generation != runContext->generation ||
+            runContext->cancellation.isCancelled())
+        {
+            co_return false;
+        }
+
+        if (const auto* error =
+                std::get_if<javelin::jmap::sync::MailboxStateRefreshError>(&refreshResult))
+        {
+            qWarning().noquote() << "Long poll mailbox state refresh failed" << error->message;
+            co_return false;
+        }
+
+        co_return true;
     }
 
     void LongPollService::restart()

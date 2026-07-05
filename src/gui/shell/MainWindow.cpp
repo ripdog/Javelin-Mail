@@ -582,6 +582,33 @@ namespace javelin::gui::shell
                         refreshActiveTabFromServer();
                     }
                 });
+        connect(&m_longPollService, &javelin::app::LongPollService::accountMailStateChanged, this,
+                [this](const QString& accountId, const QString& refreshedMailboxId)
+                {
+                    const auto account = accountId.toStdString();
+                    markTabsStaleForAccount(account);
+                    {
+                        QSignalBlocker mailboxSelectionBlocker{m_mailboxView->selectionModel()};
+                        m_mailboxModel->refresh();
+                        m_mailboxView->expandAll();
+                    }
+
+                    if (!activeTabIsMailbox() ||
+                        activeAccountId() != std::optional<std::string>{account})
+                    {
+                        return;
+                    }
+
+                    const auto mailbox = activeMailboxId();
+                    if (!mailbox.has_value() ||
+                        (!refreshedMailboxId.isEmpty() &&
+                         mailbox == std::optional<std::string>{refreshedMailboxId.toStdString()}))
+                    {
+                        return;
+                    }
+
+                    refreshActiveTabFromServer();
+                });
         connect(
             &m_longPollService, &javelin::app::LongPollService::mailboxRefreshed, this,
             [this](const QString& accountId, const QString& mailboxId, const bool scrollToNewest)

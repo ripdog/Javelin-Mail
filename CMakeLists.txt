@@ -143,6 +143,8 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/sync/LongPollMailboxObserver.h
     src/jmap/sync/MailboxRefreshExecutor.cpp
     src/jmap/sync/MailboxRefreshExecutor.h
+    src/jmap/sync/MailboxStateRefreshExecutor.cpp
+    src/jmap/sync/MailboxStateRefreshExecutor.h
     src/jmap/sync/MailboxQueryDescriptor.cpp
     src/jmap/sync/MailboxQueryDescriptor.h
     src/jmap/sync/PendingActions.cpp
@@ -265,6 +267,8 @@ add_library(javelin_jmap STATIC
     src/jmap/sync/LongPollMailboxObserver.h
     src/jmap/sync/MailboxRefreshExecutor.cpp
     src/jmap/sync/MailboxRefreshExecutor.h
+    src/jmap/sync/MailboxStateRefreshExecutor.cpp
+    src/jmap/sync/MailboxStateRefreshExecutor.h
     src/jmap/sync/MailboxQueryDescriptor.cpp
     src/jmap/sync/MailboxQueryDescriptor.h
     src/jmap/sync/PendingActions.cpp

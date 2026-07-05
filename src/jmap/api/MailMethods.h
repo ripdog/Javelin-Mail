@@ -308,6 +308,10 @@ namespace javelin::jmap::api
         std::vector<std::string> destroyed;
     };
 
+    struct MailboxChangesResponse : ChangesResponse
+    {
+    };
+
     struct EmailChangesResponse
     {
         std::string accountId;
@@ -346,6 +350,8 @@ namespace javelin::jmap::api
     [[nodiscard]] ParsedEnvelope<EmailSubmissionSetResponse>
     parseEmailSubmissionSetResponse(std::string_view json);
     [[nodiscard]] ParsedEnvelope<ChangesResponse> parseChangesResponse(std::string_view json);
+    [[nodiscard]] ParsedEnvelope<MailboxChangesResponse>
+    parseMailboxChangesResponse(std::string_view json);
     [[nodiscard]] ParsedEnvelope<EmailChangesResponse>
     parseEmailChangesResponse(std::string_view json);
 
@@ -361,6 +367,8 @@ namespace javelin::jmap::api
     emailQuery(const EmailQueryRequest& request);
     [[nodiscard]] std::optional<MethodRequest<EmailQueryChangesResponse>>
     emailQueryChanges(const EmailQueryChangesRequest& request);
+    [[nodiscard]] std::optional<MethodRequest<MailboxChangesResponse>>
+    mailboxChanges(const ChangesRequest& request);
     [[nodiscard]] std::optional<MethodRequest<EmailChangesResponse>>
     emailChanges(const ChangesRequest& request);
     [[nodiscard]] std::optional<MethodRequest<EmailContentGetResponse>>
@@ -469,6 +477,16 @@ namespace javelin::jmap::api
         [[nodiscard]] static ParsedEnvelope<EmailChangesResponse> parse(std::string_view json)
         {
             return parseEmailChangesResponse(json);
+        }
+    };
+
+    template <> struct MethodResponseTraits<MailboxChangesResponse>
+    {
+        static constexpr std::string_view methodName = "Mailbox/changes";
+
+        [[nodiscard]] static ParsedEnvelope<MailboxChangesResponse> parse(std::string_view json)
+        {
+            return parseMailboxChangesResponse(json);
         }
     };
 

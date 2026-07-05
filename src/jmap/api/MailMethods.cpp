@@ -1370,6 +1370,34 @@ namespace javelin::jmap::api
         };
     }
 
+    ParsedEnvelope<MailboxChangesResponse> parseMailboxChangesResponse(std::string_view json)
+    {
+        const auto parsed = parseChangesResponse(json);
+        if (!parsed.ok() || !parsed.value.has_value())
+        {
+            return {
+                .value = std::nullopt,
+                .error = parsed.error,
+            };
+        }
+
+        return {
+            .value =
+                MailboxChangesResponse{
+                    ChangesResponse{
+                        .accountId = std::move(parsed.value->accountId),
+                        .oldState = std::move(parsed.value->oldState),
+                        .newState = std::move(parsed.value->newState),
+                        .hasMoreChanges = parsed.value->hasMoreChanges,
+                        .created = std::move(parsed.value->created),
+                        .updated = std::move(parsed.value->updated),
+                        .destroyed = std::move(parsed.value->destroyed),
+                    },
+                },
+            .error = std::nullopt,
+        };
+    }
+
     std::optional<MethodRequest<IdentityGetResponse>> identityGet(const GetRequest& request)
     {
         const auto arguments = serializeGetRequest(request);
@@ -1465,6 +1493,21 @@ namespace javelin::jmap::api
 
         return MethodRequest<EmailChangesResponse>{
             .name = "Email/changes",
+            .arguments = *arguments,
+        };
+    }
+
+    std::optional<MethodRequest<MailboxChangesResponse>>
+    mailboxChanges(const ChangesRequest& request)
+    {
+        const auto arguments = serializeChangesRequest(request);
+        if (!arguments.has_value())
+        {
+            return std::nullopt;
+        }
+
+        return MethodRequest<MailboxChangesResponse>{
+            .name = "Mailbox/changes",
             .arguments = *arguments,
         };
     }
