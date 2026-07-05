@@ -286,3 +286,33 @@ TEST_CASE("email repository lists mailbox email ids", "[jmap][cache][repository]
     CHECK(std::get<std::vector<std::string>>(result) ==
           std::vector<std::string>{"eml-both", "eml-inbox"});
 }
+
+TEST_CASE("email repository removes mailbox membership without deleting email",
+          "[jmap][cache][repository]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    javelin::jmap::cache::EmailRepository repository{databaseContext.connection};
+
+    auto email = loadEmailFixture();
+    email.id = "eml-both";
+    email.mailboxIds = {"mbx-inbox", "mbx-archive"};
+
+    REQUIRE_FALSE(repository.replaceAll("account-1", {email}).has_value());
+
+    const std::vector<std::string> emailIds{"eml-both"};
+    REQUIRE_FALSE(repository.removeFromMailbox("account-1", "mbx-inbox", emailIds).has_value());
+
+    const auto inboxResult = repository.listMailboxEmailIds("account-1", "mbx-inbox");
+    REQUIRE(std::holds_alternative<std::vector<std::string>>(inboxResult));
+    CHECK(std::get<std::vector<std::string>>(inboxResult).empty());
+
+    const auto loadedResult = repository.find("account-1", "eml-both");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(loadedResult));
+    const auto& loaded = std::get<std::optional<javelin::jmap::domain::Email>>(loadedResult);
+    REQUIRE(loaded.has_value());
+    CHECK(loaded->mailboxIds == std::vector<std::string>{"mbx-archive"});
+}

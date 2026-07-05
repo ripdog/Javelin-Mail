@@ -559,6 +559,64 @@ namespace javelin::jmap::cache
         return std::nullopt;
     }
 
+    std::optional<DatabaseError>
+    EmailRepository::removeFromMailbox(const std::string_view accountId,
+                                       const std::string_view mailboxId,
+                                       const std::span<const std::string> emailIds)
+    {
+        if (const auto error = m_connection.validate())
+        {
+            return error;
+        }
+
+        if (emailIds.empty())
+        {
+            return std::nullopt;
+        }
+
+        QSqlDatabase& database = m_connection.database();
+        if (!database.transaction())
+        {
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message = QStringLiteral("Begin email mailbox removal transaction: ") +
+                           database.lastError().text(),
+            };
+        }
+
+        QSqlQuery deleteQuery{database};
+        deleteQuery.prepare(QStringLiteral(
+            "DELETE FROM email_mailboxes "
+            "WHERE account_id = :account_id AND mailbox_id = :mailbox_id AND email_id = "
+            ":email_id"));
+
+        for (const auto& emailId : emailIds)
+        {
+            deleteQuery.bindValue(QStringLiteral(":account_id"),
+                                  QString::fromStdString(std::string{accountId}));
+            deleteQuery.bindValue(QStringLiteral(":mailbox_id"),
+                                  QString::fromStdString(std::string{mailboxId}));
+            deleteQuery.bindValue(QStringLiteral(":email_id"), QString::fromStdString(emailId));
+            if (!deleteQuery.exec())
+            {
+                database.rollback();
+                return makeQueryError(QStringLiteral("Remove email from mailbox"), deleteQuery);
+            }
+        }
+
+        if (!database.commit())
+        {
+            database.rollback();
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message = QStringLiteral("Commit email mailbox removal transaction: ") +
+                           database.lastError().text(),
+            };
+        }
+
+        return std::nullopt;
+    }
+
     std::variant<std::optional<javelin::jmap::domain::Email>, DatabaseError>
     EmailRepository::find(const std::string_view accountId, const std::string_view emailId) const
     {

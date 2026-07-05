@@ -12,6 +12,7 @@
 #include "jmap/sync/SyncPlanner.h"
 
 #include <QString>
+#include <algorithm>
 #include <unordered_set>
 
 namespace javelin::jmap::sync
@@ -103,6 +104,24 @@ namespace javelin::jmap::sync
             }
 
             return deduplicated;
+        }
+
+        [[nodiscard]] std::vector<std::string>
+        fetchedMailboxEmailIds(const std::vector<javelin::jmap::domain::Email>& emails,
+                               const std::string_view mailboxId)
+        {
+            std::vector<std::string> emailIds;
+            emailIds.reserve(emails.size());
+            for (const auto& email : emails)
+            {
+                if (std::ranges::find(email.mailboxIds, std::string{mailboxId}) !=
+                    email.mailboxIds.end())
+                {
+                    emailIds.push_back(email.id);
+                }
+            }
+
+            return deduplicatedIds(std::move(emailIds));
         }
 
         [[nodiscard]] std::variant<std::vector<std::string>, MailboxRefreshError>
@@ -819,13 +838,16 @@ namespace javelin::jmap::sync
                 co_return MailboxRefreshError{.message = error->message};
             }
 
+            const auto currentFetchedMailboxEmailIds =
+                fetchedMailboxEmailIds(fetch.emails, mailboxId);
+
             javelin::jmap::cache::ThreadRepository threadRepository{m_databaseConnection};
-            if (const auto error = threadRepository.replaceAll(accountId, fetch.threads))
+            if (const auto error = threadRepository.upsertMany(accountId, fetch.threads))
             {
                 co_return MailboxRefreshError{.message = error->message};
             }
 
-            if (const auto error = emailRepository.replaceAll(accountId, fetch.emails))
+            if (const auto error = emailRepository.upsertMany(accountId, fetch.emails))
             {
                 co_return MailboxRefreshError{.message = error->message};
             }
@@ -855,25 +877,16 @@ namespace javelin::jmap::sync
                 QStringLiteral("Cached %1 threaded conversations for the selected mailbox.")
                     .arg(representativeCount));
 
-            if (previousMailboxEmailIds.has_value() && !previousMailboxEmailIds->empty())
+            if (previousMailboxEmailIds.has_value())
             {
-                const auto currentIdsResult =
-                    mailboxEmailIds(m_databaseConnection, accountId, mailboxId);
-                if (const auto* error = std::get_if<MailboxRefreshError>(&currentIdsResult))
-                {
-                    co_return *error;
-                }
-
-                const auto currentMailboxEmailIds =
-                    std::get<std::vector<std::string>>(std::move(currentIdsResult));
                 std::unordered_set<std::string> previousIdsSet(previousMailboxEmailIds->begin(),
                                                                previousMailboxEmailIds->end());
-                std::unordered_set<std::string> currentIdsSet(currentMailboxEmailIds.begin(),
-                                                              currentMailboxEmailIds.end());
+                std::unordered_set<std::string> currentIdsSet(currentFetchedMailboxEmailIds.begin(),
+                                                              currentFetchedMailboxEmailIds.end());
 
                 std::vector<std::string> insertedAfterFullFetch;
-                insertedAfterFullFetch.reserve(currentMailboxEmailIds.size());
-                for (const auto& emailId : currentMailboxEmailIds)
+                insertedAfterFullFetch.reserve(currentFetchedMailboxEmailIds.size());
+                for (const auto& emailId : currentFetchedMailboxEmailIds)
                 {
                     if (!previousIdsSet.contains(emailId))
                     {
@@ -901,8 +914,14 @@ namespace javelin::jmap::sync
 
                 if (!removedAfterFullFetch.empty())
                 {
+                    const auto removedMailboxEmailIds = removedAfterFullFetch;
                     removedAfterFullFetch.insert(removedAfterFullFetch.end(),
                                                  removedEmailIds.begin(), removedEmailIds.end());
+                    if (const auto error = emailRepository.removeFromMailbox(
+                            accountId, mailboxId, removedMailboxEmailIds))
+                    {
+                        co_return MailboxRefreshError{.message = error->message};
+                    }
                     removedEmailIds = deduplicatedIds(std::move(removedAfterFullFetch));
                 }
             }
