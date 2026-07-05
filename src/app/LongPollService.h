@@ -89,10 +89,12 @@ namespace javelin::app
         [[nodiscard]] std::optional<RunConfiguration> resolveConfiguration() const;
         [[nodiscard]] QCoro::Task<void> runLoop(std::shared_ptr<RunContext> runContext);
         [[nodiscard]] QCoro::Task<void> refreshWatchedMailbox();
+        [[nodiscard]] QCoro::Task<void>
+        refreshWatchedMailboxOnce(std::shared_ptr<RunContext> runContext);
         void restart();
         void setStatus(Status status);
         void publishNotifications(
-            std::string_view mailboxName,
+            const RunContext& runContext, std::string_view mailboxName,
             const std::vector<javelin::jmap::sync::RefreshNotificationCandidate>& candidates);
 
         javelin::jmap::cache::DatabaseConnection& m_databaseConnection;
@@ -108,6 +110,8 @@ namespace javelin::app
         std::size_t m_generation = 0;
         Status m_status = Status::Disconnected;
         bool m_shouldCatchUpRefreshOnReconnect = false;
+        bool m_refreshInFlight = false;
+        bool m_refreshAgainRequested = false;
     };
 
 } // namespace javelin::app
