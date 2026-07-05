@@ -615,6 +615,26 @@ namespace javelin::jmap::sync
             }
 
             const auto& existingIds = std::get<std::vector<std::string>>(existingIdsResult);
+            std::unordered_set<std::string> existingIdSet(existingIds.begin(), existingIds.end());
+            const auto updatedIds = deduplicatedIds(emailChanges.updated);
+            const bool hasMissingUpdatedIds =
+                std::ranges::any_of(updatedIds, [&existingIdSet](const auto& emailId)
+                                    { return !existingIdSet.contains(emailId); });
+            if (hasMissingUpdatedIds)
+            {
+                co_return IncrementalCollapsedMailboxRefresh{
+                    .requiresFullFetch = true,
+                    .queryState = {},
+                    .emailState = {},
+                    .updatedEmails = {},
+                    .representativeCount = 0,
+                    .changedEmailIds = emailChanges.updated,
+                    .insertedEmailIds = {},
+                    .removedEmailIds = {},
+                    .requiresNotificationScan = false,
+                };
+            }
+
             if (existingIds.empty())
             {
                 co_return IncrementalCollapsedMailboxRefresh{

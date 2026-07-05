@@ -512,6 +512,127 @@ TEST_CASE("mailbox refresh executor applies updated-only deltas without full reb
           std::optional<std::string>{"Quarterly update v2"});
 }
 
+TEST_CASE("mailbox refresh executor rebuilds window when updated delta is missing locally",
+          "[jmap][sync][refresh]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+
+    javelin::jmap::cache::SyncStateRepository syncStateRepository{databaseContext.connection};
+    REQUIRE_FALSE(syncStateRepository
+                      .upsert({.accountId = "account-1",
+                               .objectType = "EmailQuery",
+                               .queryKey = mailboxQueryKey()},
+                              "query-state-1")
+                      .has_value());
+    REQUIRE_FALSE(syncStateRepository
+                      .upsert({.accountId = "account-1", .objectType = "Email", .queryKey = {}},
+                              "email-state-1")
+                      .has_value());
+
+    FakeTransport transport;
+    transport.queuedResults
+        .push_back(javelin::jmap::api::
+                       HttpResponse{
+                           .statusCode = 200,
+                           .body =
+                               QByteArray::fromStdString(
+                                   serializeResponseEnvelope(
+                                       {
+                                           .methodResponses =
+                                               {
+                                                   javelin::jmap::api::MethodInvocation{
+                                                       .name = "Email/queryChanges",
+                                                       .arguments =
+                                                           R"({"accountId":"account-1","oldQueryState":"query-state-1","newQueryState":"query-state-2","added":[],"removed":[],"hasMoreChanges":false})",
+                                                       .callId = "mailbox-query-changes",
+                                                   },
+                                                   javelin::
+                                                       jmap::api::MethodInvocation{
+                                                           .name = "Email/changes",
+                                                           .arguments =
+                                                               R"({"accountId":"account-1","oldState":"email-state-1","newState":"email-state-2","hasMoreChanges":false,"created":[],"updated":["eml-1"],"destroyed":[]})",
+                                                           .callId = "email-changes",
+                                                       },
+                                               },
+                                           .createdIds = std::nullopt,
+                                           .sessionState = "session-state-2",
+                                       })),
+                       });
+    transport
+        .queuedResults.push_back(javelin::jmap::
+                                     api::
+                                         HttpResponse{
+                                             .statusCode = 200,
+                                             .body =
+                                                 QByteArray::fromStdString(
+                                                     serializeResponseEnvelope(
+                                                         {
+                                                             .methodResponses =
+                                                                 {
+                                                                     javelin::jmap::api::
+                                                                         MethodInvocation{
+                                                                             .name = "Email/query",
+                                                                             .arguments =
+                                                                                 R"({"accountId":"account-1","queryState":"query-state-2","canCalculateChanges":true,"position":0,"ids":["eml-1"],"total":1})",
+                                                                             .callId =
+                                                                                 "mailbox-query",
+                                                                         },
+                                                                     javelin::
+                                                                         jmap::api::MethodInvocation{
+                                                                             .name = "Email/get",
+                                                                             .arguments =
+                                                                                 emailGetArguments("email-state-2",
+                                                                                                   javelin::tests::loadFixture("jmap/entities/email.json")),
+                                                                             .callId =
+                                                                                 "thread-ids-get",
+                                                                         },
+                                                                     javelin::jmap::
+                                                                         api::MethodInvocation{
+                                                                             .name = "Thread/get",
+                                                                             .arguments =
+                                                                                 R"({"accountId":"account-1","state":"thread-state-2","list":[{"id":"thr-123","emailIds":["eml-1"]}],"notFound":[]})",
+                                                                             .callId =
+                                                                                 "threads-get",
+                                                                         },
+                                                                     javelin::jmap::
+                                                                         api::MethodInvocation{
+                                                                             .name = "Email/get",
+                                                                             .arguments = emailGetArguments("email-state-2",
+                                                                                                            javelin::
+                                                                                                                tests::loadFixture(
+                                                                                                                    "jmap/entities/email.json")),
+                                                                             .callId = "mailbox-"
+                                                                                       "emails-get",
+                                                                         },
+                                                                 },
+                                                             .createdIds = std::nullopt,
+                                                             .sessionState = "session-state-2",
+                                                         })),
+                                         });
+
+    javelin::jmap::api::MethodCaller methodCaller{transport};
+    javelin::jmap::sync::MailboxRefreshExecutor executor{databaseContext.connection, methodCaller,
+                                                         makeRequestContext()};
+    const auto result =
+        QCoro::waitFor(executor.refreshCollapsedMailbox("account-1", "mbx-inbox", {}));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailboxRefreshSummary>(result));
+    const auto& summary = std::get<javelin::jmap::sync::MailboxRefreshSummary>(result);
+    CHECK_FALSE(summary.usedIncrementalRefresh);
+    CHECK(summary.changedEmailIds == std::vector<std::string>{"eml-1"});
+    CHECK(summary.insertedEmailIds == std::vector<std::string>{"eml-1"});
+    REQUIRE(transport.requests.size() == 2);
+
+    javelin::jmap::cache::EmailRepository emailRepository{databaseContext.connection};
+    const auto emailResult = emailRepository.find("account-1", "eml-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(emailResult));
+    REQUIRE(std::get<std::optional<javelin::jmap::domain::Email>>(emailResult).has_value());
+}
+
 TEST_CASE("mailbox refresh executor preserves change hints when delta falls back to full fetch",
           "[jmap][sync][refresh]")
 {
@@ -696,74 +817,64 @@ TEST_CASE("mailbox refresh executor derives inserted email ids from full fetch f
                                            .sessionState = "session-state-2",
                                        })),
                        });
-    transport
-        .queuedResults.push_back(javelin::
-                                     jmap::
-                                         api::
-                                             HttpResponse{
-                                                 .statusCode = 200,
-                                                 .body =
-                                                     QByteArray::fromStdString(
-                                                         serializeResponseEnvelope(
-                                                             {
-                                                                 .methodResponses =
-                                                                     {
-                                                                         javelin::jmap::api::
-                                                                             MethodInvocation{
-                                                                                 .name =
-                                                                                     "Email/query",
-                                                                                 .arguments =
-                                                                                     R"({"accountId":"account-1","queryState":"query-state-2","canCalculateChanges":true,"position":0,"ids":["eml-2"],"total":1})",
-                                                                                 .callId = "mailbox"
-                                                                                           "-query",
-                                                                             },
-                                                                         javelin::
-                                                                             jmap::
-                                                                                 api::MethodInvocation{
-                                                                                     .name = "Email"
-                                                                                             "/get",
-                                                                                     .arguments =
-                                                                                         emailGetArguments(
-                                                                                             "email"
-                                                                                             "-stat"
-                                                                                             "e-2",
-                                                                                             {newRepresentativeEmailFixture()}),
-                                                                                     .callId =
-                                                                                         "thread-"
-                                                                                         "ids-get",
-                                                                                 },
-                                                                         javelin::
-                                                                             jmap::api::MethodInvocation{
-                                                                                 .name =
-                                                                                     "Thread/get",
-                                                                                 .arguments =
-                                                                                     R"({"accountId":"account-1","state":"thread-state-2","list":[{"id":"thr-123","emailIds":["eml-2","eml-1"]}],"notFound":[]})",
-                                                                                 .callId =
-                                                                                     "threads-get",
-                                                                             },
-                                                                         javelin::
-                                                                             jmap::api::
-                                                                                 MethodInvocation{
-                                                                                     .name = "Email"
-                                                                                             "/get",
-                                                                                     .arguments =
-                                                                                         emailGetArguments(
-                                                                                             "email"
-                                                                                             "-stat"
-                                                                                             "e-2",
-                                                                                             {javelin::tests::loadFixture(
-                                                                                                  "jmap/entities/email.json"),
-                                                                                              newRepresentativeEmailFixture()}),
-                                                                                     .callId =
-                                                                                         "mailbox-"
-                                                                                         "emails-"
-                                                                                         "get",
-                                                                                 },
-                                                                     },
-                                                                 .createdIds = std::nullopt,
-                                                                 .sessionState = "session-state-2",
-                                                             })),
-                                             });
+    transport.queuedResults
+        .push_back(javelin::jmap::api::
+                       HttpResponse{
+                           .statusCode = 200,
+                           .body =
+                               QByteArray::fromStdString(
+                                   serializeResponseEnvelope(
+                                       {
+                                           .methodResponses =
+                                               {
+                                                   javelin::jmap::api::MethodInvocation{
+                                                       .name = "Email/query",
+                                                       .arguments =
+                                                           R"({"accountId":"account-1","queryState":"query-state-2","canCalculateChanges":true,"position":0,"ids":["eml-2"],"total":1})",
+                                                       .callId = "mailbox"
+                                                                 "-query",
+                                                   },
+                                                   javelin::
+                                                       jmap::api::MethodInvocation{
+                                                           .name = "Email"
+                                                                   "/get",
+                                                           .arguments =
+                                                               emailGetArguments("email"
+                                                                                 "-stat"
+                                                                                 "e-2",
+                                                                                 {newRepresentativeEmailFixture()}),
+                                                           .callId = "thread-"
+                                                                     "ids-get",
+                                                       },
+                                                   javelin::
+                                                       jmap::
+                                                           api::MethodInvocation{
+                                                               .name = "Thread/get",
+                                                               .arguments =
+                                                                   R"({"accountId":"account-1","state":"thread-state-2","list":[{"id":"thr-123","emailIds":["eml-2","eml-1"]}],"notFound":[]})",
+                                                               .callId = "threads-get",
+                                                           },
+                                                   javelin::
+                                                       jmap::
+                                                           api::MethodInvocation{
+                                                               .name = "Email"
+                                                                       "/get",
+                                                               .arguments =
+                                                                   emailGetArguments("email"
+                                                                                     "-stat"
+                                                                                     "e-2",
+                                                                                     {javelin::
+                                                                                          tests::loadFixture("jmap/entities/email.json"),
+                                                                                      newRepresentativeEmailFixture()}),
+                                                               .callId = "mailbox-"
+                                                                         "emails-"
+                                                                         "get",
+                                                           },
+                                               },
+                                           .createdIds = std::nullopt,
+                                           .sessionState = "session-state-2",
+                                       })),
+                       });
 
     javelin::jmap::api::MethodCaller methodCaller{transport};
     javelin::jmap::sync::MailboxRefreshExecutor executor{databaseContext.connection, methodCaller,
