@@ -230,10 +230,20 @@ namespace javelin::jmap::submission
         [[nodiscard]] std::string buildReplyHtml(const javelin::jmap::domain::Email& email,
                                                  const std::string_view htmlBody)
         {
-            return QStringLiteral("<p><br/></p><p>On %1, %2 wrote:</p><blockquote>%3</blockquote>")
-                .arg(QString::fromStdString(email.sentAt.value_or(email.receivedAt)),
-                     QString::fromStdString(joinAddresses(email.from)),
-                     QString::fromStdString(std::string{htmlBody}))
+            const auto sentAt =
+                QString::fromStdString(email.sentAt.value_or(email.receivedAt)).toHtmlEscaped();
+            const auto from = QString::fromStdString(joinAddresses(email.from)).toHtmlEscaped();
+            const auto cite =
+                email.messageId.empty()
+                    ? QString{}
+                    : QStringLiteral(" cite=\"%1\"")
+                          .arg(QStringLiteral("mid:%1")
+                                   .arg(QString::fromStdString(email.messageId.front()))
+                                   .toHtmlEscaped());
+            return QStringLiteral(
+                       "<p><br/></p><div class=\"moz-cite-prefix\">On %1, %2 "
+                       "wrote:<br/></div><blockquote type=\"cite\"%3>%4</blockquote>")
+                .arg(sentAt, from, cite, QString::fromStdString(std::string{htmlBody}))
                 .toStdString();
         }
 
@@ -311,6 +321,27 @@ namespace javelin::jmap::submission
                 .arg(QString::fromStdString(
                     escapeHtml(QString::fromStdString(std::string{plainText}))))
                 .toStdString();
+        }
+
+        [[nodiscard]] std::vector<DraftAttachment> draftAttachmentsFromMessage(
+            const std::vector<javelin::jmap::cache::MessageAttachment>& attachments)
+        {
+            std::vector<DraftAttachment> draftAttachments;
+            draftAttachments.reserve(attachments.size());
+            for (const auto& attachment : attachments)
+            {
+                draftAttachments.push_back(DraftAttachment{
+                    .localFilePath = {},
+                    .displayName = attachment.name.value_or(std::string{}),
+                    .mediaType = attachment.mediaType,
+                    .size = attachment.size,
+                    .blobId = attachment.blobId,
+                    .inlineDisposition =
+                        attachment.disposition == std::optional<std::string>{std::string{"inline"}},
+                    .contentId = attachment.cid,
+                });
+            }
+            return draftAttachments;
         }
 
         [[nodiscard]] std::optional<javelin::jmap::domain::Identity> chooseDefaultIdentity(
@@ -881,6 +912,7 @@ namespace javelin::jmap::submission
                 trimSubjectPrefix(messageSnapshot->email.subject.value_or(std::string{}), "Fwd:");
             snapshot.plainTextBody = buildForwardPlainText(messageSnapshot->email, plainBody);
             snapshot.htmlBody = buildForwardHtml(messageSnapshot->email, htmlBody);
+            snapshot.attachments = draftAttachmentsFromMessage(messageSnapshot->attachments);
             break;
         case ComposeMode::EditDraft:
             snapshot.draftEmailId = sourceEmailId;
@@ -894,19 +926,7 @@ namespace javelin::jmap::submission
             snapshot.threading.messageId = messageSnapshot->email.messageId;
             snapshot.threading.inReplyTo = messageSnapshot->email.inReplyTo;
             snapshot.threading.references = messageSnapshot->email.references;
-            for (const auto& attachment : messageSnapshot->attachments)
-            {
-                snapshot.attachments.push_back(DraftAttachment{
-                    .localFilePath = {},
-                    .displayName = attachment.name.value_or(std::string{}),
-                    .mediaType = attachment.mediaType,
-                    .size = attachment.size,
-                    .blobId = attachment.blobId,
-                    .inlineDisposition =
-                        attachment.disposition == std::optional<std::string>{std::string{"inline"}},
-                    .contentId = attachment.cid,
-                });
-            }
+            snapshot.attachments = draftAttachmentsFromMessage(messageSnapshot->attachments);
             break;
         case ComposeMode::NewMessage:
             break;
