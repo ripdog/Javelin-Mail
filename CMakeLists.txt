@@ -7,6 +7,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(JAVELIN_ENABLE_LOCAL_DATA_INSTALL "Copy app data into the active install prefix during builds" ON)
+option(JAVELIN_ENABLE_FASTTEXT_LANGUAGE_DETECTION "Use fastText for local mail language detection" ON)
 
 include(cmake/Warnings.cmake)
 include(cmake/Dependencies.cmake)
@@ -159,6 +160,10 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/auth/Auth.h
     src/jmap/JmapCore.cpp
     src/jmap/JmapCore.h
+    src/jmap/language/FastTextLanguageDetector.cpp
+    src/jmap/language/FastTextLanguageDetector.h
+    src/jmap/language/LanguageDetection.cpp
+    src/jmap/language/LanguageDetection.h
     src/jmap/submission/ComposeService.cpp
     src/jmap/submission/ComposeService.h
     src/jmap/submission/ComposeTypes.h
@@ -281,6 +286,10 @@ add_library(javelin_jmap STATIC
     src/jmap/auth/Auth.h
     src/jmap/JmapCore.cpp
     src/jmap/JmapCore.h
+    src/jmap/language/FastTextLanguageDetector.cpp
+    src/jmap/language/FastTextLanguageDetector.h
+    src/jmap/language/LanguageDetection.cpp
+    src/jmap/language/LanguageDetection.h
     src/jmap/submission/ComposeService.cpp
     src/jmap/submission/ComposeService.h
     src/jmap/submission/ComposeTypes.h
@@ -292,6 +301,7 @@ target_link_libraries(javelin_jmap
     PUBLIC
         QCoro6::Coro
         Qt::Core
+        Qt::Gui
         Qt::Network
         Qt::Sql
         Qt::WebEngineCore
@@ -300,6 +310,15 @@ target_link_libraries(javelin_jmap
         QCoro6::Network
         glaze::glaze
 )
+if(JAVELIN_ENABLE_FASTTEXT_LANGUAGE_DETECTION)
+    target_link_libraries(javelin_jmap PRIVATE fasttext_javelin)
+    target_compile_definitions(javelin_jmap
+        PUBLIC
+            JAVELIN_ENABLE_FASTTEXT_LANGUAGE_DETECTION=1
+            JAVELIN_FASTTEXT_LANGUAGE_MODEL_PATH="${CMAKE_INSTALL_PREFIX}/${KDE_INSTALL_DATADIR}/javelinmail/models/fasttext/lid.176.ftz"
+    )
+    target_compile_options(javelin_jmap PRIVATE -fexceptions)
+endif()
 javelin_set_project_warnings(javelin_jmap)
 javelin_enable_static_analysis(javelin_jmap)
 javelin_enable_sanitizers(javelin_jmap)
@@ -442,8 +461,17 @@ if(JAVELIN_ENABLE_LOCAL_DATA_INSTALL)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${PROJECT_SOURCE_DIR}/res/javelinmailui.rc"
             "${_local_kxmlgui_dir}/javelinmailui.rc"
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "${CMAKE_INSTALL_PREFIX}/${KDE_INSTALL_DATADIR}/javelinmail/models/fasttext"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${PROJECT_SOURCE_DIR}/res/models/fasttext"
+            "${CMAKE_INSTALL_PREFIX}/${KDE_INSTALL_DATADIR}/javelinmail/models/fasttext"
         COMMAND ${CMAKE_COMMAND} -E touch "${_install_data_stamp}"
-        DEPENDS "${PROJECT_SOURCE_DIR}/res/javelinmailui.rc"
+        DEPENDS
+            "${PROJECT_SOURCE_DIR}/res/javelinmailui.rc"
+            "${PROJECT_SOURCE_DIR}/res/models/fasttext/LICENSE"
+            "${PROJECT_SOURCE_DIR}/res/models/fasttext/lid.176.ftz"
+            "${PROJECT_SOURCE_DIR}/res/models/fasttext/README.md"
         COMMENT "Installing data files to local prefix"
         VERBATIM
     )
@@ -464,6 +492,7 @@ target_compile_definitions(Javelin-Mail
     PRIVATE
         JAVELIN_APP_VERSION="${PROJECT_VERSION}"
         JAVELIN_DATA_DIR="${CMAKE_INSTALL_PREFIX}/${KDE_INSTALL_DATADIR}"
+        JAVELIN_FASTTEXT_LANGUAGE_MODEL_PATH="${CMAKE_INSTALL_PREFIX}/${KDE_INSTALL_DATADIR}/javelinmail/models/fasttext/lid.176.ftz"
 )
 if(JAVELIN_ENABLE_LOCAL_DATA_INSTALL)
     add_dependencies(Javelin-Mail install_data)
@@ -488,6 +517,10 @@ install(TARGETS Javelin-Mail
 
 install(FILES res/javelinmailui.rc
     DESTINATION ${KDE_INSTALL_KXMLGUIDIR}/javelinmail
+)
+
+install(DIRECTORY res/models/fasttext/
+    DESTINATION ${KDE_INSTALL_DATADIR}/javelinmail/models/fasttext
 )
 
 install(FILES res/javelinmail.desktop

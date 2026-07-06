@@ -11,6 +11,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLocale>
+#include <QLoggingCategory>
 #include <QMenu>
 #include <QMimeDatabase>
 #include <QMouseEvent>
@@ -31,6 +32,8 @@
 
 namespace javelin::gui::messageview
 {
+    Q_LOGGING_CATEGORY(messageViewLog, "javelin.gui.messageview")
+
     namespace
     {
         constexpr auto remoteContentGroup = "remoteContent";
@@ -118,6 +121,13 @@ namespace javelin::gui::messageview
             }
 
             return QLocale{}.toString(dateTime.toLocalTime(), QLocale::ShortFormat);
+        }
+
+        [[nodiscard]] QString languageName(const std::string& languageCode)
+        {
+            const auto locale = QLocale{QString::fromStdString(languageCode)};
+            const auto name = QLocale::languageToString(locale.language());
+            return name == QStringLiteral("C") ? QString::fromStdString(languageCode) : name;
         }
 
         void makeLabelSelectable(QLabel* label)
@@ -479,6 +489,29 @@ namespace javelin::gui::messageview
         buttonLayout->addWidget(m_permitDomainRemoteContentButton);
         buttonLayout->addWidget(m_remoteContentButton);
 
+        m_languageBannerWidget = new QWidget(this);
+        auto* languageLayout = new QHBoxLayout(m_languageBannerWidget);
+        languageLayout->setContentsMargins(8, 6, 8, 6);
+        languageLayout->setSpacing(8);
+        m_languageBannerWidget->setStyleSheet(QStringLiteral(
+            "QWidget { background: #243044; border: 1px solid #3f5373; border-radius: 6px; }"
+            "QLabel { border: 0; background: transparent; }"
+            "QToolButton { border: 1px solid #60789f; border-radius: 4px; padding: 4px 8px; }"));
+
+        m_languageStatusLabel = new QLabel(m_languageBannerWidget);
+        m_languageStatusLabel->setWordWrap(true);
+        makeLabelSelectable(m_languageStatusLabel);
+
+        m_translateButton = new QToolButton(m_languageBannerWidget);
+        m_translateButton->setText(QStringLiteral("Translate"));
+        m_translateButton->setEnabled(false);
+        m_translateButton->setToolTip(
+            QStringLiteral("Translation provider support has not been implemented yet."));
+
+        languageLayout->addWidget(m_languageStatusLabel, 1);
+        languageLayout->addWidget(m_translateButton);
+        m_languageBannerWidget->setVisible(false);
+
         m_bodyStack = new QStackedWidget(this);
         m_bodyStack->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
@@ -613,6 +646,7 @@ namespace javelin::gui::messageview
 
         layout->addWidget(headerWidget);
         layout->addWidget(m_bodyControlsWidget);
+        layout->addWidget(m_languageBannerWidget);
         layout->addWidget(m_bodyStack, 1);
         layout->addWidget(m_attachmentHeaderWidget);
         layout->addWidget(m_attachmentListWidget);
@@ -694,6 +728,7 @@ namespace javelin::gui::messageview
         m_activeView = view;
         updateSenderRemoteContentPermit();
         updateRemoteContentButton();
+        updateLanguageBanner();
 
         switch (m_activeView)
         {
@@ -806,6 +841,30 @@ namespace javelin::gui::messageview
                                            : QStringLiteral("Load remote content"));
     }
 
+    void MessageViewContainer::updateLanguageBanner()
+    {
+        const bool shouldShow =
+            m_snapshot.has_value() && m_snapshot->languageDetection.has_value() &&
+            m_snapshot->shouldOfferTranslation &&
+            (m_activeView == ActiveView::PlainText || m_activeView == ActiveView::Html);
+        m_languageBannerWidget->setVisible(shouldShow);
+        if (!shouldShow)
+        {
+            m_languageStatusLabel->clear();
+            return;
+        }
+
+        const auto& detection = *m_snapshot->languageDetection;
+        qCInfo(messageViewLog) << "Detected message language"
+                               << QString::fromStdString(detection.languageCode) << "confidence"
+                               << detection.confidence << "englishConfidence"
+                               << detection.englishConfidence << "offerTranslation"
+                               << m_snapshot->shouldOfferTranslation;
+        m_languageStatusLabel->setText(
+            QStringLiteral("This message appears to be in %1. Translation is not wired up yet.")
+                .arg(languageName(detection.languageCode)));
+    }
+
     void MessageViewContainer::updatePresentation(const bool reloadBody)
     {
         if (reloadBody)
@@ -818,6 +877,7 @@ namespace javelin::gui::messageview
         rebuildMultipleSelectionRows();
         updateAttachmentSection();
         updateRemoteContentButton();
+        updateLanguageBanner();
         m_loadingIndicator->setVisible(false);
 
         if (!m_accountId.has_value())

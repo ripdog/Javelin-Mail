@@ -2,6 +2,7 @@
 
 #include "jmap/cache/Database.h"
 #include "jmap/domain/MailEntities.h"
+#include "jmap/language/LanguageDetection.h"
 #include "jmap/render/HtmlMessageDocumentBuilder.h"
 
 #include <cstdint>
@@ -46,6 +47,8 @@ namespace javelin::jmap::cache
         std::optional<MessageBody> plainTextBody;
         std::optional<MessageBody> htmlBody;
         std::optional<javelin::jmap::render::HtmlRenderDocument> htmlRenderDocument;
+        std::optional<javelin::jmap::language::LanguageDetectionResult> languageDetection;
+        bool shouldOfferTranslation = false;
         std::vector<MessageAttachment> attachments;
     };
 
@@ -53,12 +56,14 @@ namespace javelin::jmap::cache
     {
       public:
         explicit MessageViewService(DatabaseConnection& connection);
+        MessageViewService(DatabaseConnection& connection, std::string languageModelPath);
 
         [[nodiscard]] std::variant<std::optional<MessageViewSnapshot>, DatabaseError>
         load(std::string_view accountId, std::string_view emailId) const;
 
       private:
         DatabaseConnection& m_connection;
+        mutable javelin::jmap::language::LanguageDetectionService m_languageDetectionService;
     };
 
 } // namespace javelin::jmap::cache

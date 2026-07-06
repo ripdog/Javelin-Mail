@@ -1,0 +1,11 @@
+The fastText language identification models are distributed by Facebook Research
+under the Creative Commons Attribution-Share-Alike License 3.0.
+
+License: CC-BY-SA-3.0
+License text: https://creativecommons.org/licenses/by-sa/3.0/legalcode
+Model documentation: https://fasttext.cc/docs/en/language-identification.html
+
+The model file expected in this directory is:
+
+    lid.176.ftz
+

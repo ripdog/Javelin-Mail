@@ -9,6 +9,7 @@ add_executable(javelin_jmap_tests
     jmap/InlineMessageUrlTest.cpp
     jmap/JmapCoreMessageContentTest.cpp
     jmap/JmapCoreTest.cpp
+    jmap/LanguageDetectionTest.cpp
     jmap/LongPollWorkerTest.cpp
     jmap/MailMethodsTest.cpp
     jmap/MailboxRepositoryTest.cpp

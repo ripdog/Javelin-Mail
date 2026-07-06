@@ -65,6 +65,7 @@ namespace javelin::gui::messageview
         void updatePresentation(bool reloadBody = true);
         void updateSenderRemoteContentPermit();
         void updateRemoteContentButton();
+        void updateLanguageBanner();
         void updateAttachmentSection();
         void rebuildAttachmentRows();
         void rebuildMultipleSelectionRows();
@@ -100,6 +101,9 @@ namespace javelin::gui::messageview
         QToolButton* m_permitSenderRemoteContentButton = nullptr;
         QToolButton* m_permitDomainRemoteContentButton = nullptr;
         QToolButton* m_remoteContentButton = nullptr;
+        QWidget* m_languageBannerWidget = nullptr;
+        QLabel* m_languageStatusLabel = nullptr;
+        QToolButton* m_translateButton = nullptr;
         QWidget* m_bodyControlsWidget = nullptr;
         QStackedWidget* m_bodyStack = nullptr;
         QProgressBar* m_loadingIndicator = nullptr;
