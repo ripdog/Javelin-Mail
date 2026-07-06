@@ -221,6 +221,8 @@ namespace javelin::gui::shell
         void refreshFromServer();
         void refreshSelectedMessageContent(std::string accountId, std::string emailId);
         [[nodiscard]] std::vector<std::string> selectedEmailIds() const;
+        [[nodiscard]] std::variant<std::vector<std::string>, QString>
+        selectedEmailIdsForMailboxAction(std::string_view accountId) const;
         [[nodiscard]] std::vector<javelin::jmap::cache::MessageListItem>
         selectedMessageSummaries() const;
         void selectMessageAlone(const QString& emailId);

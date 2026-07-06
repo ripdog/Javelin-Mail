@@ -3585,6 +3585,90 @@ namespace javelin::gui::shell
         return emailIds;
     }
 
+    std::variant<std::vector<std::string>, QString>
+    MainWindow::selectedEmailIdsForMailboxAction(const std::string_view accountId) const
+    {
+        std::vector<QModelIndex> indexes;
+        const auto* selectionModel = m_messageView->selectionModel();
+        if (selectionModel != nullptr)
+        {
+            const QModelIndexList selectedRows = selectionModel->selectedRows();
+            indexes.reserve(static_cast<std::size_t>(selectedRows.size()));
+            for (const auto& index : selectedRows)
+            {
+                if (index.isValid())
+                {
+                    indexes.push_back(index);
+                }
+            }
+        }
+
+        if (indexes.empty() && m_messageView->currentIndex().isValid())
+        {
+            indexes.push_back(m_messageView->currentIndex());
+        }
+
+        std::ranges::sort(indexes, [](const QModelIndex& left, const QModelIndex& right)
+                          { return left.row() < right.row(); });
+
+        std::vector<std::string> emailIds;
+        std::unordered_set<std::string> seen;
+        const auto appendEmailId = [&emailIds, &seen](std::string emailId)
+        {
+            if (!emailId.empty() && seen.insert(emailId).second)
+            {
+                emailIds.push_back(std::move(emailId));
+            }
+        };
+
+        for (const auto& index : indexes)
+        {
+            const auto emailId = index.data(javelin::gui::messages::MessageListModel::EmailIdRole)
+                                     .toString()
+                                     .toStdString();
+            const auto threadId = index.data(javelin::gui::messages::MessageListModel::ThreadIdRole)
+                                      .toString()
+                                      .toStdString();
+            const auto rowKind = static_cast<javelin::gui::messages::MessageListModel::RowKind>(
+                index.data(javelin::gui::messages::MessageListModel::RowKindRole).toInt());
+            const auto threadMessageCount =
+                index.data(javelin::gui::messages::MessageListModel::ThreadMessageCountRole)
+                    .toULongLong();
+            const bool isCollapsedThreadSummary =
+                rowKind == javelin::gui::messages::MessageListModel::RowKind::ThreadSummary &&
+                !index.data(javelin::gui::messages::MessageListModel::IsExpandedRole).toBool() &&
+                threadMessageCount > 1;
+            if (!isCollapsedThreadSummary)
+            {
+                appendEmailId(emailId);
+                continue;
+            }
+
+            const auto threadMessagesResult =
+                m_queryService.listThreadMessages(accountId, threadId);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&threadMessagesResult))
+            {
+                return error->message;
+            }
+
+            const auto& threadMessages =
+                std::get<std::vector<javelin::jmap::cache::MessageListItem>>(threadMessagesResult);
+            if (threadMessages.empty())
+            {
+                appendEmailId(emailId);
+                continue;
+            }
+
+            for (const auto& item : threadMessages)
+            {
+                appendEmailId(item.emailId);
+            }
+        }
+
+        return emailIds;
+    }
+
     std::vector<javelin::jmap::cache::MessageListItem> MainWindow::selectedMessageSummaries() const
     {
         std::vector<QModelIndex> indexes;
@@ -3678,8 +3762,21 @@ namespace javelin::gui::shell
     {
         const auto accountId = activeAccountId();
         const auto mailboxId = activeMailboxId();
-        auto emailIds = selectedEmailIds();
-        if (!accountId.has_value() || !mailboxId.has_value() || emailIds.empty())
+        if (!accountId.has_value() || !mailboxId.has_value())
+        {
+            statusBar()->showMessage(QStringLiteral("Select a message to archive."), 3000);
+            return;
+        }
+
+        auto emailIdsResult = selectedEmailIdsForMailboxAction(*accountId);
+        if (const auto* error = std::get_if<QString>(&emailIdsResult))
+        {
+            statusBar()->showMessage(*error, 10000);
+            return;
+        }
+
+        auto emailIds = std::get<std::vector<std::string>>(std::move(emailIdsResult));
+        if (emailIds.empty())
         {
             statusBar()->showMessage(QStringLiteral("Select a message to archive."), 3000);
             return;
@@ -3692,8 +3789,21 @@ namespace javelin::gui::shell
     {
         const auto accountId = activeAccountId();
         const auto mailboxId = activeMailboxId();
-        auto emailIds = selectedEmailIds();
-        if (!accountId.has_value() || !mailboxId.has_value() || emailIds.empty())
+        if (!accountId.has_value() || !mailboxId.has_value())
+        {
+            statusBar()->showMessage(QStringLiteral("Select a message to delete."), 3000);
+            return;
+        }
+
+        auto emailIdsResult = selectedEmailIdsForMailboxAction(*accountId);
+        if (const auto* error = std::get_if<QString>(&emailIdsResult))
+        {
+            statusBar()->showMessage(*error, 10000);
+            return;
+        }
+
+        auto emailIds = std::get<std::vector<std::string>>(std::move(emailIdsResult));
+        if (emailIds.empty())
         {
             statusBar()->showMessage(QStringLiteral("Select a message to delete."), 3000);
             return;
@@ -3706,8 +3816,21 @@ namespace javelin::gui::shell
     {
         const auto accountId = activeAccountId();
         const auto sourceMailboxId = activeMailboxId();
-        auto emailIds = selectedEmailIds();
-        if (!accountId.has_value() || !sourceMailboxId.has_value() || emailIds.empty())
+        if (!accountId.has_value() || !sourceMailboxId.has_value())
+        {
+            statusBar()->showMessage(QStringLiteral("Select a message to move."), 3000);
+            return;
+        }
+
+        auto emailIdsResult = selectedEmailIdsForMailboxAction(*accountId);
+        if (const auto* error = std::get_if<QString>(&emailIdsResult))
+        {
+            statusBar()->showMessage(*error, 10000);
+            return;
+        }
+
+        auto emailIds = std::get<std::vector<std::string>>(std::move(emailIdsResult));
+        if (emailIds.empty())
         {
             statusBar()->showMessage(QStringLiteral("Select a message to move."), 3000);
             return;
@@ -3751,8 +3874,21 @@ namespace javelin::gui::shell
     {
         const auto accountId = activeAccountId();
         const auto sourceMailboxId = activeMailboxId();
-        auto emailIds = selectedEmailIds();
-        if (!accountId.has_value() || !sourceMailboxId.has_value() || emailIds.empty())
+        if (!accountId.has_value() || !sourceMailboxId.has_value())
+        {
+            statusBar()->showMessage(QStringLiteral("Select a message to copy."), 3000);
+            return;
+        }
+
+        auto emailIdsResult = selectedEmailIdsForMailboxAction(*accountId);
+        if (const auto* error = std::get_if<QString>(&emailIdsResult))
+        {
+            statusBar()->showMessage(*error, 10000);
+            return;
+        }
+
+        auto emailIds = std::get<std::vector<std::string>>(std::move(emailIdsResult));
+        if (emailIds.empty())
         {
             statusBar()->showMessage(QStringLiteral("Select a message to copy."), 3000);
             return;
