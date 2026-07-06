@@ -63,6 +63,8 @@ set(JAVELIN_FORMAT_FILES
     src/gui/messages/MessageListDelegate.h
     src/gui/messages/MessageListDelegate.cpp
     src/gui/messages/MessageListDelegate.h
+    src/gui/messageview/GoogleHtmlTranslator.cpp
+    src/gui/messageview/GoogleHtmlTranslator.h
     src/gui/messageview/HtmlMessageView.cpp
     src/gui/messageview/HtmlMessageView.h
     src/gui/messageview/MessageViewContainer.cpp
@@ -336,6 +338,8 @@ add_library(javelin_gui STATIC
     src/gui/messages/MessageListModel.h
     src/gui/messages/MessageListDelegate.cpp
     src/gui/messages/MessageListDelegate.h
+    src/gui/messageview/GoogleHtmlTranslator.cpp
+    src/gui/messageview/GoogleHtmlTranslator.h
     src/gui/messageview/HtmlMessageView.cpp
     src/gui/messageview/HtmlMessageView.h
     src/gui/messageview/MessageViewContainer.cpp
@@ -355,6 +359,7 @@ target_include_directories(javelin_gui PUBLIC
 target_link_libraries(javelin_gui
     PUBLIC
         Qt::Core
+        Qt::Network
         Qt::Svg
         Qt::Widgets
         Qt::WebEngineWidgets

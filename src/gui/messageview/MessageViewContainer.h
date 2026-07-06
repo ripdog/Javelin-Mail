@@ -23,6 +23,7 @@ class QWidget;
 
 namespace javelin::gui::messageview
 {
+    class GoogleHtmlTranslator;
     class HtmlMessageView;
 
     class MessageViewContainer : public QWidget
@@ -66,6 +67,8 @@ namespace javelin::gui::messageview
         void updateSenderRemoteContentPermit();
         void updateRemoteContentButton();
         void updateLanguageBanner();
+        void translateCurrentMessage();
+        void restoreCurrentTranslation();
         void updateAttachmentSection();
         void rebuildAttachmentRows();
         void rebuildMultipleSelectionRows();
@@ -104,6 +107,7 @@ namespace javelin::gui::messageview
         QWidget* m_languageBannerWidget = nullptr;
         QLabel* m_languageStatusLabel = nullptr;
         QToolButton* m_translateButton = nullptr;
+        GoogleHtmlTranslator* m_translator = nullptr;
         QWidget* m_bodyControlsWidget = nullptr;
         QStackedWidget* m_bodyStack = nullptr;
         QProgressBar* m_loadingIndicator = nullptr;
@@ -117,6 +121,10 @@ namespace javelin::gui::messageview
         ActiveView m_activeView = ActiveView::Placeholder;
         bool m_attachmentsExpanded = false;
         bool m_attachmentsCollapsed = false;
+        bool m_translationInProgress = false;
+        bool m_messageTranslated = false;
+        QString m_originalPlainText;
+        QString m_translationError;
     };
 
 } // namespace javelin::gui::messageview

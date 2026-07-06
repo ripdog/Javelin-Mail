@@ -2,6 +2,10 @@
 
 #include <QWidget>
 
+#include <QStringList>
+#include <QVector>
+
+#include <functional>
 #include <string_view>
 
 class QWebEngineView;
@@ -21,6 +25,9 @@ namespace javelin::gui::messageview
         void clearDocument();
         void setRemoteContentEnabled(bool enabled);
         [[nodiscard]] bool remoteContentEnabled() const;
+        void collectTranslationChunks(std::function<void(QVector<QStringList>)> callback);
+        void applyTranslationChunks(const QVector<QStringList>& translatedChunks);
+        void restoreOriginalText();
 
       Q_SIGNALS:
         void viewSourceRequested();

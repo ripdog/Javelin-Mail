@@ -1,5 +1,6 @@
 #include "gui/messageview/MessageViewContainer.h"
 #include "gui/IconUtils.h"
+#include "gui/messageview/GoogleHtmlTranslator.h"
 #include "gui/messageview/HtmlMessageView.h"
 
 #include <QApplication>
@@ -11,7 +12,6 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLocale>
-#include <QLoggingCategory>
 #include <QMenu>
 #include <QMimeDatabase>
 #include <QMouseEvent>
@@ -28,12 +28,11 @@
 
 #include <algorithm>
 #include <cctype>
+#include <variant>
 #include <vector>
 
 namespace javelin::gui::messageview
 {
-    Q_LOGGING_CATEGORY(messageViewLog, "javelin.gui.messageview")
-
     namespace
     {
         constexpr auto remoteContentGroup = "remoteContent";
@@ -504,13 +503,13 @@ namespace javelin::gui::messageview
 
         m_translateButton = new QToolButton(m_languageBannerWidget);
         m_translateButton->setText(QStringLiteral("Translate"));
-        m_translateButton->setEnabled(false);
-        m_translateButton->setToolTip(
-            QStringLiteral("Translation provider support has not been implemented yet."));
+        connect(m_translateButton, &QToolButton::clicked, this,
+                &MessageViewContainer::translateCurrentMessage);
 
         languageLayout->addWidget(m_languageStatusLabel, 1);
         languageLayout->addWidget(m_translateButton);
         m_languageBannerWidget->setVisible(false);
+        m_translator = new GoogleHtmlTranslator(this);
 
         m_bodyStack = new QStackedWidget(this);
         m_bodyStack->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
@@ -672,6 +671,10 @@ namespace javelin::gui::messageview
         m_emailId = std::move(emailId);
         m_multipleMessages.clear();
         m_attachmentsExpanded = false;
+        m_translationInProgress = false;
+        m_messageTranslated = false;
+        m_originalPlainText.clear();
+        m_translationError.clear();
         m_loading = false;
         m_errorMessage.clear();
 
@@ -698,6 +701,10 @@ namespace javelin::gui::messageview
         m_emailId = std::nullopt;
         m_multipleMessages = std::move(messages);
         m_attachmentsExpanded = false;
+        m_translationInProgress = false;
+        m_messageTranslated = false;
+        m_originalPlainText.clear();
+        m_translationError.clear();
         m_loading = false;
         m_errorMessage.clear();
         m_snapshot = std::nullopt;
@@ -709,6 +716,10 @@ namespace javelin::gui::messageview
         const auto previousRenderedBody = renderedBodyKey(m_snapshot);
         m_loading = false;
         m_errorMessage.clear();
+        m_translationInProgress = false;
+        m_messageTranslated = false;
+        m_originalPlainText.clear();
+        m_translationError.clear();
         m_snapshot = std::nullopt;
         if (m_accountId.has_value() && m_emailId.has_value())
         {
@@ -843,10 +854,14 @@ namespace javelin::gui::messageview
 
     void MessageViewContainer::updateLanguageBanner()
     {
+        const bool canTranslateView =
+            m_activeView == ActiveView::PlainText || m_activeView == ActiveView::Html;
+        const bool hasLanguageOffer = m_snapshot.has_value() &&
+                                      m_snapshot->languageDetection.has_value() &&
+                                      m_snapshot->shouldOfferTranslation;
         const bool shouldShow =
-            m_snapshot.has_value() && m_snapshot->languageDetection.has_value() &&
-            m_snapshot->shouldOfferTranslation &&
-            (m_activeView == ActiveView::PlainText || m_activeView == ActiveView::Html);
+            canTranslateView && (hasLanguageOffer || m_translationInProgress ||
+                                 m_messageTranslated || !m_translationError.isEmpty());
         m_languageBannerWidget->setVisible(shouldShow);
         if (!shouldShow)
         {
@@ -854,15 +869,140 @@ namespace javelin::gui::messageview
             return;
         }
 
+        m_translateButton->setEnabled(!m_translationInProgress);
+        m_translateButton->setText(m_messageTranslated ? QStringLiteral("Show original")
+                                                       : QStringLiteral("Translate"));
+        m_translateButton->setToolTip(m_messageTranslated
+                                          ? QStringLiteral("Restore the original message text")
+                                          : QStringLiteral("Translate this message to English"));
+
+        if (m_translationInProgress)
+        {
+            m_languageStatusLabel->setText(QStringLiteral("Translating message..."));
+            return;
+        }
+
+        if (!m_translationError.isEmpty())
+        {
+            m_languageStatusLabel->setText(m_translationError);
+            return;
+        }
+
+        if (m_messageTranslated)
+        {
+            m_languageStatusLabel->setText(QStringLiteral("Message translated to English."));
+            return;
+        }
+
         const auto& detection = *m_snapshot->languageDetection;
-        qCInfo(messageViewLog) << "Detected message language"
-                               << QString::fromStdString(detection.languageCode) << "confidence"
-                               << detection.confidence << "englishConfidence"
-                               << detection.englishConfidence << "offerTranslation"
-                               << m_snapshot->shouldOfferTranslation;
-        m_languageStatusLabel->setText(
-            QStringLiteral("This message appears to be in %1. Translation is not wired up yet.")
-                .arg(languageName(detection.languageCode)));
+        m_languageStatusLabel->setText(QStringLiteral("This message appears to be in %1.")
+                                           .arg(languageName(detection.languageCode)));
+    }
+
+    void MessageViewContainer::translateCurrentMessage()
+    {
+        if (m_messageTranslated)
+        {
+            restoreCurrentTranslation();
+            return;
+        }
+
+        if (!m_snapshot.has_value() || m_translationInProgress)
+        {
+            return;
+        }
+
+        const auto selectedEmailId = m_emailId;
+        m_translationInProgress = true;
+        m_translationError.clear();
+        updateLanguageBanner();
+
+        const auto handleTranslatedChunks =
+            [this, selectedEmailId](GoogleHtmlTranslator::Result result)
+        {
+            if (m_emailId != selectedEmailId)
+            {
+                return;
+            }
+
+            m_translationInProgress = false;
+            if (const auto* error = std::get_if<QString>(&result))
+            {
+                m_translationError = QStringLiteral("Translation failed: %1").arg(*error);
+                updateLanguageBanner();
+                return;
+            }
+
+            const auto& chunks = std::get<GoogleHtmlTranslator::TranslationChunks>(result);
+            if (m_activeView == ActiveView::PlainText)
+            {
+                if (chunks.empty() || chunks.front().empty())
+                {
+                    m_translationError =
+                        QStringLiteral("Translation failed: no translated text was returned.");
+                    updateLanguageBanner();
+                    return;
+                }
+                m_originalPlainText = m_plainTextView->toPlainText();
+                m_plainTextView->setPlainText(chunks.front().front());
+            }
+            else if (m_activeView == ActiveView::Html)
+            {
+                m_htmlView->applyTranslationChunks(chunks);
+            }
+
+            m_messageTranslated = true;
+            updateLanguageBanner();
+        };
+
+        if (m_activeView == ActiveView::PlainText)
+        {
+            GoogleHtmlTranslator::TranslationChunks chunks;
+            chunks.push_back(QStringList{m_plainTextView->toPlainText()});
+            m_translator->translate(std::move(chunks), QStringLiteral("auto"), QStringLiteral("en"),
+                                    handleTranslatedChunks);
+            return;
+        }
+
+        if (m_activeView == ActiveView::Html)
+        {
+            m_htmlView->collectTranslationChunks(
+                [this, selectedEmailId, handleTranslatedChunks](QVector<QStringList> chunks)
+                {
+                    if (m_emailId != selectedEmailId)
+                    {
+                        return;
+                    }
+                    if (chunks.empty())
+                    {
+                        m_translationInProgress = false;
+                        m_translationError =
+                            QStringLiteral("Translation failed: no message text was found.");
+                        updateLanguageBanner();
+                        return;
+                    }
+                    m_translator->translate(std::move(chunks), QStringLiteral("auto"),
+                                            QStringLiteral("en"), handleTranslatedChunks);
+                });
+        }
+    }
+
+    void MessageViewContainer::restoreCurrentTranslation()
+    {
+        if (m_activeView == ActiveView::PlainText && !m_originalPlainText.isEmpty())
+        {
+            m_plainTextView->setPlainText(m_originalPlainText);
+        }
+        else if (m_activeView == ActiveView::Html)
+        {
+            m_htmlView->restoreOriginalText();
+        }
+
+        m_translationInProgress = false;
+        m_messageTranslated = false;
+        m_originalPlainText.clear();
+        m_translationError.clear();
+        updateLanguageBanner();
     }
 
     void MessageViewContainer::updatePresentation(const bool reloadBody)
@@ -871,6 +1011,10 @@ namespace javelin::gui::messageview
         {
             m_plainTextView->clear();
             m_htmlView->clearDocument();
+            m_translationInProgress = false;
+            m_messageTranslated = false;
+            m_originalPlainText.clear();
+            m_translationError.clear();
         }
         m_attachmentStatusLabel->clear();
         rebuildAttachmentRows();

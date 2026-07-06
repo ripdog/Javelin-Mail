@@ -2,14 +2,16 @@
 
 #include "jmap/render/InlineMessageUrl.h"
 
-#include <QContextMenuEvent>
-#include <QMenu>
 #include <QAction>
+#include <QContextMenuEvent>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QMenu>
 #include <QPointer>
-#include <QVBoxLayout>
 #include <QString>
-#include <QWebEnginePage>
+#include <QVBoxLayout>
 #include <QWebEngineContextMenuRequest>
+#include <QWebEnginePage>
 #include <QWebEngineSettings>
 #include <QWebEngineView>
 
@@ -25,8 +27,7 @@ namespace javelin::gui::messageview
         class FilteredWebEngineView final : public QWebEngineView
         {
           public:
-            explicit FilteredWebEngineView(std::function<void()> viewSourceAction,
-                                           QWidget* parent)
+            explicit FilteredWebEngineView(std::function<void()> viewSourceAction, QWidget* parent)
                 : QWebEngineView(parent), m_viewSourceAction(std::move(viewSourceAction))
             {
             }
@@ -102,10 +103,7 @@ namespace javelin::gui::messageview
         settings->setAttribute(QWebEngineSettings::PluginsEnabled, false);
         settings->setAttribute(QWebEngineSettings::PlaybackRequiresUserGesture, true);
         connect(m_view, &QWebEngineView::loadFinished, this,
-                [this](const bool)
-                {
-                    applyRemoteContentPolicy();
-                });
+                [this](const bool) { applyRemoteContentPolicy(); });
 
         layout->addWidget(m_view);
     }
@@ -143,6 +141,157 @@ namespace javelin::gui::messageview
     bool HtmlMessageView::remoteContentEnabled() const
     {
         return m_remoteContentEnabled;
+    }
+
+    void
+    HtmlMessageView::collectTranslationChunks(std::function<void(QVector<QStringList>)> callback)
+    {
+        m_view->page()->runJavaScript(QStringLiteral(R"JS(
+(() => {
+  window.__javelinTranslation = window.__javelinTranslation || {
+    translated: false,
+    nodesToRestore: [],
+    chunks: [],
+    activeToken: 0,
+  };
+  const state = window.__javelinTranslation;
+
+  const skippedElementNames = new Set([
+    'SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'CODE',
+    'TEXTAREA', 'INPUT', 'SELECT', 'OPTION',
+  ]);
+
+  function isPlainTextMessageElement(element) {
+    if (!element || element.nodeType !== Node.ELEMENT_NODE) return false;
+    if (element.closest('.moz-text-plain')) return true;
+    const body = document.body;
+    if (!body) return false;
+    const bodyChildren = Array.from(body.children).filter((child) => child.nodeName !== 'BR');
+    return bodyChildren.length === 1 && bodyChildren[0] === element;
+  }
+
+  function shouldSkipElement(element) {
+    if (!element || element.nodeType !== Node.ELEMENT_NODE) return false;
+    if (skippedElementNames.has(element.nodeName)) return true;
+    if (element.nodeName === 'PRE' && !isPlainTextMessageElement(element)) return true;
+    if (element.closest("[translate='no'], .notranslate")) return true;
+    return false;
+  }
+
+  function collectTextNodes(root) {
+    const nodes = [];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        if (!node.textContent || !node.textContent.trim()) return NodeFilter.FILTER_REJECT;
+        if (shouldSkipElement(node.parentElement)) return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
+      },
+    });
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    return nodes;
+  }
+
+  function chunkNodes(nodes) {
+    const chunks = [];
+    let chunk = [];
+    let size = 0;
+    for (const node of nodes) {
+      const length = node.textContent.length;
+      if (chunk.length > 0 && size + length > 1200) {
+        chunks.push(chunk);
+        chunk = [];
+        size = 0;
+      }
+      chunk.push(node);
+      size += length;
+    }
+    if (chunk.length > 0) chunks.push(chunk);
+    return chunks;
+  }
+
+  for (const item of state.nodesToRestore) {
+    if (item.node) item.node.textContent = item.originalText;
+  }
+  state.nodesToRestore = [];
+  state.translated = false;
+  state.activeToken++;
+  document.documentElement.removeAttribute('data-javelin-translation-state');
+
+  state.chunks = chunkNodes(collectTextNodes(document.body || document.documentElement));
+  return state.chunks.map((chunk) => chunk.map((node) => node.textContent));
+})();
+)JS"),
+                                      [callback = std::move(callback)](const QVariant& result)
+                                      {
+                                          QVector<QStringList> chunks;
+                                          const auto chunkValues = result.toList();
+                                          chunks.reserve(chunkValues.size());
+                                          for (const auto& chunkValue : chunkValues)
+                                          {
+                                              QStringList texts;
+                                              const auto textValues = chunkValue.toList();
+                                              texts.reserve(textValues.size());
+                                              for (const auto& textValue : textValues)
+                                              {
+                                                  texts.push_back(textValue.toString());
+                                              }
+                                              chunks.push_back(std::move(texts));
+                                          }
+                                          callback(std::move(chunks));
+                                      });
+    }
+
+    void HtmlMessageView::applyTranslationChunks(const QVector<QStringList>& translatedChunks)
+    {
+        QJsonArray chunks;
+        for (const auto& translatedChunk : translatedChunks)
+        {
+            QJsonArray chunk;
+            for (const auto& text : translatedChunk)
+            {
+                chunk.push_back(text);
+            }
+            chunks.push_back(chunk);
+        }
+
+        const auto json = QString::fromUtf8(QJsonDocument{chunks}.toJson(QJsonDocument::Compact));
+        m_view->page()->runJavaScript(QStringLiteral(R"JS(
+((translatedChunks) => {
+  const state = window.__javelinTranslation;
+  if (!state || !state.chunks) return false;
+  state.translated = true;
+  document.documentElement.setAttribute('data-javelin-translation-state', 'translated');
+  for (let i = 0; i < state.chunks.length; i++) {
+    for (let j = 0; j < state.chunks[i].length; j++) {
+      const node = state.chunks[i][j];
+      const translated = translatedChunks[i] && translatedChunks[i][j];
+      if (!node || !translated) continue;
+      state.nodesToRestore.push({ node, originalText: node.textContent });
+      node.textContent = translated;
+    }
+  }
+  return true;
+})(%1);
+)JS")
+                                          .arg(json));
+    }
+
+    void HtmlMessageView::restoreOriginalText()
+    {
+        m_view->page()->runJavaScript(QStringLiteral(R"JS(
+(() => {
+  const state = window.__javelinTranslation;
+  if (!state) return false;
+  state.activeToken++;
+  for (const item of state.nodesToRestore || []) {
+    if (item.node) item.node.textContent = item.originalText;
+  }
+  state.nodesToRestore = [];
+  state.translated = false;
+  document.documentElement.removeAttribute('data-javelin-translation-state');
+  return true;
+})();
+)JS"));
     }
 
     void HtmlMessageView::applyRemoteContentPolicy()
