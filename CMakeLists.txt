@@ -435,13 +435,19 @@ endif()
 # FetchContent dependencies).
 set(_local_kxmlgui_dir "${CMAKE_INSTALL_PREFIX}/${KDE_INSTALL_KXMLGUIDIR}/javelinmail")
 if(JAVELIN_ENABLE_LOCAL_DATA_INSTALL)
-    add_custom_target(install_data ALL
+    set(_install_data_stamp "${CMAKE_CURRENT_BINARY_DIR}/install_data.stamp")
+    add_custom_command(
+        OUTPUT "${_install_data_stamp}"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${_local_kxmlgui_dir}"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            ${PROJECT_SOURCE_DIR}/res/javelinmailui.rc
+            "${PROJECT_SOURCE_DIR}/res/javelinmailui.rc"
             "${_local_kxmlgui_dir}/javelinmailui.rc"
+        COMMAND ${CMAKE_COMMAND} -E touch "${_install_data_stamp}"
+        DEPENDS "${PROJECT_SOURCE_DIR}/res/javelinmailui.rc"
         COMMENT "Installing data files to local prefix"
+        VERBATIM
     )
+    add_custom_target(install_data DEPENDS "${_install_data_stamp}")
 endif()
 
 qt_add_translations(
