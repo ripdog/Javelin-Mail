@@ -6,10 +6,12 @@
 #include "jmap/sync/MailboxRefreshExecutor.h"
 #include "jmap/sync/MailboxStateRefreshExecutor.h"
 
+#include <QDateTime>
 #include <QDebug>
 #include <QMetaObject>
 #include <QNetworkAccessManager>
 
+#include <chrono>
 #include <ranges>
 
 namespace javelin::app
@@ -18,6 +20,8 @@ namespace javelin::app
     namespace
     {
         constexpr std::size_t maxRecentNotificationKeys = 512;
+        constexpr auto resumeWatchdogInterval = std::chrono::seconds{30};
+        constexpr auto resumeWatchdogStallThreshold = std::chrono::seconds{90};
 
         [[nodiscard]] LongPollService::Status
         toServiceStatus(const javelin::jmap::sync::LongPollConnectionStatus status)
@@ -47,6 +51,11 @@ namespace javelin::app
           m_networkAccessManager(networkAccessManager), m_accountRepository(accountRepository),
           m_queryService(queryService)
     {
+        m_lastResumeWatchdogTickMs = QDateTime::currentMSecsSinceEpoch();
+        m_resumeWatchdogTimer.setInterval(resumeWatchdogInterval);
+        QObject::connect(&m_resumeWatchdogTimer, &QTimer::timeout, this,
+                         &LongPollService::handleResumeWatchdogTimeout);
+        m_resumeWatchdogTimer.start();
     }
 
     LongPollService::~LongPollService()
@@ -317,6 +326,44 @@ namespace javelin::app
         co_return true;
     }
 
+    void LongPollService::handleResumeWatchdogTimeout()
+    {
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        const qint64 elapsedMs = now - m_lastResumeWatchdogTickMs;
+        m_lastResumeWatchdogTickMs = now;
+
+        if (elapsedMs <=
+            std::chrono::duration_cast<std::chrono::milliseconds>(resumeWatchdogStallThreshold)
+                .count())
+        {
+            return;
+        }
+
+        qWarning().noquote() << "Long poll resume watchdog detected event-loop stall" << elapsedMs
+                             << "ms; restarting event-source stream";
+        restartForCatchUp();
+    }
+
+    void LongPollService::scheduleCatchUpRefresh()
+    {
+        auto task = refreshWatchedMailbox();
+        QCoro::connect(std::move(task), this, []() {});
+    }
+
+    void LongPollService::restartForCatchUp()
+    {
+        if (!hasValidSettings())
+        {
+            return;
+        }
+
+        restart();
+        if (m_runContext != nullptr)
+        {
+            m_shouldCatchUpRefreshOnReconnect = true;
+        }
+    }
+
     void LongPollService::restart()
     {
         const auto nextConfiguration = resolveConfiguration();
@@ -404,8 +451,7 @@ namespace javelin::app
             m_runContext != nullptr)
         {
             m_shouldCatchUpRefreshOnReconnect = false;
-            Q_EMIT mailStateChanged(QString::fromStdString(m_runContext->configuration.accountId),
-                                    true);
+            scheduleCatchUpRefresh();
         }
         Q_EMIT statusChanged(m_status);
     }

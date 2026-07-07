@@ -12,6 +12,7 @@
 #include <QCoroTask>
 
 #include <QObject>
+#include <QTimer>
 
 #include <deque>
 #include <memory>
@@ -94,6 +95,9 @@ namespace javelin::app
         refreshWatchedMailboxOnce(std::shared_ptr<RunContext> runContext);
         [[nodiscard]] QCoro::Task<bool>
         refreshMailboxStateOnce(std::shared_ptr<RunContext> runContext);
+        void handleResumeWatchdogTimeout();
+        void scheduleCatchUpRefresh();
+        void restartForCatchUp();
         void restart();
         void setStatus(Status status);
         void publishNotifications(
@@ -115,6 +119,8 @@ namespace javelin::app
         bool m_shouldCatchUpRefreshOnReconnect = false;
         bool m_refreshInFlight = false;
         bool m_refreshAgainRequested = false;
+        QTimer m_resumeWatchdogTimer;
+        qint64 m_lastResumeWatchdogTickMs = 0;
     };
 
 } // namespace javelin::app
