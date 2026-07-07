@@ -1,13 +1,12 @@
 #pragma once
 
-#include <QDialog>
+#include <KConfigDialog>
 
 #include <vector>
 
 class QLineEdit;
 class QListWidget;
 class QPushButton;
-class QStackedWidget;
 
 namespace javelin::jmap::cache
 {
@@ -26,7 +25,7 @@ namespace javelin::gui::settings
         QStringList cachedAccountIds;
     };
 
-    class PreferencesDialog : public QDialog
+    class PreferencesDialog : public KConfigDialog
     {
         Q_OBJECT
 
@@ -45,9 +44,14 @@ namespace javelin::gui::settings
                                            const QString& cachedAccountId);
 
       private:
+        void updateSettings() override;
+        [[nodiscard]] bool hasChanged() override;
+
         void addAccount();
         void removeCurrentAccount();
         void selectAccount(int row);
+        void noteUnsavedChanges();
+        void saveCurrentSettings();
         void storeCurrentEdits();
         void refreshAccountList();
         void refreshRemoteContentList();
@@ -57,14 +61,13 @@ namespace javelin::gui::settings
 
         javelin::jmap::cache::AccountRepository& m_accountRepository;
         std::vector<ConnectionSettings> m_accounts;
+        bool m_hasPendingChanges = false;
         int m_currentRow = -1;
-        QListWidget* m_pageList = nullptr;
         QListWidget* m_accountList = nullptr;
         QPushButton* m_removeButton = nullptr;
         QLineEdit* m_sessionUrlEdit = nullptr;
         QLineEdit* m_loginEmailEdit = nullptr;
         QLineEdit* m_apiKeyEdit = nullptr;
-        QStackedWidget* m_pageStack = nullptr;
         QListWidget* m_remoteContentList = nullptr;
         QPushButton* m_removeRemoteContentButton = nullptr;
         QListWidget* m_autoTranslateList = nullptr;

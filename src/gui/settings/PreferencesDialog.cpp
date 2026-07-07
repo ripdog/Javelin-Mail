@@ -13,7 +13,6 @@
 #include <QPushButton>
 #include <QSettings>
 #include <QSplitter>
-#include <QStackedWidget>
 #include <QUuid>
 #include <QVBoxLayout>
 
@@ -142,24 +141,13 @@ namespace javelin::gui::settings
 
     PreferencesDialog::PreferencesDialog(javelin::jmap::cache::AccountRepository& accountRepository,
                                          QWidget* parent)
-        : QDialog(parent), m_accountRepository(accountRepository), m_accounts(loadAccounts())
+        : KConfigDialog(parent, QStringLiteral("preferences"), nullptr),
+          m_accountRepository(accountRepository), m_accounts(loadAccounts())
     {
         setWindowTitle(QStringLiteral("Preferences"));
         resize(760, 420);
 
-        auto* outerLayout = new QVBoxLayout(this);
-        auto* contentLayout = new QHBoxLayout();
-
-        m_pageList = new QListWidget(this);
-        m_pageList->setFixedWidth(150);
-        m_pageList->addItem(QStringLiteral("Accounts"));
-        m_pageList->addItem(QStringLiteral("Remote Content"));
-        m_pageList->addItem(QStringLiteral("Translation"));
-        contentLayout->addWidget(m_pageList);
-
-        m_pageStack = new QStackedWidget(this);
-
-        auto* accountsPage = new QWidget(m_pageStack);
+        auto* accountsPage = new QWidget(this);
         auto* accountsPageLayout = new QVBoxLayout(accountsPage);
         auto* splitter = new QSplitter(accountsPage);
         auto* accountPanel = new QWidget(splitter);
@@ -196,9 +184,10 @@ namespace javelin::gui::settings
         splitter->addWidget(detailsPanel);
         splitter->setStretchFactor(1, 1);
         accountsPageLayout->addWidget(splitter, 1);
-        m_pageStack->addWidget(accountsPage);
+        addPage(accountsPage, QStringLiteral("Accounts"), QStringLiteral("user-identity"),
+                QString{}, false);
 
-        auto* remoteContentPage = new QWidget(m_pageStack);
+        auto* remoteContentPage = new QWidget(this);
         auto* remoteContentLayout = new QVBoxLayout(remoteContentPage);
         remoteContentLayout->addWidget(
             new QLabel(QStringLiteral("Allowed Remote Content"), remoteContentPage));
@@ -210,9 +199,10 @@ namespace javelin::gui::settings
         m_removeRemoteContentButton = new QPushButton(QStringLiteral("Remove"), remoteContentPage);
         remoteContentButtons->addWidget(m_removeRemoteContentButton);
         remoteContentLayout->addLayout(remoteContentButtons);
-        m_pageStack->addWidget(remoteContentPage);
+        addPage(remoteContentPage, QStringLiteral("Remote Content"), QStringLiteral("image"),
+                QString{}, false);
 
-        auto* translationPage = new QWidget(m_pageStack);
+        auto* translationPage = new QWidget(this);
         auto* translationLayout = new QVBoxLayout(translationPage);
         translationLayout->addWidget(
             new QLabel(QStringLiteral("Auto-Translate Entries"), translationPage));
@@ -224,33 +214,19 @@ namespace javelin::gui::settings
         m_removeAutoTranslateButton = new QPushButton(QStringLiteral("Remove"), translationPage);
         translationButtons->addWidget(m_removeAutoTranslateButton);
         translationLayout->addLayout(translationButtons);
-        m_pageStack->addWidget(translationPage);
+        addPage(translationPage, QStringLiteral("Translation"),
+                QStringLiteral("preferences-desktop-locale"), QString{}, false);
 
-        contentLayout->addWidget(m_pageStack, 1);
-        outerLayout->addLayout(contentLayout, 1);
-
-        auto* buttonBox =
-            new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
-        connect(buttonBox, &QDialogButtonBox::accepted, this,
-                [this]
-                {
-                    storeCurrentEdits();
-                    saveAccounts(m_accounts);
-                    QSettings settings;
-                    settings.beginGroup(QLatin1StringView{accountsGroup});
-                    settings.setValue(QLatin1StringView{activeAccountIdKey}, this->settings().id);
-                    settings.endGroup();
-                    settings.sync();
-                    accept();
-                });
-        connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
         connect(addButton, &QPushButton::clicked, this, &PreferencesDialog::addAccount);
         connect(m_removeButton, &QPushButton::clicked, this,
                 &PreferencesDialog::removeCurrentAccount);
         connect(m_accountList, &QListWidget::currentRowChanged, this,
                 &PreferencesDialog::selectAccount);
-        connect(m_pageList, &QListWidget::currentRowChanged, m_pageStack,
-                &QStackedWidget::setCurrentIndex);
+        connect(m_sessionUrlEdit, &QLineEdit::textEdited, this,
+                &PreferencesDialog::noteUnsavedChanges);
+        connect(m_loginEmailEdit, &QLineEdit::textEdited, this,
+                &PreferencesDialog::noteUnsavedChanges);
+        connect(m_apiKeyEdit, &QLineEdit::textEdited, this, &PreferencesDialog::noteUnsavedChanges);
         connect(m_removeRemoteContentButton, &QPushButton::clicked, this,
                 &PreferencesDialog::removeSelectedRemoteContentPermits);
         connect(m_remoteContentList, &QListWidget::itemSelectionChanged, this,
@@ -267,7 +243,6 @@ namespace javelin::gui::settings
                     m_removeAutoTranslateButton->setEnabled(
                         !m_autoTranslateList->selectedItems().empty());
                 });
-        outerLayout->addWidget(buttonBox);
 
         if (m_accounts.empty())
         {
@@ -276,11 +251,23 @@ namespace javelin::gui::settings
         refreshAccountList();
         refreshRemoteContentList();
         refreshAutoTranslateList();
-        m_pageList->setCurrentRow(0);
         m_accountList->setCurrentRow(0);
+        m_hasPendingChanges = false;
+        updateButtons();
     }
 
     PreferencesDialog::~PreferencesDialog() = default;
+
+    void PreferencesDialog::updateSettings()
+    {
+        saveCurrentSettings();
+        KConfigDialog::updateSettings();
+    }
+
+    bool PreferencesDialog::hasChanged()
+    {
+        return m_hasPendingChanges;
+    }
 
     ConnectionSettings PreferencesDialog::settings() const
     {
@@ -400,6 +387,7 @@ namespace javelin::gui::settings
     {
         storeCurrentEdits();
         m_accounts.push_back(newAccount());
+        noteUnsavedChanges();
         refreshAccountList();
         m_accountList->setCurrentRow(static_cast<int>(m_accounts.size()) - 1);
         m_loginEmailEdit->setFocus();
@@ -449,6 +437,8 @@ namespace javelin::gui::settings
         m_currentRow = -1;
         refreshAccountList();
         m_accountList->setCurrentRow(m_accounts.empty() ? -1 : 0);
+        m_hasPendingChanges = false;
+        updateButtons();
     }
 
     void PreferencesDialog::selectAccount(const int row)
@@ -490,6 +480,24 @@ namespace javelin::gui::settings
                 ->setText(account.loginEmail.isEmpty() ? QStringLiteral("New account")
                                                        : account.loginEmail);
         }
+    }
+
+    void PreferencesDialog::noteUnsavedChanges()
+    {
+        m_hasPendingChanges = true;
+        updateButtons();
+    }
+
+    void PreferencesDialog::saveCurrentSettings()
+    {
+        storeCurrentEdits();
+        saveAccounts(m_accounts);
+        QSettings settings;
+        settings.beginGroup(QLatin1StringView{accountsGroup});
+        settings.setValue(QLatin1StringView{activeAccountIdKey}, this->settings().id);
+        settings.endGroup();
+        settings.sync();
+        m_hasPendingChanges = false;
     }
 
     void PreferencesDialog::refreshAccountList()

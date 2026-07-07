@@ -31,7 +31,7 @@ include(KDECMakeSettings)
 include(KDECompilerSettings NO_POLICY_SCOPE)
 include(FeatureSummary)
 
-find_package(KF6 REQUIRED COMPONENTS XmlGui CoreAddons)
+find_package(KF6 REQUIRED COMPONENTS ConfigWidgets XmlGui CoreAddons)
 find_package(KPim6Mime REQUIRED)
 
 qt_standard_project_setup()
@@ -367,6 +367,7 @@ target_link_libraries(javelin_gui
         Qt::Svg
         Qt::Widgets
         Qt::WebEngineWidgets
+        KF6::ConfigWidgets
         KF6::XmlGui
     PRIVATE
         Qt::Concurrent
