@@ -15,6 +15,7 @@
 #include "jmap/cache/SubmissionRepository.h"
 
 #include <QDateTime>
+#include <QDebug>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
@@ -205,6 +206,16 @@ namespace javelin::jmap::submission
                 parts.push_back(QString::fromStdString(addressLabel(address)));
             }
             return parts.join(QStringLiteral(", ")).toStdString();
+        }
+
+        [[nodiscard]] QString joinStrings(const std::vector<std::string>& values)
+        {
+            QStringList parts;
+            for (const auto& value : values)
+            {
+                parts.push_back(QString::fromStdString(value));
+            }
+            return parts.join(QStringLiteral(","));
         }
 
         [[nodiscard]] std::string buildReplyPlainText(const javelin::jmap::domain::Email& email,
@@ -1251,6 +1262,11 @@ namespace javelin::jmap::submission
         }
 
         const auto handle = builder.call(*request, "send-message");
+        qInfo().noquote() << "Compose send submitting draft"
+                          << QString::fromStdString(draftSummary.accountId)
+                          << QString::fromStdString(draftSummary.draftEmailId)
+                          << "draftsMailbox" << QString::fromStdString(draftsMailbox->id)
+                          << "sentMailbox" << QString::fromStdString(sentMailbox->id);
         const auto result = co_await methodCaller.call(
             buildApiRequestContext(settings, draftSummary.accountId, session), builder);
         if (const auto* error = std::get_if<javelin::jmap::api::TransportError>(&result))
@@ -1268,6 +1284,13 @@ namespace javelin::jmap::submission
 
         const auto& envelope = std::get<javelin::jmap::api::ResponseEnvelope>(result);
         const javelin::jmap::api::ResponseReader reader{envelope};
+        for (const auto& response : reader.rawAll(handle.callId))
+        {
+            qInfo().noquote() << "Compose send raw response"
+                              << QString::fromStdString(response.name) << "callId"
+                              << QString::fromStdString(response.callId) << "arguments"
+                              << QString::fromStdString(response.arguments);
+        }
         const auto submissionResult = reader.require(handle);
         if (const auto* error =
                 std::get_if<javelin::jmap::api::ResponseReaderError>(&submissionResult))
@@ -1280,6 +1303,10 @@ namespace javelin::jmap::submission
 
         const auto& submissionResponse =
             std::get<javelin::jmap::api::EmailSubmissionSetResponse>(submissionResult);
+        qInfo().noquote() << "Compose send submission response"
+                          << QString::fromStdString(draftSummary.accountId) << "created"
+                          << submissionResponse.created.size() << "notCreated"
+                          << joinStrings(submissionResponse.notCreated);
         if (!submissionResponse.notCreated.empty() || submissionResponse.created.empty())
         {
             co_return javelin::jmap::LiveRefreshError{
@@ -1299,6 +1326,14 @@ namespace javelin::jmap::submission
                                .arg(QString::fromStdString(error->message)),
             };
         }
+        const auto& implicitEmailResponse =
+            std::get<javelin::jmap::api::EmailSetResponse>(implicitEmailResult);
+        qInfo().noquote() << "Compose send implicit Email/set response"
+                          << QString::fromStdString(draftSummary.accountId) << "updated"
+                          << joinStrings(implicitEmailResponse.updated) << "destroyed"
+                          << joinStrings(implicitEmailResponse.destroyed) << "notUpdated"
+                          << joinStrings(implicitEmailResponse.notUpdated) << "notDestroyed"
+                          << joinStrings(implicitEmailResponse.notDestroyed);
 
         javelin::jmap::cache::SubmissionRepository submissionRepository{m_connection};
         const auto createdSubmission = submissionResponse.created.begin()->second;
@@ -1324,6 +1359,11 @@ namespace javelin::jmap::submission
         if (const auto& email = std::get<std::optional<javelin::jmap::domain::Email>>(emailResult);
             email.has_value())
         {
+            qInfo().noquote() << "Compose send local cache before update"
+                              << QString::fromStdString(draftSummary.accountId)
+                              << QString::fromStdString(draftSummary.draftEmailId) << "mailboxes"
+                              << joinStrings(email->mailboxIds) << "keywords"
+                              << joinStrings(email->keywords);
             auto updatedEmail = *email;
             updatedEmail.mailboxIds.erase(std::remove(updatedEmail.mailboxIds.begin(),
                                                       updatedEmail.mailboxIds.end(),
@@ -1342,6 +1382,17 @@ namespace javelin::jmap::submission
             {
                 co_return javelin::jmap::LiveRefreshError{.message = error->message};
             }
+            qInfo().noquote() << "Compose send local cache after update"
+                              << QString::fromStdString(draftSummary.accountId)
+                              << QString::fromStdString(draftSummary.draftEmailId) << "mailboxes"
+                              << joinStrings(updatedEmail.mailboxIds) << "keywords"
+                              << joinStrings(updatedEmail.keywords);
+        }
+        else
+        {
+            qWarning().noquote() << "Compose send local draft missing after submission"
+                                 << QString::fromStdString(draftSummary.accountId)
+                                 << QString::fromStdString(draftSummary.draftEmailId);
         }
 
         if (const auto error = discard(draftSummary.composeSessionId))
