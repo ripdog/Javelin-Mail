@@ -4,10 +4,12 @@
 #include "jmap/api/RequestBuilder.h"
 #include "jmap/domain/MailEntities.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <variant>
 #include <vector>
 
 namespace javelin::jmap::api
@@ -184,10 +186,12 @@ namespace javelin::jmap::api
         std::vector<std::string> notFound;
     };
 
+    using EmailPatchValue = std::variant<std::nullptr_t, bool>;
+
     struct EmailSetUpdate
     {
-        std::unordered_map<std::string, bool> mailboxIds;
-        std::unordered_map<std::string, bool> keywords;
+        std::unordered_map<std::string, EmailPatchValue> mailboxIds;
+        std::unordered_map<std::string, EmailPatchValue> keywords;
     };
 
     struct EmailBodyValueCreate
@@ -273,7 +277,7 @@ namespace javelin::jmap::api
         std::optional<EmailSubmissionEnvelope> envelope;
     };
 
-    using EmailSubmissionPatchValue = std::optional<bool>;
+    using EmailSubmissionPatchValue = EmailPatchValue;
 
     struct EmailSubmissionSetRequest
     {

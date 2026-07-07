@@ -355,6 +355,30 @@ TEST_CASE("email set requests serialize typed mailbox and keyword updates", "[jm
         R"({"accountId":"u1","update":{"eml-1":{"mailboxIds":{"mbx-archive":true},"keywords":{"$seen":true}}}})");
 }
 
+TEST_CASE("email set requests serialize nullable mailbox and keyword patch removals",
+          "[jmap][method][mail]")
+{
+    const auto json = javelin::jmap::api::serializeEmailSetRequest({
+        .accountId = "u1",
+        .create = {},
+        .update =
+            {
+                {"eml-1",
+                 javelin::jmap::api::EmailSetUpdate{
+                     .mailboxIds = {{"mbx-drafts", nullptr}, {"mbx-sent", true}},
+                     .keywords = {{"$draft", nullptr}, {"$seen", true}},
+                 }},
+            },
+        .destroy = {},
+    });
+
+    REQUIRE(json.has_value());
+    CHECK(json->find(R"("mbx-drafts":null)") != std::string::npos);
+    CHECK(json->find(R"("mbx-sent":true)") != std::string::npos);
+    CHECK(json->find(R"("$draft":null)") != std::string::npos);
+    CHECK(json->find(R"("$seen":true)") != std::string::npos);
+}
+
 TEST_CASE("email set responses parse updated and failed ids", "[jmap][method][mail]")
 {
     const auto result = javelin::jmap::api::parseEmailSetResponse(

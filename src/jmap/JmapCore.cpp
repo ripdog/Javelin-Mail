@@ -424,10 +424,10 @@ namespace javelin::jmap
             };
         }
 
-        [[nodiscard]] std::unordered_map<std::string, bool>
+        [[nodiscard]] std::unordered_map<std::string, javelin::jmap::api::EmailPatchValue>
         enabledMap(const std::vector<std::string>& values)
         {
-            std::unordered_map<std::string, bool> enabled;
+            std::unordered_map<std::string, javelin::jmap::api::EmailPatchValue> enabled;
             enabled.reserve(values.size());
             for (const auto& value : values)
             {

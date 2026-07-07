@@ -1248,9 +1248,9 @@ namespace javelin::jmap::submission
                 {
                     {"#send",
                      {
-                         {std::string{"mailboxIds/"} + draftsMailbox->id, std::nullopt},
+                         {std::string{"mailboxIds/"} + draftsMailbox->id, nullptr},
                          {std::string{"mailboxIds/"} + sentMailbox->id, true},
-                         {"keywords/$draft", std::nullopt},
+                         {"keywords/$draft", nullptr},
                      }},
                 },
         });
@@ -1334,6 +1334,90 @@ namespace javelin::jmap::submission
                           << joinStrings(implicitEmailResponse.destroyed) << "notUpdated"
                           << joinStrings(implicitEmailResponse.notUpdated) << "notDestroyed"
                           << joinStrings(implicitEmailResponse.notDestroyed);
+
+        const auto cleanupRequest = javelin::jmap::api::emailSet({
+            .accountId = draftSummary.accountId,
+            .create = {},
+            .update =
+                {
+                    {draftSummary.draftEmailId,
+                     javelin::jmap::api::EmailSetUpdate{
+                         .mailboxIds = {{draftsMailbox->id, nullptr},
+                                        {sentMailbox->id, true}},
+                         .keywords = {{"$draft", nullptr}, {"$seen", true}},
+                     }},
+                },
+            .destroy = {},
+        });
+        if (!cleanupRequest.has_value())
+        {
+            qWarning().noquote() << "Compose send failed to encode explicit draft cleanup"
+                                 << QString::fromStdString(draftSummary.accountId)
+                                 << QString::fromStdString(draftSummary.draftEmailId);
+        }
+        else
+        {
+            javelin::jmap::api::RequestBuilder cleanupBuilder;
+            cleanupBuilder.useCore().useMail();
+            const auto cleanupHandle = cleanupBuilder.call(*cleanupRequest, "send-cleanup");
+            const auto cleanupResult = co_await methodCaller.call(
+                buildApiRequestContext(settings, draftSummary.accountId, session),
+                cleanupBuilder);
+            if (const auto* transportError =
+                    std::get_if<javelin::jmap::api::TransportError>(&cleanupResult))
+            {
+                qWarning().noquote() << "Compose send explicit draft cleanup transport failure"
+                                     << transportMessage(*transportError);
+            }
+            else if (const auto* authError =
+                         std::get_if<javelin::jmap::api::AuthError>(&cleanupResult))
+            {
+                qWarning().noquote() << "Compose send explicit draft cleanup auth failure"
+                                     << authMessage(*authError);
+            }
+            else if (const auto* protocolError =
+                         std::get_if<javelin::jmap::api::ProtocolError>(&cleanupResult))
+            {
+                qWarning().noquote() << "Compose send explicit draft cleanup protocol failure"
+                                     << protocolMessage(*protocolError);
+            }
+            else
+            {
+                const auto& cleanupEnvelope =
+                    std::get<javelin::jmap::api::ResponseEnvelope>(cleanupResult);
+                const javelin::jmap::api::ResponseReader cleanupReader{cleanupEnvelope};
+                for (const auto& response : cleanupReader.rawAll(cleanupHandle.callId))
+                {
+                    qInfo().noquote() << "Compose send cleanup raw response"
+                                      << QString::fromStdString(response.name) << "callId"
+                                      << QString::fromStdString(response.callId) << "arguments"
+                                      << QString::fromStdString(response.arguments);
+                }
+                const auto cleanupResponseResult = cleanupReader.require(cleanupHandle);
+                if (const auto* readerError =
+                        std::get_if<javelin::jmap::api::ResponseReaderError>(
+                            &cleanupResponseResult))
+                {
+                    qWarning().noquote() << "Compose send explicit draft cleanup response failure"
+                                         << QString::fromStdString(readerError->message);
+                }
+                else
+                {
+                    const auto& cleanupResponse =
+                        std::get<javelin::jmap::api::EmailSetResponse>(cleanupResponseResult);
+                    qInfo().noquote() << "Compose send explicit draft cleanup response"
+                                      << QString::fromStdString(draftSummary.accountId)
+                                      << "updated" << joinStrings(cleanupResponse.updated)
+                                      << "notUpdated" << joinStrings(cleanupResponse.notUpdated);
+                    if (!cleanupResponse.notUpdated.empty())
+                    {
+                        qWarning().noquote()
+                            << "Compose send explicit draft cleanup rejected for"
+                            << joinStrings(cleanupResponse.notUpdated);
+                    }
+                }
+            }
+        }
 
         javelin::jmap::cache::SubmissionRepository submissionRepository{m_connection};
         const auto createdSubmission = submissionResponse.created.begin()->second;

@@ -146,8 +146,8 @@ namespace
 
     struct RawEmailSetUpdate
     {
-        std::unordered_map<std::string, bool> mailboxIds;
-        std::unordered_map<std::string, bool> keywords;
+        std::unordered_map<std::string, javelin::jmap::api::EmailPatchValue> mailboxIds;
+        std::unordered_map<std::string, javelin::jmap::api::EmailPatchValue> keywords;
     };
 
     struct RawEmailBodyValueCreate
@@ -243,7 +243,9 @@ namespace
         std::string accountId;
         std::unordered_map<std::string, RawEmailSubmissionCreate> create;
         std::optional<
-            std::unordered_map<std::string, std::unordered_map<std::string, std::optional<bool>>>>
+            std::unordered_map<
+                std::string,
+                std::unordered_map<std::string, javelin::jmap::api::EmailSubmissionPatchValue>>>
             onSuccessUpdateEmail;
     };
 
@@ -960,8 +962,8 @@ namespace javelin::jmap::api
                     ? std::nullopt
                     : std::optional<std::unordered_map<
                           std::string,
-                          std::unordered_map<std::string,
-                                             std::optional<bool>>>>{request.onSuccessUpdateEmail},
+                          std::unordered_map<std::string, EmailSubmissionPatchValue>>>{
+                          request.onSuccessUpdateEmail},
         });
     }
 
