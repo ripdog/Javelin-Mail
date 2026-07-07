@@ -3,6 +3,7 @@
 #include "gui/messageview/GoogleHtmlTranslator.h"
 #include "gui/messageview/HtmlMessageView.h"
 #include "jmap/cache/TranslationCacheRepository.h"
+#include "jmap/language/LanguageDetection.h"
 
 #include <QAction>
 #include <QApplication>
@@ -10,6 +11,7 @@
 #include <QFileIconProvider>
 #include <QFileInfo>
 #include <QFrame>
+#include <QFutureWatcher>
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -26,8 +28,10 @@
 #include <QStackedWidget>
 #include <QStringList>
 #include <QStyle>
+#include <QTextDocument>
 #include <QToolButton>
 #include <QVBoxLayout>
+#include <QtConcurrent>
 
 #include <algorithm>
 #include <cctype>
@@ -46,6 +50,46 @@ namespace javelin::gui::messageview
         constexpr auto autoTranslateDomainsKey = "autoTranslateDomains";
         constexpr auto targetLanguage = "en";
         constexpr auto automaticSourceLanguage = "auto";
+
+        [[nodiscard]] std::string defaultLanguageModelPath()
+        {
+#ifdef JAVELIN_FASTTEXT_LANGUAGE_MODEL_PATH
+            return JAVELIN_FASTTEXT_LANGUAGE_MODEL_PATH;
+#else
+            return {};
+#endif
+        }
+
+        [[nodiscard]] std::string
+        detectionText(const javelin::jmap::cache::MessageViewSnapshot& snapshot)
+        {
+            if (snapshot.plainTextBody.has_value() && !snapshot.plainTextBody->isTruncated)
+            {
+                return snapshot.plainTextBody->value;
+            }
+
+            if (snapshot.htmlBody.has_value() && !snapshot.htmlBody->isTruncated)
+            {
+                QTextDocument document;
+                document.setHtml(QString::fromStdString(snapshot.htmlBody->value));
+                return document.toPlainText().toStdString();
+            }
+
+            return {};
+        }
+
+        [[nodiscard]] std::optional<javelin::jmap::language::LanguageDetectionResult>
+        detectMessageLanguage(javelin::jmap::cache::MessageViewSnapshot snapshot)
+        {
+            const auto text = detectionText(snapshot);
+            if (text.empty())
+            {
+                return std::nullopt;
+            }
+
+            javelin::jmap::language::LanguageDetectionService service{defaultLanguageModelPath()};
+            return service.detect(text);
+        }
 
         [[nodiscard]] QString
         attachmentName(const javelin::jmap::cache::MessageAttachment& attachment)
@@ -676,6 +720,7 @@ namespace javelin::gui::messageview
         connect(m_htmlView, &HtmlMessageView::documentLoaded, this,
                 [this]
                 {
+                    m_htmlDocumentLoaded = true;
                     if (m_activeView == ActiveView::Html)
                     {
                         maybeAutoTranslateCurrentMessage();
@@ -767,6 +812,8 @@ namespace javelin::gui::messageview
         m_translationError.clear();
         m_autoTranslateAttempted = false;
         m_translationWasAutomatic = false;
+        m_languageDetectionStarted = false;
+        m_htmlDocumentLoaded = false;
         m_loading = false;
         m_errorMessage.clear();
 
@@ -799,6 +846,8 @@ namespace javelin::gui::messageview
         m_translationError.clear();
         m_autoTranslateAttempted = false;
         m_translationWasAutomatic = false;
+        m_languageDetectionStarted = false;
+        m_htmlDocumentLoaded = false;
         m_loading = false;
         m_errorMessage.clear();
         m_snapshot = std::nullopt;
@@ -816,6 +865,8 @@ namespace javelin::gui::messageview
         m_translationError.clear();
         m_autoTranslateAttempted = false;
         m_translationWasAutomatic = false;
+        m_languageDetectionStarted = false;
+        m_htmlDocumentLoaded = false;
         m_snapshot = std::nullopt;
         if (m_accountId.has_value() && m_emailId.has_value())
         {
@@ -1068,6 +1119,10 @@ namespace javelin::gui::messageview
         {
             return;
         }
+        if (m_activeView == ActiveView::Html && !m_htmlDocumentLoaded)
+        {
+            return;
+        }
 
         const auto sender = currentSenderAddress();
         const auto domain = currentSenderDomain();
@@ -1288,6 +1343,42 @@ namespace javelin::gui::messageview
         updateLanguageBanner();
     }
 
+    void MessageViewContainer::startLanguageDetection()
+    {
+        if (m_languageDetectionStarted || !m_snapshot.has_value())
+        {
+            return;
+        }
+
+        m_languageDetectionStarted = true;
+        const auto selectedEmailId = m_emailId;
+        auto* watcher =
+            new QFutureWatcher<std::optional<javelin::jmap::language::LanguageDetectionResult>>{
+                this};
+        connect(watcher,
+                &QFutureWatcher<
+                    std::optional<javelin::jmap::language::LanguageDetectionResult>>::finished,
+                this,
+                [this, watcher, selectedEmailId]
+                {
+                    const auto detection = watcher->result();
+                    watcher->deleteLater();
+                    if (m_emailId != selectedEmailId || !m_snapshot.has_value())
+                    {
+                        return;
+                    }
+
+                    m_snapshot->languageDetection = detection;
+                    m_snapshot->shouldOfferTranslation =
+                        detection.has_value() &&
+                        javelin::jmap::language::shouldOfferTranslation(*detection);
+                    updateLanguageBanner();
+                    maybeAutoTranslateCurrentMessage();
+                });
+        watcher->setFuture(QtConcurrent::run([snapshot = *m_snapshot]
+                                             { return detectMessageLanguage(snapshot); }));
+    }
+
     void MessageViewContainer::updatePresentation(const bool reloadBody)
     {
         if (reloadBody)
@@ -1300,6 +1391,8 @@ namespace javelin::gui::messageview
             m_translationError.clear();
             m_autoTranslateAttempted = false;
             m_translationWasAutomatic = false;
+            m_languageDetectionStarted = false;
+            m_htmlDocumentLoaded = false;
         }
         m_attachmentStatusLabel->clear();
         rebuildAttachmentRows();
@@ -1423,6 +1516,7 @@ namespace javelin::gui::messageview
                 m_snapshot->htmlRenderDocument.has_value()
                     ? QString::fromStdString(m_snapshot->htmlRenderDocument->html)
                     : QString::fromStdString(m_snapshot->htmlBody->value);
+            m_htmlDocumentLoaded = false;
             m_htmlView->setDocumentHtml(renderDocument.toStdString());
         }
         updateSenderRemoteContentPermit();
@@ -1435,11 +1529,12 @@ namespace javelin::gui::messageview
         if (m_snapshot->htmlBody.has_value())
         {
             setActiveView(ActiveView::Html);
+            startLanguageDetection();
         }
         else if (m_snapshot->plainTextBody.has_value())
         {
             setActiveView(ActiveView::PlainText);
-            maybeAutoTranslateCurrentMessage();
+            startLanguageDetection();
         }
         else
         {

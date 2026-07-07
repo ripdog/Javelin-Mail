@@ -56,14 +56,12 @@ namespace javelin::jmap::cache
     {
       public:
         explicit MessageViewService(DatabaseConnection& connection);
-        MessageViewService(DatabaseConnection& connection, std::string languageModelPath);
 
         [[nodiscard]] std::variant<std::optional<MessageViewSnapshot>, DatabaseError>
         load(std::string_view accountId, std::string_view emailId) const;
 
       private:
         DatabaseConnection& m_connection;
-        mutable javelin::jmap::language::LanguageDetectionService m_languageDetectionService;
     };
 
 } // namespace javelin::jmap::cache

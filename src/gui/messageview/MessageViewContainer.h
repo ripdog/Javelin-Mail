@@ -74,6 +74,7 @@ namespace javelin::gui::messageview
         void updateSenderRemoteContentPermit();
         void updateRemoteContentButton();
         void updateLanguageBanner();
+        void startLanguageDetection();
         void translateCurrentMessage();
         void translateCurrentMessageFromCacheOrNetwork(bool automatic, bool allowNetwork);
         void restoreCurrentTranslation();
@@ -141,6 +142,8 @@ namespace javelin::gui::messageview
         QString m_translationError;
         bool m_autoTranslateAttempted = false;
         bool m_translationWasAutomatic = false;
+        bool m_languageDetectionStarted = false;
+        bool m_htmlDocumentLoaded = false;
     };
 
 } // namespace javelin::gui::messageview
