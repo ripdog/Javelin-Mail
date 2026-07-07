@@ -243,6 +243,8 @@ namespace javelin::gui::messageview
 
     QStringList GoogleHtmlTranslator::transformResponse(QString result)
     {
+        result = unescapeHtml(std::move(result));
+
         const auto preIndex = result.indexOf(QStringLiteral("<pre"));
         if (preIndex != -1)
         {
@@ -280,13 +282,7 @@ namespace javelin::gui::messageview
         }
         result.replace(QStringLiteral("</b>"), QString{});
 
-        struct IndexedText
-        {
-            qsizetype index = 0;
-            QString text;
-        };
-
-        QVector<IndexedText> indexedTexts;
+        QStringList resultArray;
         qsizetype lastEnd = 0;
         static const QRegularExpression anchorRegex{
             QStringLiteral(R"((\<a\si\=([0-9]+)\>)([^\<\>]*(?=\<\/a\>))*)")};
@@ -294,43 +290,58 @@ namespace javelin::gui::messageview
         while (iterator.hasNext())
         {
             const auto match = iterator.next();
-            QString text = match.captured(3);
+            auto taggedText = match.captured(0);
             if (match.capturedStart() > lastEnd)
             {
-                text = result.sliced(lastEnd, match.capturedStart() - lastEnd)
-                           .replace(QStringLiteral("</a>"), QString{}) +
-                       text;
+                const auto outsideText = result.sliced(lastEnd, match.capturedStart() - lastEnd)
+                                             .replace(QStringLiteral("</a>"), QString{});
+                taggedText = match.captured(1) + outsideText + match.captured(3);
             }
-            indexedTexts.push_back({
-                .index = match.captured(2).toLongLong(),
-                .text = text,
-            });
+            resultArray.push_back(std::move(taggedText));
             lastEnd = match.capturedEnd();
         }
 
-        if (!indexedTexts.empty() && lastEnd < result.size())
+        const auto lastOutsideText =
+            result.sliced(lastEnd).replace(QStringLiteral("</a>"), QString{});
+        if (!resultArray.empty())
         {
-            indexedTexts.last().text +=
-                result.sliced(lastEnd).replace(QStringLiteral("</a>"), QString{});
+            resultArray.last() += lastOutsideText;
         }
 
-        if (indexedTexts.empty())
+        if (resultArray.empty())
         {
-            return {unescapeHtml(result)};
+            return {result};
+        }
+
+        QVector<qsizetype> indexes;
+        indexes.reserve(resultArray.size());
+        for (auto& value : resultArray)
+        {
+            const auto tagEndIndex = value.indexOf(QLatin1Char('>'));
+            if (tagEndIndex == -1)
+            {
+                continue;
+            }
+            indexes.push_back(value.sliced(0, tagEndIndex)
+                                  .remove(QLatin1Char('<'))
+                                  .remove(QStringLiteral("a i="))
+                                  .toLongLong());
+            value = value.sliced(tagEndIndex + 1);
         }
 
         QStringList output;
-        for (const auto& item : indexedTexts)
+        for (qsizetype i = 0; i < indexes.size() && i < resultArray.size(); ++i)
         {
-            if (output.size() <= item.index)
+            const auto resultIndex = indexes[i];
+            if (output.size() <= resultIndex)
             {
-                output.resize(item.index + 1);
+                output.resize(resultIndex + 1);
             }
-            if (!output[item.index].isEmpty())
+            if (!output[resultIndex].isEmpty())
             {
-                output[item.index] += QLatin1Char(' ');
+                output[resultIndex] += QLatin1Char(' ');
             }
-            output[item.index] += unescapeHtml(item.text);
+            output[resultIndex] += resultArray[i];
         }
 
         return output;

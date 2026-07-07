@@ -4,6 +4,7 @@
 
 #include <QAction>
 #include <QContextMenuEvent>
+#include <QDesktopServices>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QMenu>
@@ -23,6 +24,33 @@ namespace javelin::gui::messageview
 
     namespace
     {
+        [[nodiscard]] bool shouldOpenExternally(const QUrl& url)
+        {
+            const auto scheme = url.scheme();
+            return scheme == QStringLiteral("http") || scheme == QStringLiteral("https") ||
+                   scheme == QStringLiteral("mailto");
+        }
+
+        class MessageWebEnginePage final : public QWebEnginePage
+        {
+          public:
+            using QWebEnginePage::QWebEnginePage;
+
+          protected:
+            bool acceptNavigationRequest(const QUrl& url, NavigationType type,
+                                         bool isMainFrame) override
+            {
+                if (type == QWebEnginePage::NavigationTypeLinkClicked && isMainFrame)
+                {
+                    if (shouldOpenExternally(url))
+                    {
+                        QDesktopServices::openUrl(url);
+                    }
+                    return false;
+                }
+                return QWebEnginePage::acceptNavigationRequest(url, type, isMainFrame);
+            }
+        };
 
         class FilteredWebEngineView final : public QWebEngineView
         {
@@ -95,6 +123,7 @@ namespace javelin::gui::messageview
         layout->setContentsMargins(0, 0, 0, 0);
 
         m_view = new FilteredWebEngineView([this] { Q_EMIT viewSourceRequested(); }, this);
+        m_view->setPage(new MessageWebEnginePage(m_view));
         auto* settings = m_view->settings();
         settings->setAttribute(QWebEngineSettings::JavascriptEnabled, true);
         settings->setAttribute(QWebEngineSettings::LocalContentCanAccessFileUrls, false);
@@ -265,7 +294,7 @@ namespace javelin::gui::messageview
     for (let j = 0; j < state.chunks[i].length; j++) {
       const node = state.chunks[i][j];
       const translated = translatedChunks[i] && translatedChunks[i][j];
-      if (!node || !translated) continue;
+      if (!node || translated === undefined || translated === null) continue;
       state.nodesToRestore.push({ node, originalText: node.textContent });
       node.textContent = translated;
     }
