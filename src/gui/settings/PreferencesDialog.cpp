@@ -199,8 +199,8 @@ namespace javelin::gui::settings
         m_removeRemoteContentButton = new QPushButton(QStringLiteral("Remove"), remoteContentPage);
         remoteContentButtons->addWidget(m_removeRemoteContentButton);
         remoteContentLayout->addLayout(remoteContentButtons);
-        addPage(remoteContentPage, QStringLiteral("Remote Content"), QStringLiteral("image"),
-                QString{}, false);
+        addPage(remoteContentPage, QStringLiteral("Remote Content"),
+                QStringLiteral("network-wireless-on"), QString{}, false);
 
         auto* translationPage = new QWidget(this);
         auto* translationLayout = new QVBoxLayout(translationPage);
