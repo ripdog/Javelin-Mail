@@ -61,6 +61,12 @@ namespace javelin::gui::settings
 
         javelin::jmap::cache::AccountRepository& m_accountRepository;
         std::vector<ConnectionSettings> m_accounts;
+        std::vector<ConnectionSettings> m_removedAccounts;
+        QStringList m_loadedAccountIds;
+        QStringList m_remoteContentSenders;
+        QStringList m_remoteContentDomains;
+        QStringList m_autoTranslateSenders;
+        QStringList m_autoTranslateDomains;
         bool m_hasPendingChanges = false;
         int m_currentRow = -1;
         QListWidget* m_accountList = nullptr;

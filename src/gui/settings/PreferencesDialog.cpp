@@ -142,7 +142,13 @@ namespace javelin::gui::settings
     PreferencesDialog::PreferencesDialog(javelin::jmap::cache::AccountRepository& accountRepository,
                                          QWidget* parent)
         : KConfigDialog(parent, QStringLiteral("preferences"), nullptr),
-          m_accountRepository(accountRepository), m_accounts(loadAccounts())
+          m_accountRepository(accountRepository), m_accounts(loadAccounts()),
+          m_remoteContentSenders(remoteContentAllowList(QLatin1StringView{allowedSendersKey})),
+          m_remoteContentDomains(remoteContentAllowList(QLatin1StringView{allowedDomainsKey})),
+          m_autoTranslateSenders(settingsList(QLatin1StringView{translationGroup},
+                                              QLatin1StringView{autoTranslateSendersKey})),
+          m_autoTranslateDomains(settingsList(QLatin1StringView{translationGroup},
+                                              QLatin1StringView{autoTranslateDomainsKey}))
     {
         setWindowTitle(QStringLiteral("Preferences"));
         resize(760, 420);
@@ -247,6 +253,10 @@ namespace javelin::gui::settings
         if (m_accounts.empty())
         {
             m_accounts.push_back(newAccount());
+        }
+        for (const auto& account : m_accounts)
+        {
+            m_loadedAccountIds.push_back(account.id);
         }
         refreshAccountList();
         refreshRemoteContentList();
@@ -402,8 +412,9 @@ namespace javelin::gui::settings
 
         const auto& account = m_accounts[static_cast<std::size_t>(m_currentRow)];
         QMessageBox warning{QMessageBox::Warning, QStringLiteral("Remove account"),
-                            QStringLiteral("Removing this account permanently wipes all of its "
-                                           "cached mail, drafts, state, and pending actions."),
+                            QStringLiteral("Applying this change will permanently wipe all of this "
+                                           "account's cached mail, drafts, state, and pending "
+                                           "actions."),
                             QMessageBox::Cancel, this};
         auto* removeButton =
             warning.addButton(QStringLiteral("Remove Account"), QMessageBox::DestructiveRole);
@@ -419,26 +430,15 @@ namespace javelin::gui::settings
             return;
         }
 
-        if (const auto error = m_accountRepository.removeConfiguredAccount(
-                account.loginEmail, account.sessionUrl, account.cachedAccountIds))
+        if (m_loadedAccountIds.contains(account.id))
         {
-            QMessageBox::critical(this, QStringLiteral("Could not remove account"), error->message);
-            return;
+            m_removedAccounts.push_back(account);
         }
-
         m_accounts.erase(m_accounts.begin() + m_currentRow);
-        saveAccounts(m_accounts);
-        QSettings settings;
-        settings.beginGroup(QLatin1StringView{accountsGroup});
-        settings.setValue(QLatin1StringView{activeAccountIdKey},
-                          m_accounts.empty() ? QString{} : m_accounts.front().id);
-        settings.endGroup();
-        settings.sync();
         m_currentRow = -1;
         refreshAccountList();
         m_accountList->setCurrentRow(m_accounts.empty() ? -1 : 0);
-        m_hasPendingChanges = false;
-        updateButtons();
+        noteUnsavedChanges();
     }
 
     void PreferencesDialog::selectAccount(const int row)
@@ -491,12 +491,36 @@ namespace javelin::gui::settings
     void PreferencesDialog::saveCurrentSettings()
     {
         storeCurrentEdits();
+        for (const auto& account : m_removedAccounts)
+        {
+            if (const auto error = m_accountRepository.removeConfiguredAccount(
+                    account.loginEmail, account.sessionUrl, account.cachedAccountIds))
+            {
+                QMessageBox::critical(this, QStringLiteral("Could not remove account"),
+                                      error->message);
+                return;
+            }
+        }
+        m_removedAccounts.clear();
+
         saveAccounts(m_accounts);
+        saveRemoteContentAllowList(QLatin1StringView{allowedSendersKey}, m_remoteContentSenders);
+        saveRemoteContentAllowList(QLatin1StringView{allowedDomainsKey}, m_remoteContentDomains);
+        saveSettingsList(QLatin1StringView{translationGroup},
+                         QLatin1StringView{autoTranslateSendersKey}, m_autoTranslateSenders);
+        saveSettingsList(QLatin1StringView{translationGroup},
+                         QLatin1StringView{autoTranslateDomainsKey}, m_autoTranslateDomains);
+
         QSettings settings;
         settings.beginGroup(QLatin1StringView{accountsGroup});
         settings.setValue(QLatin1StringView{activeAccountIdKey}, this->settings().id);
         settings.endGroup();
         settings.sync();
+        m_loadedAccountIds.clear();
+        for (const auto& account : m_accounts)
+        {
+            m_loadedAccountIds.push_back(account.id);
+        }
         m_hasPendingChanges = false;
     }
 
@@ -514,8 +538,7 @@ namespace javelin::gui::settings
     {
         m_remoteContentList->clear();
 
-        const auto senders = remoteContentAllowList(QLatin1StringView{allowedSendersKey});
-        for (const auto& sender : senders)
+        for (const auto& sender : m_remoteContentSenders)
         {
             auto* item =
                 new QListWidgetItem(QStringLiteral("Sender: %1").arg(sender), m_remoteContentList);
@@ -523,8 +546,7 @@ namespace javelin::gui::settings
             item->setData(remoteContentValueRole, sender);
         }
 
-        const auto domains = remoteContentAllowList(QLatin1StringView{allowedDomainsKey});
-        for (const auto& domain : domains)
+        for (const auto& domain : m_remoteContentDomains)
         {
             auto* item =
                 new QListWidgetItem(QStringLiteral("Domain: %1").arg(domain), m_remoteContentList);
@@ -537,9 +559,6 @@ namespace javelin::gui::settings
 
     void PreferencesDialog::removeSelectedRemoteContentPermits()
     {
-        auto senders = remoteContentAllowList(QLatin1StringView{allowedSendersKey});
-        auto domains = remoteContentAllowList(QLatin1StringView{allowedDomainsKey});
-
         for (const auto* item : m_remoteContentList->selectedItems())
         {
             const auto kind =
@@ -547,26 +566,23 @@ namespace javelin::gui::settings
             const auto value = item->data(remoteContentValueRole).toString();
             if (kind == RemoteContentPermitKind::Sender)
             {
-                senders.removeAll(value);
+                m_remoteContentSenders.removeAll(value);
             }
             else
             {
-                domains.removeAll(value);
+                m_remoteContentDomains.removeAll(value);
             }
         }
 
-        saveRemoteContentAllowList(QLatin1StringView{allowedSendersKey}, senders);
-        saveRemoteContentAllowList(QLatin1StringView{allowedDomainsKey}, domains);
         refreshRemoteContentList();
+        noteUnsavedChanges();
     }
 
     void PreferencesDialog::refreshAutoTranslateList()
     {
         m_autoTranslateList->clear();
 
-        const auto senders = settingsList(QLatin1StringView{translationGroup},
-                                          QLatin1StringView{autoTranslateSendersKey});
-        for (const auto& sender : senders)
+        for (const auto& sender : m_autoTranslateSenders)
         {
             auto* item =
                 new QListWidgetItem(QStringLiteral("Sender: %1").arg(sender), m_autoTranslateList);
@@ -574,9 +590,7 @@ namespace javelin::gui::settings
             item->setData(autoTranslateValueRole, sender);
         }
 
-        const auto domains = settingsList(QLatin1StringView{translationGroup},
-                                          QLatin1StringView{autoTranslateDomainsKey});
-        for (const auto& domain : domains)
+        for (const auto& domain : m_autoTranslateDomains)
         {
             auto* item =
                 new QListWidgetItem(QStringLiteral("Domain: %1").arg(domain), m_autoTranslateList);
@@ -589,11 +603,6 @@ namespace javelin::gui::settings
 
     void PreferencesDialog::removeSelectedAutoTranslateEntries()
     {
-        auto senders = settingsList(QLatin1StringView{translationGroup},
-                                    QLatin1StringView{autoTranslateSendersKey});
-        auto domains = settingsList(QLatin1StringView{translationGroup},
-                                    QLatin1StringView{autoTranslateDomainsKey});
-
         for (const auto* item : m_autoTranslateList->selectedItems())
         {
             const auto kind =
@@ -601,19 +610,16 @@ namespace javelin::gui::settings
             const auto value = item->data(autoTranslateValueRole).toString();
             if (kind == AutoTranslateEntryKind::Sender)
             {
-                senders.removeAll(value);
+                m_autoTranslateSenders.removeAll(value);
             }
             else
             {
-                domains.removeAll(value);
+                m_autoTranslateDomains.removeAll(value);
             }
         }
 
-        saveSettingsList(QLatin1StringView{translationGroup},
-                         QLatin1StringView{autoTranslateSendersKey}, senders);
-        saveSettingsList(QLatin1StringView{translationGroup},
-                         QLatin1StringView{autoTranslateDomainsKey}, domains);
         refreshAutoTranslateList();
+        noteUnsavedChanges();
     }
 
 } // namespace javelin::gui::settings
