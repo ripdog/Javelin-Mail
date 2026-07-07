@@ -295,7 +295,8 @@ namespace javelin::gui::messageview
             {
                 const auto outsideText = result.sliced(lastEnd, match.capturedStart() - lastEnd)
                                              .replace(QStringLiteral("</a>"), QString{});
-                taggedText = match.captured(1) + outsideText + match.captured(3);
+                const auto tagText = match.captured(1);
+                taggedText = tagText + outsideText + taggedText.sliced(tagText.size());
             }
             resultArray.push_back(std::move(taggedText));
             lastEnd = match.capturedEnd();
