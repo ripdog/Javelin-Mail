@@ -20,6 +20,7 @@ namespace javelin::app
     namespace
     {
         constexpr std::size_t maxRecentNotificationKeys = 512;
+        constexpr auto refreshDebounceInterval = std::chrono::milliseconds{750};
         constexpr auto resumeWatchdogInterval = std::chrono::seconds{30};
         constexpr auto resumeWatchdogStallThreshold = std::chrono::seconds{90};
 
@@ -51,6 +52,10 @@ namespace javelin::app
           m_networkAccessManager(networkAccessManager), m_accountRepository(accountRepository),
           m_queryService(queryService)
     {
+        m_refreshDebounceTimer.setSingleShot(true);
+        m_refreshDebounceTimer.setInterval(refreshDebounceInterval);
+        QObject::connect(&m_refreshDebounceTimer, &QTimer::timeout, this,
+                         &LongPollService::scheduleCatchUpRefresh);
         m_lastResumeWatchdogTickMs = QDateTime::currentMSecsSinceEpoch();
         m_resumeWatchdogTimer.setInterval(resumeWatchdogInterval);
         QObject::connect(&m_resumeWatchdogTimer, &QTimer::timeout, this,
@@ -90,6 +95,7 @@ namespace javelin::app
 
         m_recentNotificationKeys.clear();
         m_notifiedEmailKeys.clear();
+        m_refreshDebounceTimer.stop();
         m_refreshInFlight = false;
         m_refreshAgainRequested = false;
         setStatus(Status::Disconnected);
@@ -104,7 +110,8 @@ namespace javelin::app
     QCoro::Task<void> LongPollService::onUpdate(javelin::jmap::sync::LongPollResponse response)
     {
         m_lastEventId = response.newState;
-        co_await refreshWatchedMailbox();
+        scheduleDebouncedRefresh();
+        co_return;
     }
 
     bool LongPollService::hasValidSettings() const
@@ -342,6 +349,16 @@ namespace javelin::app
         qWarning().noquote() << "Long poll resume watchdog detected event-loop stall" << elapsedMs
                              << "ms; restarting event-source stream";
         restartForCatchUp();
+    }
+
+    void LongPollService::scheduleDebouncedRefresh()
+    {
+        if (!hasValidSettings() || m_runContext == nullptr)
+        {
+            return;
+        }
+
+        m_refreshDebounceTimer.start();
     }
 
     void LongPollService::scheduleCatchUpRefresh()

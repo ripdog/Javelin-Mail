@@ -96,6 +96,7 @@ namespace javelin::app
         [[nodiscard]] QCoro::Task<bool>
         refreshMailboxStateOnce(std::shared_ptr<RunContext> runContext);
         void handleResumeWatchdogTimeout();
+        void scheduleDebouncedRefresh();
         void scheduleCatchUpRefresh();
         void restartForCatchUp();
         void restart();
@@ -119,6 +120,7 @@ namespace javelin::app
         bool m_shouldCatchUpRefreshOnReconnect = false;
         bool m_refreshInFlight = false;
         bool m_refreshAgainRequested = false;
+        QTimer m_refreshDebounceTimer;
         QTimer m_resumeWatchdogTimer;
         qint64 m_lastResumeWatchdogTickMs = 0;
     };
