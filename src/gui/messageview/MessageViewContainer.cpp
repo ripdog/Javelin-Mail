@@ -673,6 +673,14 @@ namespace javelin::gui::messageview
         m_htmlView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
         connect(m_htmlView, &HtmlMessageView::viewSourceRequested, this,
                 &MessageViewContainer::viewSourceRequested);
+        connect(m_htmlView, &HtmlMessageView::documentLoaded, this,
+                [this]
+                {
+                    if (m_activeView == ActiveView::Html)
+                    {
+                        maybeAutoTranslateCurrentMessage();
+                    }
+                });
 
         m_bodyStack->addWidget(m_placeholderPanel);
         m_bodyStack->addWidget(m_multipleSelectionScrollArea);
@@ -1427,7 +1435,6 @@ namespace javelin::gui::messageview
         if (m_snapshot->htmlBody.has_value())
         {
             setActiveView(ActiveView::Html);
-            maybeAutoTranslateCurrentMessage();
         }
         else if (m_snapshot->plainTextBody.has_value())
         {

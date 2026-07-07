@@ -132,7 +132,14 @@ namespace javelin::gui::messageview
         settings->setAttribute(QWebEngineSettings::PluginsEnabled, false);
         settings->setAttribute(QWebEngineSettings::PlaybackRequiresUserGesture, true);
         connect(m_view, &QWebEngineView::loadFinished, this,
-                [this](const bool) { applyRemoteContentPolicy(); });
+                [this](const bool ok)
+                {
+                    applyRemoteContentPolicy();
+                    if (ok)
+                    {
+                        Q_EMIT documentLoaded();
+                    }
+                });
 
         layout->addWidget(m_view);
     }

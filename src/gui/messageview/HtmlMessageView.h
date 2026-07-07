@@ -31,6 +31,7 @@ namespace javelin::gui::messageview
 
       Q_SIGNALS:
         void viewSourceRequested();
+        void documentLoaded();
 
       private:
         void applyRemoteContentPolicy();
