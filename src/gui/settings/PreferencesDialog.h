@@ -52,6 +52,8 @@ namespace javelin::gui::settings
         void refreshAccountList();
         void refreshRemoteContentList();
         void removeSelectedRemoteContentPermits();
+        void refreshAutoTranslateList();
+        void removeSelectedAutoTranslateEntries();
 
         javelin::jmap::cache::AccountRepository& m_accountRepository;
         std::vector<ConnectionSettings> m_accounts;
@@ -65,6 +67,8 @@ namespace javelin::gui::settings
         QStackedWidget* m_pageStack = nullptr;
         QListWidget* m_remoteContentList = nullptr;
         QPushButton* m_removeRemoteContentButton = nullptr;
+        QListWidget* m_autoTranslateList = nullptr;
+        QPushButton* m_removeAutoTranslateButton = nullptr;
     };
 
 } // namespace javelin::gui::settings

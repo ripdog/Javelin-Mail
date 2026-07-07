@@ -545,17 +545,19 @@ namespace javelin::gui::shell
 
     } // namespace
 
-    MainWindow::MainWindow(javelin::jmap::JmapCore& jmapCore,
-                           javelin::jmap::cache::AccountRepository& accountRepository,
-                           javelin::jmap::cache::IdentityRepository& identityRepository,
-                           javelin::jmap::cache::MessageViewService& messageViewService,
-                           javelin::jmap::cache::QueryService& queryService,
-                           javelin::jmap::submission::ComposeService& composeService,
-                           javelin::app::LongPollService& longPollService, QWidget* parent)
+    MainWindow::MainWindow(
+        javelin::jmap::JmapCore& jmapCore,
+        javelin::jmap::cache::AccountRepository& accountRepository,
+        javelin::jmap::cache::IdentityRepository& identityRepository,
+        javelin::jmap::cache::MessageViewService& messageViewService,
+        javelin::jmap::cache::QueryService& queryService,
+        javelin::jmap::cache::TranslationCacheRepository& translationCacheRepository,
+        javelin::jmap::submission::ComposeService& composeService,
+        javelin::app::LongPollService& longPollService, QWidget* parent)
         : KXmlGuiWindow(parent), m_jmapCore(jmapCore), m_accountRepository(accountRepository),
           m_identityRepository(identityRepository), m_messageViewService(messageViewService),
-          m_queryService(queryService), m_composeService(composeService),
-          m_longPollService(longPollService)
+          m_queryService(queryService), m_translationCacheRepository(translationCacheRepository),
+          m_composeService(composeService), m_longPollService(longPollService)
     {
         setupUi();
         createActions();
@@ -911,7 +913,8 @@ namespace javelin::gui::shell
         messageLayout->addWidget(m_messageEmptyState);
         messageLayout->addWidget(m_messageView, 1);
 
-        m_messageViewContainer = new javelin::gui::messageview::MessageViewContainer(this);
+        m_messageViewContainer =
+            new javelin::gui::messageview::MessageViewContainer(m_translationCacheRepository, this);
         connect(m_messageViewContainer,
                 &javelin::gui::messageview::MessageViewContainer::saveAttachmentRequested, this,
                 [this](const QString& accountId, const QString& emailId, const QString& partId)

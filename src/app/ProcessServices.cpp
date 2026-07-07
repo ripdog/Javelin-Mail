@@ -10,6 +10,7 @@
 #include "jmap/cache/MessageViewService.h"
 #include "jmap/cache/QueryService.h"
 #include "jmap/cache/SubmissionRepository.h"
+#include "jmap/cache/TranslationCacheRepository.h"
 #include "jmap/render/InlineMessageUrl.h"
 #include "jmap/submission/ComposeService.h"
 
@@ -67,14 +68,16 @@ namespace javelin::app
         m_messageViewService =
             std::make_unique<javelin::jmap::cache::MessageViewService>(m_databaseConnection);
         m_queryService = std::make_unique<javelin::jmap::cache::QueryService>(m_databaseConnection);
+        m_translationCacheRepository =
+            std::make_unique<javelin::jmap::cache::TranslationCacheRepository>(
+                m_databaseConnection);
         m_submissionRepository =
             std::make_unique<javelin::jmap::cache::SubmissionRepository>(m_databaseConnection);
         m_composeService = std::make_unique<javelin::jmap::submission::ComposeService>(
             m_databaseConnection, *m_transport, *m_jmapCore);
         m_longPollService = std::make_unique<LongPollService>(
             m_databaseConnection, *m_transport, *m_longPollNetworkAccessManager,
-            *m_accountRepository,
-            *m_queryService);
+            *m_accountRepository, *m_queryService);
     }
 
     ProcessServices::~ProcessServices() = default;
@@ -107,6 +110,11 @@ namespace javelin::app
     javelin::jmap::cache::QueryService& ProcessServices::queryService()
     {
         return *m_queryService;
+    }
+
+    javelin::jmap::cache::TranslationCacheRepository& ProcessServices::translationCacheRepository()
+    {
+        return *m_translationCacheRepository;
     }
 
     javelin::jmap::submission::ComposeService& ProcessServices::composeService()

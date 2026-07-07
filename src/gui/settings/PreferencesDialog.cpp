@@ -36,10 +36,21 @@ namespace javelin::gui::settings
         constexpr auto remoteContentGroup = "remoteContent";
         constexpr auto allowedSendersKey = "allowedSenders";
         constexpr auto allowedDomainsKey = "allowedDomains";
+        constexpr auto translationGroup = "translation";
+        constexpr auto autoTranslateSendersKey = "autoTranslateSenders";
+        constexpr auto autoTranslateDomainsKey = "autoTranslateDomains";
         constexpr int remoteContentKindRole = Qt::UserRole + 1;
         constexpr int remoteContentValueRole = Qt::UserRole + 2;
+        constexpr int autoTranslateKindRole = Qt::UserRole + 1;
+        constexpr int autoTranslateValueRole = Qt::UserRole + 2;
 
         enum class RemoteContentPermitKind
+        {
+            Sender,
+            Domain,
+        };
+
+        enum class AutoTranslateEntryKind
         {
             Sender,
             Domain,
@@ -62,10 +73,8 @@ namespace javelin::gui::settings
             settings.beginGroup(QLatin1StringView{legacyConnectionGroup});
             const ConnectionSettings account{
                 .id = QUuid::createUuid().toString(QUuid::WithoutBraces),
-                .sessionUrl =
-                    settings.value(QLatin1StringView{sessionUrlKey}).toString().trimmed(),
-                .loginEmail =
-                    settings.value(QLatin1StringView{loginEmailKey}).toString().trimmed(),
+                .sessionUrl = settings.value(QLatin1StringView{sessionUrlKey}).toString().trimmed(),
+                .loginEmail = settings.value(QLatin1StringView{loginEmailKey}).toString().trimmed(),
                 .apiKey = settings.value(QLatin1StringView{apiKeyKey}).toString().trimmed(),
                 .cachedAccountIds = {},
             };
@@ -102,10 +111,37 @@ namespace javelin::gui::settings
             settings.endGroup();
             settings.sync();
         }
+
+        [[nodiscard]] QStringList settingsList(const QLatin1StringView group,
+                                               const QLatin1StringView key)
+        {
+            QSettings settings;
+            settings.beginGroup(group);
+            auto values = settings.value(key).toStringList();
+            settings.endGroup();
+            values.removeAll(QString{});
+            values.removeDuplicates();
+            values.sort(Qt::CaseInsensitive);
+            return values;
+        }
+
+        void saveSettingsList(const QLatin1StringView group, const QLatin1StringView key,
+                              QStringList values)
+        {
+            values.removeAll(QString{});
+            values.removeDuplicates();
+            values.sort(Qt::CaseInsensitive);
+
+            QSettings settings;
+            settings.beginGroup(group);
+            settings.setValue(key, values);
+            settings.endGroup();
+            settings.sync();
+        }
     } // namespace
 
-    PreferencesDialog::PreferencesDialog(
-        javelin::jmap::cache::AccountRepository& accountRepository, QWidget* parent)
+    PreferencesDialog::PreferencesDialog(javelin::jmap::cache::AccountRepository& accountRepository,
+                                         QWidget* parent)
         : QDialog(parent), m_accountRepository(accountRepository), m_accounts(loadAccounts())
     {
         setWindowTitle(QStringLiteral("Preferences"));
@@ -118,6 +154,7 @@ namespace javelin::gui::settings
         m_pageList->setFixedWidth(150);
         m_pageList->addItem(QStringLiteral("Accounts"));
         m_pageList->addItem(QStringLiteral("Remote Content"));
+        m_pageList->addItem(QStringLiteral("Translation"));
         contentLayout->addWidget(m_pageList);
 
         m_pageStack = new QStackedWidget(this);
@@ -163,8 +200,8 @@ namespace javelin::gui::settings
 
         auto* remoteContentPage = new QWidget(m_pageStack);
         auto* remoteContentLayout = new QVBoxLayout(remoteContentPage);
-        remoteContentLayout->addWidget(new QLabel(QStringLiteral("Allowed Remote Content"),
-                                                  remoteContentPage));
+        remoteContentLayout->addWidget(
+            new QLabel(QStringLiteral("Allowed Remote Content"), remoteContentPage));
         m_remoteContentList = new QListWidget(remoteContentPage);
         m_remoteContentList->setSelectionMode(QAbstractItemView::ExtendedSelection);
         remoteContentLayout->addWidget(m_remoteContentList, 1);
@@ -174,6 +211,20 @@ namespace javelin::gui::settings
         remoteContentButtons->addWidget(m_removeRemoteContentButton);
         remoteContentLayout->addLayout(remoteContentButtons);
         m_pageStack->addWidget(remoteContentPage);
+
+        auto* translationPage = new QWidget(m_pageStack);
+        auto* translationLayout = new QVBoxLayout(translationPage);
+        translationLayout->addWidget(
+            new QLabel(QStringLiteral("Auto-Translate Entries"), translationPage));
+        m_autoTranslateList = new QListWidget(translationPage);
+        m_autoTranslateList->setSelectionMode(QAbstractItemView::ExtendedSelection);
+        translationLayout->addWidget(m_autoTranslateList, 1);
+        auto* translationButtons = new QHBoxLayout();
+        translationButtons->addStretch(1);
+        m_removeAutoTranslateButton = new QPushButton(QStringLiteral("Remove"), translationPage);
+        translationButtons->addWidget(m_removeAutoTranslateButton);
+        translationLayout->addLayout(translationButtons);
+        m_pageStack->addWidget(translationPage);
 
         contentLayout->addWidget(m_pageStack, 1);
         outerLayout->addLayout(contentLayout, 1);
@@ -208,6 +259,14 @@ namespace javelin::gui::settings
                     m_removeRemoteContentButton->setEnabled(
                         !m_remoteContentList->selectedItems().empty());
                 });
+        connect(m_removeAutoTranslateButton, &QPushButton::clicked, this,
+                &PreferencesDialog::removeSelectedAutoTranslateEntries);
+        connect(m_autoTranslateList, &QListWidget::itemSelectionChanged, this,
+                [this]
+                {
+                    m_removeAutoTranslateButton->setEnabled(
+                        !m_autoTranslateList->selectedItems().empty());
+                });
         outerLayout->addWidget(buttonBox);
 
         if (m_accounts.empty())
@@ -216,6 +275,7 @@ namespace javelin::gui::settings
         }
         refreshAccountList();
         refreshRemoteContentList();
+        refreshAutoTranslateList();
         m_pageList->setCurrentRow(0);
         m_accountList->setCurrentRow(0);
     }
@@ -247,10 +307,8 @@ namespace javelin::gui::settings
             settings.setArrayIndex(index);
             accounts.push_back(ConnectionSettings{
                 .id = settings.value(QLatin1StringView{idKey}).toString(),
-                .sessionUrl =
-                    settings.value(QLatin1StringView{sessionUrlKey}).toString().trimmed(),
-                .loginEmail =
-                    settings.value(QLatin1StringView{loginEmailKey}).toString().trimmed(),
+                .sessionUrl = settings.value(QLatin1StringView{sessionUrlKey}).toString().trimmed(),
+                .loginEmail = settings.value(QLatin1StringView{loginEmailKey}).toString().trimmed(),
                 .apiKey = settings.value(QLatin1StringView{apiKeyKey}).toString().trimmed(),
                 .cachedAccountIds =
                     settings.value(QLatin1StringView{cachedAccountIdsKey}).toStringList(),
@@ -288,8 +346,7 @@ namespace javelin::gui::settings
         const auto activeAccountId =
             settings.value(QLatin1StringView{activeAccountIdKey}).toString();
         settings.endGroup();
-        const auto active =
-            std::ranges::find(accounts, activeAccountId, &ConnectionSettings::id);
+        const auto active = std::ranges::find(accounts, activeAccountId, &ConnectionSettings::id);
         return active == accounts.end() ? accounts.front() : *active;
     }
 
@@ -306,8 +363,7 @@ namespace javelin::gui::settings
     {
         QSettings settings;
         settings.beginGroup(QLatin1StringView{accountsGroup});
-        settings.beginWriteArray(QLatin1StringView{sizeKey},
-                                 static_cast<int>(accounts.size()));
+        settings.beginWriteArray(QLatin1StringView{sizeKey}, static_cast<int>(accounts.size()));
         for (int index = 0; index < static_cast<int>(accounts.size()); ++index)
         {
             settings.setArrayIndex(index);
@@ -327,8 +383,8 @@ namespace javelin::gui::settings
                                                    const QString& cachedAccountId)
     {
         auto accounts = loadAccounts();
-        const auto found = std::ranges::find(accounts, configuredAccountId,
-                                             &ConnectionSettings::id);
+        const auto found =
+            std::ranges::find(accounts, configuredAccountId, &ConnectionSettings::id);
         if (found == accounts.end())
         {
             return;
@@ -363,9 +419,8 @@ namespace javelin::gui::settings
                             QMessageBox::Cancel, this};
         auto* removeButton =
             warning.addButton(QStringLiteral("Remove Account"), QMessageBox::DestructiveRole);
-        auto* confirmation =
-            new QCheckBox(QStringLiteral("I understand that all cached data will be wiped."),
-                          &warning);
+        auto* confirmation = new QCheckBox(
+            QStringLiteral("I understand that all cached data will be wiped."), &warning);
         confirmation->setChecked(false);
         removeButton->setEnabled(false);
         connect(confirmation, &QCheckBox::toggled, removeButton, &QPushButton::setEnabled);
@@ -454,20 +509,18 @@ namespace javelin::gui::settings
         const auto senders = remoteContentAllowList(QLatin1StringView{allowedSendersKey});
         for (const auto& sender : senders)
         {
-            auto* item = new QListWidgetItem(QStringLiteral("Sender: %1").arg(sender),
-                                             m_remoteContentList);
-            item->setData(remoteContentKindRole,
-                          static_cast<int>(RemoteContentPermitKind::Sender));
+            auto* item =
+                new QListWidgetItem(QStringLiteral("Sender: %1").arg(sender), m_remoteContentList);
+            item->setData(remoteContentKindRole, static_cast<int>(RemoteContentPermitKind::Sender));
             item->setData(remoteContentValueRole, sender);
         }
 
         const auto domains = remoteContentAllowList(QLatin1StringView{allowedDomainsKey});
         for (const auto& domain : domains)
         {
-            auto* item = new QListWidgetItem(QStringLiteral("Domain: %1").arg(domain),
-                                             m_remoteContentList);
-            item->setData(remoteContentKindRole,
-                          static_cast<int>(RemoteContentPermitKind::Domain));
+            auto* item =
+                new QListWidgetItem(QStringLiteral("Domain: %1").arg(domain), m_remoteContentList);
+            item->setData(remoteContentKindRole, static_cast<int>(RemoteContentPermitKind::Domain));
             item->setData(remoteContentValueRole, domain);
         }
 
@@ -497,6 +550,62 @@ namespace javelin::gui::settings
         saveRemoteContentAllowList(QLatin1StringView{allowedSendersKey}, senders);
         saveRemoteContentAllowList(QLatin1StringView{allowedDomainsKey}, domains);
         refreshRemoteContentList();
+    }
+
+    void PreferencesDialog::refreshAutoTranslateList()
+    {
+        m_autoTranslateList->clear();
+
+        const auto senders = settingsList(QLatin1StringView{translationGroup},
+                                          QLatin1StringView{autoTranslateSendersKey});
+        for (const auto& sender : senders)
+        {
+            auto* item =
+                new QListWidgetItem(QStringLiteral("Sender: %1").arg(sender), m_autoTranslateList);
+            item->setData(autoTranslateKindRole, static_cast<int>(AutoTranslateEntryKind::Sender));
+            item->setData(autoTranslateValueRole, sender);
+        }
+
+        const auto domains = settingsList(QLatin1StringView{translationGroup},
+                                          QLatin1StringView{autoTranslateDomainsKey});
+        for (const auto& domain : domains)
+        {
+            auto* item =
+                new QListWidgetItem(QStringLiteral("Domain: %1").arg(domain), m_autoTranslateList);
+            item->setData(autoTranslateKindRole, static_cast<int>(AutoTranslateEntryKind::Domain));
+            item->setData(autoTranslateValueRole, domain);
+        }
+
+        m_removeAutoTranslateButton->setEnabled(false);
+    }
+
+    void PreferencesDialog::removeSelectedAutoTranslateEntries()
+    {
+        auto senders = settingsList(QLatin1StringView{translationGroup},
+                                    QLatin1StringView{autoTranslateSendersKey});
+        auto domains = settingsList(QLatin1StringView{translationGroup},
+                                    QLatin1StringView{autoTranslateDomainsKey});
+
+        for (const auto* item : m_autoTranslateList->selectedItems())
+        {
+            const auto kind =
+                static_cast<AutoTranslateEntryKind>(item->data(autoTranslateKindRole).toInt());
+            const auto value = item->data(autoTranslateValueRole).toString();
+            if (kind == AutoTranslateEntryKind::Sender)
+            {
+                senders.removeAll(value);
+            }
+            else
+            {
+                domains.removeAll(value);
+            }
+        }
+
+        saveSettingsList(QLatin1StringView{translationGroup},
+                         QLatin1StringView{autoTranslateSendersKey}, senders);
+        saveSettingsList(QLatin1StringView{translationGroup},
+                         QLatin1StringView{autoTranslateDomainsKey}, domains);
+        refreshAutoTranslateList();
     }
 
 } // namespace javelin::gui::settings

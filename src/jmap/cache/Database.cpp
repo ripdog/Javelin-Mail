@@ -724,6 +724,26 @@ namespace javelin::jmap::cache
                                 "raw_message_sources (account_id, blob_id)"),
                         },
                 },
+                MigrationStep{
+                    .version = 10,
+                    .name = QStringLiteral("translation_cache"),
+                    .statements =
+                        {
+                            QStringLiteral("CREATE TABLE IF NOT EXISTS translation_cache ("
+                                           "source_language TEXT NOT NULL,"
+                                           "target_language TEXT NOT NULL,"
+                                           "input_hash TEXT NOT NULL,"
+                                           "input_text TEXT NOT NULL,"
+                                           "translated_text TEXT NOT NULL,"
+                                           "updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+                                           "PRIMARY KEY (source_language, target_language, "
+                                           "input_hash)"
+                                           ") STRICT"),
+                            QStringLiteral(
+                                "CREATE INDEX IF NOT EXISTS idx_translation_cache_updated ON "
+                                "translation_cache (updated_at DESC)"),
+                        },
+                },
             },
         };
     }

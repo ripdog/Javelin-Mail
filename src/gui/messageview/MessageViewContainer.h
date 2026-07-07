@@ -21,6 +21,11 @@ class QToolButton;
 class QVBoxLayout;
 class QWidget;
 
+namespace javelin::jmap::cache
+{
+    class TranslationCacheRepository;
+}
+
 namespace javelin::gui::messageview
 {
     class GoogleHtmlTranslator;
@@ -31,7 +36,9 @@ namespace javelin::gui::messageview
         Q_OBJECT
 
       public:
-        explicit MessageViewContainer(QWidget* parent = nullptr);
+        explicit MessageViewContainer(
+            javelin::jmap::cache::TranslationCacheRepository& translationCacheRepository,
+            QWidget* parent = nullptr);
         ~MessageViewContainer() override;
 
         void setSelection(javelin::jmap::cache::MessageViewService& messageViewService,
@@ -68,7 +75,12 @@ namespace javelin::gui::messageview
         void updateRemoteContentButton();
         void updateLanguageBanner();
         void translateCurrentMessage();
+        void translateCurrentMessageFromCacheOrNetwork(bool automatic, bool allowNetwork);
         void restoreCurrentTranslation();
+        void updateTranslateOptionsMenu();
+        void setAutoTranslateSender(bool enabled);
+        void setAutoTranslateDomain(bool enabled);
+        void maybeAutoTranslateCurrentMessage();
         void updateAttachmentSection();
         void rebuildAttachmentRows();
         void rebuildMultipleSelectionRows();
@@ -107,7 +119,9 @@ namespace javelin::gui::messageview
         QWidget* m_languageBannerWidget = nullptr;
         QLabel* m_languageStatusLabel = nullptr;
         QToolButton* m_translateButton = nullptr;
+        QToolButton* m_translateOptionsButton = nullptr;
         GoogleHtmlTranslator* m_translator = nullptr;
+        javelin::jmap::cache::TranslationCacheRepository& m_translationCacheRepository;
         QWidget* m_bodyControlsWidget = nullptr;
         QStackedWidget* m_bodyStack = nullptr;
         QProgressBar* m_loadingIndicator = nullptr;
@@ -125,6 +139,8 @@ namespace javelin::gui::messageview
         bool m_messageTranslated = false;
         QString m_originalPlainText;
         QString m_translationError;
+        bool m_autoTranslateAttempted = false;
+        bool m_translationWasAutomatic = false;
     };
 
 } // namespace javelin::gui::messageview

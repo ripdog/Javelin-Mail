@@ -53,6 +53,7 @@ namespace javelin::jmap::cache
     class IdentityRepository;
     class MessageViewService;
     class QueryService;
+    class TranslationCacheRepository;
 } // namespace javelin::jmap::cache
 
 namespace javelin::gui::mailboxes
@@ -83,14 +84,15 @@ namespace javelin::gui::shell
         Q_OBJECT
 
       public:
-        explicit MainWindow(javelin::jmap::JmapCore& jmapCore,
-                            javelin::jmap::cache::AccountRepository& accountRepository,
-                            javelin::jmap::cache::IdentityRepository& identityRepository,
-                            javelin::jmap::cache::MessageViewService& messageViewService,
-                            javelin::jmap::cache::QueryService& queryService,
-                            javelin::jmap::submission::ComposeService& composeService,
-                            javelin::app::LongPollService& longPollService,
-                            QWidget* parent = nullptr);
+        explicit MainWindow(
+            javelin::jmap::JmapCore& jmapCore,
+            javelin::jmap::cache::AccountRepository& accountRepository,
+            javelin::jmap::cache::IdentityRepository& identityRepository,
+            javelin::jmap::cache::MessageViewService& messageViewService,
+            javelin::jmap::cache::QueryService& queryService,
+            javelin::jmap::cache::TranslationCacheRepository& translationCacheRepository,
+            javelin::jmap::submission::ComposeService& composeService,
+            javelin::app::LongPollService& longPollService, QWidget* parent = nullptr);
         ~MainWindow() override = default;
         void openMessageFromNotification(const QString& accountId, const QString& mailboxId,
                                          const QString& threadId, const QString& emailId);
@@ -292,6 +294,7 @@ namespace javelin::gui::shell
         javelin::jmap::cache::IdentityRepository& m_identityRepository;
         javelin::jmap::cache::MessageViewService& m_messageViewService;
         javelin::jmap::cache::QueryService& m_queryService;
+        javelin::jmap::cache::TranslationCacheRepository& m_translationCacheRepository;
         javelin::jmap::submission::ComposeService& m_composeService;
         javelin::app::LongPollService& m_longPollService;
         QSplitter* m_mainSplitter = nullptr;

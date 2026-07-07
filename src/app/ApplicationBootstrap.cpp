@@ -92,8 +92,7 @@ namespace javelin::app
     {
         KAboutData aboutData(QStringLiteral("javelinmail"), QStringLiteral("Javelin Mail"),
                              QStringLiteral(JAVELIN_APP_VERSION),
-                             QStringLiteral("A JMAP email client"),
-                             KAboutLicense::GPL_V3);
+                             QStringLiteral("A JMAP email client"), KAboutLicense::GPL_V3);
         aboutData.setOrganizationDomain("javelin.app");
         KAboutData::setApplicationData(aboutData);
 
@@ -105,8 +104,8 @@ namespace javelin::app
         if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
             settings.apiKey.isEmpty())
         {
-            javelin::gui::settings::PreferencesDialog dialog{
-                m_processServices->accountRepository(), m_mainWindow};
+            javelin::gui::settings::PreferencesDialog dialog{m_processServices->accountRepository(),
+                                                             m_mainWindow};
             dialog.exec();
         }
         else
@@ -150,8 +149,8 @@ namespace javelin::app
         m_mainWindow = new javelin::gui::shell::MainWindow(
             m_processServices->jmapCore(), m_processServices->accountRepository(),
             m_processServices->identityRepository(), m_processServices->messageViewService(),
-            m_processServices->queryService(), m_processServices->composeService(),
-            m_processServices->longPollService());
+            m_processServices->queryService(), m_processServices->translationCacheRepository(),
+            m_processServices->composeService(), m_processServices->longPollService());
 
         m_mainWindow->setAttribute(Qt::WA_DeleteOnClose);
 
@@ -196,19 +195,19 @@ namespace javelin::app
                 m_notificationController->notifyNewMail(accountId, mailboxId, threadId, emailId,
                                                         mailboxName, title, message);
             });
-        QObject::connect(
-            m_notificationController.get(), &DesktopNotificationController::notificationActivated,
-            &m_application,
-            [this](const QString& accountId, const QString& mailboxId, const QString& threadId,
-                   const QString& emailId, const QString& activationToken)
-            {
-                restoreMainWindow(activationToken);
-                if (m_mainWindow != nullptr)
-                {
-                    m_mainWindow->openMessageFromNotification(accountId, mailboxId, threadId,
-                                                              emailId);
-                }
-            });
+        QObject::connect(m_notificationController.get(),
+                         &DesktopNotificationController::notificationActivated, &m_application,
+                         [this](const QString& accountId, const QString& mailboxId,
+                                const QString& threadId, const QString& emailId,
+                                const QString& activationToken)
+                         {
+                             restoreMainWindow(activationToken);
+                             if (m_mainWindow != nullptr)
+                             {
+                                 m_mainWindow->openMessageFromNotification(accountId, mailboxId,
+                                                                           threadId, emailId);
+                             }
+                         });
 
         QObject::connect(m_trayIcon.get(), &QSystemTrayIcon::activated,
                          [&](QSystemTrayIcon::ActivationReason reason)

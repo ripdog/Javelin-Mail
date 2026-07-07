@@ -124,6 +124,8 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/cache/SyncStateRepository.h
     src/jmap/cache/ThreadRepository.cpp
     src/jmap/cache/ThreadRepository.h
+    src/jmap/cache/TranslationCacheRepository.cpp
+    src/jmap/cache/TranslationCacheRepository.h
     src/jmap/domain/MailEntities.h
     src/jmap/domain/MailEntityParsers.cpp
     src/jmap/domain/MailEntityParsers.h
@@ -250,6 +252,8 @@ add_library(javelin_jmap STATIC
     src/jmap/cache/SyncStateRepository.h
     src/jmap/cache/ThreadRepository.cpp
     src/jmap/cache/ThreadRepository.h
+    src/jmap/cache/TranslationCacheRepository.cpp
+    src/jmap/cache/TranslationCacheRepository.h
     src/jmap/domain/MailEntities.h
     src/jmap/domain/MailEntityParsers.cpp
     src/jmap/domain/MailEntityParsers.h

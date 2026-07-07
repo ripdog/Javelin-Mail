@@ -2,7 +2,9 @@
 #include "gui/IconUtils.h"
 #include "gui/messageview/GoogleHtmlTranslator.h"
 #include "gui/messageview/HtmlMessageView.h"
+#include "jmap/cache/TranslationCacheRepository.h"
 
+#include <QAction>
 #include <QApplication>
 #include <QDateTime>
 #include <QFileIconProvider>
@@ -19,6 +21,7 @@
 #include <QProgressBar>
 #include <QScrollArea>
 #include <QSettings>
+#include <QSignalBlocker>
 #include <QSizePolicy>
 #include <QStackedWidget>
 #include <QStringList>
@@ -38,6 +41,11 @@ namespace javelin::gui::messageview
         constexpr auto remoteContentGroup = "remoteContent";
         constexpr auto allowedSendersKey = "allowedSenders";
         constexpr auto allowedDomainsKey = "allowedDomains";
+        constexpr auto translationGroup = "translation";
+        constexpr auto autoTranslateSendersKey = "autoTranslateSenders";
+        constexpr auto autoTranslateDomainsKey = "autoTranslateDomains";
+        constexpr auto targetLanguage = "en";
+        constexpr auto automaticSourceLanguage = "auto";
 
         [[nodiscard]] QString
         attachmentName(const javelin::jmap::cache::MessageAttachment& attachment)
@@ -183,6 +191,58 @@ namespace javelin::gui::messageview
                 values.push_back(value);
                 saveRemoteContentAllowList(key, values);
             }
+        }
+
+        [[nodiscard]] QStringList settingsList(const QLatin1StringView group,
+                                               const QLatin1StringView key)
+        {
+            QSettings settings;
+            settings.beginGroup(group);
+            auto values = settings.value(key).toStringList();
+            settings.endGroup();
+            values.removeAll(QString{});
+            values.removeDuplicates();
+            values.sort(Qt::CaseInsensitive);
+            return values;
+        }
+
+        void saveSettingsList(const QLatin1StringView group, const QLatin1StringView key,
+                              QStringList values)
+        {
+            values.removeAll(QString{});
+            values.removeDuplicates();
+            values.sort(Qt::CaseInsensitive);
+
+            QSettings settings;
+            settings.beginGroup(group);
+            settings.setValue(key, values);
+            settings.endGroup();
+            settings.sync();
+        }
+
+        void setSettingsListValue(const QLatin1StringView group, const QLatin1StringView key,
+                                  QString value, const bool enabled)
+        {
+            value = value.trimmed().toLower();
+            if (value.isEmpty())
+            {
+                return;
+            }
+
+            auto values = settingsList(group, key);
+            values.removeAll(value);
+            if (enabled)
+            {
+                values.push_back(value);
+            }
+            saveSettingsList(group, key, values);
+        }
+
+        [[nodiscard]] bool settingsListContains(const QLatin1StringView group,
+                                                const QLatin1StringView key, const QString& value)
+        {
+            return !value.isEmpty() &&
+                   settingsList(group, key).contains(value, Qt::CaseInsensitive);
         }
 
         [[nodiscard]] QIcon
@@ -388,7 +448,10 @@ namespace javelin::gui::messageview
 
     } // namespace
 
-    MessageViewContainer::MessageViewContainer(QWidget* parent) : QWidget(parent)
+    MessageViewContainer::MessageViewContainer(
+        javelin::jmap::cache::TranslationCacheRepository& translationCacheRepository,
+        QWidget* parent)
+        : QWidget(parent), m_translationCacheRepository(translationCacheRepository)
     {
         auto* layout = new QVBoxLayout(this);
         layout->setContentsMargins(8, 8, 8, 0);
@@ -506,8 +569,27 @@ namespace javelin::gui::messageview
         connect(m_translateButton, &QToolButton::clicked, this,
                 &MessageViewContainer::translateCurrentMessage);
 
+        m_translateOptionsButton = new QToolButton(m_languageBannerWidget);
+        m_translateOptionsButton->setText(QStringLiteral("Options"));
+        m_translateOptionsButton->setPopupMode(QToolButton::InstantPopup);
+        m_translateOptionsButton->setToolTip(QStringLiteral("Translation options"));
+        auto* translateMenu = new QMenu(m_translateOptionsButton);
+        auto* autoSenderAction = translateMenu->addAction(QStringLiteral("Auto-translate sender"));
+        autoSenderAction->setCheckable(true);
+        autoSenderAction->setData(QStringLiteral("sender"));
+        auto* autoDomainAction =
+            translateMenu->addAction(QStringLiteral("Auto-translate sender domain"));
+        autoDomainAction->setCheckable(true);
+        autoDomainAction->setData(QStringLiteral("domain"));
+        connect(autoSenderAction, &QAction::toggled, this,
+                &MessageViewContainer::setAutoTranslateSender);
+        connect(autoDomainAction, &QAction::toggled, this,
+                &MessageViewContainer::setAutoTranslateDomain);
+        m_translateOptionsButton->setMenu(translateMenu);
+
         languageLayout->addWidget(m_languageStatusLabel, 1);
         languageLayout->addWidget(m_translateButton);
+        languageLayout->addWidget(m_translateOptionsButton);
         m_languageBannerWidget->setVisible(false);
         m_translator = new GoogleHtmlTranslator(this);
 
@@ -675,6 +757,8 @@ namespace javelin::gui::messageview
         m_messageTranslated = false;
         m_originalPlainText.clear();
         m_translationError.clear();
+        m_autoTranslateAttempted = false;
+        m_translationWasAutomatic = false;
         m_loading = false;
         m_errorMessage.clear();
 
@@ -705,6 +789,8 @@ namespace javelin::gui::messageview
         m_messageTranslated = false;
         m_originalPlainText.clear();
         m_translationError.clear();
+        m_autoTranslateAttempted = false;
+        m_translationWasAutomatic = false;
         m_loading = false;
         m_errorMessage.clear();
         m_snapshot = std::nullopt;
@@ -720,6 +806,8 @@ namespace javelin::gui::messageview
         m_messageTranslated = false;
         m_originalPlainText.clear();
         m_translationError.clear();
+        m_autoTranslateAttempted = false;
+        m_translationWasAutomatic = false;
         m_snapshot = std::nullopt;
         if (m_accountId.has_value() && m_emailId.has_value())
         {
@@ -863,6 +951,8 @@ namespace javelin::gui::messageview
             canTranslateView && (hasLanguageOffer || m_translationInProgress ||
                                  m_messageTranslated || !m_translationError.isEmpty());
         m_languageBannerWidget->setVisible(shouldShow);
+        m_translateOptionsButton->setVisible(shouldShow);
+        updateTranslateOptionsMenu();
         if (!shouldShow)
         {
             m_languageStatusLabel->clear();
@@ -890,13 +980,97 @@ namespace javelin::gui::messageview
 
         if (m_messageTranslated)
         {
-            m_languageStatusLabel->setText(QStringLiteral("Message translated to English."));
+            m_languageStatusLabel->setText(m_translationWasAutomatic
+                                               ? QStringLiteral("Auto-translated to English.")
+                                               : QStringLiteral("Message translated to English."));
             return;
         }
 
         const auto& detection = *m_snapshot->languageDetection;
         m_languageStatusLabel->setText(QStringLiteral("This message appears to be in %1.")
                                            .arg(languageName(detection.languageCode)));
+    }
+
+    void MessageViewContainer::updateTranslateOptionsMenu()
+    {
+        if (m_translateOptionsButton == nullptr || m_translateOptionsButton->menu() == nullptr)
+        {
+            return;
+        }
+
+        const auto sender = currentSenderAddress();
+        const auto domain = currentSenderDomain();
+        for (auto* action : m_translateOptionsButton->menu()->actions())
+        {
+            const auto kind = action->data().toString();
+            QSignalBlocker blocker{action};
+            if (kind == QStringLiteral("sender"))
+            {
+                action->setEnabled(!sender.isEmpty());
+                action->setChecked(settingsListContains(QLatin1StringView{translationGroup},
+                                                        QLatin1StringView{autoTranslateSendersKey},
+                                                        sender));
+            }
+            else if (kind == QStringLiteral("domain"))
+            {
+                action->setEnabled(!domain.isEmpty());
+                action->setChecked(settingsListContains(QLatin1StringView{translationGroup},
+                                                        QLatin1StringView{autoTranslateDomainsKey},
+                                                        domain));
+            }
+        }
+    }
+
+    void MessageViewContainer::setAutoTranslateSender(const bool enabled)
+    {
+        const auto sender = currentSenderAddress();
+        setSettingsListValue(QLatin1StringView{translationGroup},
+                             QLatin1StringView{autoTranslateSendersKey}, sender, enabled);
+        if (enabled)
+        {
+            setSettingsListValue(QLatin1StringView{translationGroup},
+                                 QLatin1StringView{autoTranslateDomainsKey}, currentSenderDomain(),
+                                 false);
+            m_autoTranslateAttempted = false;
+        }
+        updateTranslateOptionsMenu();
+        maybeAutoTranslateCurrentMessage();
+    }
+
+    void MessageViewContainer::setAutoTranslateDomain(const bool enabled)
+    {
+        const auto domain = currentSenderDomain();
+        setSettingsListValue(QLatin1StringView{translationGroup},
+                             QLatin1StringView{autoTranslateDomainsKey}, domain, enabled);
+        if (enabled)
+        {
+            setSettingsListValue(QLatin1StringView{translationGroup},
+                                 QLatin1StringView{autoTranslateSendersKey}, currentSenderAddress(),
+                                 false);
+            m_autoTranslateAttempted = false;
+        }
+        updateTranslateOptionsMenu();
+        maybeAutoTranslateCurrentMessage();
+    }
+
+    void MessageViewContainer::maybeAutoTranslateCurrentMessage()
+    {
+        if (m_autoTranslateAttempted || m_messageTranslated || m_translationInProgress ||
+            !m_snapshot.has_value() || !m_snapshot->shouldOfferTranslation)
+        {
+            return;
+        }
+
+        const auto sender = currentSenderAddress();
+        const auto domain = currentSenderDomain();
+        const bool allowNetwork =
+            settingsListContains(QLatin1StringView{translationGroup},
+                                 QLatin1StringView{autoTranslateSendersKey}, sender) ||
+            settingsListContains(QLatin1StringView{translationGroup},
+                                 QLatin1StringView{autoTranslateDomainsKey}, domain);
+
+        m_autoTranslateAttempted = true;
+        translateCurrentMessageFromCacheOrNetwork(true, allowNetwork);
     }
 
     void MessageViewContainer::translateCurrentMessage()
@@ -907,6 +1081,12 @@ namespace javelin::gui::messageview
             return;
         }
 
+        translateCurrentMessageFromCacheOrNetwork(false, true);
+    }
+
+    void MessageViewContainer::translateCurrentMessageFromCacheOrNetwork(const bool automatic,
+                                                                         const bool allowNetwork)
+    {
         if (!m_snapshot.has_value() || m_translationInProgress)
         {
             return;
@@ -915,59 +1095,155 @@ namespace javelin::gui::messageview
         const auto selectedEmailId = m_emailId;
         m_translationInProgress = true;
         m_translationError.clear();
+        m_translationWasAutomatic = automatic;
         updateLanguageBanner();
 
-        const auto handleTranslatedChunks =
-            [this, selectedEmailId](GoogleHtmlTranslator::Result result)
+        const auto applyTranslatedChunks =
+            [this](const GoogleHtmlTranslator::TranslationChunks& chunks) -> bool
         {
-            if (m_emailId != selectedEmailId)
-            {
-                return;
-            }
-
-            m_translationInProgress = false;
-            if (const auto* error = std::get_if<QString>(&result))
-            {
-                m_translationError = QStringLiteral("Translation failed: %1").arg(*error);
-                updateLanguageBanner();
-                return;
-            }
-
-            const auto& chunks = std::get<GoogleHtmlTranslator::TranslationChunks>(result);
             if (m_activeView == ActiveView::PlainText)
             {
                 if (chunks.empty() || chunks.front().empty())
+                {
+                    return false;
+                }
+                m_originalPlainText = m_plainTextView->toPlainText();
+                m_plainTextView->setPlainText(chunks.front().front());
+                return true;
+            }
+
+            if (m_activeView == ActiveView::Html)
+            {
+                m_htmlView->applyTranslationChunks(chunks);
+                return true;
+            }
+
+            return false;
+        };
+
+        const auto cacheTranslatedChunks =
+            [this](const GoogleHtmlTranslator::TranslationChunks& sourceChunks,
+                   const GoogleHtmlTranslator::TranslationChunks& translatedChunks)
+        {
+            for (qsizetype i = 0; i < sourceChunks.size() && i < translatedChunks.size(); ++i)
+            {
+                const auto& sourceChunk = sourceChunks[i];
+                const auto& translatedChunk = translatedChunks[i];
+                for (qsizetype j = 0; j < sourceChunk.size() && j < translatedChunk.size(); ++j)
+                {
+                    (void)m_translationCacheRepository.upsert({
+                        .sourceLanguage = QStringLiteral("auto"),
+                        .targetLanguage = QStringLiteral("en"),
+                        .inputText = sourceChunk[j],
+                        .translatedText = translatedChunk[j],
+                    });
+                }
+            }
+        };
+
+        const auto translateChunks =
+            [this, selectedEmailId, allowNetwork, applyTranslatedChunks,
+             cacheTranslatedChunks](GoogleHtmlTranslator::TranslationChunks chunks)
+        {
+            GoogleHtmlTranslator::TranslationChunks cachedChunks;
+            cachedChunks.reserve(chunks.size());
+            bool cacheComplete = true;
+            for (const auto& chunk : chunks)
+            {
+                QStringList cachedChunk;
+                cachedChunk.reserve(chunk.size());
+                for (const auto& text : chunk)
+                {
+                    const auto cached = m_translationCacheRepository.find(
+                        QStringLiteral("auto"), QStringLiteral("en"), text);
+                    if (const auto* value = std::get_if<std::optional<QString>>(&cached);
+                        value != nullptr && value->has_value())
+                    {
+                        cachedChunk.push_back(**value);
+                    }
+                    else
+                    {
+                        cacheComplete = false;
+                        break;
+                    }
+                }
+                if (!cacheComplete)
+                {
+                    break;
+                }
+                cachedChunks.push_back(std::move(cachedChunk));
+            }
+
+            if (cacheComplete)
+            {
+                m_translationInProgress = false;
+                if (!applyTranslatedChunks(cachedChunks))
                 {
                     m_translationError =
                         QStringLiteral("Translation failed: no translated text was returned.");
                     updateLanguageBanner();
                     return;
                 }
-                m_originalPlainText = m_plainTextView->toPlainText();
-                m_plainTextView->setPlainText(chunks.front().front());
-            }
-            else if (m_activeView == ActiveView::Html)
-            {
-                m_htmlView->applyTranslationChunks(chunks);
+                m_messageTranslated = true;
+                updateLanguageBanner();
+                return;
             }
 
-            m_messageTranslated = true;
-            updateLanguageBanner();
+            if (!allowNetwork)
+            {
+                m_translationInProgress = false;
+                m_translationWasAutomatic = false;
+                updateLanguageBanner();
+                return;
+            }
+
+            const auto sourceChunks = chunks;
+            m_translator->translate(
+                std::move(chunks), QStringLiteral("auto"), QStringLiteral("en"),
+                [this, selectedEmailId, sourceChunks, applyTranslatedChunks,
+                 cacheTranslatedChunks](GoogleHtmlTranslator::Result result)
+                {
+                    if (m_emailId != selectedEmailId)
+                    {
+                        return;
+                    }
+
+                    m_translationInProgress = false;
+                    if (const auto* error = std::get_if<QString>(&result))
+                    {
+                        m_translationError = QStringLiteral("Translation failed: %1").arg(*error);
+                        updateLanguageBanner();
+                        return;
+                    }
+
+                    const auto& translatedChunks =
+                        std::get<GoogleHtmlTranslator::TranslationChunks>(result);
+                    if (!applyTranslatedChunks(translatedChunks))
+                    {
+                        m_translationError =
+                            QStringLiteral("Translation failed: no translated text was returned.");
+                        updateLanguageBanner();
+                        return;
+                    }
+                    cacheTranslatedChunks(sourceChunks, translatedChunks);
+
+                    m_messageTranslated = true;
+                    updateLanguageBanner();
+                });
         };
 
         if (m_activeView == ActiveView::PlainText)
         {
             GoogleHtmlTranslator::TranslationChunks chunks;
             chunks.push_back(QStringList{m_plainTextView->toPlainText()});
-            m_translator->translate(std::move(chunks), QStringLiteral("auto"), QStringLiteral("en"),
-                                    handleTranslatedChunks);
+            translateChunks(std::move(chunks));
             return;
         }
 
         if (m_activeView == ActiveView::Html)
         {
             m_htmlView->collectTranslationChunks(
-                [this, selectedEmailId, handleTranslatedChunks](QVector<QStringList> chunks)
+                [this, selectedEmailId, translateChunks](QVector<QStringList> chunks)
                 {
                     if (m_emailId != selectedEmailId)
                     {
@@ -981,8 +1257,7 @@ namespace javelin::gui::messageview
                         updateLanguageBanner();
                         return;
                     }
-                    m_translator->translate(std::move(chunks), QStringLiteral("auto"),
-                                            QStringLiteral("en"), handleTranslatedChunks);
+                    translateChunks(std::move(chunks));
                 });
         }
     }
@@ -1015,6 +1290,8 @@ namespace javelin::gui::messageview
             m_messageTranslated = false;
             m_originalPlainText.clear();
             m_translationError.clear();
+            m_autoTranslateAttempted = false;
+            m_translationWasAutomatic = false;
         }
         m_attachmentStatusLabel->clear();
         rebuildAttachmentRows();
@@ -1150,10 +1427,12 @@ namespace javelin::gui::messageview
         if (m_snapshot->htmlBody.has_value())
         {
             setActiveView(ActiveView::Html);
+            maybeAutoTranslateCurrentMessage();
         }
         else if (m_snapshot->plainTextBody.has_value())
         {
             setActiveView(ActiveView::PlainText);
+            maybeAutoTranslateCurrentMessage();
         }
         else
         {

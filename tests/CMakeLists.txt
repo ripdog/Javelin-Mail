@@ -33,6 +33,7 @@ add_executable(javelin_jmap_tests
     jmap/SyncPlannerTest.cpp
     jmap/SyncReconcilerTest.cpp
     jmap/ThreadRepositoryTest.cpp
+    jmap/TranslationCacheRepositoryTest.cpp
 )
 
 target_include_directories(javelin_jmap_tests
