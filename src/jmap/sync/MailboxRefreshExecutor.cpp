@@ -11,7 +11,9 @@
 #include "jmap/sync/RefreshNotificationPlanner.h"
 #include "jmap/sync/SyncPlanner.h"
 
+#include <QDebug>
 #include <QString>
+#include <QStringList>
 #include <algorithm>
 #include <unordered_set>
 
@@ -104,6 +106,34 @@ namespace javelin::jmap::sync
             }
 
             return deduplicated;
+        }
+
+        [[nodiscard]] QString joinIds(const std::vector<std::string>& ids)
+        {
+            QStringList parts;
+            for (const auto& id : ids)
+            {
+                parts.push_back(QString::fromStdString(id));
+            }
+            return parts.join(QStringLiteral(","));
+        }
+
+        [[nodiscard]] QString emailMailboxSummary(
+            const std::vector<javelin::jmap::domain::Email>& emails)
+        {
+            QStringList parts;
+            for (const auto& email : emails)
+            {
+                QStringList mailboxIds;
+                for (const auto& mailboxId : email.mailboxIds)
+                {
+                    mailboxIds.push_back(QString::fromStdString(mailboxId));
+                }
+                parts.push_back(QStringLiteral("%1[%2]")
+                                    .arg(QString::fromStdString(email.id),
+                                         mailboxIds.join(QStringLiteral(","))));
+            }
+            return parts.join(QStringLiteral(";"));
         }
 
         [[nodiscard]] std::vector<std::string>
@@ -359,6 +389,14 @@ namespace javelin::jmap::sync
                 };
             }
             const auto& parsedQuery = std::get<javelin::jmap::api::EmailQueryResponse>(queryResult);
+            qInfo().noquote() << "Mailbox refresh query result"
+                              << QString::fromStdString(accountId)
+                              << QString::fromStdString(mailboxId) << "state"
+                              << QString::fromStdString(parsedQuery.queryState) << "ids"
+                              << joinIds(parsedQuery.ids) << "total"
+                              << (parsedQuery.total.has_value()
+                                      ? QString::number(*parsedQuery.total)
+                                      : QStringLiteral("unknown"));
 
             emitProgress(QStringLiteral("Fetched %1 conversation ids for the selected mailbox.")
                              .arg(parsedQuery.ids.size()));
@@ -416,6 +454,11 @@ namespace javelin::jmap::sync
                 };
             }
             const auto& parsedEmails = std::get<javelin::jmap::api::EmailGetResponse>(emailResult);
+            qInfo().noquote() << "Mailbox refresh fetched thread emails"
+                              << QString::fromStdString(accountId)
+                              << QString::fromStdString(mailboxId) << "state"
+                              << QString::fromStdString(parsedEmails.state) << "emails"
+                              << emailMailboxSummary(parsedEmails.list);
 
             emitProgress(
                 QStringLiteral("Fetched %1 thread messages.").arg(parsedEmails.list.size()));
@@ -922,6 +965,10 @@ namespace javelin::jmap::sync
                 if (!removedAfterFullFetch.empty())
                 {
                     const auto removedMailboxEmailIds = removedAfterFullFetch;
+                    qInfo().noquote() << "Mailbox refresh removing stale mailbox membership"
+                                      << QString::fromStdString(accountId)
+                                      << QString::fromStdString(mailboxId) << "emailIds"
+                                      << joinIds(removedMailboxEmailIds);
                     removedAfterFullFetch.insert(removedAfterFullFetch.end(),
                                                  removedEmailIds.begin(), removedEmailIds.end());
                     if (const auto error = emailRepository.removeFromMailbox(
