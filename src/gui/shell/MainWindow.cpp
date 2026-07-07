@@ -2477,7 +2477,8 @@ namespace javelin::gui::shell
             return;
         }
 
-        const auto accountId = currentAccountId(*m_mailboxView);
+        const auto accountId =
+            activeAccountId().has_value() ? activeAccountId() : currentAccountId(*m_mailboxView);
         if (!accountId.has_value())
         {
             statusBar()->showMessage(QStringLiteral("Select an account before searching."), 5000);
@@ -2489,7 +2490,8 @@ namespace javelin::gui::shell
 
     void MainWindow::showAdvancedSearch()
     {
-        const auto accountId = currentAccountId(*m_mailboxView);
+        const auto accountId =
+            activeAccountId().has_value() ? activeAccountId() : currentAccountId(*m_mailboxView);
         if (!accountId.has_value())
         {
             statusBar()->showMessage(QStringLiteral("Select an account before searching."), 5000);
