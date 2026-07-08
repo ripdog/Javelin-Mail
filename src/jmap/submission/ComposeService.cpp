@@ -29,6 +29,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <iterator>
 #include <unordered_set>
 
 namespace javelin::jmap::submission
@@ -251,9 +252,8 @@ namespace javelin::jmap::submission
                           .arg(QStringLiteral("mid:%1")
                                    .arg(QString::fromStdString(email.messageId.front()))
                                    .toHtmlEscaped());
-            return QStringLiteral(
-                       "<p><br/></p><div class=\"moz-cite-prefix\">On %1, %2 "
-                       "wrote:<br/></div><blockquote type=\"cite\"%3>%4</blockquote>")
+            return QStringLiteral("<p><br/></p><div class=\"moz-cite-prefix\">On %1, %2 "
+                                  "wrote:<br/></div><blockquote type=\"cite\"%3>%4</blockquote>")
                 .arg(sentAt, from, cite, QString::fromStdString(std::string{htmlBody}))
                 .toStdString();
         }
@@ -459,9 +459,9 @@ namespace javelin::jmap::submission
                 {
                     qWarning().noquote()
                         << "JMAP Identity/get failed"
-                        << "method" << QString::fromStdString(response.name)
-                        << "callId" << QString::fromStdString(response.callId)
-                        << "arguments" << QString::fromStdString(response.arguments);
+                        << "method" << QString::fromStdString(response.name) << "callId"
+                        << QString::fromStdString(response.callId) << "arguments"
+                        << QString::fromStdString(response.arguments);
                 }
                 co_return javelin::jmap::LiveRefreshError{
                     .message = QStringLiteral("Failed to read Identity/get response: %1")
@@ -650,16 +650,11 @@ namespace javelin::jmap::submission
                 };
             }
 
-            if (snapshot.attachments.empty())
-            {
-                return bodyRoot;
-            }
-
-            std::vector<javelin::jmap::api::EmailBodyPartCreate> mixedParts;
-            mixedParts.push_back(bodyRoot);
+            std::vector<javelin::jmap::api::EmailBodyPartCreate> inlineParts;
+            std::vector<javelin::jmap::api::EmailBodyPartCreate> attachmentParts;
             for (const auto& attachment : snapshot.attachments)
             {
-                mixedParts.push_back(javelin::jmap::api::EmailBodyPartCreate{
+                auto part = javelin::jmap::api::EmailBodyPartCreate{
                     .partId = std::nullopt,
                     .blobId = attachment.blobId,
                     .type = attachment.mediaType,
@@ -671,8 +666,44 @@ namespace javelin::jmap::submission
                                        : std::optional<std::string>{"attachment"},
                     .cid = attachment.contentId,
                     .subParts = std::nullopt,
-                });
+                };
+                if (attachment.inlineDisposition && attachment.contentId.has_value())
+                {
+                    inlineParts.push_back(std::move(part));
+                }
+                else
+                {
+                    attachmentParts.push_back(std::move(part));
+                }
             }
+
+            if (!inlineParts.empty())
+            {
+                std::vector<javelin::jmap::api::EmailBodyPartCreate> relatedParts;
+                relatedParts.push_back(std::move(bodyRoot));
+                relatedParts.insert(relatedParts.end(),
+                                    std::make_move_iterator(inlineParts.begin()),
+                                    std::make_move_iterator(inlineParts.end()));
+                bodyRoot = javelin::jmap::api::EmailBodyPartCreate{
+                    .partId = std::nullopt,
+                    .blobId = std::nullopt,
+                    .type = "multipart/related",
+                    .name = std::nullopt,
+                    .disposition = std::nullopt,
+                    .cid = std::nullopt,
+                    .subParts = std::move(relatedParts),
+                };
+            }
+
+            if (attachmentParts.empty())
+            {
+                return bodyRoot;
+            }
+
+            std::vector<javelin::jmap::api::EmailBodyPartCreate> mixedParts;
+            mixedParts.push_back(std::move(bodyRoot));
+            mixedParts.insert(mixedParts.end(), std::make_move_iterator(attachmentParts.begin()),
+                              std::make_move_iterator(attachmentParts.end()));
 
             return javelin::jmap::api::EmailBodyPartCreate{
                 .partId = std::nullopt,
@@ -758,8 +789,7 @@ namespace javelin::jmap::submission
     }
 
     QCoro::Task<std::variant<DraftSnapshot, javelin::jmap::LiveRefreshError>>
-    ComposeService::open(javelin::jmap::LiveConnectionSettings settings,
-                         OpenComposeRequest request)
+    ComposeService::open(javelin::jmap::LiveConnectionSettings settings, OpenComposeRequest request)
     {
         if (const auto validationError = validateSettings(settings))
         {
@@ -1188,8 +1218,7 @@ namespace javelin::jmap::submission
     }
 
     QCoro::Task<std::variant<SendSummary, javelin::jmap::LiveRefreshError>>
-    ComposeService::send(javelin::jmap::LiveConnectionSettings settings,
-                         DraftSnapshot snapshot)
+    ComposeService::send(javelin::jmap::LiveConnectionSettings settings, DraftSnapshot snapshot)
     {
         const auto draftSaveResult = co_await saveDraft(settings, std::move(snapshot));
         if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&draftSaveResult))
@@ -1264,9 +1293,9 @@ namespace javelin::jmap::submission
         const auto handle = builder.call(*request, "send-message");
         qInfo().noquote() << "Compose send submitting draft"
                           << QString::fromStdString(draftSummary.accountId)
-                          << QString::fromStdString(draftSummary.draftEmailId)
-                          << "draftsMailbox" << QString::fromStdString(draftsMailbox->id)
-                          << "sentMailbox" << QString::fromStdString(sentMailbox->id);
+                          << QString::fromStdString(draftSummary.draftEmailId) << "draftsMailbox"
+                          << QString::fromStdString(draftsMailbox->id) << "sentMailbox"
+                          << QString::fromStdString(sentMailbox->id);
         const auto result = co_await methodCaller.call(
             buildApiRequestContext(settings, draftSummary.accountId, session), builder);
         if (const auto* error = std::get_if<javelin::jmap::api::TransportError>(&result))
@@ -1342,8 +1371,7 @@ namespace javelin::jmap::submission
                 {
                     {draftSummary.draftEmailId,
                      javelin::jmap::api::EmailSetUpdate{
-                         .mailboxIds = {{draftsMailbox->id, nullptr},
-                                        {sentMailbox->id, true}},
+                         .mailboxIds = {{draftsMailbox->id, nullptr}, {sentMailbox->id, true}},
                          .keywords = {{"$draft", nullptr}, {"$seen", true}},
                      }},
                 },
@@ -1361,8 +1389,7 @@ namespace javelin::jmap::submission
             cleanupBuilder.useCore().useMail();
             const auto cleanupHandle = cleanupBuilder.call(*cleanupRequest, "send-cleanup");
             const auto cleanupResult = co_await methodCaller.call(
-                buildApiRequestContext(settings, draftSummary.accountId, session),
-                cleanupBuilder);
+                buildApiRequestContext(settings, draftSummary.accountId, session), cleanupBuilder);
             if (const auto* transportError =
                     std::get_if<javelin::jmap::api::TransportError>(&cleanupResult))
             {
@@ -1394,9 +1421,8 @@ namespace javelin::jmap::submission
                                       << QString::fromStdString(response.arguments);
                 }
                 const auto cleanupResponseResult = cleanupReader.require(cleanupHandle);
-                if (const auto* readerError =
-                        std::get_if<javelin::jmap::api::ResponseReaderError>(
-                            &cleanupResponseResult))
+                if (const auto* readerError = std::get_if<javelin::jmap::api::ResponseReaderError>(
+                        &cleanupResponseResult))
                 {
                     qWarning().noquote() << "Compose send explicit draft cleanup response failure"
                                          << QString::fromStdString(readerError->message);
@@ -1406,14 +1432,13 @@ namespace javelin::jmap::submission
                     const auto& cleanupResponse =
                         std::get<javelin::jmap::api::EmailSetResponse>(cleanupResponseResult);
                     qInfo().noquote() << "Compose send explicit draft cleanup response"
-                                      << QString::fromStdString(draftSummary.accountId)
-                                      << "updated" << joinStrings(cleanupResponse.updated)
-                                      << "notUpdated" << joinStrings(cleanupResponse.notUpdated);
+                                      << QString::fromStdString(draftSummary.accountId) << "updated"
+                                      << joinStrings(cleanupResponse.updated) << "notUpdated"
+                                      << joinStrings(cleanupResponse.notUpdated);
                     if (!cleanupResponse.notUpdated.empty())
                     {
-                        qWarning().noquote()
-                            << "Compose send explicit draft cleanup rejected for"
-                            << joinStrings(cleanupResponse.notUpdated);
+                        qWarning().noquote() << "Compose send explicit draft cleanup rejected for"
+                                             << joinStrings(cleanupResponse.notUpdated);
                     }
                 }
             }

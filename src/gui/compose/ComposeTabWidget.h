@@ -10,6 +10,9 @@
 
 class QAction;
 class QComboBox;
+class QDragEnterEvent;
+class QDragMoveEvent;
+class QDropEvent;
 class QHBoxLayout;
 class QLabel;
 class QLineEdit;
@@ -61,6 +64,11 @@ namespace javelin::gui::compose
 
         void saveDraftAndClose();
 
+      protected:
+        void dragEnterEvent(QDragEnterEvent* event) override;
+        void dragMoveEvent(QDragMoveEvent* event) override;
+        void dropEvent(QDropEvent* event) override;
+
       Q_SIGNALS:
         void titleChanged(const QString& title);
         void statusMessageRequested(const QString& message, int timeoutMs = 5000);
@@ -82,7 +90,11 @@ namespace javelin::gui::compose
         void updateEditorModeUi();
         void updateTabTitle();
         void addAttachments();
+        void addAttachmentPaths(const QStringList& filePaths);
         void removeAttachmentAt(std::size_t index);
+        void setAttachmentEmbedded(std::size_t index, bool embedded);
+        void insertEmbeddedImage(std::size_t index);
+        void removeEmbeddedImageReference(const std::string& contentId);
         void requestClose();
         void startSaveDraft(bool closeAfterSave);
         void startSend();
