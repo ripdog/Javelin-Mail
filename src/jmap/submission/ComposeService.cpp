@@ -355,6 +355,21 @@ namespace javelin::jmap::submission
             return draftAttachments;
         }
 
+        [[nodiscard]] bool isWildcardSenderIdentity(const javelin::jmap::domain::Identity& identity)
+        {
+            return identity.email.starts_with("*@");
+        }
+
+        [[nodiscard]] std::vector<javelin::jmap::domain::Identity>
+        senderIdentities(const std::vector<javelin::jmap::domain::Identity>& identities)
+        {
+            std::vector<javelin::jmap::domain::Identity> filtered;
+            filtered.reserve(identities.size());
+            std::copy_if(identities.cbegin(), identities.cend(), std::back_inserter(filtered),
+                         [](const auto& identity) { return !isWildcardSenderIdentity(identity); });
+            return filtered;
+        }
+
         [[nodiscard]] std::optional<javelin::jmap::domain::Identity> chooseDefaultIdentity(
             const std::vector<javelin::jmap::domain::Identity>& identities,
             const std::optional<std::vector<javelin::jmap::domain::EmailAddress>>& fromAddresses =
@@ -371,7 +386,10 @@ namespace javelin::jmap::submission
                 {
                     const auto it = std::find_if(identities.cbegin(), identities.cend(),
                                                  [&fromAddress](const auto& identity)
-                                                 { return identity.email == fromAddress.email; });
+                                                 {
+                                                     return !isWildcardSenderIdentity(identity) &&
+                                                            identity.email == fromAddress.email;
+                                                 });
                     if (it != identities.cend())
                     {
                         return *it;
@@ -379,7 +397,10 @@ namespace javelin::jmap::submission
                 }
             }
 
-            return identities.front();
+            const auto it =
+                std::find_if(identities.cbegin(), identities.cend(), [](const auto& identity)
+                             { return !isWildcardSenderIdentity(identity); });
+            return it == identities.cend() ? std::nullopt : std::optional{*it};
         }
 
         [[nodiscard]] QCoro::Task<std::variant<std::vector<javelin::jmap::domain::Identity>,
@@ -824,10 +845,11 @@ namespace javelin::jmap::submission
         }
         const auto& identities =
             std::get<std::vector<javelin::jmap::domain::Identity>>(identitiesResult);
-        if (identities.empty())
+        const auto availableSenderIdentities = senderIdentities(identities);
+        if (availableSenderIdentities.empty())
         {
             co_return javelin::jmap::LiveRefreshError{
-                .message = QStringLiteral("No identities are available for this account."),
+                .message = QStringLiteral("No sender identities are available for this account."),
             };
         }
 
@@ -837,15 +859,16 @@ namespace javelin::jmap::submission
             .draftEmailId = std::nullopt,
             .mode = request.mode,
             .editorMode = BodyEditorMode::RichText,
-            .identityId = identities.front().id,
+            .identityId = availableSenderIdentities.front().id,
             .to = {},
             .cc = {},
-            .bcc = identities.front().bcc,
+            .bcc = availableSenderIdentities.front().bcc,
             .subject = std::nullopt,
-            .plainTextBody = identities.front().textSignature.value_or(std::string{}),
-            .htmlBody = identities.front().htmlSignature.value_or(
-                identities.front().textSignature.has_value()
-                    ? htmlFromText(*identities.front().textSignature)
+            .plainTextBody =
+                availableSenderIdentities.front().textSignature.value_or(std::string{}),
+            .htmlBody = availableSenderIdentities.front().htmlSignature.value_or(
+                availableSenderIdentities.front().textSignature.has_value()
+                    ? htmlFromText(*availableSenderIdentities.front().textSignature)
                     : std::string{}),
             .threading = {},
             .attachments = {},
@@ -1013,13 +1036,13 @@ namespace javelin::jmap::submission
         }
         const auto& identities =
             std::get<std::vector<javelin::jmap::domain::Identity>>(identitiesResult);
-        const auto identityIt =
-            std::find_if(identities.cbegin(), identities.cend(), [&snapshot](const auto& identity)
-                         { return identity.id == snapshot.identityId; });
+        const auto identityIt = std::find_if(
+            identities.cbegin(), identities.cend(), [&snapshot](const auto& identity)
+            { return identity.id == snapshot.identityId && !isWildcardSenderIdentity(identity); });
         if (identityIt == identities.cend())
         {
             co_return javelin::jmap::LiveRefreshError{
-                .message = QStringLiteral("The selected identity is unavailable."),
+                .message = QStringLiteral("The selected sender identity is unavailable."),
             };
         }
 

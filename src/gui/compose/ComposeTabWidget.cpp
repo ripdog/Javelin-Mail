@@ -449,6 +449,11 @@ namespace javelin::gui::compose
             return QString::fromStdString(identity.email);
         }
 
+        [[nodiscard]] bool isWildcardSenderIdentity(const javelin::jmap::domain::Identity& identity)
+        {
+            return identity.email.starts_with("*@");
+        }
+
         [[nodiscard]] std::optional<javelin::jmap::LiveConnectionSettings>
         liveSettings(const std::string_view accountId, QString* errorMessage = nullptr)
         {
@@ -905,12 +910,25 @@ namespace javelin::gui::compose
             return;
         }
 
-        m_identities = std::get<std::vector<javelin::jmap::domain::Identity>>(identitiesResult);
+        const auto& identities =
+            std::get<std::vector<javelin::jmap::domain::Identity>>(identitiesResult);
+        m_identities.clear();
+        m_identities.reserve(identities.size());
         m_fromCombo->clear();
-        for (const auto& identity : m_identities)
+        for (const auto& identity : identities)
         {
+            if (isWildcardSenderIdentity(identity))
+            {
+                continue;
+            }
+            m_identities.push_back(identity);
             m_fromCombo->addItem(identityDisplayText(identity),
                                  QString::fromStdString(identity.id));
+        }
+        if (m_identities.empty())
+        {
+            Q_EMIT statusMessageRequested(
+                QStringLiteral("No sender identities are available for this account."), 10000);
         }
     }
 
