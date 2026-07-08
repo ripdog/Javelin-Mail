@@ -468,6 +468,9 @@ namespace javelin::app
             m_runContext != nullptr)
         {
             m_shouldCatchUpRefreshOnReconnect = false;
+            qInfo().noquote() << "Long poll scheduling reconnect catch-up refresh"
+                              << QString::fromStdString(m_runContext->configuration.accountId)
+                              << QString::fromStdString(m_runContext->configuration.mailboxId);
             scheduleCatchUpRefresh();
         }
         Q_EMIT statusChanged(m_status);
