@@ -8,12 +8,23 @@
 #include <QTimer>
 #include <QTranslator>
 
+#include <memory>
+
 #ifndef JAVELIN_DATA_DIR
 #define JAVELIN_DATA_DIR ""
 #endif
 
 namespace
 {
+    constexpr auto uiProfilingEnvVar = "JAVELIN_UI_PROFILING";
+
+    [[nodiscard]] bool uiProfilingEnabled()
+    {
+        bool ok = false;
+        const int value = qEnvironmentVariableIntValue(uiProfilingEnvVar, &ok);
+        return ok && value != 0;
+    }
+
     class UiStallProbe final : public QObject
     {
       public:
@@ -44,10 +55,22 @@ namespace
     class ProfilingApplication final : public QApplication
     {
       public:
-        using QApplication::QApplication;
+        ProfilingApplication(int& argc, char** argv, const bool profilingEnabled)
+            : QApplication(argc, argv), m_profilingEnabled(profilingEnabled)
+        {
+            if (m_profilingEnabled)
+            {
+                qInfo().noquote() << "UI profiling enabled via" << uiProfilingEnvVar;
+            }
+        }
 
         bool notify(QObject* receiver, QEvent* event) override
         {
+            if (!m_profilingEnabled)
+            {
+                return QApplication::notify(receiver, event);
+            }
+
             const char* receiverClass =
                 receiver != nullptr ? receiver->metaObject()->className() : "<null>";
             const QString objectName =
@@ -69,6 +92,9 @@ namespace
 
             return result;
         }
+
+      private:
+        bool m_profilingEnabled = false;
     };
 } // namespace
 
@@ -88,8 +114,9 @@ int main(int argc, char* argv[])
     }
 
     javelin::app::registerInlineMessageUrlScheme();
-    ProfilingApplication application(argc, argv);
-    UiStallProbe stallProbe;
+    const bool profileUi = uiProfilingEnabled();
+    ProfilingApplication application(argc, argv, profileUi);
+    const auto stallProbe = profileUi ? std::make_unique<UiStallProbe>() : nullptr;
     application.setApplicationName(QStringLiteral("Javelin Mail"));
     application.setOrganizationName(QStringLiteral("Javelin Mail"));
 
