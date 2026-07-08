@@ -4,6 +4,7 @@
 Do not run git commands in parallel - you will hit git lock file contention.
 When building, use the cmake debug preset always.
 Tokens are precious - do not do wasteful things like re-reading files after clang-format, run rebuilds after formatting. Do not read files already in your context - edit boldly. The edit tool will stop you making invalid edits.
+If you have made meaningful changes during your turn, always commit at the end.
 
 This repository is for a Qt Widgets JMAP email client. Treat it as a modern-only codebase:
 

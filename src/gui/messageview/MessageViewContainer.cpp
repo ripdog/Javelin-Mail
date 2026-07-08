@@ -2,6 +2,7 @@
 #include "gui/IconUtils.h"
 #include "gui/messageview/GoogleHtmlTranslator.h"
 #include "gui/messageview/HtmlMessageView.h"
+#include "gui/settings/PreferencesDialog.h"
 #include "jmap/cache/TranslationCacheRepository.h"
 #include "jmap/language/LanguageDetection.h"
 
@@ -121,12 +122,6 @@ namespace javelin::gui::messageview
             }
 
             return std::nullopt;
-        }
-
-        [[nodiscard]] QString
-        attachmentSizeLabel(const javelin::jmap::cache::MessageAttachment& attachment)
-        {
-            return QLocale{}.formattedDataSize(static_cast<qint64>(attachment.size));
         }
 
         [[nodiscard]] QString addressLabel(const javelin::jmap::domain::EmailAddress& address)
@@ -325,79 +320,87 @@ namespace javelin::gui::messageview
           public:
             AttachmentTile(const javelin::jmap::cache::MessageAttachment& attachment,
                            std::function<void()> openAction, std::function<void()> saveAction,
-                           QWidget* parent = nullptr)
-                : QFrame(parent), m_openAction(std::move(openAction)),
-                  m_saveAction(std::move(saveAction))
+                           QString saveToolTip, QWidget* parent = nullptr)
+                : QFrame(parent)
             {
-                setToolTip(attachmentName(attachment));
-                setCursor(Qt::PointingHandCursor);
+                const auto fileName = attachmentName(attachment);
+                setToolTip(fileName);
                 setFrameStyle(QFrame::NoFrame);
                 setObjectName(QStringLiteral("attachmentTile"));
-                setStyleSheet(QStringLiteral(
-                    "#attachmentTile { background: rgba(255, 255, 255, 0.06); border: 1px solid "
-                    "rgba(255, 255, 255, 0.08); border-radius: 6px; }"
-                    "#attachmentTile:hover { background: rgba(255, 255, 255, 0.1); }"));
+                setMinimumWidth(minimumTileWidth);
+                setStyleSheet(QStringLiteral("#attachmentTile {"
+                                             " background: rgba(255, 255, 255, 0.06);"
+                                             " border: 1px solid rgba(255, 255, 255, 0.08);"
+                                             " border-radius: 6px;"
+                                             "}"
+                                             "#attachmentTile QToolButton {"
+                                             " background: transparent;"
+                                             " border: 0;"
+                                             " border-radius: 0;"
+                                             " padding: 6px 8px;"
+                                             "}"
+                                             "#attachmentTile QToolButton:hover {"
+                                             " background: rgba(255, 255, 255, 0.06);"
+                                             "}"
+                                             "#attachmentTile QToolButton:pressed {"
+                                             " background: rgba(255, 255, 255, 0.1);"
+                                             "}"
+                                             "#attachmentTile #saveAttachmentButton {"
+                                             " border-left: 1px solid rgba(255, 255, 255, 0.12);"
+                                             "}"));
 
                 auto* layout = new QHBoxLayout(this);
-                layout->setContentsMargins(8, 6, 8, 6);
-                layout->setSpacing(8);
+                layout->setContentsMargins(0, 0, 0, 0);
+                layout->setSpacing(0);
 
-                auto* iconLabel = new QLabel(this);
-                iconLabel->setPixmap(attachmentIcon(attachment).pixmap(18, 18));
-                iconLabel->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+                auto* openButton = new QToolButton(this);
+                openButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+                openButton->setIcon(attachmentIcon(attachment));
+                openButton->setText(fileName);
+                openButton->setToolTip(
+                    QStringLiteral("Open %1 in default application").arg(fileName));
+                openButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+                connect(openButton, &QToolButton::clicked, this,
+                        [action = std::move(openAction)]
+                        {
+                            if (action)
+                            {
+                                action();
+                            }
+                        });
 
-                auto* nameLabel = new QLabel(attachmentName(attachment), this);
-                nameLabel->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-                nameLabel->setWordWrap(false);
-                nameLabel->setToolTip(attachmentName(attachment));
+                auto* saveButton = new QToolButton(this);
+                saveButton->setObjectName(QStringLiteral("saveAttachmentButton"));
+                saveButton->setIcon(QIcon::fromTheme(QStringLiteral("edit-download")));
+                saveButton->setToolTip(std::move(saveToolTip));
+                saveButton->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
+                connect(saveButton, &QToolButton::clicked, this,
+                        [action = std::move(saveAction)]
+                        {
+                            if (action)
+                            {
+                                action();
+                            }
+                        });
 
-                auto* sizeLabel = new QLabel(attachmentSizeLabel(attachment), this);
-                sizeLabel->setStyleSheet(QStringLiteral("color: #c2c6cf;"));
-                sizeLabel->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
+                layout->addWidget(openButton, 1);
+                layout->addWidget(saveButton);
 
-                layout->addWidget(iconLabel);
-                layout->addWidget(nameLabel, 1);
-                layout->addWidget(sizeLabel);
+                const int preferredWidth =
+                    openButton->sizeHint().width() + saveButton->sizeHint().width();
+                m_targetWidth = std::clamp(preferredWidth, minimumTileWidth, maximumTileWidth);
+                setMaximumWidth(maximumTileWidth);
             }
 
-          protected:
-            void mousePressEvent(QMouseEvent* event) override
+            [[nodiscard]] int targetWidth() const
             {
-                if (event->button() == Qt::LeftButton)
-                {
-                    showMenu(event->globalPosition().toPoint());
-                    event->accept();
-                    return;
-                }
-
-                QFrame::mousePressEvent(event);
-            }
-
-            void contextMenuEvent(QContextMenuEvent* event) override
-            {
-                showMenu(event->globalPos());
-                event->accept();
+                return m_targetWidth;
             }
 
           private:
-            void showMenu(const QPoint& globalPos)
-            {
-                QMenu menu(this);
-                auto* open = menu.addAction(QStringLiteral("Open"));
-                auto* save = menu.addAction(QStringLiteral("Save"));
-                const QAction* chosen = menu.exec(globalPos);
-                if (chosen == open && m_openAction)
-                {
-                    m_openAction();
-                }
-                else if (chosen == save && m_saveAction)
-                {
-                    m_saveAction();
-                }
-            }
-
-            std::function<void()> m_openAction;
-            std::function<void()> m_saveAction;
+            static constexpr int minimumTileWidth = 200;
+            static constexpr int maximumTileWidth = 500;
+            int m_targetWidth = minimumTileWidth;
         };
 
         class MessagePreviewTile : public QFrame
@@ -733,7 +736,8 @@ namespace javelin::gui::messageview
         m_bodyStack->addWidget(m_htmlView);
 
         m_attachmentStatusLabel = new QLabel(this);
-        m_attachmentStatusLabel->setWordWrap(true);
+        m_attachmentStatusLabel->setWordWrap(false);
+        m_attachmentStatusLabel->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
         makeLabelSelectable(m_attachmentStatusLabel);
         m_attachmentStatusLabel->setVisible(false);
 
@@ -766,24 +770,24 @@ namespace javelin::gui::messageview
                     }
                 });
 
-        attachmentHeaderLayout->addWidget(m_attachmentExpanderButton);
-        attachmentHeaderLayout->addWidget(m_attachmentStatusLabel, 1);
-        attachmentHeaderLayout->addWidget(m_saveAllAttachmentsButton);
-        m_attachmentHeaderWidget->setVisible(false);
-
-        m_attachmentListWidget = new QWidget(this);
+        m_attachmentListWidget = new QWidget(m_attachmentHeaderWidget);
         m_attachmentListLayout = new QGridLayout(m_attachmentListWidget);
         m_attachmentListLayout->setContentsMargins(0, 0, 0, 0);
         m_attachmentListLayout->setHorizontalSpacing(6);
         m_attachmentListLayout->setVerticalSpacing(6);
+        m_attachmentListLayout->setAlignment(Qt::AlignLeft | Qt::AlignTop);
         m_attachmentListWidget->setVisible(false);
+
+        attachmentHeaderLayout->addWidget(m_attachmentStatusLabel);
+        attachmentHeaderLayout->addWidget(m_attachmentListWidget, 1);
+        attachmentHeaderLayout->addWidget(m_saveAllAttachmentsButton);
+        m_attachmentHeaderWidget->setVisible(false);
 
         layout->addWidget(headerWidget);
         layout->addWidget(m_bodyControlsWidget);
         layout->addWidget(m_languageBannerWidget);
         layout->addWidget(m_bodyStack, 1);
         layout->addWidget(m_attachmentHeaderWidget);
-        layout->addWidget(m_attachmentListWidget);
 
         updatePresentation();
     }
@@ -1605,23 +1609,28 @@ namespace javelin::gui::messageview
 
         const auto attachments = visibleAttachments(m_snapshot);
         const bool hasAttachments = !attachments.empty();
-        m_attachmentListWidget->setVisible(hasAttachments &&
-                                           (!m_attachmentsCollapsed || m_attachmentsExpanded));
+        m_attachmentListWidget->setVisible(hasAttachments);
         m_attachmentsCollapsed = false;
         if (!hasAttachments || !m_accountId.has_value() || !m_emailId.has_value())
         {
             return;
         }
 
-        constexpr int targetTileWidth = 220;
         constexpr int tileSpacing = 6;
         std::vector<AttachmentTile*> tiles;
         tiles.reserve(attachments.size());
-        int requiredSingleRowWidth = 0;
+        const auto attachmentSaveSettings =
+            javelin::gui::settings::PreferencesDialog::loadAttachmentSaveSettings();
 
         for (std::size_t index = 0; index < attachments.size(); ++index)
         {
             const auto* attachment = attachments.at(index);
+            const auto fileName = attachmentName(*attachment);
+            const auto saveToolTip =
+                attachmentSaveSettings.alwaysAsk
+                    ? QStringLiteral("Save %1 to selected location").arg(fileName)
+                    : QStringLiteral("Save %1 to %2")
+                          .arg(fileName, attachmentSaveSettings.directory);
             auto* tile = new AttachmentTile(
                 *attachment,
                 [this, partId = QString::fromStdString(attachment->partId)]
@@ -1634,38 +1643,43 @@ namespace javelin::gui::messageview
                     Q_EMIT saveAttachmentRequested(QString::fromStdString(*m_accountId),
                                                    QString::fromStdString(*m_emailId), partId);
                 },
-                m_attachmentListWidget);
-            tile->setMinimumWidth(targetTileWidth);
+                saveToolTip, m_attachmentListWidget);
             tiles.push_back(tile);
-            requiredSingleRowWidth += tile->sizeHint().width();
-            if (index > 0)
-            {
-                requiredSingleRowWidth += tileSpacing;
-            }
         }
 
         const int availableWidth =
-            std::max(m_attachmentListWidget->contentsRect().width(), width());
-        m_attachmentsCollapsed = requiredSingleRowWidth > availableWidth;
-        const int columnCount =
-            m_attachmentsCollapsed
-                ? std::max(1, (availableWidth + tileSpacing) / (targetTileWidth + tileSpacing))
-                : static_cast<int>(tiles.size());
-
-        for (std::size_t index = 0; index < tiles.size(); ++index)
+            std::max(m_attachmentListWidget->contentsRect().width(),
+                     m_attachmentHeaderWidget->contentsRect().width() -
+                         m_attachmentStatusLabel->sizeHint().width() -
+                         m_saveAllAttachmentsButton->sizeHint().width() - 12);
+        int row = 0;
+        int column = 0;
+        int rowWidth = 0;
+        int maxColumnCount = 0;
+        for (auto* tile : tiles)
         {
-            auto* tile = tiles.at(index);
+            const int tileWidth = std::min(tile->targetWidth(), availableWidth);
+            const int nextWidth = column == 0 ? tileWidth : rowWidth + tileSpacing + tileWidth;
+            if (column > 0 && nextWidth > availableWidth)
+            {
+                maxColumnCount = std::max(maxColumnCount, column);
+                ++row;
+                column = 0;
+                rowWidth = 0;
+            }
 
-            const int row = m_attachmentsCollapsed ? static_cast<int>(index) / columnCount : 0;
-            const int column = m_attachmentsCollapsed ? static_cast<int>(index) % columnCount
-                                                      : static_cast<int>(index);
-            m_attachmentListLayout->addWidget(tile, row, column);
+            tile->setFixedWidth(tileWidth);
+            m_attachmentListLayout->addWidget(tile, row, column, Qt::AlignLeft);
+            rowWidth = column == 0 ? tileWidth : rowWidth + tileSpacing + tileWidth;
+            ++column;
         }
+        maxColumnCount = std::max(maxColumnCount, column);
 
-        for (int column = 0; column < columnCount; ++column)
+        for (int stretchColumn = 0; stretchColumn < maxColumnCount; ++stretchColumn)
         {
-            m_attachmentListLayout->setColumnStretch(column, 1);
+            m_attachmentListLayout->setColumnStretch(stretchColumn, 0);
         }
+        m_attachmentListLayout->setColumnStretch(maxColumnCount, 1);
     }
 
     void MessageViewContainer::rebuildMultipleSelectionRows()
@@ -1710,18 +1724,11 @@ namespace javelin::gui::messageview
         const auto attachments = visibleAttachments(m_snapshot);
         if (!attachments.empty())
         {
-            std::uint64_t totalSize = 0;
-            for (const auto* attachment : attachments)
-            {
-                totalSize += attachment->size;
-            }
-
             const auto attachmentCount = static_cast<qulonglong>(attachments.size());
-            return QStringLiteral("%1 %2  %3")
+            return QStringLiteral("%1 %2")
                 .arg(attachmentCount)
                 .arg(attachmentCount == 1 ? QStringLiteral("attachment")
-                                          : QStringLiteral("attachments"))
-                .arg(QLocale{}.formattedDataSize(static_cast<qint64>(totalSize)));
+                                          : QStringLiteral("attachments"));
         }
 
         if (m_snapshot->htmlRenderDocument.has_value() &&
@@ -1739,13 +1746,10 @@ namespace javelin::gui::messageview
         const bool hasAttachments = !visibleAttachments(m_snapshot).empty();
         m_attachmentHeaderWidget->setVisible(hasAttachments);
         m_attachmentStatusLabel->setVisible(hasAttachments);
-        m_attachmentExpanderButton->setVisible(hasAttachments && m_attachmentsCollapsed);
+        m_attachmentExpanderButton->setVisible(false);
         m_saveAllAttachmentsButton->setVisible(hasAttachments);
         m_saveAllAttachmentsButton->setEnabled(hasAttachments);
-        m_attachmentExpanderButton->setArrowType(m_attachmentsExpanded ? Qt::DownArrow
-                                                                       : Qt::RightArrow);
-        m_attachmentListWidget->setVisible(hasAttachments &&
-                                           (!m_attachmentsCollapsed || m_attachmentsExpanded));
+        m_attachmentListWidget->setVisible(hasAttachments);
     }
 
     void MessageViewContainer::resizeEvent(QResizeEvent* event)

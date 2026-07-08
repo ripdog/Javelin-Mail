@@ -1,6 +1,7 @@
 #include "gui/shell/MessageFileUtils.h"
 
 #include <QDir>
+#include <QFileInfo>
 #include <QMimeDatabase>
 #include <QRegularExpression>
 #include <QSaveFile>
@@ -27,8 +28,8 @@ namespace javelin::gui::shell
             return name.isEmpty() ? fallback : name;
         }
 
-        [[nodiscard]] bool isEmbeddedInline(
-            const javelin::jmap::cache::MessageAttachment& attachment)
+        [[nodiscard]] bool
+        isEmbeddedInline(const javelin::jmap::cache::MessageAttachment& attachment)
         {
             return attachment.cid.has_value() && attachment.disposition.has_value() &&
                    std::ranges::equal(*attachment.disposition, std::string_view{"inline"},
@@ -61,6 +62,25 @@ namespace javelin::gui::shell
         }
 
         return fileName;
+    }
+
+    QString uniqueFilePath(const QString& directoryPath, const QString& fileName)
+    {
+        const QDir directory{directoryPath};
+        const QFileInfo original{fileName};
+        const auto completeSuffix = original.completeSuffix();
+        const auto baseName = completeSuffix.isEmpty() ? fileName : original.completeBaseName();
+        const auto suffix =
+            completeSuffix.isEmpty() ? QString{} : QStringLiteral(".") + completeSuffix;
+
+        auto candidate = directory.filePath(fileName);
+        for (int index = 1; QFileInfo::exists(candidate); ++index)
+        {
+            candidate = directory.filePath(
+                QStringLiteral("%1 (%2)%3").arg(baseName).arg(index).arg(suffix));
+        }
+
+        return candidate;
     }
 
     FileWriteResult writePayloadToPath(const QString& path, const QByteArray& payload)
@@ -101,8 +121,8 @@ namespace javelin::gui::shell
         BatchWriteResult result;
         for (const auto& file : files)
         {
-            const auto writeResult =
-                writePayloadToPath(directory.filePath(file.fileName), file.payload);
+            const auto writeResult = writePayloadToPath(
+                uniqueFilePath(directory.absolutePath(), file.fileName), file.payload);
             if (!writeResult.errorMessage.isEmpty())
             {
                 return BatchWriteResult{
@@ -145,8 +165,8 @@ namespace javelin::gui::shell
 
         for (const auto& attachment : attachments)
         {
-            const auto downloadResult =
-                co_await jmapCore.downloadAttachment(settings, accountId, emailId, attachment.partId);
+            const auto downloadResult = co_await jmapCore.downloadAttachment(
+                settings, accountId, emailId, attachment.partId);
             if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&downloadResult))
             {
                 co_return SaveAllDownloadResult{
@@ -189,9 +209,8 @@ namespace javelin::gui::shell
     QString tempMessageSourcePath(QTemporaryDir& directory,
                                   const javelin::jmap::MessageSourceDownload& download)
     {
-        return directory.filePath(QStringLiteral("%1-%2")
-                                      .arg(QString::fromStdString(download.emailId),
-                                           suggestedSourceFileName(download)));
+        return directory.filePath(QStringLiteral("%1-%2").arg(
+            QString::fromStdString(download.emailId), suggestedSourceFileName(download)));
     }
 
 } // namespace javelin::gui::shell

@@ -4,6 +4,8 @@
 
 #include <QCheckBox>
 #include <QDialogButtonBox>
+#include <QDir>
+#include <QFileDialog>
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -11,6 +13,7 @@
 #include <QListWidget>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QRadioButton>
 #include <QSettings>
 #include <QSplitter>
 #include <QUuid>
@@ -38,6 +41,9 @@ namespace javelin::gui::settings
         constexpr auto translationGroup = "translation";
         constexpr auto autoTranslateSendersKey = "autoTranslateSenders";
         constexpr auto autoTranslateDomainsKey = "autoTranslateDomains";
+        constexpr auto attachmentsGroup = "attachments";
+        constexpr auto alwaysAskKey = "alwaysAsk";
+        constexpr auto directoryKey = "directory";
         constexpr int remoteContentKindRole = Qt::UserRole + 1;
         constexpr int remoteContentValueRole = Qt::UserRole + 2;
         constexpr int autoTranslateKindRole = Qt::UserRole + 1;
@@ -137,6 +143,16 @@ namespace javelin::gui::settings
             settings.endGroup();
             settings.sync();
         }
+
+        void saveAttachmentSaveSettings(const AttachmentSaveSettings& value)
+        {
+            QSettings settings;
+            settings.beginGroup(QLatin1StringView{attachmentsGroup});
+            settings.setValue(QLatin1StringView{alwaysAskKey}, value.alwaysAsk);
+            settings.setValue(QLatin1StringView{directoryKey}, value.directory);
+            settings.endGroup();
+            settings.sync();
+        }
     } // namespace
 
     PreferencesDialog::PreferencesDialog(javelin::jmap::cache::AccountRepository& accountRepository,
@@ -148,7 +164,8 @@ namespace javelin::gui::settings
           m_autoTranslateSenders(settingsList(QLatin1StringView{translationGroup},
                                               QLatin1StringView{autoTranslateSendersKey})),
           m_autoTranslateDomains(settingsList(QLatin1StringView{translationGroup},
-                                              QLatin1StringView{autoTranslateDomainsKey}))
+                                              QLatin1StringView{autoTranslateDomainsKey})),
+          m_attachmentSaveSettings(loadAttachmentSaveSettings())
     {
         setWindowTitle(QStringLiteral("Preferences"));
         resize(760, 420);
@@ -223,6 +240,28 @@ namespace javelin::gui::settings
         addPage(translationPage, QStringLiteral("Translation"),
                 QStringLiteral("preferences-desktop-locale"), QString{}, false);
 
+        auto* attachmentsPage = new QWidget(this);
+        auto* attachmentsLayout = new QVBoxLayout(attachmentsPage);
+        m_askAttachmentDirectoryRadio = new QRadioButton(
+            QStringLiteral("Always ask where to save attachments"), attachmentsPage);
+        m_saveAttachmentDirectoryRadio =
+            new QRadioButton(QStringLiteral("Always save attachments to:"), attachmentsPage);
+        attachmentsLayout->addWidget(m_askAttachmentDirectoryRadio);
+        attachmentsLayout->addWidget(m_saveAttachmentDirectoryRadio);
+        auto* attachmentDirectoryLayout = new QHBoxLayout();
+        m_attachmentDirectoryEdit = new QLineEdit(attachmentsPage);
+        m_attachmentDirectoryEdit->setReadOnly(true);
+        m_attachmentDirectoryButton = new QPushButton(QStringLiteral("Choose..."), attachmentsPage);
+        attachmentDirectoryLayout->addWidget(m_attachmentDirectoryEdit, 1);
+        attachmentDirectoryLayout->addWidget(m_attachmentDirectoryButton);
+        attachmentsLayout->addLayout(attachmentDirectoryLayout);
+        attachmentsLayout->addStretch(1);
+        m_askAttachmentDirectoryRadio->setChecked(m_attachmentSaveSettings.alwaysAsk);
+        m_saveAttachmentDirectoryRadio->setChecked(!m_attachmentSaveSettings.alwaysAsk);
+        m_attachmentDirectoryEdit->setText(m_attachmentSaveSettings.directory);
+        addPage(attachmentsPage, QStringLiteral("Attachments"), QStringLiteral("mail-attachment"),
+                QString{}, false);
+
         connect(addButton, &QPushButton::clicked, this, &PreferencesDialog::addAccount);
         connect(m_removeButton, &QPushButton::clicked, this,
                 &PreferencesDialog::removeCurrentAccount);
@@ -249,6 +288,30 @@ namespace javelin::gui::settings
                     m_removeAutoTranslateButton->setEnabled(
                         !m_autoTranslateList->selectedItems().empty());
                 });
+        connect(m_askAttachmentDirectoryRadio, &QRadioButton::toggled, this,
+                [this](const bool checked)
+                {
+                    if (!checked)
+                    {
+                        return;
+                    }
+                    m_attachmentSaveSettings.alwaysAsk = true;
+                    updateAttachmentDirectoryControls();
+                    noteUnsavedChanges();
+                });
+        connect(m_saveAttachmentDirectoryRadio, &QRadioButton::toggled, this,
+                [this](const bool checked)
+                {
+                    if (!checked)
+                    {
+                        return;
+                    }
+                    m_attachmentSaveSettings.alwaysAsk = false;
+                    updateAttachmentDirectoryControls();
+                    noteUnsavedChanges();
+                });
+        connect(m_attachmentDirectoryButton, &QPushButton::clicked, this,
+                &PreferencesDialog::selectAttachmentDirectory);
 
         if (m_accounts.empty())
         {
@@ -261,6 +324,7 @@ namespace javelin::gui::settings
         refreshAccountList();
         refreshRemoteContentList();
         refreshAutoTranslateList();
+        updateAttachmentDirectoryControls();
         m_accountList->setCurrentRow(0);
         m_hasPendingChanges = false;
         updateButtons();
@@ -270,6 +334,11 @@ namespace javelin::gui::settings
 
     void PreferencesDialog::updateSettings()
     {
+        if (!validateCurrentSettings())
+        {
+            return;
+        }
+
         saveCurrentSettings();
         KConfigDialog::updateSettings();
     }
@@ -354,6 +423,18 @@ namespace javelin::gui::settings
             accounts, [accountId](const auto& account)
             { return account.cachedAccountIds.contains(accountId.toString()); });
         return found == accounts.end() ? ConnectionSettings{} : *found;
+    }
+
+    AttachmentSaveSettings PreferencesDialog::loadAttachmentSaveSettings()
+    {
+        QSettings settings;
+        settings.beginGroup(QLatin1StringView{attachmentsGroup});
+        const AttachmentSaveSettings value{
+            .alwaysAsk = settings.value(QLatin1StringView{alwaysAskKey}, true).toBool(),
+            .directory = settings.value(QLatin1StringView{directoryKey}).toString(),
+        };
+        settings.endGroup();
+        return value;
     }
 
     void PreferencesDialog::saveAccounts(const std::vector<ConnectionSettings>& accounts)
@@ -510,6 +591,7 @@ namespace javelin::gui::settings
                          QLatin1StringView{autoTranslateSendersKey}, m_autoTranslateSenders);
         saveSettingsList(QLatin1StringView{translationGroup},
                          QLatin1StringView{autoTranslateDomainsKey}, m_autoTranslateDomains);
+        saveAttachmentSaveSettings(m_attachmentSaveSettings);
 
         QSettings settings;
         settings.beginGroup(QLatin1StringView{accountsGroup});
@@ -620,6 +702,48 @@ namespace javelin::gui::settings
 
         refreshAutoTranslateList();
         noteUnsavedChanges();
+    }
+
+    void PreferencesDialog::selectAttachmentDirectory()
+    {
+        const auto directory =
+            QFileDialog::getExistingDirectory(this, QStringLiteral("Select Attachment Directory"),
+                                              m_attachmentSaveSettings.directory);
+        if (directory.isEmpty())
+        {
+            return;
+        }
+
+        m_attachmentSaveSettings.directory = directory;
+        m_attachmentDirectoryEdit->setText(directory);
+        noteUnsavedChanges();
+    }
+
+    bool PreferencesDialog::validateCurrentSettings()
+    {
+        if (m_attachmentSaveSettings.alwaysAsk)
+        {
+            return true;
+        }
+
+        if (!m_attachmentSaveSettings.directory.isEmpty() &&
+            QDir{m_attachmentSaveSettings.directory}.exists())
+        {
+            return true;
+        }
+
+        QMessageBox::warning(this, QStringLiteral("Invalid attachment directory"),
+                             QStringLiteral("Choose an existing directory for attachments, or "
+                                            "select always asking where to save attachments."));
+        m_attachmentDirectoryButton->setFocus();
+        return false;
+    }
+
+    void PreferencesDialog::updateAttachmentDirectoryControls()
+    {
+        const bool useDirectory = !m_attachmentSaveSettings.alwaysAsk;
+        m_attachmentDirectoryEdit->setEnabled(useDirectory);
+        m_attachmentDirectoryButton->setEnabled(useDirectory);
     }
 
 } // namespace javelin::gui::settings

@@ -3171,13 +3171,23 @@ namespace javelin::gui::shell
             return;
         }
 
+        const auto attachmentSettings =
+            javelin::gui::settings::PreferencesDialog::loadAttachmentSaveSettings();
+        if (!attachmentSettings.alwaysAsk && (attachmentSettings.directory.isEmpty() ||
+                                              !QDir{attachmentSettings.directory}.exists()))
+        {
+            statusBar()->showMessage(
+                QStringLiteral("Select a valid attachment save directory in Preferences."), 5000);
+            return;
+        }
+
         statusBar()->showMessage(QStringLiteral("Downloading attachment..."));
         auto task =
             m_jmapCore.downloadAttachment(toLiveConnectionSettings(settings), std::move(accountId),
                                           std::move(emailId), std::move(partId));
         QCoro::connect(
             std::move(task), this,
-            [this](javelin::jmap::AttachmentDownloadResult result)
+            [this, attachmentSettings](javelin::jmap::AttachmentDownloadResult result)
             {
                 if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
                 {
@@ -3186,8 +3196,11 @@ namespace javelin::gui::shell
                 }
 
                 const auto& download = std::get<javelin::jmap::AttachmentDownload>(result);
-                const QString targetPath = QFileDialog::getSaveFileName(
-                    this, QStringLiteral("Save Attachment"), suggestedFileName(download));
+                const QString targetPath =
+                    attachmentSettings.alwaysAsk
+                        ? QFileDialog::getSaveFileName(this, QStringLiteral("Save Attachment"),
+                                                       suggestedFileName(download))
+                        : uniqueFilePath(attachmentSettings.directory, suggestedFileName(download));
                 if (targetPath.isEmpty())
                 {
                     statusBar()->showMessage(QStringLiteral("Attachment save canceled."), 3000);
@@ -3257,11 +3270,22 @@ namespace javelin::gui::shell
             return;
         }
 
-        const QString targetDirectory = QFileDialog::getExistingDirectory(
-            this, QStringLiteral("Save All Attachments"), QDir::homePath());
+        const auto attachmentSettings =
+            javelin::gui::settings::PreferencesDialog::loadAttachmentSaveSettings();
+        const QString targetDirectory =
+            attachmentSettings.alwaysAsk
+                ? QFileDialog::getExistingDirectory(this, QStringLiteral("Save All Attachments"),
+                                                    QDir::homePath())
+                : attachmentSettings.directory;
         if (targetDirectory.isEmpty())
         {
             statusBar()->showMessage(QStringLiteral("Save all attachments canceled."), 3000);
+            return;
+        }
+        if (!QDir{targetDirectory}.exists())
+        {
+            statusBar()->showMessage(
+                QStringLiteral("Select a valid attachment save directory in Preferences."), 5000);
             return;
         }
 

@@ -7,6 +7,7 @@
 class QLineEdit;
 class QListWidget;
 class QPushButton;
+class QRadioButton;
 
 namespace javelin::jmap::cache
 {
@@ -25,6 +26,12 @@ namespace javelin::gui::settings
         QStringList cachedAccountIds;
     };
 
+    struct AttachmentSaveSettings
+    {
+        bool alwaysAsk = true;
+        QString directory;
+    };
+
     class PreferencesDialog : public KConfigDialog
     {
         Q_OBJECT
@@ -39,6 +46,7 @@ namespace javelin::gui::settings
         [[nodiscard]] static std::vector<ConnectionSettings> loadAccounts();
         [[nodiscard]] static ConnectionSettings loadSettings();
         [[nodiscard]] static ConnectionSettings loadSettingsForAccount(QStringView accountId);
+        [[nodiscard]] static AttachmentSaveSettings loadAttachmentSaveSettings();
         static void saveAccounts(const std::vector<ConnectionSettings>& accounts);
         static void associateCachedAccount(const QString& configuredAccountId,
                                            const QString& cachedAccountId);
@@ -58,6 +66,9 @@ namespace javelin::gui::settings
         void removeSelectedRemoteContentPermits();
         void refreshAutoTranslateList();
         void removeSelectedAutoTranslateEntries();
+        void selectAttachmentDirectory();
+        [[nodiscard]] bool validateCurrentSettings();
+        void updateAttachmentDirectoryControls();
 
         javelin::jmap::cache::AccountRepository& m_accountRepository;
         std::vector<ConnectionSettings> m_accounts;
@@ -67,6 +78,7 @@ namespace javelin::gui::settings
         QStringList m_remoteContentDomains;
         QStringList m_autoTranslateSenders;
         QStringList m_autoTranslateDomains;
+        AttachmentSaveSettings m_attachmentSaveSettings;
         bool m_hasPendingChanges = false;
         int m_currentRow = -1;
         QListWidget* m_accountList = nullptr;
@@ -78,6 +90,10 @@ namespace javelin::gui::settings
         QPushButton* m_removeRemoteContentButton = nullptr;
         QListWidget* m_autoTranslateList = nullptr;
         QPushButton* m_removeAutoTranslateButton = nullptr;
+        QRadioButton* m_askAttachmentDirectoryRadio = nullptr;
+        QRadioButton* m_saveAttachmentDirectoryRadio = nullptr;
+        QLineEdit* m_attachmentDirectoryEdit = nullptr;
+        QPushButton* m_attachmentDirectoryButton = nullptr;
     };
 
 } // namespace javelin::gui::settings

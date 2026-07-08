@@ -41,7 +41,9 @@ namespace javelin::gui::shell
     };
 
     [[nodiscard]] QString suggestedFileName(const javelin::jmap::AttachmentDownload& download);
-    [[nodiscard]] FileWriteResult writePayloadToPath(const QString& path, const QByteArray& payload);
+    [[nodiscard]] QString uniqueFilePath(const QString& directoryPath, const QString& fileName);
+    [[nodiscard]] FileWriteResult writePayloadToPath(const QString& path,
+                                                     const QByteArray& payload);
     [[nodiscard]] BatchWriteResult
     writePayloadBatchToDirectory(const QString& directoryPath,
                                  const std::vector<DownloadedAttachmentFile>& files);
@@ -54,9 +56,10 @@ namespace javelin::gui::shell
                         std::vector<javelin::jmap::cache::MessageAttachment> attachments);
     [[nodiscard]] QString tempAttachmentPath(QTemporaryDir& directory,
                                              const javelin::jmap::AttachmentDownload& download);
-    [[nodiscard]] QString suggestedSourceFileName(
-        const javelin::jmap::MessageSourceDownload& download);
-    [[nodiscard]] QString tempMessageSourcePath(
-        QTemporaryDir& directory, const javelin::jmap::MessageSourceDownload& download);
+    [[nodiscard]] QString
+    suggestedSourceFileName(const javelin::jmap::MessageSourceDownload& download);
+    [[nodiscard]] QString
+    tempMessageSourcePath(QTemporaryDir& directory,
+                          const javelin::jmap::MessageSourceDownload& download);
 
 } // namespace javelin::gui::shell
