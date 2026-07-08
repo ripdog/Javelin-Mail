@@ -2,12 +2,70 @@
 #include "app/WebEngineSetup.h"
 
 #include <QApplication>
+#include <QElapsedTimer>
+#include <QEvent>
 #include <QLocale>
+#include <QTimer>
 #include <QTranslator>
 
 #ifndef JAVELIN_DATA_DIR
 #define JAVELIN_DATA_DIR ""
 #endif
+
+namespace
+{
+    class UiStallProbe final : public QObject
+    {
+      public:
+        explicit UiStallProbe(QObject* parent = nullptr) : QObject(parent)
+        {
+            m_timer.setTimerType(Qt::PreciseTimer);
+            m_timer.setInterval(50);
+            m_last.start();
+
+            connect(&m_timer, &QTimer::timeout, this,
+                    [this]
+                    {
+                        const qint64 elapsed = m_last.restart();
+                        if (elapsed > 200)
+                        {
+                            qWarning().noquote() << "UI event loop stall:" << elapsed << "ms";
+                        }
+                    });
+
+            m_timer.start();
+        }
+
+      private:
+        QTimer m_timer;
+        QElapsedTimer m_last;
+    };
+
+    class ProfilingApplication final : public QApplication
+    {
+      public:
+        using QApplication::QApplication;
+
+        bool notify(QObject* receiver, QEvent* event) override
+        {
+            QElapsedTimer timer;
+            timer.start();
+
+            const bool result = QApplication::notify(receiver, event);
+
+            const qint64 elapsed = timer.elapsed();
+            if (elapsed > 50)
+            {
+                qWarning().noquote()
+                    << "Slow Qt event:" << elapsed << "ms"
+                    << "receiver=" << receiver->metaObject()->className()
+                    << "objectName=" << receiver->objectName() << "event=" << event->type();
+            }
+
+            return result;
+        }
+    };
+} // namespace
 
 int main(int argc, char* argv[])
 {
@@ -25,7 +83,8 @@ int main(int argc, char* argv[])
     }
 
     javelin::app::registerInlineMessageUrlScheme();
-    QApplication application(argc, argv);
+    ProfilingApplication application(argc, argv);
+    UiStallProbe stallProbe;
     application.setApplicationName(QStringLiteral("Javelin Mail"));
     application.setOrganizationName(QStringLiteral("Javelin Mail"));
 
