@@ -121,12 +121,15 @@ namespace javelin::jmap::cache
         QSqlQuery query{m_connection.database()};
         query.prepare(
             QStringLiteral(
-                "WITH mailbox_threads AS ("
+                "WITH mailbox_email_ids AS MATERIALIZED ("
+                "  SELECT em.email_id "
+                "  FROM email_mailboxes em INDEXED BY idx_email_mailboxes_mailbox "
+                "  WHERE em.account_id = :account_id AND em.mailbox_id = :mailbox_id"
+                "), mailbox_threads AS MATERIALIZED ("
                 "  SELECT DISTINCT e.thread_id "
-                "  FROM emails e "
-                "  INNER JOIN email_mailboxes em ON em.account_id = e.account_id AND em.email_id = "
-                "e.email_id "
-                "  WHERE e.account_id = :account_id AND em.mailbox_id = :mailbox_id"
+                "  FROM mailbox_email_ids me "
+                "  CROSS JOIN emails e ON e.account_id = :account_id AND e.email_id = "
+                "me.email_id"
                 "), ranked_threads AS ("
                 "  SELECT e.email_id, e.thread_id, e.subject, e.preview, e.received_at, e.sent_at, "
                 "         %2 AS sort_key, "
@@ -140,13 +143,13 @@ namespace javelin::jmap::cache
                 "             (PARTITION BY e.thread_id) AS thread_has_unread, "
                 "         MAX(CASE WHEN flagged.email_id IS NULL THEN 0 ELSE 1 END) OVER "
                 "             (PARTITION BY e.thread_id) AS thread_has_flagged "
-                "  FROM emails e "
-                "  INNER JOIN mailbox_threads mt ON mt.thread_id = e.thread_id "
+                "  FROM mailbox_threads mt "
+                "  CROSS JOIN emails e INDEXED BY idx_emails_thread "
+                "       ON e.account_id = :account_id AND e.thread_id = mt.thread_id "
                 "  LEFT JOIN email_keywords seen ON seen.account_id = e.account_id "
                 "       AND seen.email_id = e.email_id AND seen.keyword = '$seen' "
                 "  LEFT JOIN email_keywords flagged ON flagged.account_id = e.account_id "
                 "       AND flagged.email_id = e.email_id AND flagged.keyword = '$flagged' "
-                "  WHERE e.account_id = :account_id"
                 ") "
                 "SELECT rt.email_id, rt.thread_id, rt.subject, rt.preview, rt.received_at, "
                 "rt.sent_at, "
@@ -443,11 +446,15 @@ namespace javelin::jmap::cache
 
         QSqlQuery query{m_connection.database()};
         query.prepare(
-            QStringLiteral("SELECT COUNT(DISTINCT e.thread_id) "
-                           "FROM emails e "
-                           "INNER JOIN email_mailboxes em ON em.account_id = e.account_id "
-                           "    AND em.email_id = e.email_id "
-                           "WHERE e.account_id = :account_id AND em.mailbox_id = :mailbox_id"));
+            QStringLiteral("WITH mailbox_email_ids AS MATERIALIZED ("
+                           "  SELECT em.email_id "
+                           "  FROM email_mailboxes em INDEXED BY idx_email_mailboxes_mailbox "
+                           "  WHERE em.account_id = :account_id AND em.mailbox_id = :mailbox_id"
+                           ") "
+                           "SELECT COUNT(DISTINCT e.thread_id) "
+                           "FROM mailbox_email_ids me "
+                           "CROSS JOIN emails e ON e.account_id = :account_id "
+                           "     AND e.email_id = me.email_id"));
         query.bindValue(QStringLiteral(":account_id"),
                         QString::fromStdString(std::string{accountId}));
         query.bindValue(QStringLiteral(":mailbox_id"),
