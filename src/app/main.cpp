@@ -48,6 +48,12 @@ namespace
 
         bool notify(QObject* receiver, QEvent* event) override
         {
+            const char* receiverClass =
+                receiver != nullptr ? receiver->metaObject()->className() : "<null>";
+            const QString objectName =
+                receiver != nullptr ? receiver->objectName() : QStringLiteral("<null>");
+            const auto eventType = event != nullptr ? event->type() : QEvent::None;
+
             QElapsedTimer timer;
             timer.start();
 
@@ -56,12 +62,6 @@ namespace
             const qint64 elapsed = timer.elapsed();
             if (elapsed > 50)
             {
-                const char* receiverClass =
-                    receiver != nullptr ? receiver->metaObject()->className() : "<null>";
-                const QString objectName =
-                    receiver != nullptr ? receiver->objectName() : QStringLiteral("<null>");
-                const auto eventType = event != nullptr ? event->type() : QEvent::None;
-
                 qWarning().noquote() << "Slow Qt event:" << elapsed << "ms"
                                      << "receiver=" << receiverClass << "objectName=" << objectName
                                      << "event=" << eventType;
