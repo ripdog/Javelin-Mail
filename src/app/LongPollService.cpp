@@ -264,6 +264,7 @@ namespace javelin::app
         if (const auto* summary =
                 std::get_if<javelin::jmap::sync::MailboxRefreshSummary>(&refreshResult))
         {
+            m_shouldCatchUpRefreshOnReconnect = false;
             watchedMailboxRefreshed = true;
             Q_EMIT mailboxRefreshed(QString::fromStdString(runContext->configuration.accountId),
                                     QString::fromStdString(runContext->configuration.mailboxId),
@@ -378,6 +379,10 @@ namespace javelin::app
         if (m_runContext != nullptr)
         {
             m_shouldCatchUpRefreshOnReconnect = true;
+            qInfo().noquote() << "Long poll scheduling resume catch-up refresh"
+                              << QString::fromStdString(m_runContext->configuration.accountId)
+                              << QString::fromStdString(m_runContext->configuration.mailboxId);
+            scheduleDebouncedRefresh();
         }
     }
 
@@ -455,6 +460,10 @@ namespace javelin::app
     {
         if (m_status == status)
         {
+            if (status == Status::Disconnected && m_shouldCatchUpRefreshOnReconnect)
+            {
+                scheduleDebouncedRefresh();
+            }
             return;
         }
 
@@ -467,11 +476,10 @@ namespace javelin::app
         if (status == Status::Connected && m_shouldCatchUpRefreshOnReconnect &&
             m_runContext != nullptr)
         {
-            m_shouldCatchUpRefreshOnReconnect = false;
             qInfo().noquote() << "Long poll scheduling reconnect catch-up refresh"
                               << QString::fromStdString(m_runContext->configuration.accountId)
                               << QString::fromStdString(m_runContext->configuration.mailboxId);
-            scheduleCatchUpRefresh();
+            scheduleDebouncedRefresh();
         }
         Q_EMIT statusChanged(m_status);
     }
