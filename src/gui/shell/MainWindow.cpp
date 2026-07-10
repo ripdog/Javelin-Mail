@@ -839,6 +839,9 @@ namespace javelin::gui::shell
         m_mailboxView->setExpandsOnDoubleClick(false);
         m_mailboxView->expandAll();
         m_mailboxView->setContextMenuPolicy(Qt::CustomContextMenu);
+        m_mailboxView->setAcceptDrops(true);
+        m_mailboxView->setDropIndicatorShown(true);
+        m_mailboxView->setDragDropMode(QAbstractItemView::DropOnly);
 
         m_mailboxPane = new QWidget(this);
         auto* mailboxLayout = new QVBoxLayout(m_mailboxPane);
@@ -855,11 +858,43 @@ namespace javelin::gui::shell
         m_messageView->setFrameShape(QFrame::NoFrame);
         m_messageView->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
         m_messageView->setSelectionMode(QAbstractItemView::ExtendedSelection);
+        m_messageView->setDragEnabled(true);
+        m_messageView->setDragDropMode(QAbstractItemView::DragOnly);
+        m_messageView->setDefaultDropAction(Qt::MoveAction);
         m_messageView->setStyleSheet(QStringLiteral("QListView { border: none; padding: 3px; }"));
         m_messageView->setMouseTracking(true);
         m_messageView->viewport()->setMouseTracking(true);
         m_messageView->installEventFilter(this);
         m_messageView->viewport()->installEventFilter(this);
+
+        connect(m_mailboxModel, &javelin::gui::mailboxes::MailboxTreeModel::emailsDropped, this,
+                [this](const QString& sourceAccountId, const QString& destinationAccountId,
+                       const QString& destinationMailboxId, const QStringList& emailIds)
+                {
+                    Q_UNUSED(emailIds);
+                    const auto sourceAccount = activeAccountId();
+                    const auto sourceMailboxId = activeMailboxId();
+                    if (!sourceAccount.has_value() || !sourceMailboxId.has_value() ||
+                        sourceAccountId.toStdString() != *sourceAccount ||
+                        sourceAccountId != destinationAccountId)
+                    {
+                        m_statusBar->showMessage(
+                            QStringLiteral("Messages can only be moved within their account."),
+                            5000);
+                        return;
+                    }
+
+                    auto idsResult = selectedEmailIdsForMailboxAction(*sourceAccount);
+                    if (const auto* error = std::get_if<QString>(&idsResult))
+                    {
+                        m_statusBar->showMessage(*error, 10000);
+                        return;
+                    }
+                    auto ids = std::get<std::vector<std::string>>(std::move(idsResult));
+                    queueMoveEmails(sourceAccountId.toStdString(), *sourceMailboxId,
+                                    destinationMailboxId.toStdString(), std::move(ids),
+                                    QStringLiteral("Queued move."));
+                });
 
         auto* messagePane = new QWidget(this);
         auto* messageLayout = new QVBoxLayout(messagePane);

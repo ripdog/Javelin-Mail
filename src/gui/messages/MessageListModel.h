@@ -48,6 +48,10 @@ namespace javelin::gui::messages
 
         [[nodiscard]] int rowCount(const QModelIndex& parent = QModelIndex{}) const override;
         [[nodiscard]] QVariant data(const QModelIndex& index, int role) const override;
+        [[nodiscard]] Qt::ItemFlags flags(const QModelIndex& index) const override;
+        [[nodiscard]] QStringList mimeTypes() const override;
+        [[nodiscard]] QMimeData* mimeData(const QModelIndexList& indexes) const override;
+        [[nodiscard]] Qt::DropActions supportedDragActions() const override;
 
         void setPage(std::optional<std::string> accountId,
                      std::vector<javelin::jmap::cache::MessageListItem> items);

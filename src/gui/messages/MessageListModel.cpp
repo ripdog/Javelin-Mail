@@ -1,6 +1,9 @@
 #include "gui/messages/MessageListModel.h"
 
+#include <QDataStream>
+#include <QMimeData>
 #include <QString>
+#include <QStringList>
 
 #include <algorithm>
 
@@ -8,6 +11,7 @@ namespace javelin::gui::messages
 {
     namespace
     {
+        constexpr auto emailDragMimeType = "application/x-javelin-mail-email-ids";
 
         [[nodiscard]] bool containsThreadId(const std::vector<std::string>& threadIds,
                                             const std::string_view threadId)
@@ -169,6 +173,55 @@ namespace javelin::gui::messages
         }
 
         return {};
+    }
+
+    Qt::ItemFlags MessageListModel::flags(const QModelIndex& index) const
+    {
+        auto result = QAbstractListModel::flags(index);
+        if (index.isValid())
+        {
+            result |= Qt::ItemIsDragEnabled;
+        }
+        return result;
+    }
+
+    QStringList MessageListModel::mimeTypes() const
+    {
+        return {QString::fromLatin1(emailDragMimeType)};
+    }
+
+    QMimeData* MessageListModel::mimeData(const QModelIndexList& indexes) const
+    {
+        if (!m_accountId.has_value())
+        {
+            return nullptr;
+        }
+
+        QStringList emailIds;
+        for (const auto& index : indexes)
+        {
+            const auto emailId = data(index, EmailIdRole).toString();
+            if (!emailId.isEmpty() && !emailIds.contains(emailId))
+            {
+                emailIds.push_back(emailId);
+            }
+        }
+        if (emailIds.isEmpty())
+        {
+            return nullptr;
+        }
+
+        QByteArray payload;
+        QDataStream stream{&payload, QIODeviceBase::WriteOnly};
+        stream << QString::fromStdString(*m_accountId) << emailIds;
+        auto* mimeData = new QMimeData;
+        mimeData->setData(QString::fromLatin1(emailDragMimeType), payload);
+        return mimeData;
+    }
+
+    Qt::DropActions MessageListModel::supportedDragActions() const
+    {
+        return Qt::MoveAction;
     }
 
     void MessageListModel::setPage(std::optional<std::string> accountId,

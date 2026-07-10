@@ -4,6 +4,7 @@
 #include "jmap/cache/QueryService.h"
 
 #include <QAbstractItemModel>
+#include <QStringList>
 
 #include <memory>
 #include <optional>
@@ -37,8 +38,19 @@ namespace javelin::gui::mailboxes
         [[nodiscard]] int rowCount(const QModelIndex& parent = QModelIndex{}) const override;
         [[nodiscard]] int columnCount(const QModelIndex& parent = QModelIndex{}) const override;
         [[nodiscard]] QVariant data(const QModelIndex& index, int role) const override;
+        [[nodiscard]] Qt::ItemFlags flags(const QModelIndex& index) const override;
+        [[nodiscard]] QStringList mimeTypes() const override;
+        [[nodiscard]] bool canDropMimeData(const QMimeData* data, Qt::DropAction action, int row,
+                                           int column, const QModelIndex& parent) const override;
+        [[nodiscard]] bool dropMimeData(const QMimeData* data, Qt::DropAction action, int row,
+                                        int column, const QModelIndex& parent) override;
+        [[nodiscard]] Qt::DropActions supportedDropActions() const override;
 
         void refresh();
+
+      Q_SIGNALS:
+        void emailsDropped(const QString& sourceAccountId, const QString& destinationAccountId,
+                           const QString& destinationMailboxId, const QStringList& emailIds);
 
       private:
         // Each node represents either an account (mailboxId empty, children = mailboxes)

@@ -3,13 +3,19 @@
 #include "gui/mailboxes/MailboxIconUtils.h"
 
 #include <QApplication>
+#include <QDataStream>
 #include <QIcon>
+#include <QMimeData>
 #include <QPalette>
 
 #include <unordered_map>
 
 namespace javelin::gui::mailboxes
 {
+    namespace
+    {
+        constexpr auto emailDragMimeType = "application/x-javelin-mail-email-ids";
+    }
 
     MailboxTreeModel::MailboxTreeModel(javelin::jmap::cache::AccountRepository& accountRepository,
                                        javelin::jmap::cache::QueryService& queryService,
@@ -155,6 +161,65 @@ namespace javelin::gui::mailboxes
         }
 
         return {};
+    }
+
+    Qt::ItemFlags MailboxTreeModel::flags(const QModelIndex& index) const
+    {
+        auto result = QAbstractItemModel::flags(index);
+        const auto* node = nodeForIndex(index);
+        if (node != nullptr && !node->mailboxId.empty())
+        {
+            result |= Qt::ItemIsDropEnabled;
+        }
+        return result;
+    }
+
+    QStringList MailboxTreeModel::mimeTypes() const
+    {
+        return {QString::fromLatin1(emailDragMimeType)};
+    }
+
+    bool MailboxTreeModel::canDropMimeData(const QMimeData* data, const Qt::DropAction action,
+                                           const int row, const int column,
+                                           const QModelIndex& parentIndex) const
+    {
+        Q_UNUSED(row);
+        Q_UNUSED(column);
+        const auto* node = nodeForIndex(parentIndex);
+        return action == Qt::MoveAction && data != nullptr &&
+               data->hasFormat(QString::fromLatin1(emailDragMimeType)) && node != nullptr &&
+               !node->mailboxId.empty();
+    }
+
+    bool MailboxTreeModel::dropMimeData(const QMimeData* data, const Qt::DropAction action,
+                                        const int row, const int column,
+                                        const QModelIndex& parentIndex)
+    {
+        if (!canDropMimeData(data, action, row, column, parentIndex))
+        {
+            return false;
+        }
+
+        QString sourceAccountId;
+        QStringList emailIds;
+        auto payload = data->data(QString::fromLatin1(emailDragMimeType));
+        QDataStream stream{&payload, QIODeviceBase::ReadOnly};
+        stream >> sourceAccountId >> emailIds;
+        const auto* node = nodeForIndex(parentIndex);
+        if (stream.status() != QDataStream::Ok || sourceAccountId.isEmpty() || emailIds.isEmpty() ||
+            node == nullptr)
+        {
+            return false;
+        }
+
+        Q_EMIT emailsDropped(sourceAccountId, QString::fromStdString(node->accountId),
+                             QString::fromStdString(node->mailboxId), emailIds);
+        return true;
+    }
+
+    Qt::DropActions MailboxTreeModel::supportedDropActions() const
+    {
+        return Qt::MoveAction;
     }
 
     void MailboxTreeModel::refresh()
