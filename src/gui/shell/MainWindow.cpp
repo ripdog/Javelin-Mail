@@ -33,6 +33,7 @@
 #include <QDesktopServices>
 #include <QDialog>
 #include <QDir>
+#include <QDrag>
 #include <QElapsedTimer>
 #include <QEvent>
 #include <QFileDialog>
@@ -53,6 +54,7 @@
 #include <QMessageBox>
 #include <QMetaObject>
 #include <QMouseEvent>
+#include <QPainter>
 #include <QPushButton>
 #include <QScrollBar>
 #include <QSettings>
@@ -82,6 +84,64 @@ namespace javelin::gui::shell
         constexpr auto emailListSortPropertyKey = "emailListSortProperty";
         constexpr auto emailListSortDirectionKey = "emailListSortDirection";
         constexpr auto tabsKey = "tabs";
+
+        class CompactDragListView final : public QListView
+        {
+          public:
+            using QListView::QListView;
+
+          protected:
+            void startDrag(const Qt::DropActions supportedActions) override
+            {
+                auto indexes = selectionModel()->selectedRows();
+                if (indexes.isEmpty() && currentIndex().isValid())
+                {
+                    indexes.push_back(currentIndex());
+                }
+
+                auto* dragMimeData = model()->mimeData(indexes);
+                if (dragMimeData == nullptr)
+                {
+                    return;
+                }
+
+                const QString label = indexes.size() == 1
+                                          ? QStringLiteral("1 selected")
+                                          : QStringLiteral("%1 selected").arg(indexes.size());
+                const QFontMetrics metrics{font()};
+                const QSize badgeSize{metrics.horizontalAdvance(label) + 48,
+                                      std::max(34, metrics.height() + 14)};
+                const qreal scale = devicePixelRatioF();
+                QPixmap badge{badgeSize * scale};
+                badge.setDevicePixelRatio(scale);
+                badge.fill(Qt::transparent);
+
+                QPainter painter{&badge};
+                painter.setRenderHint(QPainter::Antialiasing);
+                painter.setPen(Qt::NoPen);
+                painter.setBrush(palette().highlight());
+                painter.drawRoundedRect(QRect{QPoint{}, badgeSize}.adjusted(1, 1, -1, -1), 8, 8);
+
+                const QRect envelopeRect{12, (badgeSize.height() - 14) / 2, 20, 14};
+                QPen envelopePen{palette().highlightedText(), 1.5};
+                painter.setPen(envelopePen);
+                painter.setBrush(Qt::NoBrush);
+                painter.drawRoundedRect(envelopeRect, 2, 2);
+                painter.drawLine(envelopeRect.topLeft(), envelopeRect.center());
+                painter.drawLine(envelopeRect.topRight(), envelopeRect.center());
+
+                painter.setPen(palette().highlightedText().color());
+                painter.setFont(font());
+                painter.drawText(QRect{40, 0, badgeSize.width() - 48, badgeSize.height()},
+                                 Qt::AlignVCenter | Qt::AlignLeft, label);
+
+                auto* drag = new QDrag{this};
+                drag->setMimeData(dragMimeData);
+                drag->setPixmap(badge);
+                drag->setHotSpot(QPoint{-10, -10});
+                static_cast<void>(drag->exec(supportedActions, defaultDropAction()));
+            }
+        };
 
         /// Returns the account ID for the currently selected mailbox tree index.
         /// Works for both account-level nodes and mailbox nodes.
@@ -850,7 +910,7 @@ namespace javelin::gui::shell
         mailboxLayout->addWidget(m_mailboxSearchEdit);
         mailboxLayout->addWidget(m_mailboxView);
 
-        m_messageView = new QListView(this);
+        m_messageView = new CompactDragListView(this);
         m_messageView->setModel(m_messageModel);
         auto* messageListDelegate = new javelin::gui::messages::MessageListDelegate(m_messageView);
         m_messageView->setItemDelegate(messageListDelegate);
