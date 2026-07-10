@@ -744,6 +744,22 @@ namespace javelin::jmap::cache
                                 "translation_cache (updated_at DESC)"),
                         },
                 },
+                MigrationStep{
+                    .version = 11,
+                    .name = QStringLiteral("contacts_capabilities"),
+                    .statements =
+                        {
+                            QStringLiteral("ALTER TABLE accounts ADD COLUMN cap_contacts INTEGER "
+                                           "NOT NULL DEFAULT 0"),
+                            QStringLiteral("ALTER TABLE accounts ADD COLUMN "
+                                           "contacts_capabilities_json TEXT NOT NULL DEFAULT "
+                                           "'null'"),
+                            QStringLiteral("ALTER TABLE sessions ADD COLUMN "
+                                           "has_contacts_capability INTEGER NOT NULL DEFAULT 0"),
+                            QStringLiteral("ALTER TABLE sessions ADD COLUMN "
+                                           "primary_contacts_account_id TEXT"),
+                        },
+                },
             },
         };
     }

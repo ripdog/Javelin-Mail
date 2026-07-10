@@ -43,6 +43,13 @@ template <> struct glz::meta<javelin::jmap::api::CoreCapability>
         &T::maxObjectsInSet, "collationAlgorithms", &T::collationAlgorithms);
 };
 
+template <> struct glz::meta<javelin::jmap::api::ContactsCapability>
+{
+    using T = javelin::jmap::api::ContactsCapability;
+    static constexpr auto value = glz::object("maxAddressBooksPerCard", &T::maxAddressBooksPerCard,
+                                              "mayCreateAddressBook", &T::mayCreateAddressBook);
+};
+
 template <> struct glz::meta<javelin::jmap::api::detail::RawAccount>
 {
     using T = javelin::jmap::api::detail::RawAccount;
@@ -102,6 +109,27 @@ namespace javelin::jmap::api
             return coreCapability;
         }
 
+        [[nodiscard]] std::optional<ContactsCapability>
+        parseContactsCapability(const std::unordered_map<std::string, glz::generic>& capabilities)
+        {
+            const auto it = capabilities.find(std::string{contactsCapabilityUri});
+            if (it == capabilities.end())
+            {
+                return std::nullopt;
+            }
+            std::string buffer;
+            if (glz::write_json(it->second, buffer))
+            {
+                return std::nullopt;
+            }
+            ContactsCapability capability;
+            if (glz::read<glz::opts{.error_on_unknown_keys = false}>(capability, buffer))
+            {
+                return std::nullopt;
+            }
+            return capability;
+        }
+
         [[nodiscard]] PrimaryAccounts
         parsePrimaryAccounts(const std::unordered_map<std::string, std::string>& primaryAccounts)
         {
@@ -118,6 +146,12 @@ namespace javelin::jmap::api
                 submissionIt != primaryAccounts.end())
             {
                 result.submissionAccountId = submissionIt->second;
+            }
+
+            if (const auto contactsIt = primaryAccounts.find(std::string{contactsCapabilityUri});
+                contactsIt != primaryAccounts.end())
+            {
+                result.contactsAccountId = contactsIt->second;
             }
 
             return result;
@@ -144,6 +178,7 @@ namespace javelin::jmap::api
                                                           mailCapabilityUri),
                                 .submission = capabilityPresent(rawAccount.accountCapabilities,
                                                                 submissionCapabilityUri),
+                                .contacts = parseContactsCapability(rawAccount.accountCapabilities),
                             },
                     });
             }
@@ -167,6 +202,8 @@ namespace javelin::jmap::api
                         .mail = capabilityPresent(rawSession.capabilities, mailCapabilityUri),
                         .submission =
                             capabilityPresent(rawSession.capabilities, submissionCapabilityUri),
+                        .contacts =
+                            capabilityPresent(rawSession.capabilities, contactsCapabilityUri),
                     },
                 .accounts = parseAccounts(std::move(rawSession.accounts)),
                 .primaryAccounts = parsePrimaryAccounts(rawSession.primaryAccounts),

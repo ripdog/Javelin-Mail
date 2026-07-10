@@ -87,7 +87,13 @@ TEST_CASE("session repository round-trips cached session bootstrap", "[jmap][cac
 
     auto databaseContext = makeDatabaseContext();
     javelin::jmap::cache::SessionRepository repository{databaseContext.connection};
-    const auto session = loadSessionFixture();
+    auto session = loadSessionFixture();
+    session.capabilities.contacts = true;
+    session.primaryAccounts.contactsAccountId = "u1";
+    session.accounts.at("u1").accountCapabilities.contacts = javelin::jmap::api::ContactsCapability{
+        .maxAddressBooksPerCard = 8,
+        .mayCreateAddressBook = true,
+    };
 
     if (const auto error = repository.replace("u1", session))
     {
@@ -103,11 +109,16 @@ TEST_CASE("session repository round-trips cached session bootstrap", "[jmap][cac
     CHECK(loaded.capabilities.core);
     CHECK(loaded.capabilities.mail);
     CHECK(loaded.capabilities.submission);
+    CHECK(loaded.capabilities.contacts);
     REQUIRE(loaded.capabilities.coreDetails.has_value());
     CHECK(loaded.capabilities.coreDetails->maxCallsInRequest == 16);
     CHECK(loaded.primaryAccounts.mailAccountId == session.primaryAccounts.mailAccountId);
+    CHECK(loaded.primaryAccounts.contactsAccountId == "u1");
     REQUIRE(loaded.accounts.contains("u1"));
     CHECK(loaded.accounts.at("u1").accountCapabilities.mail);
+    REQUIRE(loaded.accounts.at("u1").accountCapabilities.contacts.has_value());
+    CHECK(loaded.accounts.at("u1").accountCapabilities.contacts->maxAddressBooksPerCard == 8);
+    CHECK(loaded.accounts.at("u1").accountCapabilities.contacts->mayCreateAddressBook);
 }
 
 TEST_CASE("session repository replacement updates cached session rows", "[jmap][cache][repository]")
@@ -190,8 +201,8 @@ TEST_CASE("session repository replacement preserves cached mailboxes for retaine
     }
 
     QSqlQuery countQuery{databaseContext.connection.database()};
-    REQUIRE(countQuery.exec(
-        QStringLiteral("SELECT COUNT(*) FROM mailboxes WHERE account_id = 'u1'")));
+    REQUIRE(
+        countQuery.exec(QStringLiteral("SELECT COUNT(*) FROM mailboxes WHERE account_id = 'u1'")));
     REQUIRE(countQuery.next());
     CHECK(countQuery.value(0).toInt() == 1);
 }

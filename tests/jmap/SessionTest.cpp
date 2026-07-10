@@ -36,6 +36,22 @@ TEST_CASE("session parser ignores unknown server fields", "[jmap]")
     CHECK(result.session->accounts.contains("u1"));
 }
 
+TEST_CASE("session parser exposes contacts capability metadata", "[jmap][contacts]")
+{
+    const auto result = javelin::jmap::api::parseSession(
+        R"({"username":"alice@example.com","apiUrl":"https://example.test/jmap","downloadUrl":"https://example.test/download/{accountId}/{blobId}/{name}","uploadUrl":"https://example.test/upload/{accountId}","state":"1","capabilities":{"urn:ietf:params:jmap:core":{},"urn:ietf:params:jmap:mail":{},"urn:ietf:params:jmap:contacts":{}},"accounts":{"u1":{"name":"Personal","isPersonal":true,"isReadOnly":false,"accountCapabilities":{"urn:ietf:params:jmap:mail":{},"urn:ietf:params:jmap:contacts":{"maxAddressBooksPerCard":4,"mayCreateAddressBook":true}}}},"primaryAccounts":{"urn:ietf:params:jmap:mail":"u1","urn:ietf:params:jmap:contacts":"u1"}})",
+        {.mail = true});
+
+    REQUIRE(result.ok());
+    REQUIRE(result.session.has_value());
+    CHECK(result.session->capabilities.contacts);
+    CHECK(result.session->primaryAccounts.contactsAccountId == "u1");
+    const auto& capability = result.session->accounts.at("u1").accountCapabilities.contacts;
+    REQUIRE(capability.has_value());
+    CHECK(capability->maxAddressBooksPerCard == 4);
+    CHECK(capability->mayCreateAddressBook);
+}
+
 TEST_CASE("session capability validation fails when primary mail account is missing", "[jmap]")
 {
     javelin::jmap::api::Session session{
@@ -62,7 +78,9 @@ TEST_CASE("session capability validation fails when primary mail account is miss
                         .name = "Personal",
                         .isPersonal = true,
                         .isReadOnly = false,
-                        .accountCapabilities = {.mail = true, .submission = false},
+                        .accountCapabilities = {.mail = true,
+                                                .submission = false,
+                                                .contacts = std::nullopt},
                     },
                 },
             },

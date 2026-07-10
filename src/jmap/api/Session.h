@@ -13,6 +13,7 @@ namespace javelin::jmap::api
     constexpr std::string_view coreCapabilityUri = "urn:ietf:params:jmap:core";
     constexpr std::string_view mailCapabilityUri = "urn:ietf:params:jmap:mail";
     constexpr std::string_view submissionCapabilityUri = "urn:ietf:params:jmap:submission";
+    constexpr std::string_view contactsCapabilityUri = "urn:ietf:params:jmap:contacts";
 
     struct CoreCapability
     {
@@ -31,12 +32,20 @@ namespace javelin::jmap::api
         std::optional<CoreCapability> coreDetails;
         bool mail = false;
         bool submission = false;
+        bool contacts = false;
+    };
+
+    struct ContactsCapability
+    {
+        std::optional<std::uint64_t> maxAddressBooksPerCard;
+        bool mayCreateAddressBook = false;
     };
 
     struct AccountCapabilities
     {
         bool mail = false;
         bool submission = false;
+        std::optional<ContactsCapability> contacts;
     };
 
     struct Account
@@ -52,6 +61,7 @@ namespace javelin::jmap::api
     {
         std::optional<std::string> mailAccountId;
         std::optional<std::string> submissionAccountId;
+        std::optional<std::string> contactsAccountId;
     };
 
     struct Session
