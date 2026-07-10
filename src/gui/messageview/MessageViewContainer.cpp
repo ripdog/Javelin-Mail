@@ -4,6 +4,7 @@
 #include "gui/messageview/HtmlMessageView.h"
 #include "gui/settings/PreferencesDialog.h"
 #include "jmap/cache/TranslationCacheRepository.h"
+#include "jmap/contacts/ContactIdentityLookup.h"
 #include "jmap/language/LanguageDetection.h"
 
 #include <QAction>
@@ -497,8 +498,9 @@ namespace javelin::gui::messageview
 
     MessageViewContainer::MessageViewContainer(
         javelin::jmap::cache::TranslationCacheRepository& translationCacheRepository,
-        QWidget* parent)
-        : QWidget(parent), m_translationCacheRepository(translationCacheRepository)
+        javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup, QWidget* parent)
+        : QWidget(parent), m_translationCacheRepository(translationCacheRepository),
+          m_contactIdentityLookup(contactIdentityLookup)
     {
         auto* layout = new QVBoxLayout(this);
         layout->setContentsMargins(8, 8, 8, 0);
@@ -1505,8 +1507,7 @@ namespace javelin::gui::messageview
         m_detailLabel->clear();
         m_detailLabel->setVisible(false);
         m_metadataWidget->setVisible(true);
-        m_fromLabel->setText(
-            QStringLiteral("From: %1").arg(addressListLabel(m_snapshot->email.from)));
+        m_fromLabel->setText(QStringLiteral("From: %1").arg(contactAwareSenderLabel()));
         m_toLabel->setText(QStringLiteral("To: %1").arg(addressListLabel(m_snapshot->email.to)));
         m_receivedLabel->setText(QStringLiteral("Received: %1")
                                      .arg(formatReceivedDateTime(m_snapshot->email.receivedAt)));
@@ -1576,6 +1577,36 @@ namespace javelin::gui::messageview
         addRemoteContentAllowListValue(QLatin1StringView{allowedDomainsKey}, currentSenderDomain());
         updateSenderRemoteContentPermit();
         updateRemoteContentButton();
+    }
+
+    QString MessageViewContainer::contactAwareSenderLabel() const
+    {
+        if (!m_snapshot.has_value() || m_snapshot->email.from.empty() || !m_accountId.has_value())
+        {
+            return m_snapshot.has_value() ? addressListLabel(m_snapshot->email.from) : QString{};
+        }
+        QStringList labels;
+        for (const auto& sender : m_snapshot->email.from)
+        {
+            const auto resolved = m_contactIdentityLookup.resolve(*m_accountId, sender.email);
+            const auto* identity =
+                std::get_if<std::optional<javelin::jmap::contacts::ContactIdentity>>(&resolved);
+            if (identity == nullptr || !identity->has_value())
+            {
+                labels.push_back(addressListLabel({sender}));
+                continue;
+            }
+            QString name = QString::fromStdString((*identity)->displayName);
+            if ((*identity)->organization.has_value() &&
+                *(*identity)->organization != (*identity)->displayName)
+            {
+                name +=
+                    QStringLiteral(" — %1").arg(QString::fromStdString(*(*identity)->organization));
+            }
+            labels.push_back(
+                QStringLiteral("%1 <%2>").arg(name, QString::fromStdString(sender.email)));
+        }
+        return labels.join(QStringLiteral(", "));
     }
 
     QString MessageViewContainer::currentSenderAddress() const

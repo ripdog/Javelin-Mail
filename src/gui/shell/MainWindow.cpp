@@ -19,6 +19,7 @@
 #include "jmap/cache/IdentityRepository.h"
 #include "jmap/cache/MessageViewService.h"
 #include "jmap/cache/QueryService.h"
+#include "jmap/contacts/ContactIdentityLookup.h"
 #include "jmap/contacts/ContactService.h"
 #include "jmap/query/QueryDiff.h"
 #include "jmap/submission/ComposeService.h"
@@ -627,6 +628,7 @@ namespace javelin::gui::shell
         javelin::jmap::cache::AccountRepository& accountRepository,
         javelin::jmap::cache::ContactRepository& contactRepository,
         javelin::jmap::contacts::ContactService& contactService,
+        javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
         javelin::jmap::cache::IdentityRepository& identityRepository,
         javelin::jmap::cache::MessageViewService& messageViewService,
         javelin::jmap::cache::QueryService& queryService,
@@ -635,8 +637,9 @@ namespace javelin::gui::shell
         javelin::app::LongPollService& longPollService, QWidget* parent)
         : KXmlGuiWindow(parent), m_jmapCore(jmapCore), m_accountRepository(accountRepository),
           m_contactRepository(contactRepository), m_contactService(contactService),
-          m_identityRepository(identityRepository), m_messageViewService(messageViewService),
-          m_queryService(queryService), m_translationCacheRepository(translationCacheRepository),
+          m_contactIdentityLookup(contactIdentityLookup), m_identityRepository(identityRepository),
+          m_messageViewService(messageViewService), m_queryService(queryService),
+          m_translationCacheRepository(translationCacheRepository),
           m_composeService(composeService), m_longPollService(longPollService)
     {
         m_statusBar = new LayeredStatusBar(this);
@@ -1040,8 +1043,8 @@ namespace javelin::gui::shell
         messageLayout->addWidget(m_messageEmptyState);
         messageLayout->addWidget(m_messageView, 1);
 
-        m_messageViewContainer =
-            new javelin::gui::messageview::MessageViewContainer(m_translationCacheRepository, this);
+        m_messageViewContainer = new javelin::gui::messageview::MessageViewContainer(
+            m_translationCacheRepository, m_contactIdentityLookup, this);
         connect(m_messageViewContainer,
                 &javelin::gui::messageview::MessageViewContainer::saveAttachmentRequested, this,
                 [this](const QString& accountId, const QString& emailId, const QString& partId)
@@ -2553,7 +2556,8 @@ namespace javelin::gui::shell
         });
         const auto index = static_cast<int>(m_tabs.size() - 1);
         auto* widget = new javelin::gui::compose::ComposeTabWidget(
-            m_composeService, m_identityRepository, std::move(snapshot), m_contentStack);
+            m_composeService, m_identityRepository, m_contactIdentityLookup, std::move(snapshot),
+            m_contentStack);
         attachComposeWidget(widget, index);
         m_activeTabIndex = index;
         updateTabBar();
@@ -3737,6 +3741,25 @@ namespace javelin::gui::shell
                         .arg(QString::fromStdString(summary.accountId)),
                     10000);
                 m_longPollService.applySettings(toLiveConnectionSettings(settings));
+
+                auto contactsTask = m_contactService.refreshAll(toLiveConnectionSettings(settings),
+                                                                summary.accountId);
+                QCoro::connect(
+                    std::move(contactsTask), this,
+                    [this](javelin::jmap::contacts::ContactRefreshResult contactsResult)
+                    {
+                        if (const auto* error =
+                                std::get_if<javelin::jmap::LiveRefreshError>(&contactsResult))
+                        {
+                            qWarning().noquote() << "Contacts refresh failed" << error->message;
+                            return;
+                        }
+                        reloadAccounts();
+                        const auto& contacts =
+                            std::get<javelin::jmap::contacts::ContactRefreshSummary>(
+                                contactsResult);
+                        qInfo() << "Contacts cache refreshed" << contacts.contactCount;
+                    });
             });
     }
 
@@ -4882,7 +4905,8 @@ namespace javelin::gui::shell
                 },
         });
         auto* widget = new javelin::gui::compose::ComposeTabWidget(
-            m_composeService, m_identityRepository, *snapshot, m_contentStack);
+            m_composeService, m_identityRepository, m_contactIdentityLookup, *snapshot,
+            m_contentStack);
         attachComposeWidget(widget, static_cast<int>(m_tabs.size() - 1));
     }
 

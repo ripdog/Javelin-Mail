@@ -34,6 +34,11 @@ namespace javelin::jmap::cache
     class IdentityRepository;
 }
 
+namespace javelin::jmap::contacts
+{
+    class ContactIdentityLookup;
+}
+
 namespace javelin::jmap::submission
 {
     class ComposeService;
@@ -49,6 +54,7 @@ namespace javelin::gui::compose
       public:
         ComposeTabWidget(javelin::jmap::submission::ComposeService& composeService,
                          javelin::jmap::cache::IdentityRepository& identityRepository,
+                         javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
                          javelin::jmap::submission::DraftSnapshot snapshot,
                          QWidget* parent = nullptr);
         ~ComposeTabWidget() override = default;
@@ -79,6 +85,7 @@ namespace javelin::gui::compose
         void setupUi();
         void createToolbarActions();
         void loadIdentities();
+        void setupContactCompletion();
         void applySnapshotToUi();
         void populateAttachments();
         void refreshPreview();
@@ -113,6 +120,7 @@ namespace javelin::gui::compose
 
         javelin::jmap::submission::ComposeService& m_composeService;
         javelin::jmap::cache::IdentityRepository& m_identityRepository;
+        javelin::jmap::contacts::ContactIdentityLookup& m_contactIdentityLookup;
         javelin::jmap::submission::DraftSnapshot m_snapshot;
         std::vector<javelin::jmap::domain::Identity> m_identities;
         bool m_syncingUi = false;

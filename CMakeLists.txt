@@ -139,6 +139,8 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/contacts/ContactTypes.h
     src/jmap/contacts/ContactService.cpp
     src/jmap/contacts/ContactService.h
+    src/jmap/contacts/ContactIdentityLookup.cpp
+    src/jmap/contacts/ContactIdentityLookup.h
     src/jmap/domain/MailEntityParsers.cpp
     src/jmap/domain/MailEntityParsers.h
     src/jmap/query/MessageGrouping.cpp
@@ -242,6 +244,8 @@ add_library(javelin_jmap STATIC
     src/jmap/contacts/ContactTypes.h
     src/jmap/contacts/ContactService.cpp
     src/jmap/contacts/ContactService.h
+    src/jmap/contacts/ContactIdentityLookup.cpp
+    src/jmap/contacts/ContactIdentityLookup.h
     src/jmap/api/Transport.cpp
     src/jmap/api/Transport.h
     src/jmap/cache/AccountRepository.cpp

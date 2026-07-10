@@ -11,6 +11,7 @@
 #include <QFileDialog>
 #include <QFormLayout>
 #include <QHBoxLayout>
+#include <QHeaderView>
 #include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
@@ -22,6 +23,7 @@
 #include <QSpinBox>
 #include <QSplitter>
 #include <QStackedWidget>
+#include <QTableWidget>
 #include <QUuid>
 #include <QVBoxLayout>
 
@@ -97,6 +99,113 @@ namespace javelin::gui::contacts
             QComboBox* m_subscription = nullptr;
         };
 
+        class SharingDialog final : public QDialog
+        {
+          public:
+            explicit SharingDialog(
+                std::optional<
+                    std::unordered_map<std::string, javelin::jmap::api::AddressBookRights>>
+                    sharing,
+                QWidget* parent)
+                : QDialog(parent)
+            {
+                setWindowTitle(QStringLiteral("Address Book Sharing"));
+                resize(720, 360);
+                auto* layout = new QVBoxLayout(this);
+                m_table = new QTableWidget(0, 5, this);
+                m_table->setHorizontalHeaderLabels(
+                    {QStringLiteral("Principal ID"), QStringLiteral("Read"),
+                     QStringLiteral("Write"), QStringLiteral("Share"), QStringLiteral("Delete")});
+                m_table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
+                for (const auto& [principal, rights] : sharing.value_or(
+                         std::unordered_map<std::string, javelin::jmap::api::AddressBookRights>{}))
+                {
+                    addRow(QString::fromStdString(principal), rights);
+                }
+                layout->addWidget(m_table);
+                auto* rowButtons = new QHBoxLayout();
+                auto* add = new QPushButton(QStringLiteral("Add Principal"), this);
+                auto* remove = new QPushButton(QStringLiteral("Remove"), this);
+                rowButtons->addWidget(add);
+                rowButtons->addWidget(remove);
+                rowButtons->addStretch(1);
+                layout->addLayout(rowButtons);
+                auto* buttons =
+                    new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, this);
+                layout->addWidget(buttons);
+                connect(add, &QPushButton::clicked, this,
+                        [this]
+                        {
+                            bool accepted = false;
+                            const QString principal = QInputDialog::getText(
+                                this, QStringLiteral("Principal"), QStringLiteral("Principal ID"),
+                                QLineEdit::Normal, QString{}, &accepted);
+                            if (accepted && !principal.trimmed().isEmpty())
+                            {
+                                addRow(principal.trimmed(), {});
+                            }
+                        });
+                connect(remove, &QPushButton::clicked, this,
+                        [this]
+                        {
+                            if (m_table->currentRow() >= 0)
+                            {
+                                m_table->removeRow(m_table->currentRow());
+                            }
+                        });
+                connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
+                connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+            }
+
+            [[nodiscard]] std::optional<
+                std::unordered_map<std::string, javelin::jmap::api::AddressBookRights>>
+            sharing() const
+            {
+                if (m_table->rowCount() == 0)
+                {
+                    return std::nullopt;
+                }
+                std::unordered_map<std::string, javelin::jmap::api::AddressBookRights> result;
+                for (int row = 0; row < m_table->rowCount(); ++row)
+                {
+                    result.emplace(
+                        m_table->item(row, 0)->text().toStdString(),
+                        javelin::jmap::api::AddressBookRights{.mayRead = checked(row, 1),
+                                                              .mayWrite = checked(row, 2),
+                                                              .mayShare = checked(row, 3),
+                                                              .mayDelete = checked(row, 4)});
+                }
+                return result;
+            }
+
+          private:
+            void addRow(const QString& principal,
+                        const javelin::jmap::api::AddressBookRights& rights)
+            {
+                const int row = m_table->rowCount();
+                m_table->insertRow(row);
+                m_table->setItem(row, 0, new QTableWidgetItem(principal));
+                for (int column = 1; column < 5; ++column)
+                {
+                    auto* item = new QTableWidgetItem();
+                    item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+                    const bool value = column == 1   ? rights.mayRead
+                                       : column == 2 ? rights.mayWrite
+                                       : column == 3 ? rights.mayShare
+                                                     : rights.mayDelete;
+                    item->setCheckState(value ? Qt::Checked : Qt::Unchecked);
+                    m_table->setItem(row, column, item);
+                }
+            }
+
+            [[nodiscard]] bool checked(const int row, const int column) const
+            {
+                return m_table->item(row, column)->checkState() == Qt::Checked;
+            }
+
+            QTableWidget* m_table = nullptr;
+        };
+
         [[nodiscard]] QString accountLabel(const javelin::jmap::cache::ContactAccount& account)
         {
             return account.name.empty() ? QString::fromStdString(account.accountId)
@@ -131,6 +240,7 @@ namespace javelin::gui::contacts
         m_deleteBookButton = new QPushButton(QStringLiteral("Delete"), this);
         m_defaultBookButton = new QPushButton(QStringLiteral("Make Default"), this);
         m_subscribeBookButton = new QPushButton(QStringLiteral("Subscribe"), this);
+        m_shareBookButton = new QPushButton(QStringLiteral("Sharing"), this);
         m_refreshButton = new QPushButton(QStringLiteral("Refresh"), this);
         top->addWidget(new QLabel(QStringLiteral("Account"), this));
         top->addWidget(m_accountCombo);
@@ -141,6 +251,7 @@ namespace javelin::gui::contacts
         top->addWidget(m_deleteBookButton);
         top->addWidget(m_defaultBookButton);
         top->addWidget(m_subscribeBookButton);
+        top->addWidget(m_shareBookButton);
         top->addWidget(m_refreshButton);
         root->addLayout(top);
 
@@ -164,9 +275,11 @@ namespace javelin::gui::contacts
         m_newContactButton = new QPushButton(QStringLiteral("New"), left);
         m_editContactButton = new QPushButton(QStringLiteral("Edit"), left);
         m_deleteContactButton = new QPushButton(QStringLiteral("Delete"), left);
+        m_copyContactButton = new QPushButton(QStringLiteral("Copy"), left);
         contactButtons->addWidget(m_newContactButton);
         contactButtons->addWidget(m_editContactButton);
         contactButtons->addWidget(m_deleteContactButton);
+        contactButtons->addWidget(m_copyContactButton);
         leftLayout->addLayout(contactButtons);
 
         m_detailStack = new QStackedWidget(splitter);
@@ -232,6 +345,8 @@ namespace javelin::gui::contacts
                 &ContactsManagerWidget::beginEditContact);
         connect(m_deleteContactButton, &QPushButton::clicked, this,
                 &ContactsManagerWidget::deleteContact);
+        connect(m_copyContactButton, &QPushButton::clicked, this,
+                &ContactsManagerWidget::copyContact);
         connect(m_saveButton, &QPushButton::clicked, this, &ContactsManagerWidget::saveContact);
         connect(m_uploadPhotoButton, &QPushButton::clicked, this,
                 &ContactsManagerWidget::uploadPhoto);
@@ -248,6 +363,8 @@ namespace javelin::gui::contacts
                 &ContactsManagerWidget::setDefaultAddressBook);
         connect(m_subscribeBookButton, &QPushButton::clicked, this,
                 &ContactsManagerWidget::toggleAddressBookSubscription);
+        connect(m_shareBookButton, &QPushButton::clicked, this,
+                &ContactsManagerWidget::editAddressBookSharing);
     }
 
     void ContactsManagerWidget::reloadAccounts()
@@ -372,6 +489,7 @@ namespace javelin::gui::contacts
             m_detailStack->setCurrentIndex(0);
             m_editContactButton->setEnabled(false);
             m_deleteContactButton->setEnabled(false);
+            m_copyContactButton->setEnabled(false);
             return;
         }
         m_viewTitle->setText(QString::fromStdString(contact->displayName));
@@ -382,6 +500,7 @@ namespace javelin::gui::contacts
         m_detailStack->setCurrentIndex(1);
         m_editContactButton->setEnabled(!m_busy);
         m_deleteContactButton->setEnabled(!m_busy);
+        m_copyContactButton->setEnabled(!m_busy);
     }
 
     void ContactsManagerWidget::beginCreateContact()
@@ -567,6 +686,67 @@ namespace javelin::gui::contacts
                        });
     }
 
+    void ContactsManagerWidget::copyContact()
+    {
+        const auto sourceAccountId = currentAccountId();
+        const auto* contact = currentContact();
+        if (!sourceAccountId.has_value() || contact == nullptr || m_accounts.empty())
+            return;
+
+        QStringList accountLabels;
+        for (const auto& account : m_accounts)
+            accountLabels.push_back(accountLabel(account));
+        bool accepted = false;
+        const QString selectedAccount = QInputDialog::getItem(this, QStringLiteral("Copy Contact"),
+                                                              QStringLiteral("Destination account"),
+                                                              accountLabels, 0, false, &accepted);
+        const qsizetype accountIndex = accountLabels.indexOf(selectedAccount);
+        if (!accepted || accountIndex < 0)
+            return;
+        const auto& destinationAccount = m_accounts[static_cast<std::size_t>(accountIndex)];
+        const auto booksResult = m_repository.listAddressBooks(destinationAccount.accountId);
+        const auto* books = std::get_if<std::vector<javelin::jmap::api::AddressBook>>(&booksResult);
+        if (books == nullptr || books->empty())
+        {
+            QMessageBox::information(this, QStringLiteral("Copy Contact"),
+                                     QStringLiteral("The destination has no address book."));
+            return;
+        }
+        QStringList bookLabels;
+        for (const auto& book : *books)
+            bookLabels.push_back(QString::fromStdString(book.name));
+        const QString selectedBook = QInputDialog::getItem(
+            this, QStringLiteral("Copy Contact"), QStringLiteral("Destination address book"),
+            bookLabels, 0, false, &accepted);
+        const qsizetype bookIndex = bookLabels.indexOf(selectedBook);
+        if (!accepted || bookIndex < 0)
+            return;
+        const auto& book = (*books)[static_cast<std::size_t>(bookIndex)];
+
+        javelin::jmap::api::ContactCardCopyRequest request;
+        request.fromAccountId = *sourceAccountId;
+        request.accountId = destinationAccount.accountId;
+        request.create.emplace(
+            "copy-contact",
+            javelin::jmap::api::ContactDocument{
+                .json =
+                    QStringLiteral("{\"id\":\"%1\",\"addressBookIds\":{\"%2\":true}}")
+                        .arg(QString::fromStdString(contact->id), QString::fromStdString(book.id))
+                        .toStdString()});
+        setBusy(true);
+        auto task = m_service.copyContactCards(m_settings, m_ownerAccountId, std::move(request));
+        QCoro::connect(std::move(task), this,
+                       [this](javelin::jmap::contacts::ContactMutationResult result)
+                       {
+                           setBusy(false);
+                           if (const auto* error =
+                                   std::get_if<javelin::jmap::LiveRefreshError>(&result))
+                               Q_EMIT statusMessageRequested(error->message, 10000);
+                           else
+                               refreshRemote();
+                       });
+    }
+
     void ContactsManagerWidget::refreshRemote()
     {
         if (m_busy)
@@ -676,6 +856,30 @@ namespace javelin::gui::contacts
         applyAddressBookSet(std::move(request), QStringLiteral("Updating subscription…"));
     }
 
+    void ContactsManagerWidget::editAddressBookSharing()
+    {
+        const auto accountId = currentAccountId();
+        auto* book = currentAddressBook();
+        if (!accountId.has_value() || book == nullptr)
+            return;
+        if (!book->myRights.mayShare)
+        {
+            QMessageBox::information(
+                this, QStringLiteral("Address Book Sharing"),
+                QStringLiteral("You do not have permission to change sharing."));
+            return;
+        }
+        SharingDialog dialog{book->shareWith, this};
+        if (dialog.exec() != QDialog::Accepted)
+            return;
+        auto changed = *book;
+        changed.shareWith = dialog.sharing();
+        javelin::jmap::api::AddressBookSetRequest request;
+        request.accountId = *accountId;
+        request.update.emplace(book->id, javelin::jmap::api::addressBookUpdateDocument(changed));
+        applyAddressBookSet(std::move(request), QStringLiteral("Updating address book sharing…"));
+    }
+
     void
     ContactsManagerWidget::applyAddressBookSet(javelin::jmap::api::AddressBookSetRequest request,
                                                QString progressMessage)
@@ -701,9 +905,9 @@ namespace javelin::gui::contacts
     {
         m_busy = busy;
         for (auto* button :
-             {m_newContactButton, m_editContactButton, m_deleteContactButton, m_refreshButton,
-              m_saveButton, m_addBookButton, m_editBookButton, m_deleteBookButton,
-              m_defaultBookButton, m_subscribeBookButton, m_uploadPhotoButton})
+             {m_newContactButton, m_editContactButton, m_deleteContactButton, m_copyContactButton,
+              m_refreshButton, m_saveButton, m_addBookButton, m_editBookButton, m_deleteBookButton,
+              m_defaultBookButton, m_subscribeBookButton, m_shareBookButton, m_uploadPhotoButton})
             button->setEnabled(!busy);
         m_accountCombo->setEnabled(!busy);
         m_addressBookCombo->setEnabled(!busy);

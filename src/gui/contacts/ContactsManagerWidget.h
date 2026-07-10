@@ -55,11 +55,13 @@ namespace javelin::gui::contacts
         void saveContact();
         void uploadPhoto();
         void deleteContact();
+        void copyContact();
         void createAddressBook();
         void editAddressBook();
         void deleteAddressBook();
         void setDefaultAddressBook();
         void toggleAddressBookSubscription();
+        void editAddressBookSharing();
         void applyAddressBookSet(javelin::jmap::api::AddressBookSetRequest request,
                                  QString progressMessage);
         void setBusy(bool busy);
@@ -91,6 +93,7 @@ namespace javelin::gui::contacts
         QPushButton* m_newContactButton = nullptr;
         QPushButton* m_editContactButton = nullptr;
         QPushButton* m_deleteContactButton = nullptr;
+        QPushButton* m_copyContactButton = nullptr;
         QPushButton* m_refreshButton = nullptr;
         QPushButton* m_saveButton = nullptr;
         QPushButton* m_uploadPhotoButton = nullptr;
@@ -100,5 +103,6 @@ namespace javelin::gui::contacts
         QPushButton* m_deleteBookButton = nullptr;
         QPushButton* m_defaultBookButton = nullptr;
         QPushButton* m_subscribeBookButton = nullptr;
+        QPushButton* m_shareBookButton = nullptr;
     };
 } // namespace javelin::gui::contacts

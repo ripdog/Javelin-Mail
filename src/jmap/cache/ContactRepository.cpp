@@ -234,10 +234,6 @@ namespace javelin::jmap::cache
         const std::vector<javelin::jmap::contacts::ContactSummary>& contacts,
         const std::span<const std::string> destroyed, const std::string_view state)
     {
-        if (contacts.empty() && destroyed.empty())
-        {
-            return std::nullopt;
-        }
         auto& database = m_connection.database();
         if (!database.transaction())
         {

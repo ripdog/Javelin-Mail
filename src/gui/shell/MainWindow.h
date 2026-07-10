@@ -45,7 +45,8 @@ namespace javelin::jmap::submission
 namespace javelin::jmap::contacts
 {
     class ContactService;
-}
+    class ContactIdentityLookup;
+} // namespace javelin::jmap::contacts
 
 namespace javelin::app
 {
@@ -100,6 +101,7 @@ namespace javelin::gui::shell
             javelin::jmap::cache::AccountRepository& accountRepository,
             javelin::jmap::cache::ContactRepository& contactRepository,
             javelin::jmap::contacts::ContactService& contactService,
+            javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
             javelin::jmap::cache::IdentityRepository& identityRepository,
             javelin::jmap::cache::MessageViewService& messageViewService,
             javelin::jmap::cache::QueryService& queryService,
@@ -321,6 +323,7 @@ namespace javelin::gui::shell
         javelin::jmap::cache::AccountRepository& m_accountRepository;
         javelin::jmap::cache::ContactRepository& m_contactRepository;
         javelin::jmap::contacts::ContactService& m_contactService;
+        javelin::jmap::contacts::ContactIdentityLookup& m_contactIdentityLookup;
         javelin::jmap::cache::IdentityRepository& m_identityRepository;
         javelin::jmap::cache::MessageViewService& m_messageViewService;
         javelin::jmap::cache::QueryService& m_queryService;

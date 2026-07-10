@@ -25,6 +25,10 @@ namespace javelin::jmap::cache
 {
     class TranslationCacheRepository;
 }
+namespace javelin::jmap::contacts
+{
+    class ContactIdentityLookup;
+}
 
 namespace javelin::gui::messageview
 {
@@ -38,6 +42,7 @@ namespace javelin::gui::messageview
       public:
         explicit MessageViewContainer(
             javelin::jmap::cache::TranslationCacheRepository& translationCacheRepository,
+            javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
             QWidget* parent = nullptr);
         ~MessageViewContainer() override;
 
@@ -91,6 +96,7 @@ namespace javelin::gui::messageview
         [[nodiscard]] QString attachmentStatusText() const;
         [[nodiscard]] QString currentSenderAddress() const;
         [[nodiscard]] QString currentSenderDomain() const;
+        [[nodiscard]] QString contactAwareSenderLabel() const;
         void resizeEvent(QResizeEvent* event) override;
 
         std::optional<std::string> m_accountId;
@@ -124,6 +130,7 @@ namespace javelin::gui::messageview
         QToolButton* m_translateOptionsButton = nullptr;
         GoogleHtmlTranslator* m_translator = nullptr;
         javelin::jmap::cache::TranslationCacheRepository& m_translationCacheRepository;
+        javelin::jmap::contacts::ContactIdentityLookup& m_contactIdentityLookup;
         QWidget* m_bodyControlsWidget = nullptr;
         QStackedWidget* m_bodyStack = nullptr;
         QProgressBar* m_loadingIndicator = nullptr;

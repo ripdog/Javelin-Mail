@@ -1,0 +1,41 @@
+#pragma once
+
+#include "jmap/cache/Database.h"
+
+#include <optional>
+#include <string>
+#include <string_view>
+#include <variant>
+#include <vector>
+
+namespace javelin::jmap::cache
+{
+    class ContactRepository;
+}
+
+namespace javelin::jmap::contacts
+{
+    struct ContactIdentity
+    {
+        std::string contactId;
+        std::string displayName;
+        std::optional<std::string> organization;
+        std::string email;
+    };
+
+    class ContactIdentityLookup
+    {
+      public:
+        explicit ContactIdentityLookup(javelin::jmap::cache::ContactRepository& repository);
+
+        [[nodiscard]] std::variant<std::optional<ContactIdentity>,
+                                   javelin::jmap::cache::DatabaseError>
+        resolve(std::string_view accountId, std::string_view email) const;
+        [[nodiscard]] std::variant<std::vector<ContactIdentity>,
+                                   javelin::jmap::cache::DatabaseError>
+        suggestions(std::optional<std::string_view> accountId = std::nullopt) const;
+
+      private:
+        javelin::jmap::cache::ContactRepository& m_repository;
+    };
+} // namespace javelin::jmap::contacts

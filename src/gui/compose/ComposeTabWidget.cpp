@@ -3,13 +3,16 @@
 #include "gui/messageview/HtmlMessageView.h"
 #include "gui/settings/PreferencesDialog.h"
 #include "jmap/cache/IdentityRepository.h"
+#include "jmap/contacts/ContactIdentityLookup.h"
 #include "jmap/submission/ComposeService.h"
 
 #include <QCoroTask>
 
+#include <QAbstractItemView>
 #include <QAction>
 #include <QApplication>
 #include <QComboBox>
+#include <QCompleter>
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>
 #include <QDropEvent>
@@ -33,6 +36,7 @@
 #include <QScrollArea>
 #include <QSignalBlocker>
 #include <QSizePolicy>
+#include <QStringListModel>
 #include <QStyle>
 #include <QTabWidget>
 #include <QTextBlockFormat>
@@ -479,15 +483,18 @@ namespace javelin::gui::compose
 
     } // namespace
 
-    ComposeTabWidget::ComposeTabWidget(javelin::jmap::submission::ComposeService& composeService,
-                                       javelin::jmap::cache::IdentityRepository& identityRepository,
-                                       javelin::jmap::submission::DraftSnapshot snapshot,
-                                       QWidget* parent)
+    ComposeTabWidget::ComposeTabWidget(
+        javelin::jmap::submission::ComposeService& composeService,
+        javelin::jmap::cache::IdentityRepository& identityRepository,
+        javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
+        javelin::jmap::submission::DraftSnapshot snapshot, QWidget* parent)
         : QWidget(parent), m_composeService(composeService),
-          m_identityRepository(identityRepository), m_snapshot(std::move(snapshot))
+          m_identityRepository(identityRepository), m_contactIdentityLookup(contactIdentityLookup),
+          m_snapshot(std::move(snapshot))
     {
         setAcceptDrops(true);
         setupUi();
+        setupContactCompletion();
         createToolbarActions();
         loadIdentities();
         applySnapshotToUi();
@@ -692,6 +699,65 @@ namespace javelin::gui::compose
 
         addAttachmentPaths(filePaths);
         event->acceptProposedAction();
+    }
+
+    void ComposeTabWidget::setupContactCompletion()
+    {
+        const auto result = m_contactIdentityLookup.suggestions();
+        const auto* contacts =
+            std::get_if<std::vector<javelin::jmap::contacts::ContactIdentity>>(&result);
+        if (contacts == nullptr)
+        {
+            return;
+        }
+        QStringList values;
+        values.reserve(static_cast<qsizetype>(contacts->size()));
+        for (const auto& contact : *contacts)
+        {
+            QString name = QString::fromStdString(contact.displayName);
+            if (contact.organization.has_value() && *contact.organization != contact.displayName)
+            {
+                name += QStringLiteral(" — %1").arg(QString::fromStdString(*contact.organization));
+            }
+            values.push_back(
+                QStringLiteral("%1 <%2>").arg(name, QString::fromStdString(contact.email)));
+        }
+
+        for (auto* edit : {m_toEdit, m_ccEdit, m_bccEdit})
+        {
+            auto* model = new QStringListModel(values, edit);
+            auto* completer = new QCompleter(model, edit);
+            completer->setWidget(edit);
+            completer->setCaseSensitivity(Qt::CaseInsensitive);
+            completer->setCompletionMode(QCompleter::PopupCompletion);
+            completer->setFilterMode(Qt::MatchContains);
+            connect(edit, &QLineEdit::textEdited, completer,
+                    [edit, completer](const QString& text)
+                    {
+                        const qsizetype separator = std::max(text.lastIndexOf(QLatin1Char(',')),
+                                                             text.lastIndexOf(QLatin1Char(';')));
+                        const QString token = text.sliced(separator + 1).trimmed();
+                        if (token.isEmpty())
+                        {
+                            completer->popup()->hide();
+                            return;
+                        }
+                        completer->setCompletionPrefix(token);
+                        completer->complete();
+                    });
+            connect(completer, qOverload<const QString&>(&QCompleter::activated), edit,
+                    [edit](const QString& completion)
+                    {
+                        const QString text = edit->text();
+                        const qsizetype separator = std::max(text.lastIndexOf(QLatin1Char(',')),
+                                                             text.lastIndexOf(QLatin1Char(';')));
+                        const QString prefix = separator >= 0
+                                                   ? text.left(separator + 1) + QStringLiteral(" ")
+                                                   : QString{};
+                        edit->setText(prefix + completion);
+                        edit->setCursorPosition(static_cast<int>(edit->text().size()));
+                    });
+        }
     }
 
     void ComposeTabWidget::setupUi()

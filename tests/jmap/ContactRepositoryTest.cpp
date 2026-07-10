@@ -1,4 +1,5 @@
 #include "jmap/cache/ContactRepository.h"
+#include "jmap/contacts/ContactIdentityLookup.h"
 
 #include <QCoreApplication>
 #include <QSqlQuery>
@@ -92,4 +93,18 @@ TEST_CASE("contact repository greedily caches, filters, and resolves email addre
     REQUIRE(std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(found).has_value());
     CHECK(std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(found)->displayName ==
           "Joe Bloggs");
+
+    javelin::jmap::contacts::ContactIdentityLookup identities{repository};
+    const auto resolved = identities.resolve("a1", "JOE@example.test");
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::contacts::ContactIdentity>>(resolved));
+    REQUIRE(
+        std::get<std::optional<javelin::jmap::contacts::ContactIdentity>>(resolved).has_value());
+    CHECK(
+        std::get<std::optional<javelin::jmap::contacts::ContactIdentity>>(resolved)->displayName ==
+        "Joe Bloggs");
+    const auto suggestions = identities.suggestions("a1");
+    REQUIRE(
+        std::holds_alternative<std::vector<javelin::jmap::contacts::ContactIdentity>>(suggestions));
+    CHECK(std::get<std::vector<javelin::jmap::contacts::ContactIdentity>>(suggestions).size() == 2);
 }
