@@ -81,6 +81,8 @@ set(JAVELIN_FORMAT_FILES
     src/gui/shell/MainWindow.h
     src/jmap/api/Error.cpp
     src/jmap/api/Error.h
+    src/jmap/api/ContactsMethods.cpp
+    src/jmap/api/ContactsMethods.h
     src/jmap/api/MailMethods.cpp
     src/jmap/api/MailMethods.h
     src/jmap/api/MethodCaller.cpp
@@ -177,6 +179,7 @@ set(JAVELIN_FORMAT_FILES
     tests/FixtureReader.h
     tests/jmap/AccountRepositoryTest.cpp
     tests/jmap/AuthTest.cpp
+    tests/jmap/ContactsMethodsTest.cpp
     tests/jmap/DatabaseTest.cpp
     tests/jmap/EmailRepositoryTest.cpp
     tests/jmap/HtmlMessageDocumentBuilderTest.cpp
@@ -207,6 +210,8 @@ set(JAVELIN_FORMAT_FILES
 )
 
 add_library(javelin_jmap STATIC
+    src/jmap/api/ContactsMethods.cpp
+    src/jmap/api/ContactsMethods.h
     src/jmap/api/Error.cpp
     src/jmap/api/Error.h
     src/jmap/api/MailMethods.cpp
