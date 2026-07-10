@@ -60,30 +60,42 @@ namespace javelin::jmap::sync
                    error.methodError->type == "tooManyChanges";
         }
 
-        [[nodiscard]] std::vector<std::string>
-        changedMailboxIds(const javelin::jmap::api::MailboxChangesResponse& changes)
+        struct IncrementalMailboxFetch
         {
-            std::vector<std::string> ids;
-            ids.reserve(changes.created.size() + changes.updated.size());
+            javelin::jmap::api::MailboxChangesResponse changes;
+            javelin::jmap::api::MailboxGetResponse fetched;
+        };
+
+        [[nodiscard]] javelin::jmap::api::MailboxGetResponse
+        mergeMailboxFetches(const std::string_view accountId,
+                            const javelin::jmap::api::MailboxChangesResponse& changes,
+                            javelin::jmap::api::MailboxGetResponse created,
+                            const javelin::jmap::api::MailboxGetResponse& updated)
+        {
+            javelin::jmap::api::MailboxGetResponse fetched{
+                .accountId = std::string{accountId},
+                .state = changes.newState,
+                .list = std::move(created.list),
+                .notFound = std::move(created.notFound),
+            };
+
             std::unordered_set<std::string> seen;
             seen.reserve(changes.created.size() + changes.updated.size());
-
-            for (const auto& id : changes.created)
+            for (const auto& mailbox : fetched.list)
             {
-                if (seen.insert(id).second)
+                seen.insert(mailbox.id);
+            }
+            for (const auto& mailbox : updated.list)
+            {
+                if (seen.insert(mailbox.id).second)
                 {
-                    ids.push_back(id);
+                    fetched.list.push_back(mailbox);
                 }
             }
-            for (const auto& id : changes.updated)
-            {
-                if (seen.insert(id).second)
-                {
-                    ids.push_back(id);
-                }
-            }
+            fetched.notFound.insert(fetched.notFound.end(), updated.notFound.begin(),
+                                    updated.notFound.end());
 
-            return ids;
+            return fetched;
         }
 
         [[nodiscard]] QCoro::Task<
@@ -140,11 +152,11 @@ namespace javelin::jmap::sync
             co_return std::get<javelin::jmap::api::MailboxGetResponse>(mailboxResult);
         }
 
-        [[nodiscard]] QCoro::Task<
-            std::variant<javelin::jmap::api::MailboxChangesResponse, MailboxStateRefreshError>>
-        fetchMailboxChanges(javelin::jmap::api::MethodCaller& methodCaller,
-                            javelin::jmap::api::ApiRequestContext apiRequestContext,
-                            const std::string_view accountId, const std::string_view sinceState)
+        [[nodiscard]] QCoro::Task<std::variant<IncrementalMailboxFetch, MailboxStateRefreshError>>
+        fetchMailboxChangesAndMailboxes(javelin::jmap::api::MethodCaller& methodCaller,
+                                        javelin::jmap::api::ApiRequestContext apiRequestContext,
+                                        const std::string_view accountId,
+                                        const std::string_view sinceState)
         {
             const auto changesRequest = javelin::jmap::api::mailboxChanges({
                 .accountId = std::string{accountId},
@@ -161,6 +173,27 @@ namespace javelin::jmap::sync
             javelin::jmap::api::RequestBuilder builder;
             builder.useCore().useMail();
             const auto changesHandle = builder.call(*changesRequest, "mailbox-changes");
+            const auto createdRequest =
+                javelin::jmap::api::mailboxGet(javelin::jmap::api::getRequestFrom(
+                    std::string{accountId}, changesHandle, "/created"));
+            if (!createdRequest.has_value())
+            {
+                co_return MailboxStateRefreshError{
+                    .message = QStringLiteral("Failed to encode the created Mailbox/get request."),
+                };
+            }
+            const auto createdHandle = builder.call(*createdRequest, "created-mailboxes");
+
+            const auto updatedRequest =
+                javelin::jmap::api::mailboxGet(javelin::jmap::api::getRequestFrom(
+                    std::string{accountId}, changesHandle, "/updated"));
+            if (!updatedRequest.has_value())
+            {
+                co_return MailboxStateRefreshError{
+                    .message = QStringLiteral("Failed to encode the updated Mailbox/get request."),
+                };
+            }
+            const auto updatedHandle = builder.call(*updatedRequest, "updated-mailboxes");
 
             const auto envelopeResult = co_await methodCaller.call(apiRequestContext, builder);
             if (const auto* error =
@@ -194,7 +227,35 @@ namespace javelin::jmap::sync
                 };
             }
 
-            co_return std::get<javelin::jmap::api::MailboxChangesResponse>(changesResult);
+            const auto& changes =
+                std::get<javelin::jmap::api::MailboxChangesResponse>(changesResult);
+            const auto createdResult = reader.require(createdHandle);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::api::ResponseReaderError>(&createdResult))
+            {
+                co_return MailboxStateRefreshError{
+                    .message = QStringLiteral("Failed to read created Mailbox/get response: %1")
+                                   .arg(QString::fromStdString(error->message)),
+                };
+            }
+
+            const auto updatedResult = reader.require(updatedHandle);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::api::ResponseReaderError>(&updatedResult))
+            {
+                co_return MailboxStateRefreshError{
+                    .message = QStringLiteral("Failed to read updated Mailbox/get response: %1")
+                                   .arg(QString::fromStdString(error->message)),
+                };
+            }
+
+            co_return IncrementalMailboxFetch{
+                .changes = changes,
+                .fetched = mergeMailboxFetches(
+                    accountId, changes,
+                    std::get<javelin::jmap::api::MailboxGetResponse>(createdResult),
+                    std::get<javelin::jmap::api::MailboxGetResponse>(updatedResult)),
+            };
         }
 
     } // namespace
@@ -223,41 +284,22 @@ namespace javelin::jmap::sync
         const auto& plan = std::get<SyncPlan>(planResult);
         if (plan.kind == SyncPlanKind::IncrementalChanges && plan.sinceState.has_value())
         {
-            const auto changesResult = co_await fetchMailboxChanges(
+            const auto changesResult = co_await fetchMailboxChangesAndMailboxes(
                 m_methodCaller, m_apiRequestContext, accountId, *plan.sinceState);
-            const auto* changes =
-                std::get_if<javelin::jmap::api::MailboxChangesResponse>(&changesResult);
-            if (changes != nullptr && !changes->hasMoreChanges)
+            const auto* incrementalFetch = std::get_if<IncrementalMailboxFetch>(&changesResult);
+            if (incrementalFetch != nullptr && !incrementalFetch->changes.hasMoreChanges)
             {
-                const auto ids = changedMailboxIds(*changes);
-                javelin::jmap::api::MailboxGetResponse fetched{
-                    .accountId = std::string{accountId},
-                    .state = changes->newState,
-                    .list = {},
-                    .notFound = {},
-                };
-                if (!ids.empty())
-                {
-                    const auto fetchedResult = co_await fetchMailboxes(
-                        m_methodCaller, m_apiRequestContext, accountId, ids);
-                    if (const auto* error = std::get_if<MailboxStateRefreshError>(&fetchedResult))
-                    {
-                        co_return *error;
-                    }
-
-                    fetched = std::get<javelin::jmap::api::MailboxGetResponse>(fetchedResult);
-                }
-
                 javelin::jmap::cache::MailboxRepository mailboxRepository{m_databaseConnection};
                 javelin::jmap::cache::EmailRepository emailRepository{m_databaseConnection};
                 SyncReconciler reconciler{mailboxRepository, emailRepository, syncStateRepository};
-                if (const auto error = reconciler.applyMailboxChanges(key, *changes, fetched))
+                if (const auto error = reconciler.applyMailboxChanges(
+                        key, incrementalFetch->changes, incrementalFetch->fetched))
                 {
                     co_return MailboxStateRefreshError{.message = error->message};
                 }
 
                 co_return MailboxStateRefreshSummary{
-                    .mailboxCount = fetched.list.size(),
+                    .mailboxCount = incrementalFetch->fetched.list.size(),
                     .usedIncrementalRefresh = true,
                 };
             }

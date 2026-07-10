@@ -229,42 +229,43 @@ TEST_CASE("mailbox state refresh executor applies mailbox changes", "[jmap][sync
 
     FakeTransport transport;
     transport.queuedResults
-        .push_back(
-            javelin::jmap::api::HttpResponse{
-                .statusCode = 200,
-                .body =
-                    QByteArray::fromStdString(
-                        serializeResponseEnvelope(
-                            {
-                                .methodResponses =
-                                    {
-                                        javelin::jmap::api::MethodInvocation{
-                                            .name = "Mailbox/changes",
-                                            .arguments =
-                                                R"({"accountId":"account-1","oldState":"mailbox-state-1","newState":"mailbox-state-2","hasMoreChanges":false,"created":[],"updated":["mbx-inbox"],"destroyed":[]})",
-                                            .callId = "mailbox-changes",
-                                        },
-                                    },
-                                .createdIds = std::nullopt,
-                                .sessionState = "session-state-2",
-                            })),
-            });
-    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
-        .statusCode = 200,
-        .body = QByteArray::fromStdString(serializeResponseEnvelope({
-            .methodResponses =
-                {
-                    javelin::jmap::api::MethodInvocation{
-                        .name = "Mailbox/get",
-                        .arguments =
-                            mailboxGetArguments("mailbox-state-2", updatedMailboxFixture()),
-                        .callId = "mailboxes",
-                    },
-                },
-            .createdIds = std::nullopt,
-            .sessionState = "session-state-2",
-        })),
-    });
+        .push_back(javelin::jmap::api::
+                       HttpResponse{
+                           .statusCode = 200,
+                           .body =
+                               QByteArray::fromStdString(
+                                   serializeResponseEnvelope(
+                                       {
+                                           .methodResponses =
+                                               {
+                                                   javelin::jmap::api::MethodInvocation{
+                                                       .name = "Mailbox/changes",
+                                                       .arguments =
+                                                           R"({"accountId":"account-1","oldState":"mailbox-state-1","newState":"mailbox-state-2","hasMoreChanges":false,"created":[],"updated":["mbx-inbox"],"destroyed":[]})",
+                                                       .callId = "mailbox-changes",
+                                                   },
+                                                   javelin::
+                                                       jmap::api::MethodInvocation{
+                                                           .name = "Mailbox/get",
+                                                           .arguments =
+                                                               mailboxGetArguments(
+                                                                   "mailbox-state-2", ""),
+                                                           .callId = "created-mailboxes",
+                                                       },
+                                                   javelin::
+                                                       jmap::
+                                                           api::MethodInvocation{
+                                                               .name = "Mailbox/get",
+                                                               .arguments =
+                                                                   mailboxGetArguments(
+                                                                       "mailbox-state-2", updatedMailboxFixture()),
+                                                               .callId = "updated-mailboxes",
+                                                           },
+                                               },
+                                           .createdIds = std::nullopt,
+                                           .sessionState = "session-state-2",
+                                       })),
+                       });
 
     javelin::jmap::api::MethodCaller methodCaller{transport};
     javelin::jmap::sync::MailboxStateRefreshExecutor executor{databaseContext.connection,
@@ -275,7 +276,24 @@ TEST_CASE("mailbox state refresh executor applies mailbox changes", "[jmap][sync
     const auto& summary = std::get<javelin::jmap::sync::MailboxStateRefreshSummary>(result);
     CHECK(summary.mailboxCount == 1);
     CHECK(summary.usedIncrementalRefresh);
-    REQUIRE(transport.requests.size() == 2);
+    REQUIRE(transport.requests.size() == 1);
+    const auto requestEnvelope =
+        javelin::jmap::api::parseRequestEnvelope(transport.requests.front().body.toStdString());
+    REQUIRE(requestEnvelope.ok());
+    REQUIRE(requestEnvelope.value.has_value());
+    REQUIRE(requestEnvelope.value->methodCalls.size() == 3);
+    CHECK(requestEnvelope.value->methodCalls[0].name == "Mailbox/changes");
+    CHECK(requestEnvelope.value->methodCalls[0].callId == "mailbox-changes");
+    CHECK(requestEnvelope.value->methodCalls[1].name == "Mailbox/get");
+    CHECK(requestEnvelope.value->methodCalls[1].callId == "created-mailboxes");
+    CHECK(requestEnvelope.value->methodCalls[1].arguments.find(R"("#ids")") != std::string::npos);
+    CHECK(requestEnvelope.value->methodCalls[1].arguments.find(R"("/created")") !=
+          std::string::npos);
+    CHECK(requestEnvelope.value->methodCalls[2].name == "Mailbox/get");
+    CHECK(requestEnvelope.value->methodCalls[2].callId == "updated-mailboxes");
+    CHECK(requestEnvelope.value->methodCalls[2].arguments.find(R"("#ids")") != std::string::npos);
+    CHECK(requestEnvelope.value->methodCalls[2].arguments.find(R"("/updated")") !=
+          std::string::npos);
 
     javelin::jmap::cache::QueryService queryService{databaseContext.connection};
     const auto mailboxTreeResult = queryService.listMailboxTree("account-1");
