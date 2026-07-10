@@ -135,6 +135,8 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/domain/MailEntities.h
     src/jmap/contacts/ContactTypes.cpp
     src/jmap/contacts/ContactTypes.h
+    src/jmap/contacts/ContactService.cpp
+    src/jmap/contacts/ContactService.h
     src/jmap/domain/MailEntityParsers.cpp
     src/jmap/domain/MailEntityParsers.h
     src/jmap/query/MessageGrouping.cpp
@@ -185,6 +187,7 @@ set(JAVELIN_FORMAT_FILES
     tests/jmap/AuthTest.cpp
     tests/jmap/ContactsMethodsTest.cpp
     tests/jmap/ContactRepositoryTest.cpp
+    tests/jmap/ContactServiceTest.cpp
     tests/jmap/DatabaseTest.cpp
     tests/jmap/EmailRepositoryTest.cpp
     tests/jmap/HtmlMessageDocumentBuilderTest.cpp
@@ -235,6 +238,8 @@ add_library(javelin_jmap STATIC
     src/jmap/api/SessionParser.h
     src/jmap/contacts/ContactTypes.cpp
     src/jmap/contacts/ContactTypes.h
+    src/jmap/contacts/ContactService.cpp
+    src/jmap/contacts/ContactService.h
     src/jmap/api/Transport.cpp
     src/jmap/api/Transport.h
     src/jmap/cache/AccountRepository.cpp
