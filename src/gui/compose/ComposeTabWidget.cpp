@@ -1269,6 +1269,7 @@ namespace javelin::gui::compose
         if (!settings.has_value())
         {
             Q_EMIT statusMessageRequested(errorMessage, 10000);
+            Q_EMIT userInterventionRequired(errorMessage);
             return;
         }
 
@@ -1297,6 +1298,10 @@ namespace javelin::gui::compose
                 if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
                 {
                     Q_EMIT statusMessageRequested(error->message, 10000);
+                    if (error->requiresUserIntervention)
+                    {
+                        Q_EMIT userInterventionRequired(error->message);
+                    }
                     m_closeAfterSave = false;
                     return;
                 }
@@ -1337,6 +1342,7 @@ namespace javelin::gui::compose
         if (!settings.has_value())
         {
             Q_EMIT statusMessageRequested(errorMessage, 10000);
+            Q_EMIT userInterventionRequired(errorMessage);
             return;
         }
 
@@ -1361,6 +1367,10 @@ namespace javelin::gui::compose
                 if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
                 {
                     Q_EMIT statusMessageRequested(error->message, 10000);
+                    if (error->requiresUserIntervention)
+                    {
+                        Q_EMIT userInterventionRequired(error->message);
+                    }
                     return;
                 }
 

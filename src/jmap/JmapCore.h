@@ -47,6 +47,7 @@ namespace javelin::jmap
     struct LiveRefreshError
     {
         QString message;
+        bool requiresUserIntervention = false;
     };
 
     using LiveRefreshResult = std::variant<LiveRefreshSummary, LiveRefreshError>;

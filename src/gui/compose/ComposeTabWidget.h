@@ -72,6 +72,7 @@ namespace javelin::gui::compose
       Q_SIGNALS:
         void titleChanged(const QString& title);
         void statusMessageRequested(const QString& message, int timeoutMs = 5000);
+        void userInterventionRequired(const QString& message);
         void closeRequested();
 
       private:

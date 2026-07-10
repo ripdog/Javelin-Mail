@@ -35,7 +35,8 @@ class QWidget;
 namespace javelin::jmap
 {
     class JmapCore;
-}
+    struct LiveRefreshError;
+} // namespace javelin::jmap
 
 namespace javelin::jmap::submission
 {
@@ -162,6 +163,9 @@ namespace javelin::gui::shell
         };
 
         void createActions();
+        void presentError(const javelin::jmap::LiveRefreshError& error,
+                          const QString& title = QStringLiteral("Action Required"));
+        void presentUserInterventionError(const QString& message);
         void setupUi();
         void connectSelection();
         void composeNewMessage();

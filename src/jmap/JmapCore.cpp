@@ -160,6 +160,7 @@ namespace javelin::jmap
                         requireSessionUrl
                             ? QStringLiteral("Session URL, login email, and API key are required.")
                             : QStringLiteral("Login email and API key are required."),
+                    .requiresUserIntervention = true,
                 };
             }
 
@@ -198,7 +199,10 @@ namespace javelin::jmap
             const auto tokenResult = accessTokenResolver.resolve(credentials);
             if (const auto* error = std::get_if<javelin::jmap::api::AuthError>(&tokenResult))
             {
-                return LiveRefreshError{.message = authMessage(*error)};
+                return LiveRefreshError{
+                    .message = authMessage(*error),
+                    .requiresUserIntervention = true,
+                };
             }
 
             return std::get<javelin::jmap::auth::OAuthToken>(tokenResult).accessToken;
@@ -577,7 +581,10 @@ namespace javelin::jmap
             }
             if (const auto* error = std::get_if<javelin::jmap::api::AuthError>(&envelopeResult))
             {
-                co_return LiveRefreshError{.message = authMessage(*error)};
+                co_return LiveRefreshError{
+                    .message = authMessage(*error),
+                    .requiresUserIntervention = true,
+                };
             }
             if (const auto* error = std::get_if<javelin::jmap::api::ProtocolError>(&envelopeResult))
             {
@@ -773,7 +780,10 @@ namespace javelin::jmap
         }
         if (const auto* error = std::get_if<javelin::jmap::api::AuthError>(&discovered))
         {
-            co_return LiveRefreshError{.message = authMessage(*error)};
+            co_return LiveRefreshError{
+                .message = authMessage(*error),
+                .requiresUserIntervention = true,
+            };
         }
         if (const auto* error = std::get_if<javelin::jmap::api::ProtocolError>(&discovered))
         {
@@ -831,7 +841,10 @@ namespace javelin::jmap
         }
         if (const auto* error = std::get_if<javelin::jmap::api::AuthError>(&mailboxEnvelopeResult))
         {
-            co_return LiveRefreshError{.message = authMessage(*error)};
+            co_return LiveRefreshError{
+                .message = authMessage(*error),
+                .requiresUserIntervention = true,
+            };
         }
         if (const auto* error =
                 std::get_if<javelin::jmap::api::ProtocolError>(&mailboxEnvelopeResult))
@@ -1397,7 +1410,10 @@ namespace javelin::jmap
         }
         if (const auto* error = std::get_if<javelin::jmap::api::AuthError>(&envelopeResult))
         {
-            co_return LiveRefreshError{.message = authMessage(*error)};
+            co_return LiveRefreshError{
+                .message = authMessage(*error),
+                .requiresUserIntervention = true,
+            };
         }
         if (const auto* error = std::get_if<javelin::jmap::api::ProtocolError>(&envelopeResult))
         {

@@ -75,6 +75,21 @@
 
 namespace javelin::gui::shell
 {
+    void MainWindow::presentError(const javelin::jmap::LiveRefreshError& error,
+                                  const QString& title)
+    {
+        m_statusBar->showMessage(error.message, 10000);
+        if (error.requiresUserIntervention)
+        {
+            QMessageBox::critical(this, title, error.message);
+        }
+    }
+
+    void MainWindow::presentUserInterventionError(const QString& message)
+    {
+        presentError({.message = message, .requiresUserIntervention = true});
+    }
+
     namespace
     {
         constexpr auto windowGroup = "mainWindow";
@@ -2067,7 +2082,7 @@ namespace javelin::gui::shell
                             break;
                         }
                     }
-                    m_statusBar->showMessage(error->message, 10000);
+                    presentError(*error);
                     updateEmptyStates();
                     return;
                 }
@@ -2153,7 +2168,7 @@ namespace javelin::gui::shell
                             break;
                         }
                     }
-                    m_statusBar->showMessage(error->message, 10000);
+                    presentError(*error);
                     updateEmptyStates();
                     return;
                 }
@@ -2348,9 +2363,8 @@ namespace javelin::gui::shell
         if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
             settings.apiKey.isEmpty())
         {
-            m_statusBar->showMessage(
-                QStringLiteral("Set Session URL, Login Email, and API Key in Preferences first."),
-                5000);
+            presentUserInterventionError(
+                QStringLiteral("Set Session URL, Login Email, and API Key in Preferences first."));
             return;
         }
 
@@ -2365,7 +2379,7 @@ namespace javelin::gui::shell
                 if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
                 {
                     qWarning().noquote() << "GUI compose open failed" << error->message;
-                    m_statusBar->showMessage(error->message, 10000);
+                    presentError(*error);
                     return;
                 }
 
@@ -2452,6 +2466,9 @@ namespace javelin::gui::shell
         connect(widget, &javelin::gui::compose::ComposeTabWidget::statusMessageRequested, this,
                 [this](const QString& message, const int timeoutMs)
                 { m_statusBar->showMessage(message, timeoutMs); });
+        connect(widget, &javelin::gui::compose::ComposeTabWidget::userInterventionRequired, this,
+                [this](const QString& message)
+                { QMessageBox::critical(this, QStringLiteral("Action Required"), message); });
         connect(widget, &javelin::gui::compose::ComposeTabWidget::closeRequested, this,
                 [this, widget]
                 {
@@ -2501,7 +2518,7 @@ namespace javelin::gui::shell
         {
             if (const auto error = m_composeService.discard(widget->composeSessionId()))
             {
-                m_statusBar->showMessage(error->message, 10000);
+                presentError(*error);
                 return false;
             }
             m_contentStack->removeWidget(widget);
@@ -2527,7 +2544,7 @@ namespace javelin::gui::shell
 
             if (const auto error = m_composeService.discard(widget->composeSessionId()))
             {
-                m_statusBar->showMessage(error->message, 10000);
+                presentError(*error);
                 return false;
             }
             m_contentStack->removeWidget(widget);
@@ -2557,7 +2574,7 @@ namespace javelin::gui::shell
 
         if (const auto error = m_composeService.discard(widget->composeSessionId()))
         {
-            m_statusBar->showMessage(error->message, 10000);
+            presentError(*error);
             return false;
         }
 
@@ -3264,9 +3281,8 @@ namespace javelin::gui::shell
         if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
             settings.apiKey.isEmpty())
         {
-            m_statusBar->showMessage(
-                QStringLiteral("Set Session URL, Login Email, and API Key in Preferences first."),
-                5000);
+            presentUserInterventionError(
+                QStringLiteral("Set Session URL, Login Email, and API Key in Preferences first."));
             return;
         }
 
@@ -3275,8 +3291,8 @@ namespace javelin::gui::shell
         if (!attachmentSettings.alwaysAsk && (attachmentSettings.directory.isEmpty() ||
                                               !QDir{attachmentSettings.directory}.exists()))
         {
-            m_statusBar->showMessage(
-                QStringLiteral("Select a valid attachment save directory in Preferences."), 5000);
+            presentUserInterventionError(
+                QStringLiteral("Select a valid attachment save directory in Preferences."));
             return;
         }
 
@@ -3290,7 +3306,7 @@ namespace javelin::gui::shell
             {
                 if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
                 {
-                    m_statusBar->showMessage(error->message, 10000);
+                    presentError(*error);
                     return;
                 }
 
@@ -3315,10 +3331,9 @@ namespace javelin::gui::shell
                             const auto writeResult = watcher->result();
                             if (!writeResult.errorMessage.isEmpty())
                             {
-                                m_statusBar->showMessage(
+                                presentUserInterventionError(
                                     QStringLiteral("Failed to save attachment: %1")
-                                        .arg(writeResult.errorMessage),
-                                    10000);
+                                        .arg(writeResult.errorMessage));
                             }
                             else
                             {
@@ -3339,7 +3354,7 @@ namespace javelin::gui::shell
         const auto snapshotResult = m_messageViewService.load(accountId, emailId);
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&snapshotResult))
         {
-            m_statusBar->showMessage(error->message, 10000);
+            presentUserInterventionError(error->message);
             return;
         }
 
@@ -3363,9 +3378,8 @@ namespace javelin::gui::shell
         if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
             settings.apiKey.isEmpty())
         {
-            m_statusBar->showMessage(
-                QStringLiteral("Set Session URL, Login Email, and API Key in Preferences first."),
-                5000);
+            presentUserInterventionError(
+                QStringLiteral("Set Session URL, Login Email, and API Key in Preferences first."));
             return;
         }
 
@@ -3383,8 +3397,8 @@ namespace javelin::gui::shell
         }
         if (!QDir{targetDirectory}.exists())
         {
-            m_statusBar->showMessage(
-                QStringLiteral("Select a valid attachment save directory in Preferences."), 5000);
+            presentUserInterventionError(
+                QStringLiteral("Select a valid attachment save directory in Preferences."));
             return;
         }
 
@@ -3397,7 +3411,7 @@ namespace javelin::gui::shell
             {
                 if (!result.errorMessage.isEmpty())
                 {
-                    m_statusBar->showMessage(result.errorMessage, 10000);
+                    presentUserInterventionError(result.errorMessage);
                     return;
                 }
 
@@ -3410,10 +3424,9 @@ namespace javelin::gui::shell
                         const auto writeResult = watcher->result();
                         if (!writeResult.errorMessage.isEmpty())
                         {
-                            m_statusBar->showMessage(
+                            presentUserInterventionError(
                                 QStringLiteral("Failed to save attachments to %1: %2")
-                                    .arg(writeResult.failedPath, writeResult.errorMessage),
-                                10000);
+                                    .arg(writeResult.failedPath, writeResult.errorMessage));
                         }
                         else
                         {
@@ -3435,16 +3448,15 @@ namespace javelin::gui::shell
         if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
             settings.apiKey.isEmpty())
         {
-            m_statusBar->showMessage(
-                QStringLiteral("Set Session URL, Login Email, and API Key in Preferences first."),
-                5000);
+            presentUserInterventionError(
+                QStringLiteral("Set Session URL, Login Email, and API Key in Preferences first."));
             return;
         }
 
         if (!m_openAttachmentDirectory.isValid())
         {
-            m_statusBar->showMessage(
-                QStringLiteral("A temporary directory for attachments is unavailable."), 10000);
+            presentUserInterventionError(
+                QStringLiteral("A temporary directory for attachments is unavailable."));
             return;
         }
 
@@ -3458,7 +3470,7 @@ namespace javelin::gui::shell
             {
                 if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
                 {
-                    m_statusBar->showMessage(error->message, 10000);
+                    presentError(*error);
                     return;
                 }
 
@@ -3473,10 +3485,9 @@ namespace javelin::gui::shell
                             const auto writeResult = watcher->result();
                             if (!writeResult.errorMessage.isEmpty())
                             {
-                                m_statusBar->showMessage(
+                                presentUserInterventionError(
                                     QStringLiteral("Failed to prepare attachment: %1")
-                                        .arg(writeResult.errorMessage),
-                                    10000);
+                                        .arg(writeResult.errorMessage));
                                 watcher->deleteLater();
                                 return;
                             }
@@ -3526,9 +3537,8 @@ namespace javelin::gui::shell
         if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
             settings.apiKey.isEmpty())
         {
-            m_statusBar->showMessage(
-                QStringLiteral("Set Session URL, Login Email, and API Key in Preferences first."),
-                5000);
+            presentUserInterventionError(
+                QStringLiteral("Set Session URL, Login Email, and API Key in Preferences first."));
             return;
         }
 
@@ -3558,7 +3568,7 @@ namespace javelin::gui::shell
                 if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
                 {
                     qWarning().noquote() << "GUI refresh failed" << error->message;
-                    m_statusBar->showMessage(error->message, 10000);
+                    presentError(*error);
                     return;
                 }
 
@@ -3649,7 +3659,7 @@ namespace javelin::gui::shell
                 {
                     m_messageViewContainer->setErrorState(error->message);
                     qWarning().noquote() << "GUI message content refresh failed" << error->message;
-                    m_statusBar->showMessage(error->message, 10000);
+                    presentError(*error);
                     return;
                 }
 
@@ -4123,7 +4133,7 @@ namespace javelin::gui::shell
                                                           destinationMailboxId);
             if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
             {
-                m_statusBar->showMessage(error->message, 10000);
+                presentError(*error);
                 return;
             }
         }
@@ -4160,7 +4170,7 @@ namespace javelin::gui::shell
                                                           destinationMailboxId);
             if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
             {
-                m_statusBar->showMessage(error->message, 10000);
+                presentError(*error);
                 return;
             }
         }
@@ -4200,7 +4210,7 @@ namespace javelin::gui::shell
         const auto result = m_jmapCore.queueMarkEmailRead(accountId, emailId);
         if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
         {
-            m_statusBar->showMessage(error->message, 10000);
+            presentError(*error);
             return;
         }
 
@@ -4230,7 +4240,7 @@ namespace javelin::gui::shell
             m_jmapCore.queueSetEmailFlagged(*accountId, emailId.toStdString(), !isFlagged);
         if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
         {
-            m_statusBar->showMessage(error->message, 10000);
+            presentError(*error);
             return;
         }
 
@@ -4260,7 +4270,7 @@ namespace javelin::gui::shell
         const auto result = m_jmapCore.queueMarkEmailUnread(*accountId, *emailId);
         if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
         {
-            m_statusBar->showMessage(error->message, 10000);
+            presentError(*error);
             return;
         }
 
@@ -4432,7 +4442,7 @@ namespace javelin::gui::shell
                            if (const auto* error =
                                    std::get_if<javelin::jmap::LiveRefreshError>(&submitResult))
                            {
-                               m_statusBar->showMessage(error->message, 10000);
+                               presentError(*error);
                                return;
                            }
 
@@ -4462,17 +4472,15 @@ namespace javelin::gui::shell
         if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
             settings.apiKey.isEmpty())
         {
-            m_statusBar->showMessage(
-                QStringLiteral("Set Session URL, Login Email, and API Key in Preferences first."),
-                5000);
+            presentUserInterventionError(
+                QStringLiteral("Set Session URL, Login Email, and API Key in Preferences first."));
             return;
         }
 
         if (!m_openAttachmentDirectory.isValid())
         {
-            m_statusBar->showMessage(
-                QStringLiteral("A temporary directory for message source files is unavailable."),
-                10000);
+            presentUserInterventionError(
+                QStringLiteral("A temporary directory for message source files is unavailable."));
             return;
         }
 
@@ -4485,7 +4493,7 @@ namespace javelin::gui::shell
             {
                 if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
                 {
-                    m_statusBar->showMessage(error->message, 10000);
+                    presentError(*error);
                     return;
                 }
 
@@ -4501,10 +4509,9 @@ namespace javelin::gui::shell
                             const auto writeResult = watcher->result();
                             if (!writeResult.errorMessage.isEmpty())
                             {
-                                m_statusBar->showMessage(
+                                presentUserInterventionError(
                                     QStringLiteral("Failed to prepare message source: %1")
-                                        .arg(writeResult.errorMessage),
-                                    10000);
+                                        .arg(writeResult.errorMessage));
                                 watcher->deleteLater();
                                 return;
                             }
@@ -4711,7 +4718,7 @@ namespace javelin::gui::shell
         const auto draftResult = m_composeService.loadWorkingCopy(composeSessionId.toStdString());
         if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&draftResult))
         {
-            m_statusBar->showMessage(error->message, 10000);
+            presentError(*error);
             return;
         }
 
