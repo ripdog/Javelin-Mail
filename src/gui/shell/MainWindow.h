@@ -45,7 +45,7 @@ namespace javelin::jmap::submission
 
 namespace javelin::app
 {
-    class LongPollService;
+    class LongPollCoordinator;
 }
 
 namespace javelin::jmap::cache
@@ -60,6 +60,11 @@ namespace javelin::jmap::cache
 namespace javelin::gui::mailboxes
 {
     class MailboxTreeModel;
+}
+
+namespace javelin::gui::settings
+{
+    struct ConnectionSettings;
 }
 
 namespace javelin::gui::messages
@@ -94,7 +99,7 @@ namespace javelin::gui::shell
             javelin::jmap::cache::QueryService& queryService,
             javelin::jmap::cache::TranslationCacheRepository& translationCacheRepository,
             javelin::jmap::submission::ComposeService& composeService,
-            javelin::app::LongPollService& longPollService, QWidget* parent = nullptr);
+            javelin::app::LongPollCoordinator& longPollService, QWidget* parent = nullptr);
         ~MainWindow() override = default;
         void openMessageFromNotification(const QString& accountId, const QString& mailboxId,
                                          const QString& threadId, const QString& emailId);
@@ -226,6 +231,10 @@ namespace javelin::gui::shell
         void goToNextPage();
         void refreshViewsFromCache();
         void refreshFromServer();
+        void refreshAccountFromServer(std::string accountId);
+        void refreshConnectionSettings(javelin::gui::settings::ConnectionSettings settings);
+        void applyLongPollSettings();
+        void updateWindowTitle();
         void refreshSelectedMessageContent(std::string accountId, std::string emailId);
         [[nodiscard]] std::vector<std::string> selectedEmailIds() const;
         [[nodiscard]] std::variant<std::vector<std::string>, QString>
@@ -301,7 +310,7 @@ namespace javelin::gui::shell
         javelin::jmap::cache::QueryService& m_queryService;
         javelin::jmap::cache::TranslationCacheRepository& m_translationCacheRepository;
         javelin::jmap::submission::ComposeService& m_composeService;
-        javelin::app::LongPollService& m_longPollService;
+        javelin::app::LongPollCoordinator& m_longPollService;
         QSplitter* m_mainSplitter = nullptr;
         QStackedWidget* m_contentStack = nullptr;
         QWidget* m_mailboxPane = nullptr;

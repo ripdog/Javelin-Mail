@@ -45,6 +45,8 @@ set(JAVELIN_FORMAT_FILES
     src/app/InlineMessageSchemeHandler.h
     src/app/LongPollService.cpp
     src/app/LongPollService.h
+    src/app/LongPollCoordinator.cpp
+    src/app/LongPollCoordinator.h
     src/app/WebEngineSetup.h
     src/app/main.cpp
     src/app/ProcessServices.cpp
@@ -397,6 +399,8 @@ add_library(javelin_app STATIC
     src/app/InlineMessageSchemeHandler.h
     src/app/LongPollService.cpp
     src/app/LongPollService.h
+    src/app/LongPollCoordinator.cpp
+    src/app/LongPollCoordinator.h
     src/app/WebEngineSetup.h
     src/app/ProcessServices.cpp
     src/app/ProcessServices.h

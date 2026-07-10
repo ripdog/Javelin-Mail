@@ -68,16 +68,19 @@ namespace javelin::app
         stop();
     }
 
-    void LongPollService::applySettings(javelin::jmap::LiveConnectionSettings settings)
+    void LongPollService::applySettings(javelin::jmap::LiveConnectionSettings settings,
+                                        std::string accountId)
     {
         if (m_settings.has_value() && m_runContext != nullptr &&
             m_settings->sessionUrl == settings.sessionUrl &&
-            m_settings->loginEmail == settings.loginEmail && m_settings->apiKey == settings.apiKey)
+            m_settings->loginEmail == settings.loginEmail &&
+            m_settings->apiKey == settings.apiKey && m_accountId == accountId)
         {
             return;
         }
 
         m_settings = std::move(settings);
+        m_accountId = std::move(accountId);
         restart();
     }
 
@@ -127,20 +130,8 @@ namespace javelin::app
             return std::nullopt;
         }
 
-        const auto accountsResult = m_accountRepository.listAll();
-        const auto* accounts =
-            std::get_if<std::vector<javelin::jmap::cache::CachedAccount>>(&accountsResult);
-        if (accounts == nullptr || accounts->empty())
-        {
-            return std::nullopt;
-        }
-
-        const auto primaryIt =
-            std::ranges::find_if(*accounts, [](const auto& account) { return account.isPrimary; });
-        const auto& account = primaryIt != accounts->end() ? *primaryIt : accounts->front();
-
         javelin::jmap::cache::SessionRepository sessionRepository{m_databaseConnection};
-        const auto sessionResult = sessionRepository.load(account.accountId);
+        const auto sessionResult = sessionRepository.load(m_accountId);
         const auto* session =
             std::get_if<std::optional<javelin::jmap::api::Session>>(&sessionResult);
         if (session == nullptr || !session->has_value() || !(*session)->eventSourceUrl.has_value())
@@ -150,7 +141,7 @@ namespace javelin::app
             return std::nullopt;
         }
 
-        const auto mailboxTreeResult = m_queryService.listMailboxTree(account.accountId);
+        const auto mailboxTreeResult = m_queryService.listMailboxTree(m_accountId);
         const auto* mailboxTree =
             std::get_if<std::vector<javelin::jmap::cache::MailboxTreeItem>>(&mailboxTreeResult);
         if (mailboxTree == nullptr || mailboxTree->empty())
@@ -166,7 +157,7 @@ namespace javelin::app
 
         return RunConfiguration{
             .settings = *m_settings,
-            .accountId = account.accountId,
+            .accountId = m_accountId,
             .mailboxId = mailbox.id,
             .mailboxName = mailbox.name,
             .apiUrl = session->value().apiUrl,
