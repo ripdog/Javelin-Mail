@@ -48,7 +48,7 @@ namespace javelin::app
                         QObject* parent = nullptr);
         ~LongPollService() override;
 
-        void applySettings(javelin::jmap::LiveConnectionSettings settings);
+        void applySettings(javelin::jmap::LiveConnectionSettings settings, std::string accountId);
         void stop();
 
         [[nodiscard]] Status status() const;
@@ -111,6 +111,7 @@ namespace javelin::app
         javelin::jmap::cache::AccountRepository& m_accountRepository;
         javelin::jmap::cache::QueryService& m_queryService;
         std::optional<javelin::jmap::LiveConnectionSettings> m_settings;
+        std::string m_accountId;
         std::shared_ptr<RunContext> m_runContext;
         std::string m_lastEventId;
         std::deque<std::string> m_recentNotificationKeys;

@@ -20,7 +20,7 @@ namespace javelin::jmap::contacts
 namespace javelin::app
 {
     class InlineMessageSchemeHandler;
-    class LongPollService;
+    class LongPollCoordinator;
 } // namespace javelin::app
 
 namespace javelin::jmap::api
@@ -70,7 +70,7 @@ namespace javelin::app
         [[nodiscard]] javelin::jmap::cache::TranslationCacheRepository&
         translationCacheRepository();
         [[nodiscard]] javelin::jmap::submission::ComposeService& composeService();
-        [[nodiscard]] javelin::app::LongPollService& longPollService();
+        [[nodiscard]] javelin::app::LongPollCoordinator& longPollService();
 
       private:
         std::unique_ptr<javelin::jmap::JmapCore> m_jmapCore;
@@ -90,7 +90,7 @@ namespace javelin::app
             m_translationCacheRepository;
         std::unique_ptr<javelin::jmap::cache::SubmissionRepository> m_submissionRepository;
         std::unique_ptr<javelin::jmap::submission::ComposeService> m_composeService;
-        std::unique_ptr<LongPollService> m_longPollService;
+        std::unique_ptr<LongPollCoordinator> m_longPollService;
     };
 
 } // namespace javelin::app

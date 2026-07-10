@@ -1,7 +1,7 @@
 #include "app/ApplicationBootstrap.h"
 
 #include "app/DesktopNotificationController.h"
-#include "app/LongPollService.h"
+#include "app/LongPollCoordinator.h"
 #include "app/ProcessServices.h"
 #include "gui/settings/PreferencesDialog.h"
 #include "gui/shell/MainWindow.h"
@@ -78,6 +78,27 @@ namespace javelin::app
             };
         }
 
+        [[nodiscard]] std::vector<LongPollAccountConfiguration> longPollConfigurations()
+        {
+            std::vector<LongPollAccountConfiguration> configurations;
+            for (const auto& settings : javelin::gui::settings::PreferencesDialog::loadAccounts())
+            {
+                if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
+                    settings.apiKey.isEmpty())
+                {
+                    continue;
+                }
+                for (const auto& accountId : settings.cachedAccountIds)
+                {
+                    configurations.push_back(LongPollAccountConfiguration{
+                        .settings = toLiveConnectionSettings(settings),
+                        .accountId = accountId.toStdString(),
+                    });
+                }
+            }
+            return configurations;
+        }
+
     } // namespace
 
     ApplicationBootstrap::ApplicationBootstrap(QApplication& application)
@@ -108,10 +129,7 @@ namespace javelin::app
                                                              m_mainWindow};
             dialog.exec();
         }
-        else
-        {
-            m_processServices->longPollService().applySettings(toLiveConnectionSettings(settings));
-        }
+        m_processServices->longPollService().applySettings(longPollConfigurations());
 
         return m_application.exec();
     }
@@ -187,7 +205,7 @@ namespace javelin::app
         m_trayIcon->setContextMenu(m_trayMenu.get());
 
         QObject::connect(
-            &m_processServices->longPollService(), &LongPollService::notificationRaised,
+            &m_processServices->longPollService(), &LongPollCoordinator::notificationRaised,
             m_notificationController.get(),
             [this](const QString& accountId, const QString& mailboxId, const QString& threadId,
                    const QString& emailId, const QString& mailboxName, const QString& title,

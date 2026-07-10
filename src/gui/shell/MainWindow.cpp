@@ -1,6 +1,6 @@
 #include "gui/shell/MainWindow.h"
 
-#include "app/LongPollService.h"
+#include "app/LongPollCoordinator.h"
 #include "gui/IconUtils.h"
 #include "gui/compose/ComposeTabWidget.h"
 #include "gui/contacts/ContactsManagerWidget.h"
@@ -634,7 +634,7 @@ namespace javelin::gui::shell
         javelin::jmap::cache::QueryService& queryService,
         javelin::jmap::cache::TranslationCacheRepository& translationCacheRepository,
         javelin::jmap::submission::ComposeService& composeService,
-        javelin::app::LongPollService& longPollService, QWidget* parent)
+        javelin::app::LongPollCoordinator& longPollService, QWidget* parent)
         : KXmlGuiWindow(parent), m_jmapCore(jmapCore), m_accountRepository(accountRepository),
           m_contactRepository(contactRepository), m_contactService(contactService),
           m_contactIdentityLookup(contactIdentityLookup), m_identityRepository(identityRepository),
@@ -651,16 +651,16 @@ namespace javelin::gui::shell
                  QStringLiteral("javelinmailui.rc"));
         setToolBarVisible(QStringLiteral("mainToolBar"), true);
         connectSelection();
-        connect(&m_longPollService, &javelin::app::LongPollService::statusChanged, this,
+        connect(&m_longPollService, &javelin::app::LongPollCoordinator::statusChanged, this,
                 [this](const auto) { updateLongPollStatus(); });
-        connect(&m_longPollService, &javelin::app::LongPollService::mailStateChanged, this,
+        connect(&m_longPollService, &javelin::app::LongPollCoordinator::mailStateChanged, this,
                 [this](const QString& accountId, const bool requiresCatchUpRefresh)
                 {
                     const auto account = accountId.toStdString();
                     markTabsStaleForAccount(account);
                     if (requiresCatchUpRefresh)
                     {
-                        refreshFromServer();
+                        refreshAccountFromServer(account);
                         return;
                     }
 
@@ -669,7 +669,8 @@ namespace javelin::gui::shell
                         refreshActiveTabFromServer();
                     }
                 });
-        connect(&m_longPollService, &javelin::app::LongPollService::accountMailStateChanged, this,
+        connect(&m_longPollService, &javelin::app::LongPollCoordinator::accountMailStateChanged,
+                this,
                 [this](const QString& accountId, const QString& refreshedMailboxId)
                 {
                     const auto account = accountId.toStdString();
@@ -701,7 +702,7 @@ namespace javelin::gui::shell
                     refreshActiveTabFromServer();
                 });
         connect(
-            &m_longPollService, &javelin::app::LongPollService::mailboxRefreshed, this,
+            &m_longPollService, &javelin::app::LongPollCoordinator::mailboxRefreshed, this,
             [this](const QString& accountId, const QString& mailboxId, const bool scrollToNewest)
             {
                 {
@@ -1637,6 +1638,36 @@ namespace javelin::gui::shell
             m_tabBar->setCurrentIndex(*m_activeTabIndex);
         }
         m_tabBar->setVisible(m_tabs.size() > 1);
+        updateWindowTitle();
+    }
+
+    void MainWindow::updateWindowTitle()
+    {
+        const auto* tab = activeTab();
+        if (tab == nullptr)
+        {
+            setWindowTitle(QStringLiteral("Javelin Mail"));
+            return;
+        }
+
+        const auto title = titleForTab(*tab);
+        const auto configuredAccounts = javelin::gui::settings::PreferencesDialog::loadAccounts();
+        if (configuredAccounts.size() <= 1)
+        {
+            setWindowTitle(title);
+            return;
+        }
+
+        const auto accountId = activeAccountId();
+        if (!accountId.has_value())
+        {
+            setWindowTitle(title);
+            return;
+        }
+        const auto settings = javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
+            QString::fromStdString(*accountId));
+        const auto host = QUrl{settings.sessionUrl}.host();
+        setWindowTitle(host.isEmpty() ? title : QStringLiteral("%1 - %2").arg(title, host));
     }
 
     void MainWindow::openOrActivateMailboxTab(std::string accountId, std::string mailboxId,
@@ -3661,23 +3692,40 @@ namespace javelin::gui::shell
             if (!settings.sessionUrl.isEmpty() && !settings.loginEmail.isEmpty() &&
                 !settings.apiKey.isEmpty())
             {
-                refreshFromServer();
+                refreshConnectionSettings(settings);
             }
             else
             {
-                m_longPollService.stop();
+                applyLongPollSettings();
             }
         }
     }
 
     void MainWindow::refreshFromServer()
     {
+        const auto accountId =
+            activeAccountId().has_value() ? activeAccountId() : currentAccountId(*m_mailboxView);
+        if (!accountId.has_value())
+        {
+            presentUserInterventionError(QStringLiteral("Select an account to refresh."));
+            return;
+        }
+        refreshAccountFromServer(*accountId);
+    }
+
+    void MainWindow::refreshAccountFromServer(std::string accountId)
+    {
+        refreshConnectionSettings(javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
+            QString::fromStdString(accountId)));
+    }
+
+    void MainWindow::refreshConnectionSettings(javelin::gui::settings::ConnectionSettings settings)
+    {
         if (m_refreshInFlight)
         {
             return;
         }
 
-        const auto settings = javelin::gui::settings::PreferencesDialog::loadSettings();
         if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
             settings.apiKey.isEmpty())
         {
@@ -3690,7 +3738,7 @@ namespace javelin::gui::shell
         m_refreshAction->setEnabled(false);
         m_preferencesAction->setEnabled(false);
         m_statusBar->showMessage(QStringLiteral("Refreshing mail from server..."));
-        qInfo() << "GUI refresh requested";
+        qInfo().noquote() << "GUI refresh requested" << settings.loginEmail << settings.sessionUrl;
 
         auto task = m_jmapCore.refreshFromServer(
             toLiveConnectionSettings(settings),
@@ -3740,8 +3788,6 @@ namespace javelin::gui::shell
                         .arg(summary.emailCount)
                         .arg(QString::fromStdString(summary.accountId)),
                     10000);
-                m_longPollService.applySettings(toLiveConnectionSettings(settings));
-
                 auto contactsTask = m_contactService.refreshAll(toLiveConnectionSettings(settings),
                                                                 summary.accountId);
                 QCoro::connect(
@@ -3760,7 +3806,29 @@ namespace javelin::gui::shell
                                 contactsResult);
                         qInfo() << "Contacts cache refreshed" << contacts.contactCount;
                     });
+                applyLongPollSettings();
             });
+    }
+
+    void MainWindow::applyLongPollSettings()
+    {
+        std::vector<javelin::app::LongPollAccountConfiguration> configurations;
+        for (const auto& settings : javelin::gui::settings::PreferencesDialog::loadAccounts())
+        {
+            if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
+                settings.apiKey.isEmpty())
+            {
+                continue;
+            }
+            for (const auto& accountId : settings.cachedAccountIds)
+            {
+                configurations.push_back(javelin::app::LongPollAccountConfiguration{
+                    .settings = toLiveConnectionSettings(settings),
+                    .accountId = accountId.toStdString(),
+                });
+            }
+        }
+        m_longPollService.applySettings(std::move(configurations));
     }
 
     void MainWindow::refreshSelectedMessageContent(std::string accountId, std::string emailId)
@@ -4566,7 +4634,7 @@ namespace javelin::gui::shell
             index.data(javelin::gui::mailboxes::MailboxTreeModel::AccountIdRole).toString();
         const auto mailboxId =
             index.data(javelin::gui::mailboxes::MailboxTreeModel::MailboxIdRole).toString();
-        if (accountId.isEmpty() || mailboxId.isEmpty())
+        if (accountId.isEmpty())
         {
             return;
         }
@@ -4574,6 +4642,15 @@ namespace javelin::gui::shell
         m_mailboxView->setCurrentIndex(index);
 
         QMenu menu{this};
+        if (mailboxId.isEmpty())
+        {
+            auto* refreshAccountAction = menu.addAction(QStringLiteral("Refresh Account"));
+            connect(refreshAccountAction, &QAction::triggered, this,
+                    [this, account = accountId.toStdString()]
+                    { refreshAccountFromServer(account); });
+            menu.exec(m_mailboxView->viewport()->mapToGlobal(position));
+            return;
+        }
         auto* openAsTabAction = menu.addAction(QStringLiteral("Open as Tab"));
         connect(openAsTabAction, &QAction::triggered, this,
                 [this] { openMailboxSelectionInTab(true); });
