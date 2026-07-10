@@ -11,6 +11,11 @@ namespace javelin::jmap
     class JmapCore;
 }
 
+namespace javelin::jmap::contacts
+{
+    class ContactService;
+}
+
 namespace javelin::app
 {
     class InlineMessageSchemeHandler;
@@ -25,6 +30,7 @@ namespace javelin::jmap::api
 namespace javelin::jmap::cache
 {
     class AccountRepository;
+    class ContactRepository;
     class IdentityRepository;
     class MessageViewService;
     class QueryService;
@@ -54,6 +60,8 @@ namespace javelin::app
         [[nodiscard]] javelin::jmap::JmapCore& jmapCore();
         [[nodiscard]] const javelin::jmap::JmapCore& jmapCore() const;
         [[nodiscard]] javelin::jmap::cache::AccountRepository& accountRepository();
+        [[nodiscard]] javelin::jmap::cache::ContactRepository& contactRepository();
+        [[nodiscard]] javelin::jmap::contacts::ContactService& contactService();
         [[nodiscard]] javelin::jmap::cache::IdentityRepository& identityRepository();
         [[nodiscard]] javelin::jmap::cache::MessageViewService& messageViewService();
         [[nodiscard]] javelin::jmap::cache::QueryService& queryService();
@@ -70,6 +78,8 @@ namespace javelin::app
         std::unique_ptr<javelin::jmap::api::QtNetworkTransport> m_transport;
         std::unique_ptr<InlineMessageSchemeHandler> m_inlineMessageSchemeHandler;
         std::unique_ptr<javelin::jmap::cache::AccountRepository> m_accountRepository;
+        std::unique_ptr<javelin::jmap::cache::ContactRepository> m_contactRepository;
+        std::unique_ptr<javelin::jmap::contacts::ContactService> m_contactService;
         std::unique_ptr<javelin::jmap::cache::IdentityRepository> m_identityRepository;
         std::unique_ptr<javelin::jmap::cache::MessageViewService> m_messageViewService;
         std::unique_ptr<javelin::jmap::cache::QueryService> m_queryService;

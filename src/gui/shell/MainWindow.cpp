@@ -3,6 +3,7 @@
 #include "app/LongPollService.h"
 #include "gui/IconUtils.h"
 #include "gui/compose/ComposeTabWidget.h"
+#include "gui/contacts/ContactsManagerWidget.h"
 #include "gui/mailboxes/MailboxIconUtils.h"
 #include "gui/mailboxes/MailboxTreeModel.h"
 #include "gui/messages/MessageListDelegate.h"
@@ -14,9 +15,11 @@
 #include "gui/shell/MessageFileUtils.h"
 #include "jmap/JmapCore.h"
 #include "jmap/cache/AccountRepository.h"
+#include "jmap/cache/ContactRepository.h"
 #include "jmap/cache/IdentityRepository.h"
 #include "jmap/cache/MessageViewService.h"
 #include "jmap/cache/QueryService.h"
+#include "jmap/contacts/ContactService.h"
 #include "jmap/query/QueryDiff.h"
 #include "jmap/submission/ComposeService.h"
 
@@ -622,6 +625,8 @@ namespace javelin::gui::shell
     MainWindow::MainWindow(
         javelin::jmap::JmapCore& jmapCore,
         javelin::jmap::cache::AccountRepository& accountRepository,
+        javelin::jmap::cache::ContactRepository& contactRepository,
+        javelin::jmap::contacts::ContactService& contactService,
         javelin::jmap::cache::IdentityRepository& identityRepository,
         javelin::jmap::cache::MessageViewService& messageViewService,
         javelin::jmap::cache::QueryService& queryService,
@@ -629,6 +634,7 @@ namespace javelin::gui::shell
         javelin::jmap::submission::ComposeService& composeService,
         javelin::app::LongPollService& longPollService, QWidget* parent)
         : KXmlGuiWindow(parent), m_jmapCore(jmapCore), m_accountRepository(accountRepository),
+          m_contactRepository(contactRepository), m_contactService(contactService),
           m_identityRepository(identityRepository), m_messageViewService(messageViewService),
           m_queryService(queryService), m_translationCacheRepository(translationCacheRepository),
           m_composeService(composeService), m_longPollService(longPollService)
@@ -803,6 +809,16 @@ namespace javelin::gui::shell
             KStandardAction::preferences(this, &MainWindow::openPreferences, actionCollection());
         m_preferencesAction->setIcon(
             thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/settings.svg")));
+
+        m_contactsAction = new QAction(QIcon::fromTheme(QStringLiteral("view-pim-contacts")),
+                                       QStringLiteral("Contacts"), this);
+        connect(m_contactsAction, &QAction::triggered, this, &MainWindow::openContacts);
+        actionCollection()->addAction(QStringLiteral("open_contacts"), m_contactsAction);
+        const auto contactAccounts = m_contactRepository.listAccounts();
+        m_contactsAction->setEnabled(
+            std::holds_alternative<std::vector<javelin::jmap::cache::ContactAccount>>(
+                contactAccounts) &&
+            !std::get<std::vector<javelin::jmap::cache::ContactAccount>>(contactAccounts).empty());
 
         m_newMessageAction =
             new QAction(thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/new-mail.svg")),
@@ -1250,6 +1266,60 @@ namespace javelin::gui::shell
                 { refreshSelectionFromModels(); });
     }
 
+    void MainWindow::openContacts()
+    {
+        for (std::size_t index = 0; index < m_tabs.size(); ++index)
+        {
+            if (std::holds_alternative<ContactsTabState>(m_tabs[index].content))
+            {
+                m_activeTabIndex = static_cast<int>(index);
+                updateTabBar();
+                activateTab(*m_activeTabIndex, false);
+                return;
+            }
+        }
+
+        const auto result = m_contactRepository.listAccounts();
+        const auto* accounts =
+            std::get_if<std::vector<javelin::jmap::cache::ContactAccount>>(&result);
+        if (accounts == nullptr || accounts->empty())
+        {
+            m_statusBar->showMessage(
+                QStringLiteral("The configured server does not support JMAP Contacts."), 10000);
+            return;
+        }
+        const auto active = activeAccountId();
+        auto selected = accounts->begin();
+        if (active.has_value())
+        {
+            const auto match = std::ranges::find(*accounts, *active,
+                                                 &javelin::jmap::cache::ContactAccount::accountId);
+            if (match != accounts->end())
+            {
+                selected = match;
+            }
+        }
+        const auto settings = javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
+            QString::fromStdString(selected->accountId));
+        auto* widget = new javelin::gui::contacts::ContactsManagerWidget(
+            m_contactRepository, m_contactService, toLiveConnectionSettings(settings),
+            selected->ownerAccountId, m_contentStack);
+        connect(widget, &javelin::gui::contacts::ContactsManagerWidget::statusMessageRequested,
+                m_statusBar, &LayeredStatusBar::showMessage);
+        connect(widget, &javelin::gui::contacts::ContactsManagerWidget::userInterventionRequired,
+                this, &MainWindow::presentUserInterventionError);
+        m_contentStack->addWidget(widget);
+        m_tabs.push_back(TabState{.content = ContactsTabState{.accountId = selected->ownerAccountId,
+                                                              .title = QStringLiteral("Contacts"),
+                                                              .widget = widget,
+                                                              .page = {},
+                                                              .selection = {}}});
+        m_activeTabIndex = static_cast<int>(m_tabs.size() - 1);
+        updateTabBar();
+        activateTab(*m_activeTabIndex, false);
+        widget->refreshRemote();
+    }
+
     void MainWindow::composeNewMessage()
     {
         const auto accountId =
@@ -1390,6 +1460,12 @@ namespace javelin::gui::shell
         return tab != nullptr && std::holds_alternative<ComposeTabState>(tab->content);
     }
 
+    bool MainWindow::activeTabIsContacts() const
+    {
+        const auto* tab = activeTab();
+        return tab != nullptr && std::holds_alternative<ContactsTabState>(tab->content);
+    }
+
     std::optional<std::string> MainWindow::activeAccountId() const
     {
         const auto* tab = activeTab();
@@ -1406,6 +1482,11 @@ namespace javelin::gui::shell
         if (const auto* searchTab = std::get_if<SearchTabState>(&tab->content))
         {
             return searchTab->accountId;
+        }
+
+        if (const auto* contactsTab = std::get_if<ContactsTabState>(&tab->content))
+        {
+            return contactsTab->accountId;
         }
 
         return std::get<ComposeTabState>(tab->content).accountId;
@@ -1439,6 +1520,11 @@ namespace javelin::gui::shell
             return searchTab->title;
         }
 
+        if (const auto* contactsTab = std::get_if<ContactsTabState>(&tab.content))
+        {
+            return contactsTab->title;
+        }
+
         return std::get<ComposeTabState>(tab.content).title;
     }
 
@@ -1454,6 +1540,11 @@ namespace javelin::gui::shell
         {
             return javelin::gui::themedSvgIcon(
                 QStringLiteral(":/icons/thunderbird-icons/search.svg"), color);
+        }
+
+        if (std::holds_alternative<ContactsTabState>(tab.content))
+        {
+            return QIcon::fromTheme(QStringLiteral("view-pim-contacts"));
         }
 
         return javelin::gui::themedSvgIcon(QStringLiteral(":/icons/thunderbird-icons/new-mail.svg"),
@@ -1483,9 +1574,10 @@ namespace javelin::gui::shell
             {
                 for (int index = 0; index < m_tabBar->count(); ++index)
                 {
-                    const bool canClose =
-                        index != 0 || std::holds_alternative<ComposeTabState>(
-                                          m_tabs[static_cast<std::size_t>(index)].content);
+                    const auto& content = m_tabs[static_cast<std::size_t>(index)].content;
+                    const bool canClose = index != 0 ||
+                                          std::holds_alternative<ComposeTabState>(content) ||
+                                          std::holds_alternative<ContactsTabState>(content);
                     if (!canClose)
                     {
                         continue;
@@ -1515,9 +1607,9 @@ namespace javelin::gui::shell
 
         for (int index = 0; index < static_cast<int>(m_tabs.size()); ++index)
         {
-            const bool canClose =
-                index != 0 || std::holds_alternative<ComposeTabState>(
-                                  m_tabs[static_cast<std::size_t>(index)].content);
+            const auto& content = m_tabs[static_cast<std::size_t>(index)].content;
+            const bool canClose = index != 0 || std::holds_alternative<ComposeTabState>(content) ||
+                                  std::holds_alternative<ContactsTabState>(content);
             if (!canClose)
             {
                 m_tabBar->setTabButton(index, QTabBar::RightSide, nullptr);
@@ -1709,6 +1801,12 @@ namespace javelin::gui::shell
         {
             m_contentStack->setCurrentWidget(composeTab->widget);
         }
+        else if (const auto* contactsTab = std::get_if<ContactsTabState>(
+                     &m_tabs[static_cast<std::size_t>(index)].content);
+                 contactsTab != nullptr && contactsTab->widget != nullptr)
+        {
+            m_contentStack->setCurrentWidget(contactsTab->widget);
+        }
         else if (m_contentStack != nullptr)
         {
             m_contentStack->setCurrentIndex(0);
@@ -1730,7 +1828,8 @@ namespace javelin::gui::shell
         {
             return;
         }
-        if (index == 0 && !std::holds_alternative<ComposeTabState>(m_tabs[0].content))
+        if (index == 0 && !std::holds_alternative<ComposeTabState>(m_tabs[0].content) &&
+            !std::holds_alternative<ContactsTabState>(m_tabs[0].content))
         {
             return;
         }
@@ -1740,6 +1839,22 @@ namespace javelin::gui::shell
             !closeComposeTab(index))
         {
             return;
+        }
+
+        if (auto* contactsTab =
+                std::get_if<ContactsTabState>(&m_tabs[static_cast<std::size_t>(index)].content))
+        {
+            if (contactsTab->widget != nullptr && contactsTab->widget->operationInFlight())
+            {
+                m_statusBar->showMessage(
+                    QStringLiteral("Wait for the Contacts operation to finish."), 5000);
+                return;
+            }
+            if (contactsTab->widget != nullptr)
+            {
+                m_contentStack->removeWidget(contactsTab->widget);
+                contactsTab->widget->deleteLater();
+            }
         }
 
         m_tabs.erase(m_tabs.begin() + index);
@@ -1773,7 +1888,7 @@ namespace javelin::gui::shell
         if (m_mailboxPane != nullptr)
         {
             m_mailboxPane->setVisible(m_activeTabIndex == std::optional<int>{0} &&
-                                      !activeTabIsCompose());
+                                      !activeTabIsCompose() && !activeTabIsContacts());
         }
 
         m_syncingNavigation = true;
@@ -1783,6 +1898,10 @@ namespace javelin::gui::shell
         if (const auto* composeTab = std::get_if<ComposeTabState>(&tab->content))
         {
             Q_UNUSED(composeTab);
+            m_mailboxSearchEdit->clear();
+        }
+        else if (std::holds_alternative<ContactsTabState>(tab->content))
+        {
             m_mailboxSearchEdit->clear();
         }
         else if (const auto* mailboxTab = std::get_if<MailboxTabState>(&tab->content))
@@ -1997,6 +2116,12 @@ namespace javelin::gui::shell
         }
         else
         {
+            if (std::holds_alternative<ContactsTabState>(tab->content))
+            {
+                m_messageModel->clear();
+                m_messageViewContainer->setSelection(m_messageViewService, std::nullopt,
+                                                     std::nullopt, std::nullopt);
+            }
             updateMessageActions();
             return;
         }
@@ -2038,6 +2163,13 @@ namespace javelin::gui::shell
         if (auto* searchTab = std::get_if<SearchTabState>(&tab.content))
         {
             refreshSearchTabFromServer(*searchTab);
+            return;
+        }
+
+        if (auto* contactsTab = std::get_if<ContactsTabState>(&tab.content);
+            contactsTab != nullptr && contactsTab->widget != nullptr)
+        {
+            contactsTab->widget->refreshRemote();
         }
     }
 
@@ -2831,6 +2963,13 @@ namespace javelin::gui::shell
     {
         m_mailboxModel->refresh();
         m_mailboxView->expandAll();
+        if (m_contactsAction != nullptr)
+        {
+            const auto result = m_contactRepository.listAccounts();
+            const auto* accounts =
+                std::get_if<std::vector<javelin::jmap::cache::ContactAccount>>(&result);
+            m_contactsAction->setEnabled(accounts != nullptr && !accounts->empty());
+        }
     }
 
     void MainWindow::refreshViewsFromCache()
@@ -3156,7 +3295,8 @@ namespace javelin::gui::shell
     void MainWindow::updateMessageActions()
     {
         const auto selectedIds = selectedEmailIds();
-        const bool hasEmailSelection = activeAccountId().has_value() && !selectedIds.empty();
+        const bool hasEmailSelection =
+            activeAccountId().has_value() && !selectedIds.empty() && !activeTabIsContacts();
         const bool hasMailboxSelection = activeTabIsMailbox() && activeAccountId().has_value() &&
                                          activeMailboxId().has_value() && !selectedIds.empty();
         const auto draftsMailbox =
@@ -4826,11 +4966,15 @@ namespace javelin::gui::shell
                     settings.setValue(QStringLiteral("cachedItems"),
                                       QJsonDocument{itemsArray}.toJson(QJsonDocument::Compact));
                 }
-                else
+                else if constexpr (std::is_same_v<std::decay_t<decltype(content)>, ComposeTabState>)
                 {
                     settings.setValue(QStringLiteral("type"), QStringLiteral("compose"));
                     settings.setValue(QStringLiteral("composeSessionId"),
                                       QString::fromStdString(content.composeSessionId));
+                }
+                else
+                {
+                    settings.setValue(QStringLiteral("type"), QStringLiteral("contacts"));
                 }
             },
             tab.content);

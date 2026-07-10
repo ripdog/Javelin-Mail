@@ -1,4 +1,5 @@
 #include "jmap/api/ContactsMethods.h"
+#include "jmap/contacts/ContactTypes.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -72,4 +73,20 @@ TEST_CASE("contacts set responses preserve patches and errors", "[jmap][contacts
     CHECK(response.value->created.at("c1").json.find("card-1") != std::string::npos);
     CHECK(response.value->notDestroyed.at("book-1").json.find("addressBookHasContents") !=
           std::string::npos);
+}
+
+TEST_CASE("contact document editing removes immutable ids and retains extensions",
+          "[jmap][contacts][document]")
+{
+    const auto prepared = javelin::jmap::contacts::prepareContactDocument(
+        R"({"id":"server-id","uid":"u1","kind":"individual","addressBookIds":{"b1":true},"x-extension":{"answer":42}})",
+        false);
+    REQUIRE(std::holds_alternative<std::string>(prepared));
+    const auto& json = std::get<std::string>(prepared);
+    CHECK(json.find("server-id") == std::string::npos);
+    CHECK(json.find("x-extension") != std::string::npos);
+
+    const auto photo = javelin::jmap::contacts::setContactPhoto(json, "blob-1", "image/png");
+    REQUIRE(std::holds_alternative<std::string>(photo));
+    CHECK(std::get<std::string>(photo).find("blob-1") != std::string::npos);
 }

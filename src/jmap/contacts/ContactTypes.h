@@ -5,6 +5,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <variant>
 #include <vector>
 
 namespace javelin::jmap::contacts
@@ -34,4 +35,8 @@ namespace javelin::jmap::contacts
     [[nodiscard]] std::optional<ContactSummary>
     summarizeContact(std::string accountId, const javelin::jmap::api::ContactCard& card);
     [[nodiscard]] std::string normalizeEmail(std::string_view email);
+    [[nodiscard]] std::variant<std::string, std::string_view>
+    prepareContactDocument(std::string_view json, bool creating);
+    [[nodiscard]] std::variant<std::string, std::string_view>
+    setContactPhoto(std::string_view json, std::string blobId, std::string mediaType);
 } // namespace javelin::jmap::contacts

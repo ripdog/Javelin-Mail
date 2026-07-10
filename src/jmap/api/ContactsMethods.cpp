@@ -46,6 +46,15 @@ namespace javelin::jmap::api::detail
         bool onSuccessDestroyOriginal = false;
     };
 
+    struct RawAddressBookCreate
+    {
+        std::string name;
+        std::optional<std::string> description;
+        std::uint32_t sortOrder = 0;
+        bool isSubscribed = true;
+        std::optional<std::unordered_map<std::string, AddressBookRights>> shareWith;
+    };
+
     struct RawSetResult
     {
         std::string accountId;
@@ -170,6 +179,14 @@ template <> struct glz::meta<javelin::jmap::api::detail::RawContactCardCopyReque
                     "onSuccessDestroyOriginal", &T::onSuccessDestroyOriginal);
 };
 
+template <> struct glz::meta<javelin::jmap::api::detail::RawAddressBookCreate>
+{
+    using T = javelin::jmap::api::detail::RawAddressBookCreate;
+    static constexpr auto value =
+        glz::object("name", &T::name, "description", &T::description, "sortOrder", &T::sortOrder,
+                    "isSubscribed", &T::isSubscribed, "shareWith", &T::shareWith);
+};
+
 template <> struct glz::meta<javelin::jmap::api::detail::RawSetResult>
 {
     using T = javelin::jmap::api::detail::RawSetResult;
@@ -281,6 +298,22 @@ namespace javelin::jmap::api
             .create = rawDocuments(request.create),
             .onSuccessDestroyOriginal = request.onSuccessDestroyOriginal,
         });
+    }
+
+    ContactDocument addressBookCreateDocument(const AddressBook& addressBook)
+    {
+        return {.json =
+                    serialize(detail::RawAddressBookCreate{.name = addressBook.name,
+                                                           .description = addressBook.description,
+                                                           .sortOrder = addressBook.sortOrder,
+                                                           .isSubscribed = addressBook.isSubscribed,
+                                                           .shareWith = addressBook.shareWith})
+                        .value_or("{}")};
+    }
+
+    ContactDocument addressBookUpdateDocument(const AddressBook& addressBook)
+    {
+        return addressBookCreateDocument(addressBook);
     }
 
     ParsedEnvelope<AddressBookGetResponse> parseAddressBookGetResponse(std::string_view json)

@@ -159,4 +159,60 @@ namespace javelin::jmap::contacts
         }
         return summary;
     }
+
+    std::variant<std::string, std::string_view> prepareContactDocument(const std::string_view json,
+                                                                       const bool creating)
+    {
+        std::string buffer{json};
+        glz::generic value;
+        if (glz::read_json(value, buffer) || !value.is_object())
+        {
+            return std::string_view{"The contact document must be a valid JSON object."};
+        }
+        auto& object = value.get_object();
+        object.erase("id");
+        if (creating && (!object.contains("uid") || !object.contains("kind") ||
+                         !object.contains("addressBookIds")))
+        {
+            return std::string_view{
+                "New contacts require uid, kind, and at least one addressBookIds entry."};
+        }
+        std::string result;
+        if (glz::write_json(value, result))
+        {
+            return std::string_view{"Unable to serialize the contact document."};
+        }
+        return result;
+    }
+
+    std::variant<std::string, std::string_view>
+    setContactPhoto(const std::string_view json, std::string blobId, std::string mediaType)
+    {
+        std::string buffer{json};
+        glz::generic value;
+        if (glz::read_json(value, buffer) || !value.is_object())
+        {
+            return std::string_view{"The contact document must be valid before adding a photo."};
+        }
+        auto& media = value["media"];
+        if (media.is_null())
+        {
+            media.data = glz::generic::object_t{};
+        }
+        if (!media.is_object())
+        {
+            return std::string_view{"The contact media property is not an object."};
+        }
+        glz::generic photo;
+        photo["kind"] = std::string{"photo"};
+        photo["blobId"] = std::move(blobId);
+        photo["mediaType"] = std::move(mediaType);
+        media["javelin-photo"] = std::move(photo);
+        std::string result;
+        if (glz::write_json(value, result))
+        {
+            return std::string_view{"Unable to update the contact photo."};
+        }
+        return result;
+    }
 } // namespace javelin::jmap::contacts

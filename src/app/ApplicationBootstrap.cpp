@@ -148,6 +148,7 @@ namespace javelin::app
 
         m_mainWindow = new javelin::gui::shell::MainWindow(
             m_processServices->jmapCore(), m_processServices->accountRepository(),
+            m_processServices->contactRepository(), m_processServices->contactService(),
             m_processServices->identityRepository(), m_processServices->messageViewService(),
             m_processServices->queryService(), m_processServices->translationCacheRepository(),
             m_processServices->composeService(), m_processServices->longPollService());

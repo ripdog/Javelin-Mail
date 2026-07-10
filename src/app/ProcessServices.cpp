@@ -6,11 +6,13 @@
 #include "jmap/JmapCore.h"
 #include "jmap/api/Transport.h"
 #include "jmap/cache/AccountRepository.h"
+#include "jmap/cache/ContactRepository.h"
 #include "jmap/cache/IdentityRepository.h"
 #include "jmap/cache/MessageViewService.h"
 #include "jmap/cache/QueryService.h"
 #include "jmap/cache/SubmissionRepository.h"
 #include "jmap/cache/TranslationCacheRepository.h"
+#include "jmap/contacts/ContactService.h"
 #include "jmap/render/InlineMessageUrl.h"
 #include "jmap/submission/ComposeService.h"
 
@@ -63,6 +65,10 @@ namespace javelin::app
         m_jmapCore = std::make_unique<javelin::jmap::JmapCore>(m_databaseConnection, *m_transport);
         m_accountRepository =
             std::make_unique<javelin::jmap::cache::AccountRepository>(m_databaseConnection);
+        m_contactRepository =
+            std::make_unique<javelin::jmap::cache::ContactRepository>(m_databaseConnection);
+        m_contactService = std::make_unique<javelin::jmap::contacts::ContactService>(
+            m_databaseConnection, *m_transport);
         m_identityRepository =
             std::make_unique<javelin::jmap::cache::IdentityRepository>(m_databaseConnection);
         m_messageViewService =
@@ -95,6 +101,16 @@ namespace javelin::app
     javelin::jmap::cache::AccountRepository& ProcessServices::accountRepository()
     {
         return *m_accountRepository;
+    }
+
+    javelin::jmap::cache::ContactRepository& ProcessServices::contactRepository()
+    {
+        return *m_contactRepository;
+    }
+
+    javelin::jmap::contacts::ContactService& ProcessServices::contactService()
+    {
+        return *m_contactService;
     }
 
     javelin::jmap::cache::IdentityRepository& ProcessServices::identityRepository()

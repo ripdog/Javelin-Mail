@@ -42,6 +42,10 @@ namespace javelin::jmap::submission
 {
     class ComposeService;
 }
+namespace javelin::jmap::contacts
+{
+    class ContactService;
+}
 
 namespace javelin::app
 {
@@ -51,6 +55,7 @@ namespace javelin::app
 namespace javelin::jmap::cache
 {
     class AccountRepository;
+    class ContactRepository;
     class IdentityRepository;
     class MessageViewService;
     class QueryService;
@@ -76,6 +81,10 @@ namespace javelin::gui::compose
 {
     class ComposeTabWidget;
 }
+namespace javelin::gui::contacts
+{
+    class ContactsManagerWidget;
+}
 
 namespace javelin::gui::shell
 {
@@ -89,6 +98,8 @@ namespace javelin::gui::shell
         explicit MainWindow(
             javelin::jmap::JmapCore& jmapCore,
             javelin::jmap::cache::AccountRepository& accountRepository,
+            javelin::jmap::cache::ContactRepository& contactRepository,
+            javelin::jmap::contacts::ContactService& contactService,
             javelin::jmap::cache::IdentityRepository& identityRepository,
             javelin::jmap::cache::MessageViewService& messageViewService,
             javelin::jmap::cache::QueryService& queryService,
@@ -150,9 +161,19 @@ namespace javelin::gui::shell
             TabSelectionState selection;
         };
 
+        struct ContactsTabState
+        {
+            std::string accountId;
+            QString title;
+            javelin::gui::contacts::ContactsManagerWidget* widget = nullptr;
+            PageState page;
+            TabSelectionState selection;
+        };
+
         struct TabState
         {
-            std::variant<MailboxTabState, SearchTabState, ComposeTabState> content;
+            std::variant<MailboxTabState, SearchTabState, ComposeTabState, ContactsTabState>
+                content;
         };
 
         struct MessageContentRequestState
@@ -169,6 +190,7 @@ namespace javelin::gui::shell
         void setupUi();
         void connectSelection();
         void composeNewMessage();
+        void openContacts();
         void composeReply();
         void composeReplyAll();
         void composeForward();
@@ -217,6 +239,7 @@ namespace javelin::gui::shell
         [[nodiscard]] bool activeTabIsMailbox() const;
         [[nodiscard]] bool activeTabIsSearch() const;
         [[nodiscard]] bool activeTabIsCompose() const;
+        [[nodiscard]] bool activeTabIsContacts() const;
         [[nodiscard]] std::optional<std::string> activeAccountId() const;
         [[nodiscard]] std::optional<std::string> activeMailboxId() const;
         [[nodiscard]] const TabState* activeTab() const;
@@ -296,6 +319,8 @@ namespace javelin::gui::shell
 
         javelin::jmap::JmapCore& m_jmapCore;
         javelin::jmap::cache::AccountRepository& m_accountRepository;
+        javelin::jmap::cache::ContactRepository& m_contactRepository;
+        javelin::jmap::contacts::ContactService& m_contactService;
         javelin::jmap::cache::IdentityRepository& m_identityRepository;
         javelin::jmap::cache::MessageViewService& m_messageViewService;
         javelin::jmap::cache::QueryService& m_queryService;
@@ -326,6 +351,7 @@ namespace javelin::gui::shell
         QAction* m_quitAction = nullptr;
         QAction* m_preferencesAction = nullptr;
         QAction* m_newMessageAction = nullptr;
+        QAction* m_contactsAction = nullptr;
         QAction* m_replyAction = nullptr;
         QAction* m_replyAllAction = nullptr;
         QAction* m_forwardAction = nullptr;

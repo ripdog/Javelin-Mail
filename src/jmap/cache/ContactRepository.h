@@ -10,6 +10,15 @@
 
 namespace javelin::jmap::cache
 {
+    struct ContactAccount
+    {
+        std::string accountId;
+        std::string ownerAccountId;
+        std::string name;
+        bool isReadOnly = false;
+        bool mayCreateAddressBook = false;
+    };
+
     class ContactRepository
     {
       public:
@@ -26,6 +35,8 @@ namespace javelin::jmap::cache
                        std::span<const std::string> destroyed, std::string_view state);
         [[nodiscard]] std::variant<std::vector<javelin::jmap::api::AddressBook>, DatabaseError>
         listAddressBooks(std::string_view accountId, bool includeUnsubscribed = true) const;
+        [[nodiscard]] std::variant<std::vector<ContactAccount>, DatabaseError>
+        listAccounts(std::optional<std::string_view> ownerAccountId = std::nullopt) const;
         [[nodiscard]] std::variant<std::vector<javelin::jmap::contacts::ContactSummary>,
                                    DatabaseError>
         listContacts(std::string_view accountId,

@@ -1,4 +1,5 @@
 #include "jmap/cache/ContactRepository.h"
+#include "jmap/api/Session.h"
 
 #include <glaze/glaze.hpp>
 
@@ -329,6 +330,38 @@ namespace javelin::jmap::cache
                  .isSubscribed = query.value(5).toInt() != 0,
                  .shareWith = std::move(shareWith),
                  .myRights = rights});
+        }
+        return result;
+    }
+
+    std::variant<std::vector<ContactAccount>, DatabaseError>
+    ContactRepository::listAccounts(const std::optional<std::string_view> ownerAccountId) const
+    {
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral("SELECT account_id,owner_account_id,name,is_read_only,"
+                                     "contacts_capabilities_json FROM accounts WHERE "
+                                     "cap_contacts=1 AND (:owner='' OR owner_account_id=:owner) "
+                                     "ORDER BY is_primary DESC,name COLLATE NOCASE,account_id"));
+        query.bindValue(QStringLiteral(":owner"),
+                        ownerAccountId.has_value()
+                            ? QString::fromStdString(std::string{*ownerAccountId})
+                            : QStringLiteral(""));
+        if (!query.exec())
+        {
+            return queryError(QStringLiteral("List Contacts accounts"), query);
+        }
+        std::vector<ContactAccount> result;
+        while (query.next())
+        {
+            javelin::jmap::api::ContactsCapability capability;
+            auto json = query.value(4).toString().toStdString();
+            static_cast<void>(
+                glz::read<glz::opts{.error_on_unknown_keys = false}>(capability, json));
+            result.push_back({.accountId = query.value(0).toString().toStdString(),
+                              .ownerAccountId = query.value(1).toString().toStdString(),
+                              .name = query.value(2).toString().toStdString(),
+                              .isReadOnly = query.value(3).toInt() != 0,
+                              .mayCreateAddressBook = capability.mayCreateAddressBook});
         }
         return result;
     }
