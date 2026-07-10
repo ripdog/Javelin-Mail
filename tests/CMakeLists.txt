@@ -4,6 +4,7 @@ add_executable(javelin_jmap_tests
     jmap/AccountRepositoryTest.cpp
     jmap/AuthTest.cpp
     jmap/ContactsMethodsTest.cpp
+    jmap/ContactRepositoryTest.cpp
     jmap/DatabaseTest.cpp
     jmap/EmailRepositoryTest.cpp
     jmap/HtmlMessageDocumentBuilderTest.cpp

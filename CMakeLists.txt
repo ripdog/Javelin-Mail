@@ -103,6 +103,8 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/cache/AccountRepository.h
     src/jmap/cache/ComposeSessionRepository.cpp
     src/jmap/cache/ComposeSessionRepository.h
+    src/jmap/cache/ContactRepository.cpp
+    src/jmap/cache/ContactRepository.h
     src/jmap/cache/Database.cpp
     src/jmap/cache/Database.h
     src/jmap/cache/EmailRepository.cpp
@@ -131,6 +133,8 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/cache/TranslationCacheRepository.cpp
     src/jmap/cache/TranslationCacheRepository.h
     src/jmap/domain/MailEntities.h
+    src/jmap/contacts/ContactTypes.cpp
+    src/jmap/contacts/ContactTypes.h
     src/jmap/domain/MailEntityParsers.cpp
     src/jmap/domain/MailEntityParsers.h
     src/jmap/query/MessageGrouping.cpp
@@ -180,6 +184,7 @@ set(JAVELIN_FORMAT_FILES
     tests/jmap/AccountRepositoryTest.cpp
     tests/jmap/AuthTest.cpp
     tests/jmap/ContactsMethodsTest.cpp
+    tests/jmap/ContactRepositoryTest.cpp
     tests/jmap/DatabaseTest.cpp
     tests/jmap/EmailRepositoryTest.cpp
     tests/jmap/HtmlMessageDocumentBuilderTest.cpp
@@ -228,12 +233,16 @@ add_library(javelin_jmap STATIC
     src/jmap/api/SessionClient.h
     src/jmap/api/SessionParser.cpp
     src/jmap/api/SessionParser.h
+    src/jmap/contacts/ContactTypes.cpp
+    src/jmap/contacts/ContactTypes.h
     src/jmap/api/Transport.cpp
     src/jmap/api/Transport.h
     src/jmap/cache/AccountRepository.cpp
     src/jmap/cache/AccountRepository.h
     src/jmap/cache/ComposeSessionRepository.cpp
     src/jmap/cache/ComposeSessionRepository.h
+    src/jmap/cache/ContactRepository.cpp
+    src/jmap/cache/ContactRepository.h
     src/jmap/cache/Database.cpp
     src/jmap/cache/Database.h
     src/jmap/cache/EmailRepository.cpp
