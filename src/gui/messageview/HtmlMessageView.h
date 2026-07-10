@@ -32,6 +32,7 @@ namespace javelin::gui::messageview
       Q_SIGNALS:
         void viewSourceRequested();
         void documentLoaded();
+        void hoveredLinkChanged(QString url);
 
       private:
         void applyRemoteContentPolicy();

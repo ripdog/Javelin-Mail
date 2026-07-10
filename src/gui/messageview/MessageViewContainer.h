@@ -59,6 +59,7 @@ namespace javelin::gui::messageview
         void saveAllAttachmentsRequested(QString accountId, QString emailId);
         void viewSourceRequested();
         void messageActivated(QString emailId);
+        void hoveredLinkChanged(QString url);
 
       private:
         enum class ActiveView

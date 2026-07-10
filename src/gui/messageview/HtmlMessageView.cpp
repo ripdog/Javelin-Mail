@@ -124,6 +124,8 @@ namespace javelin::gui::messageview
 
         m_view = new FilteredWebEngineView([this] { Q_EMIT viewSourceRequested(); }, this);
         m_view->setPage(new MessageWebEnginePage(m_view));
+        connect(m_view->page(), &QWebEnginePage::linkHovered, this,
+                [this](const QString& url) { Q_EMIT hoveredLinkChanged(url); });
         auto* settings = m_view->settings();
         settings->setAttribute(QWebEngineSettings::JavascriptEnabled, true);
         settings->setAttribute(QWebEngineSettings::LocalContentCanAccessFileUrls, false);

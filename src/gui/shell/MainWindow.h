@@ -78,6 +78,7 @@ namespace javelin::gui::compose
 
 namespace javelin::gui::shell
 {
+    class LayeredStatusBar;
 
     class MainWindow : public KXmlGuiWindow
     {
@@ -316,6 +317,7 @@ namespace javelin::gui::shell
         QToolButton* m_previousPageButton = nullptr;
         QToolButton* m_nextPageButton = nullptr;
         QLabel* m_messageEmptyState = nullptr;
+        LayeredStatusBar* m_statusBar = nullptr;
         QAction* m_refreshAction = nullptr;
         QAction* m_quitAction = nullptr;
         QAction* m_preferencesAction = nullptr;

@@ -10,6 +10,7 @@
 #include "gui/messageview/MessageViewContainer.h"
 #include "gui/search/AdvancedSearchDialog.h"
 #include "gui/settings/PreferencesDialog.h"
+#include "gui/shell/LayeredStatusBar.h"
 #include "gui/shell/MessageFileUtils.h"
 #include "jmap/JmapCore.h"
 #include "jmap/cache/AccountRepository.h"
@@ -58,9 +59,7 @@
 #include <QSignalBlocker>
 #include <QSplitter>
 #include <QStackedWidget>
-#include <QStatusBar>
 #include <QTabBar>
-#include <QTimer>
 #include <QToolButton>
 #include <QTreeView>
 #include <QUrl>
@@ -559,6 +558,8 @@ namespace javelin::gui::shell
           m_queryService(queryService), m_translationCacheRepository(translationCacheRepository),
           m_composeService(composeService), m_longPollService(longPollService)
     {
+        m_statusBar = new LayeredStatusBar(this);
+        setStatusBar(m_statusBar);
         setupUi();
         createActions();
         setupGUI(KXmlGuiWindow::ToolBar | KXmlGuiWindow::Keys | KXmlGuiWindow::Save |
@@ -939,6 +940,9 @@ namespace javelin::gui::shell
         connect(m_messageViewContainer,
                 &javelin::gui::messageview::MessageViewContainer::messageActivated, this,
                 &MainWindow::selectMessageAlone);
+        connect(m_messageViewContainer,
+                &javelin::gui::messageview::MessageViewContainer::hoveredLinkChanged, this,
+                [this](const QString& url) { m_statusBar->setOverlayMessage(url); });
 
         m_messageView->setContextMenuPolicy(Qt::CustomContextMenu);
         connect(m_messageView, &QListView::customContextMenuRequested, this,
@@ -1006,8 +1010,8 @@ namespace javelin::gui::shell
         centralLayout->addWidget(m_contentStack);
 
         setCentralWidget(centralContainer);
-        statusBar()->showMessage(m_jmapCore.statusSummary());
-        statusBar()->addPermanentWidget(m_longPollStatusLabel);
+        m_statusBar->showMessage(m_jmapCore.statusSummary());
+        m_statusBar->addPermanentWidget(m_longPollStatusLabel);
         updateEmptyStates();
         updateMessageListHeader();
         updateLongPollStatus();
@@ -1142,7 +1146,7 @@ namespace javelin::gui::shell
             activeAccountId().has_value() ? activeAccountId() : currentAccountId(*m_mailboxView);
         if (!accountId.has_value())
         {
-            statusBar()->showMessage(
+            m_statusBar->showMessage(
                 QStringLiteral("Select an account before composing a message."), 5000);
             return;
         }
@@ -1161,7 +1165,7 @@ namespace javelin::gui::shell
         const auto emailId = currentEmailId(*m_messageView);
         if (!accountId.has_value() || !emailId.has_value())
         {
-            statusBar()->showMessage(QStringLiteral("Select a message to reply to."), 5000);
+            m_statusBar->showMessage(QStringLiteral("Select a message to reply to."), 5000);
             return;
         }
 
@@ -1179,7 +1183,7 @@ namespace javelin::gui::shell
         const auto emailId = currentEmailId(*m_messageView);
         if (!accountId.has_value() || !emailId.has_value())
         {
-            statusBar()->showMessage(QStringLiteral("Select a message to reply to."), 5000);
+            m_statusBar->showMessage(QStringLiteral("Select a message to reply to."), 5000);
             return;
         }
 
@@ -1197,7 +1201,7 @@ namespace javelin::gui::shell
         const auto emailId = currentEmailId(*m_messageView);
         if (!accountId.has_value() || !emailId.has_value())
         {
-            statusBar()->showMessage(QStringLiteral("Select a message to forward."), 5000);
+            m_statusBar->showMessage(QStringLiteral("Select a message to forward."), 5000);
             return;
         }
 
@@ -1215,7 +1219,7 @@ namespace javelin::gui::shell
         const auto emailId = currentEmailId(*m_messageView);
         if (!accountId.has_value() || !emailId.has_value())
         {
-            statusBar()->showMessage(QStringLiteral("Select a draft to edit."), 5000);
+            m_statusBar->showMessage(QStringLiteral("Select a draft to edit."), 5000);
             return;
         }
 
@@ -1223,7 +1227,7 @@ namespace javelin::gui::shell
         if (!activeMailboxId().has_value() || !draftsMailbox.has_value() ||
             draftsMailbox->id != *activeMailboxId())
         {
-            statusBar()->showMessage(QStringLiteral("Open a message from Drafts to edit it."),
+            m_statusBar->showMessage(QStringLiteral("Open a message from Drafts to edit it."),
                                      5000);
             return;
         }
@@ -1948,7 +1952,7 @@ namespace javelin::gui::shell
             [this](const QString& message)
             {
                 qInfo().noquote() << "GUI mailbox page progress" << message;
-                statusBar()->showMessage(message);
+                m_statusBar->showMessage(message);
             });
         QCoro::connect(
             std::move(task), this,
@@ -1968,7 +1972,7 @@ namespace javelin::gui::shell
                             break;
                         }
                     }
-                    statusBar()->showMessage(error->message, 10000);
+                    m_statusBar->showMessage(error->message, 10000);
                     updateEmptyStates();
                     return;
                 }
@@ -2004,7 +2008,7 @@ namespace javelin::gui::shell
                         refreshSelectionFromModels();
                     }
                     updateEmptyStates();
-                    statusBar()->showMessage(
+                    m_statusBar->showMessage(
                         QStringLiteral("Loaded %1 mailbox conversations.")
                             .arg(static_cast<qulonglong>(summary.representativeCount)),
                         5000);
@@ -2035,7 +2039,7 @@ namespace javelin::gui::shell
             [this](const QString& message)
             {
                 qInfo().noquote() << "GUI search progress" << message;
-                statusBar()->showMessage(message);
+                m_statusBar->showMessage(message);
             });
         QCoro::connect(
             std::move(task), this,
@@ -2054,7 +2058,7 @@ namespace javelin::gui::shell
                             break;
                         }
                     }
-                    statusBar()->showMessage(error->message, 10000);
+                    m_statusBar->showMessage(error->message, 10000);
                     updateEmptyStates();
                     return;
                 }
@@ -2089,7 +2093,7 @@ namespace javelin::gui::shell
                         refreshSelectionFromModels();
                     }
                     updateEmptyStates();
-                    statusBar()->showMessage(
+                    m_statusBar->showMessage(
                         summary.total.has_value() && *summary.total > summary.representativeCount
                             ? QStringLiteral("Showing the first %1 of %2 server matches.")
                                   .arg(static_cast<qulonglong>(summary.representativeCount))
@@ -2249,13 +2253,13 @@ namespace javelin::gui::shell
         if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
             settings.apiKey.isEmpty())
         {
-            statusBar()->showMessage(
+            m_statusBar->showMessage(
                 QStringLiteral("Set Session URL, Login Email, and API Key in Preferences first."),
                 5000);
             return;
         }
 
-        statusBar()->showMessage(QStringLiteral("Preparing compose tab..."));
+        m_statusBar->showMessage(QStringLiteral("Preparing compose tab..."));
         auto task = m_composeService.open(toLiveConnectionSettings(settings), std::move(request));
         QCoro::connect(
             std::move(task), this,
@@ -2266,13 +2270,13 @@ namespace javelin::gui::shell
                 if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
                 {
                     qWarning().noquote() << "GUI compose open failed" << error->message;
-                    statusBar()->showMessage(error->message, 10000);
+                    m_statusBar->showMessage(error->message, 10000);
                     return;
                 }
 
                 openOrActivateComposeTab(
                     std::get<javelin::jmap::submission::DraftSnapshot>(std::move(result)));
-                statusBar()->showMessage(QStringLiteral("Compose ready."), 3000);
+                m_statusBar->showMessage(QStringLiteral("Compose ready."), 3000);
             });
     }
 
@@ -2352,7 +2356,7 @@ namespace javelin::gui::shell
                 });
         connect(widget, &javelin::gui::compose::ComposeTabWidget::statusMessageRequested, this,
                 [this](const QString& message, const int timeoutMs)
-                { statusBar()->showMessage(message, timeoutMs); });
+                { m_statusBar->showMessage(message, timeoutMs); });
         connect(widget, &javelin::gui::compose::ComposeTabWidget::closeRequested, this,
                 [this, widget]
                 {
@@ -2385,7 +2389,7 @@ namespace javelin::gui::shell
         auto* widget = composeTab->widget;
         if (widget->operationInFlight())
         {
-            statusBar()->showMessage(
+            m_statusBar->showMessage(
                 QStringLiteral("Wait for the current compose operation to finish first."), 5000);
             return false;
         }
@@ -2402,7 +2406,7 @@ namespace javelin::gui::shell
         {
             if (const auto error = m_composeService.discard(widget->composeSessionId()))
             {
-                statusBar()->showMessage(error->message, 10000);
+                m_statusBar->showMessage(error->message, 10000);
                 return false;
             }
             m_contentStack->removeWidget(widget);
@@ -2428,7 +2432,7 @@ namespace javelin::gui::shell
 
             if (const auto error = m_composeService.discard(widget->composeSessionId()))
             {
-                statusBar()->showMessage(error->message, 10000);
+                m_statusBar->showMessage(error->message, 10000);
                 return false;
             }
             m_contentStack->removeWidget(widget);
@@ -2458,7 +2462,7 @@ namespace javelin::gui::shell
 
         if (const auto error = m_composeService.discard(widget->composeSessionId()))
         {
-            statusBar()->showMessage(error->message, 10000);
+            m_statusBar->showMessage(error->message, 10000);
             return false;
         }
 
@@ -2481,7 +2485,7 @@ namespace javelin::gui::shell
             activeAccountId().has_value() ? activeAccountId() : currentAccountId(*m_mailboxView);
         if (!accountId.has_value())
         {
-            statusBar()->showMessage(QStringLiteral("Select an account before searching."), 5000);
+            m_statusBar->showMessage(QStringLiteral("Select an account before searching."), 5000);
             return;
         }
 
@@ -2494,7 +2498,7 @@ namespace javelin::gui::shell
             activeAccountId().has_value() ? activeAccountId() : currentAccountId(*m_mailboxView);
         if (!accountId.has_value())
         {
-            statusBar()->showMessage(QStringLiteral("Select an account before searching."), 5000);
+            m_statusBar->showMessage(QStringLiteral("Select an account before searching."), 5000);
             return;
         }
 
@@ -2507,7 +2511,7 @@ namespace javelin::gui::shell
         auto criteria = dialog.criteria();
         if (javelin::jmap::search::isEmpty(criteria))
         {
-            statusBar()->showMessage(QStringLiteral("Enter at least one search field."), 5000);
+            m_statusBar->showMessage(QStringLiteral("Enter at least one search field."), 5000);
             return;
         }
 
@@ -2623,7 +2627,7 @@ namespace javelin::gui::shell
         updateSortButton();
         loadActiveTabFromCache(true);
         updateMessageListHeader();
-        statusBar()->showMessage(QStringLiteral("Sorting by %1, %2.")
+        m_statusBar->showMessage(QStringLiteral("Sorting by %1, %2.")
                                      .arg(sortPropertyLabel(m_emailListSort.property),
                                           sortDirectionLabel(m_emailListSort.direction)),
                                  5000);
@@ -3165,7 +3169,7 @@ namespace javelin::gui::shell
         if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
             settings.apiKey.isEmpty())
         {
-            statusBar()->showMessage(
+            m_statusBar->showMessage(
                 QStringLiteral("Set Session URL, Login Email, and API Key in Preferences first."),
                 5000);
             return;
@@ -3176,12 +3180,12 @@ namespace javelin::gui::shell
         if (!attachmentSettings.alwaysAsk && (attachmentSettings.directory.isEmpty() ||
                                               !QDir{attachmentSettings.directory}.exists()))
         {
-            statusBar()->showMessage(
+            m_statusBar->showMessage(
                 QStringLiteral("Select a valid attachment save directory in Preferences."), 5000);
             return;
         }
 
-        statusBar()->showMessage(QStringLiteral("Downloading attachment..."));
+        m_statusBar->showMessage(QStringLiteral("Downloading attachment..."));
         auto task =
             m_jmapCore.downloadAttachment(toLiveConnectionSettings(settings), std::move(accountId),
                                           std::move(emailId), std::move(partId));
@@ -3191,7 +3195,7 @@ namespace javelin::gui::shell
             {
                 if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
                 {
-                    statusBar()->showMessage(error->message, 10000);
+                    m_statusBar->showMessage(error->message, 10000);
                     return;
                 }
 
@@ -3203,11 +3207,11 @@ namespace javelin::gui::shell
                         : uniqueFilePath(attachmentSettings.directory, suggestedFileName(download));
                 if (targetPath.isEmpty())
                 {
-                    statusBar()->showMessage(QStringLiteral("Attachment save canceled."), 3000);
+                    m_statusBar->showMessage(QStringLiteral("Attachment save canceled."), 3000);
                     return;
                 }
 
-                statusBar()->showMessage(QStringLiteral("Saving attachment..."));
+                m_statusBar->showMessage(QStringLiteral("Saving attachment..."));
 
                 auto* watcher = new QFutureWatcher<FileWriteResult>(this);
                 connect(watcher, &QFutureWatcher<FileWriteResult>::finished, this,
@@ -3216,14 +3220,14 @@ namespace javelin::gui::shell
                             const auto writeResult = watcher->result();
                             if (!writeResult.errorMessage.isEmpty())
                             {
-                                statusBar()->showMessage(
+                                m_statusBar->showMessage(
                                     QStringLiteral("Failed to save attachment: %1")
                                         .arg(writeResult.errorMessage),
                                     10000);
                             }
                             else
                             {
-                                statusBar()->showMessage(
+                                m_statusBar->showMessage(
                                     QStringLiteral("Saved attachment to %1").arg(writeResult.path),
                                     5000);
                             }
@@ -3240,7 +3244,7 @@ namespace javelin::gui::shell
         const auto snapshotResult = m_messageViewService.load(accountId, emailId);
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&snapshotResult))
         {
-            statusBar()->showMessage(error->message, 10000);
+            m_statusBar->showMessage(error->message, 10000);
             return;
         }
 
@@ -3248,14 +3252,14 @@ namespace javelin::gui::shell
             std::get<std::optional<javelin::jmap::cache::MessageViewSnapshot>>(snapshotResult);
         if (!snapshot.has_value())
         {
-            statusBar()->showMessage(QStringLiteral("The selected message is unavailable."), 5000);
+            m_statusBar->showMessage(QStringLiteral("The selected message is unavailable."), 5000);
             return;
         }
 
         const auto attachments = visibleDownloadableAttachments(*snapshot);
         if (attachments.empty())
         {
-            statusBar()->showMessage(QStringLiteral("No downloadable attachments are available."),
+            m_statusBar->showMessage(QStringLiteral("No downloadable attachments are available."),
                                      5000);
             return;
         }
@@ -3264,7 +3268,7 @@ namespace javelin::gui::shell
         if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
             settings.apiKey.isEmpty())
         {
-            statusBar()->showMessage(
+            m_statusBar->showMessage(
                 QStringLiteral("Set Session URL, Login Email, and API Key in Preferences first."),
                 5000);
             return;
@@ -3279,17 +3283,17 @@ namespace javelin::gui::shell
                 : attachmentSettings.directory;
         if (targetDirectory.isEmpty())
         {
-            statusBar()->showMessage(QStringLiteral("Save all attachments canceled."), 3000);
+            m_statusBar->showMessage(QStringLiteral("Save all attachments canceled."), 3000);
             return;
         }
         if (!QDir{targetDirectory}.exists())
         {
-            statusBar()->showMessage(
+            m_statusBar->showMessage(
                 QStringLiteral("Select a valid attachment save directory in Preferences."), 5000);
             return;
         }
 
-        statusBar()->showMessage(QStringLiteral("Downloading attachments..."));
+        m_statusBar->showMessage(QStringLiteral("Downloading attachments..."));
         auto task = downloadAttachments(m_jmapCore, toLiveConnectionSettings(settings), accountId,
                                         emailId, attachments);
         QCoro::connect(
@@ -3298,11 +3302,11 @@ namespace javelin::gui::shell
             {
                 if (!result.errorMessage.isEmpty())
                 {
-                    statusBar()->showMessage(result.errorMessage, 10000);
+                    m_statusBar->showMessage(result.errorMessage, 10000);
                     return;
                 }
 
-                statusBar()->showMessage(QStringLiteral("Saving attachments..."));
+                m_statusBar->showMessage(QStringLiteral("Saving attachments..."));
                 auto* watcher = new QFutureWatcher<BatchWriteResult>(this);
                 connect(
                     watcher, &QFutureWatcher<BatchWriteResult>::finished, this,
@@ -3311,14 +3315,14 @@ namespace javelin::gui::shell
                         const auto writeResult = watcher->result();
                         if (!writeResult.errorMessage.isEmpty())
                         {
-                            statusBar()->showMessage(
+                            m_statusBar->showMessage(
                                 QStringLiteral("Failed to save attachments to %1: %2")
                                     .arg(writeResult.failedPath, writeResult.errorMessage),
                                 10000);
                         }
                         else
                         {
-                            statusBar()->showMessage(
+                            m_statusBar->showMessage(
                                 QStringLiteral("Saved %1 attachments.").arg(writeResult.savedCount),
                                 5000);
                         }
@@ -3336,7 +3340,7 @@ namespace javelin::gui::shell
         if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
             settings.apiKey.isEmpty())
         {
-            statusBar()->showMessage(
+            m_statusBar->showMessage(
                 QStringLiteral("Set Session URL, Login Email, and API Key in Preferences first."),
                 5000);
             return;
@@ -3344,12 +3348,12 @@ namespace javelin::gui::shell
 
         if (!m_openAttachmentDirectory.isValid())
         {
-            statusBar()->showMessage(
+            m_statusBar->showMessage(
                 QStringLiteral("A temporary directory for attachments is unavailable."), 10000);
             return;
         }
 
-        statusBar()->showMessage(QStringLiteral("Downloading attachment..."));
+        m_statusBar->showMessage(QStringLiteral("Downloading attachment..."));
         auto task =
             m_jmapCore.downloadAttachment(toLiveConnectionSettings(settings), std::move(accountId),
                                           std::move(emailId), std::move(partId));
@@ -3359,13 +3363,13 @@ namespace javelin::gui::shell
             {
                 if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
                 {
-                    statusBar()->showMessage(error->message, 10000);
+                    m_statusBar->showMessage(error->message, 10000);
                     return;
                 }
 
                 const auto& download = std::get<javelin::jmap::AttachmentDownload>(result);
                 const QString targetPath = tempAttachmentPath(m_openAttachmentDirectory, download);
-                statusBar()->showMessage(QStringLiteral("Preparing attachment..."));
+                m_statusBar->showMessage(QStringLiteral("Preparing attachment..."));
 
                 auto* watcher = new QFutureWatcher<FileWriteResult>(this);
                 connect(watcher, &QFutureWatcher<FileWriteResult>::finished, this,
@@ -3374,7 +3378,7 @@ namespace javelin::gui::shell
                             const auto writeResult = watcher->result();
                             if (!writeResult.errorMessage.isEmpty())
                             {
-                                statusBar()->showMessage(
+                                m_statusBar->showMessage(
                                     QStringLiteral("Failed to prepare attachment: %1")
                                         .arg(writeResult.errorMessage),
                                     10000);
@@ -3384,7 +3388,7 @@ namespace javelin::gui::shell
 
                             const bool opened =
                                 QDesktopServices::openUrl(QUrl::fromLocalFile(writeResult.path));
-                            statusBar()->showMessage(
+                            m_statusBar->showMessage(
                                 opened ? QStringLiteral("Opened attachment.")
                                        : QStringLiteral(
                                              "The attachment was saved, but no app opened it."),
@@ -3402,7 +3406,7 @@ namespace javelin::gui::shell
         javelin::gui::settings::PreferencesDialog dialog{m_accountRepository, this};
         if (dialog.exec() == QDialog::Accepted)
         {
-            statusBar()->showMessage(QStringLiteral("Saved connection preferences."), 3000);
+            m_statusBar->showMessage(QStringLiteral("Saved connection preferences."), 3000);
             const auto settings = dialog.settings();
             if (!settings.sessionUrl.isEmpty() && !settings.loginEmail.isEmpty() &&
                 !settings.apiKey.isEmpty())
@@ -3427,7 +3431,7 @@ namespace javelin::gui::shell
         if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
             settings.apiKey.isEmpty())
         {
-            statusBar()->showMessage(
+            m_statusBar->showMessage(
                 QStringLiteral("Set Session URL, Login Email, and API Key in Preferences first."),
                 5000);
             return;
@@ -3436,7 +3440,7 @@ namespace javelin::gui::shell
         m_refreshInFlight = true;
         m_refreshAction->setEnabled(false);
         m_preferencesAction->setEnabled(false);
-        statusBar()->showMessage(QStringLiteral("Refreshing mail from server..."));
+        m_statusBar->showMessage(QStringLiteral("Refreshing mail from server..."));
         qInfo() << "GUI refresh requested";
 
         auto task = m_jmapCore.refreshFromServer(
@@ -3445,7 +3449,7 @@ namespace javelin::gui::shell
             {
                 qInfo().noquote() << "GUI refresh progress" << message;
                 QMetaObject::invokeMethod(
-                    this, [this, message] { statusBar()->showMessage(message); },
+                    this, [this, message] { m_statusBar->showMessage(message); },
                     Qt::QueuedConnection);
             });
         QCoro::connect(
@@ -3459,7 +3463,7 @@ namespace javelin::gui::shell
                 if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
                 {
                     qWarning().noquote() << "GUI refresh failed" << error->message;
-                    statusBar()->showMessage(error->message, 10000);
+                    m_statusBar->showMessage(error->message, 10000);
                     return;
                 }
 
@@ -3481,7 +3485,7 @@ namespace javelin::gui::shell
                                   << static_cast<qulonglong>(summary.emailCount);
                 reloadAccounts();
                 refreshViewsFromCache();
-                statusBar()->showMessage(
+                m_statusBar->showMessage(
                     QStringLiteral("Synced %1 mailboxes and %2 messages for %3.")
                         .arg(summary.mailboxCount)
                         .arg(summary.emailCount)
@@ -3525,7 +3529,7 @@ namespace javelin::gui::shell
             {
                 qInfo().noquote() << "GUI message content progress" << message;
                 QMetaObject::invokeMethod(
-                    this, [this, message] { statusBar()->showMessage(message, 5000); },
+                    this, [this, message] { m_statusBar->showMessage(message, 5000); },
                     Qt::QueuedConnection);
             });
         QCoro::connect(
@@ -3550,7 +3554,7 @@ namespace javelin::gui::shell
                 {
                     m_messageViewContainer->setErrorState(error->message);
                     qWarning().noquote() << "GUI message content refresh failed" << error->message;
-                    statusBar()->showMessage(error->message, 10000);
+                    m_statusBar->showMessage(error->message, 10000);
                     return;
                 }
 
@@ -3576,7 +3580,7 @@ namespace javelin::gui::shell
                                   << summary.usedCachedContent;
                 if (!summary.usedCachedContent)
                 {
-                    statusBar()->showMessage(QStringLiteral("Message ready."), 5000);
+                    m_statusBar->showMessage(QStringLiteral("Message ready."), 5000);
                 }
             });
     }
@@ -3793,21 +3797,21 @@ namespace javelin::gui::shell
         const auto mailboxId = activeMailboxId();
         if (!accountId.has_value() || !mailboxId.has_value())
         {
-            statusBar()->showMessage(QStringLiteral("Select a message to archive."), 3000);
+            m_statusBar->showMessage(QStringLiteral("Select a message to archive."), 3000);
             return;
         }
 
         auto emailIdsResult = selectedEmailIdsForMailboxAction(*accountId);
         if (const auto* error = std::get_if<QString>(&emailIdsResult))
         {
-            statusBar()->showMessage(*error, 10000);
+            m_statusBar->showMessage(*error, 10000);
             return;
         }
 
         auto emailIds = std::get<std::vector<std::string>>(std::move(emailIdsResult));
         if (emailIds.empty())
         {
-            statusBar()->showMessage(QStringLiteral("Select a message to archive."), 3000);
+            m_statusBar->showMessage(QStringLiteral("Select a message to archive."), 3000);
             return;
         }
 
@@ -3820,21 +3824,21 @@ namespace javelin::gui::shell
         const auto mailboxId = activeMailboxId();
         if (!accountId.has_value() || !mailboxId.has_value())
         {
-            statusBar()->showMessage(QStringLiteral("Select a message to delete."), 3000);
+            m_statusBar->showMessage(QStringLiteral("Select a message to delete."), 3000);
             return;
         }
 
         auto emailIdsResult = selectedEmailIdsForMailboxAction(*accountId);
         if (const auto* error = std::get_if<QString>(&emailIdsResult))
         {
-            statusBar()->showMessage(*error, 10000);
+            m_statusBar->showMessage(*error, 10000);
             return;
         }
 
         auto emailIds = std::get<std::vector<std::string>>(std::move(emailIdsResult));
         if (emailIds.empty())
         {
-            statusBar()->showMessage(QStringLiteral("Select a message to delete."), 3000);
+            m_statusBar->showMessage(QStringLiteral("Select a message to delete."), 3000);
             return;
         }
 
@@ -3847,21 +3851,21 @@ namespace javelin::gui::shell
         const auto sourceMailboxId = activeMailboxId();
         if (!accountId.has_value() || !sourceMailboxId.has_value())
         {
-            statusBar()->showMessage(QStringLiteral("Select a message to move."), 3000);
+            m_statusBar->showMessage(QStringLiteral("Select a message to move."), 3000);
             return;
         }
 
         auto emailIdsResult = selectedEmailIdsForMailboxAction(*accountId);
         if (const auto* error = std::get_if<QString>(&emailIdsResult))
         {
-            statusBar()->showMessage(*error, 10000);
+            m_statusBar->showMessage(*error, 10000);
             return;
         }
 
         auto emailIds = std::get<std::vector<std::string>>(std::move(emailIdsResult));
         if (emailIds.empty())
         {
-            statusBar()->showMessage(QStringLiteral("Select a message to move."), 3000);
+            m_statusBar->showMessage(QStringLiteral("Select a message to move."), 3000);
             return;
         }
 
@@ -3892,7 +3896,7 @@ namespace javelin::gui::shell
         }
         if (menu.actions().empty())
         {
-            statusBar()->showMessage(QStringLiteral("No destination mailboxes available."), 3000);
+            m_statusBar->showMessage(QStringLiteral("No destination mailboxes available."), 3000);
             return;
         }
 
@@ -3905,21 +3909,21 @@ namespace javelin::gui::shell
         const auto sourceMailboxId = activeMailboxId();
         if (!accountId.has_value() || !sourceMailboxId.has_value())
         {
-            statusBar()->showMessage(QStringLiteral("Select a message to copy."), 3000);
+            m_statusBar->showMessage(QStringLiteral("Select a message to copy."), 3000);
             return;
         }
 
         auto emailIdsResult = selectedEmailIdsForMailboxAction(*accountId);
         if (const auto* error = std::get_if<QString>(&emailIdsResult))
         {
-            statusBar()->showMessage(*error, 10000);
+            m_statusBar->showMessage(*error, 10000);
             return;
         }
 
         auto emailIds = std::get<std::vector<std::string>>(std::move(emailIdsResult));
         if (emailIds.empty())
         {
-            statusBar()->showMessage(QStringLiteral("Select a message to copy."), 3000);
+            m_statusBar->showMessage(QStringLiteral("Select a message to copy."), 3000);
             return;
         }
 
@@ -3950,7 +3954,7 @@ namespace javelin::gui::shell
         }
         if (menu.actions().empty())
         {
-            statusBar()->showMessage(QStringLiteral("No destination mailboxes available."), 3000);
+            m_statusBar->showMessage(QStringLiteral("No destination mailboxes available."), 3000);
             return;
         }
 
@@ -3963,7 +3967,7 @@ namespace javelin::gui::shell
         const auto archiveMailbox = findMailboxByRole(m_queryService, accountId, "archive");
         if (!archiveMailbox.has_value())
         {
-            statusBar()->showMessage(QStringLiteral("No Archive mailbox is available."), 5000);
+            m_statusBar->showMessage(QStringLiteral("No Archive mailbox is available."), 5000);
             return;
         }
 
@@ -3977,7 +3981,7 @@ namespace javelin::gui::shell
         const auto archiveMailbox = findMailboxByRole(m_queryService, accountId, "archive");
         if (!archiveMailbox.has_value())
         {
-            statusBar()->showMessage(QStringLiteral("No Archive mailbox is available."), 5000);
+            m_statusBar->showMessage(QStringLiteral("No Archive mailbox is available."), 5000);
             return;
         }
 
@@ -3991,7 +3995,7 @@ namespace javelin::gui::shell
         const auto trashMailbox = findMailboxByRole(m_queryService, accountId, "trash");
         if (!trashMailbox.has_value())
         {
-            statusBar()->showMessage(QStringLiteral("No Trash mailbox is available."), 5000);
+            m_statusBar->showMessage(QStringLiteral("No Trash mailbox is available."), 5000);
             return;
         }
 
@@ -4005,7 +4009,7 @@ namespace javelin::gui::shell
         const auto trashMailbox = findMailboxByRole(m_queryService, accountId, "trash");
         if (!trashMailbox.has_value())
         {
-            statusBar()->showMessage(QStringLiteral("No Trash mailbox is available."), 5000);
+            m_statusBar->showMessage(QStringLiteral("No Trash mailbox is available."), 5000);
             return;
         }
 
@@ -4024,7 +4028,7 @@ namespace javelin::gui::shell
                                                           destinationMailboxId);
             if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
             {
-                statusBar()->showMessage(error->message, 10000);
+                m_statusBar->showMessage(error->message, 10000);
                 return;
             }
         }
@@ -4039,12 +4043,12 @@ namespace javelin::gui::shell
             {
                 successMessage.chop(1);
             }
-            statusBar()->showMessage(
+            m_statusBar->showMessage(
                 QStringLiteral("%1 for %2 messages.").arg(successMessage).arg(selectedCount), 5000);
         }
         else
         {
-            statusBar()->showMessage(std::move(successMessage), 5000);
+            m_statusBar->showMessage(std::move(successMessage), 5000);
         }
 
         submitQueuedEmailMutations(std::move(accountId));
@@ -4061,7 +4065,7 @@ namespace javelin::gui::shell
                                                           destinationMailboxId);
             if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
             {
-                statusBar()->showMessage(error->message, 10000);
+                m_statusBar->showMessage(error->message, 10000);
                 return;
             }
         }
@@ -4076,12 +4080,12 @@ namespace javelin::gui::shell
             {
                 successMessage.chop(1);
             }
-            statusBar()->showMessage(
+            m_statusBar->showMessage(
                 QStringLiteral("%1 for %2 messages.").arg(successMessage).arg(selectedCount), 5000);
         }
         else
         {
-            statusBar()->showMessage(std::move(successMessage), 5000);
+            m_statusBar->showMessage(std::move(successMessage), 5000);
         }
 
         submitQueuedEmailMutations(std::move(accountId));
@@ -4101,7 +4105,7 @@ namespace javelin::gui::shell
         const auto result = m_jmapCore.queueMarkEmailRead(accountId, emailId);
         if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
         {
-            statusBar()->showMessage(error->message, 10000);
+            m_statusBar->showMessage(error->message, 10000);
             return;
         }
 
@@ -4131,14 +4135,14 @@ namespace javelin::gui::shell
             m_jmapCore.queueSetEmailFlagged(*accountId, emailId.toStdString(), !isFlagged);
         if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
         {
-            statusBar()->showMessage(error->message, 10000);
+            m_statusBar->showMessage(error->message, 10000);
             return;
         }
 
         m_messageView->setCurrentIndex(index);
         refreshMessageListPreservingSelection();
         refreshSelectionFromModels();
-        statusBar()->showMessage(
+        m_statusBar->showMessage(
             isFlagged ? QStringLiteral("Removed star.") : QStringLiteral("Added star."), 5000);
         submitQueuedEmailMutations(*accountId);
     }
@@ -4149,7 +4153,7 @@ namespace javelin::gui::shell
         const auto emailId = currentEmailId(*m_messageView);
         if (!accountId.has_value() || !emailId.has_value())
         {
-            statusBar()->showMessage(QStringLiteral("Select a message to mark unread."), 3000);
+            m_statusBar->showMessage(QStringLiteral("Select a message to mark unread."), 3000);
             return;
         }
 
@@ -4161,13 +4165,13 @@ namespace javelin::gui::shell
         const auto result = m_jmapCore.queueMarkEmailUnread(*accountId, *emailId);
         if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
         {
-            statusBar()->showMessage(error->message, 10000);
+            m_statusBar->showMessage(error->message, 10000);
             return;
         }
 
         refreshMessageListPreservingSelection();
         refreshSelectionFromModels();
-        statusBar()->showMessage(QStringLiteral("Marked unread."), 5000);
+        m_statusBar->showMessage(QStringLiteral("Marked unread."), 5000);
         submitQueuedEmailMutations(*accountId);
     }
 
@@ -4180,7 +4184,7 @@ namespace javelin::gui::shell
                 .trimmed();
         if (!accountId.has_value() || senderEmail.isEmpty())
         {
-            statusBar()->showMessage(QStringLiteral("No sender address is available."), 5000);
+            m_statusBar->showMessage(QStringLiteral("No sender address is available."), 5000);
             return;
         }
 
@@ -4333,7 +4337,7 @@ namespace javelin::gui::shell
                            if (const auto* error =
                                    std::get_if<javelin::jmap::LiveRefreshError>(&submitResult))
                            {
-                               statusBar()->showMessage(error->message, 10000);
+                               m_statusBar->showMessage(error->message, 10000);
                                return;
                            }
 
@@ -4355,7 +4359,7 @@ namespace javelin::gui::shell
         const auto emailId = currentEmailId(*m_messageView);
         if (!accountId.has_value() || !emailId.has_value())
         {
-            statusBar()->showMessage(QStringLiteral("Select a message to view its source."), 3000);
+            m_statusBar->showMessage(QStringLiteral("Select a message to view its source."), 3000);
             return;
         }
 
@@ -4363,7 +4367,7 @@ namespace javelin::gui::shell
         if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
             settings.apiKey.isEmpty())
         {
-            statusBar()->showMessage(
+            m_statusBar->showMessage(
                 QStringLiteral("Set Session URL, Login Email, and API Key in Preferences first."),
                 5000);
             return;
@@ -4371,13 +4375,13 @@ namespace javelin::gui::shell
 
         if (!m_openAttachmentDirectory.isValid())
         {
-            statusBar()->showMessage(
+            m_statusBar->showMessage(
                 QStringLiteral("A temporary directory for message source files is unavailable."),
                 10000);
             return;
         }
 
-        statusBar()->showMessage(QStringLiteral("Downloading message source..."));
+        m_statusBar->showMessage(QStringLiteral("Downloading message source..."));
         auto task = m_jmapCore.downloadMessageSource(toLiveConnectionSettings(settings), *accountId,
                                                      *emailId);
         QCoro::connect(
@@ -4386,14 +4390,14 @@ namespace javelin::gui::shell
             {
                 if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
                 {
-                    statusBar()->showMessage(error->message, 10000);
+                    m_statusBar->showMessage(error->message, 10000);
                     return;
                 }
 
                 const auto& download = std::get<javelin::jmap::MessageSourceDownload>(result);
                 const QString targetPath =
                     tempMessageSourcePath(m_openAttachmentDirectory, download);
-                statusBar()->showMessage(QStringLiteral("Preparing message source..."));
+                m_statusBar->showMessage(QStringLiteral("Preparing message source..."));
 
                 auto* watcher = new QFutureWatcher<FileWriteResult>(this);
                 connect(watcher, &QFutureWatcher<FileWriteResult>::finished, this,
@@ -4402,7 +4406,7 @@ namespace javelin::gui::shell
                             const auto writeResult = watcher->result();
                             if (!writeResult.errorMessage.isEmpty())
                             {
-                                statusBar()->showMessage(
+                                m_statusBar->showMessage(
                                     QStringLiteral("Failed to prepare message source: %1")
                                         .arg(writeResult.errorMessage),
                                     10000);
@@ -4412,7 +4416,7 @@ namespace javelin::gui::shell
 
                             const bool opened =
                                 QDesktopServices::openUrl(QUrl::fromLocalFile(writeResult.path));
-                            statusBar()->showMessage(
+                            m_statusBar->showMessage(
                                 opened ? QStringLiteral("Opened message source.")
                                        : QStringLiteral(
                                              "The source file was saved, but no app opened it."),
@@ -4612,7 +4616,7 @@ namespace javelin::gui::shell
         const auto draftResult = m_composeService.loadWorkingCopy(composeSessionId.toStdString());
         if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&draftResult))
         {
-            statusBar()->showMessage(error->message, 10000);
+            m_statusBar->showMessage(error->message, 10000);
             return;
         }
 

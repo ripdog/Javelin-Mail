@@ -720,6 +720,8 @@ namespace javelin::gui::messageview
         m_htmlView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
         connect(m_htmlView, &HtmlMessageView::viewSourceRequested, this,
                 &MessageViewContainer::viewSourceRequested);
+        connect(m_htmlView, &HtmlMessageView::hoveredLinkChanged, this,
+                &MessageViewContainer::hoveredLinkChanged);
         connect(m_htmlView, &HtmlMessageView::documentLoaded, this,
                 [this]
                 {
