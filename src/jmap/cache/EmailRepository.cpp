@@ -255,13 +255,9 @@ namespace javelin::jmap::cache
             emailQuery.bindValue(QStringLiteral(":references_json"),
                                  serializeStringList(email.references));
             emailQuery.bindValue(QStringLiteral(":subject"),
-                                 email.subject.has_value()
-                                     ? QVariant{QString::fromStdString(*email.subject)}
-                                     : QVariant{});
+                                 QString::fromStdString(email.subject.value_or(std::string{})));
             emailQuery.bindValue(QStringLiteral(":preview"),
-                                 email.preview.has_value()
-                                     ? QVariant{QString::fromStdString(*email.preview)}
-                                     : QVariant{});
+                                 QString::fromStdString(email.preview.value_or(std::string{})));
             emailQuery.bindValue(QStringLiteral(":mailbox_ids_json"), QStringLiteral("[]"));
             emailQuery.bindValue(QStringLiteral(":keywords_json"), QStringLiteral("{}"));
             emailQuery.bindValue(QStringLiteral(":has_attachment"), email.hasAttachment ? 1 : 0);
@@ -418,13 +414,9 @@ namespace javelin::jmap::cache
             emailQuery.bindValue(QStringLiteral(":references_json"),
                                  serializeStringList(email.references));
             emailQuery.bindValue(QStringLiteral(":subject"),
-                                 email.subject.has_value()
-                                     ? QVariant{QString::fromStdString(*email.subject)}
-                                     : QVariant{});
+                                 QString::fromStdString(email.subject.value_or(std::string{})));
             emailQuery.bindValue(QStringLiteral(":preview"),
-                                 email.preview.has_value()
-                                     ? QVariant{QString::fromStdString(*email.preview)}
-                                     : QVariant{});
+                                 QString::fromStdString(email.preview.value_or(std::string{})));
             emailQuery.bindValue(QStringLiteral(":mailbox_ids_json"), QStringLiteral("[]"));
             emailQuery.bindValue(QStringLiteral(":keywords_json"), QStringLiteral("{}"));
             emailQuery.bindValue(QStringLiteral(":has_attachment"), email.hasAttachment ? 1 : 0);

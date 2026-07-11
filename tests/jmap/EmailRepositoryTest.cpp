@@ -150,6 +150,31 @@ TEST_CASE("email repository round-trips cached email summaries", "[jmap][cache][
     CHECK(loaded.replyTo.front().email == "support@example.com");
 }
 
+TEST_CASE("email repository normalizes missing subject and preview for cache writes",
+          "[jmap][cache][repository]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    javelin::jmap::cache::EmailRepository repository{databaseContext.connection};
+
+    auto email = loadEmailFixture();
+    email.subject = std::nullopt;
+    email.preview = std::nullopt;
+
+    REQUIRE_FALSE(repository.replaceAll("account-1", {email}).has_value());
+    REQUIRE_FALSE(repository.upsertMany("account-1", {email}).has_value());
+
+    const auto result = repository.find("account-1", "eml-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(result));
+    REQUIRE(std::get<std::optional<javelin::jmap::domain::Email>>(result).has_value());
+    const auto& loaded = *std::get<std::optional<javelin::jmap::domain::Email>>(result);
+    CHECK(loaded.subject == std::optional<std::string>{std::string{}});
+    CHECK(loaded.preview == std::optional<std::string>{std::string{}});
+}
+
 TEST_CASE("email repository replacement removes stale email rows", "[jmap][cache][repository]")
 {
     ApplicationGuard application;
