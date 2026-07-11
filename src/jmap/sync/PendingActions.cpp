@@ -17,6 +17,7 @@ namespace
         std::vector<std::string> removeMailboxIds;
         std::vector<std::string> addKeywords;
         std::vector<std::string> removeKeywords;
+        bool destroy = false;
     };
 
 } // namespace
@@ -25,9 +26,10 @@ template <> struct glz::meta<RawPendingEmailPatch>
 {
     using T = RawPendingEmailPatch;
 
-    static constexpr auto value = glz::object(
-        "emailId", &T::emailId, "addMailboxIds", &T::addMailboxIds, "removeMailboxIds",
-        &T::removeMailboxIds, "addKeywords", &T::addKeywords, "removeKeywords", &T::removeKeywords);
+    static constexpr auto value =
+        glz::object("emailId", &T::emailId, "addMailboxIds", &T::addMailboxIds, "removeMailboxIds",
+                    &T::removeMailboxIds, "addKeywords", &T::addKeywords, "removeKeywords",
+                    &T::removeKeywords, "destroy", &T::destroy);
 };
 
 namespace javelin::jmap::sync
@@ -55,6 +57,7 @@ namespace javelin::jmap::sync
                     .removeMailboxIds = patch.removeMailboxIds,
                     .addKeywords = patch.addKeywords,
                     .removeKeywords = patch.removeKeywords,
+                    .destroy = patch.destroy,
                 },
                 buffer);
             if (writeError)
@@ -82,6 +85,7 @@ namespace javelin::jmap::sync
                 .removeMailboxIds = std::move(raw.removeMailboxIds),
                 .addKeywords = std::move(raw.addKeywords),
                 .removeKeywords = std::move(raw.removeKeywords),
+                .destroy = raw.destroy,
             };
         }
 

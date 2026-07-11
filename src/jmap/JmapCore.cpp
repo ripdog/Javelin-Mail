@@ -28,6 +28,7 @@
 #include <QUrlQuery>
 #include <QUuid>
 #include <algorithm>
+#include <array>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -341,6 +342,61 @@ namespace javelin::jmap
                                                 : std::vector<std::string>{},
                         .addKeywords = {},
                         .removeKeywords = {},
+                    },
+            };
+
+            javelin::jmap::sync::PendingActionRepository pendingActionRepository{connection};
+            if (const auto error = pendingActionRepository.put(pendingAction))
+            {
+                return LiveRefreshError{.message = error->message};
+            }
+
+            const auto reconciledEmail =
+                javelin::jmap::sync::mergePendingEmailPatch(*email, {pendingAction});
+            if (const auto error = emailRepository.upsertMany(accountId, {reconciledEmail}))
+            {
+                return LiveRefreshError{.message = error->message};
+            }
+
+            return QueuedEmailMutation{
+                .pendingActionId = pendingActionId.toStdString(),
+                .accountId = std::move(accountId),
+                .emailId = std::move(emailId),
+            };
+        }
+
+        [[nodiscard]] QueuedEmailMutationResult
+        queueDestroyEmailMutation(javelin::jmap::cache::DatabaseConnection& connection,
+                                  std::string accountId, std::string emailId)
+        {
+            javelin::jmap::cache::EmailRepository emailRepository{connection};
+            const auto emailResult = emailRepository.find(accountId, emailId);
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&emailResult))
+            {
+                return LiveRefreshError{.message = error->message};
+            }
+
+            const auto& email = std::get<std::optional<javelin::jmap::domain::Email>>(emailResult);
+            if (!email.has_value())
+            {
+                return LiveRefreshError{
+                    .message = QStringLiteral("The selected message is not cached locally."),
+                };
+            }
+
+            const auto pendingActionId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+            const javelin::jmap::sync::PendingActionRecord pendingAction{
+                .pendingActionId = pendingActionId.toStdString(),
+                .accountId = accountId,
+                .status = javelin::jmap::sync::PendingActionStatus::Pending,
+                .emailPatch =
+                    {
+                        .emailId = emailId,
+                        .addMailboxIds = {},
+                        .removeMailboxIds = email->mailboxIds,
+                        .addKeywords = {},
+                        .removeKeywords = {},
+                        .destroy = true,
                     },
             };
 
@@ -1228,6 +1284,20 @@ namespace javelin::jmap
                               std::move(trashMailboxId));
     }
 
+    QueuedEmailMutationResult JmapCore::queueDestroyEmail(std::string accountId,
+                                                          std::string emailId)
+    {
+        if (m_impl->databaseConnection == nullptr)
+        {
+            return LiveRefreshError{
+                .message = QStringLiteral("Queued mutations are unavailable in this process."),
+            };
+        }
+
+        return queueDestroyEmailMutation(*m_impl->databaseConnection, std::move(accountId),
+                                         std::move(emailId));
+    }
+
     QueuedEmailMutationResult JmapCore::queueMarkEmailRead(std::string accountId,
                                                            std::string emailId)
     {
@@ -1376,9 +1446,27 @@ namespace javelin::jmap
         }
 
         std::unordered_map<std::string, javelin::jmap::api::EmailSetUpdate> updates;
+        std::vector<std::string> destroys;
         updates.reserve(mergedEmails.size());
+        destroys.reserve(mergedEmails.size());
         for (const auto& [emailId, email] : mergedEmails)
         {
+            const auto actionsResult = pendingActionRepository.listForEmail(accountId, emailId);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&actionsResult))
+            {
+                co_return LiveRefreshError{.message = error->message};
+            }
+            const auto actions = activePendingActions(
+                std::get<std::vector<javelin::jmap::sync::PendingActionRecord>>(actionsResult));
+            const bool destroy = std::ranges::any_of(actions, [](const auto& action)
+                                                     { return action.emailPatch.destroy; });
+            if (destroy)
+            {
+                destroys.push_back(emailId);
+                continue;
+            }
+
             updates.emplace(emailId, javelin::jmap::api::EmailSetUpdate{
                                          .mailboxIds = enabledMap(email.mailboxIds),
                                          .keywords = enabledMap(email.keywords),
@@ -1389,7 +1477,7 @@ namespace javelin::jmap
             .accountId = accountId,
             .create = {},
             .update = std::move(updates),
-            .destroy = {},
+            .destroy = std::move(destroys),
         });
         if (!requestMethod.has_value())
         {
@@ -1435,8 +1523,11 @@ namespace javelin::jmap
 
         std::unordered_set<std::string> updatedEmailIds{parsed.updated.begin(),
                                                         parsed.updated.end()};
+        std::unordered_set<std::string> destroyedEmailIds{parsed.destroyed.begin(),
+                                                          parsed.destroyed.end()};
         std::unordered_set<std::string> failedEmailIds{parsed.notUpdated.begin(),
                                                        parsed.notUpdated.end()};
+        failedEmailIds.insert(parsed.notDestroyed.begin(), parsed.notDestroyed.end());
 
         for (const auto& [emailId, email] : mergedEmails)
         {
@@ -1446,9 +1537,17 @@ namespace javelin::jmap
                 continue;
             }
 
-            if (updatedEmailIds.contains(emailId))
+            if (updatedEmailIds.contains(emailId) || destroyedEmailIds.contains(emailId))
             {
-                if (const auto error = emailRepository.upsertMany(accountId, {email}))
+                if (destroyedEmailIds.contains(emailId))
+                {
+                    const std::array destroyed{emailId};
+                    if (const auto error = emailRepository.removeMany(accountId, destroyed))
+                    {
+                        co_return LiveRefreshError{.message = error->message};
+                    }
+                }
+                else if (const auto error = emailRepository.upsertMany(accountId, {email}))
                 {
                     co_return LiveRefreshError{.message = error->message};
                 }
@@ -1479,7 +1578,7 @@ namespace javelin::jmap
         co_return SubmittedEmailMutations{
             .accountId = std::move(accountId),
             .attemptedEmailCount = mergedEmails.size(),
-            .updatedEmailCount = updatedEmailIds.size(),
+            .updatedEmailCount = updatedEmailIds.size() + destroyedEmailIds.size(),
             .failedEmailCount = failedEmailIds.size(),
         };
     }

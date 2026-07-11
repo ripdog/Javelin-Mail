@@ -471,6 +471,72 @@ TEST_CASE("JmapCore queues archive and delete mailbox moves as pending actions",
                       }));
 }
 
+TEST_CASE("JmapCore permanently destroys queued emails through Email/set",
+          "[jmap][core][pending-actions]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    javelin::jmap::cache::SessionRepository sessionRepository{databaseContext.connection};
+    const auto session = loadSessionFixture();
+    REQUIRE_FALSE(sessionRepository.replace("u1", session).has_value());
+
+    auto email = loadEmailFixture();
+    email.id = "eml-1";
+    email.threadId = "thr-1";
+    email.mailboxIds = {"mbx-trash"};
+
+    javelin::jmap::cache::EmailRepository emailRepository{databaseContext.connection};
+    REQUIRE_FALSE(emailRepository.replaceAll("u1", {email}).has_value());
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body =
+            R"({"methodResponses":[["Email/set",{"accountId":"u1","oldState":"email-state-1","newState":"email-state-2","updated":{},"destroyed":["eml-1"],"notUpdated":{},"notDestroyed":{}},"queued-email-set"]],"createdIds":{},"sessionState":"session-state-2"})",
+    });
+
+    javelin::jmap::JmapCore core{databaseContext.connection, transport};
+    const auto queuedResult = core.queueDestroyEmail("u1", "eml-1");
+    REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(queuedResult));
+
+    const auto optimisticEmailResult = emailRepository.find("u1", "eml-1");
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(optimisticEmailResult));
+    const auto& optimisticEmail =
+        std::get<std::optional<javelin::jmap::domain::Email>>(optimisticEmailResult);
+    REQUIRE(optimisticEmail.has_value());
+    CHECK(optimisticEmail->mailboxIds.empty());
+
+    const auto submitResult = QCoro::waitFor(core.submitPendingEmailMutations(
+        {
+            .sessionUrl = "https://mail.example.com/.well-known/jmap",
+            .loginEmail = "alice@example.com",
+            .apiKey = "access-token",
+        },
+        "u1"));
+
+    if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&submitResult))
+    {
+        FAIL(error->message.toStdString());
+    }
+
+    const auto& summary = std::get<javelin::jmap::SubmittedEmailMutations>(submitResult);
+    CHECK(summary.attemptedEmailCount == 1);
+    CHECK(summary.updatedEmailCount == 1);
+    CHECK(summary.failedEmailCount == 0);
+
+    REQUIRE(transport.requests.size() == 1);
+    CHECK(transport.requests.front().body.contains("\"destroy\":[\"eml-1\"]"));
+
+    const auto deletedEmailResult = emailRepository.find("u1", "eml-1");
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(deletedEmailResult));
+    CHECK_FALSE(
+        std::get<std::optional<javelin::jmap::domain::Email>>(deletedEmailResult).has_value());
+}
+
 TEST_CASE("JmapCore queues mailbox copies as pending actions", "[jmap][core][pending-actions]")
 {
     ApplicationGuard application;

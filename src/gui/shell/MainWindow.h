@@ -273,6 +273,7 @@ namespace javelin::gui::shell
                                 std::vector<std::string> emailIds);
         void queueDeleteEmails(std::string accountId, std::string mailboxId,
                                std::vector<std::string> emailIds);
+        void queueDestroyEmails(std::string accountId, std::vector<std::string> emailIds);
         void queueMoveEmails(std::string accountId, std::string sourceMailboxId,
                              std::string destinationMailboxId, std::vector<std::string> emailIds,
                              QString successMessage);
@@ -287,6 +288,7 @@ namespace javelin::gui::shell
         void markSelectedEmailUnread();
         void archiveSelectedEmail();
         void deleteSelectedEmail();
+        void permanentlyDeleteSelectedEmail();
         void showMoveMenu();
         void showCopyMenu();
         void findConversationsWithSender(const QModelIndex& index);
@@ -371,6 +373,7 @@ namespace javelin::gui::shell
         QAction* m_archiveAction = nullptr;
         QAction* m_markUnreadAction = nullptr;
         QAction* m_deleteAction = nullptr;
+        QAction* m_permanentDeleteAction = nullptr;
         QAction* m_moveAction = nullptr;
         QAction* m_copyAction = nullptr;
         QAction* m_viewSourceAction = nullptr;

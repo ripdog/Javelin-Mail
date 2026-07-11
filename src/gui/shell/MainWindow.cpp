@@ -888,6 +888,14 @@ namespace javelin::gui::shell
         actionCollection()->addAction(QStringLiteral("delete_email"), m_deleteAction);
         actionCollection()->setDefaultShortcut(m_deleteAction, QKeySequence::Delete);
 
+        m_permanentDeleteAction = new QAction(QStringLiteral("Delete Permanently"), this);
+        connect(m_permanentDeleteAction, &QAction::triggered, this,
+                &MainWindow::permanentlyDeleteSelectedEmail);
+        actionCollection()->addAction(QStringLiteral("permanently_delete_email"),
+                                      m_permanentDeleteAction);
+        actionCollection()->setDefaultShortcut(m_permanentDeleteAction,
+                                               QKeySequence{Qt::SHIFT | Qt::Key_Delete});
+
         m_moveAction = new QAction(QIcon::fromTheme(QStringLiteral("mail-move")),
                                    QStringLiteral("&Move to…"), this);
         connect(m_moveAction, &QAction::triggered, this, &MainWindow::showMoveMenu);
@@ -3373,6 +3381,7 @@ namespace javelin::gui::shell
         m_archiveAction->setEnabled(hasMailboxSelection);
         m_markUnreadAction->setEnabled(hasEmailSelection && !isUnread);
         m_deleteAction->setEnabled(hasMailboxSelection);
+        m_permanentDeleteAction->setEnabled(hasEmailSelection);
         m_moveAction->setEnabled(hasMailboxSelection);
         m_copyAction->setEnabled(hasMailboxSelection);
         m_viewSourceAction->setEnabled(hasEmailSelection);
@@ -4202,7 +4211,66 @@ namespace javelin::gui::shell
             return;
         }
 
+        const auto trashMailbox = findMailboxByRole(m_queryService, *accountId, "trash");
+        if (trashMailbox.has_value() && trashMailbox->id == *mailboxId)
+        {
+            const auto count = emailIds.size();
+            const auto prompt =
+                count == 1 ? QStringLiteral(
+                                 "Permanently delete the selected message? This cannot be undone.")
+                           : QStringLiteral(
+                                 "Permanently delete %1 selected messages? This cannot be undone.")
+                                 .arg(count);
+            if (QMessageBox::warning(this, QStringLiteral("Delete Permanently"), prompt,
+                                     QMessageBox::Yes | QMessageBox::Cancel,
+                                     QMessageBox::Cancel) != QMessageBox::Yes)
+            {
+                return;
+            }
+            queueDestroyEmails(*accountId, std::move(emailIds));
+            return;
+        }
+
         queueDeleteEmails(*accountId, *mailboxId, std::move(emailIds));
+    }
+
+    void MainWindow::permanentlyDeleteSelectedEmail()
+    {
+        const auto accountId = activeAccountId();
+        if (!accountId.has_value())
+        {
+            m_statusBar->showMessage(QStringLiteral("Select a message to delete."), 3000);
+            return;
+        }
+
+        auto emailIdsResult = selectedEmailIdsForMailboxAction(*accountId);
+        if (const auto* error = std::get_if<QString>(&emailIdsResult))
+        {
+            m_statusBar->showMessage(*error, 10000);
+            return;
+        }
+
+        auto emailIds = std::get<std::vector<std::string>>(std::move(emailIdsResult));
+        if (emailIds.empty())
+        {
+            m_statusBar->showMessage(QStringLiteral("Select a message to delete."), 3000);
+            return;
+        }
+
+        const auto count = emailIds.size();
+        const auto prompt =
+            count == 1
+                ? QStringLiteral("Permanently delete the selected message? This cannot be undone.")
+                : QStringLiteral("Permanently delete %1 selected messages? This cannot be undone.")
+                      .arg(count);
+        if (QMessageBox::warning(this, QStringLiteral("Delete Permanently"), prompt,
+                                 QMessageBox::Yes | QMessageBox::Cancel,
+                                 QMessageBox::Cancel) != QMessageBox::Yes)
+        {
+            return;
+        }
+
+        queueDestroyEmails(*accountId, std::move(emailIds));
     }
 
     void MainWindow::showMoveMenu()
@@ -4375,6 +4443,31 @@ namespace javelin::gui::shell
 
         queueMoveEmails(std::move(accountId), std::move(mailboxId), trashMailbox->id,
                         std::move(emailIds), QStringLiteral("Queued delete."));
+    }
+
+    void MainWindow::queueDestroyEmails(std::string accountId, std::vector<std::string> emailIds)
+    {
+        const auto selectedCount = emailIds.size();
+        for (const auto& emailId : emailIds)
+        {
+            const auto result = m_jmapCore.queueDestroyEmail(accountId, emailId);
+            if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+            {
+                presentError(*error);
+                return;
+            }
+        }
+
+        refreshMessageListPreservingSelection();
+        refreshSelectionFromModels();
+        updateEmptyStates();
+        updateMessageListHeader();
+        m_statusBar->showMessage(
+            selectedCount == 1
+                ? QStringLiteral("Queued permanent deletion.")
+                : QStringLiteral("Queued permanent deletion for %1 messages.").arg(selectedCount),
+            5000);
+        submitQueuedEmailMutations(std::move(accountId));
     }
 
     void MainWindow::queueMoveEmails(std::string accountId, std::string sourceMailboxId,
@@ -4599,6 +4692,7 @@ namespace javelin::gui::shell
             menu.addSeparator();
             menu.addAction(m_archiveAction);
             menu.addAction(m_deleteAction);
+            menu.addAction(m_permanentDeleteAction);
             menu.addSeparator();
             auto* moveMenu = menu.addMenu(QStringLiteral("Move to"));
             auto* copyMenu = menu.addMenu(QStringLiteral("Copy to"));

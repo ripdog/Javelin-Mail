@@ -111,6 +111,7 @@ TEST_CASE("pending action repository round-trips typed email patch actions", "[j
                 .removeMailboxIds = {"mbx-inbox"},
                 .addKeywords = {"$seen"},
                 .removeKeywords = {"$flagged"},
+                .destroy = true,
             },
     };
 
@@ -124,6 +125,7 @@ TEST_CASE("pending action repository round-trips typed email patch actions", "[j
     CHECK(records.front().status == javelin::jmap::sync::PendingActionStatus::Pending);
     CHECK(records.front().emailPatch.addMailboxIds == std::vector<std::string>{"mbx-archive"});
     CHECK(records.front().emailPatch.removeKeywords == std::vector<std::string>{"$flagged"});
+    CHECK(records.front().emailPatch.destroy);
 }
 
 TEST_CASE("pending email patch merge reapplies local mailbox and keyword deltas", "[jmap][sync]")

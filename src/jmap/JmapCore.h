@@ -206,6 +206,8 @@ namespace javelin::jmap
                                                                  std::string emailId,
                                                                  std::string sourceMailboxId,
                                                                  std::string trashMailboxId);
+        [[nodiscard]] QueuedEmailMutationResult queueDestroyEmail(std::string accountId,
+                                                                  std::string emailId);
         [[nodiscard]] QueuedEmailMutationResult queueMarkEmailRead(std::string accountId,
                                                                    std::string emailId);
         [[nodiscard]] QueuedEmailMutationResult queueMarkEmailUnread(std::string accountId,

@@ -26,6 +26,7 @@ namespace javelin::jmap::sync
         std::vector<std::string> removeMailboxIds;
         std::vector<std::string> addKeywords;
         std::vector<std::string> removeKeywords;
+        bool destroy = false;
     };
 
     struct PendingActionRecord
