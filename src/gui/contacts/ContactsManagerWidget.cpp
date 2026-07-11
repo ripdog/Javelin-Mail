@@ -20,10 +20,12 @@
 #include <QMimeDatabase>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QSpinBox>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QTableWidget>
+#include <QToolButton>
 #include <QUuid>
 #include <QVBoxLayout>
 
@@ -211,6 +213,26 @@ namespace javelin::gui::contacts
             return account.name.empty() ? QString::fromStdString(account.accountId)
                                         : QString::fromStdString(account.name);
         }
+
+        [[nodiscard]] QString lines(const std::vector<std::string>& values)
+        {
+            QStringList result;
+            for (const auto& value : values)
+                result.push_back(QString::fromStdString(value));
+            return result.join(QLatin1Char('\n'));
+        }
+
+        [[nodiscard]] std::vector<std::string> nonEmptyLines(const QString& value)
+        {
+            std::vector<std::string> result;
+            for (const auto& line : value.split(QLatin1Char('\n')))
+            {
+                const auto trimmed = line.trimmed();
+                if (!trimmed.isEmpty())
+                    result.push_back(trimmed.toStdString());
+            }
+            return result;
+        }
     } // namespace
 
     ContactsManagerWidget::ContactsManagerWidget(
@@ -231,7 +253,16 @@ namespace javelin::gui::contacts
 
     void ContactsManagerWidget::setupUi()
     {
+        setObjectName(QStringLiteral("contactsManager"));
+        setStyleSheet(QStringLiteral(
+            "#contactsManager QLineEdit, #contactsManager QPlainTextEdit, #contactsManager "
+            "QComboBox, #contactsManager QListWidget { border: 1px solid palette(mid); "
+            "border-radius: 7px; padding: 6px; background: palette(base); }"
+            "#contactsManager QPushButton { padding: 7px 11px; border-radius: 7px; }"
+            "#contactsManager QToolButton { padding: 7px 2px; font-weight: 600; }"));
         auto* root = new QVBoxLayout(this);
+        root->setContentsMargins(14, 14, 14, 14);
+        root->setSpacing(12);
         auto* top = new QHBoxLayout();
         m_accountCombo = new QComboBox(this);
         m_addressBookCombo = new QComboBox(this);
@@ -299,19 +330,103 @@ namespace javelin::gui::contacts
         auto* fullDocument = new QPlainTextEdit(view);
         fullDocument->setReadOnly(true);
         fullDocument->setObjectName(QStringLiteral("contactDocumentView"));
+        fullDocument->setVisible(false);
+        auto* viewAdvanced = new QToolButton(view);
+        viewAdvanced->setText(QStringLiteral("Advanced details"));
+        viewAdvanced->setCheckable(true);
+        viewAdvanced->setArrowType(Qt::RightArrow);
+        viewAdvanced->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        connect(viewAdvanced, &QToolButton::toggled, fullDocument,
+                [viewAdvanced, fullDocument](const bool expanded)
+                {
+                    viewAdvanced->setArrowType(expanded ? Qt::DownArrow : Qt::RightArrow);
+                    fullDocument->setVisible(expanded);
+                });
         viewLayout->addWidget(m_viewTitle);
         viewLayout->addWidget(m_viewDetails);
-        viewLayout->addWidget(new QLabel(QStringLiteral("Complete JSContact document"), view));
+        viewLayout->addStretch(1);
+        viewLayout->addWidget(viewAdvanced);
         viewLayout->addWidget(fullDocument, 1);
         m_detailStack->addWidget(view);
         auto* edit = new QWidget(m_detailStack);
         auto* editLayout = new QVBoxLayout(edit);
-        auto* hint = new QLabel(
-            QStringLiteral("Edit the complete JSContact Card. Unknown and extension properties are "
-                           "preserved. The immutable server id is removed automatically on save."),
-            edit);
-        hint->setWordWrap(true);
+        auto* scroll = new QScrollArea(edit);
+        scroll->setWidgetResizable(true);
+        scroll->setFrameShape(QFrame::NoFrame);
+        auto* formWidget = new QWidget(scroll);
+        auto* formLayout = new QVBoxLayout(formWidget);
+        formLayout->setSpacing(14);
+        auto* heading = new QLabel(QStringLiteral("Contact details"), formWidget);
+        QFont headingFont = heading->font();
+        headingFont.setPointSize(headingFont.pointSize() + 4);
+        headingFont.setBold(true);
+        heading->setFont(headingFont);
+        formLayout->addWidget(heading);
+
+        auto* identityForm = new QFormLayout();
+        identityForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+        m_kindEdit = new QComboBox(formWidget);
+        m_kindEdit->addItem(QStringLiteral("Person"), QStringLiteral("individual"));
+        m_kindEdit->addItem(QStringLiteral("Organization"), QStringLiteral("org"));
+        m_kindEdit->addItem(QStringLiteral("Group"), QStringLiteral("group"));
+        m_nameEdit = new QLineEdit(formWidget);
+        m_nameEdit->setPlaceholderText(QStringLiteral("Full name"));
+        m_organizationEdit = new QLineEdit(formWidget);
+        m_organizationEdit->setPlaceholderText(QStringLiteral("Company or organization"));
+        m_titleEdit = new QLineEdit(formWidget);
+        m_titleEdit->setPlaceholderText(QStringLiteral("Role or job title"));
+        identityForm->addRow(QStringLiteral("Type"), m_kindEdit);
+        identityForm->addRow(QStringLiteral("Name"), m_nameEdit);
+        identityForm->addRow(QStringLiteral("Organization"), m_organizationEdit);
+        identityForm->addRow(QStringLiteral("Title"), m_titleEdit);
+        formLayout->addLayout(identityForm);
+
+        auto* contactForm = new QFormLayout();
+        m_emailsEdit = new QPlainTextEdit(formWidget);
+        m_emailsEdit->setPlaceholderText(QStringLiteral("One email address per line"));
+        m_emailsEdit->setMaximumHeight(86);
+        m_phonesEdit = new QPlainTextEdit(formWidget);
+        m_phonesEdit->setPlaceholderText(QStringLiteral("One phone number per line"));
+        m_phonesEdit->setMaximumHeight(86);
+        m_addressesEdit = new QPlainTextEdit(formWidget);
+        m_addressesEdit->setPlaceholderText(QStringLiteral("One postal address per line"));
+        m_addressesEdit->setMaximumHeight(100);
+        contactForm->addRow(QStringLiteral("Emails"), m_emailsEdit);
+        contactForm->addRow(QStringLiteral("Phones"), m_phonesEdit);
+        contactForm->addRow(QStringLiteral("Addresses"), m_addressesEdit);
+        formLayout->addLayout(contactForm);
+
+        auto* personalForm = new QFormLayout();
+        m_birthdayEdit = new QLineEdit(formWidget);
+        m_birthdayEdit->setPlaceholderText(QStringLiteral("YYYY-MM-DD"));
+        m_notesEdit = new QPlainTextEdit(formWidget);
+        m_notesEdit->setPlaceholderText(QStringLiteral("Notes"));
+        m_notesEdit->setMaximumHeight(100);
+        m_addressBooksEdit = new QListWidget(formWidget);
+        m_addressBooksEdit->setMaximumHeight(110);
+        personalForm->addRow(QStringLiteral("Birthday"), m_birthdayEdit);
+        personalForm->addRow(QStringLiteral("Notes"), m_notesEdit);
+        personalForm->addRow(QStringLiteral("Address books"), m_addressBooksEdit);
+        formLayout->addLayout(personalForm);
+
+        m_advancedToggle = new QToolButton(formWidget);
+        m_advancedToggle->setText(QStringLiteral("Advanced and unusual fields"));
+        m_advancedToggle->setCheckable(true);
+        m_advancedToggle->setArrowType(Qt::RightArrow);
+        m_advancedToggle->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
         m_documentEdit = new QPlainTextEdit(edit);
+        m_documentEdit->setVisible(false);
+        m_documentEdit->setMinimumHeight(220);
+        connect(m_advancedToggle, &QToolButton::toggled, m_documentEdit,
+                [this](const bool expanded)
+                {
+                    m_advancedToggle->setArrowType(expanded ? Qt::DownArrow : Qt::RightArrow);
+                    m_documentEdit->setVisible(expanded);
+                });
+        formLayout->addWidget(m_advancedToggle);
+        formLayout->addWidget(m_documentEdit);
+        formLayout->addStretch(1);
+        scroll->setWidget(formWidget);
         auto* editButtons = new QHBoxLayout();
         m_uploadPhotoButton = new QPushButton(QStringLiteral("Upload Photo"), edit);
         editButtons->addWidget(m_uploadPhotoButton);
@@ -320,8 +435,7 @@ namespace javelin::gui::contacts
         m_saveButton = new QPushButton(QStringLiteral("Save"), edit);
         editButtons->addWidget(m_cancelButton);
         editButtons->addWidget(m_saveButton);
-        editLayout->addWidget(hint);
-        editLayout->addWidget(m_documentEdit, 1);
+        editLayout->addWidget(scroll, 1);
         editLayout->addLayout(editButtons);
         m_detailStack->addWidget(edit);
         splitter->addWidget(left);
@@ -503,6 +617,44 @@ namespace javelin::gui::contacts
         m_copyContactButton->setEnabled(!m_busy);
     }
 
+    void ContactsManagerWidget::loadEditorDocument(const QString& document)
+    {
+        const auto parsed = javelin::jmap::contacts::contactEditorData(document.toStdString());
+        const auto* editorData = std::get_if<javelin::jmap::contacts::ContactEditorData>(&parsed);
+        if (editorData == nullptr)
+        {
+            QMessageBox::warning(this, QStringLiteral("Contact Editor"),
+                                 QStringLiteral("This contact document cannot be edited."));
+            return;
+        }
+        int kindIndex = m_kindEdit->findData(QString::fromStdString(editorData->kind));
+        if (kindIndex < 0)
+            kindIndex = 0;
+        m_kindEdit->setCurrentIndex(kindIndex);
+        m_nameEdit->setText(QString::fromStdString(editorData->fullName));
+        m_organizationEdit->setText(QString::fromStdString(editorData->organization));
+        m_titleEdit->setText(QString::fromStdString(editorData->title));
+        m_emailsEdit->setPlainText(lines(editorData->emails));
+        m_phonesEdit->setPlainText(lines(editorData->phones));
+        m_addressesEdit->setPlainText(lines(editorData->addresses));
+        m_birthdayEdit->setText(QString::fromStdString(editorData->birthday));
+        m_notesEdit->setPlainText(QString::fromStdString(editorData->notes));
+        m_documentEdit->setPlainText(document);
+        m_addressBooksEdit->clear();
+        for (const auto& book : m_addressBooks)
+        {
+            auto* item = new QListWidgetItem(QString::fromStdString(book.name), m_addressBooksEdit);
+            item->setData(Qt::UserRole, QString::fromStdString(book.id));
+            item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+            item->setCheckState(std::ranges::find(editorData->addressBookIds, book.id) !=
+                                        editorData->addressBookIds.end()
+                                    ? Qt::Checked
+                                    : Qt::Unchecked);
+        }
+        m_advancedToggle->setChecked(false);
+        m_detailStack->setCurrentIndex(2);
+    }
+
     void ContactsManagerWidget::beginCreateContact()
     {
         auto bookId = currentAddressBookId();
@@ -538,8 +690,7 @@ namespace javelin::gui::contacts
                      kind == QStringLiteral("group") ? QStringLiteral(",\n  \"members\": {}")
                                                      : QString{});
         m_creating = true;
-        m_documentEdit->setPlainText(document);
-        m_detailStack->setCurrentIndex(2);
+        loadEditorDocument(document);
     }
 
     void ContactsManagerWidget::beginEditContact()
@@ -548,8 +699,7 @@ namespace javelin::gui::contacts
         if (contact == nullptr)
             return;
         m_creating = false;
-        m_documentEdit->setPlainText(QString::fromStdString(contact->document));
-        m_detailStack->setCurrentIndex(2);
+        loadEditorDocument(QString::fromStdString(contact->document));
     }
 
     void ContactsManagerWidget::cancelEdit()
@@ -562,8 +712,24 @@ namespace javelin::gui::contacts
         const auto accountId = currentAccountId();
         if (!accountId.has_value())
             return;
-        const auto prepared = javelin::jmap::contacts::prepareContactDocument(
-            m_documentEdit->toPlainText().toStdString(), m_creating);
+        javelin::jmap::contacts::ContactEditorData editor;
+        editor.kind = m_kindEdit->currentData().toString().toStdString();
+        editor.fullName = m_nameEdit->text().trimmed().toStdString();
+        editor.organization = m_organizationEdit->text().trimmed().toStdString();
+        editor.title = m_titleEdit->text().trimmed().toStdString();
+        editor.emails = nonEmptyLines(m_emailsEdit->toPlainText());
+        editor.phones = nonEmptyLines(m_phonesEdit->toPlainText());
+        editor.addresses = nonEmptyLines(m_addressesEdit->toPlainText());
+        editor.birthday = m_birthdayEdit->text().trimmed().toStdString();
+        editor.notes = m_notesEdit->toPlainText().trimmed().toStdString();
+        editor.document = m_documentEdit->toPlainText().toStdString();
+        for (int row = 0; row < m_addressBooksEdit->count(); ++row)
+        {
+            const auto* item = m_addressBooksEdit->item(row);
+            if (item->checkState() == Qt::Checked)
+                editor.addressBookIds.push_back(item->data(Qt::UserRole).toString().toStdString());
+        }
+        const auto prepared = javelin::jmap::contacts::applyContactEditorData(editor, m_creating);
         if (const auto* message = std::get_if<std::string_view>(&prepared))
         {
             QMessageBox::warning(
@@ -950,13 +1116,41 @@ namespace javelin::gui::contacts
         const javelin::jmap::contacts::ContactSummary& contact) const
     {
         QStringList lines;
-        lines << QStringLiteral("Type: %1").arg(QString::fromStdString(contact.kind));
-        if (contact.organization.has_value())
-            lines << QStringLiteral("Organization: %1")
-                         .arg(QString::fromStdString(*contact.organization));
-        for (const auto& email : contact.emails)
-            lines << QStringLiteral("Email: %1").arg(QString::fromStdString(email.address));
-        lines << QStringLiteral("UID: %1").arg(QString::fromStdString(contact.uid));
+        const auto parsed = javelin::jmap::contacts::contactEditorData(contact.document);
+        const auto* editorData = std::get_if<javelin::jmap::contacts::ContactEditorData>(&parsed);
+        if (editorData == nullptr)
+            return QStringLiteral("This contact could not be displayed.");
+        if (!editorData->organization.empty())
+            lines << QStringLiteral("%1%2").arg(
+                QString::fromStdString(editorData->organization),
+                editorData->title.empty()
+                    ? QString{}
+                    : QStringLiteral("  ·  %1").arg(QString::fromStdString(editorData->title)));
+        if (!editorData->emails.empty())
+        {
+            lines << QString{} << QStringLiteral("Email");
+            for (const auto& email : editorData->emails)
+                lines << QStringLiteral("  %1").arg(QString::fromStdString(email));
+        }
+        if (!editorData->phones.empty())
+        {
+            lines << QString{} << QStringLiteral("Phone");
+            for (const auto& phone : editorData->phones)
+                lines << QStringLiteral("  %1").arg(QString::fromStdString(phone));
+        }
+        if (!editorData->addresses.empty())
+        {
+            lines << QString{} << QStringLiteral("Address");
+            for (const auto& address : editorData->addresses)
+                lines << QStringLiteral("  %1").arg(QString::fromStdString(address));
+        }
+        if (!editorData->birthday.empty())
+            lines
+                << QString{}
+                << QStringLiteral("Birthday  %1").arg(QString::fromStdString(editorData->birthday));
+        if (!editorData->notes.empty())
+            lines << QString{} << QStringLiteral("Notes")
+                  << QString::fromStdString(editorData->notes);
         return lines.join(QLatin1Char('\n'));
     }
 } // namespace javelin::gui::contacts

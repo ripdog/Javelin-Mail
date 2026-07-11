@@ -3,7 +3,10 @@
 #include <glaze/glaze.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
+#include <format>
+#include <span>
 #include <utility>
 
 namespace javelin::jmap::contacts::detail
@@ -72,6 +75,72 @@ template <> struct glz::meta<javelin::jmap::contacts::detail::Card>
 
 namespace javelin::jmap::contacts
 {
+    namespace
+    {
+        [[nodiscard]] std::string stringProperty(const glz::generic& object,
+                                                 const std::string_view key)
+        {
+            if (!object.is_object() || !object.contains(key) || !object.at(key).is_string())
+                return {};
+            return object.at(key).get_string();
+        }
+
+        [[nodiscard]] std::vector<std::string> mappedStrings(const glz::generic& root,
+                                                             const std::string_view mapName,
+                                                             const std::string_view property)
+        {
+            std::vector<std::string> result;
+            if (!root.is_object() || !root.contains(mapName) || !root.at(mapName).is_object())
+                return result;
+            for (const auto& entry : root.at(mapName).get_object())
+            {
+                const auto text = stringProperty(entry.second, property);
+                if (!text.empty())
+                    result.push_back(text);
+            }
+            return result;
+        }
+
+        void setMappedStrings(glz::generic& root, const std::string_view mapName,
+                              const std::string_view property,
+                              const std::span<const std::string> values)
+        {
+            auto& mapValue = root[mapName];
+            if (!mapValue.is_object())
+                mapValue.data = glz::generic::object_t{};
+            auto& map = mapValue.get_object();
+            std::vector<std::string> keys;
+            keys.reserve(map.size());
+            for (const auto& entry : map)
+                keys.push_back(entry.first);
+            for (std::size_t index = 0; index < values.size(); ++index)
+            {
+                const std::string key =
+                    index < keys.size() ? keys[index] : "javelin-" + std::to_string(index + 1);
+                auto& entry = mapValue[key];
+                if (!entry.is_object())
+                    entry.data = glz::generic::object_t{};
+                entry[property] = values[index];
+            }
+            for (std::size_t index = values.size(); index < keys.size(); ++index)
+                map.erase(keys[index]);
+            if (map.empty())
+                root.get_object().erase(mapName);
+        }
+
+        void setFirstMappedString(glz::generic& root, const std::string_view mapName,
+                                  const std::string_view property, const std::string& value)
+        {
+            if (value.empty())
+            {
+                root.get_object().erase(mapName);
+                return;
+            }
+            const std::array values{value};
+            setMappedStrings(root, mapName, property, values);
+        }
+    } // namespace
+
     std::string normalizeEmail(const std::string_view email)
     {
         std::string normalized{email};
@@ -213,6 +282,226 @@ namespace javelin::jmap::contacts
         {
             return std::string_view{"Unable to update the contact photo."};
         }
+        return result;
+    }
+
+    std::variant<ContactEditorData, std::string_view> contactEditorData(const std::string_view json)
+    {
+        std::string buffer{json};
+        glz::generic value;
+        if (glz::read_json(value, buffer) || !value.is_object())
+            return std::string_view{"The contact document is not a valid JSON object."};
+
+        ContactEditorData data;
+        data.document = buffer;
+        data.kind = stringProperty(value, "kind");
+        if (value.contains("name"))
+        {
+            data.fullName = stringProperty(value.at("name"), "full");
+            if (data.fullName.empty() && value.at("name").is_object() &&
+                value.at("name").contains("components") &&
+                value.at("name").at("components").is_array())
+            {
+                for (const auto& component : value.at("name").at("components").get_array())
+                {
+                    const auto text = stringProperty(component, "value");
+                    if (!text.empty())
+                    {
+                        if (!data.fullName.empty())
+                            data.fullName += ' ';
+                        data.fullName += text;
+                    }
+                }
+            }
+        }
+        const auto organizations = mappedStrings(value, "organizations", "name");
+        if (!organizations.empty())
+            data.organization = organizations.front();
+        const auto titles = mappedStrings(value, "titles", "name");
+        if (!titles.empty())
+            data.title = titles.front();
+        data.emails = mappedStrings(value, "emails", "address");
+        data.phones = mappedStrings(value, "phones", "number");
+        data.addresses = mappedStrings(value, "addresses", "full");
+        if (data.addresses.empty() && value.contains("addresses") &&
+            value.at("addresses").is_object())
+        {
+            for (const auto& entry : value.at("addresses").get_object())
+            {
+                std::string address;
+                if (entry.second.is_object() && entry.second.contains("components") &&
+                    entry.second.at("components").is_array())
+                {
+                    for (const auto& component : entry.second.at("components").get_array())
+                    {
+                        const auto text = stringProperty(component, "value");
+                        if (!text.empty())
+                        {
+                            if (!address.empty())
+                                address += ", ";
+                            address += text;
+                        }
+                    }
+                }
+                if (!address.empty())
+                    data.addresses.push_back(std::move(address));
+            }
+        }
+        const auto notes = mappedStrings(value, "notes", "note");
+        if (!notes.empty())
+            data.notes = notes.front();
+        if (value.contains("anniversaries") && value.at("anniversaries").is_object())
+        {
+            for (const auto& entry : value.at("anniversaries").get_object())
+            {
+                if (stringProperty(entry.second, "kind") == "birth")
+                {
+                    const auto& date = entry.second.at("date");
+                    if (date.is_string())
+                        data.birthday = date.get_string();
+                    else if (date.is_object())
+                    {
+                        const auto number = [&date](const std::string_view key) -> int
+                        {
+                            return date.contains(key) && date.at(key).is_number()
+                                       ? static_cast<int>(date.at(key).get_number())
+                                       : 0;
+                        };
+                        const int year = number("year");
+                        const int month = number("month");
+                        const int day = number("day");
+                        if (year > 0 && month > 0 && day > 0)
+                            data.birthday = std::format("{:04}-{:02}-{:02}", year, month, day);
+                        else if (month > 0 && day > 0)
+                            data.birthday = std::format("--{:02}-{:02}", month, day);
+                        else if (year > 0 && month > 0)
+                            data.birthday = std::format("{:04}-{:02}", year, month);
+                        else if (year > 0)
+                            data.birthday = std::format("{:04}", year);
+                    }
+                    break;
+                }
+            }
+        }
+        if (value.contains("addressBookIds") && value.at("addressBookIds").is_object())
+        {
+            for (const auto& [id, included] : value.at("addressBookIds").get_object())
+            {
+                if (included.is_boolean() && included.get_boolean())
+                    data.addressBookIds.push_back(id);
+            }
+        }
+        return data;
+    }
+
+    std::variant<std::string, std::string_view>
+    applyContactEditorData(const ContactEditorData& data, const bool creating)
+    {
+        std::string buffer = data.document;
+        glz::generic value;
+        if (glz::read_json(value, buffer) || !value.is_object())
+            return std::string_view{"The advanced contact document is not valid JSON."};
+
+        value.get_object().erase("id");
+        value["kind"] = data.kind.empty() ? std::string{"individual"} : data.kind;
+        auto& name = value["name"];
+        if (!name.is_object())
+            name.data = glz::generic::object_t{};
+        name["full"] = data.fullName;
+        setFirstMappedString(value, "organizations", "name", data.organization);
+        setFirstMappedString(value, "titles", "name", data.title);
+        setMappedStrings(value, "emails", "address", data.emails);
+        setMappedStrings(value, "phones", "number", data.phones);
+        const bool hasUnprojectedAddresses = value.contains("addresses") &&
+                                             value.at("addresses").is_object() &&
+                                             !value.at("addresses").get_object().empty() &&
+                                             mappedStrings(value, "addresses", "full").empty();
+        if (!data.addresses.empty() || !hasUnprojectedAddresses)
+            setMappedStrings(value, "addresses", "full", data.addresses);
+        setFirstMappedString(value, "notes", "note", data.notes);
+
+        if (data.addressBookIds.empty())
+            return std::string_view{"Select at least one address book."};
+        auto& books = value["addressBookIds"];
+        books.data = glz::generic::object_t{};
+        for (const auto& id : data.addressBookIds)
+            books[id] = true;
+
+        bool hasUnprojectedBirthday = false;
+        if (value.contains("anniversaries") && value.at("anniversaries").is_object())
+        {
+            for (const auto& entry : value.at("anniversaries").get_object())
+            {
+                if (stringProperty(entry.second, "kind") == "birth" &&
+                    !entry.second.contains("date"))
+                    hasUnprojectedBirthday = true;
+                else if (stringProperty(entry.second, "kind") == "birth" &&
+                         !entry.second.at("date").is_string())
+                    hasUnprojectedBirthday = true;
+            }
+        }
+        if (data.birthday.empty() && !hasUnprojectedBirthday)
+            value.get_object().erase("anniversaries");
+        else
+        {
+            auto& anniversaries = value["anniversaries"];
+            if (!anniversaries.is_object())
+                anniversaries.data = glz::generic::object_t{};
+            std::string birthdayKey = "javelin-birthday";
+            for (const auto& entry : anniversaries.get_object())
+            {
+                if (stringProperty(entry.second, "kind") == "birth")
+                {
+                    birthdayKey = entry.first;
+                    break;
+                }
+            }
+            auto& birthday = anniversaries[birthdayKey];
+            birthday.data = glz::generic::object_t{};
+            birthday["kind"] = std::string{"birth"};
+            glz::generic date;
+            date.data = glz::generic::object_t{};
+            const auto parts = [&data]
+            {
+                std::vector<int> result;
+                std::size_t start = data.birthday.starts_with("--") ? 2 : 0;
+                while (start < data.birthday.size())
+                {
+                    const auto end = data.birthday.find('-', start);
+                    const auto token = data.birthday.substr(start, end - start);
+                    if (token.empty() ||
+                        !std::ranges::all_of(token, [](const unsigned char character)
+                                             { return std::isdigit(character) != 0; }))
+                        return std::vector<int>{};
+                    result.push_back(std::stoi(token));
+                    if (end == std::string::npos)
+                        break;
+                    start = end + 1;
+                }
+                return result;
+            }();
+            if (data.birthday.starts_with("--") && parts.size() == 2)
+            {
+                date["month"] = parts[0];
+                date["day"] = parts[1];
+            }
+            else if (parts.size() >= 1 && parts.size() <= 3)
+            {
+                date["year"] = parts[0];
+                if (parts.size() > 1)
+                    date["month"] = parts[1];
+                if (parts.size() > 2)
+                    date["day"] = parts[2];
+            }
+            else
+                return std::string_view{"Birthday must be YYYY, YYYY-MM, YYYY-MM-DD, or --MM-DD."};
+            birthday["date"] = std::move(date);
+        }
+        if (creating && !value.contains("uid"))
+            return std::string_view{"New contacts require a uid."};
+        std::string result;
+        if (glz::write_json(value, result))
+            return std::string_view{"Unable to serialize the contact."};
         return result;
     }
 } // namespace javelin::jmap::contacts

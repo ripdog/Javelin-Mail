@@ -89,4 +89,23 @@ TEST_CASE("contact document editing removes immutable ids and retains extensions
     const auto photo = javelin::jmap::contacts::setContactPhoto(json, "blob-1", "image/png");
     REQUIRE(std::holds_alternative<std::string>(photo));
     CHECK(std::get<std::string>(photo).find("blob-1") != std::string::npos);
+
+    const auto editor = javelin::jmap::contacts::contactEditorData(json);
+    REQUIRE(std::holds_alternative<javelin::jmap::contacts::ContactEditorData>(editor));
+    auto fields = std::get<javelin::jmap::contacts::ContactEditorData>(editor);
+    fields.fullName = "Joe Bloggs";
+    fields.organization = "Example Ltd";
+    fields.emails = {"joe@example.test"};
+    fields.phones = {"+64 21 555 0100"};
+    fields.addresses = {"1 Example Street, Auckland"};
+    fields.birthday = "--04-15";
+    fields.notes = "Met at the JMAP conference.";
+    const auto edited = javelin::jmap::contacts::applyContactEditorData(fields, false);
+    REQUIRE(std::holds_alternative<std::string>(edited));
+    CHECK(std::get<std::string>(edited).find("Joe Bloggs") != std::string::npos);
+    CHECK(std::get<std::string>(edited).find("x-extension") != std::string::npos);
+    CHECK(std::get<std::string>(edited).find("javelin-birthday") != std::string::npos);
+    const auto reparsed = javelin::jmap::contacts::contactEditorData(std::get<std::string>(edited));
+    REQUIRE(std::holds_alternative<javelin::jmap::contacts::ContactEditorData>(reparsed));
+    CHECK(std::get<javelin::jmap::contacts::ContactEditorData>(reparsed).birthday == "--04-15");
 }

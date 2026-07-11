@@ -16,6 +16,7 @@ class QLabel;
 class QLineEdit;
 class QListWidget;
 class QPlainTextEdit;
+class QToolButton;
 class QPushButton;
 class QStackedWidget;
 
@@ -52,6 +53,7 @@ namespace javelin::gui::contacts
         void beginCreateContact();
         void beginEditContact();
         void cancelEdit();
+        void loadEditorDocument(const QString& document);
         void saveContact();
         void uploadPhoto();
         void deleteContact();
@@ -90,6 +92,17 @@ namespace javelin::gui::contacts
         QLabel* m_viewTitle = nullptr;
         QLabel* m_viewDetails = nullptr;
         QPlainTextEdit* m_documentEdit = nullptr;
+        QComboBox* m_kindEdit = nullptr;
+        QLineEdit* m_nameEdit = nullptr;
+        QLineEdit* m_organizationEdit = nullptr;
+        QLineEdit* m_titleEdit = nullptr;
+        QPlainTextEdit* m_emailsEdit = nullptr;
+        QPlainTextEdit* m_phonesEdit = nullptr;
+        QPlainTextEdit* m_addressesEdit = nullptr;
+        QLineEdit* m_birthdayEdit = nullptr;
+        QPlainTextEdit* m_notesEdit = nullptr;
+        QListWidget* m_addressBooksEdit = nullptr;
+        QToolButton* m_advancedToggle = nullptr;
         QPushButton* m_newContactButton = nullptr;
         QPushButton* m_editContactButton = nullptr;
         QPushButton* m_deleteContactButton = nullptr;

@@ -32,6 +32,21 @@ namespace javelin::jmap::contacts
         std::string document;
     };
 
+    struct ContactEditorData
+    {
+        std::string kind;
+        std::string fullName;
+        std::string organization;
+        std::string title;
+        std::vector<std::string> emails;
+        std::vector<std::string> phones;
+        std::vector<std::string> addresses;
+        std::string birthday;
+        std::string notes;
+        std::vector<std::string> addressBookIds;
+        std::string document;
+    };
+
     [[nodiscard]] std::optional<ContactSummary>
     summarizeContact(std::string accountId, const javelin::jmap::api::ContactCard& card);
     [[nodiscard]] std::string normalizeEmail(std::string_view email);
@@ -39,4 +54,8 @@ namespace javelin::jmap::contacts
     prepareContactDocument(std::string_view json, bool creating);
     [[nodiscard]] std::variant<std::string, std::string_view>
     setContactPhoto(std::string_view json, std::string blobId, std::string mediaType);
+    [[nodiscard]] std::variant<ContactEditorData, std::string_view>
+    contactEditorData(std::string_view json);
+    [[nodiscard]] std::variant<std::string, std::string_view>
+    applyContactEditorData(const ContactEditorData& data, bool creating);
 } // namespace javelin::jmap::contacts
