@@ -7,7 +7,6 @@
 #pragma GCC diagnostic ignored "-Wnon-virtual-dtor"
 #endif
 #include <QCoroNetworkReply>
-#include <QCoroSignal>
 #include <QCoroTimer>
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic pop
@@ -17,6 +16,7 @@
 
 #include <QByteArray>
 #include <QDebug>
+#include <QElapsedTimer>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
@@ -143,6 +143,32 @@ namespace javelin::jmap::sync
                                       reply.errorString().toStdString(),
                                       statusCode.isValid() ? std::optional{statusCode.toInt()}
                                                            : std::nullopt);
+        }
+
+        [[nodiscard]] QCoro::Task<bool> waitForResponseHeaders(QNetworkReply& reply)
+        {
+            QElapsedTimer elapsed;
+            elapsed.start();
+            const auto timeoutMilliseconds =
+                std::chrono::duration_cast<std::chrono::milliseconds>(eventSourceConnectTimeout);
+            while (elapsed.elapsed() < timeoutMilliseconds.count())
+            {
+                if (reply.attribute(QNetworkRequest::HttpStatusCodeAttribute).isValid())
+                {
+                    co_return true;
+                }
+                if (reply.isFinished())
+                {
+                    co_return false;
+                }
+
+                QTimer timer;
+                timer.setSingleShot(true);
+                timer.start(std::chrono::milliseconds{25});
+                co_await qCoro(timer).waitForTimeout();
+            }
+
+            co_return reply.attribute(QNetworkRequest::HttpStatusCodeAttribute).isValid();
         }
 
         [[nodiscard]] QString encodeTemplateValue(const std::string_view value)
@@ -429,9 +455,7 @@ namespace javelin::jmap::sync
         auto statusAttribute = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute);
         if (!statusAttribute.isValid())
         {
-            const auto metadataReceived =
-                co_await qCoro(reply, &QNetworkReply::metaDataChanged, eventSourceConnectTimeout);
-            if (!metadataReceived.has_value())
+            if (!co_await waitForResponseHeaders(*reply))
             {
                 reply->abort();
                 qWarning().noquote() << "Long poll timed out waiting for event-source response"
