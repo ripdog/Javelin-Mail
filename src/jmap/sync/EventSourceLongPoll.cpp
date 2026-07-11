@@ -73,10 +73,10 @@ namespace javelin::jmap::sync
             Invalid,
         };
 
-        constexpr auto eventSourceConnectTimeout = std::chrono::seconds{15};
         constexpr auto requestedPingInterval = std::chrono::seconds{30};
-        constexpr auto maximumAcceptedPingInterval = std::chrono::seconds{300};
         constexpr auto eventSourcePingGrace = std::chrono::seconds{15};
+        constexpr auto eventSourceConnectTimeout = requestedPingInterval + eventSourcePingGrace;
+        constexpr auto maximumAcceptedPingInterval = std::chrono::seconds{300};
         constexpr auto defaultEventSourceIdleTimeout =
             maximumAcceptedPingInterval * 2 + eventSourcePingGrace;
 
@@ -233,12 +233,19 @@ namespace javelin::jmap::sync
                     };
                 }
 
+                auto pingInterval = ping.interval;
+                if (pingInterval.has_value() && *pingInterval > 1000 && *pingInterval % 1000 == 0)
+                {
+                    // Stalwart currently reports this RFC 8620 value in milliseconds.
+                    pingInterval = *pingInterval / 1000;
+                }
+
                 return ParsedEvent{
                     .status = ParsedEventStatus::Ignored,
                     .response = std::nullopt,
                     .errorMessage = std::nullopt,
-                    .pingInterval = ping.interval.has_value() && *ping.interval > 0
-                                        ? std::optional{std::chrono::seconds{*ping.interval}}
+                    .pingInterval = pingInterval.has_value() && *pingInterval > 0
+                                        ? std::optional{std::chrono::seconds{*pingInterval}}
                                         : std::nullopt,
                 };
             }
