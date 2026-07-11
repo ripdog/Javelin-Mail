@@ -118,8 +118,8 @@ namespace javelin::jmap::sync
             return parts.join(QStringLiteral(","));
         }
 
-        [[nodiscard]] QString emailMailboxSummary(
-            const std::vector<javelin::jmap::domain::Email>& emails)
+        [[nodiscard]] QString
+        emailMailboxSummary(const std::vector<javelin::jmap::domain::Email>& emails)
         {
             QStringList parts;
             for (const auto& email : emails)
@@ -129,9 +129,8 @@ namespace javelin::jmap::sync
                 {
                     mailboxIds.push_back(QString::fromStdString(mailboxId));
                 }
-                parts.push_back(QStringLiteral("%1[%2]")
-                                    .arg(QString::fromStdString(email.id),
-                                         mailboxIds.join(QStringLiteral(","))));
+                parts.push_back(QStringLiteral("%1[%2]").arg(QString::fromStdString(email.id),
+                                                             mailboxIds.join(QStringLiteral(","))));
             }
             return parts.join(QStringLiteral(";"));
         }
@@ -268,6 +267,7 @@ namespace javelin::jmap::sync
             std::vector<javelin::jmap::domain::Thread> threads;
             std::vector<javelin::jmap::domain::Email> emails;
             std::size_t representativeCount = 0;
+            std::optional<std::size_t> total;
         };
 
         struct IncrementalCollapsedMailboxRefresh
@@ -316,7 +316,7 @@ namespace javelin::jmap::sync
                 .position = 0,
                 .limit = 100,
                 .collapseThreads = true,
-                .calculateTotal = false,
+                .calculateTotal = true,
             });
             if (!queryRequest.has_value())
             {
@@ -389,8 +389,7 @@ namespace javelin::jmap::sync
                 };
             }
             const auto& parsedQuery = std::get<javelin::jmap::api::EmailQueryResponse>(queryResult);
-            qInfo().noquote() << "Mailbox refresh query result"
-                              << QString::fromStdString(accountId)
+            qInfo().noquote() << "Mailbox refresh query result" << QString::fromStdString(accountId)
                               << QString::fromStdString(mailboxId) << "state"
                               << QString::fromStdString(parsedQuery.queryState) << "ids"
                               << joinIds(parsedQuery.ids) << "total"
@@ -422,6 +421,7 @@ namespace javelin::jmap::sync
                     .threads = {},
                     .emails = {},
                     .representativeCount = 0,
+                    .total = parsedQuery.total,
                 };
             }
 
@@ -469,6 +469,7 @@ namespace javelin::jmap::sync
                 .threads = parsedThreads.list,
                 .emails = parsedEmails.list,
                 .representativeCount = parsedQuery.ids.size(),
+                .total = parsedQuery.total,
             };
         }
 
@@ -769,7 +770,7 @@ namespace javelin::jmap::sync
 
     QCoro::Task<MailboxRefreshResult> MailboxRefreshExecutor::refreshCollapsedMailbox(
         std::string accountId, std::string mailboxId,
-        std::function<void(const QString&)> reportProgress) const
+        std::function<void(const QString&)> reportProgress, const bool forceFullRefresh) const
     {
         const auto emitProgress = [&reportProgress](const QString& message)
         {
@@ -809,10 +810,9 @@ namespace javelin::jmap::sync
         std::vector<RefreshNotificationCandidate> notificationCandidates;
         std::optional<std::vector<std::string>> previousMailboxEmailIds;
 
-        const bool hasPriorMailboxState =
-            queryPlan.kind == javelin::jmap::sync::SyncPlanKind::IncrementalChanges &&
-            emailPlan.kind == javelin::jmap::sync::SyncPlanKind::IncrementalChanges;
-        if (hasPriorMailboxState)
+        if (forceFullRefresh ||
+            (queryPlan.kind == javelin::jmap::sync::SyncPlanKind::IncrementalChanges &&
+             emailPlan.kind == javelin::jmap::sync::SyncPlanKind::IncrementalChanges))
         {
             const auto previousIdsResult =
                 mailboxEmailIds(m_databaseConnection, accountId, mailboxId);
@@ -825,7 +825,8 @@ namespace javelin::jmap::sync
                 std::get<std::vector<std::string>>(std::move(previousIdsResult));
         }
 
-        if (queryPlan.kind == javelin::jmap::sync::SyncPlanKind::IncrementalChanges &&
+        if (!forceFullRefresh &&
+            queryPlan.kind == javelin::jmap::sync::SyncPlanKind::IncrementalChanges &&
             queryPlan.sinceState.has_value() &&
             emailPlan.kind == javelin::jmap::sync::SyncPlanKind::IncrementalChanges &&
             emailPlan.sinceState.has_value())
@@ -927,7 +928,9 @@ namespace javelin::jmap::sync
                 QStringLiteral("Cached %1 threaded conversations for the selected mailbox.")
                     .arg(representativeCount));
 
-            if (previousMailboxEmailIds.has_value())
+            const bool fetchedCompleteMailbox =
+                fetch.total.has_value() && *fetch.total == fetch.representativeCount;
+            if (previousMailboxEmailIds.has_value() && fetchedCompleteMailbox)
             {
                 std::unordered_set<std::string> previousIdsSet(previousMailboxEmailIds->begin(),
                                                                previousMailboxEmailIds->end());
@@ -965,10 +968,10 @@ namespace javelin::jmap::sync
                 if (!removedAfterFullFetch.empty())
                 {
                     const auto removedMailboxEmailIds = removedAfterFullFetch;
-                    qInfo().noquote() << "Mailbox refresh removing stale mailbox membership"
-                                      << QString::fromStdString(accountId)
-                                      << QString::fromStdString(mailboxId) << "emailIds"
-                                      << joinIds(removedMailboxEmailIds);
+                    qInfo().noquote()
+                        << "Mailbox refresh removing stale mailbox membership"
+                        << QString::fromStdString(accountId) << QString::fromStdString(mailboxId)
+                        << "emailIds" << joinIds(removedMailboxEmailIds);
                     removedAfterFullFetch.insert(removedAfterFullFetch.end(),
                                                  removedEmailIds.begin(), removedEmailIds.end());
                     if (const auto error = emailRepository.removeFromMailbox(

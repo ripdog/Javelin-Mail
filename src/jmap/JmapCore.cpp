@@ -1654,7 +1654,7 @@ namespace javelin::jmap
         javelin::jmap::sync::MailboxRefreshExecutor mailboxRefreshExecutor{
             *m_impl->databaseConnection, methodCaller, apiRequestContext};
         const auto refreshResult = co_await mailboxRefreshExecutor.refreshCollapsedMailbox(
-            accountId, mailboxId, reportProgress);
+            accountId, mailboxId, reportProgress, true);
         if (const auto* error =
                 std::get_if<javelin::jmap::sync::MailboxRefreshError>(&refreshResult))
         {
@@ -1768,6 +1768,28 @@ namespace javelin::jmap
             co_return LiveRefreshError{
                 .message = QStringLiteral("JMAP core is not wired to the cache and transport yet."),
             };
+        }
+
+        if (const auto validationError = validateLoginSettings(settings, true))
+        {
+            co_return *validationError;
+        }
+        const auto sessionResult = loadCachedSession(*m_impl->databaseConnection, accountId);
+        if (const auto* error = std::get_if<LiveRefreshError>(&sessionResult))
+        {
+            co_return *error;
+        }
+        javelin::jmap::api::MethodCaller methodCaller{*m_impl->transport};
+        javelin::jmap::sync::MailboxRefreshExecutor mailboxRefreshExecutor{
+            *m_impl->databaseConnection, methodCaller,
+            buildApiRequestContext(settings, accountId,
+                                   std::get<javelin::jmap::api::Session>(sessionResult))};
+        const auto refreshResult = co_await mailboxRefreshExecutor.refreshCollapsedMailbox(
+            accountId, mailboxId, reportProgress, true);
+        if (const auto* error =
+                std::get_if<javelin::jmap::sync::MailboxRefreshError>(&refreshResult))
+        {
+            co_return LiveRefreshError{.message = error->message};
         }
 
         const auto pageResult = co_await performCollapsedQueryPage(
