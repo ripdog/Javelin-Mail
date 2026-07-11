@@ -24,6 +24,7 @@
 #include <QUrl>
 #include <QUrlQuery>
 
+#include <algorithm>
 #include <optional>
 #include <string_view>
 #include <unordered_map>
@@ -74,8 +75,10 @@ namespace javelin::jmap::sync
 
         constexpr auto eventSourceConnectTimeout = std::chrono::seconds{15};
         constexpr auto requestedPingInterval = std::chrono::seconds{30};
-        constexpr auto defaultEventSourceIdleTimeout = std::chrono::seconds{75};
+        constexpr auto maximumAcceptedPingInterval = std::chrono::seconds{300};
         constexpr auto eventSourcePingGrace = std::chrono::seconds{15};
+        constexpr auto defaultEventSourceIdleTimeout =
+            maximumAcceptedPingInterval * 2 + eventSourcePingGrace;
 
         [[nodiscard]] QByteArray summarizeBody(const QByteArray& body)
         {
@@ -463,9 +466,12 @@ namespace javelin::jmap::sync
                                                 eventId, eventData);
             if (parsed.pingInterval.has_value())
             {
-                activityTimeout = *parsed.pingInterval * 2 + eventSourcePingGrace;
+                const auto effectivePingInterval =
+                    std::min(*parsed.pingInterval, maximumAcceptedPingInterval);
+                activityTimeout = effectivePingInterval * 2 + eventSourcePingGrace;
                 qInfo().noquote() << "Long poll server ping interval"
-                                  << parsed.pingInterval->count() << "seconds; activity timeout"
+                                  << parsed.pingInterval->count() << "seconds; effective interval"
+                                  << effectivePingInterval.count() << "seconds; activity timeout"
                                   << activityTimeout.count() << "seconds";
             }
             qInfo().noquote() << "Long poll received SSE event"
