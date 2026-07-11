@@ -89,9 +89,16 @@ namespace javelin::app
                 }
                 for (const auto& accountId : settings.cachedAccountIds)
                 {
+                    std::vector<std::string> mailboxIds;
+                    for (const auto& mailboxId :
+                         javelin::gui::settings::PreferencesDialog::syncedMailboxIds(accountId))
+                    {
+                        mailboxIds.push_back(mailboxId.toStdString());
+                    }
                     configurations.push_back(LongPollAccountConfiguration{
                         .settings = toLiveConnectionSettings(settings),
                         .accountId = accountId.toStdString(),
+                        .mailboxIds = std::move(mailboxIds),
                     });
                 }
             }
@@ -124,6 +131,7 @@ namespace javelin::app
         if (settings.loginEmail.isEmpty() || settings.apiKey.isEmpty())
         {
             javelin::gui::settings::PreferencesDialog dialog{m_processServices->accountRepository(),
+                                                             m_processServices->queryService(),
                                                              m_mainWindow};
             dialog.exec();
         }

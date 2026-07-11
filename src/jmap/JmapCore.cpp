@@ -812,7 +812,8 @@ namespace javelin::jmap
 
     QCoro::Task<LiveRefreshResult>
     JmapCore::refreshFromServer(LiveConnectionSettings settings,
-                                std::function<void(const QString&)> progressCallback)
+                                std::function<void(const QString&)> progressCallback,
+                                std::optional<std::vector<std::string>> configuredMailboxIds)
     {
         const auto reportProgress = [&progressCallback](const QString& message)
         {
@@ -961,23 +962,39 @@ namespace javelin::jmap
         }
 
         const auto selectedMailboxId = selectMailboxForInitialSync(parsedMailboxes.list);
+        auto mailboxIds = configuredMailboxIds.value_or(std::vector<std::string>{});
+        std::erase_if(mailboxIds,
+                      [&parsedMailboxes](const auto& mailboxId)
+                      {
+                          return std::ranges::none_of(parsedMailboxes.list,
+                                                      [&mailboxId](const auto& mailbox)
+                                                      { return mailbox.id == mailboxId; });
+                      });
+        if (!configuredMailboxIds.has_value() && mailboxIds.empty() &&
+            selectedMailboxId.has_value())
+        {
+            mailboxIds.push_back(*selectedMailboxId);
+        }
         std::size_t emailCount = 0;
 
-        if (selectedMailboxId.has_value())
+        if (!mailboxIds.empty())
         {
-            reportProgress(QStringLiteral("Fetching conversation list..."));
             javelin::jmap::sync::MailboxRefreshExecutor mailboxRefreshExecutor{
                 *m_impl->databaseConnection, methodCaller, apiRequestContext};
-            const auto refreshResult = co_await mailboxRefreshExecutor.refreshCollapsedMailbox(
-                accountId, *selectedMailboxId, reportProgress);
-            if (const auto* error =
-                    std::get_if<javelin::jmap::sync::MailboxRefreshError>(&refreshResult))
+            for (const auto& mailboxId : mailboxIds)
             {
-                co_return LiveRefreshError{.message = error->message};
-            }
+                reportProgress(QStringLiteral("Refreshing selected mailbox..."));
+                const auto refreshResult = co_await mailboxRefreshExecutor.refreshCollapsedMailbox(
+                    accountId, mailboxId, reportProgress, true);
+                if (const auto* error =
+                        std::get_if<javelin::jmap::sync::MailboxRefreshError>(&refreshResult))
+                {
+                    co_return LiveRefreshError{.message = error->message};
+                }
 
-            emailCount = std::get<javelin::jmap::sync::MailboxRefreshSummary>(refreshResult)
-                             .representativeCount;
+                emailCount += std::get<javelin::jmap::sync::MailboxRefreshSummary>(refreshResult)
+                                  .representativeCount;
+            }
             reportProgress(QStringLiteral("Cached %1 threaded conversations.").arg(emailCount));
         }
 
@@ -997,7 +1014,9 @@ namespace javelin::jmap
 
         co_return LiveRefreshSummary{
             .accountId = accountId,
-            .selectedMailboxId = selectedMailboxId,
+            .selectedMailboxId = mailboxIds.size() == 1
+                                     ? std::optional<std::string>{mailboxIds.front()}
+                                     : std::nullopt,
             .mailboxCount = parsedMailboxes.list.size(),
             .emailCount = emailCount,
             .resolvedSessionUrl = sessionClient.resolvedSessionUrl(),

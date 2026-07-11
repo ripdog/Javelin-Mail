@@ -3715,7 +3715,7 @@ namespace javelin::gui::shell
 
     void MainWindow::openPreferences()
     {
-        javelin::gui::settings::PreferencesDialog dialog{m_accountRepository, this};
+        javelin::gui::settings::PreferencesDialog dialog{m_accountRepository, m_queryService, this};
         if (dialog.exec() == QDialog::Accepted)
         {
             m_statusBar->showMessage(QStringLiteral("Saved connection preferences."), 3000);
@@ -3778,7 +3778,20 @@ namespace javelin::gui::shell
                 QMetaObject::invokeMethod(
                     this, [this, message] { m_statusBar->showMessage(message); },
                     Qt::QueuedConnection);
-            });
+            },
+            [&settings]
+            {
+                std::vector<std::string> mailboxIds;
+                for (const auto& accountId : settings.cachedAccountIds)
+                {
+                    for (const auto& mailboxId :
+                         javelin::gui::settings::PreferencesDialog::syncedMailboxIds(accountId))
+                    {
+                        mailboxIds.push_back(mailboxId.toStdString());
+                    }
+                }
+                return mailboxIds;
+            }());
         QCoro::connect(
             std::move(task), this,
             [this, settings](javelin::jmap::LiveRefreshResult result)
@@ -3864,9 +3877,16 @@ namespace javelin::gui::shell
             }
             for (const auto& accountId : settings.cachedAccountIds)
             {
+                std::vector<std::string> mailboxIds;
+                for (const auto& mailboxId :
+                     javelin::gui::settings::PreferencesDialog::syncedMailboxIds(accountId))
+                {
+                    mailboxIds.push_back(mailboxId.toStdString());
+                }
                 configurations.push_back(javelin::app::LongPollAccountConfiguration{
                     .settings = toLiveConnectionSettings(settings),
                     .accountId = accountId.toStdString(),
+                    .mailboxIds = std::move(mailboxIds),
                 });
             }
         }

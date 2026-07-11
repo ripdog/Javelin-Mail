@@ -1,8 +1,10 @@
 #include "gui/settings/PreferencesDialog.h"
 
 #include "jmap/cache/AccountRepository.h"
+#include "jmap/cache/QueryService.h"
 
 #include <QCheckBox>
+#include <QComboBox>
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFileDialog>
@@ -15,6 +17,7 @@
 #include <QPushButton>
 #include <QRadioButton>
 #include <QSettings>
+#include <QSignalBlocker>
 #include <QSplitter>
 #include <QUuid>
 #include <QVBoxLayout>
@@ -45,6 +48,8 @@ namespace javelin::gui::settings
         constexpr auto attachmentsGroup = "attachments";
         constexpr auto alwaysAskKey = "alwaysAsk";
         constexpr auto directoryKey = "directory";
+        constexpr auto mailboxSyncGroup = "mailboxSync";
+        constexpr auto mailboxIdsKey = "mailboxIds";
         constexpr int remoteContentKindRole = Qt::UserRole + 1;
         constexpr int remoteContentValueRole = Qt::UserRole + 2;
         constexpr int autoTranslateKindRole = Qt::UserRole + 1;
@@ -176,9 +181,11 @@ namespace javelin::gui::settings
     } // namespace
 
     PreferencesDialog::PreferencesDialog(javelin::jmap::cache::AccountRepository& accountRepository,
+                                         javelin::jmap::cache::QueryService& queryService,
                                          QWidget* parent)
         : KConfigDialog(parent, QStringLiteral("preferences"), nullptr),
-          m_accountRepository(accountRepository), m_accounts(loadAccounts()),
+          m_accountRepository(accountRepository), m_queryService(queryService),
+          m_accounts(loadAccounts()),
           m_remoteContentSenders(remoteContentAllowList(QLatin1StringView{allowedSendersKey})),
           m_remoteContentDomains(remoteContentAllowList(QLatin1StringView{allowedDomainsKey})),
           m_autoTranslateSenders(settingsList(QLatin1StringView{translationGroup},
@@ -232,6 +239,18 @@ namespace javelin::gui::settings
         splitter->setStretchFactor(1, 1);
         accountsPageLayout->addWidget(splitter, 1);
         addPage(accountsPage, QStringLiteral("Accounts"), QStringLiteral("user-identity"),
+                QString{}, false);
+
+        auto* mailboxSyncPage = new QWidget(this);
+        auto* mailboxSyncLayout = new QVBoxLayout(mailboxSyncPage);
+        mailboxSyncLayout->addWidget(
+            new QLabel(QStringLiteral("Keep selected mailboxes synchronized in the background."),
+                       mailboxSyncPage));
+        m_mailboxSyncAccount = new QComboBox(mailboxSyncPage);
+        mailboxSyncLayout->addWidget(m_mailboxSyncAccount);
+        m_mailboxSyncList = new QListWidget(mailboxSyncPage);
+        mailboxSyncLayout->addWidget(m_mailboxSyncList, 1);
+        addPage(mailboxSyncPage, QStringLiteral("Mailbox Sync"), QStringLiteral("view-refresh"),
                 QString{}, false);
 
         auto* remoteContentPage = new QWidget(this);
@@ -338,6 +357,19 @@ namespace javelin::gui::settings
                 });
         connect(m_attachmentDirectoryButton, &QPushButton::clicked, this,
                 &PreferencesDialog::selectAttachmentDirectory);
+        connect(m_mailboxSyncAccount, &QComboBox::currentIndexChanged, this,
+                [this]
+                {
+                    storeMailboxSyncSelection();
+                    m_mailboxSyncCurrentAccountId = m_mailboxSyncAccount->currentData().toString();
+                    refreshMailboxSyncList();
+                });
+        connect(m_mailboxSyncList, &QListWidget::itemChanged, this,
+                [this](QListWidgetItem*)
+                {
+                    storeMailboxSyncSelection();
+                    noteUnsavedChanges();
+                });
 
         if (m_accounts.empty())
         {
@@ -350,6 +382,7 @@ namespace javelin::gui::settings
         refreshAccountList();
         refreshRemoteContentList();
         refreshAutoTranslateList();
+        refreshMailboxSyncAccounts();
         updateAttachmentDirectoryControls();
         m_accountList->setCurrentRow(0);
         m_hasPendingChanges = false;
@@ -471,6 +504,18 @@ namespace javelin::gui::settings
         };
         settings.endGroup();
         return value;
+    }
+
+    QStringList PreferencesDialog::syncedMailboxIds(const QStringView accountId)
+    {
+        QSettings settings;
+        settings.beginGroup(QLatin1StringView{mailboxSyncGroup});
+        const auto ids =
+            settings
+                .value(accountId.toString() + QLatin1Char('/') + QLatin1StringView{mailboxIdsKey})
+                .toStringList();
+        settings.endGroup();
+        return ids;
     }
 
     void PreferencesDialog::saveAccounts(const std::vector<ConnectionSettings>& accounts)
@@ -645,6 +690,16 @@ namespace javelin::gui::settings
         saveSettingsList(QLatin1StringView{translationGroup},
                          QLatin1StringView{autoTranslateDomainsKey}, m_autoTranslateDomains);
         saveAttachmentSaveSettings(m_attachmentSaveSettings);
+        storeMailboxSyncSelection();
+        QSettings mailboxSettings;
+        mailboxSettings.beginGroup(QLatin1StringView{mailboxSyncGroup});
+        for (auto it = m_syncedMailboxIds.cbegin(); it != m_syncedMailboxIds.cend(); ++it)
+        {
+            mailboxSettings.setValue(it.key() + QLatin1Char('/') + QLatin1StringView{mailboxIdsKey},
+                                     it.value());
+        }
+        mailboxSettings.endGroup();
+        mailboxSettings.sync();
 
         QSettings settings;
         settings.beginGroup(QLatin1StringView{accountsGroup});
@@ -666,6 +721,76 @@ namespace javelin::gui::settings
         {
             m_accountList->addItem(accountListText(account));
         }
+    }
+
+    void PreferencesDialog::refreshMailboxSyncAccounts()
+    {
+        QSignalBlocker blocker{m_mailboxSyncAccount};
+        m_mailboxSyncAccount->clear();
+        const auto accountsResult = m_accountRepository.listAll();
+        const auto* accounts =
+            std::get_if<std::vector<javelin::jmap::cache::CachedAccount>>(&accountsResult);
+        if (accounts == nullptr)
+        {
+            refreshMailboxSyncList();
+            return;
+        }
+        for (const auto& account : *accounts)
+        {
+            const auto accountId = QString::fromStdString(account.accountId);
+            m_mailboxSyncAccount->addItem(QString::fromStdString(account.name), accountId);
+            m_syncedMailboxIds.insert(accountId, syncedMailboxIds(accountId));
+        }
+        m_mailboxSyncCurrentAccountId = m_mailboxSyncAccount->currentData().toString();
+        refreshMailboxSyncList();
+    }
+
+    void PreferencesDialog::refreshMailboxSyncList()
+    {
+        QSignalBlocker blocker{m_mailboxSyncList};
+        m_mailboxSyncList->clear();
+        const auto accountId = m_mailboxSyncCurrentAccountId;
+        if (accountId.isEmpty())
+        {
+            return;
+        }
+        const auto result = m_queryService.listMailboxTree(accountId.toStdString());
+        const auto* mailboxes =
+            std::get_if<std::vector<javelin::jmap::cache::MailboxTreeItem>>(&result);
+        if (mailboxes == nullptr)
+        {
+            return;
+        }
+        const auto selected = m_syncedMailboxIds.value(accountId);
+        for (const auto& mailbox : *mailboxes)
+        {
+            auto* item =
+                new QListWidgetItem(QString::fromStdString(mailbox.name), m_mailboxSyncList);
+            item->setData(Qt::UserRole, QString::fromStdString(mailbox.id));
+            item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+            item->setCheckState(selected.contains(QString::fromStdString(mailbox.id))
+                                    ? Qt::Checked
+                                    : Qt::Unchecked);
+        }
+    }
+
+    void PreferencesDialog::storeMailboxSyncSelection()
+    {
+        const auto accountId = m_mailboxSyncCurrentAccountId;
+        if (accountId.isEmpty())
+        {
+            return;
+        }
+        QStringList selected;
+        for (int row = 0; row < m_mailboxSyncList->count(); ++row)
+        {
+            const auto* item = m_mailboxSyncList->item(row);
+            if (item->checkState() == Qt::Checked)
+            {
+                selected.push_back(item->data(Qt::UserRole).toString());
+            }
+        }
+        m_syncedMailboxIds.insert(accountId, selected);
     }
 
     void PreferencesDialog::refreshRemoteContentList()

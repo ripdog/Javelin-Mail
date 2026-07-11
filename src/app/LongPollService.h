@@ -50,7 +50,8 @@ namespace javelin::app
                         QObject* parent = nullptr);
         ~LongPollService() override;
 
-        void applySettings(javelin::jmap::LiveConnectionSettings settings, std::string accountId);
+        void applySettings(javelin::jmap::LiveConnectionSettings settings, std::string accountId,
+                           std::vector<std::string> mailboxIds);
         void stop();
 
         [[nodiscard]] Status status() const;
@@ -73,8 +74,7 @@ namespace javelin::app
         {
             javelin::jmap::LiveConnectionSettings settings;
             std::string accountId;
-            std::string mailboxId;
-            std::string mailboxName;
+            std::vector<std::pair<std::string, std::string>> mailboxes;
             std::string apiUrl;
             std::string eventSourceUrl;
             std::optional<javelin::jmap::api::WebSocketCapability> websocket;
@@ -105,7 +105,7 @@ namespace javelin::app
         void restart();
         void setStatus(Status status);
         void publishNotifications(
-            const RunContext& runContext, std::string_view mailboxName,
+            const RunContext& runContext, std::string_view mailboxId, std::string_view mailboxName,
             const std::vector<javelin::jmap::sync::RefreshNotificationCandidate>& candidates);
 
         javelin::jmap::cache::DatabaseConnection& m_databaseConnection;
@@ -115,6 +115,7 @@ namespace javelin::app
         javelin::jmap::cache::QueryService& m_queryService;
         std::optional<javelin::jmap::LiveConnectionSettings> m_settings;
         std::string m_accountId;
+        std::vector<std::string> m_mailboxIds;
         std::shared_ptr<RunContext> m_runContext;
         std::string m_lastEventId;
         std::deque<std::string> m_recentNotificationKeys;

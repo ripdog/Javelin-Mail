@@ -167,7 +167,8 @@ namespace javelin::jmap
         [[nodiscard]] QString statusSummary() const;
         [[nodiscard]] QCoro::Task<LiveRefreshResult>
         refreshFromServer(LiveConnectionSettings settings,
-                          std::function<void(const QString&)> progressCallback = {});
+                          std::function<void(const QString&)> progressCallback = {},
+                          std::optional<std::vector<std::string>> mailboxIds = std::nullopt);
         [[nodiscard]] QCoro::Task<MessageContentRefreshResult>
         refreshMessageContent(LiveConnectionSettings settings, std::string accountId,
                               std::string emailId,

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <KConfigDialog>
+#include <QHash>
 
 #include <vector>
 
@@ -8,11 +9,13 @@ class QLineEdit;
 class QListWidget;
 class QPushButton;
 class QRadioButton;
+class QComboBox;
 
 namespace javelin::jmap::cache
 {
     class AccountRepository;
-}
+    class QueryService;
+} // namespace javelin::jmap::cache
 
 namespace javelin::gui::settings
 {
@@ -39,6 +42,7 @@ namespace javelin::gui::settings
 
       public:
         explicit PreferencesDialog(javelin::jmap::cache::AccountRepository& accountRepository,
+                                   javelin::jmap::cache::QueryService& queryService,
                                    QWidget* parent = nullptr);
         ~PreferencesDialog() override;
 
@@ -48,6 +52,7 @@ namespace javelin::gui::settings
         [[nodiscard]] static ConnectionSettings loadSettings();
         [[nodiscard]] static ConnectionSettings loadSettingsForAccount(QStringView accountId);
         [[nodiscard]] static AttachmentSaveSettings loadAttachmentSaveSettings();
+        [[nodiscard]] static QStringList syncedMailboxIds(QStringView accountId);
         static void saveAccounts(const std::vector<ConnectionSettings>& accounts);
         static void associateCachedAccount(const QString& configuredAccountId,
                                            const QString& cachedAccountId);
@@ -72,8 +77,12 @@ namespace javelin::gui::settings
         void selectAttachmentDirectory();
         [[nodiscard]] bool validateCurrentSettings();
         void updateAttachmentDirectoryControls();
+        void refreshMailboxSyncAccounts();
+        void refreshMailboxSyncList();
+        void storeMailboxSyncSelection();
 
         javelin::jmap::cache::AccountRepository& m_accountRepository;
+        javelin::jmap::cache::QueryService& m_queryService;
         std::vector<ConnectionSettings> m_accounts;
         std::vector<ConnectionSettings> m_removedAccounts;
         QStringList m_loadedAccountIds;
@@ -98,6 +107,10 @@ namespace javelin::gui::settings
         QRadioButton* m_saveAttachmentDirectoryRadio = nullptr;
         QLineEdit* m_attachmentDirectoryEdit = nullptr;
         QPushButton* m_attachmentDirectoryButton = nullptr;
+        QComboBox* m_mailboxSyncAccount = nullptr;
+        QListWidget* m_mailboxSyncList = nullptr;
+        QHash<QString, QStringList> m_syncedMailboxIds;
+        QString m_mailboxSyncCurrentAccountId;
     };
 
 } // namespace javelin::gui::settings

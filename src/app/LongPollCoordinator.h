@@ -16,6 +16,7 @@ namespace javelin::app
     {
         javelin::jmap::LiveConnectionSettings settings;
         std::string accountId;
+        std::vector<std::string> mailboxIds;
     };
 
     class LongPollCoordinator final : public QObject

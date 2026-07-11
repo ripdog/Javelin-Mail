@@ -34,7 +34,8 @@ namespace javelin::app
                 connectService(*serviceIt->second);
             }
             serviceIt->second->applySettings(std::move(configuration.settings),
-                                             configuration.accountId);
+                                             configuration.accountId,
+                                             std::move(configuration.mailboxIds));
         }
 
         for (auto serviceIt = m_services.begin(); serviceIt != m_services.end();)
