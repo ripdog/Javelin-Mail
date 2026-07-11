@@ -419,6 +419,7 @@ namespace javelin::jmap::sync
 
         QNetworkRequest networkRequest{*url};
         networkRequest.setTransferTimeout(0);
+        networkRequest.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
         networkRequest.setRawHeader("Accept", "text/event-stream");
         networkRequest.setRawHeader("Authorization", QByteArray{"Bearer "} +
                                                          QByteArray::fromStdString(m_accessToken));
