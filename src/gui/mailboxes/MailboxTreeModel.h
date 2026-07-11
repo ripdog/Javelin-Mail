@@ -57,6 +57,14 @@ namespace javelin::gui::mailboxes
         // or a mailbox. accountId is always set on every node.
         struct Node
         {
+            enum class Kind
+            {
+                Account,
+                Mailbox,
+                Separator,
+            };
+
+            Kind kind = Kind::Mailbox;
             std::string accountId;
             std::string displayName;
             std::string mailboxId; // empty for account-level nodes
@@ -68,6 +76,8 @@ namespace javelin::gui::mailboxes
         };
 
         [[nodiscard]] const Node* nodeForIndex(const QModelIndex& index) const;
+        [[nodiscard]] static bool mailboxNameLess(const std::unique_ptr<Node>& left,
+                                                  const std::unique_ptr<Node>& right);
         void rebuild();
 
         javelin::jmap::cache::AccountRepository& m_accountRepository;

@@ -7,7 +7,10 @@
 #include <QIcon>
 #include <QMimeData>
 #include <QPalette>
+#include <QSize>
 
+#include <algorithm>
+#include <array>
 #include <unordered_map>
 
 namespace javelin::gui::mailboxes
@@ -15,7 +18,26 @@ namespace javelin::gui::mailboxes
     namespace
     {
         constexpr auto emailDragMimeType = "application/x-javelin-mail-email-ids";
-    }
+
+        [[nodiscard]] int primaryMailboxRank(const std::optional<std::string>& role)
+        {
+            if (!role.has_value())
+            {
+                return 100;
+            }
+
+            static constexpr std::array roles{
+                std::string_view{"inbox"},  std::string_view{"archive"},
+                std::string_view{"drafts"}, std::string_view{"scheduled"},
+                std::string_view{"sent"},   std::string_view{"junk"},
+                std::string_view{"trash"},
+            };
+
+            const auto it = std::ranges::find(roles, *role);
+            return it == roles.end() ? 100 : static_cast<int>(std::distance(roles.begin(), it));
+        }
+
+    } // namespace
 
     MailboxTreeModel::MailboxTreeModel(javelin::jmap::cache::AccountRepository& accountRepository,
                                        javelin::jmap::cache::QueryService& queryService,
@@ -27,6 +49,14 @@ namespace javelin::gui::mailboxes
     }
 
     MailboxTreeModel::~MailboxTreeModel() = default;
+
+    bool MailboxTreeModel::mailboxNameLess(const std::unique_ptr<Node>& left,
+                                           const std::unique_ptr<Node>& right)
+    {
+        return QString::compare(QString::fromStdString(left->displayName),
+                                QString::fromStdString(right->displayName),
+                                Qt::CaseInsensitive) < 0;
+    }
 
     QModelIndex MailboxTreeModel::index(const int row, const int column,
                                         const QModelIndex& parentIndex) const
@@ -111,6 +141,19 @@ namespace javelin::gui::mailboxes
             return {};
         }
 
+        if (node->kind == Node::Kind::Separator)
+        {
+            if (role == Qt::SizeHintRole)
+            {
+                return QSize{0, 7};
+            }
+            if (role == Qt::BackgroundRole)
+            {
+                return QApplication::palette().color(QPalette::Mid);
+            }
+            return {};
+        }
+
         if (role == Qt::DisplayRole)
         {
             if (!node->mailboxId.empty() && node->unreadEmails > 0)
@@ -165,9 +208,14 @@ namespace javelin::gui::mailboxes
 
     Qt::ItemFlags MailboxTreeModel::flags(const QModelIndex& index) const
     {
-        auto result = QAbstractItemModel::flags(index);
         const auto* node = nodeForIndex(index);
-        if (node != nullptr && !node->mailboxId.empty())
+        if (node == nullptr || node->kind == Node::Kind::Separator)
+        {
+            return Qt::NoItemFlags;
+        }
+
+        auto result = QAbstractItemModel::flags(index);
+        if (!node->mailboxId.empty())
         {
             result |= Qt::ItemIsDropEnabled;
         }
@@ -249,6 +297,7 @@ namespace javelin::gui::mailboxes
         for (const auto& account : *accounts)
         {
             auto accountNode = std::make_unique<Node>();
+            accountNode->kind = Node::Kind::Account;
             accountNode->accountId = account.accountId;
             accountNode->displayName = account.name.empty() ? account.accountId : account.name;
             // mailboxId left empty — this is an account-level node.
@@ -333,6 +382,45 @@ namespace javelin::gui::mailboxes
                     nodesById.emplace(rootMailboxNode->mailboxId, rootMailboxNode.get());
                     accountNode->children.push_back(std::move(rootMailboxNode));
                     attachChildren(attachChildren, accountNode->children.back().get());
+                }
+
+                const auto sortChildrenAlphabetically = [](const auto& self, Node* parent) -> void
+                {
+                    std::ranges::sort(parent->children, mailboxNameLess);
+                    for (const auto& child : parent->children)
+                    {
+                        self(self, child.get());
+                    }
+                };
+                for (const auto& child : accountNode->children)
+                {
+                    sortChildrenAlphabetically(sortChildrenAlphabetically, child.get());
+                }
+
+                std::ranges::sort(
+                    accountNode->children,
+                    [](const std::unique_ptr<Node>& left, const std::unique_ptr<Node>& right)
+                    {
+                        const int leftRank = primaryMailboxRank(left->role);
+                        const int rightRank = primaryMailboxRank(right->role);
+                        if (leftRank != rightRank)
+                        {
+                            return leftRank < rightRank;
+                        }
+                        return mailboxNameLess(left, right);
+                    });
+
+                const auto firstOther = std::ranges::find_if(
+                    accountNode->children, [](const std::unique_ptr<Node>& child)
+                    { return primaryMailboxRank(child->role) >= 100; });
+                if (firstOther != accountNode->children.begin() &&
+                    firstOther != accountNode->children.end())
+                {
+                    auto separator = std::make_unique<Node>();
+                    separator->kind = Node::Kind::Separator;
+                    separator->accountId = account.accountId;
+                    separator->parent = accountNode.get();
+                    accountNode->children.insert(firstOther, std::move(separator));
                 }
             }
 
