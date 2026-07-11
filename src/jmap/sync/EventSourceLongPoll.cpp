@@ -38,6 +38,11 @@ namespace javelin::jmap::sync
         std::unordered_map<std::string, std::unordered_map<std::string, std::string>> changed;
     };
 
+    struct RawPing
+    {
+        std::optional<unsigned int> interval;
+    };
+
 } // namespace javelin::jmap::sync
 
 template <> struct glz::meta<javelin::jmap::sync::RawStateChange>
@@ -45,6 +50,13 @@ template <> struct glz::meta<javelin::jmap::sync::RawStateChange>
     using T = javelin::jmap::sync::RawStateChange;
 
     static constexpr auto value = glz::object("type", &T::type, "changed", &T::changed);
+};
+
+template <> struct glz::meta<javelin::jmap::sync::RawPing>
+{
+    using T = javelin::jmap::sync::RawPing;
+
+    static constexpr auto value = glz::object("interval", &T::interval);
 };
 
 namespace javelin::jmap::sync
@@ -61,7 +73,9 @@ namespace javelin::jmap::sync
         };
 
         constexpr auto eventSourceConnectTimeout = std::chrono::seconds{15};
-        constexpr auto eventSourceIdleTimeout = std::chrono::seconds{620};
+        constexpr auto requestedPingInterval = std::chrono::seconds{30};
+        constexpr auto defaultEventSourceIdleTimeout = std::chrono::seconds{75};
+        constexpr auto eventSourcePingGrace = std::chrono::seconds{15};
 
         [[nodiscard]] QByteArray summarizeBody(const QByteArray& body)
         {
@@ -95,6 +109,7 @@ namespace javelin::jmap::sync
             ParsedEventStatus status = ParsedEventStatus::NeedMoreData;
             std::optional<LongPollResponse> response;
             std::optional<std::string> errorMessage;
+            std::optional<std::chrono::seconds> pingInterval;
         };
 
         using ParsedStreamEvent =
@@ -156,12 +171,14 @@ namespace javelin::jmap::sync
                 expanded.contains(QStringLiteral("{ping}")) ||
                 expanded.contains(QStringLiteral("{?types,closeafter,ping}"));
 
-            expanded.replace(
-                QStringLiteral("{?types,closeafter,ping}"),
-                QStringLiteral("?types=%1&closeafter=no&ping=300").arg(encodeTemplateValue(types)));
+            expanded.replace(QStringLiteral("{?types,closeafter,ping}"),
+                             QStringLiteral("?types=%1&closeafter=no&ping=%2")
+                                 .arg(encodeTemplateValue(types))
+                                 .arg(requestedPingInterval.count()));
             expanded.replace(QStringLiteral("{types}"), encodeTemplateValue(types));
             expanded.replace(QStringLiteral("{closeafter}"), QStringLiteral("no"));
-            expanded.replace(QStringLiteral("{ping}"), QStringLiteral("300"));
+            expanded.replace(QStringLiteral("{ping}"),
+                             QString::number(requestedPingInterval.count()));
 
             QUrl url{expanded};
             if (!url.isValid() || url.isEmpty())
@@ -174,7 +191,8 @@ namespace javelin::jmap::sync
                 QUrlQuery query{url};
                 query.addQueryItem(QStringLiteral("types"), QString::fromStdString(types));
                 query.addQueryItem(QStringLiteral("closeafter"), QStringLiteral("no"));
-                query.addQueryItem(QStringLiteral("ping"), QStringLiteral("300"));
+                query.addQueryItem(QStringLiteral("ping"),
+                                   QString::number(requestedPingInterval.count()));
                 url.setQuery(query);
             }
 
@@ -193,15 +211,32 @@ namespace javelin::jmap::sync
                     .status = ParsedEventStatus::Ignored,
                     .response = std::nullopt,
                     .errorMessage = std::nullopt,
+                    .pingInterval = std::nullopt,
                 };
             }
 
             if (eventName == "ping")
             {
+                RawPing ping;
+                std::string buffer = std::string{eventData};
+                if (const auto readError =
+                        glz::read<glz::opts{.error_on_unknown_keys = false}>(ping, buffer))
+                {
+                    return ParsedEvent{
+                        .status = ParsedEventStatus::Invalid,
+                        .response = std::nullopt,
+                        .errorMessage = std::string{glz::format_error(readError, buffer)},
+                        .pingInterval = std::nullopt,
+                    };
+                }
+
                 return ParsedEvent{
                     .status = ParsedEventStatus::Ignored,
                     .response = std::nullopt,
                     .errorMessage = std::nullopt,
+                    .pingInterval = ping.interval.has_value() && *ping.interval > 0
+                                        ? std::optional{std::chrono::seconds{*ping.interval}}
+                                        : std::nullopt,
                 };
             }
 
@@ -211,6 +246,7 @@ namespace javelin::jmap::sync
                     .status = ParsedEventStatus::Ignored,
                     .response = std::nullopt,
                     .errorMessage = std::nullopt,
+                    .pingInterval = std::nullopt,
                 };
             }
 
@@ -223,6 +259,7 @@ namespace javelin::jmap::sync
                     .status = ParsedEventStatus::Invalid,
                     .response = std::nullopt,
                     .errorMessage = std::string{glz::format_error(readError, buffer)},
+                    .pingInterval = std::nullopt,
                 };
             }
 
@@ -238,6 +275,7 @@ namespace javelin::jmap::sync
                             .notifyObserver = false,
                         },
                     .errorMessage = std::nullopt,
+                    .pingInterval = std::nullopt,
                 };
             }
 
@@ -247,6 +285,7 @@ namespace javelin::jmap::sync
                     .status = ParsedEventStatus::Invalid,
                     .response = std::nullopt,
                     .errorMessage = std::string{"Expected a StateChange event payload."},
+                    .pingInterval = std::nullopt,
                 };
             }
 
@@ -257,6 +296,7 @@ namespace javelin::jmap::sync
                     .status = ParsedEventStatus::Ignored,
                     .response = std::nullopt,
                     .errorMessage = std::nullopt,
+                    .pingInterval = std::nullopt,
                 };
             }
 
@@ -277,6 +317,7 @@ namespace javelin::jmap::sync
                         .changedTypes = std::move(changedTypes),
                     },
                 .errorMessage = std::nullopt,
+                .pingInterval = std::nullopt,
             };
         }
 
@@ -409,6 +450,7 @@ namespace javelin::jmap::sync
             .lastState = request.lastState,
             .updateCount = 0,
         };
+        auto activityTimeout = defaultEventSourceIdleTimeout;
 
         const auto finalizeEvent = [&]() -> std::optional<ParsedStreamEvent>
         {
@@ -419,6 +461,13 @@ namespace javelin::jmap::sync
 
             const auto parsed = parseStateEvent(request.accountId, request.lastState, eventName,
                                                 eventId, eventData);
+            if (parsed.pingInterval.has_value())
+            {
+                activityTimeout = *parsed.pingInterval * 2 + eventSourcePingGrace;
+                qInfo().noquote() << "Long poll server ping interval"
+                                  << parsed.pingInterval->count() << "seconds; activity timeout"
+                                  << activityTimeout.count() << "seconds";
+            }
             qInfo().noquote() << "Long poll received SSE event"
                               << "status" << parsedEventStatusName(parsed.status) << "event"
                               << QString::fromStdString(eventName) << "id"
@@ -485,9 +534,9 @@ namespace javelin::jmap::sync
 
             if (!reply->isFinished() && reply->bytesAvailable() == 0)
             {
-                const auto activityTimeout =
-                    connectedReported ? eventSourceIdleTimeout : eventSourceConnectTimeout;
-                const bool ready = co_await qCoro(reply).waitForReadyRead(activityTimeout);
+                const auto waitTimeout =
+                    connectedReported ? activityTimeout : eventSourceConnectTimeout;
+                const bool ready = co_await qCoro(reply).waitForReadyRead(waitTimeout);
                 if (!ready && !reply->isFinished())
                 {
                     reply->abort();
