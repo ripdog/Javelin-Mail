@@ -36,6 +36,18 @@ TEST_CASE("session parser ignores unknown server fields", "[jmap]")
     CHECK(result.session->accounts.contains("u1"));
 }
 
+TEST_CASE("session parser exposes websocket push capability", "[jmap]")
+{
+    const auto result = javelin::jmap::api::parseSession(
+        R"({"username":"alice@example.com","apiUrl":"https://mail.example.com/jmap/api","downloadUrl":"https://mail.example.com/download/{accountId}/{blobId}/{name}","uploadUrl":"https://mail.example.com/upload/{accountId}","eventSourceUrl":"https://mail.example.com/events","state":"s1","capabilities":{"urn:ietf:params:jmap:core":{},"urn:ietf:params:jmap:mail":{},"urn:ietf:params:jmap:websocket":{"url":"wss://mail.example.com/jmap/ws","supportsPush":true}},"accounts":{"u1":{"name":"Personal","isPersonal":true,"isReadOnly":false,"accountCapabilities":{"urn:ietf:params:jmap:mail":{}}}},"primaryAccounts":{"urn:ietf:params:jmap:mail":"u1"}})",
+        javelin::jmap::api::RequiredCapabilities{.mail = true});
+
+    REQUIRE(result.ok());
+    REQUIRE(result.session->capabilities.websocket.has_value());
+    CHECK(result.session->capabilities.websocket->url == "wss://mail.example.com/jmap/ws");
+    CHECK(result.session->capabilities.websocket->supportsPush);
+}
+
 TEST_CASE("session parser exposes contacts capability metadata", "[jmap][contacts]")
 {
     const auto result = javelin::jmap::api::parseSession(
@@ -68,6 +80,8 @@ TEST_CASE("session capability validation fails when primary mail account is miss
                 .coreDetails = std::nullopt,
                 .mail = true,
                 .submission = false,
+                .contacts = false,
+                .websocket = std::nullopt,
             },
         .accounts =
             {

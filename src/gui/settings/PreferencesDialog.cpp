@@ -197,7 +197,8 @@ namespace javelin::gui::settings
         m_apiKeyEdit = new QLineEdit(detailsPanel);
         m_apiKeyEdit->setEchoMode(QLineEdit::Password);
         m_apiKeyEdit->setPlaceholderText(QStringLiteral("Paste API key"));
-        formLayout->addRow(QStringLiteral("Session URL"), m_sessionUrlEdit);
+        m_sessionUrlEdit->setPlaceholderText(QStringLiteral("Optional — discover from email"));
+        formLayout->addRow(QStringLiteral("Server"), m_sessionUrlEdit);
         formLayout->addRow(QStringLiteral("Login Email"), m_loginEmailEdit);
         formLayout->addRow(QStringLiteral("API Key"), m_apiKeyEdit);
         detailsLayout->addLayout(formLayout);
@@ -472,6 +473,20 @@ namespace javelin::gui::settings
             found->cachedAccountIds.push_back(cachedAccountId);
             saveAccounts(accounts);
         }
+    }
+
+    void PreferencesDialog::saveResolvedSessionUrl(const QString& configuredAccountId,
+                                                   const QString& sessionUrl)
+    {
+        auto accounts = loadAccounts();
+        const auto found =
+            std::ranges::find(accounts, configuredAccountId, &ConnectionSettings::id);
+        if (found == accounts.end() || sessionUrl.isEmpty())
+        {
+            return;
+        }
+        found->sessionUrl = sessionUrl;
+        saveAccounts(accounts);
     }
 
     void PreferencesDialog::addAccount()

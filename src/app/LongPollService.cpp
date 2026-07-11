@@ -119,8 +119,8 @@ namespace javelin::app
 
     bool LongPollService::hasValidSettings() const
     {
-        return m_settings.has_value() && !m_settings->sessionUrl.empty() &&
-               !m_settings->loginEmail.empty() && !m_settings->apiKey.empty();
+        return m_settings.has_value() && !m_settings->loginEmail.empty() &&
+               !m_settings->apiKey.empty();
     }
 
     std::optional<LongPollService::RunConfiguration> LongPollService::resolveConfiguration() const
@@ -134,7 +134,10 @@ namespace javelin::app
         const auto sessionResult = sessionRepository.load(m_accountId);
         const auto* session =
             std::get_if<std::optional<javelin::jmap::api::Session>>(&sessionResult);
-        if (session == nullptr || !session->has_value() || !(*session)->eventSourceUrl.has_value())
+        if (session == nullptr || !session->has_value() ||
+            (!(*session)->eventSourceUrl.has_value() &&
+             (!(*session)->capabilities.websocket.has_value() ||
+              !(*session)->capabilities.websocket->supportsPush)))
         {
             qWarning() << "Long poll configuration unavailable because the cached session has no "
                           "eventSourceUrl";
@@ -161,7 +164,8 @@ namespace javelin::app
             .mailboxId = mailbox.id,
             .mailboxName = mailbox.name,
             .apiUrl = session->value().apiUrl,
-            .eventSourceUrl = *session->value().eventSourceUrl,
+            .eventSourceUrl = session->value().eventSourceUrl.value_or(std::string{}),
+            .websocket = session->value().capabilities.websocket,
         };
     }
 
@@ -391,7 +395,11 @@ namespace javelin::app
             m_runContext != nullptr &&
             m_runContext->configuration.accountId == nextConfiguration->accountId &&
             m_runContext->configuration.mailboxId == nextConfiguration->mailboxId &&
-            m_runContext->configuration.eventSourceUrl == nextConfiguration->eventSourceUrl;
+            m_runContext->configuration.eventSourceUrl == nextConfiguration->eventSourceUrl &&
+            m_runContext->configuration.websocket.has_value() ==
+                nextConfiguration->websocket.has_value() &&
+            (!nextConfiguration->websocket.has_value() ||
+             m_runContext->configuration.websocket->url == nextConfiguration->websocket->url);
         if (!sameStream)
         {
             m_lastEventId.clear();
@@ -402,18 +410,28 @@ namespace javelin::app
         auto runContext = std::make_shared<RunContext>();
         runContext->generation = ++m_generation;
         runContext->configuration = *nextConfiguration;
-        runContext->channel = std::make_unique<javelin::jmap::sync::EventSourceLongPollChannel>(
-            m_networkAccessManager, nextConfiguration->settings.apiKey,
+        const auto channelStatusCallback =
             [this, generation = runContext->generation](
                 const javelin::jmap::sync::LongPollConnectionStatus status)
+        {
+            if (m_runContext == nullptr || m_runContext->generation != generation)
             {
-                if (m_runContext == nullptr || m_runContext->generation != generation)
-                {
-                    return;
-                }
+                return;
+            }
 
-                setStatus(toServiceStatus(status));
-            });
+            setStatus(toServiceStatus(status));
+        };
+        if (nextConfiguration->websocket.has_value() && nextConfiguration->websocket->supportsPush)
+        {
+            runContext->channel = std::make_unique<javelin::jmap::sync::WebSocketPushChannel>(
+                nextConfiguration->websocket->url, nextConfiguration->settings.apiKey,
+                channelStatusCallback);
+        }
+        else
+        {
+            runContext->channel = std::make_unique<javelin::jmap::sync::EventSourceLongPollChannel>(
+                m_networkAccessManager, nextConfiguration->settings.apiKey, channelStatusCallback);
+        }
         runContext->worker = std::make_unique<javelin::jmap::sync::LongPollWorker>(
             *runContext->channel, *this, runContext->sleeper, javelin::jmap::sync::BackoffPolicy{},
             [this, generation = runContext->generation](

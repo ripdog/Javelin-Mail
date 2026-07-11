@@ -83,8 +83,7 @@ namespace javelin::app
             std::vector<LongPollAccountConfiguration> configurations;
             for (const auto& settings : javelin::gui::settings::PreferencesDialog::loadAccounts())
             {
-                if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
-                    settings.apiKey.isEmpty())
+                if (settings.loginEmail.isEmpty() || settings.apiKey.isEmpty())
                 {
                     continue;
                 }
@@ -122,8 +121,7 @@ namespace javelin::app
         createMainWindow();
 
         const auto settings = javelin::gui::settings::PreferencesDialog::loadSettings();
-        if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
-            settings.apiKey.isEmpty())
+        if (settings.loginEmail.isEmpty() || settings.apiKey.isEmpty())
         {
             javelin::gui::settings::PreferencesDialog dialog{m_processServices->accountRepository(),
                                                              m_mainWindow};

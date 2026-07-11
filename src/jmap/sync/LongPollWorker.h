@@ -55,8 +55,7 @@ namespace javelin::jmap::sync
         delayForAttempt(std::size_t consecutiveFailures) const;
     };
 
-    using LongPollResult =
-        std::variant<LongPollStreamSummary, javelin::jmap::api::TransportError>;
+    using LongPollResult = std::variant<LongPollStreamSummary, javelin::jmap::api::TransportError>;
 
     enum class LongPollConnectionStatus
     {
@@ -79,6 +78,9 @@ namespace javelin::jmap::sync
     {
       public:
         virtual ~AbstractLongPollChannel() = default;
+        virtual void cancel()
+        {
+        }
 
         [[nodiscard]] virtual QCoro::Task<LongPollResult>
         poll(LongPollRequest request, AbstractLongPollObserver& observer,

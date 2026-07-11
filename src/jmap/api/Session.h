@@ -14,6 +14,13 @@ namespace javelin::jmap::api
     constexpr std::string_view mailCapabilityUri = "urn:ietf:params:jmap:mail";
     constexpr std::string_view submissionCapabilityUri = "urn:ietf:params:jmap:submission";
     constexpr std::string_view contactsCapabilityUri = "urn:ietf:params:jmap:contacts";
+    constexpr std::string_view websocketCapabilityUri = "urn:ietf:params:jmap:websocket";
+
+    struct WebSocketCapability
+    {
+        std::string url;
+        bool supportsPush = false;
+    };
 
     struct CoreCapability
     {
@@ -33,6 +40,7 @@ namespace javelin::jmap::api
         bool mail = false;
         bool submission = false;
         bool contacts = false;
+        std::optional<WebSocketCapability> websocket;
     };
 
     struct ContactsCapability

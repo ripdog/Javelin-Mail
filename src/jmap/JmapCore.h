@@ -42,6 +42,7 @@ namespace javelin::jmap
         std::optional<std::string> selectedMailboxId;
         std::size_t mailboxCount = 0;
         std::size_t emailCount = 0;
+        std::string resolvedSessionUrl;
     };
 
     struct LiveRefreshError

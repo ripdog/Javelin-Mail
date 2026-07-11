@@ -1,5 +1,6 @@
 #include "jmap/api/SessionClient.h"
 
+#include "jmap/api/SessionDiscovery.h"
 #include "jmap/api/SessionParser.h"
 #include "jmap/api/Transport.h"
 #include "jmap/auth/AccessTokenResolver.h"
@@ -59,9 +60,16 @@ namespace javelin::jmap::api
             co_return std::get<AuthError>(tokenResult);
         }
 
+        const auto sessionUrl = co_await discoverSessionUrl(
+            requestContext.credentials.sessionUrl, requestContext.credentials.emailAddress);
+        if (!sessionUrl.has_value())
+        {
+            co_return ProtocolError{.code = ProtocolErrorCode::InvalidResponse,
+                                    .message = "Could not discover a JMAP Session URL."};
+        }
+        m_resolvedSessionUrl = sessionUrl->toString().toStdString();
         const auto transportResult = co_await m_transport.send(buildSessionRequest(
-            QUrl{QString::fromStdString(requestContext.credentials.sessionUrl)},
-            std::get<javelin::jmap::auth::OAuthToken>(tokenResult).accessToken));
+            *sessionUrl, std::get<javelin::jmap::auth::OAuthToken>(tokenResult).accessToken));
 
         if (std::holds_alternative<TransportError>(transportResult))
         {
@@ -88,6 +96,11 @@ namespace javelin::jmap::api
         }
 
         co_return *parseResult.session;
+    }
+
+    std::string SessionClient::resolvedSessionUrl() const
+    {
+        return m_resolvedSessionUrl;
     }
 
 } // namespace javelin::jmap::api

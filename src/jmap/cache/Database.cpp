@@ -765,39 +765,55 @@ namespace javelin::jmap::cache
                     .name = QStringLiteral("contacts_cache"),
                     .statements =
                         {
-                            QStringLiteral("CREATE TABLE address_books (account_id TEXT NOT NULL "
-                                           "REFERENCES accounts(account_id) ON DELETE CASCADE, "
-                                           "address_book_id TEXT NOT NULL, name TEXT NOT NULL, "
-                                           "description TEXT, sort_order INTEGER NOT NULL, "
-                                           "is_default INTEGER NOT NULL, is_subscribed INTEGER NOT "
-                                           "NULL, share_with_json TEXT NOT NULL, my_rights_json TEXT "
-                                           "NOT NULL, state TEXT NOT NULL, "
-                                           "PRIMARY KEY(account_id,address_book_id)) STRICT"),
-                            QStringLiteral("CREATE TABLE contact_cards (account_id TEXT NOT NULL "
-                                           "REFERENCES accounts(account_id) ON DELETE CASCADE, "
-                                           "contact_id TEXT NOT NULL, uid TEXT NOT NULL, kind TEXT "
-                                           "NOT NULL, display_name TEXT NOT NULL, organization TEXT, "
-                                           "document_json TEXT NOT NULL, PRIMARY KEY(account_id,"
-                                           "contact_id), UNIQUE(account_id,uid)) STRICT"),
-                            QStringLiteral("CREATE TABLE contact_card_address_books (account_id TEXT "
-                                           "NOT NULL, contact_id TEXT NOT NULL, address_book_id TEXT "
-                                           "NOT NULL, PRIMARY KEY(account_id,contact_id,address_book_id), "
-                                           "FOREIGN KEY(account_id,contact_id) REFERENCES contact_cards"
-                                           "(account_id,contact_id) ON DELETE CASCADE, FOREIGN KEY"
-                                           "(account_id,address_book_id) REFERENCES address_books"
-                                           "(account_id,address_book_id) ON DELETE CASCADE) STRICT"),
-                            QStringLiteral("CREATE TABLE contact_emails (account_id TEXT NOT NULL, "
-                                           "contact_id TEXT NOT NULL, entry_key TEXT NOT NULL, address "
-                                           "TEXT NOT NULL, normalized_address TEXT NOT NULL, label TEXT, "
-                                           "preference INTEGER, PRIMARY KEY(account_id,contact_id,entry_key), "
-                                           "FOREIGN KEY(account_id,contact_id) REFERENCES contact_cards"
-                                           "(account_id,contact_id) ON DELETE CASCADE) STRICT"),
+                            QStringLiteral(
+                                "CREATE TABLE address_books (account_id TEXT NOT NULL "
+                                "REFERENCES accounts(account_id) ON DELETE CASCADE, "
+                                "address_book_id TEXT NOT NULL, name TEXT NOT NULL, "
+                                "description TEXT, sort_order INTEGER NOT NULL, "
+                                "is_default INTEGER NOT NULL, is_subscribed INTEGER NOT "
+                                "NULL, share_with_json TEXT NOT NULL, my_rights_json TEXT "
+                                "NOT NULL, state TEXT NOT NULL, "
+                                "PRIMARY KEY(account_id,address_book_id)) STRICT"),
+                            QStringLiteral(
+                                "CREATE TABLE contact_cards (account_id TEXT NOT NULL "
+                                "REFERENCES accounts(account_id) ON DELETE CASCADE, "
+                                "contact_id TEXT NOT NULL, uid TEXT NOT NULL, kind TEXT "
+                                "NOT NULL, display_name TEXT NOT NULL, organization TEXT, "
+                                "document_json TEXT NOT NULL, PRIMARY KEY(account_id,"
+                                "contact_id), UNIQUE(account_id,uid)) STRICT"),
+                            QStringLiteral(
+                                "CREATE TABLE contact_card_address_books (account_id TEXT "
+                                "NOT NULL, contact_id TEXT NOT NULL, address_book_id TEXT "
+                                "NOT NULL, PRIMARY KEY(account_id,contact_id,address_book_id), "
+                                "FOREIGN KEY(account_id,contact_id) REFERENCES contact_cards"
+                                "(account_id,contact_id) ON DELETE CASCADE, FOREIGN KEY"
+                                "(account_id,address_book_id) REFERENCES address_books"
+                                "(account_id,address_book_id) ON DELETE CASCADE) STRICT"),
+                            QStringLiteral(
+                                "CREATE TABLE contact_emails (account_id TEXT NOT NULL, "
+                                "contact_id TEXT NOT NULL, entry_key TEXT NOT NULL, address "
+                                "TEXT NOT NULL, normalized_address TEXT NOT NULL, label TEXT, "
+                                "preference INTEGER, PRIMARY KEY(account_id,contact_id,entry_key), "
+                                "FOREIGN KEY(account_id,contact_id) REFERENCES contact_cards"
+                                "(account_id,contact_id) ON DELETE CASCADE) STRICT"),
                             QStringLiteral("CREATE INDEX idx_contact_cards_name ON contact_cards"
                                            "(account_id,display_name COLLATE NOCASE,contact_id)"),
-                            QStringLiteral("CREATE INDEX idx_contact_emails_address ON contact_emails"
-                                           "(normalized_address,account_id,contact_id)"),
+                            QStringLiteral(
+                                "CREATE INDEX idx_contact_emails_address ON contact_emails"
+                                "(normalized_address,account_id,contact_id)"),
                             QStringLiteral("CREATE INDEX idx_contact_books_membership ON "
-                                           "contact_card_address_books(account_id,address_book_id,contact_id)"),
+                                           "contact_card_address_books(account_id,address_book_id,"
+                                           "contact_id)"),
+                        },
+                },
+                MigrationStep{
+                    .version = 13,
+                    .name = QStringLiteral("websocket_push_capability"),
+                    .statements =
+                        {
+                            QStringLiteral("ALTER TABLE sessions ADD COLUMN websocket_url TEXT"),
+                            QStringLiteral("ALTER TABLE sessions ADD COLUMN "
+                                           "websocket_supports_push INTEGER NOT NULL DEFAULT 0"),
                         },
                 },
             },

@@ -757,7 +757,7 @@ namespace javelin::jmap
             };
         }
 
-        if (const auto validationError = validateLoginSettings(settings, true))
+        if (const auto validationError = validateLoginSettings(settings, false))
         {
             co_return *validationError;
         }
@@ -923,6 +923,7 @@ namespace javelin::jmap
             .selectedMailboxId = selectedMailboxId,
             .mailboxCount = parsedMailboxes.list.size(),
             .emailCount = emailCount,
+            .resolvedSessionUrl = sessionClient.resolvedSessionUrl(),
         };
     }
 

@@ -50,6 +50,12 @@ template <> struct glz::meta<javelin::jmap::api::ContactsCapability>
                                               "mayCreateAddressBook", &T::mayCreateAddressBook);
 };
 
+template <> struct glz::meta<javelin::jmap::api::WebSocketCapability>
+{
+    using T = javelin::jmap::api::WebSocketCapability;
+    static constexpr auto value = glz::object("url", &T::url, "supportsPush", &T::supportsPush);
+};
+
 template <> struct glz::meta<javelin::jmap::api::detail::RawAccount>
 {
     using T = javelin::jmap::api::detail::RawAccount;
@@ -130,6 +136,28 @@ namespace javelin::jmap::api
             return capability;
         }
 
+        [[nodiscard]] std::optional<WebSocketCapability>
+        parseWebSocketCapability(const std::unordered_map<std::string, glz::generic>& capabilities)
+        {
+            const auto it = capabilities.find(std::string{websocketCapabilityUri});
+            if (it == capabilities.end())
+            {
+                return std::nullopt;
+            }
+            std::string buffer;
+            if (glz::write_json(it->second, buffer))
+            {
+                return std::nullopt;
+            }
+            WebSocketCapability capability;
+            if (glz::read<glz::opts{.error_on_unknown_keys = false}>(capability, buffer) ||
+                capability.url.empty())
+            {
+                return std::nullopt;
+            }
+            return capability;
+        }
+
         [[nodiscard]] PrimaryAccounts
         parsePrimaryAccounts(const std::unordered_map<std::string, std::string>& primaryAccounts)
         {
@@ -204,6 +232,7 @@ namespace javelin::jmap::api
                             capabilityPresent(rawSession.capabilities, submissionCapabilityUri),
                         .contacts =
                             capabilityPresent(rawSession.capabilities, contactsCapabilityUri),
+                        .websocket = parseWebSocketCapability(rawSession.capabilities),
                     },
                 .accounts = parseAccounts(std::move(rawSession.accounts)),
                 .primaryAccounts = parsePrimaryAccounts(rawSession.primaryAccounts),

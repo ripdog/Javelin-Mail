@@ -16,7 +16,7 @@ include(cmake/Sanitizers.cmake)
 include(CTest)
 
 # 1. Find Qt6 FIRST
-find_package(Qt6 6.6 REQUIRED COMPONENTS Core DBus Network Sql Widgets Concurrent LinguistTools WebEngineCore WebEngineWidgets Svg)
+find_package(Qt6 6.6 REQUIRED COMPONENTS Core DBus Network Sql Widgets Concurrent LinguistTools WebEngineCore WebEngineWidgets Svg WebSockets)
 
 # 2. Fetch Dependencies BEFORE KDE is allowed to load
 javelin_configure_dependencies()
@@ -99,6 +99,8 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/api/Session.h
     src/jmap/api/SessionClient.cpp
     src/jmap/api/SessionClient.h
+    src/jmap/api/SessionDiscovery.cpp
+    src/jmap/api/SessionDiscovery.h
     src/jmap/api/SessionParser.cpp
     src/jmap/api/SessionParser.h
     src/jmap/api/Transport.cpp
@@ -160,6 +162,8 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/sync/LongPollWorker.h
     src/jmap/sync/EventSourceLongPoll.cpp
     src/jmap/sync/EventSourceLongPoll.h
+    src/jmap/sync/WebSocketPushChannel.cpp
+    src/jmap/sync/WebSocketPushChannel.h
     src/jmap/sync/MailboxRefreshExecutor.cpp
     src/jmap/sync/MailboxRefreshExecutor.h
     src/jmap/sync/MailboxStateRefreshExecutor.cpp
@@ -224,6 +228,8 @@ set(JAVELIN_FORMAT_FILES
 )
 
 add_library(javelin_jmap STATIC
+    src/jmap/api/SessionDiscovery.cpp
+    src/jmap/api/SessionDiscovery.h
     src/jmap/api/ContactsMethods.cpp
     src/jmap/api/ContactsMethods.h
     src/jmap/api/Error.cpp
@@ -301,6 +307,8 @@ add_library(javelin_jmap STATIC
     src/jmap/sync/LongPollWorker.h
     src/jmap/sync/EventSourceLongPoll.cpp
     src/jmap/sync/EventSourceLongPoll.h
+    src/jmap/sync/WebSocketPushChannel.cpp
+    src/jmap/sync/WebSocketPushChannel.h
     src/jmap/sync/MailboxRefreshExecutor.cpp
     src/jmap/sync/MailboxRefreshExecutor.h
     src/jmap/sync/MailboxStateRefreshExecutor.cpp
@@ -340,6 +348,7 @@ target_link_libraries(javelin_jmap
         Qt::Network
         Qt::Sql
         Qt::WebEngineCore
+        Qt::WebSockets
         KPim6::Mime
     PRIVATE
         QCoro6::Network

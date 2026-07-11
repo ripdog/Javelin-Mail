@@ -50,6 +50,8 @@ namespace javelin::gui::settings
         static void saveAccounts(const std::vector<ConnectionSettings>& accounts);
         static void associateCachedAccount(const QString& configuredAccountId,
                                            const QString& cachedAccountId);
+        static void saveResolvedSessionUrl(const QString& configuredAccountId,
+                                           const QString& sessionUrl);
 
       private:
         void updateSettings() override;

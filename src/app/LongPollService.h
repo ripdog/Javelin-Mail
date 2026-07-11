@@ -1,6 +1,7 @@
 #pragma once
 
 #include "jmap/JmapCore.h"
+#include "jmap/api/Session.h"
 #include "jmap/api/Transport.h"
 #include "jmap/cache/AccountRepository.h"
 #include "jmap/cache/Database.h"
@@ -8,6 +9,7 @@
 #include "jmap/sync/EventSourceLongPoll.h"
 #include "jmap/sync/LongPollWorker.h"
 #include "jmap/sync/RefreshNotificationTypes.h"
+#include "jmap/sync/WebSocketPushChannel.h"
 
 #include <QCoroTask>
 
@@ -75,6 +77,7 @@ namespace javelin::app
             std::string mailboxName;
             std::string apiUrl;
             std::string eventSourceUrl;
+            std::optional<javelin::jmap::api::WebSocketCapability> websocket;
         };
 
         struct RunContext
@@ -83,7 +86,7 @@ namespace javelin::app
             RunConfiguration configuration;
             javelin::jmap::sync::LongPollCancellation cancellation;
             javelin::jmap::sync::QtLongPollSleeper sleeper;
-            std::unique_ptr<javelin::jmap::sync::EventSourceLongPollChannel> channel;
+            std::unique_ptr<javelin::jmap::sync::AbstractLongPollChannel> channel;
             std::unique_ptr<javelin::jmap::sync::LongPollWorker> worker;
         };
 

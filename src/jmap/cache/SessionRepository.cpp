@@ -242,13 +242,15 @@ namespace javelin::jmap::cache
             "account_id, api_url, download_url, upload_url, event_source_url, state, username, "
             "has_core_capability, has_mail_capability, has_submission_capability, "
             "has_contacts_capability, core_capabilities_json, primary_mail_account_id, "
-            "primary_submission_account_id, primary_contacts_account_id"
+            "primary_submission_account_id, primary_contacts_account_id, websocket_url, "
+            "websocket_supports_push"
             ") VALUES ("
             ":account_id, :api_url, :download_url, :upload_url, :event_source_url, :state, "
             ":username, :has_core_capability, :has_mail_capability, "
             ":has_submission_capability, :has_contacts_capability, "
             ":core_capabilities_json, :primary_mail_account_id, "
-            ":primary_submission_account_id, :primary_contacts_account_id)"));
+            ":primary_submission_account_id, :primary_contacts_account_id, :websocket_url, "
+            ":websocket_supports_push)"));
         insertSession.bindValue(QStringLiteral(":account_id"),
                                 QString::fromStdString(std::string{ownerAccountId}));
         insertSession.bindValue(QStringLiteral(":api_url"), QString::fromStdString(session.apiUrl));
@@ -289,6 +291,16 @@ namespace javelin::jmap::cache
             session.primaryAccounts.contactsAccountId.has_value()
                 ? QVariant{QString::fromStdString(*session.primaryAccounts.contactsAccountId)}
                 : QVariant{});
+        insertSession.bindValue(
+            QStringLiteral(":websocket_url"),
+            session.capabilities.websocket.has_value()
+                ? QVariant{QString::fromStdString(session.capabilities.websocket->url)}
+                : QVariant{});
+        insertSession.bindValue(QStringLiteral(":websocket_supports_push"),
+                                session.capabilities.websocket.has_value() &&
+                                        session.capabilities.websocket->supportsPush
+                                    ? 1
+                                    : 0);
         if (!insertSession.exec())
         {
             database.rollback();
@@ -322,6 +334,7 @@ namespace javelin::jmap::cache
             "has_core_capability, has_mail_capability, has_submission_capability, "
             "has_contacts_capability, core_capabilities_json, primary_mail_account_id, "
             "primary_submission_account_id, primary_contacts_account_id "
+            ", websocket_url, websocket_supports_push "
             "FROM sessions WHERE account_id = :account_id"));
         sessionQuery.bindValue(QStringLiteral(":account_id"),
                                QString::fromStdString(std::string{ownerAccountId}));
@@ -351,6 +364,12 @@ namespace javelin::jmap::cache
                     .mail = sessionQuery.value(7).toInt() != 0,
                     .submission = sessionQuery.value(8).toInt() != 0,
                     .contacts = sessionQuery.value(9).toInt() != 0,
+                    .websocket = sessionQuery.value(14).isNull()
+                                     ? std::nullopt
+                                     : std::optional{javelin::jmap::api::WebSocketCapability{
+                                           .url = sessionQuery.value(14).toString().toStdString(),
+                                           .supportsPush = sessionQuery.value(15).toInt() != 0,
+                                       }},
                 },
             .accounts = {},
             .primaryAccounts =

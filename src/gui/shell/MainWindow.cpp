@@ -3696,8 +3696,7 @@ namespace javelin::gui::shell
         {
             m_statusBar->showMessage(QStringLiteral("Saved connection preferences."), 3000);
             const auto settings = dialog.settings();
-            if (!settings.sessionUrl.isEmpty() && !settings.loginEmail.isEmpty() &&
-                !settings.apiKey.isEmpty())
+            if (!settings.loginEmail.isEmpty() && !settings.apiKey.isEmpty())
             {
                 refreshConnectionSettings(settings);
             }
@@ -3733,8 +3732,7 @@ namespace javelin::gui::shell
             return;
         }
 
-        if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
-            settings.apiKey.isEmpty())
+        if (settings.loginEmail.isEmpty() || settings.apiKey.isEmpty())
         {
             presentUserInterventionError(
                 QStringLiteral("Set Session URL, Login Email, and API Key in Preferences first."));
@@ -3772,6 +3770,10 @@ namespace javelin::gui::shell
                 }
 
                 const auto& summary = std::get<javelin::jmap::LiveRefreshSummary>(result);
+                javelin::gui::settings::PreferencesDialog::saveResolvedSessionUrl(
+                    settings.id, QString::fromStdString(summary.resolvedSessionUrl));
+                auto resolvedSettings = settings;
+                resolvedSettings.sessionUrl = QString::fromStdString(summary.resolvedSessionUrl);
                 const auto ownedAccounts = m_accountRepository.listOwnedBy(summary.accountId);
                 if (const auto* accounts =
                         std::get_if<std::vector<javelin::jmap::cache::CachedAccount>>(
@@ -3795,8 +3797,8 @@ namespace javelin::gui::shell
                         .arg(summary.emailCount)
                         .arg(QString::fromStdString(summary.accountId)),
                     10000);
-                auto contactsTask = m_contactService.refreshAll(toLiveConnectionSettings(settings),
-                                                                summary.accountId);
+                auto contactsTask = m_contactService.refreshAll(
+                    toLiveConnectionSettings(resolvedSettings), summary.accountId);
                 QCoro::connect(
                     std::move(contactsTask), this,
                     [this](javelin::jmap::contacts::ContactRefreshResult contactsResult)
@@ -3822,8 +3824,7 @@ namespace javelin::gui::shell
         std::vector<javelin::app::LongPollAccountConfiguration> configurations;
         for (const auto& settings : javelin::gui::settings::PreferencesDialog::loadAccounts())
         {
-            if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
-                settings.apiKey.isEmpty())
+            if (settings.loginEmail.isEmpty() || settings.apiKey.isEmpty())
             {
                 continue;
             }
