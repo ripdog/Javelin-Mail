@@ -62,8 +62,15 @@ namespace javelin::jmap
         bool usedCachedContent = false;
     };
 
+    struct MessageContentUnavailable
+    {
+        std::string accountId;
+        std::string emailId;
+        QString message;
+    };
+
     using MessageContentRefreshResult =
-        std::variant<MessageContentRefreshSummary, LiveRefreshError>;
+        std::variant<MessageContentRefreshSummary, MessageContentUnavailable, LiveRefreshError>;
 
     struct MailboxMessagesRefreshSummary
     {

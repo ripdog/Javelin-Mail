@@ -3814,6 +3814,15 @@ namespace javelin::gui::shell
                                   << QString::fromStdString(summary.accountId)
                                   << static_cast<qulonglong>(summary.mailboxCount)
                                   << static_cast<qulonglong>(summary.emailCount);
+                if (summary.selectedMailboxId.has_value())
+                {
+                    markTabsStaleForAccount(summary.accountId,
+                                            std::string_view{*summary.selectedMailboxId});
+                }
+                else
+                {
+                    markTabsStaleForAccount(summary.accountId);
+                }
                 reloadAccounts();
                 refreshViewsFromCache();
                 m_statusBar->showMessage(
@@ -3919,6 +3928,20 @@ namespace javelin::gui::shell
                 }
 
                 m_messageContentRequestInFlight.reset();
+                if (const auto* unavailable =
+                        std::get_if<javelin::jmap::MessageContentUnavailable>(&result))
+                {
+                    markTabsStaleForAccount(accountId);
+                    refreshActiveTabFromServer();
+                    const auto message =
+                        unavailable->message + QStringLiteral(" Refreshing the current view…");
+                    m_messageViewContainer->setErrorState(message);
+                    m_statusBar->showMessage(message, 10000);
+                    qWarning().noquote()
+                        << "GUI message content unavailable" << unavailable->message;
+                    return;
+                }
+
                 if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
                 {
                     m_messageViewContainer->setErrorState(error->message);

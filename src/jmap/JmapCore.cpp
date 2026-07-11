@@ -48,9 +48,17 @@ namespace javelin::jmap
 
         [[nodiscard]] QString transportMessage(const javelin::jmap::api::TransportError& error)
         {
+            const auto code = QString::fromUtf8(javelin::jmap::api::toString(error.code).data());
+            if (error.httpStatus.has_value())
+            {
+                return QStringLiteral("Transport error (%1, HTTP %2): %3")
+                    .arg(code)
+                    .arg(*error.httpStatus)
+                    .arg(QString::fromStdString(error.message));
+            }
+
             return QStringLiteral("Transport error (%1): %2")
-                .arg(QString::fromUtf8(javelin::jmap::api::toString(error.code).data()),
-                     QString::fromStdString(error.message));
+                .arg(code, QString::fromStdString(error.message));
         }
 
         [[nodiscard]] QString authMessage(const javelin::jmap::api::AuthError& error)
@@ -72,6 +80,12 @@ namespace javelin::jmap
             javelin::jmap::auth::AccountCredentials credentials;
             javelin::jmap::api::Session session;
             std::string accessToken;
+        };
+
+        struct BlobDownloadError
+        {
+            LiveRefreshError error;
+            std::optional<int> httpStatus;
         };
 
         [[nodiscard]] std::optional<std::string>
@@ -238,7 +252,7 @@ namespace javelin::jmap
             };
         }
 
-        [[nodiscard]] QCoro::Task<std::variant<QByteArray, LiveRefreshError>>
+        [[nodiscard]] QCoro::Task<std::variant<QByteArray, BlobDownloadError>>
         downloadBlob(javelin::jmap::api::AbstractTransport& transport,
                      std::string downloadUrlTemplate, std::string accountId,
                      javelin::jmap::cache::EmailPart part, std::string accessToken,
@@ -249,16 +263,23 @@ namespace javelin::jmap
             if (const auto* error =
                     std::get_if<javelin::jmap::api::TransportError>(&transportResult))
             {
-                co_return LiveRefreshError{.message = transportMessage(*error)};
+                co_return BlobDownloadError{
+                    .error = LiveRefreshError{.message = transportMessage(*error)},
+                    .httpStatus = error->httpStatus,
+                };
             }
 
             const auto& response = std::get<javelin::jmap::api::HttpResponse>(transportResult);
             if (response.statusCode < 200 || response.statusCode >= 300)
             {
-                co_return LiveRefreshError{
-                    .message = QStringLiteral("%1 failed with HTTP status %2.")
-                                   .arg(failurePrefix)
-                                   .arg(response.statusCode),
+                co_return BlobDownloadError{
+                    .error =
+                        LiveRefreshError{
+                            .message = QStringLiteral("%1 failed with HTTP status %2.")
+                                           .arg(failurePrefix)
+                                           .arg(response.statusCode),
+                        },
+                    .httpStatus = response.statusCode,
                 };
             }
 
@@ -1070,9 +1091,18 @@ namespace javelin::jmap
         const auto downloadResult = co_await downloadBlob(
             *m_impl->transport, context.session.downloadUrl, accountId, sourcePart,
             context.accessToken, QStringLiteral("Message source download"));
-        if (const auto* error = std::get_if<LiveRefreshError>(&downloadResult))
+        if (const auto* error = std::get_if<BlobDownloadError>(&downloadResult))
         {
-            co_return *error;
+            if (error->httpStatus == std::optional<int>{404})
+            {
+                co_return MessageContentUnavailable{
+                    .accountId = std::move(accountId),
+                    .emailId = std::move(emailId),
+                    .message = QStringLiteral(
+                        "This message is no longer available on the server (HTTP 404)."),
+                };
+            }
+            co_return error->error;
         }
 
         const auto payload = std::get<QByteArray>(downloadResult);
@@ -1221,9 +1251,9 @@ namespace javelin::jmap
         const auto payloadResult = co_await downloadBlob(
             *m_impl->transport, downloadContext.session.downloadUrl, accountId, messageBlob,
             downloadContext.accessToken, QStringLiteral("Message source download"));
-        if (const auto* error = std::get_if<LiveRefreshError>(&payloadResult))
+        if (const auto* error = std::get_if<BlobDownloadError>(&payloadResult))
         {
-            co_return *error;
+            co_return error->error;
         }
 
         co_return MessageSourceDownload{

@@ -87,7 +87,8 @@ namespace javelin::jmap::api
 
             const auto statusCode = reply.attribute(QNetworkRequest::HttpStatusCodeAttribute);
             return TransportError{
-                .code = TransportErrorCode::NetworkFailure,
+                .code = statusCode.isValid() ? TransportErrorCode::HttpFailure
+                                             : TransportErrorCode::NetworkFailure,
                 .message = reply.errorString().toStdString(),
                 .httpStatus =
                     statusCode.isValid() ? std::optional{statusCode.toInt()} : std::nullopt,

@@ -234,6 +234,41 @@ TEST_CASE("JmapCore refreshMessageContent caches raw message sources",
     CHECK(source->payload.contains(QByteArrayLiteral("<img src=\"cid:chart@cid\">")));
 }
 
+TEST_CASE("JmapCore reports missing message source downloads distinctly",
+          "[jmap][core][message-content]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    javelin::jmap::cache::SessionRepository sessionRepository{databaseContext.connection};
+    const auto session = loadSessionFixture();
+    REQUIRE_FALSE(sessionRepository.replace("u1", session).has_value());
+    seedEmail(databaseContext.connection);
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(javelin::jmap::api::TransportError{
+        .code = javelin::jmap::api::TransportErrorCode::HttpFailure,
+        .message = "server replied with status code 404",
+        .httpStatus = 404,
+    });
+
+    javelin::jmap::JmapCore core{databaseContext.connection, transport};
+    const auto result = QCoro::waitFor(core.refreshMessageContent(
+        {
+            .sessionUrl = "https://mail.example.com/.well-known/jmap",
+            .loginEmail = "alice@example.com",
+            .apiKey = "access-token",
+        },
+        "u1", "eml-1"));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::MessageContentUnavailable>(result));
+    const auto& unavailable = std::get<javelin::jmap::MessageContentUnavailable>(result);
+    CHECK(unavailable.accountId == "u1");
+    CHECK(unavailable.emailId == "eml-1");
+    CHECK(unavailable.message.contains(QStringLiteral("HTTP 404")));
+}
+
 TEST_CASE("JmapCore caches message content from junk and trash mailboxes",
           "[jmap][core][message-content]")
 {
