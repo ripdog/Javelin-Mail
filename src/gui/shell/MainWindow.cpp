@@ -66,6 +66,7 @@
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QTabBar>
+#include <QTimer>
 #include <QToolButton>
 #include <QTreeView>
 #include <QUrl>
@@ -74,6 +75,7 @@
 #include <QtConcurrent>
 
 #include <algorithm>
+#include <chrono>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -729,6 +731,11 @@ namespace javelin::gui::shell
             });
         updateLongPollStatus();
         restorePersistentState();
+
+        auto* stateSaveTimer = new QTimer(this);
+        stateSaveTimer->setInterval(std::chrono::minutes{1});
+        connect(stateSaveTimer, &QTimer::timeout, this, &MainWindow::savePersistentState);
+        stateSaveTimer->start();
     }
 
     void MainWindow::openMessageFromNotification(const QString& accountId, const QString& mailboxId,
