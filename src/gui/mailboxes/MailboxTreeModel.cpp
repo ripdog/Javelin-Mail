@@ -1,6 +1,7 @@
 #include "gui/mailboxes/MailboxTreeModel.h"
 
 #include "gui/mailboxes/MailboxIconUtils.h"
+#include "gui/settings/PreferencesDialog.h"
 
 #include <QApplication>
 #include <QDataStream>
@@ -299,7 +300,13 @@ namespace javelin::gui::mailboxes
             auto accountNode = std::make_unique<Node>();
             accountNode->kind = Node::Kind::Account;
             accountNode->accountId = account.accountId;
-            accountNode->displayName = account.name.empty() ? account.accountId : account.name;
+            const auto configuredAccount =
+                javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
+                    QString::fromStdString(account.accountId));
+            accountNode->displayName =
+                !configuredAccount.displayName.isEmpty()
+                    ? configuredAccount.displayName.toStdString()
+                    : (account.name.empty() ? account.accountId : account.name);
             // mailboxId left empty — this is an account-level node.
 
             const auto mailboxResult = m_queryService.listMailboxTree(account.accountId);

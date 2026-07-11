@@ -31,6 +31,7 @@ namespace javelin::gui::settings
         constexpr auto sizeKey = "size";
         constexpr auto activeAccountIdKey = "activeAccountId";
         constexpr auto idKey = "id";
+        constexpr auto displayNameKey = "displayName";
         constexpr auto sessionUrlKey = "sessionUrl";
         constexpr auto loginEmailKey = "loginEmail";
         constexpr auto apiKeyKey = "apiKey";
@@ -65,6 +66,7 @@ namespace javelin::gui::settings
         {
             return ConnectionSettings{
                 .id = QUuid::createUuid().toString(QUuid::WithoutBraces),
+                .displayName = {},
                 .sessionUrl = {},
                 .loginEmail = {},
                 .apiKey = {},
@@ -72,14 +74,32 @@ namespace javelin::gui::settings
             };
         }
 
+        [[nodiscard]] QString accountListText(const ConnectionSettings& account)
+        {
+            if (!account.displayName.isEmpty() && !account.loginEmail.isEmpty() &&
+                account.displayName.compare(account.loginEmail, Qt::CaseInsensitive) != 0)
+            {
+                return QStringLiteral("%1 — %2").arg(account.displayName, account.loginEmail);
+            }
+            if (!account.displayName.isEmpty())
+            {
+                return account.displayName;
+            }
+            return account.loginEmail.isEmpty() ? QStringLiteral("New account")
+                                                : account.loginEmail;
+        }
+
         [[nodiscard]] std::optional<ConnectionSettings> loadLegacyAccount()
         {
             QSettings settings;
             settings.beginGroup(QLatin1StringView{legacyConnectionGroup});
+            const auto loginEmail =
+                settings.value(QLatin1StringView{loginEmailKey}).toString().trimmed();
             const ConnectionSettings account{
                 .id = QUuid::createUuid().toString(QUuid::WithoutBraces),
+                .displayName = loginEmail,
                 .sessionUrl = settings.value(QLatin1StringView{sessionUrlKey}).toString().trimmed(),
-                .loginEmail = settings.value(QLatin1StringView{loginEmailKey}).toString().trimmed(),
+                .loginEmail = loginEmail,
                 .apiKey = settings.value(QLatin1StringView{apiKeyKey}).toString().trimmed(),
                 .cachedAccountIds = {},
             };
@@ -189,6 +209,8 @@ namespace javelin::gui::settings
         auto* detailsPanel = new QWidget(splitter);
         auto* detailsLayout = new QVBoxLayout(detailsPanel);
         auto* formLayout = new QFormLayout();
+        m_displayNameEdit = new QLineEdit(detailsPanel);
+        m_displayNameEdit->setPlaceholderText(QStringLiteral("Personal"));
         m_sessionUrlEdit = new QLineEdit(detailsPanel);
         m_sessionUrlEdit->setPlaceholderText(
             QStringLiteral("https://api.fastmail.com/jmap/session"));
@@ -198,6 +220,7 @@ namespace javelin::gui::settings
         m_apiKeyEdit->setEchoMode(QLineEdit::Password);
         m_apiKeyEdit->setPlaceholderText(QStringLiteral("Paste API key"));
         m_sessionUrlEdit->setPlaceholderText(QStringLiteral("Optional — discover from email"));
+        formLayout->addRow(QStringLiteral("Display Name"), m_displayNameEdit);
         formLayout->addRow(QStringLiteral("Server"), m_sessionUrlEdit);
         formLayout->addRow(QStringLiteral("Login Email"), m_loginEmailEdit);
         formLayout->addRow(QStringLiteral("API Key"), m_apiKeyEdit);
@@ -268,6 +291,8 @@ namespace javelin::gui::settings
                 &PreferencesDialog::removeCurrentAccount);
         connect(m_accountList, &QListWidget::currentRowChanged, this,
                 &PreferencesDialog::selectAccount);
+        connect(m_displayNameEdit, &QLineEdit::textEdited, this,
+                &PreferencesDialog::noteUnsavedChanges);
         connect(m_sessionUrlEdit, &QLineEdit::textEdited, this,
                 &PreferencesDialog::noteUnsavedChanges);
         connect(m_loginEmailEdit, &QLineEdit::textEdited, this,
@@ -356,6 +381,7 @@ namespace javelin::gui::settings
             return {};
         }
         auto result = m_accounts[static_cast<std::size_t>(m_currentRow)];
+        result.displayName = m_displayNameEdit->text().trimmed();
         result.sessionUrl = m_sessionUrlEdit->text().trimmed();
         result.loginEmail = m_loginEmailEdit->text().trimmed();
         result.apiKey = m_apiKeyEdit->text().trimmed();
@@ -372,10 +398,19 @@ namespace javelin::gui::settings
         for (int index = 0; index < count; ++index)
         {
             settings.setArrayIndex(index);
+            const auto loginEmail =
+                settings.value(QLatin1StringView{loginEmailKey}).toString().trimmed();
+            auto displayName =
+                settings.value(QLatin1StringView{displayNameKey}).toString().trimmed();
+            if (displayName.isEmpty())
+            {
+                displayName = loginEmail;
+            }
             accounts.push_back(ConnectionSettings{
                 .id = settings.value(QLatin1StringView{idKey}).toString(),
+                .displayName = displayName,
                 .sessionUrl = settings.value(QLatin1StringView{sessionUrlKey}).toString().trimmed(),
-                .loginEmail = settings.value(QLatin1StringView{loginEmailKey}).toString().trimmed(),
+                .loginEmail = loginEmail,
                 .apiKey = settings.value(QLatin1StringView{apiKeyKey}).toString().trimmed(),
                 .cachedAccountIds =
                     settings.value(QLatin1StringView{cachedAccountIdsKey}).toStringList(),
@@ -448,6 +483,7 @@ namespace javelin::gui::settings
             settings.setArrayIndex(index);
             const auto& account = accounts[static_cast<std::size_t>(index)];
             settings.setValue(QLatin1StringView{idKey}, account.id);
+            settings.setValue(QLatin1StringView{displayNameKey}, account.displayName);
             settings.setValue(QLatin1StringView{sessionUrlKey}, account.sessionUrl);
             settings.setValue(QLatin1StringView{loginEmailKey}, account.loginEmail);
             settings.setValue(QLatin1StringView{apiKeyKey}, account.apiKey);
@@ -543,11 +579,13 @@ namespace javelin::gui::settings
         m_currentRow = row;
         const bool hasAccount = row >= 0 && row < static_cast<int>(m_accounts.size());
         m_removeButton->setEnabled(hasAccount);
+        m_displayNameEdit->setEnabled(hasAccount);
         m_sessionUrlEdit->setEnabled(hasAccount);
         m_loginEmailEdit->setEnabled(hasAccount);
         m_apiKeyEdit->setEnabled(hasAccount);
         if (!hasAccount)
         {
+            m_displayNameEdit->clear();
             m_sessionUrlEdit->clear();
             m_loginEmailEdit->clear();
             m_apiKeyEdit->clear();
@@ -555,6 +593,7 @@ namespace javelin::gui::settings
         }
 
         const auto& account = m_accounts[static_cast<std::size_t>(row)];
+        m_displayNameEdit->setText(account.displayName);
         m_sessionUrlEdit->setText(account.sessionUrl);
         m_loginEmailEdit->setText(account.loginEmail);
         m_apiKeyEdit->setText(account.apiKey);
@@ -567,14 +606,13 @@ namespace javelin::gui::settings
             return;
         }
         auto& account = m_accounts[static_cast<std::size_t>(m_currentRow)];
+        account.displayName = m_displayNameEdit->text().trimmed();
         account.sessionUrl = m_sessionUrlEdit->text().trimmed();
         account.loginEmail = m_loginEmailEdit->text().trimmed();
         account.apiKey = m_apiKeyEdit->text().trimmed();
         if (m_accountList->count() > m_currentRow)
         {
-            m_accountList->item(m_currentRow)
-                ->setText(account.loginEmail.isEmpty() ? QStringLiteral("New account")
-                                                       : account.loginEmail);
+            m_accountList->item(m_currentRow)->setText(accountListText(account));
         }
     }
 
@@ -626,8 +664,7 @@ namespace javelin::gui::settings
         m_accountList->clear();
         for (const auto& account : m_accounts)
         {
-            m_accountList->addItem(account.loginEmail.isEmpty() ? QStringLiteral("New account")
-                                                                : account.loginEmail);
+            m_accountList->addItem(accountListText(account));
         }
     }
 

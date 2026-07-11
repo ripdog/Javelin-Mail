@@ -2637,6 +2637,19 @@ namespace javelin::gui::shell
                         return;
                     }
                 });
+        connect(widget, &javelin::gui::compose::ComposeTabWidget::accountChanged, this,
+                [this, widget](const QString& accountId)
+                {
+                    for (auto& tab : m_tabs)
+                    {
+                        auto* matchingTab = std::get_if<ComposeTabState>(&tab.content);
+                        if (matchingTab != nullptr && matchingTab->widget == widget)
+                        {
+                            matchingTab->accountId = accountId.toStdString();
+                            return;
+                        }
+                    }
+                });
         connect(widget, &javelin::gui::compose::ComposeTabWidget::statusMessageRequested, this,
                 [this](const QString& message, const int timeoutMs)
                 { m_statusBar->showMessage(message, timeoutMs); });
@@ -3695,6 +3708,7 @@ namespace javelin::gui::shell
         if (dialog.exec() == QDialog::Accepted)
         {
             m_statusBar->showMessage(QStringLiteral("Saved connection preferences."), 3000);
+            m_mailboxModel->refresh();
             const auto settings = dialog.settings();
             if (!settings.loginEmail.isEmpty() && !settings.apiKey.isEmpty())
             {

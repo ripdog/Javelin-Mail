@@ -6,6 +6,7 @@
 
 #include <optional>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 class QAction;
@@ -77,6 +78,7 @@ namespace javelin::gui::compose
 
       Q_SIGNALS:
         void titleChanged(const QString& title);
+        void accountChanged(const QString& accountId);
         void statusMessageRequested(const QString& message, int timeoutMs = 5000);
         void userInterventionRequired(const QString& message);
         void closeRequested();
@@ -122,7 +124,7 @@ namespace javelin::gui::compose
         javelin::jmap::cache::IdentityRepository& m_identityRepository;
         javelin::jmap::contacts::ContactIdentityLookup& m_contactIdentityLookup;
         javelin::jmap::submission::DraftSnapshot m_snapshot;
-        std::vector<javelin::jmap::domain::Identity> m_identities;
+        std::unordered_set<std::string> m_identityLoadsStarted;
         bool m_syncingUi = false;
         bool m_operationInFlight = false;
         bool m_closeWithoutPrompt = false;

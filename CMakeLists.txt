@@ -198,6 +198,7 @@ set(JAVELIN_FORMAT_FILES
     tests/jmap/ContactsMethodsTest.cpp
     tests/jmap/ContactRepositoryTest.cpp
     tests/jmap/ContactServiceTest.cpp
+    tests/jmap/ComposeServiceTest.cpp
     tests/jmap/DatabaseTest.cpp
     tests/jmap/EmailRepositoryTest.cpp
     tests/jmap/HtmlMessageDocumentBuilderTest.cpp

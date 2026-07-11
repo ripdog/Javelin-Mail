@@ -17,7 +17,7 @@ namespace javelin::jmap::cache
 {
     class ComposeSessionRepository;
     class DatabaseConnection;
-}
+} // namespace javelin::jmap::cache
 
 namespace javelin::jmap::submission
 {
@@ -31,6 +31,9 @@ namespace javelin::jmap::submission
 
         [[nodiscard]] QCoro::Task<std::variant<DraftSnapshot, javelin::jmap::LiveRefreshError>>
         open(javelin::jmap::LiveConnectionSettings settings, OpenComposeRequest request);
+        [[nodiscard]] QCoro::Task<std::variant<std::vector<javelin::jmap::domain::Identity>,
+                                               javelin::jmap::LiveRefreshError>>
+        loadSenderIdentities(javelin::jmap::LiveConnectionSettings settings, std::string accountId);
         [[nodiscard]] QCoro::Task<std::variant<DraftSaveSummary, javelin::jmap::LiveRefreshError>>
         saveDraft(javelin::jmap::LiveConnectionSettings settings, DraftSnapshot snapshot);
         [[nodiscard]] QCoro::Task<std::variant<SendSummary, javelin::jmap::LiveRefreshError>>

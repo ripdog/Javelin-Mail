@@ -816,6 +816,27 @@ namespace javelin::jmap::submission
     {
     }
 
+    QCoro::Task<
+        std::variant<std::vector<javelin::jmap::domain::Identity>, javelin::jmap::LiveRefreshError>>
+    ComposeService::loadSenderIdentities(javelin::jmap::LiveConnectionSettings settings,
+                                         std::string accountId)
+    {
+        if (const auto validationError = validateSettings(settings))
+        {
+            co_return *validationError;
+        }
+
+        const auto identitiesResult = co_await ensureIdentities(
+            m_connection, m_transport, std::move(settings), std::move(accountId));
+        if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&identitiesResult))
+        {
+            co_return *error;
+        }
+
+        co_return senderIdentities(
+            std::get<std::vector<javelin::jmap::domain::Identity>>(identitiesResult));
+    }
+
     QCoro::Task<std::variant<DraftSnapshot, javelin::jmap::LiveRefreshError>>
     ComposeService::open(javelin::jmap::LiveConnectionSettings settings, OpenComposeRequest request)
     {

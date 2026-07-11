@@ -66,6 +66,8 @@ namespace javelin::gui::compose
         constexpr auto richEditorTabIndex = 0;
         constexpr auto htmlSourceTabIndex = 1;
         constexpr auto previewTabIndex = 2;
+        constexpr auto senderIdentityIdRole = Qt::UserRole;
+        constexpr auto senderAccountIdRole = Qt::UserRole + 1;
 
         [[nodiscard]] QString defaultTitleForMode(const javelin::jmap::submission::ComposeMode mode)
         {
@@ -442,15 +444,17 @@ namespace javelin::gui::compose
             return document.toPlainText().toStdString();
         }
 
-        [[nodiscard]] QString identityDisplayText(const javelin::jmap::domain::Identity& identity)
+        [[nodiscard]] QString identityDisplayText(const javelin::jmap::domain::Identity& identity,
+                                                  const QString& accountDisplayName)
         {
-            if (!identity.name.empty())
-            {
-                return QStringLiteral("%1 <%2>").arg(QString::fromStdString(identity.name),
-                                                     QString::fromStdString(identity.email));
-            }
-
-            return QString::fromStdString(identity.email);
+            const auto identityText =
+                !identity.name.empty()
+                    ? QStringLiteral("%1 <%2>").arg(QString::fromStdString(identity.name),
+                                                    QString::fromStdString(identity.email))
+                    : QString::fromStdString(identity.email);
+            return accountDisplayName.isEmpty()
+                       ? identityText
+                       : QStringLiteral("%1 — %2").arg(identityText, accountDisplayName);
         }
 
         [[nodiscard]] bool isWildcardSenderIdentity(const javelin::jmap::domain::Identity& identity)
@@ -969,32 +973,95 @@ namespace javelin::gui::compose
 
     void ComposeTabWidget::loadIdentities()
     {
-        const auto identitiesResult = m_identityRepository.listByAccount(m_snapshot.accountId);
-        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&identitiesResult))
+        const QSignalBlocker blocker{m_fromCombo};
+        const auto selectedAccountId = QString::fromStdString(m_snapshot.accountId);
+        const auto selectedIdentityId = QString::fromStdString(m_snapshot.identityId);
+        int selectedIndex = -1;
+        int optionCount = 0;
+
+        m_fromCombo->clear();
+        for (const auto& connection : javelin::gui::settings::PreferencesDialog::loadAccounts())
         {
-            Q_EMIT statusMessageRequested(error->message, 10000);
-            return;
+            const auto accountDisplayName =
+                connection.displayName.isEmpty() ? connection.loginEmail : connection.displayName;
+            for (const auto& cachedAccountId : connection.cachedAccountIds)
+            {
+                const auto accountId = cachedAccountId.toStdString();
+                const auto identitiesResult = m_identityRepository.listByAccount(accountId);
+                if (const auto* error =
+                        std::get_if<javelin::jmap::cache::DatabaseError>(&identitiesResult))
+                {
+                    Q_EMIT statusMessageRequested(error->message, 10000);
+                    continue;
+                }
+
+                const auto& identities =
+                    std::get<std::vector<javelin::jmap::domain::Identity>>(identitiesResult);
+                bool hasSenderIdentity = false;
+                for (const auto& identity : identities)
+                {
+                    if (isWildcardSenderIdentity(identity))
+                    {
+                        continue;
+                    }
+
+                    hasSenderIdentity = true;
+                    const int index = m_fromCombo->count();
+                    m_fromCombo->addItem(identityDisplayText(identity, accountDisplayName));
+                    m_fromCombo->setItemData(index, QString::fromStdString(identity.id),
+                                             senderIdentityIdRole);
+                    m_fromCombo->setItemData(index, cachedAccountId, senderAccountIdRole);
+                    if (cachedAccountId == selectedAccountId &&
+                        QString::fromStdString(identity.id) == selectedIdentityId)
+                    {
+                        selectedIndex = index;
+                    }
+                    ++optionCount;
+                }
+
+                if (!hasSenderIdentity && !m_identityLoadsStarted.contains(accountId) &&
+                    !connection.sessionUrl.isEmpty() && !connection.loginEmail.isEmpty() &&
+                    !connection.apiKey.isEmpty())
+                {
+                    m_identityLoadsStarted.insert(accountId);
+                    auto task = m_composeService.loadSenderIdentities(
+                        javelin::jmap::LiveConnectionSettings{
+                            .sessionUrl = connection.sessionUrl.toStdString(),
+                            .loginEmail = connection.loginEmail.toStdString(),
+                            .apiKey = connection.apiKey.toStdString(),
+                        },
+                        accountId);
+                    QCoro::connect(
+                        std::move(task), this,
+                        [this](std::variant<std::vector<javelin::jmap::domain::Identity>,
+                                            javelin::jmap::LiveRefreshError>
+                                   result)
+                        {
+                            if (const auto* error =
+                                    std::get_if<javelin::jmap::LiveRefreshError>(&result))
+                            {
+                                Q_EMIT statusMessageRequested(error->message, 10000);
+                                return;
+                            }
+                            loadIdentities();
+                        });
+                }
+            }
         }
 
-        const auto& identities =
-            std::get<std::vector<javelin::jmap::domain::Identity>>(identitiesResult);
-        m_identities.clear();
-        m_identities.reserve(identities.size());
-        m_fromCombo->clear();
-        for (const auto& identity : identities)
+        if (selectedIndex >= 0)
         {
-            if (isWildcardSenderIdentity(identity))
-            {
-                continue;
-            }
-            m_identities.push_back(identity);
-            m_fromCombo->addItem(identityDisplayText(identity),
-                                 QString::fromStdString(identity.id));
+            m_fromCombo->setCurrentIndex(selectedIndex);
         }
-        if (m_identities.empty())
+        else if (optionCount > 0)
+        {
+            m_fromCombo->setCurrentIndex(0);
+        }
+        else
         {
             Q_EMIT statusMessageRequested(
-                QStringLiteral("No sender identities are available for this account."), 10000);
+                QStringLiteral("No sender identities are available for configured accounts."),
+                10000);
         }
     }
 
@@ -1010,8 +1077,18 @@ namespace javelin::gui::compose
         const QSignalBlocker htmlBlocker{m_htmlSourceEdit};
         const QSignalBlocker tabBlocker{m_editorTabs};
 
-        const auto identityIndex =
-            m_fromCombo->findData(QString::fromStdString(m_snapshot.identityId));
+        int identityIndex = -1;
+        for (int index = 0; index < m_fromCombo->count(); ++index)
+        {
+            if (m_fromCombo->itemData(index, senderAccountIdRole).toString().toStdString() ==
+                    m_snapshot.accountId &&
+                m_fromCombo->itemData(index, senderIdentityIdRole).toString().toStdString() ==
+                    m_snapshot.identityId)
+            {
+                identityIndex = index;
+                break;
+            }
+        }
         if (identityIndex >= 0)
         {
             m_fromCombo->setCurrentIndex(identityIndex);
@@ -1068,7 +1145,21 @@ namespace javelin::gui::compose
 
     void ComposeTabWidget::syncSnapshotFromUi()
     {
-        m_snapshot.identityId = m_fromCombo->currentData().toString().toStdString();
+        const auto selectedAccountId =
+            m_fromCombo->currentData(senderAccountIdRole).toString().toStdString();
+        const auto selectedIdentityId =
+            m_fromCombo->currentData(senderIdentityIdRole).toString().toStdString();
+        if (!selectedAccountId.empty() && !selectedIdentityId.empty())
+        {
+            const bool selectedAccountChanged = selectedAccountId != m_snapshot.accountId;
+            m_snapshot.accountId = selectedAccountId;
+            m_snapshot.identityId = selectedIdentityId;
+            if (selectedAccountChanged)
+            {
+                m_snapshot.draftEmailId.reset();
+                Q_EMIT accountChanged(QString::fromStdString(m_snapshot.accountId));
+            }
+        }
         m_snapshot.to = parseAddresses(m_toEdit->text());
         m_snapshot.cc = parseAddresses(m_ccEdit->text());
         m_snapshot.bcc = parseAddresses(m_bccEdit->text());
@@ -1330,6 +1421,7 @@ namespace javelin::gui::compose
             return;
         }
 
+        syncSnapshotFromUi();
         QString errorMessage;
         const auto settings = liveSettings(m_snapshot.accountId, &errorMessage);
         if (!settings.has_value())
@@ -1339,7 +1431,6 @@ namespace javelin::gui::compose
             return;
         }
 
-        syncSnapshotFromUi();
         if (m_autosaveTimer->isActive())
         {
             m_autosaveTimer->stop();
@@ -1403,6 +1494,7 @@ namespace javelin::gui::compose
             return;
         }
 
+        syncSnapshotFromUi();
         QString errorMessage;
         const auto settings = liveSettings(m_snapshot.accountId, &errorMessage);
         if (!settings.has_value())
@@ -1412,7 +1504,6 @@ namespace javelin::gui::compose
             return;
         }
 
-        syncSnapshotFromUi();
         if (m_snapshot.to.empty())
         {
             Q_EMIT statusMessageRequested(

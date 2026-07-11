@@ -20,6 +20,7 @@ namespace javelin::gui::settings
     struct ConnectionSettings
     {
         QString id;
+        QString displayName;
         QString sessionUrl;
         QString loginEmail;
         QString apiKey;
@@ -85,6 +86,7 @@ namespace javelin::gui::settings
         int m_currentRow = -1;
         QListWidget* m_accountList = nullptr;
         QPushButton* m_removeButton = nullptr;
+        QLineEdit* m_displayNameEdit = nullptr;
         QLineEdit* m_sessionUrlEdit = nullptr;
         QLineEdit* m_loginEmailEdit = nullptr;
         QLineEdit* m_apiKeyEdit = nullptr;
