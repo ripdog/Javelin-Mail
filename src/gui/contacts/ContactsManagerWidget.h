@@ -16,6 +16,7 @@ class QLabel;
 class QLineEdit;
 class QListWidget;
 class QPlainTextEdit;
+class QVBoxLayout;
 class QToolButton;
 class QPushButton;
 class QStackedWidget;
@@ -43,6 +44,8 @@ namespace javelin::gui::contacts
       Q_SIGNALS:
         void statusMessageRequested(const QString& message, int timeoutMs = 5000);
         void userInterventionRequired(const QString& message);
+        void composeMailRequested(const QString& accountId, const QString& name,
+                                  const QString& email);
 
       private:
         void setupUi();
@@ -71,8 +74,8 @@ namespace javelin::gui::contacts
         [[nodiscard]] std::optional<std::string> currentAddressBookId() const;
         [[nodiscard]] const javelin::jmap::contacts::ContactSummary* currentContact() const;
         [[nodiscard]] javelin::jmap::api::AddressBook* currentAddressBook();
-        [[nodiscard]] QString
-        contactDetails(const javelin::jmap::contacts::ContactSummary& contact) const;
+        void showAddressBookManager();
+        void populateContactCards(const javelin::jmap::contacts::ContactSummary& contact);
 
         javelin::jmap::cache::ContactRepository& m_repository;
         javelin::jmap::contacts::ContactService& m_service;
@@ -90,7 +93,8 @@ namespace javelin::gui::contacts
         QListWidget* m_contactList = nullptr;
         QStackedWidget* m_detailStack = nullptr;
         QLabel* m_viewTitle = nullptr;
-        QLabel* m_viewDetails = nullptr;
+        QWidget* m_cardContainer = nullptr;
+        QVBoxLayout* m_cardLayout = nullptr;
         QPlainTextEdit* m_documentEdit = nullptr;
         QComboBox* m_kindEdit = nullptr;
         QLineEdit* m_nameEdit = nullptr;
@@ -107,7 +111,8 @@ namespace javelin::gui::contacts
         QPushButton* m_editContactButton = nullptr;
         QPushButton* m_deleteContactButton = nullptr;
         QPushButton* m_copyContactButton = nullptr;
-        QPushButton* m_refreshButton = nullptr;
+        QToolButton* m_refreshButton = nullptr;
+        QToolButton* m_manageBooksButton = nullptr;
         QPushButton* m_saveButton = nullptr;
         QPushButton* m_uploadPhotoButton = nullptr;
         QPushButton* m_cancelButton = nullptr;

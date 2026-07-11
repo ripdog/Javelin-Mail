@@ -67,6 +67,7 @@ namespace javelin::jmap::submission
         ComposeMode mode = ComposeMode::NewMessage;
         std::optional<std::string> referenceEmailId;
         std::optional<std::string> draftEmailId;
+        std::vector<javelin::jmap::domain::EmailAddress> initialTo;
     };
 
     struct DraftSaveSummary

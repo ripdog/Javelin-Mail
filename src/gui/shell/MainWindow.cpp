@@ -1327,6 +1327,20 @@ namespace javelin::gui::shell
                 m_statusBar, &LayeredStatusBar::showMessage);
         connect(widget, &javelin::gui::contacts::ContactsManagerWidget::userInterventionRequired,
                 this, &MainWindow::presentUserInterventionError);
+        connect(widget, &javelin::gui::contacts::ContactsManagerWidget::composeMailRequested, this,
+                [this](const QString& accountId, const QString& name, const QString& email)
+                {
+                    openComposeForRequest({
+                        .accountId = accountId.toStdString(),
+                        .mode = javelin::jmap::submission::ComposeMode::NewMessage,
+                        .referenceEmailId = std::nullopt,
+                        .draftEmailId = std::nullopt,
+                        .initialTo = {{.name = name.isEmpty()
+                                                   ? std::nullopt
+                                                   : std::optional<std::string>{name.toStdString()},
+                                       .email = email.toStdString()}},
+                    });
+                });
         m_contentStack->addWidget(widget);
         m_tabs.push_back(TabState{.content = ContactsTabState{.accountId = selected->ownerAccountId,
                                                               .title = QStringLiteral("Contacts"),
@@ -1355,6 +1369,7 @@ namespace javelin::gui::shell
             .mode = javelin::jmap::submission::ComposeMode::NewMessage,
             .referenceEmailId = std::nullopt,
             .draftEmailId = std::nullopt,
+            .initialTo = {},
         });
     }
 
@@ -1373,6 +1388,7 @@ namespace javelin::gui::shell
             .mode = javelin::jmap::submission::ComposeMode::Reply,
             .referenceEmailId = *emailId,
             .draftEmailId = std::nullopt,
+            .initialTo = {},
         });
     }
 
@@ -1391,6 +1407,7 @@ namespace javelin::gui::shell
             .mode = javelin::jmap::submission::ComposeMode::ReplyAll,
             .referenceEmailId = *emailId,
             .draftEmailId = std::nullopt,
+            .initialTo = {},
         });
     }
 
@@ -1409,6 +1426,7 @@ namespace javelin::gui::shell
             .mode = javelin::jmap::submission::ComposeMode::Forward,
             .referenceEmailId = *emailId,
             .draftEmailId = std::nullopt,
+            .initialTo = {},
         });
     }
 
@@ -1436,6 +1454,7 @@ namespace javelin::gui::shell
             .mode = javelin::jmap::submission::ComposeMode::EditDraft,
             .referenceEmailId = std::nullopt,
             .draftEmailId = *emailId,
+            .initialTo = {},
         });
     }
 

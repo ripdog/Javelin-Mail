@@ -4,6 +4,8 @@
 
 #include <QCoroTask>
 
+#include <QApplication>
+#include <QClipboard>
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -12,6 +14,7 @@
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QIcon>
 #include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
@@ -259,31 +262,24 @@ namespace javelin::gui::contacts
             "QComboBox, #contactsManager QListWidget { border: 1px solid palette(mid); "
             "border-radius: 7px; padding: 6px; background: palette(base); }"
             "#contactsManager QPushButton { padding: 7px 11px; border-radius: 7px; }"
-            "#contactsManager QToolButton { padding: 7px 2px; font-weight: 600; }"));
+            "#contactsManager QToolButton { padding: 7px; font-weight: 600; }"
+            "#contactCard { background: palette(base); border: 1px solid palette(mid); "
+            "border-radius: 10px; }"
+            "#contactCardTitle { color: palette(mid); font-weight: 600; }"));
         auto* root = new QVBoxLayout(this);
         root->setContentsMargins(14, 14, 14, 14);
         root->setSpacing(12);
         auto* top = new QHBoxLayout();
         m_accountCombo = new QComboBox(this);
         m_addressBookCombo = new QComboBox(this);
-        m_addBookButton = new QPushButton(QStringLiteral("New Address Book"), this);
-        m_editBookButton = new QPushButton(QStringLiteral("Edit"), this);
-        m_deleteBookButton = new QPushButton(QStringLiteral("Delete"), this);
-        m_defaultBookButton = new QPushButton(QStringLiteral("Make Default"), this);
-        m_subscribeBookButton = new QPushButton(QStringLiteral("Subscribe"), this);
-        m_shareBookButton = new QPushButton(QStringLiteral("Sharing"), this);
-        m_refreshButton = new QPushButton(QStringLiteral("Refresh"), this);
+        m_manageBooksButton = new QToolButton(this);
+        m_manageBooksButton->setText(QStringLiteral("Manage address books…"));
+        m_manageBooksButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
         top->addWidget(new QLabel(QStringLiteral("Account"), this));
         top->addWidget(m_accountCombo);
         top->addWidget(new QLabel(QStringLiteral("Address book"), this));
         top->addWidget(m_addressBookCombo, 1);
-        top->addWidget(m_addBookButton);
-        top->addWidget(m_editBookButton);
-        top->addWidget(m_deleteBookButton);
-        top->addWidget(m_defaultBookButton);
-        top->addWidget(m_subscribeBookButton);
-        top->addWidget(m_shareBookButton);
-        top->addWidget(m_refreshButton);
+        top->addWidget(m_manageBooksButton);
         root->addLayout(top);
 
         auto* splitter = new QSplitter(Qt::Horizontal, this);
@@ -297,8 +293,14 @@ namespace javelin::gui::contacts
         m_sortCombo->addItem(QStringLiteral("Name Z–A"), 1);
         m_sortCombo->addItem(QStringLiteral("Organization"), 2);
         m_sortCombo->addItem(QStringLiteral("Email"), 3);
+        m_refreshButton = new QToolButton(left);
+        m_refreshButton->setIcon(
+            QIcon(QStringLiteral(":/icons/thunderbird-icons/cloud-download.svg")));
+        m_refreshButton->setToolTip(QStringLiteral("Refresh contacts"));
+        m_refreshButton->setAccessibleName(QStringLiteral("Refresh contacts"));
         searchRow->addWidget(m_filterEdit, 1);
         searchRow->addWidget(m_sortCombo);
+        searchRow->addWidget(m_refreshButton);
         leftLayout->addLayout(searchRow);
         m_contactList = new QListWidget(left);
         leftLayout->addWidget(m_contactList, 1);
@@ -324,9 +326,14 @@ namespace javelin::gui::contacts
         titleFont.setPointSize(titleFont.pointSize() + 5);
         titleFont.setBold(true);
         m_viewTitle->setFont(titleFont);
-        m_viewDetails = new QLabel(view);
-        m_viewDetails->setTextInteractionFlags(Qt::TextSelectableByMouse);
-        m_viewDetails->setWordWrap(true);
+        auto* cardScroll = new QScrollArea(view);
+        cardScroll->setWidgetResizable(true);
+        cardScroll->setFrameShape(QFrame::NoFrame);
+        m_cardContainer = new QWidget(cardScroll);
+        m_cardLayout = new QVBoxLayout(m_cardContainer);
+        m_cardLayout->setContentsMargins(0, 8, 8, 8);
+        m_cardLayout->setSpacing(10);
+        cardScroll->setWidget(m_cardContainer);
         auto* fullDocument = new QPlainTextEdit(view);
         fullDocument->setReadOnly(true);
         fullDocument->setObjectName(QStringLiteral("contactDocumentView"));
@@ -343,8 +350,7 @@ namespace javelin::gui::contacts
                     fullDocument->setVisible(expanded);
                 });
         viewLayout->addWidget(m_viewTitle);
-        viewLayout->addWidget(m_viewDetails);
-        viewLayout->addStretch(1);
+        viewLayout->addWidget(cardScroll, 1);
         viewLayout->addWidget(viewAdvanced);
         viewLayout->addWidget(fullDocument, 1);
         m_detailStack->addWidget(view);
@@ -465,20 +471,10 @@ namespace javelin::gui::contacts
         connect(m_uploadPhotoButton, &QPushButton::clicked, this,
                 &ContactsManagerWidget::uploadPhoto);
         connect(m_cancelButton, &QPushButton::clicked, this, &ContactsManagerWidget::cancelEdit);
-        connect(m_refreshButton, &QPushButton::clicked, this,
+        connect(m_refreshButton, &QToolButton::clicked, this,
                 &ContactsManagerWidget::refreshRemote);
-        connect(m_addBookButton, &QPushButton::clicked, this,
-                &ContactsManagerWidget::createAddressBook);
-        connect(m_editBookButton, &QPushButton::clicked, this,
-                &ContactsManagerWidget::editAddressBook);
-        connect(m_deleteBookButton, &QPushButton::clicked, this,
-                &ContactsManagerWidget::deleteAddressBook);
-        connect(m_defaultBookButton, &QPushButton::clicked, this,
-                &ContactsManagerWidget::setDefaultAddressBook);
-        connect(m_subscribeBookButton, &QPushButton::clicked, this,
-                &ContactsManagerWidget::toggleAddressBookSubscription);
-        connect(m_shareBookButton, &QPushButton::clicked, this,
-                &ContactsManagerWidget::editAddressBookSharing);
+        connect(m_manageBooksButton, &QToolButton::clicked, this,
+                &ContactsManagerWidget::showAddressBookManager);
     }
 
     void ContactsManagerWidget::reloadAccounts()
@@ -567,6 +563,8 @@ namespace javelin::gui::contacts
         std::ranges::sort(m_contacts,
                           [sort](const auto& left, const auto& right)
                           {
+                              if (left.isImportant != right.isImportant)
+                                  return left.isImportant;
                               auto key = [sort](const auto& contact)
                               {
                                   if (sort == 2)
@@ -577,10 +575,25 @@ namespace javelin::gui::contacts
                               };
                               return sort == 1 ? key(left) > key(right) : key(left) < key(right);
                           });
+        bool addedRegularSeparator = false;
         for (const auto& contact : m_contacts)
         {
+            if (!contact.isImportant && !addedRegularSeparator &&
+                std::ranges::any_of(m_contacts,
+                                    &javelin::jmap::contacts::ContactSummary::isImportant))
+            {
+                auto* separator =
+                    new QListWidgetItem(QStringLiteral("ALL CONTACTS"), m_contactList);
+                separator->setFlags(Qt::NoItemFlags);
+                QFont font = separator->font();
+                font.setBold(true);
+                separator->setFont(font);
+                addedRegularSeparator = true;
+            }
             auto* item =
                 new QListWidgetItem(QString::fromStdString(contact.displayName), m_contactList);
+            if (contact.isImportant)
+                item->setIcon(QIcon(QStringLiteral(":/icons/thunderbird-icons/starred.svg")));
             QString detail;
             if (contact.organization.has_value())
                 detail = QString::fromStdString(*contact.organization);
@@ -607,7 +620,7 @@ namespace javelin::gui::contacts
             return;
         }
         m_viewTitle->setText(QString::fromStdString(contact->displayName));
-        m_viewDetails->setText(contactDetails(*contact));
+        populateContactCards(*contact);
         if (auto* document = m_detailStack->widget(1)->findChild<QPlainTextEdit*>(
                 QStringLiteral("contactDocumentView")))
             document->setPlainText(QString::fromStdString(contact->document));
@@ -1070,10 +1083,10 @@ namespace javelin::gui::contacts
     void ContactsManagerWidget::setBusy(const bool busy)
     {
         m_busy = busy;
-        for (auto* button :
-             {m_newContactButton, m_editContactButton, m_deleteContactButton, m_copyContactButton,
-              m_refreshButton, m_saveButton, m_addBookButton, m_editBookButton, m_deleteBookButton,
-              m_defaultBookButton, m_subscribeBookButton, m_shareBookButton, m_uploadPhotoButton})
+        const std::array<QWidget*, 8> buttons{
+            m_newContactButton, m_editContactButton, m_deleteContactButton, m_copyContactButton,
+            m_refreshButton,    m_manageBooksButton, m_saveButton,          m_uploadPhotoButton};
+        for (auto* button : buttons)
             button->setEnabled(!busy);
         m_accountCombo->setEnabled(!busy);
         m_addressBookCombo->setEnabled(!busy);
@@ -1112,45 +1125,118 @@ namespace javelin::gui::contacts
         return found == m_addressBooks.end() ? nullptr : &*found;
     }
 
-    QString ContactsManagerWidget::contactDetails(
-        const javelin::jmap::contacts::ContactSummary& contact) const
+    void ContactsManagerWidget::showAddressBookManager()
     {
-        QStringList lines;
+        QDialog dialog{this};
+        dialog.setWindowTitle(QStringLiteral("Manage Address Books"));
+        auto* layout = new QVBoxLayout(&dialog);
+        auto* explanation =
+            new QLabel(QStringLiteral("Manage the currently selected address book."), &dialog);
+        layout->addWidget(explanation);
+        const auto addAction = [&dialog, layout](const QString& text)
+        {
+            auto* button = new QPushButton(text, &dialog);
+            layout->addWidget(button);
+            return button;
+        };
+        auto* create = addAction(QStringLiteral("New Address Book"));
+        auto* edit = addAction(QStringLiteral("Edit Selected Address Book"));
+        auto* makeDefault = addAction(QStringLiteral("Make Selected Address Book Default"));
+        auto* subscription = addAction(QStringLiteral("Toggle Subscription"));
+        auto* sharing = addAction(QStringLiteral("Edit Sharing"));
+        auto* remove = addAction(QStringLiteral("Delete Selected Address Book"));
+        const bool hasSelection = currentAddressBook() != nullptr;
+        for (auto* button : {edit, makeDefault, subscription, sharing, remove})
+            button->setEnabled(hasSelection && !m_busy);
+        connect(create, &QPushButton::clicked, this, &ContactsManagerWidget::createAddressBook);
+        connect(edit, &QPushButton::clicked, this, &ContactsManagerWidget::editAddressBook);
+        connect(makeDefault, &QPushButton::clicked, this,
+                &ContactsManagerWidget::setDefaultAddressBook);
+        connect(subscription, &QPushButton::clicked, this,
+                &ContactsManagerWidget::toggleAddressBookSubscription);
+        connect(sharing, &QPushButton::clicked, this,
+                &ContactsManagerWidget::editAddressBookSharing);
+        connect(remove, &QPushButton::clicked, this, &ContactsManagerWidget::deleteAddressBook);
+        auto* close = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+        connect(close, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+        layout->addWidget(close);
+        dialog.exec();
+    }
+
+    void ContactsManagerWidget::populateContactCards(
+        const javelin::jmap::contacts::ContactSummary& contact)
+    {
+        while (auto* item = m_cardLayout->takeAt(0))
+        {
+            delete item->widget();
+            delete item;
+        }
         const auto parsed = javelin::jmap::contacts::contactEditorData(contact.document);
         const auto* editorData = std::get_if<javelin::jmap::contacts::ContactEditorData>(&parsed);
         if (editorData == nullptr)
-            return QStringLiteral("This contact could not be displayed.");
-        if (!editorData->organization.empty())
-            lines << QStringLiteral("%1%2").arg(
-                QString::fromStdString(editorData->organization),
-                editorData->title.empty()
-                    ? QString{}
-                    : QStringLiteral("  ·  %1").arg(QString::fromStdString(editorData->title)));
-        if (!editorData->emails.empty())
         {
-            lines << QString{} << QStringLiteral("Email");
-            for (const auto& email : editorData->emails)
-                lines << QStringLiteral("  %1").arg(QString::fromStdString(email));
+            m_cardLayout->addWidget(new QLabel(
+                QStringLiteral("This contact could not be displayed."), m_cardContainer));
+            return;
         }
-        if (!editorData->phones.empty())
+        const auto addCard = [this](const QString& title, const QString& value,
+                                    const std::optional<QString>& email = std::nullopt,
+                                    const QString& name = QString{})
         {
-            lines << QString{} << QStringLiteral("Phone");
-            for (const auto& phone : editorData->phones)
-                lines << QStringLiteral("  %1").arg(QString::fromStdString(phone));
-        }
-        if (!editorData->addresses.empty())
+            auto* card = new QWidget(m_cardContainer);
+            card->setObjectName(QStringLiteral("contactCard"));
+            auto* layout = new QVBoxLayout(card);
+            auto* header = new QHBoxLayout();
+            auto* heading = new QLabel(title, card);
+            heading->setObjectName(QStringLiteral("contactCardTitle"));
+            header->addWidget(heading);
+            header->addStretch(1);
+            if (email.has_value())
+            {
+                auto* compose = new QToolButton(card);
+                compose->setIcon(QIcon(QStringLiteral(":/icons/thunderbird-icons/new-mail.svg")));
+                compose->setToolTip(QStringLiteral("Compose mail"));
+                connect(compose, &QToolButton::clicked, this,
+                        [this, email = *email, name]
+                        {
+                            Q_EMIT composeMailRequested(m_accountCombo->currentData().toString(),
+                                                        name, email);
+                        });
+                header->addWidget(compose);
+            }
+            auto* copy = new QToolButton(card);
+            copy->setText(QStringLiteral("Copy"));
+            copy->setToolTip(QStringLiteral("Copy to clipboard"));
+            connect(copy, &QToolButton::clicked, card,
+                    [value] { QApplication::clipboard()->setText(value); });
+            header->addWidget(copy);
+            layout->addLayout(header);
+            auto* content = new QLabel(value, card);
+            content->setTextInteractionFlags(Qt::TextSelectableByMouse);
+            content->setWordWrap(true);
+            layout->addWidget(content);
+            m_cardLayout->addWidget(card);
+        };
+        if (!editorData->organization.empty() || !editorData->title.empty())
         {
-            lines << QString{} << QStringLiteral("Address");
-            for (const auto& address : editorData->addresses)
-                lines << QStringLiteral("  %1").arg(QString::fromStdString(address));
+            QStringList identity;
+            if (!editorData->organization.empty())
+                identity << QString::fromStdString(editorData->organization);
+            if (!editorData->title.empty())
+                identity << QString::fromStdString(editorData->title);
+            addCard(QStringLiteral("Work"), identity.join(QLatin1Char('\n')));
         }
+        for (const auto& email : editorData->emails)
+            addCard(QStringLiteral("Email"), QString::fromStdString(email),
+                    QString::fromStdString(email), QString::fromStdString(editorData->fullName));
+        for (const auto& phone : editorData->phones)
+            addCard(QStringLiteral("Phone"), QString::fromStdString(phone));
+        for (const auto& address : editorData->addresses)
+            addCard(QStringLiteral("Address"), QString::fromStdString(address));
         if (!editorData->birthday.empty())
-            lines
-                << QString{}
-                << QStringLiteral("Birthday  %1").arg(QString::fromStdString(editorData->birthday));
+            addCard(QStringLiteral("Birthday"), QString::fromStdString(editorData->birthday));
         if (!editorData->notes.empty())
-            lines << QString{} << QStringLiteral("Notes")
-                  << QString::fromStdString(editorData->notes);
-        return lines.join(QLatin1Char('\n'));
+            addCard(QStringLiteral("Notes"), QString::fromStdString(editorData->notes));
+        m_cardLayout->addStretch(1);
     }
 } // namespace javelin::gui::contacts

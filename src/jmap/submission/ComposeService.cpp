@@ -888,7 +888,7 @@ namespace javelin::jmap::submission
             .mode = request.mode,
             .editorMode = BodyEditorMode::RichText,
             .identityId = availableSenderIdentities.front().id,
-            .to = {},
+            .to = std::move(request.initialTo),
             .cc = {},
             .bcc = availableSenderIdentities.front().bcc,
             .subject = std::nullopt,

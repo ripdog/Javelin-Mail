@@ -29,6 +29,7 @@ namespace javelin::jmap::contacts
         std::optional<std::string> organization;
         std::vector<ContactEmail> emails;
         std::vector<std::string> addressBookIds;
+        bool isImportant = false;
         std::string document;
     };
 

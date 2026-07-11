@@ -38,6 +38,7 @@ namespace javelin::jmap::contacts::detail
         std::string uid;
         std::string kind;
         std::unordered_map<std::string, bool> addressBookIds;
+        std::unordered_map<std::string, bool> keywords;
         std::optional<Name> name;
         std::unordered_map<std::string, Email> emails;
         std::unordered_map<std::string, Organization> organizations;
@@ -68,9 +69,10 @@ template <> struct glz::meta<javelin::jmap::contacts::detail::Organization>
 template <> struct glz::meta<javelin::jmap::contacts::detail::Card>
 {
     using T = javelin::jmap::contacts::detail::Card;
-    static constexpr auto value = glz::object(
-        "id", &T::id, "uid", &T::uid, "kind", &T::kind, "addressBookIds", &T::addressBookIds,
-        "name", &T::name, "emails", &T::emails, "organizations", &T::organizations);
+    static constexpr auto value =
+        glz::object("id", &T::id, "uid", &T::uid, "kind", &T::kind, "addressBookIds",
+                    &T::addressBookIds, "keywords", &T::keywords, "name", &T::name, "emails",
+                    &T::emails, "organizations", &T::organizations);
 };
 
 namespace javelin::jmap::contacts
@@ -174,6 +176,8 @@ namespace javelin::jmap::contacts
                                .organization = std::nullopt,
                                .emails = {},
                                .addressBookIds = {},
+                               .isImportant = parsed.keywords.contains("important") ||
+                                              parsed.keywords.contains("starred"),
                                .document = card.document};
         if (parsed.name.has_value())
         {
