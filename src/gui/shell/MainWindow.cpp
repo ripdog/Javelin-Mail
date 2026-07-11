@@ -1673,8 +1673,10 @@ namespace javelin::gui::shell
         }
         const auto settings = javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
             QString::fromStdString(*accountId));
-        const auto host = QUrl{settings.sessionUrl}.host();
-        setWindowTitle(host.isEmpty() ? title : QStringLiteral("%1 - %2").arg(title, host));
+        const auto accountName =
+            settings.displayName.isEmpty() ? settings.loginEmail : settings.displayName;
+        setWindowTitle(accountName.isEmpty() ? title
+                                             : QStringLiteral("%1 - %2").arg(title, accountName));
     }
 
     void MainWindow::openOrActivateMailboxTab(std::string accountId, std::string mailboxId,

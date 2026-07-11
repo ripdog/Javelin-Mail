@@ -56,6 +56,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <functional>
+#include <unordered_map>
 
 namespace javelin::gui::compose
 {
@@ -997,7 +998,8 @@ namespace javelin::gui::compose
 
                 const auto& identities =
                     std::get<std::vector<javelin::jmap::domain::Identity>>(identitiesResult);
-                bool hasSenderIdentity = false;
+                std::vector<const javelin::jmap::domain::Identity*> uniqueIdentities;
+                std::unordered_map<std::string, std::size_t> identityIndexByEmail;
                 for (const auto& identity : identities)
                 {
                     if (isWildcardSenderIdentity(identity))
@@ -1005,14 +1007,33 @@ namespace javelin::gui::compose
                         continue;
                     }
 
-                    hasSenderIdentity = true;
+                    auto emailKey = QString::fromStdString(identity.email)
+                                        .trimmed()
+                                        .toCaseFolded()
+                                        .toStdString();
+                    const auto existing = identityIndexByEmail.find(emailKey);
+                    if (existing == identityIndexByEmail.end())
+                    {
+                        identityIndexByEmail.emplace(std::move(emailKey), uniqueIdentities.size());
+                        uniqueIdentities.push_back(&identity);
+                    }
+                    else if (cachedAccountId == selectedAccountId &&
+                             QString::fromStdString(identity.id) == selectedIdentityId)
+                    {
+                        uniqueIdentities[existing->second] = &identity;
+                    }
+                }
+
+                const bool hasSenderIdentity = !uniqueIdentities.empty();
+                for (const auto* identity : uniqueIdentities)
+                {
                     const int index = m_fromCombo->count();
-                    m_fromCombo->addItem(identityDisplayText(identity, accountDisplayName));
-                    m_fromCombo->setItemData(index, QString::fromStdString(identity.id),
+                    m_fromCombo->addItem(identityDisplayText(*identity, accountDisplayName));
+                    m_fromCombo->setItemData(index, QString::fromStdString(identity->id),
                                              senderIdentityIdRole);
                     m_fromCombo->setItemData(index, cachedAccountId, senderAccountIdRole);
                     if (cachedAccountId == selectedAccountId &&
-                        QString::fromStdString(identity.id) == selectedIdentityId)
+                        QString::fromStdString(identity->id) == selectedIdentityId)
                     {
                         selectedIndex = index;
                     }
