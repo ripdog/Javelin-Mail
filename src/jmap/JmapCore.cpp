@@ -1558,6 +1558,12 @@ namespace javelin::jmap
         std::unordered_set<std::string> failedEmailIds{parsed.notUpdated.begin(),
                                                        parsed.notUpdated.end()};
         failedEmailIds.insert(parsed.notDestroyed.begin(), parsed.notDestroyed.end());
+        if (!parsed.notDestroyed.empty())
+        {
+            qWarning().noquote() << "Email/set permanent deletion rejected for ids"
+                                 << QString::fromStdString(parsed.notDestroyed.front()) << "count"
+                                 << static_cast<qulonglong>(parsed.notDestroyed.size());
+        }
 
         for (const auto& [emailId, email] : mergedEmails)
         {

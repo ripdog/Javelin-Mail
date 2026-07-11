@@ -230,7 +230,7 @@ namespace javelin::gui::shell
         void closeTab(int index);
         void syncNavigationForActiveTab();
         void syncActiveTabSelectionFromViews();
-        void loadActiveTabFromCache(bool forceReload = false);
+        void loadActiveTabFromCache(bool forceReload = false, bool refreshRemote = true);
         void loadMailboxTabFromCache(std::string_view accountId, std::string_view mailboxId,
                                      bool applyIfActive);
         void loadMailboxTabPageFromCache(MailboxTabState& tab, bool forceReload = false);

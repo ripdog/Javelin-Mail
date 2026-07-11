@@ -2139,7 +2139,7 @@ namespace javelin::gui::shell
         }
     }
 
-    void MainWindow::loadActiveTabFromCache(const bool forceReload)
+    void MainWindow::loadActiveTabFromCache(const bool forceReload, const bool refreshRemote)
     {
         auto* tab = activeTab();
         if (tab == nullptr)
@@ -2152,7 +2152,7 @@ namespace javelin::gui::shell
         if (auto* mailboxTab = std::get_if<MailboxTabState>(&tab->content))
         {
             loadMailboxTabPageFromCache(*mailboxTab, forceReload);
-            if (shouldRefreshMailboxTabFromServer(*mailboxTab))
+            if (refreshRemote && shouldRefreshMailboxTabFromServer(*mailboxTab))
             {
                 refreshMailboxTabFromServer(*mailboxTab);
             }
@@ -2160,7 +2160,7 @@ namespace javelin::gui::shell
         else if (auto* searchTab = std::get_if<SearchTabState>(&tab->content))
         {
             applySearchTabCachedPage(*searchTab, forceReload);
-            if (shouldRefreshSearchTabFromServer(*searchTab))
+            if (refreshRemote && shouldRefreshSearchTabFromServer(*searchTab))
             {
                 refreshSearchTabFromServer(*searchTab);
             }
@@ -4803,12 +4803,13 @@ namespace javelin::gui::shell
         syncActiveTabSelectionFromViews();
 
         QSignalBlocker blocker{m_messageView->selectionModel()};
-        loadActiveTabFromCache(true);
+        loadActiveTabFromCache(true, false);
     }
 
     void MainWindow::submitQueuedEmailMutations(std::string accountId)
     {
-        const auto settings = javelin::gui::settings::PreferencesDialog::loadSettings();
+        const auto settings = javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
+            QString::fromStdString(accountId));
         if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
             settings.apiKey.isEmpty())
         {
@@ -4817,26 +4818,38 @@ namespace javelin::gui::shell
 
         auto task =
             m_jmapCore.submitPendingEmailMutations(toLiveConnectionSettings(settings), accountId);
-        QCoro::connect(std::move(task), this,
-                       [this](javelin::jmap::SubmittedEmailMutationsResult submitResult)
-                       {
-                           if (const auto* error =
-                                   std::get_if<javelin::jmap::LiveRefreshError>(&submitResult))
-                           {
-                               presentError(*error);
-                               return;
-                           }
+        QCoro::connect(
+            std::move(task), this,
+            [this](javelin::jmap::SubmittedEmailMutationsResult submitResult)
+            {
+                if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&submitResult))
+                {
+                    presentError(*error);
+                    return;
+                }
 
-                           const auto& summary =
-                               std::get<javelin::jmap::SubmittedEmailMutations>(submitResult);
-                           if (summary.updatedEmailCount == 0)
-                           {
-                               return;
-                           }
+                const auto& summary =
+                    std::get<javelin::jmap::SubmittedEmailMutations>(submitResult);
+                if (summary.failedEmailCount > 0)
+                {
+                    markTabsStaleForAccount(summary.accountId);
+                    refreshActiveTabFromServer();
+                    presentError(javelin::jmap::LiveRefreshError{
+                        .message = QStringLiteral("The server rejected %1 email mutation(s). "
+                                                  "The mailbox has been refreshed to restore "
+                                                  "the server state.")
+                                       .arg(summary.failedEmailCount),
+                    });
+                    return;
+                }
+                if (summary.updatedEmailCount == 0)
+                {
+                    return;
+                }
 
-                           refreshMessageListPreservingSelection();
-                           refreshSelectionFromModels();
-                       });
+                refreshMessageListPreservingSelection();
+                refreshSelectionFromModels();
+            });
     }
 
     void MainWindow::viewSelectedMessageSource()
