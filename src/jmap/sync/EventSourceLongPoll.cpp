@@ -16,7 +16,6 @@
 
 #include <QByteArray>
 #include <QDebug>
-#include <QElapsedTimer>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
@@ -76,7 +75,6 @@ namespace javelin::jmap::sync
 
         constexpr auto requestedPingInterval = std::chrono::seconds{30};
         constexpr auto eventSourcePingGrace = std::chrono::seconds{15};
-        constexpr auto eventSourceConnectTimeout = std::chrono::seconds{15};
         constexpr auto maximumAcceptedPingInterval = std::chrono::seconds{300};
         constexpr auto maximumEventSourceIdleTimeout = std::chrono::seconds{350};
         constexpr auto defaultEventSourceIdleTimeout = maximumEventSourceIdleTimeout;
@@ -143,32 +141,6 @@ namespace javelin::jmap::sync
                                       reply.errorString().toStdString(),
                                       statusCode.isValid() ? std::optional{statusCode.toInt()}
                                                            : std::nullopt);
-        }
-
-        [[nodiscard]] QCoro::Task<bool> waitForResponseHeaders(QNetworkReply& reply)
-        {
-            QElapsedTimer elapsed;
-            elapsed.start();
-            const auto timeoutMilliseconds =
-                std::chrono::duration_cast<std::chrono::milliseconds>(eventSourceConnectTimeout);
-            while (elapsed.elapsed() < timeoutMilliseconds.count())
-            {
-                if (reply.attribute(QNetworkRequest::HttpStatusCodeAttribute).isValid())
-                {
-                    co_return true;
-                }
-                if (reply.isFinished())
-                {
-                    co_return false;
-                }
-
-                QTimer timer;
-                timer.setSingleShot(true);
-                timer.start(std::chrono::milliseconds{25});
-                co_await qCoro(timer).waitForTimeout();
-            }
-
-            co_return reply.attribute(QNetworkRequest::HttpStatusCodeAttribute).isValid();
         }
 
         [[nodiscard]] QString encodeTemplateValue(const std::string_view value)
@@ -452,42 +424,16 @@ namespace javelin::jmap::sync
                                  m_activeReply.clear();
                              }
                          });
-
-        auto statusAttribute = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute);
-        if (!statusAttribute.isValid())
-        {
-            if (!co_await waitForResponseHeaders(*reply))
-            {
-                reply->abort();
-                qWarning().noquote() << "Long poll timed out waiting for event-source response"
-                                     << reply->url().toString();
-                co_return makeTransportError(
-                    javelin::jmap::api::TransportErrorCode::NetworkFailure,
-                    "Timed out waiting for event-source response headers.");
-            }
-            statusAttribute = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute);
-        }
-
-        const int responseStatus = statusAttribute.isValid() ? statusAttribute.toInt() : 0;
-        if (responseStatus < 200 || responseStatus >= 300)
-        {
-            co_return makeTransportError(javelin::jmap::api::TransportErrorCode::HttpFailure,
-                                         reply->errorString().toStdString(), responseStatus);
-        }
-
-        const auto contentType = reply->header(QNetworkRequest::ContentTypeHeader).toString();
-        if (!contentType.startsWith(QStringLiteral("text/event-stream"), Qt::CaseInsensitive))
-        {
-            co_return makeTransportError(
-                javelin::jmap::api::TransportErrorCode::ResponseDecodingFailed,
-                "Event-source response did not have a text/event-stream content type.",
-                responseStatus);
-        }
-
-        if (m_statusCallback)
-        {
-            m_statusCallback(LongPollConnectionStatus::Connected);
-        }
+        bool connectedReported = false;
+        QObject::connect(reply, &QNetworkReply::requestSent, reply,
+                         [this, &connectedReported]()
+                         {
+                             if (!connectedReported && m_statusCallback)
+                             {
+                                 connectedReported = true;
+                                 m_statusCallback(LongPollConnectionStatus::Connected);
+                             }
+                         });
 
         QByteArray pendingBuffer;
         std::string eventName;
@@ -506,6 +452,7 @@ namespace javelin::jmap::sync
             .updateCount = 0,
         };
         auto activityTimeout = defaultEventSourceIdleTimeout;
+        bool responseHeadersValidated = false;
 
         const auto finalizeEvent = [&]() -> std::optional<ParsedStreamEvent>
         {
@@ -584,13 +531,34 @@ namespace javelin::jmap::sync
                 reply->attribute(QNetworkRequest::HttpStatusCodeAttribute);
             const int statusCode =
                 currentStatusAttribute.isValid() ? currentStatusAttribute.toInt() : 0;
-            if (reply->isFinished() && statusCode >= 400)
+            if (!responseHeadersValidated && currentStatusAttribute.isValid())
             {
-                const QByteArray responseBody = reply->readAll();
-                qWarning().noquote() << "Long poll HTTP failure" << reply->url().toString()
-                                     << statusCode << summarizeBody(responseBody);
-                co_return makeTransportError(javelin::jmap::api::TransportErrorCode::HttpFailure,
-                                             reply->errorString().toStdString(), statusCode);
+                if (statusCode < 200 || statusCode >= 300)
+                {
+                    const QByteArray responseBody = reply->readAll();
+                    qWarning().noquote() << "Long poll HTTP failure" << reply->url().toString()
+                                         << statusCode << summarizeBody(responseBody);
+                    co_return makeTransportError(
+                        javelin::jmap::api::TransportErrorCode::HttpFailure,
+                        reply->errorString().toStdString(), statusCode);
+                }
+
+                const auto contentType =
+                    reply->header(QNetworkRequest::ContentTypeHeader).toString();
+                if (!contentType.startsWith(QStringLiteral("text/event-stream"),
+                                            Qt::CaseInsensitive))
+                {
+                    co_return makeTransportError(
+                        javelin::jmap::api::TransportErrorCode::ResponseDecodingFailed,
+                        "Event-source response did not have a text/event-stream content type.",
+                        statusCode);
+                }
+                responseHeadersValidated = true;
+                if (!connectedReported && m_statusCallback)
+                {
+                    connectedReported = true;
+                    m_statusCallback(LongPollConnectionStatus::Connected);
+                }
             }
 
             if (!reply->isFinished() && reply->bytesAvailable() == 0)
