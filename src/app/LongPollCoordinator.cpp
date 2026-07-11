@@ -37,13 +37,26 @@ namespace javelin::app
                                              configuration.accountId);
         }
 
-        std::erase_if(m_services, [&configuredAccountIds](const auto& entry)
-                      { return !configuredAccountIds.contains(entry.first); });
+        for (auto serviceIt = m_services.begin(); serviceIt != m_services.end();)
+        {
+            if (configuredAccountIds.contains(serviceIt->first))
+            {
+                ++serviceIt;
+                continue;
+            }
+
+            disconnect(serviceIt->second.get(), nullptr, this, nullptr);
+            serviceIt = m_services.erase(serviceIt);
+        }
         updateStatus();
     }
 
     void LongPollCoordinator::stop()
     {
+        for (const auto& service : m_services | std::views::values)
+        {
+            disconnect(service.get(), nullptr, this, nullptr);
+        }
         m_services.clear();
         updateStatus();
     }
@@ -70,16 +83,24 @@ namespace javelin::app
     void LongPollCoordinator::updateStatus()
     {
         auto nextStatus = LongPollService::Status::Disconnected;
-        if (std::ranges::any_of(
-                m_services, [](const auto& entry)
-                { return entry.second->status() == LongPollService::Status::Connecting; }))
+        if (std::ranges::any_of(m_services,
+                                [](const auto& entry)
+                                {
+                                    return entry.second != nullptr &&
+                                           entry.second->status() ==
+                                               LongPollService::Status::Connecting;
+                                }))
         {
             nextStatus = LongPollService::Status::Connecting;
         }
         if (!m_services.empty() &&
-            std::ranges::all_of(
-                m_services, [](const auto& entry)
-                { return entry.second->status() == LongPollService::Status::Connected; }))
+            std::ranges::all_of(m_services,
+                                [](const auto& entry)
+                                {
+                                    return entry.second != nullptr &&
+                                           entry.second->status() ==
+                                               LongPollService::Status::Connected;
+                                }))
         {
             nextStatus = LongPollService::Status::Connected;
         }
