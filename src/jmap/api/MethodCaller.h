@@ -1,5 +1,6 @@
 #pragma once
 
+#include "jmap/api/Cancellation.h"
 #include "jmap/api/Error.h"
 #include "jmap/api/MethodEnvelope.h"
 #include "jmap/api/RequestBuilder.h"
@@ -30,10 +31,12 @@ namespace javelin::jmap::api
                      const javelin::jmap::auth::TokenRefresher* tokenRefresher = nullptr,
                      javelin::jmap::auth::SecretStore* secretStore = nullptr);
 
-        [[nodiscard]] QCoro::Task<MethodCallerResult> call(ApiRequestContext requestContext,
-                                                           RequestEnvelope request) const;
-        [[nodiscard]] QCoro::Task<MethodCallerResult> call(ApiRequestContext requestContext,
-                                                           RequestBuilder request) const;
+        [[nodiscard]] QCoro::Task<MethodCallerResult>
+        call(ApiRequestContext requestContext, RequestEnvelope request,
+             CancellationToken cancellation = {}) const;
+        [[nodiscard]] QCoro::Task<MethodCallerResult>
+        call(ApiRequestContext requestContext, RequestBuilder request,
+             CancellationToken cancellation = {}) const;
 
       private:
         JmapMethodTransport& m_transport;

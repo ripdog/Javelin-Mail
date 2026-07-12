@@ -140,6 +140,24 @@ namespace
 
 } // namespace
 
+TEST_CASE("method caller rejects cancellation before transport dispatch",
+          "[jmap][method][transport][cancellation]")
+{
+    ensureApplication();
+    FakeJmapMethodTransport transport;
+    javelin::jmap::api::MethodCaller caller{transport};
+    javelin::jmap::api::CancellationSource cancellation;
+    cancellation.cancel();
+
+    const auto result = QCoro::waitFor(
+        caller.call(makeRequestContext(), loadRequestEnvelope(), cancellation.token()));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::api::TransportError>(result));
+    CHECK(std::get<javelin::jmap::api::TransportError>(result).code ==
+          javelin::jmap::api::TransportErrorCode::Cancelled);
+    CHECK_FALSE(transport.request.has_value());
+}
+
 TEST_CASE("method caller is independent of HTTP transport", "[jmap][method][transport]")
 {
     ensureApplication();

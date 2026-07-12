@@ -17,8 +17,18 @@ namespace javelin::jmap::api
     }
 
     QCoro::Task<MethodCallerResult> MethodCaller::call(ApiRequestContext requestContext,
-                                                       RequestEnvelope request) const
+                                                       RequestEnvelope request,
+                                                       CancellationToken cancellation) const
     {
+        if (cancellation.isCancellationRequested())
+        {
+            co_return TransportError{
+                .code = TransportErrorCode::Cancelled,
+                .message = "JMAP method call cancelled before dispatch",
+                .httpStatus = std::nullopt,
+            };
+        }
+
         const javelin::jmap::auth::AccessTokenResolver accessTokenResolver{m_tokenRefresher,
                                                                            m_secretStore};
         const auto tokenResult = accessTokenResolver.resolve(requestContext.credentials);
@@ -34,6 +44,7 @@ namespace javelin::jmap::api
             .apiUrl = std::move(requestContext.apiUrl),
             .accessToken = std::get<javelin::jmap::auth::OAuthToken>(tokenResult).accessToken,
             .envelope = std::move(request),
+            .cancellation = std::move(cancellation),
         });
         if (std::holds_alternative<TransportError>(transportResult))
         {
@@ -53,9 +64,10 @@ namespace javelin::jmap::api
     }
 
     QCoro::Task<MethodCallerResult> MethodCaller::call(ApiRequestContext requestContext,
-                                                       RequestBuilder request) const
+                                                       RequestBuilder request,
+                                                       CancellationToken cancellation) const
     {
-        co_return co_await call(requestContext, request.build());
+        co_return co_await call(requestContext, request.build(), std::move(cancellation));
     }
 
 } // namespace javelin::jmap::api

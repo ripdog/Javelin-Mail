@@ -13,8 +13,10 @@
 
 #include <QDebug>
 #include <QLoggingCategory>
+#include <QMetaObject>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QPointer>
 #include <QScopeGuard>
 #include <QStringList>
 
@@ -119,6 +121,15 @@ namespace javelin::jmap::api
 
     QCoro::Task<TransportResult> QtNetworkTransport::send(HttpRequest request)
     {
+        if (request.cancellation.isCancellationRequested())
+        {
+            co_return TransportError{
+                .code = TransportErrorCode::Cancelled,
+                .message = "HTTP request cancelled before dispatch",
+                .httpStatus = std::nullopt,
+            };
+        }
+
         QNetworkRequest networkRequest{request.url};
         networkRequest.setTransferTimeout(requestTimeoutMs);
         for (const HttpHeader& header : request.headers)
@@ -136,12 +147,33 @@ namespace javelin::jmap::api
         switch (request.method)
         {
         case HttpMethod::Get:
-            reply = co_await m_networkAccessManager.get(networkRequest);
+            reply = m_networkAccessManager.get(networkRequest);
             break;
         case HttpMethod::Post:
-            reply = co_await m_networkAccessManager.post(networkRequest, request.body);
+            reply = m_networkAccessManager.post(networkRequest, request.body);
             break;
         }
+
+        const auto cancellationRegistration = request.cancellation.registerCallback(
+            [reply = QPointer<QNetworkReply>{reply}]()
+            {
+                if (reply.isNull())
+                {
+                    return;
+                }
+                QMetaObject::invokeMethod(
+                    reply.data(),
+                    [reply]()
+                    {
+                        if (!reply.isNull())
+                        {
+                            reply->abort();
+                        }
+                    },
+                    Qt::QueuedConnection);
+            });
+        static_cast<void>(cancellationRegistration);
+        co_await qCoro(reply).waitForFinished();
 
         const auto deleteReply = qScopeGuard(
             [reply]()

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "jmap/api/Cancellation.h"
 #include "jmap/api/Error.h"
 #include "jmap/api/MethodEnvelope.h"
 
@@ -17,6 +18,7 @@ namespace javelin::jmap::api
         std::string apiUrl;
         std::string accessToken;
         RequestEnvelope envelope;
+        CancellationToken cancellation{};
     };
 
     using JmapMethodTransportResult = std::variant<ResponseEnvelope, TransportError, ProtocolError>;

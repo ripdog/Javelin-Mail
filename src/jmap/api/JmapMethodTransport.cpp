@@ -14,6 +14,15 @@ namespace javelin::jmap::api
 
     QCoro::Task<JmapMethodTransportResult> HttpJmapMethodTransport::call(JmapMethodRequest request)
     {
+        if (request.cancellation.isCancellationRequested())
+        {
+            co_return TransportError{
+                .code = TransportErrorCode::Cancelled,
+                .message = "JMAP method call cancelled before HTTP dispatch",
+                .httpStatus = std::nullopt,
+            };
+        }
+
         const auto body = serializeRequestEnvelope(request.envelope);
         if (!body.has_value())
         {
@@ -35,6 +44,7 @@ namespace javelin::jmap::api
                     HttpHeader{.name = "Content-Type", .value = "application/json"},
                 },
             .body = QByteArray::fromStdString(*body),
+            .cancellation = std::move(request.cancellation),
         });
         if (const auto* error = std::get_if<TransportError>(&result))
         {

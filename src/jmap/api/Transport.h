@@ -1,5 +1,6 @@
 #pragma once
 
+#include "jmap/api/Cancellation.h"
 #include "jmap/api/Error.h"
 
 #include <QCoroTask>
@@ -33,6 +34,7 @@ namespace javelin::jmap::api
         QUrl url;
         QList<HttpHeader> headers;
         QByteArray body;
+        CancellationToken cancellation{};
     };
 
     struct HttpResponse
