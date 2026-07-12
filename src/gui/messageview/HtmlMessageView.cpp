@@ -31,6 +31,23 @@ namespace javelin::gui::messageview
                    scheme == QStringLiteral("mailto");
         }
 
+        class ExternalNavigationPage final : public QWebEnginePage
+        {
+          public:
+            using QWebEnginePage::QWebEnginePage;
+
+          protected:
+            bool acceptNavigationRequest(const QUrl& url, NavigationType, bool) override
+            {
+                if (shouldOpenExternally(url))
+                {
+                    QDesktopServices::openUrl(url);
+                }
+                deleteLater();
+                return false;
+            }
+        };
+
         class MessageWebEnginePage final : public QWebEnginePage
         {
           public:
@@ -39,9 +56,7 @@ namespace javelin::gui::messageview
           protected:
             QWebEnginePage* createWindow(WebWindowType) override
             {
-                // Keep target="_blank" links on this page so acceptNavigationRequest() can
-                // hand them to the desktop instead of silently discarding the new window.
-                return this;
+                return new ExternalNavigationPage(this);
             }
 
             bool acceptNavigationRequest(const QUrl& url, NavigationType type,
