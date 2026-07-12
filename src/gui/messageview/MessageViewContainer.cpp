@@ -728,6 +728,8 @@ namespace javelin::gui::messageview
                 [this]
                 {
                     m_htmlDocumentLoaded = true;
+                    m_loading = false;
+                    updatePresentation(false);
                     if (m_activeView == ActiveView::Html)
                     {
                         maybeAutoTranslateCurrentMessage();
@@ -1524,6 +1526,7 @@ namespace javelin::gui::messageview
                     ? QString::fromStdString(m_snapshot->htmlRenderDocument->html)
                     : QString::fromStdString(m_snapshot->htmlBody->value);
             m_htmlDocumentLoaded = false;
+            m_loading = true;
             m_htmlView->setDocumentHtml(renderDocument.toStdString());
         }
         updateSenderRemoteContentPermit();
@@ -1535,8 +1538,19 @@ namespace javelin::gui::messageview
 
         if (m_snapshot->htmlBody.has_value())
         {
-            setActiveView(ActiveView::Html);
-            startLanguageDetection();
+            if (m_htmlDocumentLoaded)
+            {
+                setActiveView(ActiveView::Html);
+                startLanguageDetection();
+            }
+            else
+            {
+                m_placeholderTitleLabel->setText(QStringLiteral("Loading message"));
+                m_placeholderDetailLabel->setText(
+                    QStringLiteral("Preparing the selected message for display."));
+                m_loadingIndicator->setVisible(true);
+                setActiveView(ActiveView::Placeholder);
+            }
         }
         else if (m_snapshot->plainTextBody.has_value())
         {
