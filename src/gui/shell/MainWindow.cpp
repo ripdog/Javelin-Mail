@@ -3477,16 +3477,6 @@ namespace javelin::gui::shell
 
     void MainWindow::saveAttachment(std::string accountId, std::string emailId, std::string partId)
     {
-        const auto settings = javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
-            QString::fromStdString(accountId));
-        if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
-            settings.apiKey.isEmpty())
-        {
-            presentUserInterventionError(
-                QStringLiteral("Set Session URL, Login Email, and API Key in Preferences first."));
-            return;
-        }
-
         const auto attachmentSettings =
             javelin::gui::settings::PreferencesDialog::loadAttachmentSaveSettings();
         if (!attachmentSettings.alwaysAsk && (attachmentSettings.directory.isEmpty() ||
@@ -3574,16 +3564,6 @@ namespace javelin::gui::shell
             return;
         }
 
-        const auto settings = javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
-            QString::fromStdString(accountId));
-        if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
-            settings.apiKey.isEmpty())
-        {
-            presentUserInterventionError(
-                QStringLiteral("Set Session URL, Login Email, and API Key in Preferences first."));
-            return;
-        }
-
         const auto attachmentSettings =
             javelin::gui::settings::PreferencesDialog::loadAttachmentSaveSettings();
         const QString targetDirectory =
@@ -3644,16 +3624,6 @@ namespace javelin::gui::shell
 
     void MainWindow::openAttachment(std::string accountId, std::string emailId, std::string partId)
     {
-        const auto settings = javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
-            QString::fromStdString(accountId));
-        if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
-            settings.apiKey.isEmpty())
-        {
-            presentUserInterventionError(
-                QStringLiteral("Set Session URL, Login Email, and API Key in Preferences first."));
-            return;
-        }
-
         if (!m_openAttachmentDirectory.isValid())
         {
             presentUserInterventionError(
@@ -3878,16 +3848,6 @@ namespace javelin::gui::shell
 
     void MainWindow::refreshSelectedMessageContent(std::string accountId, std::string emailId)
     {
-        const auto settings = javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
-            QString::fromStdString(accountId));
-        if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
-            settings.apiKey.isEmpty())
-        {
-            m_messageViewContainer->setErrorState(
-                QStringLiteral("No connection settings are associated with this account."));
-            return;
-        }
-
         if (m_messageContentRequestInFlight.has_value() &&
             m_messageContentRequestInFlight->accountId == accountId &&
             m_messageContentRequestInFlight->emailId == emailId)
@@ -4859,16 +4819,6 @@ namespace javelin::gui::shell
         if (!accountId.has_value() || !emailId.has_value())
         {
             m_statusBar->showMessage(QStringLiteral("Select a message to view its source."), 3000);
-            return;
-        }
-
-        const auto settings = javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
-            QString::fromStdString(*accountId));
-        if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
-            settings.apiKey.isEmpty())
-        {
-            presentUserInterventionError(
-                QStringLiteral("Set Session URL, Login Email, and API Key in Preferences first."));
             return;
         }
 

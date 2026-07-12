@@ -45,6 +45,10 @@ namespace javelin::app
             disconnect(serviceIt->second.get(), nullptr, this, nullptr);
             serviceIt = m_services.erase(serviceIt);
         }
+        std::erase_if(m_configurations, [&configuredAccountIds](const auto& entry)
+                      { return !configuredAccountIds.contains(entry.first); });
+        std::erase_if(m_observations, [&configuredAccountIds](const auto& entry)
+                      { return !configuredAccountIds.contains(entry.second.accountId); });
     }
 
     void LongPollCoordinator::applyAccountConfiguration(const std::string& accountId)
@@ -322,6 +326,8 @@ namespace javelin::app
             disconnect(service.get(), nullptr, this, nullptr);
         }
         m_services.clear();
+        m_configurations.clear();
+        m_observations.clear();
     }
 
     void LongPollCoordinator::connectService(const std::string& accountId, LongPollService& service)
