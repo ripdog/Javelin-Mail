@@ -5,6 +5,7 @@
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/sync/MailboxRefreshExecutor.h"
 #include "jmap/sync/MailboxStateRefreshExecutor.h"
+#include "jmap/sync/PreferredStateChangeSource.h"
 
 #include <QDateTime>
 #include <QDebug>
@@ -444,9 +445,23 @@ namespace javelin::app
         };
         if (nextConfiguration->websocket.has_value() && nextConfiguration->websocket->supportsPush)
         {
-            runContext->source = std::make_unique<javelin::jmap::sync::WebSocketStateChangeSource>(
-                nextConfiguration->websocket->url, nextConfiguration->settings.apiKey,
-                sourceStatusCallback);
+            auto webSocketSource =
+                std::make_unique<javelin::jmap::sync::WebSocketStateChangeSource>(
+                    nextConfiguration->websocket->url, nextConfiguration->settings.apiKey,
+                    sourceStatusCallback);
+            std::unique_ptr<javelin::jmap::sync::StateChangeSource> httpFallbackSource;
+            if (!nextConfiguration->eventSourceUrl.empty())
+            {
+                httpFallbackSource =
+                    std::make_unique<javelin::jmap::sync::EventSourceStateChangeSource>(
+                        m_networkAccessManager, nextConfiguration->eventSourceUrl,
+                        nextConfiguration->settings.apiKey, sourceStatusCallback);
+            }
+            runContext->source =
+                std::make_unique<javelin::jmap::sync::PreferredStateChangeSource>(
+                    m_databaseConnection, nextConfiguration->accountId,
+                    nextConfiguration->websocket->url, std::move(webSocketSource),
+                    std::move(httpFallbackSource));
         }
         else
         {

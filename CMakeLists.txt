@@ -37,6 +37,9 @@ find_package(KPim6Mime REQUIRED)
 qt_standard_project_setup()
 
 set(JAVELIN_FORMAT_FILES
+    src/jmap/sync/PreferredStateChangeSource.cpp
+    src/jmap/sync/PreferredStateChangeSource.h
+    tests/jmap/PreferredStateChangeSourceTest.cpp
     src/jmap/api/Cancellation.cpp
     src/jmap/api/Cancellation.h
     src/jmap/cache/SearchWindowRepository.cpp
@@ -253,6 +256,8 @@ set(JAVELIN_FORMAT_FILES
 )
 
 add_library(javelin_jmap STATIC
+    src/jmap/sync/PreferredStateChangeSource.cpp
+    src/jmap/sync/PreferredStateChangeSource.h
     src/jmap/api/Cancellation.cpp
     src/jmap/api/Cancellation.h
     src/jmap/cache/SearchWindowRepository.cpp
