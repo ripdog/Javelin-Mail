@@ -146,6 +146,7 @@ namespace javelin::jmap::api
                                      m_opening = false;
                                      m_pingTimer.stop();
                                      ++m_disconnectGeneration;
+                                     m_ignoredRequestIds.clear();
                                      qCInfo(logJmapWebSocketTransport) << "disconnected";
                                  });
                 QObject::connect(&m_socket, &QWebSocket::errorOccurred, &m_socket,
@@ -334,8 +335,6 @@ namespace javelin::jmap::api
 
                 if (!m_opening)
                 {
-                    m_responses.clear();
-                    m_ignoredRequestIds.clear();
                     QNetworkRequest handshake{url};
                     handshake.setRawHeader(
                         "Authorization",
