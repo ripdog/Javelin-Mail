@@ -66,7 +66,7 @@ namespace javelin::app
 
     using SearchWindowResult = std::variant<SearchWindowSummary, javelin::jmap::LiveRefreshError>;
 
-    struct LongPollAccountConfiguration
+    struct AccountSyncConfiguration
     {
         AccountConnectionSettings settings;
         std::string accountId;
@@ -79,12 +79,12 @@ namespace javelin::app
         std::vector<std::string> mailboxIds;
     };
 
-    class LongPollCoordinator final : public QObject
+    class MailApplicationService final : public QObject
     {
         Q_OBJECT
 
       public:
-        LongPollCoordinator(javelin::jmap::cache::DatabaseConnection& databaseConnection,
+        MailApplicationService(javelin::jmap::cache::DatabaseConnection& databaseConnection,
                             javelin::jmap::JmapCore& jmapCore,
                             javelin::jmap::api::JmapMethodTransport& methodTransport,
                             QNetworkAccessManager& networkAccessManager,
@@ -93,7 +93,7 @@ namespace javelin::app
                             javelin::jmap::contacts::ContactService& contactService,
                             QObject* parent = nullptr);
 
-        void applySettings(std::vector<LongPollAccountConfiguration> configurations);
+        void applySettings(std::vector<AccountSyncConfiguration> configurations);
         [[nodiscard]] MailboxObservation observeMailbox(std::string accountId,
                                                         std::string mailboxId);
         [[nodiscard]] bool requestAccountSynchronization(std::string_view accountId);
@@ -141,7 +141,7 @@ namespace javelin::app
 
       Q_SIGNALS:
         void accountStatusChanged(const QString& accountId,
-                                  javelin::app::LongPollService::Status status);
+                                  javelin::app::AccountSyncCoordinator::Status status);
         void cacheCommitted(javelin::app::MailCacheChange change);
         void notificationRaised(const QString& accountId, const QString& mailboxId,
                                 const QString& threadId, const QString& emailId,
@@ -151,7 +151,7 @@ namespace javelin::app
       private:
         friend class MailboxObservation;
 
-        void connectService(const std::string& accountId, LongPollService& service);
+        void connectCoordinator(const std::string& accountId, AccountSyncCoordinator& coordinator);
         void applyAccountConfiguration(const std::string& accountId);
         void releaseMailboxObservation(
             javelin::jmap::sync::MailboxInterestRegistry::ObservationId observationId);
@@ -163,8 +163,8 @@ namespace javelin::app
         javelin::jmap::cache::AccountRepository& m_accountRepository;
         javelin::jmap::cache::QueryService& m_queryService;
         javelin::jmap::contacts::ContactService& m_contactService;
-        std::unordered_map<std::string, std::unique_ptr<LongPollService>> m_services;
-        std::unordered_map<std::string, LongPollAccountConfiguration> m_configurations;
+        std::unordered_map<std::string, std::unique_ptr<AccountSyncCoordinator>> m_coordinators;
+        std::unordered_map<std::string, AccountSyncConfiguration> m_configurations;
         javelin::jmap::sync::MailboxInterestRegistry m_mailboxInterests;
     };
 
@@ -183,13 +183,13 @@ namespace javelin::app
         [[nodiscard]] explicit operator bool() const;
 
       private:
-        friend class LongPollCoordinator;
+        friend class MailApplicationService;
 
         MailboxObservation(
-            LongPollCoordinator& coordinator,
+            MailApplicationService& service,
             javelin::jmap::sync::MailboxInterestRegistry::ObservationId observationId);
 
-        QPointer<LongPollCoordinator> m_coordinator;
+        QPointer<MailApplicationService> m_service;
         javelin::jmap::sync::MailboxInterestRegistry::ObservationId m_observationId = 0;
     };
 

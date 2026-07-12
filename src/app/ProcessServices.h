@@ -21,7 +21,7 @@ namespace javelin::app
 {
     class ComposeService;
     class InlineMessageSchemeHandler;
-    class LongPollCoordinator;
+    class MailApplicationService;
 } // namespace javelin::app
 
 namespace javelin::jmap::api
@@ -72,13 +72,13 @@ namespace javelin::app
         [[nodiscard]] javelin::jmap::cache::TranslationCacheRepository&
         translationCacheRepository();
         [[nodiscard]] ComposeService& composeService();
-        [[nodiscard]] javelin::app::LongPollCoordinator& longPollService();
+        [[nodiscard]] MailApplicationService& mailService();
 
       private:
         std::unique_ptr<javelin::jmap::JmapCore> m_jmapCore;
         javelin::jmap::cache::DatabaseConnection m_databaseConnection;
         std::unique_ptr<QNetworkAccessManager> m_networkAccessManager;
-        std::unique_ptr<QNetworkAccessManager> m_longPollNetworkAccessManager;
+        std::unique_ptr<QNetworkAccessManager> m_stateChangeNetworkAccessManager;
         std::unique_ptr<javelin::jmap::api::QtNetworkTransport> m_transport;
         std::unique_ptr<javelin::jmap::api::HttpJmapMethodTransport> m_methodTransport;
         std::unique_ptr<InlineMessageSchemeHandler> m_inlineMessageSchemeHandler;
@@ -94,7 +94,7 @@ namespace javelin::app
         std::unique_ptr<javelin::jmap::cache::SubmissionRepository> m_submissionRepository;
         std::unique_ptr<javelin::jmap::submission::ComposeService> m_jmapComposeService;
         std::unique_ptr<ComposeService> m_composeService;
-        std::unique_ptr<LongPollCoordinator> m_longPollService;
+        std::unique_ptr<MailApplicationService> m_mailService;
     };
 
 } // namespace javelin::app

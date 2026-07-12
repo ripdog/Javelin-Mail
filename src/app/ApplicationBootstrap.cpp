@@ -78,9 +78,9 @@ namespace javelin::app
             };
         }
 
-        [[nodiscard]] std::vector<LongPollAccountConfiguration> longPollConfigurations()
+        [[nodiscard]] std::vector<AccountSyncConfiguration> accountSyncConfigurations()
         {
-            std::vector<LongPollAccountConfiguration> configurations;
+            std::vector<AccountSyncConfiguration> configurations;
             for (const auto& settings : javelin::gui::settings::PreferencesDialog::loadAccounts())
             {
                 if (settings.loginEmail.isEmpty() || settings.apiKey.isEmpty())
@@ -95,7 +95,7 @@ namespace javelin::app
                     {
                         mailboxIds.push_back(mailboxId.toStdString());
                     }
-                    configurations.push_back(LongPollAccountConfiguration{
+                    configurations.push_back(AccountSyncConfiguration{
                         .settings = toAccountConnectionSettings(settings),
                         .accountId = accountId.toStdString(),
                         .mailboxIds = std::move(mailboxIds),
@@ -178,7 +178,7 @@ namespace javelin::app
             m_processServices->contactService(), m_processServices->contactIdentityLookup(),
             m_processServices->identityRepository(), m_processServices->messageViewService(),
             m_processServices->queryService(), m_processServices->translationCacheRepository(),
-            m_processServices->composeService(), m_processServices->longPollService());
+            m_processServices->composeService(), m_processServices->mailService());
 
         m_mainWindow->setAttribute(Qt::WA_DeleteOnClose);
         QObject::connect(m_mainWindow, &javelin::gui::shell::MainWindow::accountSettingsChanged,
@@ -189,7 +189,7 @@ namespace javelin::app
 
     void ApplicationBootstrap::reloadAccountSynchronizationSettings()
     {
-        m_processServices->longPollService().applySettings(longPollConfigurations());
+        m_processServices->mailService().applySettings(accountSyncConfigurations());
     }
 
     void ApplicationBootstrap::toggleMainWindow()
@@ -220,7 +220,7 @@ namespace javelin::app
         m_trayIcon->setContextMenu(m_trayMenu.get());
 
         QObject::connect(
-            &m_processServices->longPollService(), &LongPollCoordinator::notificationRaised,
+            &m_processServices->mailService(), &MailApplicationService::notificationRaised,
             m_notificationController.get(),
             [this](const QString& accountId, const QString& mailboxId, const QString& threadId,
                    const QString& emailId, const QString& mailboxName, const QString& title,

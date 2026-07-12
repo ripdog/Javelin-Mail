@@ -24,25 +24,26 @@ namespace javelin::app
         constexpr auto resumeWatchdogInterval = std::chrono::seconds{30};
         constexpr auto resumeWatchdogStallThreshold = std::chrono::seconds{90};
 
-        [[nodiscard]] LongPollService::Status
+        [[nodiscard]] AccountSyncCoordinator::Status
         toServiceStatus(const javelin::jmap::sync::StateChangeConnectionStatus status)
         {
             switch (status)
             {
             case javelin::jmap::sync::StateChangeConnectionStatus::Disconnected:
-                return LongPollService::Status::Disconnected;
+                return AccountSyncCoordinator::Status::Disconnected;
             case javelin::jmap::sync::StateChangeConnectionStatus::Connecting:
-                return LongPollService::Status::Connecting;
+                return AccountSyncCoordinator::Status::Connecting;
             case javelin::jmap::sync::StateChangeConnectionStatus::Connected:
-                return LongPollService::Status::Connected;
+                return AccountSyncCoordinator::Status::Connected;
             }
 
-            return LongPollService::Status::Disconnected;
+            return AccountSyncCoordinator::Status::Disconnected;
         }
 
     } // namespace
 
-    LongPollService::LongPollService(javelin::jmap::cache::DatabaseConnection& databaseConnection,
+    AccountSyncCoordinator::AccountSyncCoordinator(
+        javelin::jmap::cache::DatabaseConnection& databaseConnection,
                                      javelin::jmap::api::JmapMethodTransport& methodTransport,
                                      QNetworkAccessManager& networkAccessManager,
                                      javelin::jmap::cache::AccountRepository& accountRepository,
@@ -55,20 +56,21 @@ namespace javelin::app
         m_refreshDebounceTimer.setSingleShot(true);
         m_refreshDebounceTimer.setInterval(refreshDebounceInterval);
         QObject::connect(&m_refreshDebounceTimer, &QTimer::timeout, this,
-                         &LongPollService::scheduleCatchUpRefresh);
+                         &AccountSyncCoordinator::scheduleCatchUpRefresh);
         m_lastResumeWatchdogTickMs = QDateTime::currentMSecsSinceEpoch();
         m_resumeWatchdogTimer.setInterval(resumeWatchdogInterval);
         QObject::connect(&m_resumeWatchdogTimer, &QTimer::timeout, this,
-                         &LongPollService::handleResumeWatchdogTimeout);
+                         &AccountSyncCoordinator::handleResumeWatchdogTimeout);
         m_resumeWatchdogTimer.start();
     }
 
-    LongPollService::~LongPollService()
+    AccountSyncCoordinator::~AccountSyncCoordinator()
     {
         stop();
     }
 
-    void LongPollService::applySettings(AccountConnectionSettings settings, std::string accountId,
+    void AccountSyncCoordinator::applySettings(AccountConnectionSettings settings,
+                                               std::string accountId,
                                         std::vector<std::string> mailboxIds)
     {
         if (m_settings.has_value() && m_runContext != nullptr &&
@@ -86,7 +88,7 @@ namespace javelin::app
         restart();
     }
 
-    void LongPollService::stop()
+    void AccountSyncCoordinator::stop()
     {
         if (m_runContext != nullptr)
         {
@@ -107,12 +109,12 @@ namespace javelin::app
         m_shouldCatchUpRefreshOnReconnect = false;
     }
 
-    LongPollService::Status LongPollService::status() const
+    AccountSyncCoordinator::Status AccountSyncCoordinator::status() const
     {
         return m_status;
     }
 
-    bool LongPollService::requestSynchronization()
+    bool AccountSyncCoordinator::requestSynchronization()
     {
         if (m_runContext == nullptr)
             return false;
@@ -120,20 +122,22 @@ namespace javelin::app
         return true;
     }
 
-    QCoro::Task<void> LongPollService::onStateChange(javelin::jmap::sync::StateChangeEvent event)
+    QCoro::Task<void>
+    AccountSyncCoordinator::onStateChange(javelin::jmap::sync::StateChangeEvent event)
     {
         m_lastEventId = event.newState;
         scheduleDebouncedRefresh();
         co_return;
     }
 
-    bool LongPollService::hasValidSettings() const
+    bool AccountSyncCoordinator::hasValidSettings() const
     {
         return m_settings.has_value() && !m_settings->loginEmail.empty() &&
                !m_settings->apiKey.empty();
     }
 
-    std::optional<LongPollService::RunConfiguration> LongPollService::resolveConfiguration() const
+    std::optional<AccountSyncCoordinator::RunConfiguration>
+    AccountSyncCoordinator::resolveConfiguration() const
     {
         if (!hasValidSettings())
         {
@@ -149,8 +153,8 @@ namespace javelin::app
              (!(*session)->capabilities.websocket.has_value() ||
               !(*session)->capabilities.websocket->supportsPush)))
         {
-            qWarning() << "Long poll configuration unavailable because the cached session has no "
-                          "eventSourceUrl";
+            qWarning() << "Account sync configuration unavailable because the cached session has "
+                          "no state-change source";
             return std::nullopt;
         }
 
@@ -159,7 +163,8 @@ namespace javelin::app
             std::get_if<std::vector<javelin::jmap::cache::MailboxTreeItem>>(&mailboxTreeResult);
         if (mailboxTree == nullptr || mailboxTree->empty())
         {
-            qWarning() << "Long poll configuration unavailable because the mailbox tree is empty";
+            qWarning() << "Account sync configuration unavailable because the mailbox tree is "
+                          "empty";
             return std::nullopt;
         }
 
@@ -182,7 +187,7 @@ namespace javelin::app
         };
     }
 
-    QCoro::Task<void> LongPollService::runLoop(std::shared_ptr<RunContext> runContext)
+    QCoro::Task<void> AccountSyncCoordinator::runLoop(std::shared_ptr<RunContext> runContext)
     {
         javelin::jmap::sync::StateChangeSubscription subscription{
             .accountId = runContext->configuration.accountId,
@@ -193,7 +198,7 @@ namespace javelin::app
         co_await runContext->worker->run(subscription, runContext->cancellation);
     }
 
-    QCoro::Task<void> LongPollService::refreshWatchedMailbox()
+    QCoro::Task<void> AccountSyncCoordinator::refreshWatchedMailbox()
     {
         auto runContext = m_runContext;
         if (runContext == nullptr || !hasValidSettings())
@@ -224,7 +229,7 @@ namespace javelin::app
     }
 
     QCoro::Task<void>
-    LongPollService::refreshWatchedMailboxOnce(std::shared_ptr<RunContext> runContext)
+    AccountSyncCoordinator::refreshWatchedMailboxOnce(std::shared_ptr<RunContext> runContext)
     {
         if (runContext == nullptr || !hasValidSettings() ||
             runContext->cancellation.isCancelled() || m_runContext == nullptr ||
@@ -301,7 +306,7 @@ namespace javelin::app
     }
 
     QCoro::Task<bool>
-    LongPollService::refreshMailboxStateOnce(std::shared_ptr<RunContext> runContext)
+    AccountSyncCoordinator::refreshMailboxStateOnce(std::shared_ptr<RunContext> runContext)
     {
         if (runContext == nullptr || !hasValidSettings() ||
             runContext->cancellation.isCancelled() || m_runContext == nullptr ||
@@ -339,14 +344,14 @@ namespace javelin::app
         if (const auto* error =
                 std::get_if<javelin::jmap::sync::MailboxStateRefreshError>(&refreshResult))
         {
-            qWarning().noquote() << "Long poll mailbox state refresh failed" << error->message;
+            qWarning().noquote() << "Account sync mailbox state refresh failed" << error->message;
             co_return false;
         }
 
         co_return true;
     }
 
-    void LongPollService::handleResumeWatchdogTimeout()
+    void AccountSyncCoordinator::handleResumeWatchdogTimeout()
     {
         const qint64 now = QDateTime::currentMSecsSinceEpoch();
         const qint64 elapsedMs = now - m_lastResumeWatchdogTickMs;
@@ -359,12 +364,12 @@ namespace javelin::app
             return;
         }
 
-        qWarning().noquote() << "Long poll resume watchdog detected event-loop stall" << elapsedMs
-                             << "ms; restarting event-source stream";
+        qWarning().noquote() << "State-change resume watchdog detected event-loop stall"
+                             << elapsedMs << "ms; restarting source";
         restartForCatchUp();
     }
 
-    void LongPollService::scheduleDebouncedRefresh()
+    void AccountSyncCoordinator::scheduleDebouncedRefresh()
     {
         if (!hasValidSettings() || m_runContext == nullptr)
         {
@@ -374,13 +379,13 @@ namespace javelin::app
         m_refreshDebounceTimer.start();
     }
 
-    void LongPollService::scheduleCatchUpRefresh()
+    void AccountSyncCoordinator::scheduleCatchUpRefresh()
     {
         auto task = refreshWatchedMailbox();
         QCoro::connect(std::move(task), this, []() {});
     }
 
-    void LongPollService::restartForCatchUp()
+    void AccountSyncCoordinator::restartForCatchUp()
     {
         if (!hasValidSettings())
         {
@@ -391,18 +396,18 @@ namespace javelin::app
         if (m_runContext != nullptr)
         {
             m_shouldCatchUpRefreshOnReconnect = true;
-            qInfo().noquote() << "Long poll scheduling resume catch-up refresh"
+            qInfo().noquote() << "Account sync scheduling resume catch-up refresh"
                               << QString::fromStdString(m_runContext->configuration.accountId);
             scheduleDebouncedRefresh();
         }
     }
 
-    void LongPollService::restart()
+    void AccountSyncCoordinator::restart()
     {
         const auto nextConfiguration = resolveConfiguration();
         if (!nextConfiguration.has_value())
         {
-            qWarning() << "Long poll restart aborted because no configuration could be resolved";
+            qWarning() << "Account sync restart aborted because no configuration could be resolved";
             stop();
             return;
         }
@@ -483,7 +488,7 @@ namespace javelin::app
                        });
     }
 
-    void LongPollService::setStatus(const Status status)
+    void AccountSyncCoordinator::setStatus(const Status status)
     {
         if (m_status == status)
         {
@@ -503,14 +508,14 @@ namespace javelin::app
         if (status == Status::Connected && m_shouldCatchUpRefreshOnReconnect &&
             m_runContext != nullptr)
         {
-            qInfo().noquote() << "Long poll scheduling reconnect catch-up refresh"
+            qInfo().noquote() << "Account sync scheduling reconnect catch-up refresh"
                               << QString::fromStdString(m_runContext->configuration.accountId);
             scheduleDebouncedRefresh();
         }
         Q_EMIT statusChanged(m_status);
     }
 
-    void LongPollService::publishNotifications(
+    void AccountSyncCoordinator::publishNotifications(
         const RunContext& runContext, const std::string_view mailboxId,
         const std::string_view mailboxName,
         const std::vector<javelin::jmap::sync::RefreshNotificationCandidate>& candidates)

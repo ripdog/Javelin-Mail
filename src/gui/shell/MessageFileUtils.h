@@ -50,7 +50,7 @@ namespace javelin::gui::shell
     [[nodiscard]] std::vector<javelin::jmap::cache::MessageAttachment>
     visibleDownloadableAttachments(const javelin::jmap::cache::MessageViewSnapshot& snapshot);
     [[nodiscard]] QCoro::Task<SaveAllDownloadResult>
-    downloadAttachments(javelin::app::LongPollCoordinator& mailService, std::string accountId,
+    downloadAttachments(javelin::app::MailApplicationService& mailService, std::string accountId,
                         std::string emailId,
                         std::vector<javelin::jmap::cache::MessageAttachment> attachments);
     [[nodiscard]] QString tempAttachmentPath(QTemporaryDir& directory,

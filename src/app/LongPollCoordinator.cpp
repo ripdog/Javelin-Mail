@@ -24,9 +24,9 @@ namespace javelin::app
     } // namespace
 
     MailboxObservation::MailboxObservation(
-        LongPollCoordinator& coordinator,
+        MailApplicationService& service,
         const javelin::jmap::sync::MailboxInterestRegistry::ObservationId observationId)
-        : m_coordinator(&coordinator), m_observationId(observationId)
+        : m_service(&service), m_observationId(observationId)
     {
     }
 
@@ -36,7 +36,7 @@ namespace javelin::app
     }
 
     MailboxObservation::MailboxObservation(MailboxObservation&& other) noexcept
-        : m_coordinator(std::exchange(other.m_coordinator, nullptr)),
+        : m_service(std::exchange(other.m_service, nullptr)),
           m_observationId(std::exchange(other.m_observationId, 0))
     {
     }
@@ -49,27 +49,27 @@ namespace javelin::app
         }
 
         reset();
-        m_coordinator = std::exchange(other.m_coordinator, nullptr);
+        m_service = std::exchange(other.m_service, nullptr);
         m_observationId = std::exchange(other.m_observationId, 0);
         return *this;
     }
 
     void MailboxObservation::reset()
     {
-        if (m_coordinator != nullptr && m_observationId != 0)
+        if (m_service != nullptr && m_observationId != 0)
         {
-            m_coordinator->releaseMailboxObservation(m_observationId);
+            m_service->releaseMailboxObservation(m_observationId);
         }
-        m_coordinator.clear();
+        m_service.clear();
         m_observationId = 0;
     }
 
     MailboxObservation::operator bool() const
     {
-        return m_coordinator != nullptr && m_observationId != 0;
+        return m_service != nullptr && m_observationId != 0;
     }
 
-    LongPollCoordinator::LongPollCoordinator(
+    MailApplicationService::MailApplicationService(
         javelin::jmap::cache::DatabaseConnection& databaseConnection,
         javelin::jmap::JmapCore& jmapCore, javelin::jmap::api::JmapMethodTransport& methodTransport,
         QNetworkAccessManager& networkAccessManager,
@@ -84,7 +84,7 @@ namespace javelin::app
     }
 
     void
-    LongPollCoordinator::applySettings(std::vector<LongPollAccountConfiguration> configurations)
+    MailApplicationService::applySettings(std::vector<AccountSyncConfiguration> configurations)
     {
         std::unordered_set<std::string> configuredAccountIds;
         for (auto& configuration : configurations)
@@ -95,25 +95,25 @@ namespace javelin::app
             applyAccountConfiguration(accountId);
         }
 
-        for (auto serviceIt = m_services.begin(); serviceIt != m_services.end();)
+        for (auto coordinatorIt = m_coordinators.begin(); coordinatorIt != m_coordinators.end();)
         {
-            if (configuredAccountIds.contains(serviceIt->first))
+            if (configuredAccountIds.contains(coordinatorIt->first))
             {
-                ++serviceIt;
+                ++coordinatorIt;
                 continue;
             }
 
-            Q_EMIT accountStatusChanged(QString::fromStdString(serviceIt->first),
-                                        LongPollService::Status::Disconnected);
-            disconnect(serviceIt->second.get(), nullptr, this, nullptr);
-            serviceIt = m_services.erase(serviceIt);
+            Q_EMIT accountStatusChanged(QString::fromStdString(coordinatorIt->first),
+                                        AccountSyncCoordinator::Status::Disconnected);
+            disconnect(coordinatorIt->second.get(), nullptr, this, nullptr);
+            coordinatorIt = m_coordinators.erase(coordinatorIt);
         }
         std::erase_if(m_configurations, [&configuredAccountIds](const auto& entry)
                       { return !configuredAccountIds.contains(entry.first); });
         m_mailboxInterests.eraseAccountsNotIn(configuredAccountIds);
     }
 
-    void LongPollCoordinator::applyAccountConfiguration(const std::string& accountId)
+    void MailApplicationService::applyAccountConfiguration(const std::string& accountId)
     {
         const auto stored = m_configurations.find(accountId);
         if (stored == m_configurations.end())
@@ -128,19 +128,19 @@ namespace javelin::app
         configuration.mailboxIds.erase(std::ranges::unique(configuration.mailboxIds).begin(),
                                        configuration.mailboxIds.end());
 
-        auto [serviceIt, inserted] = m_services.try_emplace(accountId);
+        auto [coordinatorIt, inserted] = m_coordinators.try_emplace(accountId);
         if (inserted)
         {
-            serviceIt->second = std::make_unique<LongPollService>(
+            coordinatorIt->second = std::make_unique<AccountSyncCoordinator>(
                 m_databaseConnection, m_methodTransport, m_networkAccessManager,
                 m_accountRepository, m_queryService, this);
-            connectService(serviceIt->first, *serviceIt->second);
+            connectCoordinator(coordinatorIt->first, *coordinatorIt->second);
         }
-        serviceIt->second->applySettings(std::move(configuration.settings), accountId,
-                                         std::move(configuration.mailboxIds));
+        coordinatorIt->second->applySettings(std::move(configuration.settings), accountId,
+                                             std::move(configuration.mailboxIds));
     }
 
-    MailboxObservation LongPollCoordinator::observeMailbox(std::string accountId,
+    MailboxObservation MailApplicationService::observeMailbox(std::string accountId,
                                                            std::string mailboxId)
     {
         const auto configuredAccountId = accountId;
@@ -150,7 +150,7 @@ namespace javelin::app
         return MailboxObservation{*this, observationId};
     }
 
-    void LongPollCoordinator::releaseMailboxObservation(
+    void MailApplicationService::releaseMailboxObservation(
         const javelin::jmap::sync::MailboxInterestRegistry::ObservationId observationId)
     {
         const auto interest = m_mailboxInterests.unobserve(observationId);
@@ -161,21 +161,21 @@ namespace javelin::app
         applyAccountConfiguration(interest->accountId);
     }
 
-    bool LongPollCoordinator::requestAccountSynchronization(const std::string_view accountId)
+    bool MailApplicationService::requestAccountSynchronization(const std::string_view accountId)
     {
-        const auto service = m_services.find(std::string{accountId});
-        if (service == m_services.end())
+        const auto coordinator = m_coordinators.find(std::string{accountId});
+        if (coordinator == m_coordinators.end())
             return false;
-        return service->second->requestSynchronization();
+        return coordinator->second->requestSynchronization();
     }
 
-    QString LongPollCoordinator::statusSummary() const
+    QString MailApplicationService::statusSummary() const
     {
         return m_jmapCore.statusSummary();
     }
 
     QCoro::Task<MailboxWindowResult>
-    LongPollCoordinator::requestMailboxWindow(MailboxWindowIntent intent)
+    MailApplicationService::requestMailboxWindow(MailboxWindowIntent intent)
     {
         const auto configuration = m_configurations.find(intent.accountId);
         if (configuration == m_configurations.end())
@@ -255,7 +255,7 @@ namespace javelin::app
     }
 
     QCoro::Task<SearchWindowResult>
-    LongPollCoordinator::requestSearchWindow(SearchWindowIntent intent)
+    MailApplicationService::requestSearchWindow(SearchWindowIntent intent)
     {
         const auto configuration = m_configurations.find(intent.accountId);
         if (configuration == m_configurations.end())
@@ -300,13 +300,13 @@ namespace javelin::app
     }
 
     javelin::jmap::QueuedEmailMutationResult
-    LongPollCoordinator::queueDestroyEmail(std::string accountId, std::string emailId)
+    MailApplicationService::queueDestroyEmail(std::string accountId, std::string emailId)
     {
         return m_jmapCore.queueDestroyEmail(std::move(accountId), std::move(emailId));
     }
 
     javelin::jmap::QueuedEmailMutationResult
-    LongPollCoordinator::queueMoveEmail(std::string accountId, std::string emailId,
+    MailApplicationService::queueMoveEmail(std::string accountId, std::string emailId,
                                         std::string sourceMailboxId,
                                         std::string destinationMailboxId)
     {
@@ -316,7 +316,7 @@ namespace javelin::app
     }
 
     javelin::jmap::QueuedEmailMutationResult
-    LongPollCoordinator::queueCopyEmail(std::string accountId, std::string emailId,
+    MailApplicationService::queueCopyEmail(std::string accountId, std::string emailId,
                                         std::string sourceMailboxId,
                                         std::string destinationMailboxId)
     {
@@ -326,26 +326,26 @@ namespace javelin::app
     }
 
     javelin::jmap::QueuedEmailMutationResult
-    LongPollCoordinator::queueMarkEmailRead(std::string accountId, std::string emailId)
+    MailApplicationService::queueMarkEmailRead(std::string accountId, std::string emailId)
     {
         return m_jmapCore.queueMarkEmailRead(std::move(accountId), std::move(emailId));
     }
 
     javelin::jmap::QueuedEmailMutationResult
-    LongPollCoordinator::queueMarkEmailUnread(std::string accountId, std::string emailId)
+    MailApplicationService::queueMarkEmailUnread(std::string accountId, std::string emailId)
     {
         return m_jmapCore.queueMarkEmailUnread(std::move(accountId), std::move(emailId));
     }
 
     javelin::jmap::QueuedEmailMutationResult
-    LongPollCoordinator::queueSetEmailFlagged(std::string accountId, std::string emailId,
+    MailApplicationService::queueSetEmailFlagged(std::string accountId, std::string emailId,
                                               const bool flagged)
     {
         return m_jmapCore.queueSetEmailFlagged(std::move(accountId), std::move(emailId), flagged);
     }
 
     QCoro::Task<javelin::jmap::SubmittedEmailMutationsResult>
-    LongPollCoordinator::submitPendingEmailMutations(std::string accountId)
+    MailApplicationService::submitPendingEmailMutations(std::string accountId)
     {
         const auto configuration = m_configurations.find(accountId);
         if (configuration == m_configurations.end())
@@ -358,7 +358,7 @@ namespace javelin::app
     }
 
     QCoro::Task<javelin::jmap::MessageContentRefreshResult>
-    LongPollCoordinator::requestMessageContent(std::string accountId, std::string emailId)
+    MailApplicationService::requestMessageContent(std::string accountId, std::string emailId)
     {
         const auto configuration = m_configurations.find(accountId);
         if (configuration == m_configurations.end())
@@ -372,7 +372,7 @@ namespace javelin::app
     }
 
     QCoro::Task<javelin::jmap::AttachmentDownloadResult>
-    LongPollCoordinator::requestAttachment(std::string accountId, std::string emailId,
+    MailApplicationService::requestAttachment(std::string accountId, std::string emailId,
                                            std::string partId)
     {
         const auto configuration = m_configurations.find(accountId);
@@ -387,7 +387,7 @@ namespace javelin::app
     }
 
     QCoro::Task<javelin::jmap::MessageSourceDownloadResult>
-    LongPollCoordinator::requestMessageSource(std::string accountId, std::string emailId)
+    MailApplicationService::requestMessageSource(std::string accountId, std::string emailId)
     {
         const auto configuration = m_configurations.find(accountId);
         if (configuration == m_configurations.end())
@@ -401,14 +401,14 @@ namespace javelin::app
     }
 
     QCoro::Task<javelin::jmap::LiveRefreshResult>
-    LongPollCoordinator::bootstrapAccount(AccountBootstrapIntent intent)
+    MailApplicationService::bootstrapAccount(AccountBootstrapIntent intent)
     {
         co_return co_await m_jmapCore.refreshFromServer(toLiveConnectionSettings(intent.settings),
                                                         {}, std::move(intent.mailboxIds));
     }
 
     QCoro::Task<javelin::jmap::contacts::ContactRefreshResult>
-    LongPollCoordinator::requestContacts(std::string accountId)
+    MailApplicationService::requestContacts(std::string accountId)
     {
         const auto configuration = m_configurations.find(accountId);
         if (configuration == m_configurations.end())
@@ -421,7 +421,7 @@ namespace javelin::app
     }
 
     QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
-    LongPollCoordinator::setAddressBooks(std::string accountId,
+    MailApplicationService::setAddressBooks(std::string accountId,
                                          javelin::jmap::api::AddressBookSetRequest request)
     {
         const auto configuration = m_configurations.find(accountId);
@@ -435,7 +435,7 @@ namespace javelin::app
     }
 
     QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
-    LongPollCoordinator::setContactCards(std::string accountId,
+    MailApplicationService::setContactCards(std::string accountId,
                                          javelin::jmap::api::ContactCardSetRequest request)
     {
         const auto configuration = m_configurations.find(accountId);
@@ -449,7 +449,7 @@ namespace javelin::app
     }
 
     QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
-    LongPollCoordinator::copyContactCards(std::string accountId,
+    MailApplicationService::copyContactCards(std::string accountId,
                                           javelin::jmap::api::ContactCardCopyRequest request)
     {
         const auto configuration = m_configurations.find(accountId);
@@ -463,7 +463,8 @@ namespace javelin::app
     }
 
     QCoro::Task<javelin::jmap::contacts::ContactUploadResult>
-    LongPollCoordinator::uploadContactMedia(std::string ownerAccountId, std::string accountId,
+    MailApplicationService::uploadContactMedia(std::string ownerAccountId,
+                                               std::string accountId,
                                             QByteArray payload, std::string mediaType)
     {
         const auto configuration = m_configurations.find(ownerAccountId);
@@ -476,28 +477,29 @@ namespace javelin::app
             std::move(accountId), std::move(payload), std::move(mediaType));
     }
 
-    void LongPollCoordinator::stop()
+    void MailApplicationService::stop()
     {
-        for (const auto& [accountId, service] : m_services)
+        for (const auto& [accountId, coordinator] : m_coordinators)
         {
             Q_EMIT accountStatusChanged(QString::fromStdString(accountId),
-                                        LongPollService::Status::Disconnected);
-            disconnect(service.get(), nullptr, this, nullptr);
+                                        AccountSyncCoordinator::Status::Disconnected);
+            disconnect(coordinator.get(), nullptr, this, nullptr);
         }
-        m_services.clear();
+        m_coordinators.clear();
         m_configurations.clear();
         m_mailboxInterests.clear();
     }
 
-    void LongPollCoordinator::connectService(const std::string& accountId, LongPollService& service)
+    void MailApplicationService::connectCoordinator(const std::string& accountId,
+                                                     AccountSyncCoordinator& coordinator)
     {
-        connect(&service, &LongPollService::statusChanged, this,
+        connect(&coordinator, &AccountSyncCoordinator::statusChanged, this,
                 [this, accountId](const auto status)
                 { Q_EMIT accountStatusChanged(QString::fromStdString(accountId), status); });
-        connect(&service, &LongPollService::cacheCommitted, this,
-                &LongPollCoordinator::cacheCommitted);
-        connect(&service, &LongPollService::notificationRaised, this,
-                &LongPollCoordinator::notificationRaised);
+        connect(&coordinator, &AccountSyncCoordinator::cacheCommitted, this,
+                &MailApplicationService::cacheCommitted);
+        connect(&coordinator, &AccountSyncCoordinator::notificationRaised, this,
+                &MailApplicationService::notificationRaised);
     }
 
 } // namespace javelin::app

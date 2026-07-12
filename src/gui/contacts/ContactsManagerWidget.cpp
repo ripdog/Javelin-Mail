@@ -240,7 +240,7 @@ namespace javelin::gui::contacts
 
     ContactsManagerWidget::ContactsManagerWidget(
         javelin::jmap::cache::ContactRepository& repository,
-        javelin::app::LongPollCoordinator& service, std::string ownerAccountId, QWidget* parent)
+        javelin::app::MailApplicationService& service, std::string ownerAccountId, QWidget* parent)
         : QWidget(parent), m_repository(repository), m_service(service),
           m_ownerAccountId(std::move(ownerAccountId))
     {

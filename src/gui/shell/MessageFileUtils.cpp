@@ -155,7 +155,7 @@ namespace javelin::gui::shell
     }
 
     QCoro::Task<SaveAllDownloadResult>
-    downloadAttachments(javelin::app::LongPollCoordinator& mailService, std::string accountId,
+    downloadAttachments(javelin::app::MailApplicationService& mailService, std::string accountId,
                         std::string emailId,
                         std::vector<javelin::jmap::cache::MessageAttachment> attachments)
     {

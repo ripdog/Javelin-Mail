@@ -53,7 +53,8 @@ namespace javelin::app
         bool hasNewMail = false;
     };
 
-    class LongPollService final : public QObject, public javelin::jmap::sync::StateChangeConsumer
+    class AccountSyncCoordinator final : public QObject,
+                                         public javelin::jmap::sync::StateChangeConsumer
     {
         Q_OBJECT
 
@@ -66,13 +67,13 @@ namespace javelin::app
         };
         Q_ENUM(Status)
 
-        LongPollService(javelin::jmap::cache::DatabaseConnection& databaseConnection,
+        AccountSyncCoordinator(javelin::jmap::cache::DatabaseConnection& databaseConnection,
                         javelin::jmap::api::JmapMethodTransport& methodTransport,
                         QNetworkAccessManager& networkAccessManager,
                         javelin::jmap::cache::AccountRepository& accountRepository,
                         javelin::jmap::cache::QueryService& queryService,
                         QObject* parent = nullptr);
-        ~LongPollService() override;
+        ~AccountSyncCoordinator() override;
 
         void applySettings(AccountConnectionSettings settings, std::string accountId,
                            std::vector<std::string> mailboxIds);
@@ -84,7 +85,7 @@ namespace javelin::app
         onStateChange(javelin::jmap::sync::StateChangeEvent event) override;
 
       Q_SIGNALS:
-        void statusChanged(javelin::app::LongPollService::Status status);
+        void statusChanged(javelin::app::AccountSyncCoordinator::Status status);
         void cacheCommitted(javelin::app::MailCacheChange change);
         void notificationRaised(const QString& accountId, const QString& mailboxId,
                                 const QString& threadId, const QString& emailId,

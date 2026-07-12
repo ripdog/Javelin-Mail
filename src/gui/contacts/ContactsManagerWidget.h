@@ -29,7 +29,7 @@ namespace javelin::gui::contacts
 
       public:
         ContactsManagerWidget(javelin::jmap::cache::ContactRepository& repository,
-                              javelin::app::LongPollCoordinator& service,
+                              javelin::app::MailApplicationService& service,
                               std::string ownerAccountId, QWidget* parent = nullptr);
 
         [[nodiscard]] bool operationInFlight() const;
@@ -72,7 +72,7 @@ namespace javelin::gui::contacts
         void populateContactCards(const javelin::jmap::contacts::ContactSummary& contact);
 
         javelin::jmap::cache::ContactRepository& m_repository;
-        javelin::app::LongPollCoordinator& m_service;
+        javelin::app::MailApplicationService& m_service;
         std::string m_ownerAccountId;
         std::vector<javelin::jmap::cache::ContactAccount> m_accounts;
         std::vector<javelin::jmap::api::AddressBook> m_addressBooks;

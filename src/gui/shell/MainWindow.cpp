@@ -639,13 +639,13 @@ namespace javelin::gui::shell
         javelin::jmap::cache::QueryService& queryService,
         javelin::jmap::cache::TranslationCacheRepository& translationCacheRepository,
         javelin::app::ComposeService& composeService,
-        javelin::app::LongPollCoordinator& longPollService, QWidget* parent)
+        javelin::app::MailApplicationService& mailService, QWidget* parent)
         : KXmlGuiWindow(parent), m_accountRepository(accountRepository),
           m_contactRepository(contactRepository), m_contactService(contactService),
           m_contactIdentityLookup(contactIdentityLookup), m_identityRepository(identityRepository),
           m_messageViewService(messageViewService), m_queryService(queryService),
           m_translationCacheRepository(translationCacheRepository),
-          m_composeService(composeService), m_longPollService(longPollService)
+          m_composeService(composeService), m_mailService(mailService)
     {
         m_statusBar = new LayeredStatusBar(this);
         setStatusBar(m_statusBar);
@@ -656,22 +656,22 @@ namespace javelin::gui::shell
                  QStringLiteral("javelinmailui.rc"));
         setToolBarVisible(QStringLiteral("mainToolBar"), true);
         connectSelection();
-        connect(&m_longPollService, &javelin::app::LongPollCoordinator::accountStatusChanged, this,
+        connect(&m_mailService, &javelin::app::MailApplicationService::accountStatusChanged, this,
                 [this](const QString& accountId, const auto status)
                 {
                     using Model = javelin::gui::mailboxes::MailboxTreeModel;
                     Model::ConnectionStatus modelStatus = Model::ConnectionStatus::Disconnected;
-                    if (status == javelin::app::LongPollService::Status::Connecting)
+                    if (status == javelin::app::AccountSyncCoordinator::Status::Connecting)
                     {
                         modelStatus = Model::ConnectionStatus::Connecting;
                     }
-                    else if (status == javelin::app::LongPollService::Status::Connected)
+                    else if (status == javelin::app::AccountSyncCoordinator::Status::Connected)
                     {
                         modelStatus = Model::ConnectionStatus::Connected;
                     }
                     m_mailboxModel->setConnectionStatus(accountId, modelStatus);
                 });
-        connect(&m_longPollService, &javelin::app::LongPollCoordinator::cacheCommitted, this,
+        connect(&m_mailService, &javelin::app::MailApplicationService::cacheCommitted, this,
                 [this](const javelin::app::MailCacheChange& change)
                 {
                     {
@@ -1150,7 +1150,7 @@ namespace javelin::gui::shell
         centralLayout->addWidget(m_contentStack);
 
         setCentralWidget(centralContainer);
-        m_statusBar->showMessage(m_longPollService.statusSummary());
+        m_statusBar->showMessage(m_mailService.statusSummary());
         updateEmptyStates();
         updateMessageListHeader();
     }
@@ -1314,7 +1314,7 @@ namespace javelin::gui::shell
         const auto settings = javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
             QString::fromStdString(selected->accountId));
         auto* widget = new javelin::gui::contacts::ContactsManagerWidget(
-            m_contactRepository, m_longPollService, selected->ownerAccountId, m_contentStack);
+            m_contactRepository, m_mailService, selected->ownerAccountId, m_contentStack);
         connect(widget, &javelin::gui::contacts::ContactsManagerWidget::statusMessageRequested,
                 m_statusBar, &LayeredStatusBar::showMessage);
         connect(widget, &javelin::gui::contacts::ContactsManagerWidget::userInterventionRequired,
@@ -2172,7 +2172,7 @@ namespace javelin::gui::shell
     void MainWindow::ensureMailboxObservation(MailboxTabState& tab)
     {
         if (!tab.observationId.has_value())
-            tab.observationId = m_longPollService.observeMailbox(tab.accountId, tab.mailboxId);
+            tab.observationId = m_mailService.observeMailbox(tab.accountId, tab.mailboxId);
     }
 
     void MainWindow::releaseMailboxObservation(MailboxTabState& tab)
@@ -2278,7 +2278,7 @@ namespace javelin::gui::shell
         const auto tabAccountId = tab.accountId;
         const auto tabMailboxId = tab.mailboxId;
         const auto tabOffset = tab.page.offset;
-        auto task = m_longPollService.requestMailboxWindow(javelin::app::MailboxWindowIntent{
+        auto task = m_mailService.requestMailboxWindow(javelin::app::MailboxWindowIntent{
             .accountId = tab.accountId,
             .mailboxId = tab.mailboxId,
             .offset = tab.page.offset,
@@ -2348,7 +2348,7 @@ namespace javelin::gui::shell
         const auto tabQuery = tab.query;
         const auto tabCriteria = tab.criteria;
         const auto tabOffset = tab.page.offset;
-        auto task = m_longPollService.requestSearchWindow(javelin::app::SearchWindowIntent{
+        auto task = m_mailService.requestSearchWindow(javelin::app::SearchWindowIntent{
             .accountId = tab.accountId,
             .criteria = tabCriteria,
             .offset = tab.page.offset,
@@ -3447,8 +3447,8 @@ namespace javelin::gui::shell
         }
 
         m_statusBar->showMessage(QStringLiteral("Downloading attachment..."));
-        auto task = m_longPollService.requestAttachment(std::move(accountId), std::move(emailId),
-                                                        std::move(partId));
+        auto task = m_mailService.requestAttachment(std::move(accountId), std::move(emailId),
+                                                    std::move(partId));
         QCoro::connect(
             std::move(task), this,
             [this, attachmentSettings](javelin::jmap::AttachmentDownloadResult result)
@@ -3543,7 +3543,7 @@ namespace javelin::gui::shell
         }
 
         m_statusBar->showMessage(QStringLiteral("Downloading attachments..."));
-        auto task = downloadAttachments(m_longPollService, accountId, emailId, attachments);
+        auto task = downloadAttachments(m_mailService, accountId, emailId, attachments);
         QCoro::connect(
             std::move(task), this,
             [this, targetDirectory](SaveAllDownloadResult result)
@@ -3591,8 +3591,8 @@ namespace javelin::gui::shell
         }
 
         m_statusBar->showMessage(QStringLiteral("Downloading attachment..."));
-        auto task = m_longPollService.requestAttachment(std::move(accountId), std::move(emailId),
-                                                        std::move(partId));
+        auto task = m_mailService.requestAttachment(std::move(accountId), std::move(emailId),
+                                                    std::move(partId));
         QCoro::connect(
             std::move(task), this,
             [this](javelin::jmap::AttachmentDownloadResult result)
@@ -3667,7 +3667,7 @@ namespace javelin::gui::shell
 
     void MainWindow::refreshAccountFromServer(std::string accountId)
     {
-        if (!m_longPollService.requestAccountSynchronization(accountId))
+        if (!m_mailService.requestAccountSynchronization(accountId))
         {
             refreshConnectionSettings(
                 javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
@@ -3702,7 +3702,7 @@ namespace javelin::gui::shell
             for (const auto& mailboxId :
                  javelin::gui::settings::PreferencesDialog::syncedMailboxIds(accountId))
                 mailboxIds.push_back(mailboxId.toStdString());
-        auto task = m_longPollService.bootstrapAccount(javelin::app::AccountBootstrapIntent{
+        auto task = m_mailService.bootstrapAccount(javelin::app::AccountBootstrapIntent{
             .settings = toAccountConnectionSettings(settings),
             .mailboxIds = std::move(mailboxIds),
         });
@@ -3757,7 +3757,7 @@ namespace javelin::gui::shell
                         .arg(QString::fromStdString(summary.accountId)),
                     10000);
                 Q_EMIT accountSettingsChanged();
-                auto contactsTask = m_longPollService.requestContacts(summary.accountId);
+                auto contactsTask = m_mailService.requestContacts(summary.accountId);
                 QCoro::connect(
                     std::move(contactsTask), this,
                     [this](javelin::jmap::contacts::ContactRefreshResult contactsResult)
@@ -3795,7 +3795,7 @@ namespace javelin::gui::shell
             .token = requestToken,
         };
 
-        auto task = m_longPollService.requestMessageContent(accountId, emailId);
+        auto task = m_mailService.requestMessageContent(accountId, emailId);
         QCoro::connect(
             std::move(task), this,
             [this, accountId = std::move(accountId), emailId = std::move(emailId),
@@ -4361,7 +4361,7 @@ namespace javelin::gui::shell
                                   << "message(s)";
         for (const auto& emailId : emailIds)
         {
-            const auto result = m_longPollService.queueDestroyEmail(accountId, emailId);
+            const auto result = m_mailService.queueDestroyEmail(accountId, emailId);
             if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
             {
                 presentError(*error);
@@ -4392,7 +4392,7 @@ namespace javelin::gui::shell
             << QString::fromStdString(destinationMailboxId);
         for (const auto& emailId : emailIds)
         {
-            const auto result = m_longPollService.queueMoveEmail(
+            const auto result = m_mailService.queueMoveEmail(
                 accountId, emailId, sourceMailboxId, destinationMailboxId);
             if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
             {
@@ -4433,7 +4433,7 @@ namespace javelin::gui::shell
             << QString::fromStdString(destinationMailboxId);
         for (const auto& emailId : emailIds)
         {
-            const auto result = m_longPollService.queueCopyEmail(
+            const auto result = m_mailService.queueCopyEmail(
                 accountId, emailId, sourceMailboxId, destinationMailboxId);
             if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
             {
@@ -4475,7 +4475,7 @@ namespace javelin::gui::shell
     void MainWindow::queueMarkEmailRead(std::string accountId, std::string emailId)
     {
         qCInfo(logUserOperations) << "mark read requested";
-        const auto result = m_longPollService.queueMarkEmailRead(accountId, emailId);
+        const auto result = m_mailService.queueMarkEmailRead(accountId, emailId);
         if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
         {
             presentError(*error);
@@ -4506,7 +4506,7 @@ namespace javelin::gui::shell
             index.data(javelin::gui::messages::MessageListModel::IsFlaggedRole).toBool();
         qCInfo(logUserOperations) << (isFlagged ? "remove star requested" : "add star requested");
         const auto result =
-            m_longPollService.queueSetEmailFlagged(*accountId, emailId.toStdString(), !isFlagged);
+            m_mailService.queueSetEmailFlagged(*accountId, emailId.toStdString(), !isFlagged);
         if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
         {
             presentError(*error);
@@ -4538,7 +4538,7 @@ namespace javelin::gui::shell
 
         qCInfo(logUserOperations) << "mark unread requested";
 
-        const auto result = m_longPollService.queueMarkEmailUnread(*accountId, *emailId);
+        const auto result = m_mailService.queueMarkEmailUnread(*accountId, *emailId);
         if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
         {
             presentError(*error);
@@ -4708,7 +4708,7 @@ namespace javelin::gui::shell
 
     void MainWindow::submitQueuedEmailMutations(std::string accountId)
     {
-        auto task = m_longPollService.submitPendingEmailMutations(accountId);
+        auto task = m_mailService.submitPendingEmailMutations(accountId);
         QCoro::connect(
             std::move(task), this,
             [this](javelin::jmap::SubmittedEmailMutationsResult submitResult)
@@ -4761,7 +4761,7 @@ namespace javelin::gui::shell
         }
 
         m_statusBar->showMessage(QStringLiteral("Downloading message source..."));
-        auto task = m_longPollService.requestMessageSource(*accountId, *emailId);
+        auto task = m_mailService.requestMessageSource(*accountId, *emailId);
         QCoro::connect(
             std::move(task), this,
             [this](javelin::jmap::MessageSourceDownloadResult result)

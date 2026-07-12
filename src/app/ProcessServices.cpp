@@ -57,7 +57,7 @@ namespace javelin::app
         m_databaseConnection =
             std::get<javelin::jmap::cache::DatabaseConnection>(std::move(databaseResult));
         m_networkAccessManager = std::make_unique<QNetworkAccessManager>();
-        m_longPollNetworkAccessManager = std::make_unique<QNetworkAccessManager>();
+        m_stateChangeNetworkAccessManager = std::make_unique<QNetworkAccessManager>();
         m_transport =
             std::make_unique<javelin::jmap::api::QtNetworkTransport>(*m_networkAccessManager);
         m_methodTransport =
@@ -90,8 +90,9 @@ namespace javelin::app
         m_jmapComposeService = std::make_unique<javelin::jmap::submission::ComposeService>(
             m_databaseConnection, *m_transport, *m_methodTransport, *m_jmapCore);
         m_composeService = std::make_unique<ComposeService>(*m_jmapComposeService);
-        m_longPollService = std::make_unique<LongPollCoordinator>(
-            m_databaseConnection, *m_jmapCore, *m_methodTransport, *m_longPollNetworkAccessManager,
+        m_mailService = std::make_unique<MailApplicationService>(
+            m_databaseConnection, *m_jmapCore, *m_methodTransport,
+            *m_stateChangeNetworkAccessManager,
             *m_accountRepository, *m_queryService, *m_contactService);
     }
 
@@ -152,9 +153,9 @@ namespace javelin::app
         return *m_composeService;
     }
 
-    LongPollCoordinator& ProcessServices::longPollService()
+    MailApplicationService& ProcessServices::mailService()
     {
-        return *m_longPollService;
+        return *m_mailService;
     }
 
 } // namespace javelin::app

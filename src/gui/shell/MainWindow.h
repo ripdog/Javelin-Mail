@@ -106,7 +106,7 @@ namespace javelin::gui::shell
             javelin::jmap::cache::QueryService& queryService,
             javelin::jmap::cache::TranslationCacheRepository& translationCacheRepository,
             javelin::app::ComposeService& composeService,
-            javelin::app::LongPollCoordinator& longPollService, QWidget* parent = nullptr);
+            javelin::app::MailApplicationService& mailService, QWidget* parent = nullptr);
         ~MainWindow() override = default;
         void openMessageFromNotification(const QString& accountId, const QString& mailboxId,
                                          const QString& threadId, const QString& emailId);
@@ -339,7 +339,7 @@ namespace javelin::gui::shell
         javelin::jmap::cache::QueryService& m_queryService;
         javelin::jmap::cache::TranslationCacheRepository& m_translationCacheRepository;
         javelin::app::ComposeService& m_composeService;
-        javelin::app::LongPollCoordinator& m_longPollService;
+        javelin::app::MailApplicationService& m_mailService;
         QSplitter* m_mainSplitter = nullptr;
         QStackedWidget* m_contentStack = nullptr;
         QWidget* m_mailboxPane = nullptr;
