@@ -142,6 +142,14 @@ namespace javelin::jmap::api
         {
             qWarning().noquote() << "JMAP transport network error" << request.url.toString()
                                  << reply->error() << reply->errorString();
+            if (reply->error() == QNetworkReply::TimeoutError)
+            {
+                // A machine sleep can leave Qt's pooled HTTP connections unusable even after the
+                // network is available again. Do not replay the request because a timed-out POST
+                // may have reached the server, but ensure the next request opens a fresh
+                // connection.
+                m_networkAccessManager.clearConnectionCache();
+            }
             co_return mapReplyError(*reply);
         }
 
