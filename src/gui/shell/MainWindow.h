@@ -35,7 +35,6 @@ class QWidget;
 
 namespace javelin::jmap
 {
-    class JmapCore;
     struct LiveRefreshError;
 } // namespace javelin::jmap
 

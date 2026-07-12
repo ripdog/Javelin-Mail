@@ -44,6 +44,7 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/sync/MailboxInterestRegistry.h
     src/jmap/sync/MailboxWindowPolicy.cpp
     src/jmap/sync/MailboxWindowPolicy.h
+    src/app/AccountConnectionSettings.h
     src/app/ApplicationBootstrap.cpp
     src/app/ApplicationBootstrap.h
     src/app/DesktopNotificationController.cpp
@@ -467,6 +468,7 @@ javelin_enable_sanitizers(javelin_gui)
 target_compile_options(javelin_gui PRIVATE -fexceptions)
 
 add_library(javelin_app STATIC
+    src/app/AccountConnectionSettings.h
     src/app/ApplicationBootstrap.cpp
     src/app/ApplicationBootstrap.h
     src/app/DesktopNotificationController.cpp

@@ -68,8 +68,8 @@ namespace javelin::app
         stop();
     }
 
-    void LongPollService::applySettings(javelin::jmap::LiveConnectionSettings settings,
-                                        std::string accountId, std::vector<std::string> mailboxIds)
+    void LongPollService::applySettings(AccountConnectionSettings settings, std::string accountId,
+                                        std::vector<std::string> mailboxIds)
     {
         if (m_settings.has_value() && m_runContext != nullptr &&
             m_settings->sessionUrl == settings.sessionUrl &&

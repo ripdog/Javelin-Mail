@@ -1,6 +1,6 @@
 #pragma once
 
-#include "jmap/JmapCore.h"
+#include "app/AccountConnectionSettings.h"
 #include "jmap/api/JmapMethodTransport.h"
 #include "jmap/api/Session.h"
 #include "jmap/cache/AccountRepository.h"
@@ -65,7 +65,7 @@ namespace javelin::app
                         QObject* parent = nullptr);
         ~LongPollService() override;
 
-        void applySettings(javelin::jmap::LiveConnectionSettings settings, std::string accountId,
+        void applySettings(AccountConnectionSettings settings, std::string accountId,
                            std::vector<std::string> mailboxIds);
         void stop();
         [[nodiscard]] bool requestSynchronization();
@@ -85,7 +85,7 @@ namespace javelin::app
       private:
         struct RunConfiguration
         {
-            javelin::jmap::LiveConnectionSettings settings;
+            AccountConnectionSettings settings;
             std::string accountId;
             std::vector<std::pair<std::string, std::string>> mailboxes;
             std::string apiUrl;
@@ -126,7 +126,7 @@ namespace javelin::app
         QNetworkAccessManager& m_networkAccessManager;
         javelin::jmap::cache::AccountRepository& m_accountRepository;
         javelin::jmap::cache::QueryService& m_queryService;
-        std::optional<javelin::jmap::LiveConnectionSettings> m_settings;
+        std::optional<AccountConnectionSettings> m_settings;
         std::string m_accountId;
         std::vector<std::string> m_mailboxIds;
         std::shared_ptr<RunContext> m_runContext;

@@ -68,10 +68,10 @@ namespace javelin::app
             QByteArray m_previousToken;
         };
 
-        [[nodiscard]] javelin::jmap::LiveConnectionSettings
-        toLiveConnectionSettings(const javelin::gui::settings::ConnectionSettings& settings)
+        [[nodiscard]] AccountConnectionSettings
+        toAccountConnectionSettings(const javelin::gui::settings::ConnectionSettings& settings)
         {
-            return javelin::jmap::LiveConnectionSettings{
+            return AccountConnectionSettings{
                 .sessionUrl = settings.sessionUrl.toStdString(),
                 .loginEmail = settings.loginEmail.toStdString(),
                 .apiKey = settings.apiKey.toStdString(),
@@ -96,7 +96,7 @@ namespace javelin::app
                         mailboxIds.push_back(mailboxId.toStdString());
                     }
                     configurations.push_back(LongPollAccountConfiguration{
-                        .settings = toLiveConnectionSettings(settings),
+                        .settings = toAccountConnectionSettings(settings),
                         .accountId = accountId.toStdString(),
                         .mailboxIds = std::move(mailboxIds),
                     });

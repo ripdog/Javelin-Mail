@@ -1,5 +1,6 @@
 #pragma once
 
+#include "app/AccountConnectionSettings.h"
 #include "app/LongPollService.h"
 #include "jmap/contacts/ContactService.h"
 #include "jmap/query/EmailListSort.h"
@@ -55,8 +56,14 @@ namespace javelin::app
 
     struct LongPollAccountConfiguration
     {
-        javelin::jmap::LiveConnectionSettings settings;
+        AccountConnectionSettings settings;
         std::string accountId;
+        std::vector<std::string> mailboxIds;
+    };
+
+    struct AccountBootstrapIntent
+    {
+        AccountConnectionSettings settings;
         std::vector<std::string> mailboxIds;
     };
 
@@ -106,8 +113,7 @@ namespace javelin::app
         [[nodiscard]] QCoro::Task<javelin::jmap::MessageSourceDownloadResult>
         requestMessageSource(std::string accountId, std::string emailId);
         [[nodiscard]] QCoro::Task<javelin::jmap::LiveRefreshResult>
-        bootstrapAccount(javelin::jmap::LiveConnectionSettings settings,
-                         std::vector<std::string> mailboxIds);
+        bootstrapAccount(AccountBootstrapIntent intent);
         [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactRefreshResult>
         requestContacts(std::string accountId);
         [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactMutationResult>

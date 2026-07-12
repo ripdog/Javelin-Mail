@@ -327,6 +327,16 @@ namespace javelin::gui::shell
             return {};
         }
 
+        [[nodiscard]] javelin::app::AccountConnectionSettings
+        toAccountConnectionSettings(const javelin::gui::settings::ConnectionSettings& settings)
+        {
+            return javelin::app::AccountConnectionSettings{
+                .sessionUrl = settings.sessionUrl.toStdString(),
+                .loginEmail = settings.loginEmail.toStdString(),
+                .apiKey = settings.apiKey.toStdString(),
+            };
+        }
+
         [[nodiscard]] javelin::jmap::LiveConnectionSettings
         toLiveConnectionSettings(const javelin::gui::settings::ConnectionSettings& settings)
         {
@@ -3705,8 +3715,10 @@ namespace javelin::gui::shell
             for (const auto& mailboxId :
                  javelin::gui::settings::PreferencesDialog::syncedMailboxIds(accountId))
                 mailboxIds.push_back(mailboxId.toStdString());
-        auto task = m_longPollService.bootstrapAccount(toLiveConnectionSettings(settings),
-                                                       std::move(mailboxIds));
+        auto task = m_longPollService.bootstrapAccount(javelin::app::AccountBootstrapIntent{
+            .settings = toAccountConnectionSettings(settings),
+            .mailboxIds = std::move(mailboxIds),
+        });
         QCoro::connect(
             std::move(task), this,
             [this, settings](javelin::jmap::LiveRefreshResult result)
