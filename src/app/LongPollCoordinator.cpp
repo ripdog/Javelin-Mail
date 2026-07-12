@@ -117,12 +117,8 @@ namespace javelin::app
         connect(&service, &LongPollService::statusChanged, this,
                 [this, accountId](const auto status)
                 { Q_EMIT accountStatusChanged(QString::fromStdString(accountId), status); });
-        connect(&service, &LongPollService::mailStateChanged, this,
-                &LongPollCoordinator::mailStateChanged);
-        connect(&service, &LongPollService::accountMailStateChanged, this,
-                &LongPollCoordinator::accountMailStateChanged);
-        connect(&service, &LongPollService::mailboxRefreshed, this,
-                &LongPollCoordinator::mailboxRefreshed);
+        connect(&service, &LongPollService::cacheCommitted, this,
+                &LongPollCoordinator::cacheCommitted);
         connect(&service, &LongPollService::notificationRaised, this,
                 &LongPollCoordinator::notificationRaised);
     }

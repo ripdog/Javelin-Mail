@@ -261,6 +261,8 @@ namespace javelin::app
         javelin::jmap::sync::MailboxRefreshExecutor mailboxRefreshExecutor{
             m_databaseConnection, methodCaller, apiRequestContext};
         bool watchedMailboxRefreshed = false;
+        QStringList refreshedMailboxIds;
+        bool hasNewMail = false;
         for (const auto& [mailboxId, mailboxName] : runContext->configuration.mailboxes)
         {
             const auto refreshResult = co_await mailboxRefreshExecutor.refreshCollapsedMailbox(
@@ -270,9 +272,8 @@ namespace javelin::app
             {
                 m_shouldCatchUpRefreshOnReconnect = false;
                 watchedMailboxRefreshed = true;
-                Q_EMIT mailboxRefreshed(QString::fromStdString(runContext->configuration.accountId),
-                                        QString::fromStdString(mailboxId),
-                                        !summary->insertedEmailIds.empty());
+                refreshedMailboxIds.push_back(QString::fromStdString(mailboxId));
+                hasNewMail = hasNewMail || !summary->insertedEmailIds.empty();
                 publishNotifications(*runContext, mailboxId, mailboxName,
                                      summary->notificationCandidates);
             }
@@ -290,8 +291,11 @@ namespace javelin::app
 
         if (mailboxStateRefreshed || watchedMailboxRefreshed)
         {
-            Q_EMIT accountMailStateChanged(
-                QString::fromStdString(runContext->configuration.accountId), QString{});
+            Q_EMIT cacheCommitted(MailCacheChange{
+                .accountId = QString::fromStdString(runContext->configuration.accountId),
+                .mailboxIds = std::move(refreshedMailboxIds),
+                .hasNewMail = hasNewMail,
+            });
         }
     }
 

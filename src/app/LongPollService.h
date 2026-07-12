@@ -14,6 +14,7 @@
 #include <QCoroTask>
 
 #include <QObject>
+#include <QStringList>
 #include <QTimer>
 
 #include <deque>
@@ -27,6 +28,12 @@ class QNetworkAccessManager;
 
 namespace javelin::app
 {
+    struct MailCacheChange
+    {
+        QString accountId;
+        QStringList mailboxIds;
+        bool hasNewMail = false;
+    };
 
     class LongPollService final : public QObject,
                                   public javelin::jmap::sync::AbstractLongPollObserver
@@ -61,10 +68,7 @@ namespace javelin::app
 
       Q_SIGNALS:
         void statusChanged(javelin::app::LongPollService::Status status);
-        void mailStateChanged(const QString& accountId, bool requiresCatchUpRefresh);
-        void accountMailStateChanged(const QString& accountId, const QString& refreshedMailboxId);
-        void mailboxRefreshed(const QString& accountId, const QString& mailboxId,
-                              bool scrollToNewest);
+        void cacheCommitted(javelin::app::MailCacheChange change);
         void notificationRaised(const QString& accountId, const QString& mailboxId,
                                 const QString& threadId, const QString& emailId,
                                 const QString& mailboxName, const QString& title,

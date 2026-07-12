@@ -673,52 +673,30 @@ namespace javelin::gui::shell
                     }
                     m_mailboxModel->setConnectionStatus(accountId, modelStatus);
                 });
-        connect(&m_longPollService, &javelin::app::LongPollCoordinator::mailStateChanged, this,
-                [this](const QString& accountId, const bool requiresCatchUpRefresh)
+        connect(&m_longPollService, &javelin::app::LongPollCoordinator::cacheCommitted, this,
+                [this](const javelin::app::MailCacheChange& change)
                 {
-                    static_cast<void>(accountId);
-                    static_cast<void>(requiresCatchUpRefresh);
-                });
-        connect(&m_longPollService, &javelin::app::LongPollCoordinator::accountMailStateChanged,
-                this,
-                [this](const QString& accountId, const QString& refreshedMailboxId)
-                {
-                    const auto account = accountId.toStdString();
                     {
                         QSignalBlocker mailboxSelectionBlocker{m_mailboxView->selectionModel()};
                         m_mailboxModel->refresh();
                         m_mailboxView->expandAll();
                     }
-
-                    static_cast<void>(account);
-                    static_cast<void>(refreshedMailboxId);
-                });
-        connect(
-            &m_longPollService, &javelin::app::LongPollCoordinator::mailboxRefreshed, this,
-            [this](const QString& accountId, const QString& mailboxId, const bool scrollToNewest)
-            {
-                {
-                    QSignalBlocker mailboxSelectionBlocker{m_mailboxView->selectionModel()};
-                    m_mailboxModel->refresh();
-                    m_mailboxView->expandAll();
-                }
-                if (activeTabIsMailbox())
-                {
-                    const auto mailbox = activeMailboxId();
-                    const auto account = activeAccountId();
-                    if (account == std::optional<std::string>{accountId.toStdString()} &&
-                        mailbox == std::optional<std::string>{mailboxId.toStdString()})
+                    for (const auto& mailboxId : change.mailboxIds)
                     {
-                        loadMailboxTabFromCache(accountId.toStdString(), mailboxId.toStdString(),
-                                                true);
-                        if (scrollToNewest && m_messageModel->rowCount() > 0 &&
+                        loadMailboxTabFromCache(change.accountId.toStdString(),
+                                                mailboxId.toStdString(), true);
+                        if (change.hasNewMail && activeTabIsMailbox() &&
+                            activeAccountId() ==
+                                std::optional<std::string>{change.accountId.toStdString()} &&
+                            activeMailboxId() ==
+                                std::optional<std::string>{mailboxId.toStdString()} &&
+                            m_messageModel->rowCount() > 0 &&
                             m_messageView->verticalScrollBar()->value() == 0)
                         {
                             m_messageView->scrollTo(m_messageModel->index(0, 0));
                         }
                     }
-                }
-            });
+                });
         restorePersistentState();
 
         auto* stateSaveTimer = new QTimer(this);
