@@ -47,6 +47,8 @@ namespace javelin::jmap::api
     [[nodiscard]] std::optional<std::string>
     serializeRequestEnvelope(const RequestEnvelope& request);
     [[nodiscard]] std::optional<std::string>
+    serializeWebSocketRequestEnvelope(const RequestEnvelope& request, std::string_view requestId);
+    [[nodiscard]] std::optional<std::string>
     serializeResponseEnvelope(const ResponseEnvelope& response);
 
 } // namespace javelin::jmap::api

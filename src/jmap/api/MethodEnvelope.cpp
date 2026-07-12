@@ -21,6 +21,15 @@ namespace
         std::optional<std::unordered_map<std::string, std::string>> createdIds;
     };
 
+    struct RawWebSocketRequestEnvelope
+    {
+        std::string type = "Request";
+        std::string id;
+        std::vector<std::string> usingCapabilities;
+        std::vector<RawMethodInvocation> methodCalls;
+        std::optional<std::unordered_map<std::string, std::string>> createdIds;
+    };
+
     struct RawResponseEnvelope
     {
         std::vector<RawMethodInvocation> methodResponses;
@@ -43,6 +52,15 @@ template <> struct glz::meta<RawRequestEnvelope>
 
     static constexpr auto value = glz::object("using", &T::usingCapabilities, "methodCalls",
                                               &T::methodCalls, "createdIds", &T::createdIds);
+};
+
+template <> struct glz::meta<RawWebSocketRequestEnvelope>
+{
+    using T = RawWebSocketRequestEnvelope;
+
+    static constexpr auto value =
+        glz::object("@type", &T::type, "id", &T::id, "using", &T::usingCapabilities,
+                    "methodCalls", &T::methodCalls, "createdIds", &T::createdIds);
 };
 
 template <> struct glz::meta<RawResponseEnvelope>
@@ -188,6 +206,35 @@ namespace javelin::jmap::api
     std::optional<std::string> serializeRequestEnvelope(const RequestEnvelope& request)
     {
         RawRequestEnvelope envelope{
+            .usingCapabilities = request.usingCapabilities,
+            .methodCalls = {},
+            .createdIds = request.createdIds,
+        };
+        envelope.methodCalls.reserve(request.methodCalls.size());
+        for (const auto& methodCall : request.methodCalls)
+        {
+            const auto decodedArguments = decodeJson(methodCall.arguments);
+            if (!decodedArguments.has_value())
+            {
+                return std::nullopt;
+            }
+
+            envelope.methodCalls.push_back(RawMethodInvocation{
+                .name = methodCall.name,
+                .arguments = std::move(*decodedArguments),
+                .callId = methodCall.callId,
+            });
+        }
+
+        return serializeEnvelope(envelope);
+    }
+
+    std::optional<std::string>
+    serializeWebSocketRequestEnvelope(const RequestEnvelope& request, const std::string_view requestId)
+    {
+        RawWebSocketRequestEnvelope envelope{
+            .type = "Request",
+            .id = std::string{requestId},
             .usingCapabilities = request.usingCapabilities,
             .methodCalls = {},
             .createdIds = request.createdIds,

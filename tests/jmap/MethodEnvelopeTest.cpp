@@ -3,6 +3,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <string>
+
 TEST_CASE("request envelopes parse typed invocation tuples from fixtures", "[jmap][method]")
 {
     const auto result = javelin::jmap::api::parseRequestEnvelope(
@@ -42,6 +44,26 @@ TEST_CASE("response envelopes ignore unknown server fields", "[jmap][method]")
     REQUIRE(result.value->methodResponses.size() == 1);
     CHECK(result.value->methodResponses.front().name == "Mailbox/get");
     CHECK(result.value->methodResponses.front().callId == "c1");
+}
+
+TEST_CASE("websocket request envelopes include RFC 8887 correlation metadata",
+          "[jmap][method][websocket]")
+{
+    const auto parsed = javelin::jmap::api::parseRequestEnvelope(
+        javelin::tests::loadFixture("jmap/method/request.json"));
+    REQUIRE(parsed.ok());
+    REQUIRE(parsed.value.has_value());
+
+    const auto serialized =
+        javelin::jmap::api::serializeWebSocketRequestEnvelope(*parsed.value, "request-42");
+    REQUIRE(serialized.has_value());
+    CHECK(serialized->find("\"@type\":\"Request\"") != std::string::npos);
+    CHECK(serialized->find("\"id\":\"request-42\"") != std::string::npos);
+
+    const auto reparsed = javelin::jmap::api::parseRequestEnvelope(*serialized);
+    REQUIRE(reparsed.ok());
+    REQUIRE(reparsed.value.has_value());
+    CHECK(reparsed.value->methodCalls.size() == parsed.value->methodCalls.size());
 }
 
 TEST_CASE("request envelopes serialize and round-trip", "[jmap][method]")

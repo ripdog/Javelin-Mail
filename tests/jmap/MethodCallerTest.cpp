@@ -172,6 +172,7 @@ TEST_CASE("method caller is independent of HTTP transport", "[jmap][method][tran
 
     REQUIRE(std::holds_alternative<javelin::jmap::api::ResponseEnvelope>(result));
     REQUIRE(transport.request.has_value());
+    CHECK(transport.request->accountId == "u1");
     CHECK(transport.request->apiUrl == "https://mail.example.com/jmap/api");
     CHECK(transport.request->accessToken == "access-token");
     CHECK(transport.request->envelope.methodCalls.size() == 2);

@@ -41,6 +41,7 @@ namespace javelin::jmap::api
         }
 
         const auto transportResult = co_await m_transport.call(JmapMethodRequest{
+            .accountId = requestContext.credentials.accountId,
             .apiUrl = std::move(requestContext.apiUrl),
             .accessToken = std::get<javelin::jmap::auth::OAuthToken>(tokenResult).accessToken,
             .envelope = std::move(request),

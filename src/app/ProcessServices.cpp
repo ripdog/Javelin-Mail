@@ -60,8 +60,11 @@ namespace javelin::app
         m_stateChangeNetworkAccessManager = std::make_unique<QNetworkAccessManager>();
         m_transport =
             std::make_unique<javelin::jmap::api::QtNetworkTransport>(*m_networkAccessManager);
-        m_methodTransport =
+        m_httpMethodTransport =
             std::make_unique<javelin::jmap::api::HttpJmapMethodTransport>(*m_transport);
+        m_methodTransport =
+            std::make_unique<javelin::jmap::api::PreferredJmapMethodTransport>(
+                m_databaseConnection, *m_httpMethodTransport);
         m_inlineMessageSchemeHandler =
             std::make_unique<InlineMessageSchemeHandler>(m_databaseConnection);
         QWebEngineProfile::defaultProfile()->installUrlSchemeHandler(

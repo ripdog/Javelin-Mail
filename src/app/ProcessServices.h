@@ -27,6 +27,7 @@ namespace javelin::app
 namespace javelin::jmap::api
 {
     class HttpJmapMethodTransport;
+    class PreferredJmapMethodTransport;
     class QtNetworkTransport;
 } // namespace javelin::jmap::api
 
@@ -80,7 +81,8 @@ namespace javelin::app
         std::unique_ptr<QNetworkAccessManager> m_networkAccessManager;
         std::unique_ptr<QNetworkAccessManager> m_stateChangeNetworkAccessManager;
         std::unique_ptr<javelin::jmap::api::QtNetworkTransport> m_transport;
-        std::unique_ptr<javelin::jmap::api::HttpJmapMethodTransport> m_methodTransport;
+        std::unique_ptr<javelin::jmap::api::HttpJmapMethodTransport> m_httpMethodTransport;
+        std::unique_ptr<javelin::jmap::api::PreferredJmapMethodTransport> m_methodTransport;
         std::unique_ptr<InlineMessageSchemeHandler> m_inlineMessageSchemeHandler;
         std::unique_ptr<javelin::jmap::cache::AccountRepository> m_accountRepository;
         std::unique_ptr<javelin::jmap::cache::ContactRepository> m_contactRepository;

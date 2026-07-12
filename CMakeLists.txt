@@ -238,6 +238,7 @@ set(JAVELIN_FORMAT_FILES
     tests/jmap/MethodCallerTest.cpp
     tests/jmap/MethodEnvelopeTest.cpp
     tests/jmap/PendingActionsTest.cpp
+    tests/jmap/PreferredJmapMethodTransportTest.cpp
     tests/jmap/QueryDiffTest.cpp
     tests/jmap/QueryServiceTest.cpp
     tests/jmap/RefreshNotificationPlannerTest.cpp

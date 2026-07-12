@@ -31,6 +31,7 @@ add_executable(javelin_jmap_tests
     jmap/MethodEnvelopeTest.cpp
     jmap/RequestBuilderTest.cpp
     jmap/PendingActionsTest.cpp
+    jmap/PreferredJmapMethodTransportTest.cpp
     jmap/QueryDiffTest.cpp
     jmap/QueryServiceTest.cpp
     jmap/RefreshNotificationPlannerTest.cpp

@@ -6,8 +6,14 @@
 
 #include <QCoroTask>
 
+#include <memory>
 #include <string>
 #include <variant>
+
+namespace javelin::jmap::cache
+{
+    class DatabaseConnection;
+}
 
 namespace javelin::jmap::api
 {
@@ -15,6 +21,7 @@ namespace javelin::jmap::api
 
     struct JmapMethodRequest
     {
+        std::string accountId;
         std::string apiUrl;
         std::string accessToken;
         RequestEnvelope envelope;
@@ -42,6 +49,26 @@ namespace javelin::jmap::api
 
       private:
         AbstractTransport& m_transport;
+    };
+
+    class PreferredJmapMethodTransport final : public JmapMethodTransport
+    {
+      public:
+        PreferredJmapMethodTransport(javelin::jmap::cache::DatabaseConnection& databaseConnection,
+                                     HttpJmapMethodTransport& httpTransport);
+        ~PreferredJmapMethodTransport() override;
+
+        PreferredJmapMethodTransport(const PreferredJmapMethodTransport&) = delete;
+        PreferredJmapMethodTransport& operator=(const PreferredJmapMethodTransport&) = delete;
+        PreferredJmapMethodTransport(PreferredJmapMethodTransport&&) = delete;
+        PreferredJmapMethodTransport& operator=(PreferredJmapMethodTransport&&) = delete;
+
+        [[nodiscard]] QCoro::Task<JmapMethodTransportResult>
+        call(JmapMethodRequest request) override;
+
+      private:
+        struct Impl;
+        std::unique_ptr<Impl> m_impl;
     };
 
 } // namespace javelin::jmap::api
