@@ -2182,7 +2182,7 @@ namespace javelin::gui::shell
         if (auto* mailboxTab = std::get_if<MailboxTabState>(&tab->content))
         {
             loadMailboxTabPageFromCache(*mailboxTab, forceReload);
-            if (refreshRemote && shouldRefreshMailboxTabFromServer(*mailboxTab))
+            if (refreshRemote)
             {
                 refreshMailboxTabFromServer(*mailboxTab);
             }
@@ -2273,6 +2273,7 @@ namespace javelin::gui::shell
             .offset = tab.page.offset,
             .limit = pageSize,
             .sort = m_emailListSort,
+            .forceRefresh = tab.page.stale,
         });
         QCoro::connect(
             std::move(task), this,
@@ -2406,38 +2407,6 @@ namespace javelin::gui::shell
                     return;
                 }
             });
-    }
-
-    bool MainWindow::shouldRefreshMailboxTabFromServer(const MailboxTabState& tab) const
-    {
-        if (tab.page.refreshInFlight)
-        {
-            return false;
-        }
-
-        if (tab.page.stale)
-        {
-            return true;
-        }
-
-        if (!tab.page.total.has_value())
-        {
-            return tab.page.items.empty();
-        }
-
-        if (*tab.page.total == 0)
-        {
-            return false;
-        }
-
-        if (tab.page.offset >= *tab.page.total)
-        {
-            return false;
-        }
-
-        const auto remainingRows = *tab.page.total - tab.page.offset;
-        const auto expectedRows = std::min(pageSize, remainingRows);
-        return tab.page.items.size() < expectedRows;
     }
 
     bool MainWindow::shouldRefreshSearchTabFromServer(const SearchTabState& tab) const

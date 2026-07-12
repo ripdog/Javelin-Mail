@@ -241,7 +241,6 @@ namespace javelin::gui::shell
         void refreshTabFromServer(std::size_t tabIndex);
         void refreshMailboxTabFromServer(MailboxTabState& tab);
         void refreshSearchTabFromServer(SearchTabState& tab);
-        [[nodiscard]] bool shouldRefreshMailboxTabFromServer(const MailboxTabState& tab) const;
         [[nodiscard]] bool shouldRefreshSearchTabFromServer(const SearchTabState& tab) const;
         [[nodiscard]] QString titleForTab(const TabState& tab) const;
         [[nodiscard]] QIcon iconForTab(const TabState& tab) const;

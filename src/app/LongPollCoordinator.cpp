@@ -1,5 +1,7 @@
 #include "app/LongPollCoordinator.h"
 
+#include "jmap/sync/MailboxWindowPolicy.h"
+
 #include <algorithm>
 #include <ranges>
 #include <unordered_set>
@@ -169,6 +171,42 @@ namespace javelin::app
                 .message = QStringLiteral("Account synchronization is not configured."),
                 .requiresUserIntervention = true,
             };
+        }
+
+        const auto cachedCountResult =
+            m_queryService.countMailboxMessages(intent.accountId, intent.mailboxId);
+        const auto mailboxTreeResult = m_queryService.listMailboxTree(intent.accountId);
+        const auto* cachedCount = std::get_if<std::size_t>(&cachedCountResult);
+        const auto* mailboxes =
+            std::get_if<std::vector<javelin::jmap::cache::MailboxTreeItem>>(&mailboxTreeResult);
+        if (cachedCount != nullptr && mailboxes != nullptr)
+        {
+            const auto mailbox =
+                std::ranges::find(mailboxes->cbegin(), mailboxes->cend(), intent.mailboxId,
+                                  &javelin::jmap::cache::MailboxTreeItem::id);
+            if (mailbox != mailboxes->cend())
+            {
+                const javelin::jmap::sync::MailboxWindowAvailability availability{
+                    .cachedRepresentativeCount = *cachedCount,
+                    .serverRepresentativeCount = static_cast<std::size_t>(mailbox->totalThreads),
+                    .offset = intent.offset,
+                    .limit = intent.limit,
+                    .sort = intent.sort,
+                    .forceRefresh = intent.forceRefresh,
+                };
+                if (javelin::jmap::sync::cacheSatisfiesMailboxWindow(availability))
+                {
+                    co_return MailboxWindowSummary{
+                        .accountId = std::move(intent.accountId),
+                        .mailboxId = std::move(intent.mailboxId),
+                        .offset = intent.offset,
+                        .limit = intent.limit,
+                        .representativeCount =
+                            javelin::jmap::sync::cachedMailboxWindowSize(availability),
+                        .total = availability.serverRepresentativeCount,
+                    };
+                }
+            }
         }
 
         auto result = co_await m_jmapCore.queryMailboxPage(
