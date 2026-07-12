@@ -38,7 +38,7 @@ namespace javelin::jmap
     struct LiveRefreshError;
 } // namespace javelin::jmap
 
-namespace javelin::jmap::submission
+namespace javelin::app
 {
     class ComposeService;
 }
@@ -105,7 +105,7 @@ namespace javelin::gui::shell
             javelin::jmap::cache::MessageViewService& messageViewService,
             javelin::jmap::cache::QueryService& queryService,
             javelin::jmap::cache::TranslationCacheRepository& translationCacheRepository,
-            javelin::jmap::submission::ComposeService& composeService,
+            javelin::app::ComposeService& composeService,
             javelin::app::LongPollCoordinator& longPollService, QWidget* parent = nullptr);
         ~MainWindow() override = default;
         void openMessageFromNotification(const QString& accountId, const QString& mailboxId,
@@ -338,7 +338,7 @@ namespace javelin::gui::shell
         javelin::jmap::cache::MessageViewService& m_messageViewService;
         javelin::jmap::cache::QueryService& m_queryService;
         javelin::jmap::cache::TranslationCacheRepository& m_translationCacheRepository;
-        javelin::jmap::submission::ComposeService& m_composeService;
+        javelin::app::ComposeService& m_composeService;
         javelin::app::LongPollCoordinator& m_longPollService;
         QSplitter* m_mainSplitter = nullptr;
         QStackedWidget* m_contentStack = nullptr;

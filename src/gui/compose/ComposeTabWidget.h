@@ -40,7 +40,7 @@ namespace javelin::jmap::contacts
     class ContactIdentityLookup;
 }
 
-namespace javelin::jmap::submission
+namespace javelin::app
 {
     class ComposeService;
 }
@@ -53,7 +53,7 @@ namespace javelin::gui::compose
         Q_OBJECT
 
       public:
-        ComposeTabWidget(javelin::jmap::submission::ComposeService& composeService,
+        ComposeTabWidget(javelin::app::ComposeService& composeService,
                          javelin::jmap::cache::IdentityRepository& identityRepository,
                          javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
                          javelin::jmap::submission::DraftSnapshot snapshot,
@@ -120,7 +120,7 @@ namespace javelin::gui::compose
         void clearFormatting();
         void insertLink();
 
-        javelin::jmap::submission::ComposeService& m_composeService;
+        javelin::app::ComposeService& m_composeService;
         javelin::jmap::cache::IdentityRepository& m_identityRepository;
         javelin::jmap::contacts::ContactIdentityLookup& m_contactIdentityLookup;
         javelin::jmap::submission::DraftSnapshot m_snapshot;

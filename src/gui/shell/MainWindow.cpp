@@ -1,5 +1,6 @@
 #include "gui/shell/MainWindow.h"
 
+#include "app/ComposeService.h"
 #include "app/LongPollCoordinator.h"
 #include "gui/IconUtils.h"
 #include "gui/compose/ComposeTabWidget.h"
@@ -15,7 +16,6 @@
 #include "gui/settings/PreferencesDialog.h"
 #include "gui/shell/LayeredStatusBar.h"
 #include "gui/shell/MessageFileUtils.h"
-#include "jmap/JmapCore.h"
 #include "jmap/cache/AccountRepository.h"
 #include "jmap/cache/ContactRepository.h"
 #include "jmap/cache/IdentityRepository.h"
@@ -24,7 +24,6 @@
 #include "jmap/contacts/ContactIdentityLookup.h"
 #include "jmap/contacts/ContactService.h"
 #include "jmap/query/QueryDiff.h"
-#include "jmap/submission/ComposeService.h"
 
 #include <QCoroTask>
 
@@ -337,16 +336,6 @@ namespace javelin::gui::shell
             };
         }
 
-        [[nodiscard]] javelin::jmap::LiveConnectionSettings
-        toLiveConnectionSettings(const javelin::gui::settings::ConnectionSettings& settings)
-        {
-            return javelin::jmap::LiveConnectionSettings{
-                .sessionUrl = settings.sessionUrl.toStdString(),
-                .loginEmail = settings.loginEmail.toStdString(),
-                .apiKey = settings.apiKey.toStdString(),
-            };
-        }
-
         [[nodiscard]] std::optional<javelin::jmap::cache::MailboxTreeItem>
         findMailboxByRole(javelin::jmap::cache::QueryService& queryService,
                           const std::string_view accountId, const std::string_view role)
@@ -649,7 +638,7 @@ namespace javelin::gui::shell
         javelin::jmap::cache::MessageViewService& messageViewService,
         javelin::jmap::cache::QueryService& queryService,
         javelin::jmap::cache::TranslationCacheRepository& translationCacheRepository,
-        javelin::jmap::submission::ComposeService& composeService,
+        javelin::app::ComposeService& composeService,
         javelin::app::LongPollCoordinator& longPollService, QWidget* parent)
         : KXmlGuiWindow(parent), m_accountRepository(accountRepository),
           m_contactRepository(contactRepository), m_contactService(contactService),
@@ -2539,7 +2528,8 @@ namespace javelin::gui::shell
         }
 
         m_statusBar->showMessage(QStringLiteral("Preparing compose tab..."));
-        auto task = m_composeService.open(toLiveConnectionSettings(settings), std::move(request));
+        auto task =
+            m_composeService.open(toAccountConnectionSettings(settings), std::move(request));
         QCoro::connect(
             std::move(task), this,
             [this](std::variant<javelin::jmap::submission::DraftSnapshot,

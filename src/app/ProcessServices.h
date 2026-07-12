@@ -19,6 +19,7 @@ namespace javelin::jmap::contacts
 
 namespace javelin::app
 {
+    class ComposeService;
     class InlineMessageSchemeHandler;
     class LongPollCoordinator;
 } // namespace javelin::app
@@ -70,7 +71,7 @@ namespace javelin::app
         [[nodiscard]] javelin::jmap::cache::QueryService& queryService();
         [[nodiscard]] javelin::jmap::cache::TranslationCacheRepository&
         translationCacheRepository();
-        [[nodiscard]] javelin::jmap::submission::ComposeService& composeService();
+        [[nodiscard]] ComposeService& composeService();
         [[nodiscard]] javelin::app::LongPollCoordinator& longPollService();
 
       private:
@@ -91,7 +92,8 @@ namespace javelin::app
         std::unique_ptr<javelin::jmap::cache::TranslationCacheRepository>
             m_translationCacheRepository;
         std::unique_ptr<javelin::jmap::cache::SubmissionRepository> m_submissionRepository;
-        std::unique_ptr<javelin::jmap::submission::ComposeService> m_composeService;
+        std::unique_ptr<javelin::jmap::submission::ComposeService> m_jmapComposeService;
+        std::unique_ptr<ComposeService> m_composeService;
         std::unique_ptr<LongPollCoordinator> m_longPollService;
     };
 

@@ -1,10 +1,10 @@
 #include "gui/compose/ComposeTabWidget.h"
 
+#include "app/ComposeService.h"
 #include "gui/messageview/HtmlMessageView.h"
 #include "gui/settings/PreferencesDialog.h"
 #include "jmap/cache/IdentityRepository.h"
 #include "jmap/contacts/ContactIdentityLookup.h"
-#include "jmap/submission/ComposeService.h"
 
 #include <QCoroTask>
 
@@ -463,7 +463,7 @@ namespace javelin::gui::compose
             return identity.email.starts_with("*@");
         }
 
-        [[nodiscard]] std::optional<javelin::jmap::LiveConnectionSettings>
+        [[nodiscard]] std::optional<javelin::app::AccountConnectionSettings>
         liveSettings(const std::string_view accountId, QString* errorMessage = nullptr)
         {
             const auto settings = javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
@@ -479,7 +479,7 @@ namespace javelin::gui::compose
                 return std::nullopt;
             }
 
-            return javelin::jmap::LiveConnectionSettings{
+            return javelin::app::AccountConnectionSettings{
                 .sessionUrl = settings.sessionUrl.toStdString(),
                 .loginEmail = settings.loginEmail.toStdString(),
                 .apiKey = settings.apiKey.toStdString(),
@@ -489,7 +489,7 @@ namespace javelin::gui::compose
     } // namespace
 
     ComposeTabWidget::ComposeTabWidget(
-        javelin::jmap::submission::ComposeService& composeService,
+        javelin::app::ComposeService& composeService,
         javelin::jmap::cache::IdentityRepository& identityRepository,
         javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
         javelin::jmap::submission::DraftSnapshot snapshot, QWidget* parent)
@@ -1046,7 +1046,7 @@ namespace javelin::gui::compose
                 {
                     m_identityLoadsStarted.insert(accountId);
                     auto task = m_composeService.loadSenderIdentities(
-                        javelin::jmap::LiveConnectionSettings{
+                        javelin::app::AccountConnectionSettings{
                             .sessionUrl = connection.sessionUrl.toStdString(),
                             .loginEmail = connection.loginEmail.toStdString(),
                             .apiKey = connection.apiKey.toStdString(),

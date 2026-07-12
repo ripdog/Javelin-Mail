@@ -47,6 +47,8 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/sync/MailboxWindowPolicy.cpp
     src/jmap/sync/MailboxWindowPolicy.h
     src/app/AccountConnectionSettings.h
+    src/app/ComposeService.cpp
+    src/app/ComposeService.h
     src/app/ApplicationBootstrap.cpp
     src/app/ApplicationBootstrap.h
     src/app/DesktopNotificationController.cpp
@@ -446,7 +448,9 @@ foreach(gui_source IN LISTS javelin_gui_boundary_sources)
        gui_source_contents MATCHES "#include \"jmap/sync/(MailboxRefreshExecutor|MailboxStateRefreshExecutor)\\.h\"" OR
        gui_source_contents MATCHES "LongPollAccountConfiguration" OR
        gui_source_contents MATCHES "javelin::jmap::MailboxPage(Result|Summary)" OR
-       gui_source_contents MATCHES "javelin::jmap::MessageSearch(Result|Summary)")
+       gui_source_contents MATCHES "javelin::jmap::MessageSearch(Result|Summary)" OR
+       gui_source_contents MATCHES "javelin::jmap::LiveConnectionSettings" OR
+       gui_source_contents MATCHES "javelin::jmap::submission::ComposeService")
         message(FATAL_ERROR "GUI boundary violation in ${gui_source}")
     endif()
 endforeach()
@@ -474,6 +478,8 @@ target_compile_options(javelin_gui PRIVATE -fexceptions)
 
 add_library(javelin_app STATIC
     src/app/AccountConnectionSettings.h
+    src/app/ComposeService.cpp
+    src/app/ComposeService.h
     src/app/ApplicationBootstrap.cpp
     src/app/ApplicationBootstrap.h
     src/app/DesktopNotificationController.cpp
