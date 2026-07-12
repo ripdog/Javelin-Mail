@@ -17,8 +17,16 @@ refresh, mailbox interest, state tokens, cache reconciliation, retries, and post
 Consumers receive one `MailCacheChange` after a synchronization pass commits and reload affected
 views from SQLite.
 
-`JmapMethodTransport` is the request/response boundary for typed JMAP envelopes. The current
-`HttpJmapMethodTransport` adapts it to HTTP. A future RFC 8887 connection may implement the same
-interface and the state-change source interface over one physical WebSocket without changing
-synchronization or GUI code. Session discovery and binary resource transfers remain distinct HTTP
+`JmapMethodTransport` is the request/response boundary for typed JMAP envelopes.
+`PreferredJmapMethodTransport` uses the RFC 8887 capability advertised by the cached Session to
+keep an authenticated `jmap` WebSocket per owning account, correlate concurrent requests, and send
+typed method envelopes over that connection. It falls back to `HttpJmapMethodTransport` only when
+the request was not dispatched, so an uncertain disconnect cannot replay a mutation.
+
+The transport decision is persisted per owning account and advertised WebSocket URL. A failed
+endpoint uses HTTP for a bounded retry period; a newly advertised URL is probed immediately.
+State-change synchronization consults the same decision, preferring RFC 8887 push and switching to
+the JMAP EventSource endpoint when WebSocket push fails. Startup performs lightweight Session
+rediscovery before restarting account synchronization, while account bootstrap discovers the same
+capability during account addition. Session discovery and binary resource transfers remain HTTP
 operations.
