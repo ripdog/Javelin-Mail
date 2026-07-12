@@ -16,6 +16,7 @@
 #include "jmap/cache/MessageContentTypes.h"
 #include "jmap/cache/MimeMessageParser.h"
 #include "jmap/cache/RawMessageSourceRepository.h"
+#include "jmap/cache/SearchWindowRepository.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/cache/SyncStateRepository.h"
 #include "jmap/cache/ThreadRepository.h"
@@ -1737,6 +1738,7 @@ namespace javelin::jmap
         };
 
         auto query = javelin::jmap::search::displayString(criteria);
+        const auto queryKey = javelin::jmap::search::cacheKey(criteria, sort);
         qInfo().noquote() << "JMAP core search start" << QString::fromStdString(accountId)
                           << QString::fromStdString(query);
         reportProgress(QStringLiteral("Searching the server..."));
@@ -1764,6 +1766,26 @@ namespace javelin::jmap
         }
 
         auto page = std::get<CollapsedQueryPage>(std::move(pageResult));
+        std::vector<std::string> emailIds;
+        emailIds.reserve(page.results.size());
+        for (const auto& item : page.results)
+        {
+            emailIds.push_back(item.emailId);
+        }
+        javelin::jmap::cache::SearchWindowRepository searchWindowRepository{
+            *m_impl->databaseConnection};
+        if (const auto error = searchWindowRepository.replace({
+                .accountId = accountId,
+                .queryKey = queryKey,
+                .offset = offset,
+                .limit = limit,
+                .total = page.total,
+                .emailIds = std::move(emailIds),
+            }))
+        {
+            co_return LiveRefreshError{.message = error->message};
+        }
+
         co_return MessageSearchSummary{
             .accountId = std::move(accountId),
             .query = std::move(query),

@@ -44,6 +44,14 @@ namespace javelin::jmap::cache
         std::optional<javelin::jmap::domain::EmailAddress> from;
     };
 
+    struct SearchWindowPage
+    {
+        std::size_t offset = 0;
+        std::size_t limit = 0;
+        std::optional<std::size_t> total;
+        std::vector<MessageListItem> items;
+    };
+
     class QueryService
     {
       public:
@@ -60,6 +68,9 @@ namespace javelin::jmap::cache
         [[nodiscard]] std::variant<std::vector<MessageListItem>, DatabaseError>
         listMessagesByEmailIds(std::string_view accountId,
                                const std::vector<std::string>& emailIds) const;
+        [[nodiscard]] std::variant<std::optional<SearchWindowPage>, DatabaseError>
+        loadSearchWindow(std::string_view accountId, std::string_view queryKey, std::size_t offset,
+                         std::size_t limit) const;
         [[nodiscard]] std::variant<std::vector<MessageListItem>, DatabaseError>
         listThreadMessages(std::string_view accountId, std::string_view threadId) const;
 

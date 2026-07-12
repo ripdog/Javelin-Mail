@@ -54,6 +54,18 @@ namespace javelin::app
 
     using MailboxWindowResult = std::variant<MailboxWindowSummary, javelin::jmap::LiveRefreshError>;
 
+    struct SearchWindowSummary
+    {
+        std::string accountId;
+        std::string queryKey;
+        std::size_t offset = 0;
+        std::size_t limit = 0;
+        std::size_t representativeCount = 0;
+        std::optional<std::size_t> total;
+    };
+
+    using SearchWindowResult = std::variant<SearchWindowSummary, javelin::jmap::LiveRefreshError>;
+
     struct LongPollAccountConfiguration
     {
         AccountConnectionSettings settings;
@@ -88,7 +100,7 @@ namespace javelin::app
         [[nodiscard]] QString statusSummary() const;
         [[nodiscard]] QCoro::Task<MailboxWindowResult>
         requestMailboxWindow(MailboxWindowIntent intent);
-        [[nodiscard]] QCoro::Task<javelin::jmap::MessageSearchResult>
+        [[nodiscard]] QCoro::Task<SearchWindowResult>
         requestSearchWindow(SearchWindowIntent intent);
         [[nodiscard]] javelin::jmap::QueuedEmailMutationResult
         queueDestroyEmail(std::string accountId, std::string emailId);

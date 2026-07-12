@@ -69,6 +69,20 @@ namespace javelin::jmap::search
             conditions.push_back(std::move(condition));
         }
 
+        void appendKeyPart(std::string& key, const std::optional<std::string>& value)
+        {
+            const auto normalizedValue = normalized(value);
+            if (!normalizedValue.has_value())
+            {
+                key += "0:";
+                return;
+            }
+
+            key += std::to_string(normalizedValue->size());
+            key.push_back(':');
+            key += *normalizedValue;
+        }
+
     } // namespace
 
     bool isEmpty(const EmailSearchCriteria& criteria)
@@ -110,6 +124,26 @@ namespace javelin::jmap::search
             result += part;
         }
         return result;
+    }
+
+    std::string cacheKey(const EmailSearchCriteria& criteria,
+                         const javelin::jmap::query::EmailListSort& sort)
+    {
+        std::string key;
+        key.reserve(128);
+        appendKeyPart(key, criteria.text);
+        appendKeyPart(key, criteria.with);
+        appendKeyPart(key, criteria.from);
+        appendKeyPart(key, criteria.to);
+        appendKeyPart(key, criteria.cc);
+        appendKeyPart(key, criteria.bcc);
+        appendKeyPart(key, criteria.subject);
+        appendKeyPart(key, criteria.body);
+        key += "|sort:";
+        key += std::to_string(static_cast<int>(sort.property));
+        key.push_back(':');
+        key += std::to_string(static_cast<int>(sort.direction));
+        return key;
     }
 
     javelin::jmap::api::EmailQueryFilter toEmailQueryFilter(const EmailSearchCriteria& criteria)

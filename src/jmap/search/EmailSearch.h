@@ -1,6 +1,7 @@
 #pragma once
 
 #include "jmap/api/MailMethods.h"
+#include "jmap/query/EmailListSort.h"
 
 #include <optional>
 #include <string>
@@ -22,6 +23,8 @@ namespace javelin::jmap::search
 
     [[nodiscard]] bool isEmpty(const EmailSearchCriteria& criteria);
     [[nodiscard]] std::string displayString(const EmailSearchCriteria& criteria);
+    [[nodiscard]] std::string cacheKey(const EmailSearchCriteria& criteria,
+                                       const javelin::jmap::query::EmailListSort& sort);
     [[nodiscard]] javelin::jmap::api::EmailQueryFilter
     toEmailQueryFilter(const EmailSearchCriteria& criteria);
 

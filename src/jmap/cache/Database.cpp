@@ -816,6 +816,33 @@ namespace javelin::jmap::cache
                                            "websocket_supports_push INTEGER NOT NULL DEFAULT 0"),
                         },
                 },
+                MigrationStep{
+                    .version = 14,
+                    .name = QStringLiteral("search_windows"),
+                    .statements =
+                        {
+                            QStringLiteral(
+                                "CREATE TABLE search_windows (account_id TEXT NOT NULL REFERENCES "
+                                "accounts(account_id) ON DELETE CASCADE, query_key TEXT NOT NULL, "
+                                "window_offset INTEGER NOT NULL, window_limit INTEGER NOT NULL, "
+                                "total INTEGER, updated_at TEXT NOT NULL DEFAULT "
+                                "CURRENT_TIMESTAMP, "
+                                "PRIMARY KEY(account_id,query_key,window_offset,window_limit)) "
+                                "STRICT"),
+                            QStringLiteral(
+                                "CREATE TABLE search_window_items (account_id TEXT NOT NULL, "
+                                "query_key TEXT NOT NULL, window_offset INTEGER NOT NULL, "
+                                "window_limit INTEGER NOT NULL, position INTEGER NOT NULL, "
+                                "email_id TEXT NOT NULL, "
+                                "PRIMARY KEY(account_id,query_key,window_offset,window_limit,"
+                                "position), FOREIGN KEY(account_id,query_key,window_offset,"
+                                "window_limit) REFERENCES search_windows(account_id,query_key,"
+                                "window_offset,window_limit) ON DELETE CASCADE) STRICT"),
+                            QStringLiteral(
+                                "CREATE INDEX idx_search_window_items_email ON search_window_items"
+                                "(account_id,email_id)"),
+                        },
+                },
             },
         };
     }

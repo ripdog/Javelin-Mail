@@ -39,6 +39,8 @@ qt_standard_project_setup()
 set(JAVELIN_FORMAT_FILES
     src/jmap/api/Cancellation.cpp
     src/jmap/api/Cancellation.h
+    src/jmap/cache/SearchWindowRepository.cpp
+    src/jmap/cache/SearchWindowRepository.h
     src/jmap/sync/StateChangeSource.h
     src/jmap/sync/MailboxInterestRegistry.cpp
     src/jmap/sync/MailboxInterestRegistry.h
@@ -247,6 +249,8 @@ set(JAVELIN_FORMAT_FILES
 add_library(javelin_jmap STATIC
     src/jmap/api/Cancellation.cpp
     src/jmap/api/Cancellation.h
+    src/jmap/cache/SearchWindowRepository.cpp
+    src/jmap/cache/SearchWindowRepository.h
     src/jmap/sync/StateChangeSource.h
     src/jmap/sync/MailboxInterestRegistry.cpp
     src/jmap/sync/MailboxInterestRegistry.h
@@ -441,7 +445,8 @@ foreach(gui_source IN LISTS javelin_gui_boundary_sources)
     if(gui_source_contents MATCHES "#include \"jmap/api/(Transport|MethodEnvelope)\\.h\"" OR
        gui_source_contents MATCHES "#include \"jmap/sync/(MailboxRefreshExecutor|MailboxStateRefreshExecutor)\\.h\"" OR
        gui_source_contents MATCHES "LongPollAccountConfiguration" OR
-       gui_source_contents MATCHES "javelin::jmap::MailboxPage(Result|Summary)")
+       gui_source_contents MATCHES "javelin::jmap::MailboxPage(Result|Summary)" OR
+       gui_source_contents MATCHES "javelin::jmap::MessageSearch(Result|Summary)")
         message(FATAL_ERROR "GUI boundary violation in ${gui_source}")
     endif()
 endforeach()

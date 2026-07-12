@@ -232,6 +232,8 @@ namespace javelin::gui::shell
         void loadMailboxTabFromCache(std::string_view accountId, std::string_view mailboxId,
                                      bool applyIfActive,
                                      std::optional<std::size_t> requiredOffset = std::nullopt);
+        void loadSearchTabFromCache(std::string_view accountId, std::string_view queryKey,
+                                    std::size_t offset, bool applyIfActive);
         void loadMailboxTabPageFromCache(MailboxTabState& tab, bool forceReload = false);
         void ensureMailboxObservation(MailboxTabState& tab);
         void releaseMailboxObservation(MailboxTabState& tab);

@@ -10,6 +10,7 @@ add_executable(javelin_jmap_tests
     jmap/ComposeServiceTest.cpp
     jmap/DatabaseTest.cpp
     jmap/EmailRepositoryTest.cpp
+    jmap/EmailSearchTest.cpp
     jmap/HtmlMessageDocumentBuilderTest.cpp
     jmap/InlineMessageUrlTest.cpp
     jmap/JmapCoreMessageContentTest.cpp
@@ -35,6 +36,7 @@ add_executable(javelin_jmap_tests
     jmap/MailEntityParsersTest.cpp
     jmap/SessionClientTest.cpp
     jmap/SessionRepositoryTest.cpp
+    jmap/SearchWindowRepositoryTest.cpp
     jmap/SessionTest.cpp
     jmap/SyncStateRepositoryTest.cpp
     jmap/SyncPlannerTest.cpp

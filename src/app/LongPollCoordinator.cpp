@@ -248,12 +248,13 @@ namespace javelin::app
                 .limit = page.limit,
                 .total = page.total,
             }},
+            .searchWindows = {},
             .hasNewMail = false,
         });
         co_return summary;
     }
 
-    QCoro::Task<javelin::jmap::MessageSearchResult>
+    QCoro::Task<SearchWindowResult>
     LongPollCoordinator::requestSearchWindow(SearchWindowIntent intent)
     {
         const auto configuration = m_configurations.find(intent.accountId);
@@ -264,9 +265,38 @@ namespace javelin::app
                 .requiresUserIntervention = true,
             };
         }
-        co_return co_await m_jmapCore.searchMessages(
+
+        const auto queryKey = javelin::jmap::search::cacheKey(intent.criteria, intent.sort);
+        auto result = co_await m_jmapCore.searchMessages(
             toLiveConnectionSettings(configuration->second.settings), intent.accountId,
             intent.criteria, intent.offset, intent.limit, intent.sort);
+        if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+        {
+            co_return *error;
+        }
+
+        const auto& page = std::get<javelin::jmap::MessageSearchSummary>(result);
+        SearchWindowSummary summary{
+            .accountId = page.accountId,
+            .queryKey = queryKey,
+            .offset = page.offset,
+            .limit = page.limit,
+            .representativeCount = page.representativeCount,
+            .total = page.total,
+        };
+        Q_EMIT cacheCommitted(MailCacheChange{
+            .accountId = QString::fromStdString(page.accountId),
+            .mailboxIds = {},
+            .queryWindows = {},
+            .searchWindows = {SearchQueryWindowChange{
+                .queryKey = QString::fromStdString(queryKey),
+                .offset = page.offset,
+                .limit = page.limit,
+                .total = page.total,
+            }},
+            .hasNewMail = false,
+        });
+        co_return summary;
     }
 
     javelin::jmap::QueuedEmailMutationResult

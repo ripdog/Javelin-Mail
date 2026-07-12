@@ -5,10 +5,12 @@
 #include "jmap/api/SessionParser.h"
 #include "jmap/api/Transport.h"
 #include "jmap/cache/EmailRepository.h"
+#include "jmap/cache/QueryService.h"
 #include "jmap/cache/RawMessageSourceRepository.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/cache/ThreadRepository.h"
 #include "jmap/domain/MailEntityParsers.h"
+#include "jmap/search/EmailSearch.h"
 #include "jmap/sync/PendingActions.h"
 
 #include <QCoroTask>
@@ -423,6 +425,22 @@ TEST_CASE("JmapCore searchMessages uses Email/query text filters and caches thre
     CHECK(summary.results.front().isFlagged);
     REQUIRE(summary.results.front().from.has_value());
     CHECK(summary.results.front().from->email == "alice@example.com");
+
+    javelin::jmap::cache::QueryService queryService{databaseContext.connection};
+    const auto cachedWindowResult = queryService.loadSearchWindow(
+        "u1",
+        javelin::jmap::search::cacheKey(
+            {.text = "quarterly"},
+            {.property = javelin::jmap::query::EmailListSortProperty::ReceivedAt,
+             .direction = javelin::jmap::query::EmailListSortDirection::Descending}),
+        0, 100);
+    const auto* cachedWindow =
+        std::get_if<std::optional<javelin::jmap::cache::SearchWindowPage>>(&cachedWindowResult);
+    REQUIRE(cachedWindow != nullptr);
+    REQUIRE(cachedWindow->has_value());
+    CHECK((*cachedWindow)->total == std::optional<std::size_t>{1});
+    REQUIRE((*cachedWindow)->items.size() == 1);
+    CHECK((*cachedWindow)->items.front().emailId == "eml-2");
 
     REQUIRE(transport.requests.size() == 1);
     const auto requestBody = QString::fromUtf8(transport.requests.front().body);

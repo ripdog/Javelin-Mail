@@ -294,6 +294,7 @@ namespace javelin::app
                 .accountId = QString::fromStdString(runContext->configuration.accountId),
                 .mailboxIds = std::move(refreshedMailboxIds),
                 .queryWindows = {},
+                .searchWindows = {},
                 .hasNewMail = hasNewMail,
             });
         }

@@ -691,6 +691,12 @@ namespace javelin::gui::shell
                         m_mailboxView->expandAll();
                     }
 
+                    for (const auto& window : change.searchWindows)
+                    {
+                        loadSearchTabFromCache(change.accountId.toStdString(),
+                                               window.queryKey.toStdString(), window.offset, true);
+                    }
+
                     std::unordered_set<std::string> queryWindowMailboxIds;
                     for (const auto& window : change.queryWindows)
                     {
@@ -2063,50 +2069,21 @@ namespace javelin::gui::shell
             return;
         }
 
-        if (tab.page.items.empty())
+        const auto queryKey = javelin::jmap::search::cacheKey(tab.criteria, m_emailListSort);
+        const auto pageResult =
+            m_queryService.loadSearchWindow(tab.accountId, queryKey, tab.page.offset, pageSize);
+        const auto* page =
+            std::get_if<std::optional<javelin::jmap::cache::SearchWindowPage>>(&pageResult);
+        if (page == nullptr || !page->has_value())
         {
-            tab.page.cacheLoaded = true;
+            tab.page.items.clear();
+            tab.page.total.reset();
+            tab.page.cacheLoaded = page != nullptr;
             return;
         }
 
-        std::vector<std::string> emailIds;
-        emailIds.reserve(tab.page.items.size());
-        for (const auto& item : tab.page.items)
-        {
-            emailIds.push_back(item.emailId);
-        }
-
-        const auto refreshedResult = m_queryService.listMessagesByEmailIds(tab.accountId, emailIds);
-        const auto* refreshedItems =
-            std::get_if<std::vector<javelin::jmap::cache::MessageListItem>>(&refreshedResult);
-        if (refreshedItems == nullptr)
-        {
-            return;
-        }
-
-        std::unordered_map<std::string, javelin::jmap::cache::MessageListItem> refreshedByEmailId;
-        refreshedByEmailId.reserve(refreshedItems->size());
-        for (auto item : *refreshedItems)
-        {
-            refreshedByEmailId.insert_or_assign(item.emailId, std::move(item));
-        }
-
-        std::vector<javelin::jmap::cache::MessageListItem> mergedItems;
-        mergedItems.reserve(tab.page.items.size());
-        for (const auto& cachedItem : tab.page.items)
-        {
-            if (const auto iterator = refreshedByEmailId.find(cachedItem.emailId);
-                iterator != refreshedByEmailId.end())
-            {
-                mergedItems.push_back(std::move(iterator->second));
-            }
-            else
-            {
-                mergedItems.push_back(cachedItem);
-            }
-        }
-
-        tab.page.items = std::move(mergedItems);
+        tab.page.items = (*page)->items;
+        tab.page.total = (*page)->total;
         tab.page.cacheLoaded = true;
     }
 
@@ -2151,6 +2128,41 @@ namespace javelin::gui::shell
             }
 
             loadMailboxTabPageFromCache(*mailboxTab, true);
+            activeTabReloaded = activeTabReloaded || &tabState == active;
+        }
+
+        if (!applyIfActive || !activeTabReloaded)
+        {
+            return;
+        }
+
+        const auto previousMessageRow = currentMessageRow(*m_messageView);
+        {
+            QSignalBlocker messageSelectionBlocker{m_messageView->selectionModel()};
+            applyActiveTabPageToModel();
+            restoreActiveTabMessageSelection(previousMessageRow);
+        }
+        refreshSelectionFromModels();
+    }
+
+    void MainWindow::loadSearchTabFromCache(const std::string_view accountId,
+                                            const std::string_view queryKey,
+                                            const std::size_t offset, const bool applyIfActive)
+    {
+        auto* active = activeTab();
+        bool activeTabReloaded = false;
+        for (auto& tabState : m_tabs)
+        {
+            auto* searchTab = std::get_if<SearchTabState>(&tabState.content);
+            if (searchTab == nullptr || searchTab->accountId != accountId ||
+                searchTab->page.offset != offset ||
+                javelin::jmap::search::cacheKey(searchTab->criteria, m_emailListSort) != queryKey)
+            {
+                continue;
+            }
+
+            applySearchTabCachedPage(*searchTab, true);
+            searchTab->page.stale = false;
             activeTabReloaded = activeTabReloaded || &tabState == active;
         }
 
@@ -2356,7 +2368,7 @@ namespace javelin::gui::shell
         });
         QCoro::connect(
             std::move(task), this,
-            [this, tabAccountId, tabQuery, tabOffset](javelin::jmap::MessageSearchResult result)
+            [this, tabAccountId, tabQuery, tabOffset](javelin::app::SearchWindowResult result)
             {
                 if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
                 {
@@ -2385,26 +2397,11 @@ namespace javelin::gui::shell
                         continue;
                     }
 
-                    const auto& summary = std::get<javelin::jmap::MessageSearchSummary>(result);
+                    const auto& summary = std::get<javelin::app::SearchWindowSummary>(result);
                     searchTab->page.total = summary.total;
-                    searchTab->page.items = summary.results;
-                    searchTab->page.cacheLoaded = true;
                     searchTab->page.refreshInFlight = false;
                     searchTab->page.stale = false;
                     searchTab->page.refreshError.clear();
-                    if (activeTabIsSearch() &&
-                        activeAccountId() == std::optional<std::string>{tabAccountId} &&
-                        std::get<SearchTabState>(activeTab()->content).query == tabQuery &&
-                        searchTab->page.offset == tabOffset)
-                    {
-                        const auto previousMessageRow = currentMessageRow(*m_messageView);
-                        {
-                            QSignalBlocker messageSelectionBlocker{m_messageView->selectionModel()};
-                            applyActiveTabPageToModel();
-                            restoreActiveTabMessageSelection(previousMessageRow);
-                        }
-                        refreshSelectionFromModels();
-                    }
                     updateEmptyStates();
                     m_statusBar->showMessage(
                         summary.total.has_value() && *summary.total > summary.representativeCount

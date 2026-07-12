@@ -1,5 +1,7 @@
 #include "jmap/cache/QueryService.h"
 
+#include "jmap/cache/SearchWindowRepository.h"
+
 #include <glaze/glaze.hpp>
 
 #include <QSqlError>
@@ -348,6 +350,38 @@ namespace javelin::jmap::cache
         }
 
         return items;
+    }
+
+    std::variant<std::optional<SearchWindowPage>, DatabaseError>
+    QueryService::loadSearchWindow(const std::string_view accountId,
+                                   const std::string_view queryKey, const std::size_t offset,
+                                   const std::size_t limit) const
+    {
+        SearchWindowRepository repository{m_connection};
+        const auto windowResult = repository.find(accountId, queryKey, offset, limit);
+        const auto* window = std::get_if<std::optional<SearchWindowRecord>>(&windowResult);
+        if (window == nullptr)
+        {
+            return std::get<DatabaseError>(windowResult);
+        }
+        if (!window->has_value())
+        {
+            return std::optional<SearchWindowPage>{std::nullopt};
+        }
+
+        const auto messagesResult = listMessagesByEmailIds(accountId, (*window)->emailIds);
+        const auto* messages = std::get_if<std::vector<MessageListItem>>(&messagesResult);
+        if (messages == nullptr)
+        {
+            return std::get<DatabaseError>(messagesResult);
+        }
+
+        return std::optional<SearchWindowPage>{SearchWindowPage{
+            .offset = (*window)->offset,
+            .limit = (*window)->limit,
+            .total = (*window)->total,
+            .items = *messages,
+        }};
     }
 
     std::variant<std::vector<MessageListItem>, DatabaseError>
