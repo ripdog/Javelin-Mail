@@ -676,50 +676,22 @@ namespace javelin::gui::shell
         connect(&m_longPollService, &javelin::app::LongPollCoordinator::mailStateChanged, this,
                 [this](const QString& accountId, const bool requiresCatchUpRefresh)
                 {
-                    const auto account = accountId.toStdString();
-                    markTabsStaleForAccount(account);
-                    if (requiresCatchUpRefresh)
-                    {
-                        refreshAccountFromServer(account);
-                        return;
-                    }
-
-                    if (activeAccountId() == std::optional<std::string>{account})
-                    {
-                        refreshActiveTabFromServer();
-                    }
+                    static_cast<void>(accountId);
+                    static_cast<void>(requiresCatchUpRefresh);
                 });
         connect(&m_longPollService, &javelin::app::LongPollCoordinator::accountMailStateChanged,
                 this,
                 [this](const QString& accountId, const QString& refreshedMailboxId)
                 {
                     const auto account = accountId.toStdString();
-                    const auto refreshedMailbox = refreshedMailboxId.toStdString();
-                    markTabsStaleForAccount(
-                        account, refreshedMailboxId.isEmpty()
-                                     ? std::optional<std::string_view>{std::nullopt}
-                                     : std::optional<std::string_view>{refreshedMailbox});
                     {
                         QSignalBlocker mailboxSelectionBlocker{m_mailboxView->selectionModel()};
                         m_mailboxModel->refresh();
                         m_mailboxView->expandAll();
                     }
 
-                    if (!activeTabIsMailbox() ||
-                        activeAccountId() != std::optional<std::string>{account})
-                    {
-                        return;
-                    }
-
-                    const auto mailbox = activeMailboxId();
-                    if (!mailbox.has_value() ||
-                        (!refreshedMailboxId.isEmpty() &&
-                         mailbox == std::optional<std::string>{refreshedMailboxId.toStdString()}))
-                    {
-                        return;
-                    }
-
-                    refreshActiveTabFromServer();
+                    static_cast<void>(account);
+                    static_cast<void>(refreshedMailboxId);
                 });
         connect(
             &m_longPollService, &javelin::app::LongPollCoordinator::mailboxRefreshed, this,

@@ -97,6 +97,8 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/api/MailMethods.h
     src/jmap/api/MethodCaller.cpp
     src/jmap/api/MethodCaller.h
+    src/jmap/api/JmapMethodTransport.cpp
+    src/jmap/api/JmapMethodTransport.h
     src/jmap/api/MethodEnvelope.cpp
     src/jmap/api/MethodEnvelope.h
     src/jmap/api/RequestBuilder.h
@@ -245,6 +247,8 @@ add_library(javelin_jmap STATIC
     src/jmap/api/MailMethods.h
     src/jmap/api/MethodCaller.cpp
     src/jmap/api/MethodCaller.h
+    src/jmap/api/JmapMethodTransport.cpp
+    src/jmap/api/JmapMethodTransport.h
     src/jmap/api/MethodEnvelope.cpp
     src/jmap/api/MethodEnvelope.h
     src/jmap/api/RequestBuilder.h
