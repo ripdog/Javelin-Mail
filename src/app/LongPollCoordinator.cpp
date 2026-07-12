@@ -56,13 +56,13 @@ namespace javelin::app
 
     LongPollCoordinator::LongPollCoordinator(
         javelin::jmap::cache::DatabaseConnection& databaseConnection,
-        javelin::jmap::JmapCore& jmapCore, javelin::jmap::api::AbstractTransport& transport,
+        javelin::jmap::JmapCore& jmapCore, javelin::jmap::api::JmapMethodTransport& methodTransport,
         QNetworkAccessManager& networkAccessManager,
         javelin::jmap::cache::AccountRepository& accountRepository,
         javelin::jmap::cache::QueryService& queryService,
         javelin::jmap::contacts::ContactService& contactService, QObject* parent)
         : QObject(parent), m_databaseConnection(databaseConnection), m_jmapCore(jmapCore),
-          m_transport(transport), m_networkAccessManager(networkAccessManager),
+          m_methodTransport(methodTransport), m_networkAccessManager(networkAccessManager),
           m_accountRepository(accountRepository), m_queryService(queryService),
           m_contactService(contactService)
     {
@@ -117,8 +117,8 @@ namespace javelin::app
         if (inserted)
         {
             serviceIt->second = std::make_unique<LongPollService>(
-                m_databaseConnection, m_transport, m_networkAccessManager, m_accountRepository,
-                m_queryService, this);
+                m_databaseConnection, m_methodTransport, m_networkAccessManager,
+                m_accountRepository, m_queryService, this);
             connectService(serviceIt->first, *serviceIt->second);
         }
         serviceIt->second->applySettings(std::move(configuration.settings), accountId,

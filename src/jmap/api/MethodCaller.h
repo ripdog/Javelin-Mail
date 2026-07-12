@@ -7,13 +7,11 @@
 
 #include <QCoroTask>
 
-#include <memory>
 #include <variant>
 
 namespace javelin::jmap::api
 {
 
-    class AbstractTransport;
     class JmapMethodTransport;
 
     struct ApiRequestContext
@@ -28,10 +26,6 @@ namespace javelin::jmap::api
     class MethodCaller
     {
       public:
-        ~MethodCaller();
-        MethodCaller(AbstractTransport& transport,
-                     const javelin::jmap::auth::TokenRefresher* tokenRefresher = nullptr,
-                     javelin::jmap::auth::SecretStore* secretStore = nullptr);
         MethodCaller(JmapMethodTransport& transport,
                      const javelin::jmap::auth::TokenRefresher* tokenRefresher = nullptr,
                      javelin::jmap::auth::SecretStore* secretStore = nullptr);
@@ -42,8 +36,7 @@ namespace javelin::jmap::api
                                                            RequestBuilder request) const;
 
       private:
-        std::unique_ptr<JmapMethodTransport> m_ownedTransport;
-        JmapMethodTransport* m_transport;
+        JmapMethodTransport& m_transport;
         const javelin::jmap::auth::TokenRefresher* m_tokenRefresher;
         javelin::jmap::auth::SecretStore* m_secretStore;
     };

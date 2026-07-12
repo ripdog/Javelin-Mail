@@ -11,7 +11,8 @@
 namespace javelin::jmap::api
 {
     class AbstractTransport;
-}
+    class JmapMethodTransport;
+} // namespace javelin::jmap::api
 
 namespace javelin::jmap::cache
 {
@@ -26,7 +27,8 @@ namespace javelin::jmap::submission
     {
       public:
         ComposeService(javelin::jmap::cache::DatabaseConnection& connection,
-                       javelin::jmap::api::AbstractTransport& transport,
+                       javelin::jmap::api::AbstractTransport& resourceTransport,
+                       javelin::jmap::api::JmapMethodTransport& methodTransport,
                        javelin::jmap::JmapCore& jmapCore);
 
         [[nodiscard]] QCoro::Task<std::variant<DraftSnapshot, javelin::jmap::LiveRefreshError>>
@@ -47,7 +49,8 @@ namespace javelin::jmap::submission
 
       private:
         javelin::jmap::cache::DatabaseConnection& m_connection;
-        javelin::jmap::api::AbstractTransport& m_transport;
+        javelin::jmap::api::AbstractTransport& m_resourceTransport;
+        javelin::jmap::api::JmapMethodTransport& m_methodTransport;
         javelin::jmap::JmapCore& m_jmapCore;
     };
 

@@ -1,6 +1,7 @@
 #include "jmap/JmapCore.h"
 
 #include "jmap/api/Error.h"
+#include "jmap/api/JmapMethodTransport.h"
 #include "jmap/api/MailMethods.h"
 #include "jmap/api/MethodCaller.h"
 #include "jmap/api/MethodEnvelope.h"
@@ -38,7 +39,8 @@ namespace javelin::jmap
     struct JmapCore::Impl
     {
         javelin::jmap::cache::DatabaseConnection* databaseConnection = nullptr;
-        javelin::jmap::api::AbstractTransport* transport = nullptr;
+        javelin::jmap::api::AbstractTransport* resourceTransport = nullptr;
+        javelin::jmap::api::JmapMethodTransport* methodTransport = nullptr;
         QString statusSummary = QStringLiteral(
             "JMAP core scaffolded. Session discovery and typed protocol live here next.");
     };
@@ -575,7 +577,7 @@ namespace javelin::jmap
 
         [[nodiscard]] QCoro::Task<std::variant<CollapsedQueryPage, LiveRefreshError>>
         performCollapsedQueryPage(javelin::jmap::cache::DatabaseConnection& databaseConnection,
-                                  javelin::jmap::api::AbstractTransport& transport,
+                                  javelin::jmap::api::JmapMethodTransport& methodTransport,
                                   LiveConnectionSettings settings, std::string accountId,
                                   javelin::jmap::api::EmailQueryFilter filter,
                                   const std::size_t offset, const std::size_t limit,
@@ -594,7 +596,7 @@ namespace javelin::jmap
             }
             const auto& session = std::get<javelin::jmap::api::Session>(sessionResult);
 
-            javelin::jmap::api::MethodCaller methodCaller{transport};
+            javelin::jmap::api::MethodCaller methodCaller{methodTransport};
             const auto apiRequestContext = buildApiRequestContext(settings, accountId, session);
 
             javelin::jmap::api::RequestBuilder builder;
@@ -796,11 +798,13 @@ namespace javelin::jmap
     }
 
     JmapCore::JmapCore(javelin::jmap::cache::DatabaseConnection& databaseConnection,
-                       javelin::jmap::api::AbstractTransport& transport)
+                       javelin::jmap::api::AbstractTransport& resourceTransport,
+                       javelin::jmap::api::JmapMethodTransport& methodTransport)
         : m_impl(std::make_unique<Impl>())
     {
         m_impl->databaseConnection = &databaseConnection;
-        m_impl->transport = &transport;
+        m_impl->resourceTransport = &resourceTransport;
+        m_impl->methodTransport = &methodTransport;
     }
 
     JmapCore::~JmapCore() = default;
@@ -827,7 +831,8 @@ namespace javelin::jmap
                           << QString::fromStdString(settings.loginEmail)
                           << QString::fromStdString(settings.sessionUrl);
         reportProgress(QStringLiteral("Discovering JMAP session..."));
-        if (m_impl->databaseConnection == nullptr || m_impl->transport == nullptr)
+        if (m_impl->databaseConnection == nullptr || m_impl->resourceTransport == nullptr ||
+            m_impl->methodTransport == nullptr)
         {
             co_return LiveRefreshError{
                 .message =
@@ -840,7 +845,7 @@ namespace javelin::jmap
             co_return *validationError;
         }
 
-        javelin::jmap::api::SessionClient sessionClient{*m_impl->transport};
+        javelin::jmap::api::SessionClient sessionClient{*m_impl->resourceTransport};
 
         const javelin::jmap::auth::SessionRequestContext sessionRequestContext{
             .credentials = buildAccountCredentials(settings, settings.loginEmail),
@@ -892,7 +897,7 @@ namespace javelin::jmap
         qInfo().noquote() << "JMAP core mailbox request context ready"
                           << QString::fromStdString(apiRequestContext.apiUrl);
 
-        javelin::jmap::api::MethodCaller methodCaller{*m_impl->transport};
+        javelin::jmap::api::MethodCaller methodCaller{*m_impl->methodTransport};
         const auto mailboxRequest = javelin::jmap::api::mailboxGet({.accountId = accountId,
                                                                     .ids = std::nullopt,
                                                                     .idsReference = std::nullopt,
@@ -1039,7 +1044,7 @@ namespace javelin::jmap
         qInfo().noquote() << "JMAP core message content refresh start"
                           << QString::fromStdString(accountId) << QString::fromStdString(emailId);
         reportProgress(QStringLiteral("Checking for saved message content..."));
-        if (m_impl->databaseConnection == nullptr || m_impl->transport == nullptr)
+        if (m_impl->databaseConnection == nullptr || m_impl->resourceTransport == nullptr)
         {
             co_return LiveRefreshError{
                 .message =
@@ -1108,7 +1113,7 @@ namespace javelin::jmap
             .isBodySection = false,
         };
         const auto downloadResult = co_await downloadBlob(
-            *m_impl->transport, context.session.downloadUrl, accountId, sourcePart,
+            *m_impl->resourceTransport, context.session.downloadUrl, accountId, sourcePart,
             context.accessToken, QStringLiteral("Message source download"));
         if (const auto* error = std::get_if<BlobDownloadError>(&downloadResult))
         {
@@ -1223,7 +1228,7 @@ namespace javelin::jmap
     JmapCore::downloadMessageSource(LiveConnectionSettings settings, std::string accountId,
                                     std::string emailId)
     {
-        if (m_impl->databaseConnection == nullptr || m_impl->transport == nullptr)
+        if (m_impl->databaseConnection == nullptr || m_impl->resourceTransport == nullptr)
         {
             co_return LiveRefreshError{
                 .message = QStringLiteral(
@@ -1268,7 +1273,7 @@ namespace javelin::jmap
             .isBodySection = false,
         };
         const auto payloadResult = co_await downloadBlob(
-            *m_impl->transport, downloadContext.session.downloadUrl, accountId, messageBlob,
+            *m_impl->resourceTransport, downloadContext.session.downloadUrl, accountId, messageBlob,
             downloadContext.accessToken, QStringLiteral("Message source download"));
         if (const auto* error = std::get_if<BlobDownloadError>(&payloadResult))
         {
@@ -1393,7 +1398,7 @@ namespace javelin::jmap
     JmapCore::submitPendingEmailMutations(LiveConnectionSettings settings, std::string accountId,
                                           const std::size_t limit)
     {
-        if (m_impl->databaseConnection == nullptr || m_impl->transport == nullptr)
+        if (m_impl->databaseConnection == nullptr || m_impl->methodTransport == nullptr)
         {
             co_return LiveRefreshError{
                 .message = QStringLiteral("JMAP core is not wired to the cache and transport yet."),
@@ -1535,7 +1540,7 @@ namespace javelin::jmap
             };
         }
 
-        javelin::jmap::api::MethodCaller methodCaller{*m_impl->transport};
+        javelin::jmap::api::MethodCaller methodCaller{*m_impl->methodTransport};
         const auto apiRequestContext = buildApiRequestContext(settings, accountId, session);
         javelin::jmap::api::RequestBuilder requestBuilder;
         requestBuilder.useCore().useMail();
@@ -1654,7 +1659,7 @@ namespace javelin::jmap
         qInfo().noquote() << "JMAP core mailbox refresh start" << QString::fromStdString(accountId)
                           << QString::fromStdString(mailboxId);
         reportProgress(QStringLiteral("Fetching messages for selected mailbox..."));
-        if (m_impl->databaseConnection == nullptr || m_impl->transport == nullptr)
+        if (m_impl->databaseConnection == nullptr || m_impl->methodTransport == nullptr)
         {
             co_return LiveRefreshError{
                 .message = QStringLiteral("JMAP core is not wired to the cache and transport yet."),
@@ -1673,7 +1678,7 @@ namespace javelin::jmap
         }
         const auto& session = std::get<javelin::jmap::api::Session>(sessionResult);
 
-        javelin::jmap::api::MethodCaller methodCaller{*m_impl->transport};
+        javelin::jmap::api::MethodCaller methodCaller{*m_impl->methodTransport};
         const auto apiRequestContext = buildApiRequestContext(settings, accountId, session);
 
         javelin::jmap::sync::MailboxRefreshExecutor mailboxRefreshExecutor{
@@ -1735,7 +1740,7 @@ namespace javelin::jmap
         qInfo().noquote() << "JMAP core search start" << QString::fromStdString(accountId)
                           << QString::fromStdString(query);
         reportProgress(QStringLiteral("Searching the server..."));
-        if (m_impl->databaseConnection == nullptr || m_impl->transport == nullptr)
+        if (m_impl->databaseConnection == nullptr || m_impl->methodTransport == nullptr)
         {
             co_return LiveRefreshError{
                 .message = QStringLiteral("JMAP core is not wired to the cache and transport yet."),
@@ -1750,7 +1755,7 @@ namespace javelin::jmap
         }
 
         const auto pageResult = co_await performCollapsedQueryPage(
-            *m_impl->databaseConnection, *m_impl->transport, settings, accountId,
+            *m_impl->databaseConnection, *m_impl->methodTransport, settings, accountId,
             javelin::jmap::search::toEmailQueryFilter(criteria), offset, limit, std::move(sort),
             reportProgress);
         if (const auto* error = std::get_if<LiveRefreshError>(&pageResult))
@@ -1788,7 +1793,7 @@ namespace javelin::jmap
                           << QString::fromStdString(mailboxId) << static_cast<qulonglong>(offset)
                           << static_cast<qulonglong>(limit);
         reportProgress(QStringLiteral("Fetching mailbox page from the server..."));
-        if (m_impl->databaseConnection == nullptr || m_impl->transport == nullptr)
+        if (m_impl->databaseConnection == nullptr || m_impl->methodTransport == nullptr)
         {
             co_return LiveRefreshError{
                 .message = QStringLiteral("JMAP core is not wired to the cache and transport yet."),
@@ -1804,7 +1809,7 @@ namespace javelin::jmap
         {
             co_return *error;
         }
-        javelin::jmap::api::MethodCaller methodCaller{*m_impl->transport};
+        javelin::jmap::api::MethodCaller methodCaller{*m_impl->methodTransport};
         javelin::jmap::sync::MailboxRefreshExecutor mailboxRefreshExecutor{
             *m_impl->databaseConnection, methodCaller,
             buildApiRequestContext(settings, accountId,
@@ -1818,7 +1823,7 @@ namespace javelin::jmap
         }
 
         const auto pageResult = co_await performCollapsedQueryPage(
-            *m_impl->databaseConnection, *m_impl->transport, settings, accountId,
+            *m_impl->databaseConnection, *m_impl->methodTransport, settings, accountId,
             javelin::jmap::api::EmailQueryFilter{
                 .inMailbox = mailboxId,
                 .text = std::nullopt,

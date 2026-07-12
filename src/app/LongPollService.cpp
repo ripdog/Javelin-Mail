@@ -43,14 +43,14 @@ namespace javelin::app
     } // namespace
 
     LongPollService::LongPollService(javelin::jmap::cache::DatabaseConnection& databaseConnection,
-                                     javelin::jmap::api::AbstractTransport& transport,
+                                     javelin::jmap::api::JmapMethodTransport& methodTransport,
                                      QNetworkAccessManager& networkAccessManager,
                                      javelin::jmap::cache::AccountRepository& accountRepository,
                                      javelin::jmap::cache::QueryService& queryService,
                                      QObject* parent)
-        : QObject(parent), m_databaseConnection(databaseConnection), m_transport(transport),
-          m_networkAccessManager(networkAccessManager), m_accountRepository(accountRepository),
-          m_queryService(queryService)
+        : QObject(parent), m_databaseConnection(databaseConnection),
+          m_methodTransport(methodTransport), m_networkAccessManager(networkAccessManager),
+          m_accountRepository(accountRepository), m_queryService(queryService)
     {
         m_refreshDebounceTimer.setSingleShot(true);
         m_refreshDebounceTimer.setInterval(refreshDebounceInterval);
@@ -241,7 +241,7 @@ namespace javelin::app
             co_return;
         }
 
-        javelin::jmap::api::MethodCaller methodCaller{m_transport};
+        javelin::jmap::api::MethodCaller methodCaller{m_methodTransport};
         const javelin::jmap::api::ApiRequestContext apiRequestContext{
             .credentials =
                 {
@@ -310,7 +310,7 @@ namespace javelin::app
             co_return false;
         }
 
-        javelin::jmap::api::MethodCaller methodCaller{m_transport};
+        javelin::jmap::api::MethodCaller methodCaller{m_methodTransport};
         const javelin::jmap::api::ApiRequestContext apiRequestContext{
             .credentials =
                 {

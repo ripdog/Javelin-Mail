@@ -1,5 +1,6 @@
 #include "jmap/contacts/ContactService.h"
 
+#include "jmap/api/JmapMethodTransport.h"
 #include "jmap/api/MethodCaller.h"
 #include "jmap/api/RequestBuilder.h"
 #include "jmap/api/Session.h"
@@ -150,7 +151,7 @@ namespace javelin::jmap::contacts
         }
 
         [[nodiscard]] QCoro::Task<ContactMutationResult>
-        setObjects(javelin::jmap::api::AbstractTransport& transport,
+        setObjects(javelin::jmap::api::JmapMethodTransport& methodTransport,
                    javelin::jmap::cache::DatabaseConnection& connection,
                    javelin::jmap::LiveConnectionSettings settings, std::string ownerAccountId,
                    std::string accountId, std::string methodName,
@@ -181,7 +182,7 @@ namespace javelin::jmap::contacts
                 javelin::jmap::api::MethodRequest<javelin::jmap::api::SetResult>{
                     .name = std::move(methodName), .arguments = std::move(*serialized)},
                 "contacts-set"));
-            javelin::jmap::api::MethodCaller caller{transport};
+            javelin::jmap::api::MethodCaller caller{methodTransport};
             const auto callResult =
                 co_await caller.call(context(settings, session, accountId), builder);
             const auto* envelope = std::get_if<javelin::jmap::api::ResponseEnvelope>(&callResult);
@@ -215,8 +216,10 @@ namespace javelin::jmap::contacts
     } // namespace
 
     ContactService::ContactService(javelin::jmap::cache::DatabaseConnection& connection,
-                                   javelin::jmap::api::AbstractTransport& transport)
-        : m_connection(connection), m_transport(transport)
+                                   javelin::jmap::api::AbstractTransport& resourceTransport,
+                                   javelin::jmap::api::JmapMethodTransport& methodTransport)
+        : m_connection(connection), m_resourceTransport(resourceTransport),
+          m_methodTransport(methodTransport)
     {
     }
 
@@ -256,7 +259,7 @@ namespace javelin::jmap::contacts
                 javelin::jmap::api::MethodRequest<javelin::jmap::api::ContactCardGetResponse>{
                     .name = "ContactCard/get", .arguments = *getArguments},
                 "contact-cards"));
-            javelin::jmap::api::MethodCaller caller{m_transport};
+            javelin::jmap::api::MethodCaller caller{m_methodTransport};
             const auto callResult =
                 co_await caller.call(context(settings, session, accountId), builder);
             const auto* envelope = std::get_if<javelin::jmap::api::ResponseEnvelope>(&callResult);
@@ -308,7 +311,7 @@ namespace javelin::jmap::contacts
                                     javelin::jmap::api::AddressBookSetRequest request)
     {
         const auto accountId = request.accountId;
-        co_return co_await setObjects(m_transport, m_connection, std::move(settings),
+        co_return co_await setObjects(m_methodTransport, m_connection, std::move(settings),
                                       std::move(ownerAccountId), accountId, "AddressBook/set",
                                       javelin::jmap::api::serializeAddressBookSetRequest(request));
     }
@@ -319,7 +322,7 @@ namespace javelin::jmap::contacts
                                     javelin::jmap::api::ContactCardSetRequest request)
     {
         const auto accountId = request.accountId;
-        co_return co_await setObjects(m_transport, m_connection, std::move(settings),
+        co_return co_await setObjects(m_methodTransport, m_connection, std::move(settings),
                                       std::move(ownerAccountId), accountId, "ContactCard/set",
                                       javelin::jmap::api::serializeContactCardSetRequest(request));
     }
@@ -330,7 +333,7 @@ namespace javelin::jmap::contacts
                                      javelin::jmap::api::ContactCardCopyRequest request)
     {
         const auto accountId = request.accountId;
-        co_return co_await setObjects(m_transport, m_connection, std::move(settings),
+        co_return co_await setObjects(m_methodTransport, m_connection, std::move(settings),
                                       std::move(ownerAccountId), accountId, "ContactCard/copy",
                                       javelin::jmap::api::serializeContactCardCopyRequest(request));
     }
@@ -348,7 +351,7 @@ namespace javelin::jmap::contacts
         const auto& session = std::get<javelin::jmap::api::Session>(sessionResult);
         QString uploadUrl = QString::fromStdString(session.uploadUrl);
         uploadUrl.replace(QStringLiteral("{accountId}"), QString::fromStdString(accountId));
-        const auto result = co_await m_transport.send({
+        const auto result = co_await m_resourceTransport.send({
             .method = javelin::jmap::api::HttpMethod::Post,
             .url = QUrl{uploadUrl},
             .headers = {{.name = "Authorization",

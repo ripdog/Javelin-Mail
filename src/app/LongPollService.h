@@ -1,8 +1,8 @@
 #pragma once
 
 #include "jmap/JmapCore.h"
+#include "jmap/api/JmapMethodTransport.h"
 #include "jmap/api/Session.h"
-#include "jmap/api/Transport.h"
 #include "jmap/cache/AccountRepository.h"
 #include "jmap/cache/Database.h"
 #include "jmap/cache/QueryService.h"
@@ -59,7 +59,7 @@ namespace javelin::app
         Q_ENUM(Status)
 
         LongPollService(javelin::jmap::cache::DatabaseConnection& databaseConnection,
-                        javelin::jmap::api::AbstractTransport& transport,
+                        javelin::jmap::api::JmapMethodTransport& methodTransport,
                         QNetworkAccessManager& networkAccessManager,
                         javelin::jmap::cache::AccountRepository& accountRepository,
                         javelin::jmap::cache::QueryService& queryService,
@@ -123,7 +123,7 @@ namespace javelin::app
             const std::vector<javelin::jmap::sync::RefreshNotificationCandidate>& candidates);
 
         javelin::jmap::cache::DatabaseConnection& m_databaseConnection;
-        javelin::jmap::api::AbstractTransport& m_transport;
+        javelin::jmap::api::JmapMethodTransport& m_methodTransport;
         QNetworkAccessManager& m_networkAccessManager;
         javelin::jmap::cache::AccountRepository& m_accountRepository;
         javelin::jmap::cache::QueryService& m_queryService;

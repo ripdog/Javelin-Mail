@@ -24,7 +24,8 @@ namespace javelin::jmap::cache
 namespace javelin::jmap::api
 {
     class AbstractTransport;
-}
+    class JmapMethodTransport;
+} // namespace javelin::jmap::api
 
 namespace javelin::jmap
 {
@@ -156,7 +157,8 @@ namespace javelin::jmap
       public:
         JmapCore();
         JmapCore(javelin::jmap::cache::DatabaseConnection& databaseConnection,
-                 javelin::jmap::api::AbstractTransport& transport);
+                 javelin::jmap::api::AbstractTransport& resourceTransport,
+                 javelin::jmap::api::JmapMethodTransport& methodTransport);
         ~JmapCore();
 
         JmapCore(const JmapCore&) = delete;

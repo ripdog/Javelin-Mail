@@ -1,5 +1,6 @@
 #include "jmap/sync/MailboxRefreshExecutor.h"
 #include "FixtureReader.h"
+#include "jmap/api/JmapMethodTransport.h"
 #include "jmap/api/MethodCaller.h"
 #include "jmap/api/MethodEnvelope.h"
 #include "jmap/api/Transport.h"
@@ -51,6 +52,16 @@ namespace
     class FakeTransport final : public javelin::jmap::api::AbstractTransport
     {
       public:
+        FakeTransport() : methodTransport(*this)
+        {
+        }
+
+        [[nodiscard]] operator javelin::jmap::api::JmapMethodTransport&()
+        {
+            return methodTransport;
+        }
+
+        javelin::jmap::api::HttpJmapMethodTransport methodTransport;
         std::vector<javelin::jmap::api::HttpRequest> requests;
         std::vector<javelin::jmap::api::TransportResult> queuedResults;
 

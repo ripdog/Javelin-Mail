@@ -1,5 +1,6 @@
 #include "FixtureReader.h"
 #include "jmap/JmapCore.h"
+#include "jmap/api/JmapMethodTransport.h"
 #include "jmap/api/MethodEnvelope.h"
 #include "jmap/api/SessionParser.h"
 #include "jmap/api/Transport.h"
@@ -52,6 +53,11 @@ namespace
     class FakeTransport final : public javelin::jmap::api::AbstractTransport
     {
       public:
+        FakeTransport() : methodTransport(*this)
+        {
+        }
+
+        javelin::jmap::api::HttpJmapMethodTransport methodTransport;
         std::vector<javelin::jmap::api::HttpRequest> requests;
         std::vector<javelin::jmap::api::TransportResult> queuedResults;
         std::function<javelin::jmap::api::TransportResult(const javelin::jmap::api::HttpRequest&)>
@@ -195,7 +201,7 @@ TEST_CASE("JmapCore refreshMessageContent caches raw message sources",
                                   "--b--\r\n"),
     });
 
-    javelin::jmap::JmapCore core{databaseContext.connection, transport};
+    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
     const auto result = QCoro::waitFor(core.refreshMessageContent(
         {
             .sessionUrl = "https://mail.example.com/.well-known/jmap",
@@ -253,7 +259,7 @@ TEST_CASE("JmapCore reports missing message source downloads distinctly",
         .httpStatus = 404,
     });
 
-    javelin::jmap::JmapCore core{databaseContext.connection, transport};
+    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
     const auto result = QCoro::waitFor(core.refreshMessageContent(
         {
             .sessionUrl = "https://mail.example.com/.well-known/jmap",
@@ -314,7 +320,7 @@ TEST_CASE("JmapCore caches message content from junk and trash mailboxes",
                                   "Readable junk body\r\n"),
     });
 
-    javelin::jmap::JmapCore core{databaseContext.connection, transport};
+    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
     const auto result = QCoro::waitFor(core.refreshMessageContent(
         {
             .sessionUrl = "https://mail.example.com/.well-known/jmap",
@@ -390,7 +396,7 @@ TEST_CASE("JmapCore searchMessages uses Email/query text filters and caches thre
         }};
     };
 
-    javelin::jmap::JmapCore core{databaseContext.connection, transport};
+    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
     const auto result = QCoro::waitFor(core.searchMessages(
         {
             .sessionUrl = "https://mail.example.com/.well-known/jmap",
@@ -454,7 +460,7 @@ TEST_CASE("JmapCore queues archive and delete mailbox moves as pending actions",
     REQUIRE_FALSE(emailRepository.replaceAll("account-1", {email}).has_value());
 
     FakeTransport transport;
-    javelin::jmap::JmapCore core{databaseContext.connection, transport};
+    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
 
     const auto archiveResult =
         core.queueArchiveEmail("account-1", "eml-1", "mbx-inbox", "mbx-archive");
@@ -532,7 +538,7 @@ TEST_CASE("JmapCore permanently destroys queued emails through Email/set",
             R"({"methodResponses":[["Email/set",{"accountId":"u1","oldState":"email-state-1","newState":"email-state-2","updated":{},"destroyed":["eml-1"],"notUpdated":{},"notDestroyed":{}},"queued-email-set"]],"createdIds":{},"sessionState":"session-state-2"})",
     });
 
-    javelin::jmap::JmapCore core{databaseContext.connection, transport};
+    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
     const auto queuedResult = core.queueDestroyEmail("u1", "eml-1");
     REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(queuedResult));
 
@@ -589,7 +595,7 @@ TEST_CASE("JmapCore queues mailbox copies as pending actions", "[jmap][core][pen
     REQUIRE_FALSE(emailRepository.replaceAll("account-1", {email}).has_value());
 
     FakeTransport transport;
-    javelin::jmap::JmapCore core{databaseContext.connection, transport};
+    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
 
     const auto copyResult = core.queueCopyEmail("account-1", "eml-1", "mbx-inbox", "mbx-projects");
     REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(copyResult));
@@ -631,7 +637,7 @@ TEST_CASE("JmapCore queues read keyword mutations as pending actions",
     REQUIRE_FALSE(emailRepository.replaceAll("account-1", {email}).has_value());
 
     FakeTransport transport;
-    javelin::jmap::JmapCore core{databaseContext.connection, transport};
+    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
 
     const auto markReadResult = core.queueMarkEmailRead("account-1", "eml-1");
     REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(markReadResult));
@@ -689,7 +695,7 @@ TEST_CASE("JmapCore downloadAttachment reads attachment payloads from cached raw
                       .has_value());
 
     FakeTransport transport;
-    javelin::jmap::JmapCore core{databaseContext.connection, transport};
+    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
     const auto result = QCoro::waitFor(core.downloadAttachment(
         {
             .sessionUrl = "https://mail.example.com/.well-known/jmap",
@@ -750,7 +756,7 @@ TEST_CASE("JmapCore downloadAttachment reads inline payloads from cached raw sou
                       .has_value());
 
     FakeTransport transport;
-    javelin::jmap::JmapCore core{databaseContext.connection, transport};
+    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
     const auto result = QCoro::waitFor(core.downloadAttachment(
         {
             .sessionUrl = "https://mail.example.com/.well-known/jmap",
@@ -801,7 +807,7 @@ TEST_CASE("JmapCore submits queued mailbox mutations through Email/set",
             R"({"methodResponses":[["Email/set",{"accountId":"u1","oldState":"email-state-1","newState":"email-state-2","updated":{"eml-1":null},"notUpdated":{}},"queued-email-set"]],"createdIds":{},"sessionState":"session-state-2"})",
     });
 
-    javelin::jmap::JmapCore core{databaseContext.connection, transport};
+    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
     const auto queuedResult = core.queueArchiveEmail("u1", "eml-1", "mbx-inbox", "mbx-archive");
     REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(queuedResult));
 
@@ -874,7 +880,7 @@ TEST_CASE("JmapCore submits queued read keyword mutations through Email/set",
             R"({"methodResponses":[["Email/set",{"accountId":"u1","oldState":"email-state-1","newState":"email-state-2","updated":{"eml-1":null},"notUpdated":{}},"queued-email-set"]],"createdIds":{},"sessionState":"session-state-2"})",
     });
 
-    javelin::jmap::JmapCore core{databaseContext.connection, transport};
+    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
     const auto queuedResult = core.queueMarkEmailRead("u1", "eml-1");
     REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(queuedResult));
 

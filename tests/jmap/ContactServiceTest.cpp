@@ -1,5 +1,6 @@
 #include "jmap/contacts/ContactService.h"
 
+#include "jmap/api/JmapMethodTransport.h"
 #include "jmap/api/Transport.h"
 #include "jmap/cache/ContactRepository.h"
 #include "jmap/cache/SessionRepository.h"
@@ -92,12 +93,13 @@ TEST_CASE("contact service greedily refreshes every contact into the cache",
             QByteArray{
                 R"({"methodResponses":[["AddressBook/get",{"accountId":"a1","state":"b1","list":[{"id":"book-1","name":"Personal","description":null,"sortOrder":0,"isDefault":true,"isSubscribed":true,"shareWith":null,"myRights":{"mayRead":true,"mayWrite":true,"mayShare":false,"mayDelete":true}}],"notFound":[]},"address-books"],["ContactCard/get",{"accountId":"a1","state":"c1","list":[{"id":"card-1","uid":"uid-1","kind":"individual","addressBookIds":{"book-1":true},"name":{"full":"Joe Bloggs"},"emails":{"e1":{"address":"joe@example.test"}}}],"notFound":[]},"contact-cards"]],"sessionState":"s2"})"},
     });
-    javelin::jmap::contacts::ContactService service{connection, transport};
+    javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
+    javelin::jmap::contacts::ContactService service{connection, transport, methodTransport};
     const auto result =
         QCoro::waitFor(service.refreshAll({.sessionUrl = "https://example.test/.well-known/jmap",
                                            .loginEmail = "alice@example.test",
                                            .apiKey = "secret"},
-        "a1"));
+                                          "a1"));
     REQUIRE(std::holds_alternative<javelin::jmap::contacts::ContactRefreshSummary>(result));
     CHECK(std::get<javelin::jmap::contacts::ContactRefreshSummary>(result).contactCount == 1);
     CHECK(transport.lastRequest.body.contains("AddressBook/get"));

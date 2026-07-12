@@ -4,6 +4,7 @@
 #include "app/LongPollCoordinator.h"
 
 #include "jmap/JmapCore.h"
+#include "jmap/api/JmapMethodTransport.h"
 #include "jmap/api/Transport.h"
 #include "jmap/cache/AccountRepository.h"
 #include "jmap/cache/ContactRepository.h"
@@ -58,18 +59,21 @@ namespace javelin::app
         m_longPollNetworkAccessManager = std::make_unique<QNetworkAccessManager>();
         m_transport =
             std::make_unique<javelin::jmap::api::QtNetworkTransport>(*m_networkAccessManager);
+        m_methodTransport =
+            std::make_unique<javelin::jmap::api::HttpJmapMethodTransport>(*m_transport);
         m_inlineMessageSchemeHandler =
             std::make_unique<InlineMessageSchemeHandler>(m_databaseConnection);
         QWebEngineProfile::defaultProfile()->installUrlSchemeHandler(
             javelin::jmap::render::inlineMessageUrlScheme().toUtf8(),
             m_inlineMessageSchemeHandler.get());
-        m_jmapCore = std::make_unique<javelin::jmap::JmapCore>(m_databaseConnection, *m_transport);
+        m_jmapCore = std::make_unique<javelin::jmap::JmapCore>(m_databaseConnection, *m_transport,
+                                                               *m_methodTransport);
         m_accountRepository =
             std::make_unique<javelin::jmap::cache::AccountRepository>(m_databaseConnection);
         m_contactRepository =
             std::make_unique<javelin::jmap::cache::ContactRepository>(m_databaseConnection);
         m_contactService = std::make_unique<javelin::jmap::contacts::ContactService>(
-            m_databaseConnection, *m_transport);
+            m_databaseConnection, *m_transport, *m_methodTransport);
         m_contactIdentityLookup =
             std::make_unique<javelin::jmap::contacts::ContactIdentityLookup>(*m_contactRepository);
         m_identityRepository =
@@ -83,9 +87,9 @@ namespace javelin::app
         m_submissionRepository =
             std::make_unique<javelin::jmap::cache::SubmissionRepository>(m_databaseConnection);
         m_composeService = std::make_unique<javelin::jmap::submission::ComposeService>(
-            m_databaseConnection, *m_transport, *m_jmapCore);
+            m_databaseConnection, *m_transport, *m_methodTransport, *m_jmapCore);
         m_longPollService = std::make_unique<LongPollCoordinator>(
-            m_databaseConnection, *m_jmapCore, *m_transport, *m_longPollNetworkAccessManager,
+            m_databaseConnection, *m_jmapCore, *m_methodTransport, *m_longPollNetworkAccessManager,
             *m_accountRepository, *m_queryService, *m_contactService);
     }
 

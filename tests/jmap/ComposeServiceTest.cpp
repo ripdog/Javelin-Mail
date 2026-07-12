@@ -1,6 +1,7 @@
 #include "jmap/submission/ComposeService.h"
 
 #include "jmap/JmapCore.h"
+#include "jmap/api/JmapMethodTransport.h"
 #include "jmap/api/Session.h"
 #include "jmap/api/Transport.h"
 #include "jmap/cache/IdentityRepository.h"
@@ -199,8 +200,9 @@ TEST_CASE("compose sending uses the account selected with the From identity",
 
     FakeTransport transport;
     transport.results = {draftCreatedResponse(), submittedResponse(), cleanupResponse()};
-    javelin::jmap::JmapCore core{connection, transport};
-    javelin::jmap::submission::ComposeService service{connection, transport, core};
+    javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
+    javelin::jmap::JmapCore core{connection, transport, methodTransport};
+    javelin::jmap::submission::ComposeService service{connection, transport, methodTransport, core};
 
     const auto result = QCoro::waitFor(service.send(
         {

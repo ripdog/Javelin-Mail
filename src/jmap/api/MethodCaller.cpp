@@ -1,7 +1,6 @@
 #include "jmap/api/MethodCaller.h"
 
 #include "jmap/api/JmapMethodTransport.h"
-#include "jmap/api/Transport.h"
 #include "jmap/auth/AccessTokenResolver.h"
 
 #include <QDebug>
@@ -10,21 +9,10 @@
 namespace javelin::jmap::api
 {
 
-    MethodCaller::~MethodCaller() = default;
-
-    MethodCaller::MethodCaller(AbstractTransport& transport,
-                               const javelin::jmap::auth::TokenRefresher* tokenRefresher,
-                               javelin::jmap::auth::SecretStore* secretStore)
-        : m_ownedTransport(std::make_unique<HttpJmapMethodTransport>(transport)),
-          m_transport(m_ownedTransport.get()), m_tokenRefresher(tokenRefresher),
-          m_secretStore(secretStore)
-    {
-    }
-
     MethodCaller::MethodCaller(JmapMethodTransport& transport,
                                const javelin::jmap::auth::TokenRefresher* tokenRefresher,
                                javelin::jmap::auth::SecretStore* secretStore)
-        : m_transport(&transport), m_tokenRefresher(tokenRefresher), m_secretStore(secretStore)
+        : m_transport(transport), m_tokenRefresher(tokenRefresher), m_secretStore(secretStore)
     {
     }
 
@@ -42,7 +30,7 @@ namespace javelin::jmap::api
             co_return std::get<AuthError>(tokenResult);
         }
 
-        const auto transportResult = co_await m_transport->call(JmapMethodRequest{
+        const auto transportResult = co_await m_transport.call(JmapMethodRequest{
             .apiUrl = std::move(requestContext.apiUrl),
             .accessToken = std::get<javelin::jmap::auth::OAuthToken>(tokenResult).accessToken,
             .envelope = std::move(request),

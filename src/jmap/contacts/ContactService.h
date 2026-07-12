@@ -15,7 +15,8 @@
 namespace javelin::jmap::api
 {
     class AbstractTransport;
-}
+    class JmapMethodTransport;
+} // namespace javelin::jmap::api
 namespace javelin::jmap::cache
 {
     class DatabaseConnection;
@@ -55,7 +56,8 @@ namespace javelin::jmap::contacts
     {
       public:
         ContactService(javelin::jmap::cache::DatabaseConnection& connection,
-                       javelin::jmap::api::AbstractTransport& transport);
+                       javelin::jmap::api::AbstractTransport& resourceTransport,
+                       javelin::jmap::api::JmapMethodTransport& methodTransport);
 
         [[nodiscard]] QCoro::Task<ContactRefreshResult>
         refreshAll(javelin::jmap::LiveConnectionSettings settings, std::string ownerAccountId);
@@ -74,6 +76,7 @@ namespace javelin::jmap::contacts
 
       private:
         javelin::jmap::cache::DatabaseConnection& m_connection;
-        javelin::jmap::api::AbstractTransport& m_transport;
+        javelin::jmap::api::AbstractTransport& m_resourceTransport;
+        javelin::jmap::api::JmapMethodTransport& m_methodTransport;
     };
 } // namespace javelin::jmap::contacts

@@ -37,6 +37,11 @@ namespace
     class FakeTransport final : public javelin::jmap::api::AbstractTransport
     {
       public:
+        FakeTransport() : methodTransport(*this)
+        {
+        }
+
+        javelin::jmap::api::HttpJmapMethodTransport methodTransport;
         javelin::jmap::api::HttpRequest lastRequest;
         std::vector<javelin::jmap::api::TransportResult> queuedResults;
 
@@ -165,7 +170,7 @@ TEST_CASE("method caller posts a typed request envelope and parses the response"
         .body = QByteArray::fromStdString(javelin::tests::loadFixture("jmap/method/response.json")),
     });
 
-    javelin::jmap::api::MethodCaller methodCaller{transport};
+    javelin::jmap::api::MethodCaller methodCaller{transport.methodTransport};
     const auto result =
         QCoro::waitFor(methodCaller.call(makeRequestContext(), loadRequestEnvelope()));
 
@@ -212,7 +217,8 @@ TEST_CASE("method caller refreshes expired tokens and persists them when configu
     auto requestContext = makeRequestContext();
     requestContext.credentials.token.expiry = javelin::jmap::auth::Clock::now();
 
-    javelin::jmap::api::MethodCaller methodCaller{transport, &tokenRefresher, &secretStore};
+    javelin::jmap::api::MethodCaller methodCaller{transport.methodTransport, &tokenRefresher,
+                                                  &secretStore};
     const auto result = QCoro::waitFor(methodCaller.call(requestContext, loadRequestEnvelope()));
 
     REQUIRE(std::holds_alternative<javelin::jmap::api::ResponseEnvelope>(result));
@@ -233,7 +239,7 @@ TEST_CASE("method caller propagates transport failures", "[jmap][method][transpo
         .httpStatus = 401,
     });
 
-    javelin::jmap::api::MethodCaller methodCaller{transport};
+    javelin::jmap::api::MethodCaller methodCaller{transport.methodTransport};
     const auto result =
         QCoro::waitFor(methodCaller.call(makeRequestContext(), loadRequestEnvelope()));
 
@@ -251,7 +257,7 @@ TEST_CASE("method caller maps malformed responses to protocol errors", "[jmap][m
         .body = "{not json}",
     });
 
-    javelin::jmap::api::MethodCaller methodCaller{transport};
+    javelin::jmap::api::MethodCaller methodCaller{transport.methodTransport};
     const auto result =
         QCoro::waitFor(methodCaller.call(makeRequestContext(), loadRequestEnvelope()));
 

@@ -66,7 +66,7 @@ namespace javelin::app
       public:
         LongPollCoordinator(javelin::jmap::cache::DatabaseConnection& databaseConnection,
                             javelin::jmap::JmapCore& jmapCore,
-                            javelin::jmap::api::AbstractTransport& transport,
+                            javelin::jmap::api::JmapMethodTransport& methodTransport,
                             QNetworkAccessManager& networkAccessManager,
                             javelin::jmap::cache::AccountRepository& accountRepository,
                             javelin::jmap::cache::QueryService& queryService,
@@ -139,7 +139,7 @@ namespace javelin::app
 
         javelin::jmap::cache::DatabaseConnection& m_databaseConnection;
         javelin::jmap::JmapCore& m_jmapCore;
-        javelin::jmap::api::AbstractTransport& m_transport;
+        javelin::jmap::api::JmapMethodTransport& m_methodTransport;
         QNetworkAccessManager& m_networkAccessManager;
         javelin::jmap::cache::AccountRepository& m_accountRepository;
         javelin::jmap::cache::QueryService& m_queryService;

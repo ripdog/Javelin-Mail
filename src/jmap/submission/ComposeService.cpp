@@ -1,5 +1,6 @@
 #include "jmap/submission/ComposeService.h"
 
+#include "jmap/api/JmapMethodTransport.h"
 #include "jmap/api/MailMethods.h"
 #include "jmap/api/MethodCaller.h"
 #include "jmap/api/ResponseReader.h"
@@ -410,7 +411,7 @@ namespace javelin::jmap::submission
         [[nodiscard]] QCoro::Task<std::variant<std::vector<javelin::jmap::domain::Identity>,
                                                javelin::jmap::LiveRefreshError>>
         ensureIdentities(javelin::jmap::cache::DatabaseConnection& connection,
-                         javelin::jmap::api::AbstractTransport& transport,
+                         javelin::jmap::api::JmapMethodTransport& methodTransport,
                          javelin::jmap::LiveConnectionSettings settings, std::string accountId)
         {
             javelin::jmap::cache::IdentityRepository identityRepository{connection};
@@ -442,7 +443,7 @@ namespace javelin::jmap::submission
                 };
             }
 
-            javelin::jmap::api::MethodCaller methodCaller{transport};
+            javelin::jmap::api::MethodCaller methodCaller{methodTransport};
             javelin::jmap::api::RequestBuilder builder;
             builder.useCore().useCapability(
                 std::string{javelin::jmap::api::submissionCapabilityUri});
@@ -810,9 +811,11 @@ namespace javelin::jmap::submission
     } // namespace
 
     ComposeService::ComposeService(javelin::jmap::cache::DatabaseConnection& connection,
-                                   javelin::jmap::api::AbstractTransport& transport,
+                                   javelin::jmap::api::AbstractTransport& resourceTransport,
+                                   javelin::jmap::api::JmapMethodTransport& methodTransport,
                                    javelin::jmap::JmapCore& jmapCore)
-        : m_connection(connection), m_transport(transport), m_jmapCore(jmapCore)
+        : m_connection(connection), m_resourceTransport(resourceTransport),
+          m_methodTransport(methodTransport), m_jmapCore(jmapCore)
     {
     }
 
@@ -827,7 +830,7 @@ namespace javelin::jmap::submission
         }
 
         const auto identitiesResult = co_await ensureIdentities(
-            m_connection, m_transport, std::move(settings), std::move(accountId));
+            m_connection, m_methodTransport, std::move(settings), std::move(accountId));
         if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&identitiesResult))
         {
             co_return *error;
@@ -866,7 +869,7 @@ namespace javelin::jmap::submission
         }
 
         const auto identitiesResult =
-            co_await ensureIdentities(m_connection, m_transport, settings, request.accountId);
+            co_await ensureIdentities(m_connection, m_methodTransport, settings, request.accountId);
         if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&identitiesResult))
         {
             co_return *error;
@@ -1056,8 +1059,8 @@ namespace javelin::jmap::submission
             };
         }
 
-        const auto identitiesResult =
-            co_await ensureIdentities(m_connection, m_transport, settings, snapshot.accountId);
+        const auto identitiesResult = co_await ensureIdentities(m_connection, m_methodTransport,
+                                                                settings, snapshot.accountId);
         if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&identitiesResult))
         {
             co_return *error;
@@ -1114,8 +1117,8 @@ namespace javelin::jmap::submission
                     attachmentMediaType(QString::fromStdString(attachment.localFilePath));
             }
 
-            const auto uploadResult = co_await uploadAttachment(m_transport, settings, session,
-                                                                snapshot.accountId, attachment);
+            const auto uploadResult = co_await uploadAttachment(
+                m_resourceTransport, settings, session, snapshot.accountId, attachment);
             if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&uploadResult))
             {
                 co_return *error;
@@ -1185,7 +1188,7 @@ namespace javelin::jmap::submission
                            : std::vector<std::string>{},
         };
 
-        javelin::jmap::api::MethodCaller methodCaller{m_transport};
+        javelin::jmap::api::MethodCaller methodCaller{m_methodTransport};
         javelin::jmap::api::RequestBuilder builder;
         builder.useCore().useMail();
         const auto methodRequest = javelin::jmap::api::emailSet(request);
@@ -1312,7 +1315,7 @@ namespace javelin::jmap::submission
             };
         }
 
-        javelin::jmap::api::MethodCaller methodCaller{m_transport};
+        javelin::jmap::api::MethodCaller methodCaller{m_methodTransport};
         javelin::jmap::api::RequestBuilder builder;
         builder.useCore().useMail().useCapability(
             std::string{javelin::jmap::api::submissionCapabilityUri});
