@@ -59,7 +59,6 @@ The explicit ownership in `ProcessServices` is a useful foundation. Continue con
 - Remove duplicate `MessageListDelegate.cpp/.h` entries from `JAVELIN_FORMAT_FILES`.
 - Remove or restore the stale `LongPollMailboxObserverTest.cpp` formatting-list entry.
 - Update `DEVELOPMENT_PLAN.md` where the intended repository layout has diverged from the current implementation.
-- Move generated Arch packages out of the repository root or standardise a dedicated package-output directory.
 
 ## Suggested order
 
