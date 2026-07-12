@@ -1,6 +1,8 @@
 #pragma once
 
 #include "app/LongPollService.h"
+#include "jmap/query/EmailListSort.h"
+#include "jmap/search/EmailSearch.h"
 
 #include <QObject>
 
@@ -12,6 +14,24 @@
 
 namespace javelin::app
 {
+
+    struct MailboxWindowIntent
+    {
+        std::string accountId;
+        std::string mailboxId;
+        std::size_t offset = 0;
+        std::size_t limit = 0;
+        javelin::jmap::query::EmailListSort sort;
+    };
+
+    struct SearchWindowIntent
+    {
+        std::string accountId;
+        javelin::jmap::search::EmailSearchCriteria criteria;
+        std::size_t offset = 0;
+        std::size_t limit = 0;
+        javelin::jmap::query::EmailListSort sort;
+    };
 
     struct LongPollAccountConfiguration
     {
@@ -26,6 +46,7 @@ namespace javelin::app
 
       public:
         LongPollCoordinator(javelin::jmap::cache::DatabaseConnection& databaseConnection,
+                            javelin::jmap::JmapCore& jmapCore,
                             javelin::jmap::api::AbstractTransport& transport,
                             QNetworkAccessManager& networkAccessManager,
                             javelin::jmap::cache::AccountRepository& accountRepository,
@@ -36,6 +57,10 @@ namespace javelin::app
         [[nodiscard]] std::uint64_t observeMailbox(std::string accountId, std::string mailboxId);
         void unobserveMailbox(std::uint64_t observationId);
         [[nodiscard]] bool requestAccountSynchronization(std::string_view accountId);
+        [[nodiscard]] QCoro::Task<javelin::jmap::MailboxPageResult>
+        requestMailboxWindow(MailboxWindowIntent intent);
+        [[nodiscard]] QCoro::Task<javelin::jmap::MessageSearchResult>
+        requestSearchWindow(SearchWindowIntent intent);
         void stop();
 
       Q_SIGNALS:
@@ -58,6 +83,7 @@ namespace javelin::app
         };
 
         javelin::jmap::cache::DatabaseConnection& m_databaseConnection;
+        javelin::jmap::JmapCore& m_jmapCore;
         javelin::jmap::api::AbstractTransport& m_transport;
         QNetworkAccessManager& m_networkAccessManager;
         javelin::jmap::cache::AccountRepository& m_accountRepository;

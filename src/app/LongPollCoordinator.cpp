@@ -8,13 +8,13 @@ namespace javelin::app
 
     LongPollCoordinator::LongPollCoordinator(
         javelin::jmap::cache::DatabaseConnection& databaseConnection,
-        javelin::jmap::api::AbstractTransport& transport,
+        javelin::jmap::JmapCore& jmapCore, javelin::jmap::api::AbstractTransport& transport,
         QNetworkAccessManager& networkAccessManager,
         javelin::jmap::cache::AccountRepository& accountRepository,
         javelin::jmap::cache::QueryService& queryService, QObject* parent)
-        : QObject(parent), m_databaseConnection(databaseConnection), m_transport(transport),
-          m_networkAccessManager(networkAccessManager), m_accountRepository(accountRepository),
-          m_queryService(queryService)
+        : QObject(parent), m_databaseConnection(databaseConnection), m_jmapCore(jmapCore),
+          m_transport(transport), m_networkAccessManager(networkAccessManager),
+          m_accountRepository(accountRepository), m_queryService(queryService)
     {
     }
 
@@ -99,6 +99,38 @@ namespace javelin::app
         if (service == m_services.end())
             return false;
         return service->second->requestSynchronization();
+    }
+
+    QCoro::Task<javelin::jmap::MailboxPageResult>
+    LongPollCoordinator::requestMailboxWindow(MailboxWindowIntent intent)
+    {
+        const auto configuration = m_configurations.find(intent.accountId);
+        if (configuration == m_configurations.end())
+        {
+            co_return javelin::jmap::LiveRefreshError{
+                .message = QStringLiteral("Account synchronization is not configured."),
+                .requiresUserIntervention = true,
+            };
+        }
+        co_return co_await m_jmapCore.queryMailboxPage(configuration->second.settings,
+                                                       intent.accountId, intent.mailboxId,
+                                                       intent.offset, intent.limit, intent.sort);
+    }
+
+    QCoro::Task<javelin::jmap::MessageSearchResult>
+    LongPollCoordinator::requestSearchWindow(SearchWindowIntent intent)
+    {
+        const auto configuration = m_configurations.find(intent.accountId);
+        if (configuration == m_configurations.end())
+        {
+            co_return javelin::jmap::LiveRefreshError{
+                .message = QStringLiteral("Account synchronization is not configured."),
+                .requiresUserIntervention = true,
+            };
+        }
+        co_return co_await m_jmapCore.searchMessages(configuration->second.settings,
+                                                     intent.accountId, intent.criteria,
+                                                     intent.offset, intent.limit, intent.sort);
     }
 
     void LongPollCoordinator::stop()

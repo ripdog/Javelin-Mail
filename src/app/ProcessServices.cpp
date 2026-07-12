@@ -85,7 +85,7 @@ namespace javelin::app
         m_composeService = std::make_unique<javelin::jmap::submission::ComposeService>(
             m_databaseConnection, *m_transport, *m_jmapCore);
         m_longPollService = std::make_unique<LongPollCoordinator>(
-            m_databaseConnection, *m_transport, *m_longPollNetworkAccessManager,
+            m_databaseConnection, *m_jmapCore, *m_transport, *m_longPollNetworkAccessManager,
             *m_accountRepository, *m_queryService);
     }
 

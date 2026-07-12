@@ -2260,18 +2260,13 @@ namespace javelin::gui::shell
         const auto tabAccountId = tab.accountId;
         const auto tabMailboxId = tab.mailboxId;
         const auto tabOffset = tab.page.offset;
-        auto task = m_jmapCore.queryMailboxPage(
-            toLiveConnectionSettings(
-                javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
-                    QString::fromStdString(tab.accountId))),
-            tab.accountId, tab.mailboxId, tab.page.offset, pageSize, m_emailListSort,
-            [this, mailboxName = tab.title, mailboxId = tab.mailboxId](const QString& message)
-            {
-                qCDebug(logGuiMailbox).noquote()
-                    << "mailbox" << mailboxName << '(' << QString::fromStdString(mailboxId) << ')'
-                    << message;
-                m_statusBar->showMessage(message);
-            });
+        auto task = m_longPollService.requestMailboxWindow(javelin::app::MailboxWindowIntent{
+            .accountId = tab.accountId,
+            .mailboxId = tab.mailboxId,
+            .offset = tab.page.offset,
+            .limit = pageSize,
+            .sort = m_emailListSort,
+        });
         QCoro::connect(
             std::move(task), this,
             [this, tabAccountId, tabMailboxId, tabOffset](javelin::jmap::MailboxPageResult result)
@@ -2349,16 +2344,13 @@ namespace javelin::gui::shell
         const auto tabQuery = tab.query;
         const auto tabCriteria = tab.criteria;
         const auto tabOffset = tab.page.offset;
-        auto task = m_jmapCore.searchMessages(
-            toLiveConnectionSettings(
-                javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
-                    QString::fromStdString(tab.accountId))),
-            tab.accountId, tabCriteria, tab.page.offset, pageSize, m_emailListSort,
-            [this](const QString& message)
-            {
-                qDebug().noquote() << "GUI search progress" << message;
-                m_statusBar->showMessage(message);
-            });
+        auto task = m_longPollService.requestSearchWindow(javelin::app::SearchWindowIntent{
+            .accountId = tab.accountId,
+            .criteria = tabCriteria,
+            .offset = tab.page.offset,
+            .limit = pageSize,
+            .sort = m_emailListSort,
+        });
         QCoro::connect(
             std::move(task), this,
             [this, tabAccountId, tabQuery, tabOffset](javelin::jmap::MessageSearchResult result)
