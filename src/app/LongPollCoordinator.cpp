@@ -93,6 +93,14 @@ namespace javelin::app
         applyAccountConfiguration(accountId);
     }
 
+    bool LongPollCoordinator::requestAccountSynchronization(const std::string_view accountId)
+    {
+        const auto service = m_services.find(std::string{accountId});
+        if (service == m_services.end())
+            return false;
+        return service->second->requestSynchronization();
+    }
+
     void LongPollCoordinator::stop()
     {
         for (const auto& [accountId, service] : m_services)

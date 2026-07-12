@@ -53,6 +53,7 @@ namespace javelin::app
         void applySettings(javelin::jmap::LiveConnectionSettings settings, std::string accountId,
                            std::vector<std::string> mailboxIds);
         void stop();
+        [[nodiscard]] bool requestSynchronization();
 
         [[nodiscard]] Status status() const;
         [[nodiscard]] QCoro::Task<void>

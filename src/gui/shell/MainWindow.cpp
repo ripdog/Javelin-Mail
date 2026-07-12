@@ -3773,8 +3773,14 @@ namespace javelin::gui::shell
 
     void MainWindow::refreshAccountFromServer(std::string accountId)
     {
-        refreshConnectionSettings(javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
-            QString::fromStdString(accountId)));
+        if (!m_longPollService.requestAccountSynchronization(accountId))
+        {
+            refreshConnectionSettings(
+                javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
+                    QString::fromStdString(accountId)));
+            return;
+        }
+        m_statusBar->showMessage(QStringLiteral("Synchronizing account..."));
     }
 
     void MainWindow::refreshConnectionSettings(javelin::gui::settings::ConnectionSettings settings)

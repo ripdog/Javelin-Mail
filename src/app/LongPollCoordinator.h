@@ -35,6 +35,7 @@ namespace javelin::app
         void applySettings(std::vector<LongPollAccountConfiguration> configurations);
         [[nodiscard]] std::uint64_t observeMailbox(std::string accountId, std::string mailboxId);
         void unobserveMailbox(std::uint64_t observationId);
+        [[nodiscard]] bool requestAccountSynchronization(std::string_view accountId);
         void stop();
 
       Q_SIGNALS:

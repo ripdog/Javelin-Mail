@@ -112,6 +112,14 @@ namespace javelin::app
         return m_status;
     }
 
+    bool LongPollService::requestSynchronization()
+    {
+        if (m_runContext == nullptr)
+            return false;
+        scheduleDebouncedRefresh();
+        return true;
+    }
+
     QCoro::Task<void> LongPollService::onUpdate(javelin::jmap::sync::LongPollResponse response)
     {
         m_lastEventId = response.newState;
