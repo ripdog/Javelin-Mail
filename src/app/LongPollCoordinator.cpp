@@ -11,10 +11,12 @@ namespace javelin::app
         javelin::jmap::JmapCore& jmapCore, javelin::jmap::api::AbstractTransport& transport,
         QNetworkAccessManager& networkAccessManager,
         javelin::jmap::cache::AccountRepository& accountRepository,
-        javelin::jmap::cache::QueryService& queryService, QObject* parent)
+        javelin::jmap::cache::QueryService& queryService,
+        javelin::jmap::contacts::ContactService& contactService, QObject* parent)
         : QObject(parent), m_databaseConnection(databaseConnection), m_jmapCore(jmapCore),
           m_transport(transport), m_networkAccessManager(networkAccessManager),
-          m_accountRepository(accountRepository), m_queryService(queryService)
+          m_accountRepository(accountRepository), m_queryService(queryService),
+          m_contactService(contactService)
     {
     }
 
@@ -101,6 +103,11 @@ namespace javelin::app
         return service->second->requestSynchronization();
     }
 
+    QString LongPollCoordinator::statusSummary() const
+    {
+        return m_jmapCore.statusSummary();
+    }
+
     QCoro::Task<javelin::jmap::MailboxPageResult>
     LongPollCoordinator::requestMailboxWindow(MailboxWindowIntent intent)
     {
@@ -131,6 +138,179 @@ namespace javelin::app
         co_return co_await m_jmapCore.searchMessages(configuration->second.settings,
                                                      intent.accountId, intent.criteria,
                                                      intent.offset, intent.limit, intent.sort);
+    }
+
+    javelin::jmap::QueuedEmailMutationResult
+    LongPollCoordinator::queueDestroyEmail(std::string accountId, std::string emailId)
+    {
+        return m_jmapCore.queueDestroyEmail(std::move(accountId), std::move(emailId));
+    }
+
+    javelin::jmap::QueuedEmailMutationResult
+    LongPollCoordinator::queueMoveEmail(std::string accountId, std::string emailId,
+                                        std::string sourceMailboxId,
+                                        std::string destinationMailboxId)
+    {
+        return m_jmapCore.queueMoveEmail(std::move(accountId), std::move(emailId),
+                                         std::move(sourceMailboxId),
+                                         std::move(destinationMailboxId));
+    }
+
+    javelin::jmap::QueuedEmailMutationResult
+    LongPollCoordinator::queueCopyEmail(std::string accountId, std::string emailId,
+                                        std::string sourceMailboxId,
+                                        std::string destinationMailboxId)
+    {
+        return m_jmapCore.queueCopyEmail(std::move(accountId), std::move(emailId),
+                                         std::move(sourceMailboxId),
+                                         std::move(destinationMailboxId));
+    }
+
+    javelin::jmap::QueuedEmailMutationResult
+    LongPollCoordinator::queueMarkEmailRead(std::string accountId, std::string emailId)
+    {
+        return m_jmapCore.queueMarkEmailRead(std::move(accountId), std::move(emailId));
+    }
+
+    javelin::jmap::QueuedEmailMutationResult
+    LongPollCoordinator::queueMarkEmailUnread(std::string accountId, std::string emailId)
+    {
+        return m_jmapCore.queueMarkEmailUnread(std::move(accountId), std::move(emailId));
+    }
+
+    javelin::jmap::QueuedEmailMutationResult
+    LongPollCoordinator::queueSetEmailFlagged(std::string accountId, std::string emailId,
+                                              const bool flagged)
+    {
+        return m_jmapCore.queueSetEmailFlagged(std::move(accountId), std::move(emailId), flagged);
+    }
+
+    QCoro::Task<javelin::jmap::SubmittedEmailMutationsResult>
+    LongPollCoordinator::submitPendingEmailMutations(std::string accountId)
+    {
+        const auto configuration = m_configurations.find(accountId);
+        if (configuration == m_configurations.end())
+            co_return javelin::jmap::LiveRefreshError{
+                .message = QStringLiteral("Account synchronization is not configured."),
+                .requiresUserIntervention = true,
+            };
+        co_return co_await m_jmapCore.submitPendingEmailMutations(configuration->second.settings,
+                                                                  std::move(accountId));
+    }
+
+    QCoro::Task<javelin::jmap::MessageContentRefreshResult>
+    LongPollCoordinator::requestMessageContent(std::string accountId, std::string emailId)
+    {
+        const auto configuration = m_configurations.find(accountId);
+        if (configuration == m_configurations.end())
+            co_return javelin::jmap::LiveRefreshError{
+                .message = QStringLiteral("Account synchronization is not configured."),
+                .requiresUserIntervention = true,
+            };
+        co_return co_await m_jmapCore.refreshMessageContent(
+            configuration->second.settings, std::move(accountId), std::move(emailId));
+    }
+
+    QCoro::Task<javelin::jmap::AttachmentDownloadResult>
+    LongPollCoordinator::requestAttachment(std::string accountId, std::string emailId,
+                                           std::string partId)
+    {
+        const auto configuration = m_configurations.find(accountId);
+        if (configuration == m_configurations.end())
+            co_return javelin::jmap::LiveRefreshError{
+                .message = QStringLiteral("Account synchronization is not configured."),
+                .requiresUserIntervention = true,
+            };
+        co_return co_await m_jmapCore.downloadAttachment(configuration->second.settings,
+                                                         std::move(accountId), std::move(emailId),
+                                                         std::move(partId));
+    }
+
+    QCoro::Task<javelin::jmap::MessageSourceDownloadResult>
+    LongPollCoordinator::requestMessageSource(std::string accountId, std::string emailId)
+    {
+        const auto configuration = m_configurations.find(accountId);
+        if (configuration == m_configurations.end())
+            co_return javelin::jmap::LiveRefreshError{
+                .message = QStringLiteral("Account synchronization is not configured."),
+                .requiresUserIntervention = true,
+            };
+        co_return co_await m_jmapCore.downloadMessageSource(
+            configuration->second.settings, std::move(accountId), std::move(emailId));
+    }
+
+    QCoro::Task<javelin::jmap::LiveRefreshResult>
+    LongPollCoordinator::bootstrapAccount(javelin::jmap::LiveConnectionSettings settings,
+                                          std::vector<std::string> mailboxIds)
+    {
+        co_return co_await m_jmapCore.refreshFromServer(std::move(settings), {},
+                                                        std::move(mailboxIds));
+    }
+
+    QCoro::Task<javelin::jmap::contacts::ContactRefreshResult>
+    LongPollCoordinator::requestContacts(std::string accountId)
+    {
+        const auto configuration = m_configurations.find(accountId);
+        if (configuration == m_configurations.end())
+            co_return javelin::jmap::LiveRefreshError{
+                .message = QStringLiteral("Account synchronization is not configured."),
+                .requiresUserIntervention = true,
+            };
+        co_return co_await m_contactService.refreshAll(configuration->second.settings,
+                                                       std::move(accountId));
+    }
+
+    QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
+    LongPollCoordinator::setAddressBooks(std::string accountId,
+                                         javelin::jmap::api::AddressBookSetRequest request)
+    {
+        const auto configuration = m_configurations.find(accountId);
+        if (configuration == m_configurations.end())
+            co_return javelin::jmap::LiveRefreshError{
+                .message = QStringLiteral("Account synchronization is not configured."),
+                .requiresUserIntervention = true};
+        co_return co_await m_contactService.setAddressBooks(
+            configuration->second.settings, std::move(accountId), std::move(request));
+    }
+
+    QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
+    LongPollCoordinator::setContactCards(std::string accountId,
+                                         javelin::jmap::api::ContactCardSetRequest request)
+    {
+        const auto configuration = m_configurations.find(accountId);
+        if (configuration == m_configurations.end())
+            co_return javelin::jmap::LiveRefreshError{
+                .message = QStringLiteral("Account synchronization is not configured."),
+                .requiresUserIntervention = true};
+        co_return co_await m_contactService.setContactCards(
+            configuration->second.settings, std::move(accountId), std::move(request));
+    }
+
+    QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
+    LongPollCoordinator::copyContactCards(std::string accountId,
+                                          javelin::jmap::api::ContactCardCopyRequest request)
+    {
+        const auto configuration = m_configurations.find(accountId);
+        if (configuration == m_configurations.end())
+            co_return javelin::jmap::LiveRefreshError{
+                .message = QStringLiteral("Account synchronization is not configured."),
+                .requiresUserIntervention = true};
+        co_return co_await m_contactService.copyContactCards(
+            configuration->second.settings, std::move(accountId), std::move(request));
+    }
+
+    QCoro::Task<javelin::jmap::contacts::ContactUploadResult>
+    LongPollCoordinator::uploadContactMedia(std::string ownerAccountId, std::string accountId,
+                                            QByteArray payload, std::string mediaType)
+    {
+        const auto configuration = m_configurations.find(ownerAccountId);
+        if (configuration == m_configurations.end())
+            co_return javelin::jmap::LiveRefreshError{
+                .message = QStringLiteral("Account synchronization is not configured."),
+                .requiresUserIntervention = true};
+        co_return co_await m_contactService.uploadMedia(
+            configuration->second.settings, std::move(ownerAccountId), std::move(accountId),
+            std::move(payload), std::move(mediaType));
     }
 
     void LongPollCoordinator::stop()

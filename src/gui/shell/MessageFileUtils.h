@@ -1,6 +1,6 @@
 #pragma once
 
-#include "jmap/JmapCore.h"
+#include "app/LongPollCoordinator.h"
 #include "jmap/cache/MessageViewService.h"
 
 #include <QCoroTask>
@@ -50,8 +50,7 @@ namespace javelin::gui::shell
     [[nodiscard]] std::vector<javelin::jmap::cache::MessageAttachment>
     visibleDownloadableAttachments(const javelin::jmap::cache::MessageViewSnapshot& snapshot);
     [[nodiscard]] QCoro::Task<SaveAllDownloadResult>
-    downloadAttachments(javelin::jmap::JmapCore& jmapCore,
-                        javelin::jmap::LiveConnectionSettings settings, std::string accountId,
+    downloadAttachments(javelin::app::LongPollCoordinator& mailService, std::string accountId,
                         std::string emailId,
                         std::vector<javelin::jmap::cache::MessageAttachment> attachments);
     [[nodiscard]] QString tempAttachmentPath(QTemporaryDir& directory,

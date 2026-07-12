@@ -155,8 +155,7 @@ namespace javelin::gui::shell
     }
 
     QCoro::Task<SaveAllDownloadResult>
-    downloadAttachments(javelin::jmap::JmapCore& jmapCore,
-                        javelin::jmap::LiveConnectionSettings settings, std::string accountId,
+    downloadAttachments(javelin::app::LongPollCoordinator& mailService, std::string accountId,
                         std::string emailId,
                         std::vector<javelin::jmap::cache::MessageAttachment> attachments)
     {
@@ -165,8 +164,8 @@ namespace javelin::gui::shell
 
         for (const auto& attachment : attachments)
         {
-            const auto downloadResult = co_await jmapCore.downloadAttachment(
-                settings, accountId, emailId, attachment.partId);
+            const auto downloadResult =
+                co_await mailService.requestAttachment(accountId, emailId, attachment.partId);
             if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&downloadResult))
             {
                 co_return SaveAllDownloadResult{

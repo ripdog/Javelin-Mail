@@ -1,5 +1,6 @@
 #include "jmap/api/MethodCaller.h"
 #include "FixtureReader.h"
+#include "jmap/api/JmapMethodTransport.h"
 #include "jmap/api/MethodEnvelope.h"
 #include "jmap/api/Transport.h"
 #include "jmap/auth/Auth.h"
@@ -47,6 +48,20 @@ namespace
 
             auto result = std::move(queuedResults.front());
             queuedResults.erase(queuedResults.begin());
+            co_return result;
+        }
+    };
+
+    class FakeJmapMethodTransport final : public javelin::jmap::api::JmapMethodTransport
+    {
+      public:
+        std::optional<javelin::jmap::api::JmapMethodRequest> request;
+        javelin::jmap::api::JmapMethodTransportResult result;
+
+        [[nodiscard]] QCoro::Task<javelin::jmap::api::JmapMethodTransportResult>
+        call(javelin::jmap::api::JmapMethodRequest value) override
+        {
+            request = std::move(value);
             co_return result;
         }
     };
@@ -119,6 +134,25 @@ namespace
     }
 
 } // namespace
+
+TEST_CASE("method caller is independent of HTTP transport", "[jmap][method][transport]")
+{
+    ensureApplication();
+    const auto parsed = javelin::jmap::api::parseResponseEnvelope(
+        javelin::tests::loadFixture("jmap/method/response.json"));
+    REQUIRE(parsed.ok());
+
+    FakeJmapMethodTransport transport;
+    transport.result = *parsed.value;
+    javelin::jmap::api::MethodCaller caller{transport};
+    const auto result = QCoro::waitFor(caller.call(makeRequestContext(), loadRequestEnvelope()));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::api::ResponseEnvelope>(result));
+    REQUIRE(transport.request.has_value());
+    CHECK(transport.request->apiUrl == "https://mail.example.com/jmap/api");
+    CHECK(transport.request->accessToken == "access-token");
+    CHECK(transport.request->envelope.methodCalls.size() == 2);
+}
 
 TEST_CASE("method caller posts a typed request envelope and parses the response",
           "[jmap][method][transport]")

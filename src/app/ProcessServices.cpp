@@ -86,7 +86,7 @@ namespace javelin::app
             m_databaseConnection, *m_transport, *m_jmapCore);
         m_longPollService = std::make_unique<LongPollCoordinator>(
             m_databaseConnection, *m_jmapCore, *m_transport, *m_longPollNetworkAccessManager,
-            *m_accountRepository, *m_queryService);
+            *m_accountRepository, *m_queryService, *m_contactService);
     }
 
     ProcessServices::~ProcessServices() = default;

@@ -240,10 +240,9 @@ namespace javelin::gui::contacts
 
     ContactsManagerWidget::ContactsManagerWidget(
         javelin::jmap::cache::ContactRepository& repository,
-        javelin::jmap::contacts::ContactService& service,
-        javelin::jmap::LiveConnectionSettings settings, std::string ownerAccountId, QWidget* parent)
+        javelin::app::LongPollCoordinator& service, std::string ownerAccountId, QWidget* parent)
         : QWidget(parent), m_repository(repository), m_service(service),
-          m_settings(std::move(settings)), m_ownerAccountId(std::move(ownerAccountId))
+          m_ownerAccountId(std::move(ownerAccountId))
     {
         setupUi();
         reloadAccounts();
@@ -472,7 +471,7 @@ namespace javelin::gui::contacts
                 &ContactsManagerWidget::uploadPhoto);
         connect(m_cancelButton, &QPushButton::clicked, this, &ContactsManagerWidget::cancelEdit);
         connect(m_refreshButton, &QToolButton::clicked, this,
-                &ContactsManagerWidget::refreshRemote);
+                &ContactsManagerWidget::requestRefresh);
         connect(m_manageBooksButton, &QToolButton::clicked, this,
                 &ContactsManagerWidget::showAddressBookManager);
     }
@@ -763,7 +762,7 @@ namespace javelin::gui::contacts
                                                     .json = std::get<std::string>(prepared)});
         }
         setBusy(true);
-        auto task = m_service.setContactCards(m_settings, m_ownerAccountId, std::move(request));
+        auto task = m_service.setContactCards(m_ownerAccountId, std::move(request));
         QCoro::connect(std::move(task), this,
                        [this](javelin::jmap::contacts::ContactMutationResult result)
                        {
@@ -776,7 +775,7 @@ namespace javelin::gui::contacts
                                    Q_EMIT userInterventionRequired(error->message);
                                return;
                            }
-                           refreshRemote();
+                           requestRefresh();
                        });
     }
 
@@ -809,8 +808,8 @@ namespace javelin::gui::contacts
             return;
         }
         setBusy(true);
-        auto task = m_service.uploadMedia(m_settings, m_ownerAccountId, *accountId, payload,
-                                          mimeType.name().toStdString());
+        auto task = m_service.uploadContactMedia(m_ownerAccountId, *accountId, payload,
+                                                 mimeType.name().toStdString());
         QCoro::connect(
             std::move(task), this,
             [this](javelin::jmap::contacts::ContactUploadResult result)
@@ -852,7 +851,7 @@ namespace javelin::gui::contacts
         request.accountId = *accountId;
         request.destroy.push_back(contact->id);
         setBusy(true);
-        auto task = m_service.setContactCards(m_settings, m_ownerAccountId, std::move(request));
+        auto task = m_service.setContactCards(m_ownerAccountId, std::move(request));
         QCoro::connect(std::move(task), this,
                        [this](javelin::jmap::contacts::ContactMutationResult result)
                        {
@@ -861,7 +860,7 @@ namespace javelin::gui::contacts
                                    std::get_if<javelin::jmap::LiveRefreshError>(&result))
                                Q_EMIT statusMessageRequested(error->message, 10000);
                            else
-                               refreshRemote();
+                               requestRefresh();
                        });
     }
 
@@ -913,7 +912,7 @@ namespace javelin::gui::contacts
                         .arg(QString::fromStdString(contact->id), QString::fromStdString(book.id))
                         .toStdString()});
         setBusy(true);
-        auto task = m_service.copyContactCards(m_settings, m_ownerAccountId, std::move(request));
+        auto task = m_service.copyContactCards(m_ownerAccountId, std::move(request));
         QCoro::connect(std::move(task), this,
                        [this](javelin::jmap::contacts::ContactMutationResult result)
                        {
@@ -922,17 +921,17 @@ namespace javelin::gui::contacts
                                    std::get_if<javelin::jmap::LiveRefreshError>(&result))
                                Q_EMIT statusMessageRequested(error->message, 10000);
                            else
-                               refreshRemote();
+                               requestRefresh();
                        });
     }
 
-    void ContactsManagerWidget::refreshRemote()
+    void ContactsManagerWidget::requestRefresh()
     {
         if (m_busy)
             return;
         setBusy(true);
         Q_EMIT statusMessageRequested(QStringLiteral("Refreshing contacts…"), 5000);
-        auto task = m_service.refreshAll(m_settings, m_ownerAccountId);
+        auto task = m_service.requestContacts(m_ownerAccountId);
         QCoro::connect(std::move(task), this,
                        [this](javelin::jmap::contacts::ContactRefreshResult result)
                        {
@@ -1065,7 +1064,7 @@ namespace javelin::gui::contacts
     {
         setBusy(true);
         Q_EMIT statusMessageRequested(progressMessage, 5000);
-        auto task = m_service.setAddressBooks(m_settings, m_ownerAccountId, std::move(request));
+        auto task = m_service.setAddressBooks(m_ownerAccountId, std::move(request));
         QCoro::connect(std::move(task), this,
                        [this](javelin::jmap::contacts::ContactMutationResult result)
                        {
@@ -1076,7 +1075,7 @@ namespace javelin::gui::contacts
                                Q_EMIT statusMessageRequested(error->message, 10000);
                                return;
                            }
-                           refreshRemote();
+                           requestRefresh();
                        });
     }
 

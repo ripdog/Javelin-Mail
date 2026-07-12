@@ -102,7 +102,6 @@ namespace javelin::gui::shell
 
       public:
         explicit MainWindow(
-            javelin::jmap::JmapCore& jmapCore,
             javelin::jmap::cache::AccountRepository& accountRepository,
             javelin::jmap::cache::ContactRepository& contactRepository,
             javelin::jmap::contacts::ContactService& contactService,
@@ -332,7 +331,6 @@ namespace javelin::gui::shell
         void closeEvent(QCloseEvent* event) override;
         bool eventFilter(QObject* watched, QEvent* event) override;
 
-        javelin::jmap::JmapCore& m_jmapCore;
         javelin::jmap::cache::AccountRepository& m_accountRepository;
         javelin::jmap::cache::ContactRepository& m_contactRepository;
         javelin::jmap::contacts::ContactService& m_contactService;

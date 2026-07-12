@@ -1,6 +1,6 @@
 #pragma once
 
-#include "jmap/JmapCore.h"
+#include "app/LongPollCoordinator.h"
 #include "jmap/api/ContactsMethods.h"
 #include "jmap/cache/ContactRepository.h"
 #include "jmap/contacts/ContactTypes.h"
@@ -21,11 +21,6 @@ class QToolButton;
 class QPushButton;
 class QStackedWidget;
 
-namespace javelin::jmap::contacts
-{
-    class ContactService;
-}
-
 namespace javelin::gui::contacts
 {
     class ContactsManagerWidget final : public QWidget
@@ -34,12 +29,11 @@ namespace javelin::gui::contacts
 
       public:
         ContactsManagerWidget(javelin::jmap::cache::ContactRepository& repository,
-                              javelin::jmap::contacts::ContactService& service,
-                              javelin::jmap::LiveConnectionSettings settings,
+                              javelin::app::LongPollCoordinator& service,
                               std::string ownerAccountId, QWidget* parent = nullptr);
 
         [[nodiscard]] bool operationInFlight() const;
-        void refreshRemote();
+        void requestRefresh();
 
       Q_SIGNALS:
         void statusMessageRequested(const QString& message, int timeoutMs = 5000);
@@ -78,8 +72,7 @@ namespace javelin::gui::contacts
         void populateContactCards(const javelin::jmap::contacts::ContactSummary& contact);
 
         javelin::jmap::cache::ContactRepository& m_repository;
-        javelin::jmap::contacts::ContactService& m_service;
-        javelin::jmap::LiveConnectionSettings m_settings;
+        javelin::app::LongPollCoordinator& m_service;
         std::string m_ownerAccountId;
         std::vector<javelin::jmap::cache::ContactAccount> m_accounts;
         std::vector<javelin::jmap::api::AddressBook> m_addressBooks;

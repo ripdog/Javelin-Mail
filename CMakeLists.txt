@@ -416,6 +416,18 @@ add_library(javelin_gui STATIC
     src/gui/shell/MainWindow.cpp
     src/gui/shell/MainWindow.h
 )
+
+file(GLOB_RECURSE javelin_gui_boundary_sources CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/gui/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/gui/*.h"
+)
+foreach(gui_source IN LISTS javelin_gui_boundary_sources)
+    file(READ "${gui_source}" gui_source_contents)
+    if(gui_source_contents MATCHES "#include \"jmap/api/(Transport|MethodEnvelope)\\.h\"" OR
+       gui_source_contents MATCHES "#include \"jmap/sync/(MailboxRefreshExecutor|MailboxStateRefreshExecutor)\\.h\"")
+        message(FATAL_ERROR "GUI boundary violation in ${gui_source}")
+    endif()
+endforeach()
 target_include_directories(javelin_gui PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
 )
