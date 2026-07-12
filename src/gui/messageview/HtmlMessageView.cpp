@@ -37,6 +37,13 @@ namespace javelin::gui::messageview
             using QWebEnginePage::QWebEnginePage;
 
           protected:
+            QWebEnginePage* createWindow(WebWindowType) override
+            {
+                // Keep target="_blank" links on this page so acceptNavigationRequest() can
+                // hand them to the desktop instead of silently discarding the new window.
+                return this;
+            }
+
             bool acceptNavigationRequest(const QUrl& url, NavigationType type,
                                          bool isMainFrame) override
             {

@@ -3502,7 +3502,8 @@ namespace javelin::gui::shell
 
     void MainWindow::saveAttachment(std::string accountId, std::string emailId, std::string partId)
     {
-        const auto settings = javelin::gui::settings::PreferencesDialog::loadSettings();
+        const auto settings = javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
+            QString::fromStdString(accountId));
         if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
             settings.apiKey.isEmpty())
         {
@@ -3599,7 +3600,8 @@ namespace javelin::gui::shell
             return;
         }
 
-        const auto settings = javelin::gui::settings::PreferencesDialog::loadSettings();
+        const auto settings = javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
+            QString::fromStdString(accountId));
         if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
             settings.apiKey.isEmpty())
         {
@@ -3669,7 +3671,8 @@ namespace javelin::gui::shell
 
     void MainWindow::openAttachment(std::string accountId, std::string emailId, std::string partId)
     {
-        const auto settings = javelin::gui::settings::PreferencesDialog::loadSettings();
+        const auto settings = javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
+            QString::fromStdString(accountId));
         if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
             settings.apiKey.isEmpty())
         {
@@ -4901,7 +4904,8 @@ namespace javelin::gui::shell
             return;
         }
 
-        const auto settings = javelin::gui::settings::PreferencesDialog::loadSettings();
+        const auto settings = javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
+            QString::fromStdString(*accountId));
         if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
             settings.apiKey.isEmpty())
         {
