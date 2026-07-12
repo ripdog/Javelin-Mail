@@ -5,6 +5,7 @@
 #include "gui/compose/ComposeTabWidget.h"
 #include "gui/contacts/ContactsManagerWidget.h"
 #include "gui/mailboxes/MailboxIconUtils.h"
+#include "gui/mailboxes/MailboxTreeDelegate.h"
 #include "gui/mailboxes/MailboxTreeModel.h"
 #include "gui/messages/MessageListDelegate.h"
 #include "gui/messages/MessageListModel.h"
@@ -653,8 +654,21 @@ namespace javelin::gui::shell
                  QStringLiteral("javelinmailui.rc"));
         setToolBarVisible(QStringLiteral("mainToolBar"), true);
         connectSelection();
-        connect(&m_longPollService, &javelin::app::LongPollCoordinator::statusChanged, this,
-                [this](const auto) { updateLongPollStatus(); });
+        connect(&m_longPollService, &javelin::app::LongPollCoordinator::accountStatusChanged, this,
+                [this](const QString& accountId, const auto status)
+                {
+                    using Model = javelin::gui::mailboxes::MailboxTreeModel;
+                    Model::ConnectionStatus modelStatus = Model::ConnectionStatus::Disconnected;
+                    if (status == javelin::app::LongPollService::Status::Connecting)
+                    {
+                        modelStatus = Model::ConnectionStatus::Connecting;
+                    }
+                    else if (status == javelin::app::LongPollService::Status::Connected)
+                    {
+                        modelStatus = Model::ConnectionStatus::Connected;
+                    }
+                    m_mailboxModel->setConnectionStatus(accountId, modelStatus);
+                });
         connect(&m_longPollService, &javelin::app::LongPollCoordinator::mailStateChanged, this,
                 [this](const QString& accountId, const bool requiresCatchUpRefresh)
                 {
@@ -729,7 +743,6 @@ namespace javelin::gui::shell
                     }
                 }
             });
-        updateLongPollStatus();
         restorePersistentState();
 
         auto* stateSaveTimer = new QTimer(this);
@@ -944,6 +957,8 @@ namespace javelin::gui::shell
 
         m_mailboxView = new QTreeView(this);
         m_mailboxView->setModel(m_mailboxModel);
+        m_mailboxView->setItemDelegate(
+            new javelin::gui::mailboxes::MailboxTreeDelegate(m_mailboxView));
         m_mailboxView->setIconSize(QSize{20, 20});
         m_mailboxView->setHeaderHidden(true);
         m_mailboxView->setExpandsOnDoubleClick(false);
@@ -1051,7 +1066,6 @@ namespace javelin::gui::shell
         messageHeaderLayout->addWidget(m_nextPageButton);
         messageHeaderLayout->addWidget(m_messageSortButton);
         messageHeaderLayout->addWidget(m_messageQuickFilterButton);
-        m_longPollStatusLabel = new QLabel(this);
         m_messageEmptyState = new QLabel(
             QStringLiteral("No messages are available for the selected mailbox yet."), messagePane);
         m_messageEmptyState->setWordWrap(true);
@@ -1156,10 +1170,8 @@ namespace javelin::gui::shell
 
         setCentralWidget(centralContainer);
         m_statusBar->showMessage(m_jmapCore.statusSummary());
-        m_statusBar->addPermanentWidget(m_longPollStatusLabel);
         updateEmptyStates();
         updateMessageListHeader();
-        updateLongPollStatus();
     }
 
     void MainWindow::connectSelection()
@@ -3284,30 +3296,6 @@ namespace javelin::gui::shell
         m_messageView->setVisible(true);
     }
 
-    void MainWindow::updateLongPollStatus()
-    {
-        QString text;
-        QString styleSheet;
-        switch (m_longPollService.status())
-        {
-        case javelin::app::LongPollService::Status::Disconnected:
-            text = QStringLiteral("Long poll: Disconnected");
-            styleSheet = QStringLiteral("QLabel { color: #d96c6c; font-weight: 600; }");
-            break;
-        case javelin::app::LongPollService::Status::Connecting:
-            text = QStringLiteral("Long poll: Connecting");
-            styleSheet = QStringLiteral("QLabel { color: #d6a14b; font-weight: 600; }");
-            break;
-        case javelin::app::LongPollService::Status::Connected:
-            text = QStringLiteral("Long poll: Connected");
-            styleSheet = QStringLiteral("QLabel { color: #69b36f; font-weight: 600; }");
-            break;
-        }
-
-        m_longPollStatusLabel->setText(text);
-        m_longPollStatusLabel->setStyleSheet(styleSheet);
-    }
-
     void MainWindow::updateMessageListHeader()
     {
         const auto* tab = activeTab();
@@ -3742,14 +3730,12 @@ namespace javelin::gui::shell
         {
             m_statusBar->showMessage(QStringLiteral("Saved connection preferences."), 3000);
             m_mailboxModel->refresh();
-            const auto settings = dialog.settings();
-            if (!settings.loginEmail.isEmpty() && !settings.apiKey.isEmpty())
+            applyLongPollSettings();
+            const auto accountId = activeAccountId().has_value() ? activeAccountId()
+                                                                 : currentAccountId(*m_mailboxView);
+            if (accountId.has_value())
             {
-                refreshConnectionSettings(settings);
-            }
-            else
-            {
-                applyLongPollSettings();
+                refreshAccountFromServer(*accountId);
             }
         }
     }

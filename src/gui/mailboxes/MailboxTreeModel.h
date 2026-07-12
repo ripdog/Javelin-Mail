@@ -5,9 +5,11 @@
 
 #include <QAbstractItemModel>
 #include <QStringList>
+#include <QStringView>
 
 #include <memory>
 #include <optional>
+#include <unordered_map>
 #include <variant>
 #include <vector>
 
@@ -25,6 +27,14 @@ namespace javelin::gui::mailboxes
             AccountIdRole = Qt::UserRole + 2,
             TotalThreadsRole = Qt::UserRole + 3,
             MailboxRoleRole = Qt::UserRole + 4,
+            ConnectionStatusRole = Qt::UserRole + 5,
+        };
+
+        enum class ConnectionStatus
+        {
+            Disconnected,
+            Connecting,
+            Connected,
         };
 
         explicit MailboxTreeModel(javelin::jmap::cache::AccountRepository& accountRepository,
@@ -47,6 +57,7 @@ namespace javelin::gui::mailboxes
         [[nodiscard]] Qt::DropActions supportedDropActions() const override;
 
         void refresh();
+        void setConnectionStatus(QStringView accountId, ConnectionStatus status);
 
       Q_SIGNALS:
         void emailsDropped(const QString& sourceAccountId, const QString& destinationAccountId,
@@ -83,6 +94,7 @@ namespace javelin::gui::mailboxes
         javelin::jmap::cache::AccountRepository& m_accountRepository;
         javelin::jmap::cache::QueryService& m_queryService;
         std::vector<std::unique_ptr<Node>> m_rootNodes;
+        std::unordered_map<std::string, ConnectionStatus> m_connectionStatuses;
     };
 
 } // namespace javelin::gui::mailboxes

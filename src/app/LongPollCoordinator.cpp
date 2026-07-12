@@ -1,6 +1,5 @@
 #include "app/LongPollCoordinator.h"
 
-#include <ranges>
 #include <unordered_set>
 
 namespace javelin::app
@@ -31,7 +30,7 @@ namespace javelin::app
                 serviceIt->second = std::make_unique<LongPollService>(
                     m_databaseConnection, m_transport, m_networkAccessManager, m_accountRepository,
                     m_queryService, this);
-                connectService(*serviceIt->second);
+                connectService(serviceIt->first, *serviceIt->second);
             }
             serviceIt->second->applySettings(std::move(configuration.settings),
                                              configuration.accountId,
@@ -46,31 +45,29 @@ namespace javelin::app
                 continue;
             }
 
+            Q_EMIT accountStatusChanged(QString::fromStdString(serviceIt->first),
+                                        LongPollService::Status::Disconnected);
             disconnect(serviceIt->second.get(), nullptr, this, nullptr);
             serviceIt = m_services.erase(serviceIt);
         }
-        updateStatus();
     }
 
     void LongPollCoordinator::stop()
     {
-        for (const auto& service : m_services | std::views::values)
+        for (const auto& [accountId, service] : m_services)
         {
+            Q_EMIT accountStatusChanged(QString::fromStdString(accountId),
+                                        LongPollService::Status::Disconnected);
             disconnect(service.get(), nullptr, this, nullptr);
         }
         m_services.clear();
-        updateStatus();
     }
 
-    LongPollService::Status LongPollCoordinator::status() const
-    {
-        return m_status;
-    }
-
-    void LongPollCoordinator::connectService(LongPollService& service)
+    void LongPollCoordinator::connectService(const std::string& accountId, LongPollService& service)
     {
         connect(&service, &LongPollService::statusChanged, this,
-                [this](const auto) { updateStatus(); });
+                [this, accountId](const auto status)
+                { Q_EMIT accountStatusChanged(QString::fromStdString(accountId), status); });
         connect(&service, &LongPollService::mailStateChanged, this,
                 &LongPollCoordinator::mailStateChanged);
         connect(&service, &LongPollService::accountMailStateChanged, this,
@@ -79,37 +76,6 @@ namespace javelin::app
                 &LongPollCoordinator::mailboxRefreshed);
         connect(&service, &LongPollService::notificationRaised, this,
                 &LongPollCoordinator::notificationRaised);
-    }
-
-    void LongPollCoordinator::updateStatus()
-    {
-        auto nextStatus = LongPollService::Status::Disconnected;
-        if (std::ranges::any_of(m_services,
-                                [](const auto& entry)
-                                {
-                                    return entry.second != nullptr &&
-                                           entry.second->status() ==
-                                               LongPollService::Status::Connecting;
-                                }))
-        {
-            nextStatus = LongPollService::Status::Connecting;
-        }
-        if (!m_services.empty() &&
-            std::ranges::all_of(m_services,
-                                [](const auto& entry)
-                                {
-                                    return entry.second != nullptr &&
-                                           entry.second->status() ==
-                                               LongPollService::Status::Connected;
-                                }))
-        {
-            nextStatus = LongPollService::Status::Connected;
-        }
-        if (m_status != nextStatus)
-        {
-            m_status = nextStatus;
-            Q_EMIT statusChanged(m_status);
-        }
     }
 
 } // namespace javelin::app

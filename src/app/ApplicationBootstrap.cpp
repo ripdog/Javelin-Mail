@@ -127,8 +127,11 @@ namespace javelin::app
         setupSystemTray();
         createMainWindow();
 
-        const auto settings = javelin::gui::settings::PreferencesDialog::loadSettings();
-        if (settings.loginEmail.isEmpty() || settings.apiKey.isEmpty())
+        const auto accounts = javelin::gui::settings::PreferencesDialog::loadAccounts();
+        const bool hasUsableConnection = std::ranges::any_of(
+            accounts, [](const auto& settings)
+            { return !settings.loginEmail.isEmpty() && !settings.apiKey.isEmpty(); });
+        if (!hasUsableConnection)
         {
             javelin::gui::settings::PreferencesDialog dialog{m_processServices->accountRepository(),
                                                              m_processServices->queryService(),

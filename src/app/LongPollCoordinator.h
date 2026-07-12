@@ -33,10 +33,10 @@ namespace javelin::app
 
         void applySettings(std::vector<LongPollAccountConfiguration> configurations);
         void stop();
-        [[nodiscard]] LongPollService::Status status() const;
 
       Q_SIGNALS:
-        void statusChanged(javelin::app::LongPollService::Status status);
+        void accountStatusChanged(const QString& accountId,
+                                  javelin::app::LongPollService::Status status);
         void mailStateChanged(const QString& accountId, bool requiresCatchUpRefresh);
         void accountMailStateChanged(const QString& accountId, const QString& refreshedMailboxId);
         void mailboxRefreshed(const QString& accountId, const QString& mailboxId,
@@ -47,8 +47,7 @@ namespace javelin::app
                                 const QString& message);
 
       private:
-        void connectService(LongPollService& service);
-        void updateStatus();
+        void connectService(const std::string& accountId, LongPollService& service);
 
         javelin::jmap::cache::DatabaseConnection& m_databaseConnection;
         javelin::jmap::api::AbstractTransport& m_transport;
@@ -56,7 +55,6 @@ namespace javelin::app
         javelin::jmap::cache::AccountRepository& m_accountRepository;
         javelin::jmap::cache::QueryService& m_queryService;
         std::unordered_map<std::string, std::unique_ptr<LongPollService>> m_services;
-        LongPollService::Status m_status = LongPollService::Status::Disconnected;
     };
 
 } // namespace javelin::app

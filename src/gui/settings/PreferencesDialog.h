@@ -49,7 +49,6 @@ namespace javelin::gui::settings
         [[nodiscard]] ConnectionSettings settings() const;
 
         [[nodiscard]] static std::vector<ConnectionSettings> loadAccounts();
-        [[nodiscard]] static ConnectionSettings loadSettings();
         [[nodiscard]] static ConnectionSettings loadSettingsForAccount(QStringView accountId);
         [[nodiscard]] static AttachmentSaveSettings loadAttachmentSaveSettings();
         [[nodiscard]] static QStringList syncedMailboxIds(QStringView accountId);

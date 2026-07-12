@@ -32,7 +32,6 @@ namespace javelin::gui::settings
         constexpr auto accountsGroup = "accounts";
         constexpr auto legacyConnectionGroup = "connection";
         constexpr auto sizeKey = "size";
-        constexpr auto activeAccountIdKey = "activeAccountId";
         constexpr auto idKey = "id";
         constexpr auto displayNameKey = "displayName";
         constexpr auto sessionUrlKey = "sessionUrl";
@@ -458,31 +457,9 @@ namespace javelin::gui::settings
             {
                 accounts.push_back(*legacyAccount);
                 saveAccounts(accounts);
-
-                settings.beginGroup(QLatin1StringView{accountsGroup});
-                settings.setValue(QLatin1StringView{activeAccountIdKey}, legacyAccount->id);
-                settings.endGroup();
-                settings.sync();
             }
         }
         return accounts;
-    }
-
-    ConnectionSettings PreferencesDialog::loadSettings()
-    {
-        const auto accounts = loadAccounts();
-        if (accounts.empty())
-        {
-            return {};
-        }
-
-        QSettings settings;
-        settings.beginGroup(QLatin1StringView{accountsGroup});
-        const auto activeAccountId =
-            settings.value(QLatin1StringView{activeAccountIdKey}).toString();
-        settings.endGroup();
-        const auto active = std::ranges::find(accounts, activeAccountId, &ConnectionSettings::id);
-        return active == accounts.end() ? accounts.front() : *active;
     }
 
     ConnectionSettings PreferencesDialog::loadSettingsForAccount(const QStringView accountId)
@@ -701,11 +678,6 @@ namespace javelin::gui::settings
         mailboxSettings.endGroup();
         mailboxSettings.sync();
 
-        QSettings settings;
-        settings.beginGroup(QLatin1StringView{accountsGroup});
-        settings.setValue(QLatin1StringView{activeAccountIdKey}, this->settings().id);
-        settings.endGroup();
-        settings.sync();
         m_loadedAccountIds.clear();
         for (const auto& account : m_accounts)
         {

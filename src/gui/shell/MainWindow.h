@@ -322,7 +322,6 @@ namespace javelin::gui::shell
         void restoreComposeTab(const QSettings& settings);
         void savePersistentState() const;
         void writePersistentTab(QSettings& settings, const TabState& tab) const;
-        void updateLongPollStatus();
         void updateEmptyStates();
         void updateMessageListHeader();
         void updateMessageActions();
@@ -353,7 +352,6 @@ namespace javelin::gui::shell
         QListView* m_messageView = nullptr;
         QLabel* m_messageListTitleLabel = nullptr;
         QLabel* m_messageListMetaLabel = nullptr;
-        QLabel* m_longPollStatusLabel = nullptr;
         QLabel* m_messagePageLabel = nullptr;
         QToolButton* m_messageQuickFilterButton = nullptr;
         QToolButton* m_messageSortButton = nullptr;

@@ -174,7 +174,25 @@ namespace javelin::gui::mailboxes
                     .arg(QString::fromStdString(node->displayName))
                     .arg(node->unreadEmails);
             }
-            return QString::fromStdString(node->displayName);
+            const auto status = m_connectionStatuses.find(node->accountId);
+            const auto connection = status == m_connectionStatuses.end()
+                                        ? ConnectionStatus::Disconnected
+                                        : status->second;
+            QString statusText;
+            switch (connection)
+            {
+            case ConnectionStatus::Disconnected:
+                statusText = QStringLiteral("Disconnected");
+                break;
+            case ConnectionStatus::Connecting:
+                statusText = QStringLiteral("Connecting");
+                break;
+            case ConnectionStatus::Connected:
+                statusText = QStringLiteral("Connected");
+                break;
+            }
+            return QStringLiteral("%1 — %2").arg(QString::fromStdString(node->displayName),
+                                                 statusText);
         }
 
         if (role == Qt::DecorationRole)
@@ -202,6 +220,14 @@ namespace javelin::gui::mailboxes
         if (role == MailboxRoleRole)
         {
             return node->role.has_value() ? QString::fromStdString(*node->role) : QVariant{};
+        }
+
+        if (role == ConnectionStatusRole && node->kind == Node::Kind::Account)
+        {
+            const auto status = m_connectionStatuses.find(node->accountId);
+            return static_cast<int>(status == m_connectionStatuses.end()
+                                        ? ConnectionStatus::Disconnected
+                                        : status->second);
         }
 
         return {};
@@ -274,6 +300,27 @@ namespace javelin::gui::mailboxes
     void MailboxTreeModel::refresh()
     {
         rebuild();
+    }
+
+    void MailboxTreeModel::setConnectionStatus(const QStringView accountId,
+                                               const ConnectionStatus status)
+    {
+        const auto id = accountId.toString().toStdString();
+        if (const auto existing = m_connectionStatuses.find(id);
+            existing != m_connectionStatuses.end() && existing->second == status)
+        {
+            return;
+        }
+        m_connectionStatuses[id] = status;
+        for (int row = 0; row < static_cast<int>(m_rootNodes.size()); ++row)
+        {
+            if (m_rootNodes[static_cast<std::size_t>(row)]->accountId == id)
+            {
+                const auto changed = index(row, 0);
+                Q_EMIT dataChanged(changed, changed, {ConnectionStatusRole, Qt::ToolTipRole});
+                return;
+            }
+        }
     }
 
     const MailboxTreeModel::Node* MailboxTreeModel::nodeForIndex(const QModelIndex& index) const
