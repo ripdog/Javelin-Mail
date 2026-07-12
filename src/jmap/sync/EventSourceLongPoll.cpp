@@ -111,13 +111,13 @@ namespace javelin::jmap::sync
         struct ParsedEvent
         {
             ParsedEventStatus status = ParsedEventStatus::NeedMoreData;
-            std::optional<LongPollResponse> response;
+            std::optional<StateChangeEvent> response;
             std::optional<std::string> errorMessage;
             std::optional<std::chrono::seconds> pingInterval;
         };
 
         using ParsedStreamEvent =
-            std::variant<LongPollResponse, javelin::jmap::api::TransportError>;
+            std::variant<StateChangeEvent, javelin::jmap::api::TransportError>;
 
         [[nodiscard]] javelin::jmap::api::TransportError
         makeTransportError(const javelin::jmap::api::TransportErrorCode code, std::string message,
@@ -151,21 +151,23 @@ namespace javelin::jmap::sync
                 QUrl::toPercentEncoding(QString::fromStdString(std::string{value})));
         }
 
-        [[nodiscard]] std::optional<QUrl> buildEventSourceUrl(const LongPollRequest& request)
+        [[nodiscard]] std::optional<QUrl>
+        buildEventSourceUrl(const std::string_view eventSourceUrl,
+                            const StateChangeSubscription& subscription)
         {
-            QString expanded = QString::fromStdString(request.eventSourceUrl);
+            QString expanded = QString::fromStdString(std::string{eventSourceUrl});
 
             std::string types = "*";
-            if (!request.types.empty())
+            if (!subscription.types.empty())
             {
                 types.clear();
-                for (std::size_t index = 0; index < request.types.size(); ++index)
+                for (std::size_t index = 0; index < subscription.types.size(); ++index)
                 {
                     if (index > 0)
                     {
                         types += ",";
                     }
-                    types += request.types[index];
+                    types += subscription.types[index];
                 }
             }
 
@@ -279,11 +281,11 @@ namespace javelin::jmap::sync
                 return ParsedEvent{
                     .status = ParsedEventStatus::Parsed,
                     .response =
-                        LongPollResponse{
+                        StateChangeEvent{
                             .newState =
                                 eventId.empty() ? std::string{fallbackState} : std::string{eventId},
                             .changedTypes = {},
-                            .notifyObserver = false,
+                            .notifyConsumer = false,
                         },
                     .errorMessage = std::nullopt,
                     .pingInterval = std::nullopt,
@@ -322,7 +324,7 @@ namespace javelin::jmap::sync
             return ParsedEvent{
                 .status = ParsedEventStatus::Parsed,
                 .response =
-                    LongPollResponse{
+                    StateChangeEvent{
                         .newState =
                             eventId.empty() ? std::string{fallbackState} : std::string{eventId},
                         .changedTypes = std::move(changedTypes),
@@ -339,7 +341,7 @@ namespace javelin::jmap::sync
 namespace javelin::jmap::sync
 {
 
-    QCoro::Task<void> QtLongPollSleeper::sleepFor(const std::chrono::milliseconds delay)
+    QCoro::Task<void> QtStateChangeSleeper::sleepFor(const std::chrono::milliseconds delay)
     {
         if (delay.count() <= 0)
         {
@@ -352,40 +354,41 @@ namespace javelin::jmap::sync
         co_await qCoro(timer).waitForTimeout();
     }
 
-    EventSourceLongPollChannel::EventSourceLongPollChannel(
-        QNetworkAccessManager& networkAccessManager, std::string accessToken,
-        LongPollStatusCallback statusCallback)
-        : m_networkAccessManager(networkAccessManager), m_accessToken(std::move(accessToken)),
-          m_statusCallback(std::move(statusCallback))
+    EventSourceStateChangeSource::EventSourceStateChangeSource(
+        QNetworkAccessManager& networkAccessManager, std::string eventSourceUrl,
+        std::string accessToken, StateChangeStatusCallback statusCallback)
+        : m_networkAccessManager(networkAccessManager), m_eventSourceUrl(std::move(eventSourceUrl)),
+          m_accessToken(std::move(accessToken)), m_statusCallback(std::move(statusCallback))
     {
     }
 
-    EventSourceLongPollChannel::~EventSourceLongPollChannel()
+    EventSourceStateChangeSource::~EventSourceStateChangeSource()
     {
         cancel();
     }
 
-    void EventSourceLongPollChannel::cancel()
+    void EventSourceStateChangeSource::cancel()
     {
         if (m_activeReply.isNull())
         {
             return;
         }
 
-        qInfo().noquote() << "Long poll aborting active event-source request"
+        qInfo().noquote() << "State-change source aborting active event-source request"
                           << m_activeReply->url().toString();
         m_activeReply->abort();
     }
 
-    QCoro::Task<LongPollResult> EventSourceLongPollChannel::poll(LongPollRequest request,
-                                                                 AbstractLongPollObserver& observer,
-                                                                 LongPollCancellation& cancellation)
+    QCoro::Task<StateChangeSourceResult>
+    EventSourceStateChangeSource::consume(StateChangeSubscription subscription,
+                                          StateChangeConsumer& consumer,
+                                          StateChangeCancellation& cancellation)
     {
-        const auto url = buildEventSourceUrl(request);
+        const auto url = buildEventSourceUrl(m_eventSourceUrl, subscription);
         if (!url.has_value())
         {
-            qWarning().noquote() << "Long poll failed to build event-source URL"
-                                 << QString::fromStdString(request.eventSourceUrl);
+            qWarning().noquote() << "State-change source failed to build event-source URL"
+                                 << QString::fromStdString(m_eventSourceUrl);
             co_return makeTransportError(
                 javelin::jmap::api::TransportErrorCode::ResponseDecodingFailed,
                 "Failed to expand the eventSourceUrl URI template.");
@@ -397,10 +400,10 @@ namespace javelin::jmap::sync
         networkRequest.setRawHeader("Accept", "text/event-stream");
         networkRequest.setRawHeader("Authorization", QByteArray{"Bearer "} +
                                                          QByteArray::fromStdString(m_accessToken));
-        if (!request.lastState.empty())
+        if (!subscription.lastState.empty())
         {
             networkRequest.setRawHeader("Last-Event-ID",
-                                        QByteArray::fromStdString(request.lastState));
+                                        QByteArray::fromStdString(subscription.lastState));
         }
 
         QNetworkReply* reply = m_networkAccessManager.get(networkRequest);
@@ -433,7 +436,7 @@ namespace javelin::jmap::sync
                              if (!connectedReported && m_statusCallback)
                              {
                                  connectedReported = true;
-                                 m_statusCallback(LongPollConnectionStatus::Connected);
+                                 m_statusCallback(StateChangeConnectionStatus::Connected);
                              }
                          });
 
@@ -449,8 +452,8 @@ namespace javelin::jmap::sync
             eventData.clear();
         };
 
-        LongPollStreamSummary streamSummary{
-            .lastState = request.lastState,
+        StateChangeStreamSummary streamSummary{
+            .lastState = subscription.lastState,
             .updateCount = 0,
         };
         auto activityTimeout = defaultEventSourceIdleTimeout;
@@ -463,8 +466,8 @@ namespace javelin::jmap::sync
                 return std::nullopt;
             }
 
-            const auto parsed = parseStateEvent(request.accountId, request.lastState, eventName,
-                                                eventId, eventData);
+            const auto parsed = parseStateEvent(subscription.accountId, subscription.lastState,
+                                                eventName, eventId, eventData);
             if (parsed.pingInterval.has_value())
             {
                 const auto effectivePingInterval =
@@ -486,8 +489,8 @@ namespace javelin::jmap::sync
             if (parsed.status == ParsedEventStatus::Invalid)
             {
                 qWarning().noquote()
-                    << "Long poll invalid event payload" << QString::fromStdString(eventName)
-                    << QString::fromStdString(eventId)
+                    << "State-change source invalid event payload"
+                    << QString::fromStdString(eventName) << QString::fromStdString(eventId)
                     << summarizeBody(QByteArray::fromStdString(eventData));
             }
             resetEvent();
@@ -498,9 +501,9 @@ namespace javelin::jmap::sync
             case ParsedEventStatus::Ignored:
                 return std::nullopt;
             case ParsedEventStatus::Parsed:
-                if (parsed.response.has_value() && !parsed.response->notifyObserver)
+                if (parsed.response.has_value() && !parsed.response->notifyConsumer)
                 {
-                    request.lastState = parsed.response->newState;
+                    subscription.lastState = parsed.response->newState;
                     streamSummary.lastState = parsed.response->newState;
                     return std::nullopt;
                 }
@@ -524,8 +527,8 @@ namespace javelin::jmap::sync
             if (reply->error() != QNetworkReply::NoError && reply->isFinished())
             {
                 qWarning().noquote()
-                    << "Long poll network error" << reply->url().toString() << reply->error()
-                    << reply->errorString()
+                    << "State-change source network error" << reply->url().toString()
+                    << reply->error() << reply->errorString()
                     << reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt()
                     << summarizeBody(reply->readAll());
                 co_return mapReplyError(*reply);
@@ -540,8 +543,9 @@ namespace javelin::jmap::sync
                 if (statusCode < 200 || statusCode >= 300)
                 {
                     const QByteArray responseBody = reply->readAll();
-                    qWarning().noquote() << "Long poll HTTP failure" << reply->url().toString()
-                                         << statusCode << summarizeBody(responseBody);
+                    qWarning().noquote()
+                        << "State-change source HTTP failure" << reply->url().toString()
+                        << statusCode << summarizeBody(responseBody);
                     co_return makeTransportError(
                         javelin::jmap::api::TransportErrorCode::HttpFailure,
                         reply->errorString().toStdString(), statusCode);
@@ -561,7 +565,7 @@ namespace javelin::jmap::sync
                 if (!connectedReported && m_statusCallback)
                 {
                     connectedReported = true;
-                    m_statusCallback(LongPollConnectionStatus::Connected);
+                    m_statusCallback(StateChangeConnectionStatus::Connected);
                 }
             }
 
@@ -571,8 +575,9 @@ namespace javelin::jmap::sync
                 if (!ready && !reply->isFinished())
                 {
                     reply->abort();
-                    qWarning().noquote() << "Long poll timed out waiting for event-source activity"
-                                         << reply->url().toString();
+                    qWarning().noquote()
+                        << "State-change source timed out waiting for event-source activity"
+                        << reply->url().toString();
                     co_return makeTransportError(
                         javelin::jmap::api::TransportErrorCode::NetworkFailure,
                         "Timed out waiting for event-source activity.");
@@ -629,11 +634,11 @@ namespace javelin::jmap::sync
                             co_return *error;
                         }
 
-                        auto response = std::get<LongPollResponse>(*parsed);
-                        request.lastState = response.newState;
-                        streamSummary.lastState = response.newState;
+                        auto event = std::get<StateChangeEvent>(*parsed);
+                        subscription.lastState = event.newState;
+                        streamSummary.lastState = event.newState;
                         ++streamSummary.updateCount;
-                        co_await observer.onUpdate(std::move(response));
+                        co_await consumer.onStateChange(std::move(event));
                     }
                     continue;
                 }
@@ -686,11 +691,11 @@ namespace javelin::jmap::sync
                         co_return *error;
                     }
 
-                    auto response = std::get<LongPollResponse>(*parsed);
-                    request.lastState = response.newState;
-                    streamSummary.lastState = response.newState;
+                    auto event = std::get<StateChangeEvent>(*parsed);
+                    subscription.lastState = event.newState;
+                    streamSummary.lastState = event.newState;
                     ++streamSummary.updateCount;
-                    co_await observer.onUpdate(std::move(response));
+                    co_await consumer.onStateChange(std::move(event));
                     co_return streamSummary;
                 }
 
@@ -700,7 +705,7 @@ namespace javelin::jmap::sync
                 }
 
                 qWarning().noquote()
-                    << "Long poll closed before a state event was received"
+                    << "State-change source closed before a state event was received"
                     << reply->url().toString() << statusCode << summarizeBody(pendingBuffer);
                 co_return makeTransportError(
                     javelin::jmap::api::TransportErrorCode::NetworkFailure,

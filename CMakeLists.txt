@@ -37,6 +37,7 @@ find_package(KPim6Mime REQUIRED)
 qt_standard_project_setup()
 
 set(JAVELIN_FORMAT_FILES
+    src/jmap/sync/StateChangeSource.h
     src/jmap/sync/MailboxInterestRegistry.cpp
     src/jmap/sync/MailboxInterestRegistry.h
     src/jmap/sync/MailboxWindowPolicy.cpp
@@ -241,6 +242,7 @@ set(JAVELIN_FORMAT_FILES
 )
 
 add_library(javelin_jmap STATIC
+    src/jmap/sync/StateChangeSource.h
     src/jmap/sync/MailboxInterestRegistry.cpp
     src/jmap/sync/MailboxInterestRegistry.h
     src/jmap/sync/MailboxWindowPolicy.cpp

@@ -22,7 +22,7 @@
 namespace javelin::jmap::sync
 {
     Q_LOGGING_CATEGORY(logWebSocket, "jmap.push.websocket")
-    struct StateChange
+    struct WebSocketStateChange
     {
         std::optional<std::string> type;
         std::unordered_map<std::string, std::unordered_map<std::string, std::string>> changed;
@@ -44,9 +44,9 @@ namespace javelin::jmap::sync
     } // namespace
 } // namespace javelin::jmap::sync
 
-template <> struct glz::meta<javelin::jmap::sync::StateChange>
+template <> struct glz::meta<javelin::jmap::sync::WebSocketStateChange>
 {
-    using T = javelin::jmap::sync::StateChange;
+    using T = javelin::jmap::sync::WebSocketStateChange;
     static constexpr auto value =
         glz::object("@type", &T::type, "changed", &T::changed, "pushState", &T::pushState);
 };
@@ -60,19 +60,19 @@ template <> struct glz::meta<javelin::jmap::sync::PushEnable>
 
 namespace javelin::jmap::sync
 {
-    WebSocketPushChannel::WebSocketPushChannel(std::string url, std::string accessToken,
-                                               LongPollStatusCallback statusCallback)
+    WebSocketStateChangeSource::WebSocketStateChangeSource(std::string url, std::string accessToken,
+                                                           StateChangeStatusCallback statusCallback)
         : m_url(std::move(url)), m_accessToken(std::move(accessToken)),
           m_statusCallback(std::move(statusCallback))
     {
     }
 
-    WebSocketPushChannel::~WebSocketPushChannel()
+    WebSocketStateChangeSource::~WebSocketStateChangeSource()
     {
         cancel();
     }
 
-    void WebSocketPushChannel::cancel()
+    void WebSocketStateChangeSource::cancel()
     {
         if (m_activeSocket != nullptr)
         {
@@ -80,9 +80,10 @@ namespace javelin::jmap::sync
         }
     }
 
-    QCoro::Task<LongPollResult> WebSocketPushChannel::poll(LongPollRequest request,
-                                                           AbstractLongPollObserver& observer,
-                                                           LongPollCancellation& cancellation)
+    QCoro::Task<StateChangeSourceResult>
+    WebSocketStateChangeSource::consume(StateChangeSubscription subscription,
+                                        StateChangeConsumer& consumer,
+                                        StateChangeCancellation& cancellation)
     {
         QWebSocket socket;
         m_activeSocket = &socket;
@@ -118,15 +119,15 @@ namespace javelin::jmap::sync
         }
         if (m_statusCallback)
         {
-            m_statusCallback(LongPollConnectionStatus::Connected);
+            m_statusCallback(StateChangeConnectionStatus::Connected);
         }
         qCInfo(logWebSocket) << "connected";
 
         const PushEnable pushEnable{
             .type = "WebSocketPushEnable",
             .dataTypes = {"Email", "Mailbox"},
-            .pushState =
-                request.lastState.empty() ? std::nullopt : std::optional{request.lastState},
+            .pushState = subscription.lastState.empty() ? std::nullopt
+                                                        : std::optional{subscription.lastState},
         };
         std::string enable;
         if (glz::write_json(pushEnable, enable))
@@ -159,7 +160,7 @@ namespace javelin::jmap::sync
         QObject::connect(&pingTimer, &QTimer::timeout, &socket, [&socket]() { socket.ping(); });
         pingTimer.start();
 
-        LongPollStreamSummary summary{.lastState = request.lastState, .updateCount = 0};
+        StateChangeStreamSummary summary{.lastState = subscription.lastState, .updateCount = 0};
         while (!cancellation.isCancelled())
         {
             if (socket.state() != QAbstractSocket::ConnectedState)
@@ -191,7 +192,7 @@ namespace javelin::jmap::sync
                 continue;
             }
 
-            StateChange change;
+            WebSocketStateChange change;
             std::string buffer = messages.front().toStdString();
             messages.pop_front();
             if (glz::read<glz::opts{.error_on_unknown_keys = false}>(change, buffer) ||
@@ -200,25 +201,25 @@ namespace javelin::jmap::sync
                 qCWarning(logWebSocket) << "invalid push message received";
                 continue;
             }
-            const auto account = change.changed.find(request.accountId);
+            const auto account = change.changed.find(subscription.accountId);
             if (account == change.changed.end())
             {
                 continue;
             }
-            LongPollResponse response;
-            response.newState = change.pushState.value_or(summary.lastState);
+            StateChangeEvent event;
+            event.newState = change.pushState.value_or(summary.lastState);
             for (const auto& [type, state] : account->second)
             {
                 static_cast<void>(state);
-                response.changedTypes.push_back(type);
+                event.changedTypes.push_back(type);
             }
             QStringList changedTypes;
-            for (const auto& type : response.changedTypes)
+            for (const auto& type : event.changedTypes)
                 changedTypes.push_back(QString::fromStdString(type));
             qCInfo(logWebSocket).noquote() << "state change" << changedTypes.join(QLatin1Char(','));
-            summary.lastState = response.newState;
+            summary.lastState = event.newState;
             ++summary.updateCount;
-            co_await observer.onUpdate(std::move(response));
+            co_await consumer.onStateChange(std::move(event));
         }
         socket.close();
         qCInfo(logWebSocket) << "closed";

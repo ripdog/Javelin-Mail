@@ -7,12 +7,12 @@
 namespace javelin::jmap::sync
 {
 
-    void LongPollCancellation::cancel()
+    void StateChangeCancellation::cancel()
     {
         m_cancelled = true;
     }
 
-    bool LongPollCancellation::isCancelled() const
+    bool StateChangeCancellation::isCancelled() const
     {
         return m_cancelled;
     }
@@ -34,22 +34,22 @@ namespace javelin::jmap::sync
         return std::min(delay, maxDelay);
     }
 
-    LongPollWorker::LongPollWorker(AbstractLongPollChannel& channel,
-                                   AbstractLongPollObserver& observer,
-                                   AbstractLongPollSleeper& sleeper,
-                                   const BackoffPolicy backoffPolicy,
-                                   LongPollStatusCallback statusCallback)
-        : m_channel(channel), m_observer(observer), m_sleeper(sleeper),
+    StateChangeWorker::StateChangeWorker(StateChangeSource& source, StateChangeConsumer& consumer,
+                                         StateChangeSleeper& sleeper,
+                                         const BackoffPolicy backoffPolicy,
+                                         StateChangeStatusCallback statusCallback)
+        : m_source(source), m_consumer(consumer), m_sleeper(sleeper),
           m_backoffPolicy(backoffPolicy), m_statusCallback(std::move(statusCallback))
     {
     }
 
-    QCoro::Task<LongPollRunSummary> LongPollWorker::run(LongPollRequest request,
-                                                        LongPollCancellation& cancellation) const
+    QCoro::Task<StateChangeRunSummary>
+    StateChangeWorker::run(StateChangeSubscription subscription,
+                           StateChangeCancellation& cancellation) const
     {
-        LongPollRunSummary summary{
-            .lastState = request.lastState,
-            .successfulPolls = 0,
+        StateChangeRunSummary summary{
+            .lastState = subscription.lastState,
+            .successfulSubscriptions = 0,
             .transientFailures = 0,
             .cancelled = false,
         };
@@ -59,22 +59,21 @@ namespace javelin::jmap::sync
         {
             if (m_statusCallback)
             {
-                m_statusCallback(LongPollConnectionStatus::Connecting);
+                m_statusCallback(StateChangeConnectionStatus::Connecting);
             }
 
-            const auto result = co_await m_channel.poll(request, m_observer, cancellation);
+            const auto result = co_await m_source.consume(subscription, m_consumer, cancellation);
             if (std::holds_alternative<javelin::jmap::api::TransportError>(result))
             {
                 const auto& error = std::get<javelin::jmap::api::TransportError>(result);
-                qWarning().noquote() << "Long poll worker transport error"
-                                     << static_cast<int>(error.code)
-                                     << QString::fromStdString(error.message)
-                                     << error.httpStatus.value_or(0);
+                qWarning().noquote()
+                    << "State-change source transport error" << static_cast<int>(error.code)
+                    << QString::fromStdString(error.message) << error.httpStatus.value_or(0);
                 if (error.code == javelin::jmap::api::TransportErrorCode::Cancelled)
                 {
                     if (m_statusCallback)
                     {
-                        m_statusCallback(LongPollConnectionStatus::Disconnected);
+                        m_statusCallback(StateChangeConnectionStatus::Disconnected);
                     }
                     summary.cancelled = true;
                     break;
@@ -82,7 +81,7 @@ namespace javelin::jmap::sync
 
                 if (m_statusCallback)
                 {
-                    m_statusCallback(LongPollConnectionStatus::Disconnected);
+                    m_statusCallback(StateChangeConnectionStatus::Disconnected);
                 }
 
                 ++summary.transientFailures;
@@ -96,17 +95,17 @@ namespace javelin::jmap::sync
             }
 
             consecutiveFailures = 0;
-            const auto& streamSummary = std::get<LongPollStreamSummary>(result);
-            request.lastState = streamSummary.lastState;
+            const auto& streamSummary = std::get<StateChangeStreamSummary>(result);
+            subscription.lastState = streamSummary.lastState;
             summary.lastState = streamSummary.lastState;
-            summary.successfulPolls += streamSummary.updateCount;
+            summary.successfulSubscriptions += streamSummary.updateCount;
         }
 
         if (cancellation.isCancelled())
         {
             if (m_statusCallback)
             {
-                m_statusCallback(LongPollConnectionStatus::Disconnected);
+                m_statusCallback(StateChangeConnectionStatus::Disconnected);
             }
             summary.cancelled = true;
         }

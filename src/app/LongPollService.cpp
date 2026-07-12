@@ -25,15 +25,15 @@ namespace javelin::app
         constexpr auto resumeWatchdogStallThreshold = std::chrono::seconds{90};
 
         [[nodiscard]] LongPollService::Status
-        toServiceStatus(const javelin::jmap::sync::LongPollConnectionStatus status)
+        toServiceStatus(const javelin::jmap::sync::StateChangeConnectionStatus status)
         {
             switch (status)
             {
-            case javelin::jmap::sync::LongPollConnectionStatus::Disconnected:
+            case javelin::jmap::sync::StateChangeConnectionStatus::Disconnected:
                 return LongPollService::Status::Disconnected;
-            case javelin::jmap::sync::LongPollConnectionStatus::Connecting:
+            case javelin::jmap::sync::StateChangeConnectionStatus::Connecting:
                 return LongPollService::Status::Connecting;
-            case javelin::jmap::sync::LongPollConnectionStatus::Connected:
+            case javelin::jmap::sync::StateChangeConnectionStatus::Connected:
                 return LongPollService::Status::Connected;
             }
 
@@ -90,9 +90,9 @@ namespace javelin::app
     {
         if (m_runContext != nullptr)
         {
-            if (m_runContext->channel != nullptr)
+            if (m_runContext->source != nullptr)
             {
-                m_runContext->channel->cancel();
+                m_runContext->source->cancel();
             }
             m_runContext->cancellation.cancel();
             m_runContext.reset();
@@ -120,9 +120,9 @@ namespace javelin::app
         return true;
     }
 
-    QCoro::Task<void> LongPollService::onUpdate(javelin::jmap::sync::LongPollResponse response)
+    QCoro::Task<void> LongPollService::onStateChange(javelin::jmap::sync::StateChangeEvent event)
     {
-        m_lastEventId = response.newState;
+        m_lastEventId = event.newState;
         scheduleDebouncedRefresh();
         co_return;
     }
@@ -184,14 +184,13 @@ namespace javelin::app
 
     QCoro::Task<void> LongPollService::runLoop(std::shared_ptr<RunContext> runContext)
     {
-        javelin::jmap::sync::LongPollRequest request{
+        javelin::jmap::sync::StateChangeSubscription subscription{
             .accountId = runContext->configuration.accountId,
-            .eventSourceUrl = runContext->configuration.eventSourceUrl,
             .lastState = m_lastEventId,
             .types = {"Email", "Mailbox"},
         };
 
-        co_await runContext->worker->run(request, runContext->cancellation);
+        co_await runContext->worker->run(subscription, runContext->cancellation);
     }
 
     QCoro::Task<void> LongPollService::refreshWatchedMailbox()
@@ -426,9 +425,9 @@ namespace javelin::app
         auto runContext = std::make_shared<RunContext>();
         runContext->generation = ++m_generation;
         runContext->configuration = *nextConfiguration;
-        const auto channelStatusCallback =
+        const auto sourceStatusCallback =
             [this, generation = runContext->generation](
-                const javelin::jmap::sync::LongPollConnectionStatus status)
+                const javelin::jmap::sync::StateChangeConnectionStatus status)
         {
             if (m_runContext == nullptr || m_runContext->generation != generation)
             {
@@ -439,26 +438,28 @@ namespace javelin::app
         };
         if (nextConfiguration->websocket.has_value() && nextConfiguration->websocket->supportsPush)
         {
-            runContext->channel = std::make_unique<javelin::jmap::sync::WebSocketPushChannel>(
+            runContext->source = std::make_unique<javelin::jmap::sync::WebSocketStateChangeSource>(
                 nextConfiguration->websocket->url, nextConfiguration->settings.apiKey,
-                channelStatusCallback);
+                sourceStatusCallback);
         }
         else
         {
-            runContext->channel = std::make_unique<javelin::jmap::sync::EventSourceLongPollChannel>(
-                m_networkAccessManager, nextConfiguration->settings.apiKey, channelStatusCallback);
+            runContext->source =
+                std::make_unique<javelin::jmap::sync::EventSourceStateChangeSource>(
+                    m_networkAccessManager, nextConfiguration->eventSourceUrl,
+                    nextConfiguration->settings.apiKey, sourceStatusCallback);
         }
-        runContext->worker = std::make_unique<javelin::jmap::sync::LongPollWorker>(
-            *runContext->channel, *this, runContext->sleeper, javelin::jmap::sync::BackoffPolicy{},
+        runContext->worker = std::make_unique<javelin::jmap::sync::StateChangeWorker>(
+            *runContext->source, *this, runContext->sleeper, javelin::jmap::sync::BackoffPolicy{},
             [this, generation = runContext->generation](
-                const javelin::jmap::sync::LongPollConnectionStatus status)
+                const javelin::jmap::sync::StateChangeConnectionStatus status)
             {
                 if (m_runContext == nullptr || m_runContext->generation != generation)
                 {
                     return;
                 }
 
-                if (status == javelin::jmap::sync::LongPollConnectionStatus::Connected)
+                if (status == javelin::jmap::sync::StateChangeConnectionStatus::Connected)
                 {
                     return;
                 }

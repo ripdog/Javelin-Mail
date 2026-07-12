@@ -44,8 +44,7 @@ namespace javelin::app
         bool hasNewMail = false;
     };
 
-    class LongPollService final : public QObject,
-                                  public javelin::jmap::sync::AbstractLongPollObserver
+    class LongPollService final : public QObject, public javelin::jmap::sync::StateChangeConsumer
     {
         Q_OBJECT
 
@@ -73,7 +72,7 @@ namespace javelin::app
 
         [[nodiscard]] Status status() const;
         [[nodiscard]] QCoro::Task<void>
-        onUpdate(javelin::jmap::sync::LongPollResponse response) override;
+        onStateChange(javelin::jmap::sync::StateChangeEvent event) override;
 
       Q_SIGNALS:
         void statusChanged(javelin::app::LongPollService::Status status);
@@ -98,10 +97,10 @@ namespace javelin::app
         {
             std::size_t generation = 0;
             RunConfiguration configuration;
-            javelin::jmap::sync::LongPollCancellation cancellation;
-            javelin::jmap::sync::QtLongPollSleeper sleeper;
-            std::unique_ptr<javelin::jmap::sync::AbstractLongPollChannel> channel;
-            std::unique_ptr<javelin::jmap::sync::LongPollWorker> worker;
+            javelin::jmap::sync::StateChangeCancellation cancellation;
+            javelin::jmap::sync::QtStateChangeSleeper sleeper;
+            std::unique_ptr<javelin::jmap::sync::StateChangeSource> source;
+            std::unique_ptr<javelin::jmap::sync::StateChangeWorker> worker;
         };
 
         [[nodiscard]] bool hasValidSettings() const;
