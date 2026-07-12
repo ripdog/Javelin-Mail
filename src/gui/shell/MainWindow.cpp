@@ -1766,6 +1766,7 @@ namespace javelin::gui::shell
         m_activeTabIndex = static_cast<int>(m_tabs.size() - 1);
         updateTabBar();
         activateTab(*m_activeTabIndex, refreshRemote);
+        applyLongPollSettings();
     }
 
     void MainWindow::activateMailboxInHomeTab(std::string accountId, std::string mailboxId,
@@ -1820,6 +1821,7 @@ namespace javelin::gui::shell
         m_activeTabIndex = 0;
         updateTabBar();
         activateTab(0, refreshRemote);
+        applyLongPollSettings();
     }
 
     void MainWindow::openOrActivateSearchTab(std::string accountId, QString query,
@@ -1955,6 +1957,7 @@ namespace javelin::gui::shell
         }
 
         m_tabs.erase(m_tabs.begin() + index);
+        applyLongPollSettings();
         if (m_tabs.empty())
         {
             m_activeTabIndex.reset();
@@ -2585,6 +2588,7 @@ namespace javelin::gui::shell
         m_activeTabIndex = static_cast<int>(m_tabs.size() - 1);
         updateTabBar();
         activateTab(*m_activeTabIndex, refreshRemote);
+        applyLongPollSettings();
     }
 
     void MainWindow::openComposeForRequest(javelin::jmap::submission::OpenComposeRequest request)
@@ -3907,6 +3911,15 @@ namespace javelin::gui::shell
                      javelin::gui::settings::PreferencesDialog::syncedMailboxIds(accountId))
                 {
                     mailboxIds.push_back(mailboxId.toStdString());
+                }
+                for (const auto& tab : m_tabs)
+                {
+                    const auto* mailboxTab = std::get_if<MailboxTabState>(&tab.content);
+                    if (mailboxTab != nullptr && mailboxTab->accountId == accountId.toStdString() &&
+                        std::ranges::find(mailboxIds, mailboxTab->mailboxId) == mailboxIds.end())
+                    {
+                        mailboxIds.push_back(mailboxTab->mailboxId);
+                    }
                 }
                 configurations.push_back(javelin::app::LongPollAccountConfiguration{
                     .settings = toLiveConnectionSettings(settings),

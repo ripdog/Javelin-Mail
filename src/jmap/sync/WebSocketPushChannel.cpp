@@ -137,14 +137,6 @@ namespace javelin::jmap::sync
                 .httpStatus = std::nullopt,
             };
         }
-        socket.sendTextMessage(QString::fromStdString(enable));
-        qCDebug(logWebSocket) << "push subscription sent for Email and Mailbox";
-
-        QTimer pingTimer;
-        pingTimer.setInterval(std::chrono::seconds{30});
-        QObject::connect(&pingTimer, &QTimer::timeout, &socket, [&socket]() { socket.ping(); });
-        pingTimer.start();
-
         std::deque<QString> messages;
         QElapsedTimer lastActivity;
         lastActivity.start();
@@ -156,6 +148,16 @@ namespace javelin::jmap::sync
                          });
         QObject::connect(&socket, &QWebSocket::pong, &socket,
                          [&lastActivity](quint64, const QByteArray&) { lastActivity.restart(); });
+
+        // Install the receive handlers before enabling push. A server may send the initial
+        // StateChange immediately in response to WebSocketPushEnable.
+        socket.sendTextMessage(QString::fromStdString(enable));
+        qCDebug(logWebSocket) << "push subscription sent for Email and Mailbox";
+
+        QTimer pingTimer;
+        pingTimer.setInterval(std::chrono::seconds{30});
+        QObject::connect(&pingTimer, &QTimer::timeout, &socket, [&socket]() { socket.ping(); });
+        pingTimer.start();
 
         LongPollStreamSummary summary{.lastState = request.lastState, .updateCount = 0};
         while (!cancellation.isCancelled())
