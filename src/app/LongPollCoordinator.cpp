@@ -1,10 +1,58 @@
 #include "app/LongPollCoordinator.h"
 
+#include <algorithm>
 #include <ranges>
 #include <unordered_set>
+#include <utility>
 
 namespace javelin::app
 {
+
+    MailboxObservation::MailboxObservation(
+        LongPollCoordinator& coordinator,
+        const javelin::jmap::sync::MailboxInterestRegistry::ObservationId observationId)
+        : m_coordinator(&coordinator), m_observationId(observationId)
+    {
+    }
+
+    MailboxObservation::~MailboxObservation()
+    {
+        reset();
+    }
+
+    MailboxObservation::MailboxObservation(MailboxObservation&& other) noexcept
+        : m_coordinator(std::exchange(other.m_coordinator, nullptr)),
+          m_observationId(std::exchange(other.m_observationId, 0))
+    {
+    }
+
+    MailboxObservation& MailboxObservation::operator=(MailboxObservation&& other) noexcept
+    {
+        if (this == &other)
+        {
+            return *this;
+        }
+
+        reset();
+        m_coordinator = std::exchange(other.m_coordinator, nullptr);
+        m_observationId = std::exchange(other.m_observationId, 0);
+        return *this;
+    }
+
+    void MailboxObservation::reset()
+    {
+        if (m_coordinator != nullptr && m_observationId != 0)
+        {
+            m_coordinator->releaseMailboxObservation(m_observationId);
+        }
+        m_coordinator.clear();
+        m_observationId = 0;
+    }
+
+    MailboxObservation::operator bool() const
+    {
+        return m_coordinator != nullptr && m_observationId != 0;
+    }
 
     LongPollCoordinator::LongPollCoordinator(
         javelin::jmap::cache::DatabaseConnection& databaseConnection,
@@ -47,8 +95,7 @@ namespace javelin::app
         }
         std::erase_if(m_configurations, [&configuredAccountIds](const auto& entry)
                       { return !configuredAccountIds.contains(entry.first); });
-        std::erase_if(m_observations, [&configuredAccountIds](const auto& entry)
-                      { return !configuredAccountIds.contains(entry.second.accountId); });
+        m_mailboxInterests.eraseAccountsNotIn(configuredAccountIds);
     }
 
     void LongPollCoordinator::applyAccountConfiguration(const std::string& accountId)
@@ -58,14 +105,13 @@ namespace javelin::app
             return;
 
         auto configuration = stored->second;
-        for (const auto& [id, observation] : m_observations)
-        {
-            static_cast<void>(id);
-            if (observation.accountId == accountId &&
-                std::ranges::find(configuration.mailboxIds, observation.mailboxId) ==
-                    configuration.mailboxIds.end())
-                configuration.mailboxIds.push_back(observation.mailboxId);
-        }
+        auto observedMailboxIds = m_mailboxInterests.mailboxIds(accountId);
+        configuration.mailboxIds.insert(configuration.mailboxIds.end(),
+                                        std::make_move_iterator(observedMailboxIds.begin()),
+                                        std::make_move_iterator(observedMailboxIds.end()));
+        std::ranges::sort(configuration.mailboxIds);
+        configuration.mailboxIds.erase(std::ranges::unique(configuration.mailboxIds).begin(),
+                                       configuration.mailboxIds.end());
 
         auto [serviceIt, inserted] = m_services.try_emplace(accountId);
         if (inserted)
@@ -79,24 +125,25 @@ namespace javelin::app
                                          std::move(configuration.mailboxIds));
     }
 
-    std::uint64_t LongPollCoordinator::observeMailbox(std::string accountId, std::string mailboxId)
+    MailboxObservation LongPollCoordinator::observeMailbox(std::string accountId,
+                                                           std::string mailboxId)
     {
-        const auto id = m_nextObservationId++;
-        const auto account = accountId;
-        m_observations.emplace(id, MailboxObservation{.accountId = std::move(accountId),
-                                                      .mailboxId = std::move(mailboxId)});
-        applyAccountConfiguration(account);
-        return id;
+        const auto configuredAccountId = accountId;
+        const auto observationId =
+            m_mailboxInterests.observe(std::move(accountId), std::move(mailboxId));
+        applyAccountConfiguration(configuredAccountId);
+        return MailboxObservation{*this, observationId};
     }
 
-    void LongPollCoordinator::unobserveMailbox(const std::uint64_t observationId)
+    void LongPollCoordinator::releaseMailboxObservation(
+        const javelin::jmap::sync::MailboxInterestRegistry::ObservationId observationId)
     {
-        const auto found = m_observations.find(observationId);
-        if (found == m_observations.end())
+        const auto interest = m_mailboxInterests.unobserve(observationId);
+        if (!interest.has_value())
+        {
             return;
-        const auto accountId = found->second.accountId;
-        m_observations.erase(found);
-        applyAccountConfiguration(accountId);
+        }
+        applyAccountConfiguration(interest->accountId);
     }
 
     bool LongPollCoordinator::requestAccountSynchronization(const std::string_view accountId)
@@ -327,7 +374,7 @@ namespace javelin::app
         }
         m_services.clear();
         m_configurations.clear();
-        m_observations.clear();
+        m_mailboxInterests.clear();
     }
 
     void LongPollCoordinator::connectService(const std::string& accountId, LongPollService& service)

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "app/LongPollCoordinator.h"
 #include "jmap/cache/QueryService.h"
 #include "jmap/query/EmailListSort.h"
 #include "jmap/search/EmailSearch.h"
@@ -47,11 +48,6 @@ namespace javelin::jmap::contacts
     class ContactService;
     class ContactIdentityLookup;
 } // namespace javelin::jmap::contacts
-
-namespace javelin::app
-{
-    class LongPollCoordinator;
-}
 
 namespace javelin::jmap::cache
 {
@@ -145,7 +141,7 @@ namespace javelin::gui::shell
             std::optional<std::string> role;
             PageState page;
             TabSelectionState selection;
-            std::optional<std::uint64_t> observationId;
+            std::optional<javelin::app::MailboxObservation> observationId;
         };
 
         struct SearchTabState

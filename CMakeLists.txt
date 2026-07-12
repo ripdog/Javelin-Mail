@@ -37,6 +37,8 @@ find_package(KPim6Mime REQUIRED)
 qt_standard_project_setup()
 
 set(JAVELIN_FORMAT_FILES
+    src/jmap/sync/MailboxInterestRegistry.cpp
+    src/jmap/sync/MailboxInterestRegistry.h
     src/app/ApplicationBootstrap.cpp
     src/app/ApplicationBootstrap.h
     src/app/DesktopNotificationController.cpp
@@ -237,6 +239,8 @@ set(JAVELIN_FORMAT_FILES
 )
 
 add_library(javelin_jmap STATIC
+    src/jmap/sync/MailboxInterestRegistry.cpp
+    src/jmap/sync/MailboxInterestRegistry.h
     src/jmap/api/SessionDiscovery.cpp
     src/jmap/api/SessionDiscovery.h
     src/jmap/api/ContactsMethods.cpp

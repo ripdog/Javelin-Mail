@@ -4,8 +4,10 @@
 #include "jmap/contacts/ContactService.h"
 #include "jmap/query/EmailListSort.h"
 #include "jmap/search/EmailSearch.h"
+#include "jmap/sync/MailboxInterestRegistry.h"
 
 #include <QObject>
+#include <QPointer>
 
 #include <cstdint>
 #include <memory>
@@ -15,6 +17,8 @@
 
 namespace javelin::app
 {
+
+    class MailboxObservation;
 
     struct MailboxWindowIntent
     {
@@ -56,8 +60,8 @@ namespace javelin::app
                             QObject* parent = nullptr);
 
         void applySettings(std::vector<LongPollAccountConfiguration> configurations);
-        [[nodiscard]] std::uint64_t observeMailbox(std::string accountId, std::string mailboxId);
-        void unobserveMailbox(std::uint64_t observationId);
+        [[nodiscard]] MailboxObservation observeMailbox(std::string accountId,
+                                                        std::string mailboxId);
         [[nodiscard]] bool requestAccountSynchronization(std::string_view accountId);
         [[nodiscard]] QString statusSummary() const;
         [[nodiscard]] QCoro::Task<javelin::jmap::MailboxPageResult>
@@ -112,14 +116,12 @@ namespace javelin::app
                                 const QString& message);
 
       private:
+        friend class MailboxObservation;
+
         void connectService(const std::string& accountId, LongPollService& service);
         void applyAccountConfiguration(const std::string& accountId);
-
-        struct MailboxObservation
-        {
-            std::string accountId;
-            std::string mailboxId;
-        };
+        void releaseMailboxObservation(
+            javelin::jmap::sync::MailboxInterestRegistry::ObservationId observationId);
 
         javelin::jmap::cache::DatabaseConnection& m_databaseConnection;
         javelin::jmap::JmapCore& m_jmapCore;
@@ -130,8 +132,32 @@ namespace javelin::app
         javelin::jmap::contacts::ContactService& m_contactService;
         std::unordered_map<std::string, std::unique_ptr<LongPollService>> m_services;
         std::unordered_map<std::string, LongPollAccountConfiguration> m_configurations;
-        std::unordered_map<std::uint64_t, MailboxObservation> m_observations;
-        std::uint64_t m_nextObservationId = 1;
+        javelin::jmap::sync::MailboxInterestRegistry m_mailboxInterests;
+    };
+
+    class MailboxObservation final
+    {
+      public:
+        MailboxObservation() = default;
+        ~MailboxObservation();
+
+        MailboxObservation(const MailboxObservation&) = delete;
+        MailboxObservation& operator=(const MailboxObservation&) = delete;
+        MailboxObservation(MailboxObservation&& other) noexcept;
+        MailboxObservation& operator=(MailboxObservation&& other) noexcept;
+
+        void reset();
+        [[nodiscard]] explicit operator bool() const;
+
+      private:
+        friend class LongPollCoordinator;
+
+        MailboxObservation(
+            LongPollCoordinator& coordinator,
+            javelin::jmap::sync::MailboxInterestRegistry::ObservationId observationId);
+
+        QPointer<LongPollCoordinator> m_coordinator;
+        javelin::jmap::sync::MailboxInterestRegistry::ObservationId m_observationId = 0;
     };
 
 } // namespace javelin::app

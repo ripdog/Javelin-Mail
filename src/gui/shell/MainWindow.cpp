@@ -2154,9 +2154,6 @@ namespace javelin::gui::shell
 
     void MainWindow::releaseMailboxObservation(MailboxTabState& tab)
     {
-        if (!tab.observationId.has_value())
-            return;
-        m_longPollService.unobserveMailbox(*tab.observationId);
         tab.observationId.reset();
     }
 
