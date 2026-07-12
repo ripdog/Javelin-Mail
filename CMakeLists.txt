@@ -520,6 +520,8 @@ endif()
 # rather than running `cmake --install` (which would also try to install
 # FetchContent dependencies).
 set(_local_kxmlgui_dir "${CMAKE_INSTALL_PREFIX}/${KDE_INSTALL_KXMLGUIDIR}/javelinmail")
+set(_local_kxmlgui_runtime_dir
+    "${CMAKE_INSTALL_PREFIX}/${KDE_INSTALL_DATADIR}/kxmlgui/javelinmail")
 if(JAVELIN_ENABLE_LOCAL_DATA_INSTALL)
     set(_install_data_stamp "${CMAKE_CURRENT_BINARY_DIR}/install_data.stamp")
     add_custom_command(
@@ -528,6 +530,14 @@ if(JAVELIN_ENABLE_LOCAL_DATA_INSTALL)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${PROJECT_SOURCE_DIR}/res/javelinmailui.rc"
             "${_local_kxmlgui_dir}/javelinmailui.rc"
+        # KF6 resolves application XMLGUI resources below share/kxmlgui.  Some
+        # KDEInstallDirs versions still report the historical kxmlgui5 path,
+        # so keep the configured install copy and also populate the runtime
+        # lookup location used by KXmlGuiWindow.
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${_local_kxmlgui_runtime_dir}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${PROJECT_SOURCE_DIR}/res/javelinmailui.rc"
+            "${_local_kxmlgui_runtime_dir}/javelinmailui.rc"
         COMMAND ${CMAKE_COMMAND} -E make_directory
             "${CMAKE_INSTALL_PREFIX}/${KDE_INSTALL_DATADIR}/javelinmail/models/fasttext"
         COMMAND ${CMAKE_COMMAND} -E copy_directory
