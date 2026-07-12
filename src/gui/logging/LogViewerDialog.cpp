@@ -93,7 +93,7 @@ namespace javelin::gui::logging
                              : entry.level == QtInfoMsg    ? palette().color(QPalette::Text)
                              : entry.level == QtWarningMsg ? QColor{QStringLiteral("#d98e04")}
                                                            : QColor{QStringLiteral("#d63031")});
-        if (entry.level >= QtWarningMsg)
+        if (severity(entry.level) >= severity(QtWarningMsg))
             format.setFontWeight(QFont::Bold);
         QTextCursor cursor = m_output->textCursor();
         cursor.movePosition(QTextCursor::End);

@@ -71,9 +71,8 @@ namespace javelin::jmap::api
                 return {};
             }
 
-            return QStringLiteral("methods %1 session %2")
-                .arg(summarizeInvocations(parsed.value->methodResponses),
-                     QString::fromStdString(parsed.value->sessionState));
+            return QStringLiteral("methods %1")
+                .arg(summarizeInvocations(parsed.value->methodResponses));
         }
 
         [[nodiscard]] QStringList failedJmapCalls(const QByteArray& body)

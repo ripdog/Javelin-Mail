@@ -12,6 +12,7 @@
 #include "jmap/sync/SyncPlanner.h"
 
 #include <QDebug>
+#include <QLoggingCategory>
 #include <QString>
 #include <QStringList>
 #include <algorithm>
@@ -19,6 +20,7 @@
 
 namespace javelin::jmap::sync
 {
+    Q_LOGGING_CATEGORY(logMailboxSync, "jmap.sync.mailbox")
 
     namespace
     {
@@ -389,13 +391,13 @@ namespace javelin::jmap::sync
                 };
             }
             const auto& parsedQuery = std::get<javelin::jmap::api::EmailQueryResponse>(queryResult);
-            qInfo().noquote() << "Mailbox refresh query result" << QString::fromStdString(accountId)
-                              << QString::fromStdString(mailboxId) << "state"
-                              << QString::fromStdString(parsedQuery.queryState) << "ids"
-                              << joinIds(parsedQuery.ids) << "total"
-                              << (parsedQuery.total.has_value()
-                                      ? QString::number(*parsedQuery.total)
-                                      : QStringLiteral("unknown"));
+            qCDebug(logMailboxSync).noquote()
+                << "query result" << QString::fromStdString(accountId)
+                << QString::fromStdString(mailboxId) << "state"
+                << QString::fromStdString(parsedQuery.queryState) << "ids"
+                << joinIds(parsedQuery.ids) << "total"
+                << (parsedQuery.total.has_value() ? QString::number(*parsedQuery.total)
+                                                  : QStringLiteral("unknown"));
 
             emitProgress(QStringLiteral("Fetched %1 conversation ids for the selected mailbox.")
                              .arg(parsedQuery.ids.size()));
@@ -454,11 +456,11 @@ namespace javelin::jmap::sync
                 };
             }
             const auto& parsedEmails = std::get<javelin::jmap::api::EmailGetResponse>(emailResult);
-            qInfo().noquote() << "Mailbox refresh fetched thread emails"
-                              << QString::fromStdString(accountId)
-                              << QString::fromStdString(mailboxId) << "state"
-                              << QString::fromStdString(parsedEmails.state) << "emails"
-                              << emailMailboxSummary(parsedEmails.list);
+            qCDebug(logMailboxSync).noquote()
+                << "fetched thread emails" << QString::fromStdString(accountId)
+                << QString::fromStdString(mailboxId) << "state"
+                << QString::fromStdString(parsedEmails.state) << "emails"
+                << emailMailboxSummary(parsedEmails.list);
 
             emitProgress(
                 QStringLiteral("Fetched %1 thread messages.").arg(parsedEmails.list.size()));
@@ -968,10 +970,10 @@ namespace javelin::jmap::sync
                 if (!removedAfterFullFetch.empty())
                 {
                     const auto removedMailboxEmailIds = removedAfterFullFetch;
-                    qInfo().noquote()
-                        << "Mailbox refresh removing stale mailbox membership"
-                        << QString::fromStdString(accountId) << QString::fromStdString(mailboxId)
-                        << "emailIds" << joinIds(removedMailboxEmailIds);
+                    qCDebug(logMailboxSync).noquote()
+                        << "removing stale mailbox membership" << QString::fromStdString(accountId)
+                        << QString::fromStdString(mailboxId) << "emailIds"
+                        << joinIds(removedMailboxEmailIds);
                     removedAfterFullFetch.insert(removedAfterFullFetch.end(),
                                                  removedEmailIds.begin(), removedEmailIds.end());
                     if (const auto error = emailRepository.removeFromMailbox(

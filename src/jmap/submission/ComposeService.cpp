@@ -1372,10 +1372,10 @@ namespace javelin::jmap::submission
         const javelin::jmap::api::ResponseReader reader{envelope};
         for (const auto& response : reader.rawAll(handle.callId))
         {
-            qInfo().noquote() << "Compose send raw response"
-                              << QString::fromStdString(response.name) << "callId"
-                              << QString::fromStdString(response.callId) << "arguments"
-                              << QString::fromStdString(response.arguments);
+            qDebug().noquote() << "Compose send raw response"
+                               << QString::fromStdString(response.name) << "callId"
+                               << QString::fromStdString(response.callId) << "arguments"
+                               << QString::fromStdString(response.arguments);
         }
         const auto submissionResult = reader.require(handle);
         if (const auto* error =
@@ -1472,10 +1472,10 @@ namespace javelin::jmap::submission
                 const javelin::jmap::api::ResponseReader cleanupReader{cleanupEnvelope};
                 for (const auto& response : cleanupReader.rawAll(cleanupHandle.callId))
                 {
-                    qInfo().noquote() << "Compose send cleanup raw response"
-                                      << QString::fromStdString(response.name) << "callId"
-                                      << QString::fromStdString(response.callId) << "arguments"
-                                      << QString::fromStdString(response.arguments);
+                    qDebug().noquote() << "Compose send cleanup raw response"
+                                       << QString::fromStdString(response.name) << "callId"
+                                       << QString::fromStdString(response.callId) << "arguments"
+                                       << QString::fromStdString(response.arguments);
                 }
                 const auto cleanupResponseResult = cleanupReader.require(cleanupHandle);
                 if (const auto* readerError = std::get_if<javelin::jmap::api::ResponseReaderError>(
@@ -1525,11 +1525,11 @@ namespace javelin::jmap::submission
         if (const auto& email = std::get<std::optional<javelin::jmap::domain::Email>>(emailResult);
             email.has_value())
         {
-            qInfo().noquote() << "Compose send local cache before update"
-                              << QString::fromStdString(draftSummary.accountId)
-                              << QString::fromStdString(draftSummary.draftEmailId) << "mailboxes"
-                              << joinStrings(email->mailboxIds) << "keywords"
-                              << joinStrings(email->keywords);
+            qDebug().noquote() << "Compose send local cache before update"
+                               << QString::fromStdString(draftSummary.accountId)
+                               << QString::fromStdString(draftSummary.draftEmailId) << "mailboxes"
+                               << joinStrings(email->mailboxIds) << "keywords"
+                               << joinStrings(email->keywords);
             auto updatedEmail = *email;
             updatedEmail.mailboxIds.erase(std::remove(updatedEmail.mailboxIds.begin(),
                                                       updatedEmail.mailboxIds.end(),
@@ -1548,11 +1548,11 @@ namespace javelin::jmap::submission
             {
                 co_return javelin::jmap::LiveRefreshError{.message = error->message};
             }
-            qInfo().noquote() << "Compose send local cache after update"
-                              << QString::fromStdString(draftSummary.accountId)
-                              << QString::fromStdString(draftSummary.draftEmailId) << "mailboxes"
-                              << joinStrings(updatedEmail.mailboxIds) << "keywords"
-                              << joinStrings(updatedEmail.keywords);
+            qDebug().noquote() << "Compose send local cache after update"
+                               << QString::fromStdString(draftSummary.accountId)
+                               << QString::fromStdString(draftSummary.draftEmailId) << "mailboxes"
+                               << joinStrings(updatedEmail.mailboxIds) << "keywords"
+                               << joinStrings(updatedEmail.keywords);
         }
         else
         {

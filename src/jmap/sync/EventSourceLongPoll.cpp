@@ -16,6 +16,7 @@
 
 #include <QByteArray>
 #include <QDebug>
+#include <QLoggingCategory>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
@@ -32,6 +33,7 @@
 
 namespace javelin::jmap::sync
 {
+    Q_LOGGING_CATEGORY(logEventSource, "jmap.push.eventsource")
 
     struct RawStateChange
     {
@@ -469,16 +471,18 @@ namespace javelin::jmap::sync
                     std::min(*parsed.pingInterval, maximumAcceptedPingInterval);
                 activityTimeout = std::min(effectivePingInterval * 2 + eventSourcePingGrace,
                                            maximumEventSourceIdleTimeout);
-                qInfo().noquote() << "Long poll server ping interval"
-                                  << parsed.pingInterval->count() << "seconds; effective interval"
-                                  << effectivePingInterval.count() << "seconds; activity timeout"
-                                  << activityTimeout.count() << "seconds";
+                qCDebug(logEventSource).noquote()
+                    << "server ping interval" << parsed.pingInterval->count()
+                    << "seconds; effective interval" << effectivePingInterval.count()
+                    << "seconds; activity timeout" << activityTimeout.count() << "seconds";
             }
-            qInfo().noquote() << "Long poll received SSE event"
-                              << "status" << parsedEventStatusName(parsed.status) << "event"
-                              << QString::fromStdString(eventName) << "id"
-                              << QString::fromStdString(eventId) << "data"
-                              << summarizeBody(QByteArray::fromStdString(eventData));
+            if (eventName == "ping")
+                qCDebug(logEventSource).noquote() << "ping received";
+            else
+                qCInfo(logEventSource).noquote()
+                    << "event" << QString::fromStdString(eventName) << "id"
+                    << QString::fromStdString(eventId) << "status"
+                    << parsedEventStatusName(parsed.status);
             if (parsed.status == ParsedEventStatus::Invalid)
             {
                 qWarning().noquote()
@@ -577,26 +581,26 @@ namespace javelin::jmap::sync
                 if (!ready && reply->isFinished())
                 {
                     const QByteArray chunk = reply->readAll();
-                    qInfo().noquote()
-                        << "Long poll received raw event-source bytes" << reply->url().toString()
-                        << chunk.size() << summarizeBody(chunk);
+                    qCDebug(logEventSource).noquote()
+                        << "raw event-source bytes" << reply->url().toString() << chunk.size()
+                        << summarizeBody(chunk);
                     pendingBuffer += chunk;
                 }
                 else if (ready)
                 {
                     const QByteArray chunk = reply->readAll();
-                    qInfo().noquote()
-                        << "Long poll received raw event-source bytes" << reply->url().toString()
-                        << chunk.size() << summarizeBody(chunk);
+                    qCDebug(logEventSource).noquote()
+                        << "raw event-source bytes" << reply->url().toString() << chunk.size()
+                        << summarizeBody(chunk);
                     pendingBuffer += chunk;
                 }
             }
             else
             {
                 const QByteArray chunk = reply->readAll();
-                qInfo().noquote() << "Long poll received raw event-source bytes"
-                                  << reply->url().toString() << chunk.size()
-                                  << summarizeBody(chunk);
+                qCDebug(logEventSource).noquote()
+                    << "raw event-source bytes" << reply->url().toString() << chunk.size()
+                    << summarizeBody(chunk);
                 pendingBuffer += chunk;
             }
 

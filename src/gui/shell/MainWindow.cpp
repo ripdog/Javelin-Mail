@@ -55,6 +55,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListView>
+#include <QLoggingCategory>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
@@ -83,6 +84,8 @@
 
 namespace javelin::gui::shell
 {
+    Q_LOGGING_CATEGORY(logGuiMailbox, "gui.mailbox")
+    Q_LOGGING_CATEGORY(logUserOperations, "user.operations")
     void MainWindow::presentError(const javelin::jmap::LiveRefreshError& error,
                                   const QString& title)
     {
@@ -1912,8 +1915,8 @@ namespace javelin::gui::shell
             refreshActiveTabFromServer();
         }
 
-        qInfo().noquote() << "GUI activate tab" << index << "refreshRemote" << refreshRemote << "ms"
-                          << timer.elapsed();
+        qCDebug(logGuiMailbox).noquote() << "activate tab" << index << "refreshRemote"
+                                         << refreshRemote << "ms" << timer.elapsed();
     }
 
     void MainWindow::closeTab(const int index)
@@ -2032,9 +2035,9 @@ namespace javelin::gui::shell
         timer.start();
         if (tab.page.cacheLoaded && !forceReload)
         {
-            qInfo().noquote() << "GUI mailbox cache load skipped"
-                              << QString::fromStdString(tab.accountId)
-                              << QString::fromStdString(tab.mailboxId);
+            qCDebug(logGuiMailbox).noquote()
+                << "cache load skipped" << QString::fromStdString(tab.accountId)
+                << QString::fromStdString(tab.mailboxId);
             return;
         }
 
@@ -2066,11 +2069,11 @@ namespace javelin::gui::shell
             }
         }
 
-        qInfo().noquote() << "GUI mailbox cache load" << QString::fromStdString(tab.accountId)
-                          << QString::fromStdString(tab.mailboxId) << "offset"
-                          << static_cast<qulonglong>(tab.page.offset) << "rows"
-                          << static_cast<qulonglong>(tab.page.items.size()) << "ms"
-                          << timer.elapsed();
+        qCDebug(logGuiMailbox).noquote()
+            << "cache load" << QString::fromStdString(tab.accountId)
+            << QString::fromStdString(tab.mailboxId) << "offset"
+            << static_cast<qulonglong>(tab.page.offset) << "rows"
+            << static_cast<qulonglong>(tab.page.items.size()) << "ms" << timer.elapsed();
     }
 
     void MainWindow::applySearchTabCachedPage(SearchTabState& tab, const bool forceReload)
@@ -2285,9 +2288,11 @@ namespace javelin::gui::shell
                 javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
                     QString::fromStdString(tab.accountId))),
             tab.accountId, tab.mailboxId, tab.page.offset, pageSize, m_emailListSort,
-            [this](const QString& message)
+            [this, mailboxName = tab.title, mailboxId = tab.mailboxId](const QString& message)
             {
-                qInfo().noquote() << "GUI mailbox page progress" << message;
+                qCDebug(logGuiMailbox).noquote()
+                    << "mailbox" << mailboxName << '(' << QString::fromStdString(mailboxId) << ')'
+                    << message;
                 m_statusBar->showMessage(message);
             });
         QCoro::connect(
@@ -2374,7 +2379,7 @@ namespace javelin::gui::shell
             tab.accountId, tabCriteria, tab.page.offset, pageSize, m_emailListSort,
             [this](const QString& message)
             {
-                qInfo().noquote() << "GUI search progress" << message;
+                qDebug().noquote() << "GUI search progress" << message;
                 m_statusBar->showMessage(message);
             });
         QCoro::connect(
@@ -3794,7 +3799,7 @@ namespace javelin::gui::shell
             toLiveConnectionSettings(settings),
             [this](const QString& message)
             {
-                qInfo().noquote() << "GUI refresh progress" << message;
+                qDebug().noquote() << "GUI refresh progress" << message;
                 QMetaObject::invokeMethod(
                     this, [this, message] { m_statusBar->showMessage(message); },
                     Qt::QueuedConnection);
@@ -3929,8 +3934,8 @@ namespace javelin::gui::shell
             m_messageContentRequestInFlight->accountId == accountId &&
             m_messageContentRequestInFlight->emailId == emailId)
         {
-            qInfo().noquote() << "GUI message content refresh already in flight"
-                              << QString::fromStdString(emailId);
+            qDebug().noquote() << "GUI message content refresh already in flight"
+                               << QString::fromStdString(emailId);
             return;
         }
 
@@ -3945,7 +3950,7 @@ namespace javelin::gui::shell
             toLiveConnectionSettings(settings), accountId, emailId,
             [this](const QString& message)
             {
-                qInfo().noquote() << "GUI message content progress" << message;
+                qDebug().noquote() << "GUI message content progress" << message;
                 QMetaObject::invokeMethod(
                     this, [this, message] { m_statusBar->showMessage(message, 5000); },
                     Qt::QueuedConnection);
@@ -3962,8 +3967,8 @@ namespace javelin::gui::shell
                     m_messageContentRequestInFlight->emailId == emailId;
                 if (!isCurrentRequest)
                 {
-                    qInfo().noquote() << "GUI message content refresh ignored stale completion"
-                                      << QString::fromStdString(emailId);
+                    qDebug().noquote() << "GUI message content refresh ignored stale completion"
+                                       << QString::fromStdString(emailId);
                     return;
                 }
 
@@ -4511,6 +4516,8 @@ namespace javelin::gui::shell
     void MainWindow::queueDestroyEmails(std::string accountId, std::vector<std::string> emailIds)
     {
         const auto selectedCount = emailIds.size();
+        qCInfo(logUserOperations) << "permanently delete requested" << selectedCount
+                                  << "message(s)";
         for (const auto& emailId : emailIds)
         {
             const auto result = m_jmapCore.queueDestroyEmail(accountId, emailId);
@@ -4538,6 +4545,10 @@ namespace javelin::gui::shell
                                      std::vector<std::string> emailIds, QString successMessage)
     {
         const auto selectedCount = emailIds.size();
+        qCInfo(logUserOperations).noquote()
+            << "move requested" << selectedCount << "message(s) from"
+            << QString::fromStdString(sourceMailboxId) << "to"
+            << QString::fromStdString(destinationMailboxId);
         for (const auto& emailId : emailIds)
         {
             const auto result = m_jmapCore.queueMoveEmail(accountId, emailId, sourceMailboxId,
@@ -4575,6 +4586,10 @@ namespace javelin::gui::shell
                                      std::vector<std::string> emailIds, QString successMessage)
     {
         const auto selectedCount = emailIds.size();
+        qCInfo(logUserOperations).noquote()
+            << "copy requested" << selectedCount << "message(s) from"
+            << QString::fromStdString(sourceMailboxId) << "to"
+            << QString::fromStdString(destinationMailboxId);
         for (const auto& emailId : emailIds)
         {
             const auto result = m_jmapCore.queueCopyEmail(accountId, emailId, sourceMailboxId,
@@ -4618,6 +4633,7 @@ namespace javelin::gui::shell
 
     void MainWindow::queueMarkEmailRead(std::string accountId, std::string emailId)
     {
+        qCInfo(logUserOperations) << "mark read requested";
         const auto result = m_jmapCore.queueMarkEmailRead(accountId, emailId);
         if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
         {
@@ -4647,6 +4663,7 @@ namespace javelin::gui::shell
 
         const bool isFlagged =
             index.data(javelin::gui::messages::MessageListModel::IsFlaggedRole).toBool();
+        qCInfo(logUserOperations) << (isFlagged ? "remove star requested" : "add star requested");
         const auto result =
             m_jmapCore.queueSetEmailFlagged(*accountId, emailId.toStdString(), !isFlagged);
         if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
@@ -4677,6 +4694,8 @@ namespace javelin::gui::shell
         {
             return;
         }
+
+        qCInfo(logUserOperations) << "mark unread requested";
 
         const auto result = m_jmapCore.queueMarkEmailUnread(*accountId, *emailId);
         if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))

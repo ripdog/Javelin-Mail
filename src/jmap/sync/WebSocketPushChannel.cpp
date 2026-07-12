@@ -6,8 +6,10 @@
 #include <QCoroTimer>
 
 #include <QElapsedTimer>
+#include <QLoggingCategory>
 #include <QNetworkRequest>
 #include <QScopeGuard>
+#include <QStringList>
 #include <QTimer>
 #include <QWebSocket>
 #include <QWebSocketHandshakeOptions>
@@ -19,6 +21,7 @@
 
 namespace javelin::jmap::sync
 {
+    Q_LOGGING_CATEGORY(logWebSocket, "jmap.push.websocket")
     struct StateChange
     {
         std::optional<std::string> type;
@@ -91,9 +94,11 @@ namespace javelin::jmap::sync
         QWebSocketHandshakeOptions handshakeOptions;
         handshakeOptions.setSubprotocols({QStringLiteral("jmap")});
         socket.open(handshake, handshakeOptions);
+        qCInfo(logWebSocket) << "connecting";
         const auto connected = co_await qCoro(&socket, &QWebSocket::connected, connectTimeout);
         if (!connected.has_value())
         {
+            qCWarning(logWebSocket) << "connection timed out";
             socket.abort();
             co_return javelin::jmap::api::TransportError{
                 .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
@@ -103,6 +108,7 @@ namespace javelin::jmap::sync
         }
         if (socket.subprotocol() != QStringLiteral("jmap"))
         {
+            qCWarning(logWebSocket) << "server rejected jmap subprotocol";
             socket.close();
             co_return javelin::jmap::api::TransportError{
                 .code = javelin::jmap::api::TransportErrorCode::ResponseDecodingFailed,
@@ -114,6 +120,7 @@ namespace javelin::jmap::sync
         {
             m_statusCallback(LongPollConnectionStatus::Connected);
         }
+        qCInfo(logWebSocket) << "connected";
 
         const PushEnable pushEnable{
             .type = "WebSocketPushEnable",
@@ -131,6 +138,7 @@ namespace javelin::jmap::sync
             };
         }
         socket.sendTextMessage(QString::fromStdString(enable));
+        qCDebug(logWebSocket) << "push subscription sent for Email and Mailbox";
 
         QTimer pingTimer;
         pingTimer.setInterval(std::chrono::seconds{30});
@@ -154,6 +162,7 @@ namespace javelin::jmap::sync
         {
             if (socket.state() != QAbstractSocket::ConnectedState)
             {
+                qCWarning(logWebSocket) << "disconnected" << socket.errorString();
                 co_return javelin::jmap::api::TransportError{
                     .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
                     .message = "JMAP WebSocket disconnected.",
@@ -163,6 +172,7 @@ namespace javelin::jmap::sync
             if (lastActivity.elapsed() >
                 std::chrono::duration_cast<std::chrono::milliseconds>(messageTimeout).count())
             {
+                qCWarning(logWebSocket) << "activity timeout";
                 socket.abort();
                 co_return javelin::jmap::api::TransportError{
                     .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
@@ -185,6 +195,7 @@ namespace javelin::jmap::sync
             if (glz::read<glz::opts{.error_on_unknown_keys = false}>(change, buffer) ||
                 change.type != std::optional<std::string>{"StateChange"})
             {
+                qCWarning(logWebSocket) << "invalid push message received";
                 continue;
             }
             const auto account = change.changed.find(request.accountId);
@@ -199,11 +210,16 @@ namespace javelin::jmap::sync
                 static_cast<void>(state);
                 response.changedTypes.push_back(type);
             }
+            QStringList changedTypes;
+            for (const auto& type : response.changedTypes)
+                changedTypes.push_back(QString::fromStdString(type));
+            qCInfo(logWebSocket).noquote() << "state change" << changedTypes.join(QLatin1Char(','));
             summary.lastState = response.newState;
             ++summary.updateCount;
             co_await observer.onUpdate(std::move(response));
         }
         socket.close();
+        qCInfo(logWebSocket) << "closed";
         co_return summary;
     }
 } // namespace javelin::jmap::sync
