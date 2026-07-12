@@ -1733,8 +1733,10 @@ namespace javelin::gui::shell
                     .role = std::move(role),
                     .page = {},
                     .selection = {},
+                    .observationId = {},
                 },
         });
+        ensureMailboxObservation(std::get<MailboxTabState>(m_tabs.back().content));
         m_activeTabIndex = static_cast<int>(m_tabs.size() - 1);
         updateTabBar();
         activateTab(*m_activeTabIndex, refreshRemote);
@@ -1766,11 +1768,14 @@ namespace javelin::gui::shell
                                 .refreshError = {},
                             },
                         .selection = {},
+                        .observationId = {},
                     },
             });
         }
         else
         {
+            if (auto* previous = std::get_if<MailboxTabState>(&m_tabs[0].content))
+                releaseMailboxObservation(*previous);
             m_tabs[0].content = MailboxTabState{
                 .accountId = std::move(accountId),
                 .mailboxId = std::move(mailboxId),
@@ -1787,9 +1792,11 @@ namespace javelin::gui::shell
                         .refreshError = {},
                     },
                 .selection = {},
+                .observationId = {},
             };
         }
 
+        ensureMailboxObservation(std::get<MailboxTabState>(m_tabs[0].content));
         m_activeTabIndex = 0;
         updateTabBar();
         activateTab(0, refreshRemote);
@@ -1928,6 +1935,9 @@ namespace javelin::gui::shell
             }
         }
 
+        if (auto* mailboxTab =
+                std::get_if<MailboxTabState>(&m_tabs[static_cast<std::size_t>(index)].content))
+            releaseMailboxObservation(*mailboxTab);
         m_tabs.erase(m_tabs.begin() + index);
         applyLongPollSettings();
         if (m_tabs.empty())
@@ -2158,6 +2168,20 @@ namespace javelin::gui::shell
             refreshSelectionFromModels();
             return;
         }
+    }
+
+    void MainWindow::ensureMailboxObservation(MailboxTabState& tab)
+    {
+        if (!tab.observationId.has_value())
+            tab.observationId = m_longPollService.observeMailbox(tab.accountId, tab.mailboxId);
+    }
+
+    void MainWindow::releaseMailboxObservation(MailboxTabState& tab)
+    {
+        if (!tab.observationId.has_value())
+            return;
+        m_longPollService.unobserveMailbox(*tab.observationId);
+        tab.observationId.reset();
     }
 
     void MainWindow::loadActiveTabFromCache(const bool forceReload, const bool refreshRemote)
@@ -2555,8 +2579,10 @@ namespace javelin::gui::shell
                     .role = role,
                     .page = {},
                     .selection = {},
+                    .observationId = {},
                 },
         });
+        ensureMailboxObservation(std::get<MailboxTabState>(m_tabs.back().content));
         m_activeTabIndex = static_cast<int>(m_tabs.size() - 1);
         updateTabBar();
         activateTab(*m_activeTabIndex, refreshRemote);
@@ -3884,15 +3910,6 @@ namespace javelin::gui::shell
                 {
                     mailboxIds.push_back(mailboxId.toStdString());
                 }
-                for (const auto& tab : m_tabs)
-                {
-                    const auto* mailboxTab = std::get_if<MailboxTabState>(&tab.content);
-                    if (mailboxTab != nullptr && mailboxTab->accountId == accountId.toStdString() &&
-                        std::ranges::find(mailboxIds, mailboxTab->mailboxId) == mailboxIds.end())
-                    {
-                        mailboxIds.push_back(mailboxTab->mailboxId);
-                    }
-                }
                 configurations.push_back(javelin::app::LongPollAccountConfiguration{
                     .settings = toLiveConnectionSettings(settings),
                     .accountId = accountId.toStdString(),
@@ -3901,6 +3918,9 @@ namespace javelin::gui::shell
             }
         }
         m_longPollService.applySettings(std::move(configurations));
+        for (auto& tab : m_tabs)
+            if (auto* mailboxTab = std::get_if<MailboxTabState>(&tab.content))
+                ensureMailboxObservation(*mailboxTab);
     }
 
     void MainWindow::refreshSelectedMessageContent(std::string accountId, std::string emailId)
@@ -5098,6 +5118,7 @@ namespace javelin::gui::shell
                             .emailId = optionalStringSetting(settings, QStringLiteral("emailId")),
                             .selectedEmailIds = {},
                         },
+                    .observationId = {},
                 },
         });
     }

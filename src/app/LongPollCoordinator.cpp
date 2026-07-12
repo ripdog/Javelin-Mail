@@ -1,5 +1,6 @@
 #include "app/LongPollCoordinator.h"
 
+#include <ranges>
 #include <unordered_set>
 
 namespace javelin::app
@@ -24,17 +25,9 @@ namespace javelin::app
         for (auto& configuration : configurations)
         {
             configuredAccountIds.insert(configuration.accountId);
-            auto [serviceIt, inserted] = m_services.try_emplace(configuration.accountId);
-            if (inserted)
-            {
-                serviceIt->second = std::make_unique<LongPollService>(
-                    m_databaseConnection, m_transport, m_networkAccessManager, m_accountRepository,
-                    m_queryService, this);
-                connectService(serviceIt->first, *serviceIt->second);
-            }
-            serviceIt->second->applySettings(std::move(configuration.settings),
-                                             configuration.accountId,
-                                             std::move(configuration.mailboxIds));
+            const auto accountId = configuration.accountId;
+            m_configurations.insert_or_assign(accountId, std::move(configuration));
+            applyAccountConfiguration(accountId);
         }
 
         for (auto serviceIt = m_services.begin(); serviceIt != m_services.end();)
@@ -50,6 +43,54 @@ namespace javelin::app
             disconnect(serviceIt->second.get(), nullptr, this, nullptr);
             serviceIt = m_services.erase(serviceIt);
         }
+    }
+
+    void LongPollCoordinator::applyAccountConfiguration(const std::string& accountId)
+    {
+        const auto stored = m_configurations.find(accountId);
+        if (stored == m_configurations.end())
+            return;
+
+        auto configuration = stored->second;
+        for (const auto& [id, observation] : m_observations)
+        {
+            static_cast<void>(id);
+            if (observation.accountId == accountId &&
+                std::ranges::find(configuration.mailboxIds, observation.mailboxId) ==
+                    configuration.mailboxIds.end())
+                configuration.mailboxIds.push_back(observation.mailboxId);
+        }
+
+        auto [serviceIt, inserted] = m_services.try_emplace(accountId);
+        if (inserted)
+        {
+            serviceIt->second = std::make_unique<LongPollService>(
+                m_databaseConnection, m_transport, m_networkAccessManager, m_accountRepository,
+                m_queryService, this);
+            connectService(serviceIt->first, *serviceIt->second);
+        }
+        serviceIt->second->applySettings(std::move(configuration.settings), accountId,
+                                         std::move(configuration.mailboxIds));
+    }
+
+    std::uint64_t LongPollCoordinator::observeMailbox(std::string accountId, std::string mailboxId)
+    {
+        const auto id = m_nextObservationId++;
+        const auto account = accountId;
+        m_observations.emplace(id, MailboxObservation{.accountId = std::move(accountId),
+                                                      .mailboxId = std::move(mailboxId)});
+        applyAccountConfiguration(account);
+        return id;
+    }
+
+    void LongPollCoordinator::unobserveMailbox(const std::uint64_t observationId)
+    {
+        const auto found = m_observations.find(observationId);
+        if (found == m_observations.end())
+            return;
+        const auto accountId = found->second.accountId;
+        m_observations.erase(found);
+        applyAccountConfiguration(accountId);
     }
 
     void LongPollCoordinator::stop()

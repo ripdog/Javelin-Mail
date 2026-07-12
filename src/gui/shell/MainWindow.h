@@ -146,6 +146,7 @@ namespace javelin::gui::shell
             std::optional<std::string> role;
             PageState page;
             TabSelectionState selection;
+            std::optional<std::uint64_t> observationId;
         };
 
         struct SearchTabState
@@ -234,6 +235,8 @@ namespace javelin::gui::shell
         void loadMailboxTabFromCache(std::string_view accountId, std::string_view mailboxId,
                                      bool applyIfActive);
         void loadMailboxTabPageFromCache(MailboxTabState& tab, bool forceReload = false);
+        void ensureMailboxObservation(MailboxTabState& tab);
+        void releaseMailboxObservation(MailboxTabState& tab);
         void applySearchTabCachedPage(SearchTabState& tab, bool forceReload = false);
         void refreshActiveTabFromServer();
         void refreshTabFromServer(std::size_t tabIndex);
