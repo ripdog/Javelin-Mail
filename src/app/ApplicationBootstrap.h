@@ -1,7 +1,7 @@
 #pragma once
 
-#include <memory>
 #include <QPointer>
+#include <memory>
 
 class QApplication;
 
@@ -9,7 +9,7 @@ namespace javelin::app
 {
     class DesktopNotificationController;
     class ProcessServices;
-}
+} // namespace javelin::app
 
 namespace javelin::gui::shell
 {
@@ -39,6 +39,7 @@ namespace javelin::app
         void restoreMainWindow(const QString& activationToken = {});
         void toggleMainWindow();
         void createMainWindow();
+        void reloadAccountSynchronizationSettings();
         void setupSystemTray();
 
         QApplication& m_application;

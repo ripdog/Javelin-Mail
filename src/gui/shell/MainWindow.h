@@ -112,6 +112,9 @@ namespace javelin::gui::shell
         void openMessageFromNotification(const QString& accountId, const QString& mailboxId,
                                          const QString& threadId, const QString& emailId);
 
+      Q_SIGNALS:
+        void accountSettingsChanged();
+
       private:
         static constexpr std::size_t pageSize = 100;
 
@@ -256,7 +259,6 @@ namespace javelin::gui::shell
         void refreshFromServer();
         void refreshAccountFromServer(std::string accountId);
         void refreshConnectionSettings(javelin::gui::settings::ConnectionSettings settings);
-        void applyLongPollSettings();
         void updateWindowTitle();
         void refreshSelectedMessageContent(std::string accountId, std::string emailId);
         [[nodiscard]] std::vector<std::string> selectedEmailIds() const;

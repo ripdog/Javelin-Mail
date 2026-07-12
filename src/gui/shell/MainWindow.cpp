@@ -1716,7 +1716,6 @@ namespace javelin::gui::shell
         m_activeTabIndex = static_cast<int>(m_tabs.size() - 1);
         updateTabBar();
         activateTab(*m_activeTabIndex, refreshRemote);
-        applyLongPollSettings();
     }
 
     void MainWindow::activateMailboxInHomeTab(std::string accountId, std::string mailboxId,
@@ -1776,7 +1775,6 @@ namespace javelin::gui::shell
         m_activeTabIndex = 0;
         updateTabBar();
         activateTab(0, refreshRemote);
-        applyLongPollSettings();
     }
 
     void MainWindow::openOrActivateSearchTab(std::string accountId, QString query,
@@ -1915,7 +1913,6 @@ namespace javelin::gui::shell
                 std::get_if<MailboxTabState>(&m_tabs[static_cast<std::size_t>(index)].content))
             releaseMailboxObservation(*mailboxTab);
         m_tabs.erase(m_tabs.begin() + index);
-        applyLongPollSettings();
         if (m_tabs.empty())
         {
             m_activeTabIndex.reset();
@@ -2551,7 +2548,6 @@ namespace javelin::gui::shell
         m_activeTabIndex = static_cast<int>(m_tabs.size() - 1);
         updateTabBar();
         activateTab(*m_activeTabIndex, refreshRemote);
-        applyLongPollSettings();
     }
 
     void MainWindow::openComposeForRequest(javelin::jmap::submission::OpenComposeRequest request)
@@ -3680,8 +3676,8 @@ namespace javelin::gui::shell
         if (dialog.exec() == QDialog::Accepted)
         {
             m_statusBar->showMessage(QStringLiteral("Saved connection preferences."), 3000);
+            Q_EMIT accountSettingsChanged();
             m_mailboxModel->refresh();
-            applyLongPollSettings();
             const auto accountId = activeAccountId().has_value() ? activeAccountId()
                                                                  : currentAccountId(*m_mailboxView);
             if (accountId.has_value())
@@ -3792,7 +3788,7 @@ namespace javelin::gui::shell
                         .arg(summary.emailCount)
                         .arg(QString::fromStdString(summary.accountId)),
                     10000);
-                applyLongPollSettings();
+                Q_EMIT accountSettingsChanged();
                 auto contactsTask = m_longPollService.requestContacts(summary.accountId);
                 QCoro::connect(
                     std::move(contactsTask), this,
@@ -3811,36 +3807,6 @@ namespace javelin::gui::shell
                         qInfo() << "Contacts cache refreshed" << contacts.contactCount;
                     });
             });
-    }
-
-    void MainWindow::applyLongPollSettings()
-    {
-        std::vector<javelin::app::LongPollAccountConfiguration> configurations;
-        for (const auto& settings : javelin::gui::settings::PreferencesDialog::loadAccounts())
-        {
-            if (settings.loginEmail.isEmpty() || settings.apiKey.isEmpty())
-            {
-                continue;
-            }
-            for (const auto& accountId : settings.cachedAccountIds)
-            {
-                std::vector<std::string> mailboxIds;
-                for (const auto& mailboxId :
-                     javelin::gui::settings::PreferencesDialog::syncedMailboxIds(accountId))
-                {
-                    mailboxIds.push_back(mailboxId.toStdString());
-                }
-                configurations.push_back(javelin::app::LongPollAccountConfiguration{
-                    .settings = toLiveConnectionSettings(settings),
-                    .accountId = accountId.toStdString(),
-                    .mailboxIds = std::move(mailboxIds),
-                });
-            }
-        }
-        m_longPollService.applySettings(std::move(configurations));
-        for (auto& tab : m_tabs)
-            if (auto* mailboxTab = std::get_if<MailboxTabState>(&tab.content))
-                ensureMailboxObservation(*mailboxTab);
     }
 
     void MainWindow::refreshSelectedMessageContent(std::string accountId, std::string emailId)

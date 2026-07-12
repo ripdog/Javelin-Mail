@@ -136,7 +136,7 @@ namespace javelin::app
             dialog.exec();
         }
 
-        m_processServices->longPollService().applySettings(longPollConfigurations());
+        reloadAccountSynchronizationSettings();
         setupSystemTray();
         createMainWindow();
 
@@ -181,8 +181,15 @@ namespace javelin::app
             m_processServices->composeService(), m_processServices->longPollService());
 
         m_mainWindow->setAttribute(Qt::WA_DeleteOnClose);
+        QObject::connect(m_mainWindow, &javelin::gui::shell::MainWindow::accountSettingsChanged,
+                         m_mainWindow, [this]() { reloadAccountSynchronizationSettings(); });
 
         m_mainWindow->show();
+    }
+
+    void ApplicationBootstrap::reloadAccountSynchronizationSettings()
+    {
+        m_processServices->longPollService().applySettings(longPollConfigurations());
     }
 
     void ApplicationBootstrap::toggleMainWindow()
