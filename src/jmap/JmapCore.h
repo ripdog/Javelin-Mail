@@ -54,6 +54,16 @@ namespace javelin::jmap
 
     using LiveRefreshResult = std::variant<LiveRefreshSummary, LiveRefreshError>;
 
+    struct SessionRefreshSummary
+    {
+        std::string ownerAccountId;
+        std::string resolvedSessionUrl;
+        bool websocketAdvertised = false;
+        bool websocketPushSupported = false;
+    };
+
+    using SessionRefreshResult = std::variant<SessionRefreshSummary, LiveRefreshError>;
+
     struct MessageContentRefreshSummary
     {
         std::string accountId;
@@ -171,6 +181,8 @@ namespace javelin::jmap
         refreshFromServer(LiveConnectionSettings settings,
                           std::function<void(const QString&)> progressCallback = {},
                           std::optional<std::vector<std::string>> mailboxIds = std::nullopt);
+        [[nodiscard]] QCoro::Task<SessionRefreshResult>
+        refreshSession(LiveConnectionSettings settings, std::string ownerAccountId);
         [[nodiscard]] QCoro::Task<MessageContentRefreshResult>
         refreshMessageContent(LiveConnectionSettings settings, std::string accountId,
                               std::string emailId,

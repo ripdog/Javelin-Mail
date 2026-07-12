@@ -815,6 +815,71 @@ namespace javelin::jmap
         return m_impl->statusSummary;
     }
 
+    QCoro::Task<SessionRefreshResult>
+    JmapCore::refreshSession(LiveConnectionSettings settings, std::string ownerAccountId)
+    {
+        if (m_impl->databaseConnection == nullptr || m_impl->resourceTransport == nullptr)
+        {
+            co_return LiveRefreshError{
+                .message = QStringLiteral(
+                    "Session discovery is unavailable in this process configuration."),
+            };
+        }
+        if (const auto validationError = validateLoginSettings(settings, false))
+        {
+            co_return *validationError;
+        }
+        if (ownerAccountId.empty())
+        {
+            co_return LiveRefreshError{
+                .message = QStringLiteral("An owner account is required for session discovery."),
+                .requiresUserIntervention = true,
+            };
+        }
+
+        javelin::jmap::api::SessionClient sessionClient{*m_impl->resourceTransport};
+        const javelin::jmap::auth::SessionRequestContext requestContext{
+            .credentials = buildAccountCredentials(settings, ownerAccountId),
+            .requiredCapabilities =
+                {
+                    .mail = true,
+                    .submission = false,
+                },
+        };
+        const auto discovered = co_await sessionClient.discover(requestContext);
+        if (const auto* error = std::get_if<javelin::jmap::api::TransportError>(&discovered))
+        {
+            co_return LiveRefreshError{.message = transportMessage(*error)};
+        }
+        if (const auto* error = std::get_if<javelin::jmap::api::AuthError>(&discovered))
+        {
+            co_return LiveRefreshError{
+                .message = authMessage(*error),
+                .requiresUserIntervention = true,
+            };
+        }
+        if (const auto* error = std::get_if<javelin::jmap::api::ProtocolError>(&discovered))
+        {
+            co_return LiveRefreshError{.message = protocolMessage(*error)};
+        }
+
+        const auto& session = std::get<javelin::jmap::api::Session>(discovered);
+        javelin::jmap::cache::SessionRepository repository{*m_impl->databaseConnection};
+        if (const auto error = repository.replace(ownerAccountId, session))
+        {
+            co_return LiveRefreshError{.message = error->message};
+        }
+
+        const bool websocketAdvertised = session.capabilities.websocket.has_value();
+        co_return SessionRefreshSummary{
+            .ownerAccountId = std::move(ownerAccountId),
+            .resolvedSessionUrl = sessionClient.resolvedSessionUrl(),
+            .websocketAdvertised = websocketAdvertised,
+            .websocketPushSupported =
+                websocketAdvertised && session.capabilities.websocket->supportsPush,
+        };
+    }
+
     QCoro::Task<LiveRefreshResult>
     JmapCore::refreshFromServer(LiveConnectionSettings settings,
                                 std::function<void(const QString&)> progressCallback,

@@ -15,6 +15,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <variant>
 #include <vector>
 
@@ -153,6 +154,9 @@ namespace javelin::app
 
         void connectCoordinator(const std::string& accountId, AccountSyncCoordinator& coordinator);
         void applyAccountConfiguration(const std::string& accountId);
+        void refreshConfiguredSessions();
+        void startSessionRefresh(const std::string& ownerAccountId,
+                                 const AccountConnectionSettings& settings);
         void releaseMailboxObservation(
             javelin::jmap::sync::MailboxInterestRegistry::ObservationId observationId);
 
@@ -165,6 +169,7 @@ namespace javelin::app
         javelin::jmap::contacts::ContactService& m_contactService;
         std::unordered_map<std::string, std::unique_ptr<AccountSyncCoordinator>> m_coordinators;
         std::unordered_map<std::string, AccountSyncConfiguration> m_configurations;
+        std::unordered_set<std::string> m_sessionRefreshesInFlight;
         javelin::jmap::sync::MailboxInterestRegistry m_mailboxInterests;
     };
 

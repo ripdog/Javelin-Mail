@@ -1,6 +1,11 @@
 #include "app/LongPollCoordinator.h"
 
+#include "jmap/cache/SessionRepository.h"
 #include "jmap/sync/MailboxWindowPolicy.h"
+
+#include <QCoroTask>
+
+#include <QDebug>
 
 #include <algorithm>
 #include <ranges>
@@ -111,6 +116,74 @@ namespace javelin::app
         std::erase_if(m_configurations, [&configuredAccountIds](const auto& entry)
                       { return !configuredAccountIds.contains(entry.first); });
         m_mailboxInterests.eraseAccountsNotIn(configuredAccountIds);
+        refreshConfiguredSessions();
+    }
+
+    void MailApplicationService::refreshConfiguredSessions()
+    {
+        javelin::jmap::cache::SessionRepository sessions{m_databaseConnection};
+        for (const auto& [accountId, configuration] : m_configurations)
+        {
+            const auto loaded = sessions.load(accountId);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&loaded))
+            {
+                qWarning().noquote() << "JMAP startup session lookup failed"
+                                     << QString::fromStdString(accountId) << error->message;
+                continue;
+            }
+
+            const auto& session =
+                std::get<std::optional<javelin::jmap::api::Session>>(loaded);
+            if (session.has_value())
+            {
+                startSessionRefresh(accountId, configuration.settings);
+            }
+        }
+    }
+
+    void MailApplicationService::startSessionRefresh(
+        const std::string& ownerAccountId, const AccountConnectionSettings& settings)
+    {
+        if (!m_sessionRefreshesInFlight.insert(ownerAccountId).second)
+        {
+            return;
+        }
+
+        const auto loginEmail = settings.loginEmail;
+        const auto sessionUrl = settings.sessionUrl;
+        auto task = m_jmapCore.refreshSession(toLiveConnectionSettings(settings), ownerAccountId);
+        QCoro::connect(
+            std::move(task), this,
+            [this, ownerAccountId, loginEmail,
+             sessionUrl](javelin::jmap::SessionRefreshResult result)
+            {
+                m_sessionRefreshesInFlight.erase(ownerAccountId);
+                if (const auto* error =
+                        std::get_if<javelin::jmap::LiveRefreshError>(&result))
+                {
+                    qWarning().noquote()
+                        << "JMAP startup session discovery failed"
+                        << QString::fromStdString(ownerAccountId) << error->message;
+                    return;
+                }
+
+                const auto& summary =
+                    std::get<javelin::jmap::SessionRefreshSummary>(result);
+                qInfo().noquote()
+                    << "JMAP startup session discovered"
+                    << QString::fromStdString(ownerAccountId)
+                    << (summary.websocketAdvertised ? QStringLiteral("WebSocket")
+                                                    : QStringLiteral("HTTP only"));
+                for (const auto& [accountId, configuration] : m_configurations)
+                {
+                    if (configuration.settings.loginEmail == loginEmail &&
+                        configuration.settings.sessionUrl == sessionUrl)
+                    {
+                        applyAccountConfiguration(accountId);
+                    }
+                }
+            });
     }
 
     void MailApplicationService::applyAccountConfiguration(const std::string& accountId)
