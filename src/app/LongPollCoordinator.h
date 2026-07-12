@@ -11,8 +11,10 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
+#include <variant>
 #include <vector>
 
 namespace javelin::app
@@ -37,6 +39,18 @@ namespace javelin::app
         std::size_t limit = 0;
         javelin::jmap::query::EmailListSort sort;
     };
+
+    struct MailboxWindowSummary
+    {
+        std::string accountId;
+        std::string mailboxId;
+        std::size_t offset = 0;
+        std::size_t limit = 0;
+        std::size_t representativeCount = 0;
+        std::optional<std::size_t> total;
+    };
+
+    using MailboxWindowResult = std::variant<MailboxWindowSummary, javelin::jmap::LiveRefreshError>;
 
     struct LongPollAccountConfiguration
     {
@@ -64,7 +78,7 @@ namespace javelin::app
                                                         std::string mailboxId);
         [[nodiscard]] bool requestAccountSynchronization(std::string_view accountId);
         [[nodiscard]] QString statusSummary() const;
-        [[nodiscard]] QCoro::Task<javelin::jmap::MailboxPageResult>
+        [[nodiscard]] QCoro::Task<MailboxWindowResult>
         requestMailboxWindow(MailboxWindowIntent intent);
         [[nodiscard]] QCoro::Task<javelin::jmap::MessageSearchResult>
         requestSearchWindow(SearchWindowIntent intent);

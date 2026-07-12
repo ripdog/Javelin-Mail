@@ -429,7 +429,8 @@ foreach(gui_source IN LISTS javelin_gui_boundary_sources)
     file(READ "${gui_source}" gui_source_contents)
     if(gui_source_contents MATCHES "#include \"jmap/api/(Transport|MethodEnvelope)\\.h\"" OR
        gui_source_contents MATCHES "#include \"jmap/sync/(MailboxRefreshExecutor|MailboxStateRefreshExecutor)\\.h\"" OR
-       gui_source_contents MATCHES "LongPollAccountConfiguration")
+       gui_source_contents MATCHES "LongPollAccountConfiguration" OR
+       gui_source_contents MATCHES "javelin::jmap::MailboxPage(Result|Summary)")
         message(FATAL_ERROR "GUI boundary violation in ${gui_source}")
     endif()
 endforeach()

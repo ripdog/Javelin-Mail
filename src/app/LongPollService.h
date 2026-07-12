@@ -28,10 +28,19 @@ class QNetworkAccessManager;
 
 namespace javelin::app
 {
+    struct MailboxQueryWindowChange
+    {
+        QString mailboxId;
+        std::size_t offset = 0;
+        std::size_t limit = 0;
+        std::optional<std::size_t> total;
+    };
+
     struct MailCacheChange
     {
         QString accountId;
         QStringList mailboxIds;
+        std::vector<MailboxQueryWindowChange> queryWindows;
         bool hasNewMail = false;
     };
 

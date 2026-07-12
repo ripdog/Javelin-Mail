@@ -680,15 +680,27 @@ namespace javelin::gui::shell
                         m_mailboxModel->refresh();
                         m_mailboxView->expandAll();
                     }
+
+                    std::unordered_set<std::string> queryWindowMailboxIds;
+                    for (const auto& window : change.queryWindows)
+                    {
+                        const auto mailboxId = window.mailboxId.toStdString();
+                        queryWindowMailboxIds.insert(mailboxId);
+                        loadMailboxTabFromCache(change.accountId.toStdString(), mailboxId, true,
+                                                window.offset);
+                    }
+
                     for (const auto& mailboxId : change.mailboxIds)
                     {
-                        loadMailboxTabFromCache(change.accountId.toStdString(),
-                                                mailboxId.toStdString(), true);
+                        const auto mailbox = mailboxId.toStdString();
+                        if (!queryWindowMailboxIds.contains(mailbox))
+                        {
+                            loadMailboxTabFromCache(change.accountId.toStdString(), mailbox, true);
+                        }
                         if (change.hasNewMail && activeTabIsMailbox() &&
                             activeAccountId() ==
                                 std::optional<std::string>{change.accountId.toStdString()} &&
-                            activeMailboxId() ==
-                                std::optional<std::string>{mailboxId.toStdString()} &&
+                            activeMailboxId() == std::optional<std::string>{mailbox} &&
                             m_messageModel->rowCount() > 0 &&
                             m_messageView->verticalScrollBar()->value() == 0)
                         {
@@ -2113,34 +2125,37 @@ namespace javelin::gui::shell
 
     void MainWindow::loadMailboxTabFromCache(const std::string_view accountId,
                                              const std::string_view mailboxId,
-                                             const bool applyIfActive)
+                                             const bool applyIfActive,
+                                             const std::optional<std::size_t> requiredOffset)
     {
+        auto* active = activeTab();
+        bool activeTabReloaded = false;
         for (auto& tabState : m_tabs)
         {
             auto* mailboxTab = std::get_if<MailboxTabState>(&tabState.content);
             if (mailboxTab == nullptr || mailboxTab->accountId != accountId ||
-                mailboxTab->mailboxId != mailboxId)
+                mailboxTab->mailboxId != mailboxId ||
+                (requiredOffset.has_value() && mailboxTab->page.offset != *requiredOffset))
             {
                 continue;
             }
 
             loadMailboxTabPageFromCache(*mailboxTab, true);
-            if (!applyIfActive || !activeTabIsMailbox() ||
-                activeAccountId() != std::optional<std::string>{std::string{accountId}} ||
-                activeMailboxId() != std::optional<std::string>{std::string{mailboxId}})
-            {
-                return;
-            }
+            activeTabReloaded = activeTabReloaded || &tabState == active;
+        }
 
-            const auto previousMessageRow = currentMessageRow(*m_messageView);
-            {
-                QSignalBlocker messageSelectionBlocker{m_messageView->selectionModel()};
-                applyActiveTabPageToModel();
-                restoreActiveTabMessageSelection(previousMessageRow);
-            }
-            refreshSelectionFromModels();
+        if (!applyIfActive || !activeTabReloaded)
+        {
             return;
         }
+
+        const auto previousMessageRow = currentMessageRow(*m_messageView);
+        {
+            QSignalBlocker messageSelectionBlocker{m_messageView->selectionModel()};
+            applyActiveTabPageToModel();
+            restoreActiveTabMessageSelection(previousMessageRow);
+        }
+        refreshSelectionFromModels();
     }
 
     void MainWindow::ensureMailboxObservation(MailboxTabState& tab)
@@ -2261,7 +2276,7 @@ namespace javelin::gui::shell
         });
         QCoro::connect(
             std::move(task), this,
-            [this, tabAccountId, tabMailboxId, tabOffset](javelin::jmap::MailboxPageResult result)
+            [this, tabAccountId, tabMailboxId, tabOffset](javelin::app::MailboxWindowResult result)
             {
                 if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
                 {
@@ -2292,26 +2307,11 @@ namespace javelin::gui::shell
                         continue;
                     }
 
-                    const auto& summary = std::get<javelin::jmap::MailboxPageSummary>(result);
+                    const auto& summary = std::get<javelin::app::MailboxWindowSummary>(result);
                     mailboxTab->page.total = summary.total;
-                    mailboxTab->page.items = summary.results;
-                    mailboxTab->page.cacheLoaded = true;
                     mailboxTab->page.refreshInFlight = false;
                     mailboxTab->page.stale = false;
                     mailboxTab->page.refreshError.clear();
-                    if (activeTabIsMailbox() &&
-                        activeAccountId() == std::optional<std::string>{tabAccountId} &&
-                        activeMailboxId() == std::optional<std::string>{tabMailboxId} &&
-                        mailboxTab->page.offset == tabOffset)
-                    {
-                        const auto previousMessageRow = currentMessageRow(*m_messageView);
-                        {
-                            QSignalBlocker messageSelectionBlocker{m_messageView->selectionModel()};
-                            applyActiveTabPageToModel();
-                            restoreActiveTabMessageSelection(previousMessageRow);
-                        }
-                        refreshSelectionFromModels();
-                    }
                     updateEmptyStates();
                     m_statusBar->showMessage(
                         QStringLiteral("Loaded %1 mailbox conversations.")

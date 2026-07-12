@@ -159,7 +159,7 @@ namespace javelin::app
         return m_jmapCore.statusSummary();
     }
 
-    QCoro::Task<javelin::jmap::MailboxPageResult>
+    QCoro::Task<MailboxWindowResult>
     LongPollCoordinator::requestMailboxWindow(MailboxWindowIntent intent)
     {
         const auto configuration = m_configurations.find(intent.accountId);
@@ -170,9 +170,36 @@ namespace javelin::app
                 .requiresUserIntervention = true,
             };
         }
-        co_return co_await m_jmapCore.queryMailboxPage(configuration->second.settings,
-                                                       intent.accountId, intent.mailboxId,
-                                                       intent.offset, intent.limit, intent.sort);
+
+        auto result = co_await m_jmapCore.queryMailboxPage(
+            configuration->second.settings, intent.accountId, intent.mailboxId, intent.offset,
+            intent.limit, intent.sort);
+        if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+        {
+            co_return *error;
+        }
+
+        auto page = std::get<javelin::jmap::MailboxPageSummary>(std::move(result));
+        MailboxWindowSummary summary{
+            .accountId = page.accountId,
+            .mailboxId = page.mailboxId,
+            .offset = page.offset,
+            .limit = page.limit,
+            .representativeCount = page.representativeCount,
+            .total = page.total,
+        };
+        Q_EMIT cacheCommitted(MailCacheChange{
+            .accountId = QString::fromStdString(page.accountId),
+            .mailboxIds = {QString::fromStdString(page.mailboxId)},
+            .queryWindows = {MailboxQueryWindowChange{
+                .mailboxId = QString::fromStdString(page.mailboxId),
+                .offset = page.offset,
+                .limit = page.limit,
+                .total = page.total,
+            }},
+            .hasNewMail = false,
+        });
+        co_return summary;
     }
 
     QCoro::Task<javelin::jmap::MessageSearchResult>

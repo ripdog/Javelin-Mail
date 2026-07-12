@@ -294,6 +294,7 @@ namespace javelin::app
             Q_EMIT cacheCommitted(MailCacheChange{
                 .accountId = QString::fromStdString(runContext->configuration.accountId),
                 .mailboxIds = std::move(refreshedMailboxIds),
+                .queryWindows = {},
                 .hasNewMail = hasNewMail,
             });
         }

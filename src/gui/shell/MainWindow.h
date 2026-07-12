@@ -231,7 +231,8 @@ namespace javelin::gui::shell
         void syncActiveTabSelectionFromViews();
         void loadActiveTabFromCache(bool forceReload = false, bool refreshRemote = true);
         void loadMailboxTabFromCache(std::string_view accountId, std::string_view mailboxId,
-                                     bool applyIfActive);
+                                     bool applyIfActive,
+                                     std::optional<std::size_t> requiredOffset = std::nullopt);
         void loadMailboxTabPageFromCache(MailboxTabState& tab, bool forceReload = false);
         void ensureMailboxObservation(MailboxTabState& tab);
         void releaseMailboxObservation(MailboxTabState& tab);
