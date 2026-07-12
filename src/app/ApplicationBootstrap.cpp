@@ -124,8 +124,6 @@ namespace javelin::app
         KAboutData::setApplicationData(aboutData);
 
         m_application.setQuitOnLastWindowClosed(false);
-        setupSystemTray();
-        createMainWindow();
 
         const auto accounts = javelin::gui::settings::PreferencesDialog::loadAccounts();
         const bool hasUsableConnection = std::ranges::any_of(
@@ -134,11 +132,13 @@ namespace javelin::app
         if (!hasUsableConnection)
         {
             javelin::gui::settings::PreferencesDialog dialog{m_processServices->accountRepository(),
-                                                             m_processServices->queryService(),
-                                                             m_mainWindow};
+                                                             m_processServices->queryService()};
             dialog.exec();
         }
+
         m_processServices->longPollService().applySettings(longPollConfigurations());
+        setupSystemTray();
+        createMainWindow();
 
         return m_application.exec();
     }
