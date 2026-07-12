@@ -843,6 +843,20 @@ namespace javelin::jmap::cache
                                 "(account_id,email_id)"),
                         },
                 },
+                MigrationStep{
+                    .version = 15,
+                    .name = QStringLiteral("jmap_transport_preferences"),
+                    .statements =
+                        {
+                            QStringLiteral(
+                                "CREATE TABLE jmap_transport_preferences ("
+                                "owner_account_id TEXT PRIMARY KEY REFERENCES accounts(account_id) "
+                                "ON DELETE CASCADE, websocket_url TEXT NOT NULL, mode TEXT NOT NULL "
+                                "CHECK(mode IN ('unknown','websocket','http_fallback')), "
+                                "retry_after TEXT, last_error TEXT, updated_at TEXT NOT NULL DEFAULT "
+                                "CURRENT_TIMESTAMP) STRICT"),
+                        },
+                },
             },
         };
     }

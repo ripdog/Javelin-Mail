@@ -15,6 +15,7 @@ add_executable(javelin_jmap_tests
     jmap/InlineMessageUrlTest.cpp
     jmap/JmapCoreMessageContentTest.cpp
     jmap/JmapCoreTest.cpp
+    jmap/JmapTransportPreferenceRepositoryTest.cpp
     jmap/LanguageDetectionTest.cpp
     jmap/LongPollMailboxObserverTest.cpp
     jmap/LongPollWorkerTest.cpp

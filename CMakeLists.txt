@@ -150,6 +150,8 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/cache/RawMessageSourceRepository.h
     src/jmap/cache/SessionRepository.cpp
     src/jmap/cache/SessionRepository.h
+    src/jmap/cache/JmapTransportPreferenceRepository.cpp
+    src/jmap/cache/JmapTransportPreferenceRepository.h
     src/jmap/cache/SubmissionRepository.cpp
     src/jmap/cache/SubmissionRepository.h
     src/jmap/cache/SyncStateRepository.cpp
@@ -225,6 +227,7 @@ set(JAVELIN_FORMAT_FILES
     tests/jmap/InlineMessageUrlTest.cpp
     tests/jmap/JmapCoreMessageContentTest.cpp
     tests/jmap/JmapCoreTest.cpp
+    tests/jmap/JmapTransportPreferenceRepositoryTest.cpp
     tests/jmap/LongPollMailboxObserverTest.cpp
     tests/jmap/LongPollWorkerTest.cpp
     tests/jmap/MailMethodsTest.cpp
@@ -313,6 +316,8 @@ add_library(javelin_jmap STATIC
     src/jmap/cache/RawMessageSourceRepository.h
     src/jmap/cache/SessionRepository.cpp
     src/jmap/cache/SessionRepository.h
+    src/jmap/cache/JmapTransportPreferenceRepository.cpp
+    src/jmap/cache/JmapTransportPreferenceRepository.h
     src/jmap/cache/SubmissionRepository.cpp
     src/jmap/cache/SubmissionRepository.h
     src/jmap/cache/SyncStateRepository.cpp
