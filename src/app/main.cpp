@@ -1,4 +1,5 @@
 #include "app/ApplicationBootstrap.h"
+#include "app/LogStore.h"
 #include "app/WebEngineSetup.h"
 
 #include <QApplication>
@@ -116,6 +117,7 @@ int main(int argc, char* argv[])
     javelin::app::registerInlineMessageUrlScheme();
     const bool profileUi = uiProfilingEnabled();
     ProfilingApplication application(argc, argv, profileUi);
+    javelin::app::LogStore::install();
     const auto stallProbe = profileUi ? std::make_unique<UiStallProbe>() : nullptr;
     application.setApplicationName(QStringLiteral("Javelin Mail"));
     application.setOrganizationName(QStringLiteral("Javelin Mail"));

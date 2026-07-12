@@ -4,6 +4,7 @@
 #include "gui/IconUtils.h"
 #include "gui/compose/ComposeTabWidget.h"
 #include "gui/contacts/ContactsManagerWidget.h"
+#include "gui/logging/LogViewerDialog.h"
 #include "gui/mailboxes/MailboxIconUtils.h"
 #include "gui/mailboxes/MailboxTreeDelegate.h"
 #include "gui/mailboxes/MailboxTreeModel.h"
@@ -930,6 +931,17 @@ namespace javelin::gui::shell
                         QStringLiteral("Advanced Search"), this);
         connect(m_advancedSearchAction, &QAction::triggered, this, &MainWindow::showAdvancedSearch);
         actionCollection()->addAction(QStringLiteral("advanced_search"), m_advancedSearchAction);
+
+        auto* logAction = new QAction(QIcon::fromTheme(QStringLiteral("view-list-text")),
+                                      QStringLiteral("Application Log"), this);
+        connect(logAction, &QAction::triggered, this,
+                [this]
+                {
+                    auto* dialog = new javelin::gui::logging::LogViewerDialog(this);
+                    dialog->setAttribute(Qt::WA_DeleteOnClose);
+                    dialog->show();
+                });
+        actionCollection()->addAction(QStringLiteral("open_application_log"), logAction);
     }
 
     void MainWindow::setupUi()

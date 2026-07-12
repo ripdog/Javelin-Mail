@@ -43,6 +43,8 @@ set(JAVELIN_FORMAT_FILES
     src/app/DesktopNotificationController.h
     src/app/InlineMessageSchemeHandler.cpp
     src/app/InlineMessageSchemeHandler.h
+    src/app/LogStore.cpp
+    src/app/LogStore.h
     src/app/LongPollService.cpp
     src/app/LongPollService.h
     src/app/LongPollCoordinator.cpp
@@ -53,6 +55,8 @@ set(JAVELIN_FORMAT_FILES
     src/app/ProcessServices.h
     src/gui/IconUtils.cpp
     src/gui/IconUtils.h
+    src/gui/logging/LogViewerDialog.cpp
+    src/gui/logging/LogViewerDialog.h
     src/gui/mailboxes/MailboxIconUtils.cpp
     src/gui/mailboxes/MailboxIconUtils.h
     src/gui/mailboxes/MailboxTreeDelegate.cpp
@@ -371,8 +375,12 @@ javelin_enable_static_analysis(javelin_jmap)
 javelin_enable_sanitizers(javelin_jmap)
 
 add_library(javelin_gui STATIC
+    src/app/LogStore.cpp
+    src/app/LogStore.h
     src/gui/IconUtils.cpp
     src/gui/IconUtils.h
+    src/gui/logging/LogViewerDialog.cpp
+    src/gui/logging/LogViewerDialog.h
     src/gui/mailboxes/MailboxIconUtils.cpp
     src/gui/mailboxes/MailboxIconUtils.h
     src/gui/compose/ComposeTabWidget.cpp
