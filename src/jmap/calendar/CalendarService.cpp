@@ -10,6 +10,7 @@
 #include <QDateTime>
 #include <QRegularExpression>
 
+#include <unordered_map>
 #include <unordered_set>
 
 namespace javelin::jmap::calendar
@@ -186,13 +187,28 @@ namespace javelin::jmap::calendar
                                          .position = 0,
                                          .limit = std::nullopt,
                                          .calculateTotal = true});
-            if (!calendarRequest || !queryRequest)
+            // Expanded ids are opaque occurrence handles. Fetch the unexpanded result set as the
+            // source of stable, editable event documents.
+            const auto baseQueryRequest =
+                api::calendarEventQuery({.accountId = accountId,
+                                         .filter = {.inCalendar = std::nullopt,
+                                                    .after = interval.start,
+                                                    .before = interval.end,
+                                                    .text = std::nullopt},
+                                         .expandRecurrences = false,
+                                         .timeZone = displayTimeZone,
+                                         .position = 0,
+                                         .limit = std::nullopt,
+                                         .calculateTotal = true});
+            if (!calendarRequest || !queryRequest || !baseQueryRequest)
                 co_return error(CalendarServiceErrorCode::Validation,
                                 QStringLiteral("Unable to serialize the calendar range request."));
             api::RequestBuilder builder;
             builder.useCore().useCapability(std::string{api::calendarsCapabilityUri});
             const auto calendarHandle = builder.call(*calendarRequest, "calendar-get");
             const auto queryHandle = builder.call(*queryRequest, "calendar-event-query");
+            const auto baseQueryHandle =
+                builder.call(*baseQueryRequest, "calendar-base-event-query");
             const auto result =
                 co_await caller.call(context(settings, session, accountId), builder);
             const auto* envelope = std::get_if<api::ResponseEnvelope>(&result);
@@ -205,8 +221,12 @@ namespace javelin::jmap::calendar
             const auto queryRead = reader.require(queryHandle);
             if (const auto* readError = std::get_if<api::ResponseReaderError>(&queryRead))
                 co_return responseError(*readError);
+            const auto baseQueryRead = reader.require(baseQueryHandle);
+            if (const auto* readError = std::get_if<api::ResponseReaderError>(&baseQueryRead))
+                co_return responseError(*readError);
             const auto& calendars = std::get<api::CalendarGetResponse>(calendarsRead);
             const auto& query = std::get<api::CalendarEventQueryResponse>(queryRead);
+            const auto& baseQuery = std::get<api::CalendarEventQueryResponse>(baseQueryRead);
             auto eventIds = query.ids;
             const auto total = query.total.value_or(eventIds.size());
             while (eventIds.size() < total)
@@ -244,6 +264,44 @@ namespace javelin::jmap::calendar
                                 std::make_move_iterator(next.ids.end()));
             }
 
+            auto baseEventIds = baseQuery.ids;
+            const auto baseTotal = baseQuery.total.value_or(baseEventIds.size());
+            while (baseEventIds.size() < baseTotal)
+            {
+                const auto nextRequest =
+                    api::calendarEventQuery({.accountId = accountId,
+                                             .filter = {.inCalendar = std::nullopt,
+                                                        .after = interval.start,
+                                                        .before = interval.end,
+                                                        .text = std::nullopt},
+                                             .expandRecurrences = false,
+                                             .timeZone = displayTimeZone,
+                                             .position = baseEventIds.size(),
+                                             .limit = baseQuery.limit,
+                                             .calculateTotal = false});
+                if (!nextRequest)
+                    co_return error(CalendarServiceErrorCode::Validation,
+                                    QStringLiteral("Unable to serialize base event pagination."));
+                api::RequestBuilder nextBuilder;
+                nextBuilder.useCore().useCapability(std::string{api::calendarsCapabilityUri});
+                const auto nextHandle = nextBuilder.call(*nextRequest, "calendar-base-event-query");
+                const auto nextResult =
+                    co_await caller.call(context(settings, session, accountId), nextBuilder);
+                const auto* nextEnvelope = std::get_if<api::ResponseEnvelope>(&nextResult);
+                if (!nextEnvelope)
+                    co_return callError(nextResult);
+                const auto nextRead = api::ResponseReader{*nextEnvelope}.require(nextHandle);
+                if (const auto* readError = std::get_if<api::ResponseReaderError>(&nextRead))
+                    co_return responseError(*readError);
+                auto next = std::get<api::CalendarEventQueryResponse>(nextRead);
+                if (next.ids.empty())
+                    co_return error(
+                        CalendarServiceErrorCode::Protocol,
+                        QStringLiteral("Base calendar query pagination stopped early."));
+                baseEventIds.insert(baseEventIds.end(), std::make_move_iterator(next.ids.begin()),
+                                    std::make_move_iterator(next.ids.end()));
+            }
+
             const auto getRequest =
                 api::calendarEventGet({.accountId = accountId,
                                        .ids = std::move(eventIds),
@@ -252,12 +310,21 @@ namespace javelin::jmap::calendar
                                        .recurrenceOverridesAfter = std::nullopt,
                                        .reduceParticipants = false,
                                        .timeZone = displayTimeZone});
-            if (!getRequest)
+            const auto baseGetRequest =
+                api::calendarEventGet({.accountId = accountId,
+                                       .ids = std::move(baseEventIds),
+                                       .properties = std::nullopt,
+                                       .recurrenceOverridesBefore = std::nullopt,
+                                       .recurrenceOverridesAfter = std::nullopt,
+                                       .reduceParticipants = false,
+                                       .timeZone = displayTimeZone});
+            if (!getRequest || !baseGetRequest)
                 co_return error(CalendarServiceErrorCode::Validation,
                                 QStringLiteral("Unable to serialize the calendar event request."));
             api::RequestBuilder getBuilder;
             getBuilder.useCore().useCapability(std::string{api::calendarsCapabilityUri});
             const auto getHandle = getBuilder.call(*getRequest, "calendar-event-get");
+            const auto baseGetHandle = getBuilder.call(*baseGetRequest, "calendar-base-event-get");
             const auto getResult =
                 co_await caller.call(context(settings, session, accountId), getBuilder);
             const auto* getEnvelope = std::get_if<api::ResponseEnvelope>(&getResult);
@@ -266,62 +333,60 @@ namespace javelin::jmap::calendar
             const auto getRead = api::ResponseReader{*getEnvelope}.require(getHandle);
             if (const auto* readError = std::get_if<api::ResponseReaderError>(&getRead))
                 co_return responseError(*readError);
+            const auto baseGetRead = api::ResponseReader{*getEnvelope}.require(baseGetHandle);
+            if (const auto* readError = std::get_if<api::ResponseReaderError>(&baseGetRead))
+                co_return responseError(*readError);
             const auto& events = std::get<api::CalendarEventGetResponse>(getRead);
+            auto baseResponse = std::get<api::CalendarEventGetResponse>(baseGetRead);
+            if (!baseResponse.notFound.empty())
+                co_return error(CalendarServiceErrorCode::Protocol,
+                                QStringLiteral("The server did not return a base calendar event."));
 
             std::vector<Occurrence> occurrences;
-            occurrences.reserve(events.list.size());
-            std::vector<CalendarEvent> baseEvents;
-            baseEvents.reserve(events.list.size());
-            std::unordered_set<std::string> baseEventIds;
-            for (const auto& event : events.list)
+            occurrences.reserve(events.list.size() + baseResponse.list.size());
+            std::unordered_map<std::string, std::string> baseIdByUid;
+            std::unordered_set<std::string> recurringBaseIds;
+            for (const auto& event : baseResponse.list)
             {
-                const auto eventId = event.baseEventId.value_or(event.id);
+                if (!event.uid.empty())
+                    baseIdByUid.emplace(event.uid, event.id);
+                if (event.recurrenceRule)
+                {
+                    recurringBaseIds.insert(event.id);
+                    continue;
+                }
                 occurrences.push_back({.accountId = accountId,
                                        .id = event.id,
-                                       .eventId = eventId,
+                                       .eventId = event.id,
+                                       .recurrenceId = std::nullopt,
+                                       .localStart = event.start,
+                                       .localEnd = localEnd(event),
+                                       .utcStart = event.utcStart,
+                                       .utcEnd = event.utcEnd,
+                                       .allDay = event.showWithoutTime});
+            }
+            for (const auto& event : events.list)
+            {
+                std::optional<std::string> eventId;
+                if (event.baseEventId && recurringBaseIds.contains(*event.baseEventId))
+                    eventId = event.baseEventId;
+                else if (event.recurrenceId && !event.uid.empty())
+                {
+                    const auto base = baseIdByUid.find(event.uid);
+                    if (base != baseIdByUid.end() && recurringBaseIds.contains(base->second))
+                        eventId = base->second;
+                }
+                if (!eventId)
+                    continue;
+                occurrences.push_back({.accountId = accountId,
+                                       .id = event.id,
+                                       .eventId = *eventId,
                                        .recurrenceId = event.recurrenceId,
                                        .localStart = event.start,
                                        .localEnd = localEnd(event),
                                        .utcStart = event.utcStart,
                                        .utcEnd = event.utcEnd,
                                        .allDay = event.showWithoutTime});
-                if (event.baseEventId)
-                    baseEventIds.insert(*event.baseEventId);
-                else
-                    baseEvents.push_back(event);
-            }
-            if (!baseEventIds.empty())
-            {
-                std::vector<std::string> ids{baseEventIds.begin(), baseEventIds.end()};
-                const auto baseRequest =
-                    api::calendarEventGet({.accountId = accountId,
-                                           .ids = std::move(ids),
-                                           .properties = std::nullopt,
-                                           .recurrenceOverridesBefore = std::nullopt,
-                                           .recurrenceOverridesAfter = std::nullopt,
-                                           .reduceParticipants = false,
-                                           .timeZone = displayTimeZone});
-                if (!baseRequest)
-                    co_return error(CalendarServiceErrorCode::Validation,
-                                    QStringLiteral("Unable to serialize the base event request."));
-                api::RequestBuilder baseBuilder;
-                baseBuilder.useCore().useCapability(std::string{api::calendarsCapabilityUri});
-                const auto baseHandle = baseBuilder.call(*baseRequest, "calendar-base-event-get");
-                const auto baseResult =
-                    co_await caller.call(context(settings, session, accountId), baseBuilder);
-                const auto* baseEnvelope = std::get_if<api::ResponseEnvelope>(&baseResult);
-                if (!baseEnvelope)
-                    co_return callError(baseResult);
-                const auto baseRead = api::ResponseReader{*baseEnvelope}.require(baseHandle);
-                if (const auto* readError = std::get_if<api::ResponseReaderError>(&baseRead))
-                    co_return responseError(*readError);
-                auto fetched = std::get<api::CalendarEventGetResponse>(baseRead);
-                if (!fetched.notFound.empty() || fetched.list.size() != baseEventIds.size())
-                    co_return error(CalendarServiceErrorCode::Protocol,
-                                    QStringLiteral("The server did not return a referenced base "
-                                                   "calendar event."));
-                baseEvents.insert(baseEvents.end(), std::make_move_iterator(fetched.list.begin()),
-                                  std::make_move_iterator(fetched.list.end()));
             }
 
             cache::CalendarRepository repository{m_connection};
@@ -333,7 +398,7 @@ namespace javelin::jmap::calendar
                                          .end = interval.end,
                                          .displayTimeZone = displayTimeZone,
                                          .queryState = query.queryState,
-                                         .events = std::move(baseEvents),
+                                         .events = std::move(baseResponse.list),
                                          .occurrences = std::move(occurrences)};
             if (const auto cacheError = repository.reconcileWindow(window))
                 co_return error(CalendarServiceErrorCode::Cache, cacheError->message);
