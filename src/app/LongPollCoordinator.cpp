@@ -178,6 +178,7 @@ namespace javelin::app
                         applyAccountConfiguration(accountId);
                     }
                 }
+                Q_EMIT sessionCapabilitiesChanged(QString::fromStdString(ownerAccountId));
             });
     }
 

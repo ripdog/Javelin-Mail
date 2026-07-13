@@ -79,6 +79,22 @@ TEST_CASE("session parser exposes strict draft-26 calendar capability metadata",
     CHECK(capability->maxExpandedQueryDuration == "P1Y");
 }
 
+TEST_CASE("session parser accepts the Stalwart draft-26 calendar capability shape",
+          "[jmap][calendar][stalwart]")
+{
+    const auto result = javelin::jmap::api::parseSession(
+        R"({"username":"calendar@example.test","apiUrl":"https://mail.example.test/jmap/","downloadUrl":"https://mail.example.test/jmap/download/{accountId}/{blobId}/{name}","uploadUrl":"https://mail.example.test/jmap/upload/{accountId}","state":"session-1","capabilities":{"urn:ietf:params:jmap:core":{},"urn:ietf:params:jmap:calendars":{}},"accounts":{"c":{"name":"calendar@example.test","isPersonal":true,"isReadOnly":false,"accountCapabilities":{"urn:ietf:params:jmap:calendars":{"minDateTime":"0001-01-01T00:00:00Z","maxDateTime":"65534-12-31T23:59:59Z","maxExpandedQueryDuration":"P52W1D","maxParticipantsPerEvent":20,"mayCreateCalendar":true}}}},"primaryAccounts":{"urn:ietf:params:jmap:calendars":"c"}})",
+        {.calendars = true});
+
+    REQUIRE(result.ok());
+    REQUIRE(result.session->accounts.at("c").accountCapabilities.calendars.has_value());
+    const auto& calendars = *result.session->accounts.at("c").accountCapabilities.calendars;
+    CHECK(calendars.minDateTime == "0001-01-01T00:00:00Z");
+    CHECK(calendars.maxDateTime == "65534-12-31T23:59:59Z");
+    CHECK(calendars.maxExpandedQueryDuration == "P52W1D");
+    CHECK(calendars.mayCreateCalendar);
+}
+
 TEST_CASE("session parser rejects malformed required calendar account capability",
           "[jmap][calendar]")
 {

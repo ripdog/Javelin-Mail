@@ -80,13 +80,6 @@ namespace javelin::app
             m_settings.has_value() && m_settings->sessionUrl == settings.sessionUrl &&
             m_settings->loginEmail == settings.loginEmail &&
             m_settings->apiKey == settings.apiKey && m_accountId == accountId;
-        if (connectionSettingsUnchanged && m_runContext != nullptr && m_mailboxIds == mailboxIds &&
-            m_notificationMailboxIds == notificationMailboxIds &&
-            m_notificationMailboxSelectionConfigured == notificationMailboxSelectionConfigured)
-        {
-            return;
-        }
-
         m_settings = std::move(settings);
         m_accountId = std::move(accountId);
         m_mailboxIds = std::move(mailboxIds);
@@ -101,6 +94,8 @@ namespace javelin::app
                 updatedConfiguration->apiUrl == m_runContext->configuration.apiUrl &&
                 updatedConfiguration->eventSourceUrl ==
                     m_runContext->configuration.eventSourceUrl &&
+                updatedConfiguration->calendarCapable ==
+                    m_runContext->configuration.calendarCapable &&
                 updatedConfiguration->websocket.has_value() ==
                     m_runContext->configuration.websocket.has_value() &&
                 (!updatedConfiguration->websocket.has_value() ||

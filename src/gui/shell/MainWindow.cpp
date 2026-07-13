@@ -78,7 +78,7 @@
 #include <QUrl>
 #include <QVBoxLayout>
 #include <QWidget>
-#include <QtConcurrent>
+#include <QtConcurrentRun>
 
 #include <algorithm>
 #include <chrono>
@@ -655,6 +655,8 @@ namespace javelin::gui::shell
         m_statusBar = new LayeredStatusBar(this);
         setStatusBar(m_statusBar);
         setupUi();
+        connect(&m_mailService, &javelin::app::MailApplicationService::sessionCapabilitiesChanged,
+                this, [this](const QString&) { reloadAccounts(); });
         createActions();
         setupGUI(KXmlGuiWindow::ToolBar | KXmlGuiWindow::Keys | KXmlGuiWindow::Save |
                      KXmlGuiWindow::Create,
@@ -3387,6 +3389,13 @@ namespace javelin::gui::shell
                 std::get_if<std::vector<javelin::jmap::cache::ContactAccount>>(&result);
             m_contactsAction->setEnabled(accounts != nullptr && !accounts->empty());
         }
+        if (m_calendarAction != nullptr)
+        {
+            const auto result = m_calendarService.accounts();
+            const auto* accounts =
+                std::get_if<std::vector<javelin::jmap::cache::CalendarAccount>>(&result);
+            m_calendarAction->setEnabled(accounts != nullptr && !accounts->empty());
+        }
     }
 
     void MainWindow::refreshViewsFromCache()
@@ -4073,10 +4082,15 @@ namespace javelin::gui::shell
         qInfo().noquote() << "GUI refresh requested" << settings.loginEmail << settings.sessionUrl;
 
         std::vector<std::string> mailboxIds;
-        for (const auto& accountId : settings.cachedAccountIds)
-            for (const auto& mailboxId :
-                 javelin::gui::settings::PreferencesDialog::syncedMailboxIds(accountId))
+        for (const auto& accountId : std::as_const(settings.cachedAccountIds))
+        {
+            const auto syncedMailboxIds =
+                javelin::gui::settings::PreferencesDialog::syncedMailboxIds(accountId);
+            for (const auto& mailboxId : syncedMailboxIds)
+            {
                 mailboxIds.push_back(mailboxId.toStdString());
+            }
+        }
         auto task = m_mailService.bootstrapAccount(javelin::app::AccountBootstrapIntent{
             .settings = toAccountConnectionSettings(settings),
             .mailboxIds = std::move(mailboxIds),
@@ -4194,7 +4208,7 @@ namespace javelin::gui::shell
                 {
                     markTabsStaleForAccount(accountId);
                     refreshActiveTabFromServer();
-                    const auto message =
+                    const QString message =
                         unavailable->message + QStringLiteral(" Refreshing the current view…");
                     m_messageViewContainer->setErrorState(message);
                     m_statusBar->showMessage(message, 10000);
