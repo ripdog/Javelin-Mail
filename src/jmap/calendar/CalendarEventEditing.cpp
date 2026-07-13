@@ -122,4 +122,33 @@ namespace javelin::jmap::calendar
         }
         return result;
     }
+
+    CalendarEvent applyOccurrenceEdit(const CalendarEvent& baseEvent,
+                                      const LocalDateTime& recurrenceId,
+                                      const CalendarEvent& editedOccurrence)
+    {
+        auto result = baseEvent;
+        auto& occurrence = result.recurrenceOverrides[recurrenceId.value];
+        occurrence.excluded = false;
+        occurrence.start = editedOccurrence.start.value == recurrenceId.value
+                               ? std::nullopt
+                               : std::optional{editedOccurrence.start};
+        occurrence.duration = editedOccurrence.duration == baseEvent.duration
+                                  ? std::nullopt
+                                  : std::optional{editedOccurrence.duration};
+        occurrence.title = editedOccurrence.title == baseEvent.title
+                               ? std::nullopt
+                               : std::optional{editedOccurrence.title};
+        if (!occurrence.start && !occurrence.duration && !occurrence.title)
+            result.recurrenceOverrides.erase(recurrenceId.value);
+        return result;
+    }
+
+    CalendarEvent excludeOccurrence(const CalendarEvent& baseEvent,
+                                    const LocalDateTime& recurrenceId)
+    {
+        auto result = baseEvent;
+        result.recurrenceOverrides[recurrenceId.value].excluded = true;
+        return result;
+    }
 } // namespace javelin::jmap::calendar

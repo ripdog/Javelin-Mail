@@ -27,6 +27,7 @@ namespace javelin::gui::calendar
                     QWidget* parent = nullptr);
 
         void setEvent(const javelin::jmap::calendar::CalendarEvent& event);
+        void setOccurrenceMode(bool occurrenceMode);
         [[nodiscard]] javelin::jmap::calendar::CalendarEvent eventDocument() const;
         void showMutationError(const QString& message);
 

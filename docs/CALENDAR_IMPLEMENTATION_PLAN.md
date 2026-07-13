@@ -34,7 +34,7 @@ The first usable calendar slice is present:
 The remaining work is ordered by correctness and data-loss risk, then synchronization,
 cache lifecycle, product completeness, and quality gates.
 
-## Milestone 1: lossless ordinary edits — in progress
+## Milestone 1: lossless ordinary edits — complete
 
 An editor must not erase information merely because its controls cannot represent
 the full JSCalendar object.
@@ -54,7 +54,7 @@ the full JSCalendar object.
 Acceptance: opening a recurring, scheduled, floating, or multi-calendar event,
 changing only its title, and saving cannot alter those unrelated properties.
 
-## Milestone 2: occurrence and series editing
+## Milestone 2: occurrence and series editing — in progress
 
 - Preserve enough base-event and recurrence identity in the cache/UI to distinguish
   an expanded occurrence from its series.
@@ -129,4 +129,3 @@ the fixed 42-cell view remains legible across font/DPI/locale changes.
 
 Acceptance: all supported behavior is reproducible without a live server and the
 documented quality gates pass from a clean checkout.
-

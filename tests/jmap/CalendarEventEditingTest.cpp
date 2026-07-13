@@ -64,3 +64,78 @@ TEST_CASE("removed editable attendees do not remove hidden participant records")
     REQUIRE(result.size() == 1);
     CHECK(result.front().id == "resource");
 }
+
+TEST_CASE("occurrence edits create an override without changing the base event")
+{
+    javelin::jmap::calendar::CalendarEvent base;
+    base.id = "series";
+    base.title = "Daily meeting";
+    base.start = {.value = "2026-07-13T09:00:00"};
+    base.duration = {.value = "PT1H"};
+    base.recurrenceRule = javelin::jmap::calendar::RecurrenceRule{};
+    base.recurrenceOverrides.emplace(
+        "2026-07-14T09:00:00", javelin::jmap::calendar::RecurrenceOverride{.excluded = false,
+                                                                           .start = std::nullopt,
+                                                                           .duration = std::nullopt,
+                                                                           .title = "Old title"});
+    auto edited = base;
+    edited.title = "Moved meeting";
+    edited.start = {.value = "2026-07-14T10:30:00"};
+    edited.duration = {.value = "PT30M"};
+
+    const auto result = javelin::jmap::calendar::applyOccurrenceEdit(
+        base, {.value = "2026-07-14T09:00:00"}, edited);
+
+    CHECK(result.id == "series");
+    CHECK(result.title == "Daily meeting");
+    CHECK(result.start.value == "2026-07-13T09:00:00");
+    REQUIRE(result.recurrenceRule.has_value());
+    const auto& occurrence = result.recurrenceOverrides.at("2026-07-14T09:00:00");
+    CHECK_FALSE(occurrence.excluded);
+    CHECK(occurrence.start ==
+          javelin::jmap::calendar::LocalDateTime{.value = "2026-07-14T10:30:00"});
+    CHECK(occurrence.duration == javelin::jmap::calendar::Duration{.value = "PT30M"});
+    CHECK(occurrence.title == std::optional<std::string>{"Moved meeting"});
+}
+
+TEST_CASE("deleting one occurrence preserves its existing override as an exclusion")
+{
+    javelin::jmap::calendar::CalendarEvent base;
+    base.id = "series";
+    base.recurrenceOverrides.emplace(
+        "2026-07-14T09:00:00",
+        javelin::jmap::calendar::RecurrenceOverride{
+            .excluded = false,
+            .start = javelin::jmap::calendar::LocalDateTime{.value = "2026-07-14T10:00:00"},
+            .duration = std::nullopt,
+            .title = "Changed"});
+
+    const auto result =
+        javelin::jmap::calendar::excludeOccurrence(base, {.value = "2026-07-14T09:00:00"});
+
+    const auto& occurrence = result.recurrenceOverrides.at("2026-07-14T09:00:00");
+    CHECK(occurrence.excluded);
+    CHECK(occurrence.start ==
+          javelin::jmap::calendar::LocalDateTime{.value = "2026-07-14T10:00:00"});
+    CHECK(occurrence.title == std::optional<std::string>{"Changed"});
+}
+
+TEST_CASE("occurrence edits only override properties that differ from the series")
+{
+    javelin::jmap::calendar::CalendarEvent base;
+    base.id = "series";
+    base.title = "Daily meeting";
+    base.start = {.value = "2026-07-13T09:00:00"};
+    base.duration = {.value = "PT1H"};
+    auto edited = base;
+    edited.title = "Special meeting";
+    edited.start = {.value = "2026-07-14T09:00:00"};
+
+    const auto result = javelin::jmap::calendar::applyOccurrenceEdit(
+        base, {.value = "2026-07-14T09:00:00"}, edited);
+
+    const auto& occurrence = result.recurrenceOverrides.at("2026-07-14T09:00:00");
+    CHECK_FALSE(occurrence.start.has_value());
+    CHECK_FALSE(occurrence.duration.has_value());
+    CHECK(occurrence.title == std::optional<std::string>{"Special meeting"});
+}

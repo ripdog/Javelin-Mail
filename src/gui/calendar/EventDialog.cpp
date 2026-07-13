@@ -237,6 +237,19 @@ namespace javelin::gui::calendar
         m_attendeesEdited = false;
     }
 
+    void EventDialog::setOccurrenceMode(const bool occurrenceMode)
+    {
+        setWindowTitle(occurrenceMode ? QStringLiteral("Edit occurrence")
+                                      : QStringLiteral("Calendar event"));
+        m_calendar->setEnabled(!occurrenceMode);
+        m_allDay->setEnabled(!occurrenceMode);
+        m_timeZone->setEnabled(!occurrenceMode && !m_allDay->isChecked());
+        m_description->setEnabled(!occurrenceMode);
+        m_location->setEnabled(!occurrenceMode);
+        m_recurrence->setEnabled(!occurrenceMode);
+        m_attendees->setEnabled(!occurrenceMode);
+    }
+
     javelin::jmap::calendar::CalendarEvent EventDialog::eventDocument() const
     {
         auto result = m_event;

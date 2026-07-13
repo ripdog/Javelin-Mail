@@ -23,6 +23,7 @@
 #include "jmap/cache/IdentityRepository.h"
 #include "jmap/cache/MessageViewService.h"
 #include "jmap/cache/QueryService.h"
+#include "jmap/calendar/CalendarEventEditing.h"
 #include "jmap/calendar/CalendarService.h"
 #include "jmap/contacts/ContactIdentityLookup.h"
 #include "jmap/contacts/ContactService.h"
@@ -1458,17 +1459,29 @@ namespace javelin::gui::shell
                             ? account.accountId + '\n'
                             : account.accountId + '\n' + calendarId->first;
                     const auto color = calendarColors.find(displayCalendarId);
-                    displayEvents.push_back({.accountId = account.accountId,
-                                             .calendarId = displayCalendarId,
-                                             .eventId = event->second->id,
-                                             .title = QString::fromStdString(event->second->title),
-                                             .color = color == calendarColors.end()
-                                                          ? QColor{QStringLiteral("#4f7cac")}
-                                                          : color->second,
-                                             .start = startTime,
-                                             .end = endTime,
-                                             .allDay = occurrence.allDay,
-                                             .recurring = occurrence.recurrenceId.has_value()});
+                    auto title = event->second->title;
+                    if (occurrence.recurrenceId)
+                    {
+                        const auto occurrenceOverride =
+                            event->second->recurrenceOverrides.find(occurrence.recurrenceId->value);
+                        if (occurrenceOverride != event->second->recurrenceOverrides.end() &&
+                            occurrenceOverride->second.title)
+                            title = *occurrenceOverride->second.title;
+                    }
+                    displayEvents.push_back(
+                        {.accountId = account.accountId,
+                         .calendarId = displayCalendarId,
+                         .eventId = event->second->id,
+                         .title = QString::fromStdString(title),
+                         .color = color == calendarColors.end() ? QColor{QStringLiteral("#4f7cac")}
+                                                                : color->second,
+                         .start = startTime,
+                         .end = endTime,
+                         .allDay = occurrence.allDay,
+                         .recurrenceId = occurrence.recurrenceId
+                                             ? std::optional{occurrence.recurrenceId->value}
+                                             : std::nullopt,
+                         .recurring = occurrence.recurrenceId.has_value()});
                 }
             }
             widget->setCalendars(std::move(calendarDisplays));
@@ -1597,8 +1610,8 @@ namespace javelin::gui::shell
                 });
         connect(
             widget, &javelin::gui::calendar::MonthCalendarWidget::eventActivated, widget,
-            [this, widget, accounts = *accounts, refreshVisible](const QString& accountId,
-                                                                 const QString& eventId)
+            [this, widget, accounts = *accounts, refreshVisible](
+                const QString& accountId, const QString& eventId, const QString& recurrenceId)
             {
                 const auto account =
                     std::ranges::find(accounts, accountId.toStdString(),
@@ -1627,9 +1640,81 @@ namespace javelin::gui::shell
                     std::get_if<std::vector<javelin::jmap::calendar::Calendar>>(&calendarsResult);
                 if (calendars == nullptr)
                     return;
+
+                enum class EditScope
+                {
+                    Occurrence,
+                    Series,
+                };
+                auto editScope = EditScope::Series;
+                if (!recurrenceId.isEmpty())
+                {
+                    QMessageBox scopePrompt{widget};
+                    scopePrompt.setWindowTitle(QStringLiteral("Edit recurring event"));
+                    scopePrompt.setText(
+                        QStringLiteral("Do you want to edit only this occurrence or the entire "
+                                       "series?"));
+                    auto* occurrenceButton = scopePrompt.addButton(
+                        QStringLiteral("This occurrence"), QMessageBox::AcceptRole);
+                    auto* seriesButton = scopePrompt.addButton(QStringLiteral("Entire series"),
+                                                               QMessageBox::ActionRole);
+                    scopePrompt.addButton(QMessageBox::Cancel);
+                    scopePrompt.exec();
+                    if (scopePrompt.clickedButton() == occurrenceButton)
+                        editScope = EditScope::Occurrence;
+                    else if (scopePrompt.clickedButton() != seriesButton)
+                        return;
+                }
+
+                auto editableEvent = *event;
+                if (editScope == EditScope::Occurrence)
+                {
+                    const auto occurrence = std::ranges::find_if(
+                        window->value().occurrences,
+                        [&eventId, &recurrenceId](const auto& candidate)
+                        {
+                            return candidate.eventId == eventId.toStdString() &&
+                                   candidate.recurrenceId &&
+                                   candidate.recurrenceId->value == recurrenceId.toStdString();
+                        });
+                    if (occurrence == window->value().occurrences.end())
+                    {
+                        qCWarning(logUserOperations).noquote()
+                            << "calendar occurrence is missing from the visible cache" << accountId
+                            << eventId << recurrenceId;
+                        m_statusBar->showMessage(
+                            QStringLiteral("This occurrence is no longer available. Refresh and "
+                                           "try again."),
+                            10000);
+                        return;
+                    }
+                    editableEvent.start = occurrence->localStart;
+                    const auto occurrenceStart = QDateTime::fromString(
+                        QString::fromStdString(occurrence->localStart.value), Qt::ISODate);
+                    const auto occurrenceEnd = QDateTime::fromString(
+                        QString::fromStdString(occurrence->localEnd.value), Qt::ISODate);
+                    if (occurrence->allDay)
+                        editableEvent.duration.value =
+                            QStringLiteral("P%1D")
+                                .arg(occurrenceStart.date().daysTo(occurrenceEnd.date()))
+                                .toStdString();
+                    else
+                        editableEvent.duration.value =
+                            QStringLiteral("PT%1S")
+                                .arg(occurrenceStart.secsTo(occurrenceEnd))
+                                .toStdString();
+                    if (const auto existingOverride =
+                            event->recurrenceOverrides.find(recurrenceId.toStdString());
+                        existingOverride != event->recurrenceOverrides.end() &&
+                        existingOverride->second.title)
+                        editableEvent.title = *existingOverride->second.title;
+                }
+
                 auto* dialog = new javelin::gui::calendar::EventDialog(*calendars, widget);
                 dialog->setAttribute(Qt::WA_DeleteOnClose, false);
-                dialog->setEvent(*event);
+                dialog->setEvent(editableEvent);
+                dialog->setOccurrenceMode(editScope == EditScope::Occurrence);
+                const auto baseEvent = *event;
                 const auto originalCalendarIds = event->calendarIds;
                 const auto dialogResult = dialog->exec();
                 if (dialogResult == QDialog::Rejected)
@@ -1637,9 +1722,22 @@ namespace javelin::gui::shell
                     dialog->deleteLater();
                     return;
                 }
-                const auto editedEvent = dialog->eventDocument();
+                auto editedEvent = dialog->eventDocument();
+                const auto occurrenceEdit = editScope == EditScope::Occurrence;
+                if (occurrenceEdit)
+                {
+                    const javelin::jmap::calendar::LocalDateTime selectedRecurrence{
+                        .value = recurrenceId.toStdString()};
+                    editedEvent =
+                        dialogResult == javelin::gui::calendar::EventDialog::DeleteRequested
+                            ? javelin::jmap::calendar::excludeOccurrence(baseEvent,
+                                                                         selectedRecurrence)
+                            : javelin::jmap::calendar::applyOccurrenceEdit(
+                                  baseEvent, selectedRecurrence, editedEvent);
+                }
                 auto task =
-                    dialogResult == javelin::gui::calendar::EventDialog::DeleteRequested
+                    dialogResult == javelin::gui::calendar::EventDialog::DeleteRequested &&
+                            !occurrenceEdit
                         ? m_mailService.deleteCalendarEvent(
                               account->ownerAccountId,
                               {.accountId = account->accountId,

@@ -386,8 +386,10 @@ namespace javelin::gui::calendar
                     *event,
                     [this, event]
                     {
-                        Q_EMIT eventActivated(QString::fromStdString(event->accountId),
-                                              QString::fromStdString(event->eventId));
+                        Q_EMIT eventActivated(
+                            QString::fromStdString(event->accountId),
+                            QString::fromStdString(event->eventId),
+                            QString::fromStdString(event->recurrenceId.value_or(std::string{})));
                     });
             }
             if (matching.size() > capacity)
@@ -426,11 +428,13 @@ namespace javelin::gui::calendar
                 continue;
             auto* chip = new EventChip(event, dialog);
             connect(chip, &QToolButton::clicked, dialog,
-                    [this, dialog, accountId = event.accountId, eventId = event.eventId]
+                    [this, dialog, accountId = event.accountId, eventId = event.eventId,
+                     recurrenceId = event.recurrenceId]
                     {
                         dialog->close();
-                        Q_EMIT eventActivated(QString::fromStdString(accountId),
-                                              QString::fromStdString(eventId));
+                        Q_EMIT eventActivated(
+                            QString::fromStdString(accountId), QString::fromStdString(eventId),
+                            QString::fromStdString(recurrenceId.value_or(std::string{})));
                     });
             layout->addWidget(chip);
         }

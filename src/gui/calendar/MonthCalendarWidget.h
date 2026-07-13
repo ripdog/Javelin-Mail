@@ -7,6 +7,7 @@
 #include <QWidget>
 
 #include <array>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -26,6 +27,7 @@ namespace javelin::gui::calendar
         QDateTime start;
         QDateTime end;
         bool allDay = false;
+        std::optional<std::string> recurrenceId;
         bool recurring = false;
     };
 
@@ -69,7 +71,8 @@ namespace javelin::gui::calendar
         void visibleIntervalChanged(const QDate& start, const QDate& end);
         void selectionChanged(const QDate& date);
         void dayAgendaRequested(const QDate& date);
-        void eventActivated(const QString& accountId, const QString& eventId);
+        void eventActivated(const QString& accountId, const QString& eventId,
+                            const QString& recurrenceId);
         void emptyTimeActivated(const QDate& date);
 
       protected:
