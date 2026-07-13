@@ -133,6 +133,20 @@ namespace javelin::jmap::calendar
             return required.empty();
         }
 
+        std::variant<std::string, CalendarServiceError>
+        currentEventState(cache::DatabaseConnection& connection, const std::string_view accountId)
+        {
+            cache::CalendarRepository repository{connection};
+            const auto loaded = repository.stateToken(accountId, "CalendarEvent");
+            if (const auto* databaseError = std::get_if<cache::DatabaseError>(&loaded))
+                return error(CalendarServiceErrorCode::Cache, databaseError->message);
+            const auto& state = std::get<std::optional<std::string>>(loaded);
+            if (!state)
+                return error(CalendarServiceErrorCode::Validation,
+                             QStringLiteral("Refresh the calendar before modifying an event."));
+            return *state;
+        }
+
         LocalDateTime localEnd(const CalendarEvent& event)
         {
             const auto start =
@@ -429,6 +443,7 @@ namespace javelin::jmap::calendar
                                          .end = interval.end,
                                          .displayTimeZone = displayTimeZone,
                                          .queryState = query.queryState,
+                                         .eventState = baseResponse.state,
                                          .events = std::move(baseResponse.list),
                                          .occurrences = std::move(occurrences)};
             if (const auto cacheError = repository.reconcileWindow(window))
@@ -443,6 +458,13 @@ namespace javelin::jmap::calendar
                                                                 std::string ownerAccountId,
                                                                 CreateEventCommand command)
     {
+        if (!command.ifInState)
+        {
+            const auto state = currentEventState(m_connection, command.accountId);
+            if (const auto* serviceError = std::get_if<CalendarServiceError>(&state))
+                co_return *serviceError;
+            command.ifInState = std::get<std::string>(state);
+        }
         const auto id = command.event.id.empty() ? std::string{"event"} : command.event.id;
         std::vector<std::string> calendarIds;
         for (const auto& [calendarId, present] : command.event.calendarIds)
@@ -462,6 +484,13 @@ namespace javelin::jmap::calendar
                                                                 std::string ownerAccountId,
                                                                 UpdateEventCommand command)
     {
+        if (!command.ifInState)
+        {
+            const auto state = currentEventState(m_connection, command.accountId);
+            if (const auto* serviceError = std::get_if<CalendarServiceError>(&state))
+                co_return *serviceError;
+            command.ifInState = std::get<std::string>(state);
+        }
         std::vector<std::string> calendarIds;
         for (const auto& [calendarId, present] : command.event.calendarIds)
             if (present)
@@ -481,6 +510,13 @@ namespace javelin::jmap::calendar
                                                                 std::string ownerAccountId,
                                                                 DeleteEventCommand command)
     {
+        if (!command.ifInState)
+        {
+            const auto state = currentEventState(m_connection, command.accountId);
+            if (const auto* serviceError = std::get_if<CalendarServiceError>(&state))
+                co_return *serviceError;
+            command.ifInState = std::get<std::string>(state);
+        }
         api::CalendarEventSetRequest request{.accountId = command.accountId,
                                              .ifInState = command.ifInState,
                                              .create = {},

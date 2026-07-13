@@ -111,6 +111,7 @@ TEST_CASE("calendar windows retain occurrences referenced by overlapping windows
         .end = {.value = "2026-04-12T00:00:00"},
         .displayTimeZone = zone,
         .queryState = "q1",
+        .eventState = "e1-state",
         .events = {event("e1", "2026-03-04T09:00:00"), event("e2", "2026-04-02T09:00:00")},
         .occurrences = {occurrence("e1", "2026-03-04T09:00:00"),
                         occurrence("e2", "2026-04-02T09:00:00")}};
@@ -121,6 +122,7 @@ TEST_CASE("calendar windows retain occurrences referenced by overlapping windows
         .end = {.value = "2026-05-10T00:00:00"},
         .displayTimeZone = zone,
         .queryState = "q2",
+        .eventState = "e2-state",
         .events = {event("e2", "2026-04-02T09:00:00")},
         .occurrences = {occurrence("e2", "2026-04-02T09:00:00")}};
     REQUIRE_FALSE(repository.reconcileWindow(second).has_value());
@@ -139,6 +141,15 @@ TEST_CASE("calendar windows retain occurrences referenced by overlapping windows
     REQUIRE(value.has_value());
     REQUIRE(value->occurrences.size() == 1);
     CHECK(value->occurrences.front().id == "e2");
+    CHECK(value->eventState == "e1-state");
+
+    const auto calendarState = repository.stateToken("a1", "Calendar");
+    REQUIRE(std::holds_alternative<std::optional<std::string>>(calendarState));
+    CHECK(std::get<std::optional<std::string>>(calendarState) == std::optional<std::string>{"c1"});
+    const auto eventState = repository.stateToken("a1", "CalendarEvent");
+    REQUIRE(std::holds_alternative<std::optional<std::string>>(eventState));
+    CHECK(std::get<std::optional<std::string>>(eventState) ==
+          std::optional<std::string>{"e1-state"});
 
     QSqlQuery count{connection.database()};
     REQUIRE(count.exec(QStringLiteral("SELECT COUNT(*) FROM calendar_occurrences")));

@@ -7,6 +7,7 @@ add_executable(javelin_jmap_tests
     jmap/CalendarMethodsTest.cpp
     jmap/CalendarEventEditingTest.cpp
     jmap/CalendarRepositoryTest.cpp
+    jmap/CalendarServiceTest.cpp
     jmap/ContactsMethodsTest.cpp
     jmap/ContactRepositoryTest.cpp
     jmap/ContactServiceTest.cpp

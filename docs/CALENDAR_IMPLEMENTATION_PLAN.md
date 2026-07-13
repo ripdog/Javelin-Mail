@@ -70,7 +70,7 @@ changing only its title, and saving cannot alter those unrelated properties.
 Acceptance: both mutation scopes produce the draft-26 wire shape and refresh the
 visible occurrence set correctly.
 
-## Milestone 3: incremental synchronization
+## Milestone 3: incremental synchronization — in progress
 
 - Feed `Calendar/changes` and `CalendarEvent/changes` into the existing synchronization
   coordinator and persist per-account state tokens transactionally.

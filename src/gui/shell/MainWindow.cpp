@@ -1489,9 +1489,20 @@ namespace javelin::gui::shell
         };
         connect(widget, &javelin::gui::calendar::MonthCalendarWidget::visibleIntervalChanged,
                 widget, loadVisible);
+        connect(&m_mailService, &javelin::app::MailApplicationService::calendarCacheCommitted,
+                widget,
+                [widget, accounts = *accounts,
+                 loadVisible](const javelin::app::CalendarCacheChange& change)
+                {
+                    const auto owner = change.ownerAccountId.toStdString();
+                    if (std::ranges::none_of(accounts, [&owner](const auto& account)
+                                             { return account.ownerAccountId == owner; }))
+                        return;
+                    loadVisible(widget->visibleStart(), widget->visibleEnd());
+                });
         loadVisible(widget->visibleStart(), widget->visibleEnd());
         const auto refreshVisible =
-            [this, widget, accounts = *accounts, loadVisible](const QDate& start, const QDate& end)
+            [this, widget, accounts = *accounts](const QDate& start, const QDate& end)
         {
             const javelin::jmap::calendar::VisibleInterval interval{
                 .start = {.value = start.toString(Qt::ISODate).toStdString() + "T00:00:00"},
@@ -1507,8 +1518,7 @@ namespace javelin::gui::shell
                     m_mailService.requestCalendarRange(account.ownerAccountId, interval, timeZone);
                 QCoro::connect(
                     std::move(task), widget,
-                    [this, start, end,
-                     loadVisible](javelin::jmap::calendar::CalendarRefreshResult result)
+                    [this](javelin::jmap::calendar::CalendarRefreshResult result)
                     {
                         if (const auto* error =
                                 std::get_if<javelin::jmap::calendar::CalendarServiceError>(&result))
@@ -1518,7 +1528,6 @@ namespace javelin::gui::shell
                             m_statusBar->showMessage(error->message, 10000);
                             return;
                         }
-                        loadVisible(start, end);
                     });
             }
         };

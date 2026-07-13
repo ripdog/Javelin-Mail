@@ -18,6 +18,7 @@ namespace javelin::jmap::cache
         calendar::LocalDateTime end;
         calendar::TimeZoneId displayTimeZone;
         std::string queryState;
+        std::string eventState;
         std::vector<calendar::CalendarEvent> events;
         std::vector<calendar::Occurrence> occurrences;
     };
@@ -42,6 +43,8 @@ namespace javelin::jmap::cache
         listCalendars(std::string_view accountId) const;
         [[nodiscard]] std::variant<std::vector<CalendarAccount>, DatabaseError>
         listAccounts() const;
+        [[nodiscard]] std::variant<std::optional<std::string>, DatabaseError>
+        stateToken(std::string_view accountId, std::string_view dataType) const;
 
         [[nodiscard]] std::optional<DatabaseError> reconcileWindow(const CalendarWindow& window);
 
