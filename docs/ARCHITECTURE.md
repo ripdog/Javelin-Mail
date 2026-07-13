@@ -30,3 +30,15 @@ the JMAP EventSource endpoint when WebSocket push fails. Startup performs lightw
 rediscovery before restarting account synchronization, while account bootstrap discovers the same
 capability during account addition. Session discovery and binary resource transfers remain HTTP
 operations.
+
+## Calendar protocol baseline
+
+Calendar support is implemented against `draft-ietf-jmap-calendars-26` (published
+5 November 2025) and RFC 8984 JSCalendar. The exact normative texts are vendored as
+`specs/draft-ietf-jmap-calendars-26.txt` and `specs/rfc8984.txt`. Later JMAP Calendars
+drafts are deliberately not accepted implicitly: changing the supported draft requires
+an explicit protocol review, fixture update, and architecture change.
+
+Calendar protocol envelopes and JSCalendar wire documents remain inside `javelin_jmap`.
+The GUI consumes typed calendar domain values and commands through `CalendarService` and
+renders committed SQLite state; it never constructs method names or raw JSON.
