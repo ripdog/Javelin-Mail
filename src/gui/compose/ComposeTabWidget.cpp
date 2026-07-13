@@ -483,7 +483,6 @@ namespace javelin::gui::compose
                 .sessionUrl = settings.sessionUrl.toStdString(),
                 .loginEmail = settings.loginEmail.toStdString(),
                 .apiKey = settings.apiKey.toStdString(),
-                .forceWebSocket = settings.forceWebSocket,
             };
         }
 
@@ -1043,7 +1042,6 @@ namespace javelin::gui::compose
                             .sessionUrl = connection.sessionUrl.toStdString(),
                             .loginEmail = connection.loginEmail.toStdString(),
                             .apiKey = connection.apiKey.toStdString(),
-                            .forceWebSocket = connection.forceWebSocket,
                         },
                         accountId);
                     QCoro::connect(

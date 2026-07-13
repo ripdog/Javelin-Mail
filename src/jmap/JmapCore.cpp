@@ -566,9 +566,6 @@ namespace javelin::jmap
             return javelin::jmap::api::ApiRequestContext{
                 .credentials = buildAccountCredentials(settings, std::move(accountId)),
                 .apiUrl = session.apiUrl,
-                .transportPolicy = settings.forceWebSocket
-                                       ? javelin::jmap::api::JmapTransportPolicy::ForceWebSocket
-                                       : javelin::jmap::api::JmapTransportPolicy::Preferred,
             };
         }
 

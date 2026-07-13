@@ -76,8 +76,7 @@ namespace javelin::app
         const bool connectionSettingsUnchanged =
             m_settings.has_value() && m_settings->sessionUrl == settings.sessionUrl &&
             m_settings->loginEmail == settings.loginEmail &&
-            m_settings->apiKey == settings.apiKey &&
-            m_settings->forceWebSocket == settings.forceWebSocket && m_accountId == accountId;
+            m_settings->apiKey == settings.apiKey && m_accountId == accountId;
         if (connectionSettingsUnchanged && m_runContext != nullptr && m_mailboxIds == mailboxIds)
         {
             return;
@@ -291,9 +290,6 @@ namespace javelin::app
                         },
                 },
             .apiUrl = runContext->configuration.apiUrl,
-            .transportPolicy = runContext->configuration.settings.forceWebSocket
-                                   ? javelin::jmap::api::JmapTransportPolicy::ForceWebSocket
-                                   : javelin::jmap::api::JmapTransportPolicy::Preferred,
         };
 
         javelin::jmap::sync::MailboxRefreshExecutor mailboxRefreshExecutor{
@@ -365,9 +361,6 @@ namespace javelin::app
                         },
                 },
             .apiUrl = runContext->configuration.apiUrl,
-            .transportPolicy = runContext->configuration.settings.forceWebSocket
-                                   ? javelin::jmap::api::JmapTransportPolicy::ForceWebSocket
-                                   : javelin::jmap::api::JmapTransportPolicy::Preferred,
         };
 
         javelin::jmap::sync::MailboxStateRefreshExecutor executor{m_databaseConnection,
@@ -452,8 +445,6 @@ namespace javelin::app
             m_runContext != nullptr &&
             m_runContext->configuration.accountId == nextConfiguration->accountId &&
             m_runContext->configuration.eventSourceUrl == nextConfiguration->eventSourceUrl &&
-            m_runContext->configuration.settings.forceWebSocket ==
-                nextConfiguration->settings.forceWebSocket &&
             m_runContext->configuration.websocket.has_value() ==
                 nextConfiguration->websocket.has_value() &&
             (!nextConfiguration->websocket.has_value() ||
@@ -486,8 +477,7 @@ namespace javelin::app
                     nextConfiguration->websocket->url, nextConfiguration->settings.apiKey,
                     sourceStatusCallback);
             std::unique_ptr<javelin::jmap::sync::StateChangeSource> httpFallbackSource;
-            if (!nextConfiguration->settings.forceWebSocket &&
-                !nextConfiguration->eventSourceUrl.empty())
+            if (!nextConfiguration->eventSourceUrl.empty())
             {
                 httpFallbackSource =
                     std::make_unique<javelin::jmap::sync::EventSourceStateChangeSource>(

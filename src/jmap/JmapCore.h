@@ -35,7 +35,6 @@ namespace javelin::jmap
         std::string sessionUrl;
         std::string loginEmail;
         std::string apiKey;
-        bool forceWebSocket = false;
     };
 
     struct LiveRefreshSummary

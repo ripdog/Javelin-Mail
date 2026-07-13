@@ -10,7 +10,6 @@ class QListWidget;
 class QPushButton;
 class QRadioButton;
 class QComboBox;
-class QCheckBox;
 
 namespace javelin::jmap::cache
 {
@@ -29,7 +28,6 @@ namespace javelin::gui::settings
         QString loginEmail;
         QString apiKey;
         QStringList cachedAccountIds;
-        bool forceWebSocket = false;
     };
 
     struct AttachmentSaveSettings
@@ -76,7 +74,6 @@ namespace javelin::gui::settings
         void refreshAutoTranslateList();
         void removeSelectedAutoTranslateEntries();
         void selectAttachmentDirectory();
-        void clearCurrentAccountCache();
         [[nodiscard]] bool validateCurrentSettings();
         void updateAttachmentDirectoryControls();
         void refreshMailboxSyncAccounts();
@@ -101,8 +98,6 @@ namespace javelin::gui::settings
         QLineEdit* m_sessionUrlEdit = nullptr;
         QLineEdit* m_loginEmailEdit = nullptr;
         QLineEdit* m_apiKeyEdit = nullptr;
-        QCheckBox* m_forceWebSocketCheck = nullptr;
-        QPushButton* m_clearCacheButton = nullptr;
         QListWidget* m_remoteContentList = nullptr;
         QPushButton* m_removeRemoteContentButton = nullptr;
         QListWidget* m_autoTranslateList = nullptr;

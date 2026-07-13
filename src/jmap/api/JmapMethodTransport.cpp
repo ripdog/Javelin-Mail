@@ -208,8 +208,7 @@ namespace javelin::jmap::api
                 }
 
                 qCDebug(logJmapWebSocketTransport).noquote()
-                    << "request dispatched" << QString::fromStdString(requestId) << "methods"
-                    << request.envelope.methodCalls.size() << "bytes" << bytesQueued;
+                    << "request dispatched" << QString::fromStdString(requestId);
                 QElapsedTimer elapsed;
                 elapsed.start();
                 while (
@@ -222,11 +221,6 @@ namespace javelin::jmap::api
                         auto buffered = std::move(response->second);
                         m_responses.erase(response);
                         m_ignoredRequestIds.erase(requestId);
-
-                        qCInfo(logJmapWebSocketTransport).noquote()
-                            << "response received" << QString::fromStdString(requestId) << "type"
-                            << QString::fromStdString(buffered.type) << "bytes"
-                            << buffered.payload.size() << "elapsed_ms" << elapsed.elapsed();
 
                         if (buffered.type == "RequestError")
                         {
@@ -565,11 +559,6 @@ namespace javelin::jmap::api
         {
             co_return co_await m_impl->httpTransport.call(std::move(request));
         }
-
-        qCDebug(logJmapWebSocketTransport).noquote()
-            << "transport selected" << (forceWebSocket ? "forced" : "preferred") << "account"
-            << QString::fromStdString(request.accountId) << "methods"
-            << request.envelope.methodCalls.size();
 
         auto& connection = m_impl->connections[target->ownerAccountId];
         if (connection == nullptr)

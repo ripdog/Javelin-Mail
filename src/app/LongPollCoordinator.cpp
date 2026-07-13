@@ -24,7 +24,6 @@ namespace javelin::app
                 .sessionUrl = settings.sessionUrl,
                 .loginEmail = settings.loginEmail,
                 .apiKey = settings.apiKey,
-                .forceWebSocket = settings.forceWebSocket,
             };
         }
     } // namespace
