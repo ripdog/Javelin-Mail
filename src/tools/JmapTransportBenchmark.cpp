@@ -34,7 +34,7 @@ namespace
 
     [[nodiscard]] Account configuredAccount(const QString& displayName)
     {
-        QSettings settings;
+        QSettings settings{QStringLiteral("Javelin Mail"), QStringLiteral("javelinmail")};
         settings.beginGroup(QStringLiteral("accounts"));
         const int count = settings.beginReadArray(QStringLiteral("size"));
         for (int index = 0; index < count; ++index)
