@@ -2,14 +2,75 @@
 
 #include <QCheckBox>
 #include <QComboBox>
-#include <QDateTimeEdit>
+#include <QDateEdit>
 #include <QDialogButtonBox>
 #include <QFormLayout>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QTimeZone>
+
+#include <optional>
+
+namespace
+{
+    QComboBox* createTimeEditor(QWidget* parent, const QString& accessibleName)
+    {
+        auto* editor = new QComboBox(parent);
+        editor->setEditable(true);
+        editor->setInsertPolicy(QComboBox::NoInsert);
+        editor->setMaxVisibleItems(12);
+        editor->setAccessibleName(accessibleName);
+        editor->lineEdit()->setPlaceholderText(QStringLiteral("HH:mm"));
+        for (auto time = QTime{0, 0}; time.isValid(); time = time.addSecs(15 * 60))
+        {
+            editor->addItem(time.toString(QStringLiteral("HH:mm")));
+            if (time == QTime{23, 45})
+                break;
+        }
+        return editor;
+    }
+
+    std::optional<QTime> enteredTime(const QComboBox* editor)
+    {
+        const auto text = editor->currentText().trimmed();
+        auto time = QTime::fromString(text, QStringLiteral("HH:mm"));
+        if (!time.isValid())
+            time = QTime::fromString(text, QStringLiteral("H:mm"));
+        return time.isValid() ? std::optional{time} : std::nullopt;
+    }
+
+    std::optional<QDateTime> enteredDateTime(const QDateEdit* date, const QComboBox* time)
+    {
+        const auto parsedTime = enteredTime(time);
+        if (!date->date().isValid() || !parsedTime.has_value())
+            return std::nullopt;
+        return QDateTime{date->date(), *parsedTime};
+    }
+
+    void setEnteredDateTime(QDateEdit* date, QComboBox* time, const QDateTime& value)
+    {
+        date->setDate(value.date());
+        time->setCurrentText(value.time().toString(QStringLiteral("HH:mm")));
+    }
+
+    std::optional<qint64> durationSeconds(const QString& value)
+    {
+        static const QRegularExpression expression{QStringLiteral(
+            "^P(?:(\\d+)W)?(?:(\\d+)D)?(?:T(?:(\\d+)H)?(?:(\\d+)M)?(?:(\\d+)S)?)?$")};
+        const auto match = expression.match(value);
+        if (!match.hasMatch())
+            return std::nullopt;
+        const auto number = [&match](const int capture)
+        { return match.captured(capture).isEmpty() ? 0LL : match.captured(capture).toLongLong(); };
+        const auto seconds = number(1) * 7 * 24 * 60 * 60 + number(2) * 24 * 60 * 60 +
+                             number(3) * 60 * 60 + number(4) * 60 + number(5);
+        return seconds > 0 ? std::optional{seconds} : std::nullopt;
+    }
+} // namespace
 
 namespace javelin::gui::calendar
 {
@@ -27,10 +88,25 @@ namespace javelin::gui::calendar
                 m_calendar->addItem(QString::fromStdString(calendar.name),
                                     QString::fromStdString(calendar.id));
         m_allDay = new QCheckBox(QStringLiteral("All day"), this);
-        m_start = new QDateTimeEdit(QDateTime::currentDateTime(), this);
-        m_end = new QDateTimeEdit(QDateTime::currentDateTime().addSecs(3600), this);
-        m_start->setCalendarPopup(true);
-        m_end->setCalendarPopup(true);
+        auto* startRow = new QWidget(this);
+        auto* startLayout = new QHBoxLayout(startRow);
+        startLayout->setContentsMargins(0, 0, 0, 0);
+        m_startDate = new QDateEdit(startRow);
+        m_startDate->setCalendarPopup(true);
+        m_startTime = createTimeEditor(startRow, QStringLiteral("Start time"));
+        startLayout->addWidget(m_startDate, 1);
+        startLayout->addWidget(m_startTime);
+        auto* endRow = new QWidget(this);
+        auto* endLayout = new QHBoxLayout(endRow);
+        endLayout->setContentsMargins(0, 0, 0, 0);
+        m_endDate = new QDateEdit(endRow);
+        m_endDate->setCalendarPopup(true);
+        m_endTime = createTimeEditor(endRow, QStringLiteral("End time"));
+        endLayout->addWidget(m_endDate, 1);
+        endLayout->addWidget(m_endTime);
+        const auto now = QDateTime::currentDateTime();
+        setEnteredDateTime(m_startDate, m_startTime, now);
+        setEnteredDateTime(m_endDate, m_endTime, now.addSecs(3600));
         m_timeZone = new QComboBox(this);
         const auto zones = QTimeZone::availableTimeZoneIds();
         for (const auto& zone : zones)
@@ -50,8 +126,8 @@ namespace javelin::gui::calendar
         layout->addRow(QStringLiteral("Title"), m_title);
         layout->addRow(QStringLiteral("Calendar"), m_calendar);
         layout->addRow(QString{}, m_allDay);
-        layout->addRow(QStringLiteral("Start"), m_start);
-        layout->addRow(QStringLiteral("End"), m_end);
+        layout->addRow(QStringLiteral("Start"), startRow);
+        layout->addRow(QStringLiteral("End"), endRow);
         layout->addRow(QStringLiteral("Time zone"), m_timeZone);
         layout->addRow(QStringLiteral("Location"), m_location);
         layout->addRow(QStringLiteral("Description"), m_description);
@@ -68,6 +144,14 @@ namespace javelin::gui::calendar
         connect(m_delete, &QPushButton::clicked, this,
                 [this]() { done(EventDialog::DeleteRequested); });
         connect(m_allDay, &QCheckBox::toggled, this, &EventDialog::updateAllDayMode);
+        connect(m_startDate, &QDateEdit::editingFinished, this, &EventDialog::updateAutomaticEnd);
+        connect(m_startTime->lineEdit(), &QLineEdit::editingFinished, this,
+                &EventDialog::updateAutomaticEnd);
+        connect(m_startTime, &QComboBox::activated, this, &EventDialog::updateAutomaticEnd);
+        connect(m_endDate, &QDateEdit::editingFinished, this, &EventDialog::markEndEdited);
+        connect(m_endTime->lineEdit(), &QLineEdit::editingFinished, this,
+                &EventDialog::markEndEdited);
+        connect(m_endTime, &QComboBox::activated, this, &EventDialog::markEndEdited);
     }
 
     void EventDialog::setEvent(const javelin::jmap::calendar::CalendarEvent& event)
@@ -83,7 +167,14 @@ namespace javelin::gui::calendar
         const auto start =
             QDateTime::fromString(QString::fromStdString(event.start.value), Qt::ISODate);
         if (start.isValid())
-            m_start->setDateTime(start);
+        {
+            setEnteredDateTime(m_startDate, m_startTime, start);
+            const auto seconds = durationSeconds(QString::fromStdString(event.duration.value));
+            setEnteredDateTime(
+                m_endDate, m_endTime,
+                start.addSecs(seconds.value_or(event.showWithoutTime ? 86400 : 3600)));
+        }
+        m_endEdited = false;
         m_timeZone->setCurrentText(QString::fromStdString(event.timeZone.value));
         m_description->setPlainText(event.description ? QString::fromStdString(*event.description)
                                                       : QString{});
@@ -97,10 +188,13 @@ namespace javelin::gui::calendar
         result.calendarIds.clear();
         result.calendarIds.emplace(m_calendar->currentData().toString().toStdString(), true);
         result.showWithoutTime = m_allDay->isChecked();
-        result.start.value = m_start->dateTime().toString(Qt::ISODate).toStdString();
-        result.duration.value = QStringLiteral("PT%1S")
-                                    .arg(m_start->dateTime().secsTo(m_end->dateTime()))
-                                    .toStdString();
+        const auto start = enteredDateTime(m_startDate, m_startTime).value();
+        const auto end = enteredDateTime(m_endDate, m_endTime).value();
+        result.start.value = start.toString(Qt::ISODate).toStdString();
+        result.duration.value =
+            (result.showWithoutTime ? QStringLiteral("P%1D").arg(start.date().daysTo(end.date()))
+                                    : QStringLiteral("PT%1S").arg(start.secsTo(end)))
+                .toStdString();
         result.timeZone.value = m_timeZone->currentText().toStdString();
         const auto description = m_description->toPlainText().trimmed();
         result.description =
@@ -157,7 +251,14 @@ namespace javelin::gui::calendar
             showMutationError(QStringLiteral("Choose a writable calendar."));
             return;
         }
-        if (m_end->dateTime() <= m_start->dateTime())
+        const auto start = enteredDateTime(m_startDate, m_startTime);
+        const auto end = enteredDateTime(m_endDate, m_endTime);
+        if (!start.has_value() || !end.has_value())
+        {
+            showMutationError(QStringLiteral("Enter start and end times as HH:mm."));
+            return;
+        }
+        if (*end <= *start)
         {
             showMutationError(QStringLiteral("The end must be after the start."));
             return;
@@ -168,10 +269,30 @@ namespace javelin::gui::calendar
 
     void EventDialog::updateAllDayMode(const bool allDay)
     {
-        m_start->setDisplayFormat(allDay ? QStringLiteral("yyyy-MM-dd")
-                                         : QStringLiteral("yyyy-MM-dd HH:mm"));
-        m_end->setDisplayFormat(allDay ? QStringLiteral("yyyy-MM-dd")
-                                       : QStringLiteral("yyyy-MM-dd HH:mm"));
+        m_startTime->setVisible(!allDay);
+        m_endTime->setVisible(!allDay);
         m_timeZone->setEnabled(!allDay);
+        if (allDay)
+        {
+            m_startTime->setCurrentText(QStringLiteral("00:00"));
+            m_endTime->setCurrentText(QStringLiteral("00:00"));
+            if (m_endDate->date() <= m_startDate->date())
+                m_endDate->setDate(m_startDate->date().addDays(1));
+        }
+    }
+
+    void EventDialog::updateAutomaticEnd()
+    {
+        const auto start = enteredDateTime(m_startDate, m_startTime);
+        if (m_endEdited || !start.has_value())
+            return;
+        setEnteredDateTime(m_endDate, m_endTime,
+                           m_allDay->isChecked() ? QDateTime{start->date().addDays(1), QTime{0, 0}}
+                                                 : start->addSecs(3600));
+    }
+
+    void EventDialog::markEndEdited()
+    {
+        m_endEdited = true;
     }
 } // namespace javelin::gui::calendar
