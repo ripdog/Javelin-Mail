@@ -8,6 +8,7 @@
 #include "jmap/cache/SessionRepository.h"
 
 #include <QDateTime>
+#include <QLoggingCategory>
 #include <QRegularExpression>
 
 #include <unordered_map>
@@ -15,12 +16,42 @@
 
 namespace javelin::jmap::calendar
 {
+    Q_LOGGING_CATEGORY(logCalendarService, "jmap.calendar")
+
     namespace
     {
         using SessionResult = std::variant<api::Session, CalendarServiceError>;
 
+        QString errorCodeName(const CalendarServiceErrorCode code)
+        {
+            switch (code)
+            {
+            case CalendarServiceErrorCode::Capability:
+                return QStringLiteral("capability");
+            case CalendarServiceErrorCode::Permission:
+                return QStringLiteral("permission");
+            case CalendarServiceErrorCode::Scheduling:
+                return QStringLiteral("scheduling");
+            case CalendarServiceErrorCode::StaleState:
+                return QStringLiteral("stale-state");
+            case CalendarServiceErrorCode::Transport:
+                return QStringLiteral("transport");
+            case CalendarServiceErrorCode::Authentication:
+                return QStringLiteral("authentication");
+            case CalendarServiceErrorCode::Protocol:
+                return QStringLiteral("protocol");
+            case CalendarServiceErrorCode::Cache:
+                return QStringLiteral("cache");
+            case CalendarServiceErrorCode::Validation:
+                return QStringLiteral("validation");
+            }
+            return QStringLiteral("unknown");
+        }
+
         CalendarServiceError error(const CalendarServiceErrorCode code, QString message)
         {
+            qCWarning(logCalendarService).noquote()
+                << "calendar error" << errorCodeName(code) << message;
             return {.code = code, .message = std::move(message)};
         }
 

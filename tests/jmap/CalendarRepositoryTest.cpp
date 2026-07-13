@@ -40,7 +40,7 @@ namespace
                 .location = std::nullopt,
                 .start = {.value = std::move(start)},
                 .duration = {.value = "PT1H"},
-                .timeZone = {.value = "Pacific/Auckland"},
+                .timeZone = javelin::jmap::calendar::TimeZoneId{.value = "Pacific/Auckland"},
                 .showWithoutTime = false,
                 .isDraft = false,
                 .isOrigin = true,

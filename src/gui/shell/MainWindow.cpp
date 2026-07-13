@@ -92,6 +92,7 @@ namespace javelin::gui::shell
     void MainWindow::presentError(const javelin::jmap::LiveRefreshError& error,
                                   const QString& title)
     {
+        qCWarning(logUserOperations).noquote() << "operation failed" << error.message;
         m_statusBar->showMessage(error.message, 10000);
         if (error.requiresUserIntervention)
         {
@@ -1377,6 +1378,14 @@ namespace javelin::gui::shell
         }
 
         const auto accountsResult = m_calendarService.accounts();
+        if (const auto* error =
+                std::get_if<javelin::jmap::calendar::CalendarServiceError>(&accountsResult))
+        {
+            qCWarning(logUserOperations).noquote()
+                << "calendar account discovery failed" << error->message;
+            m_statusBar->showMessage(error->message, 10000);
+            return;
+        }
         const auto* accounts =
             std::get_if<std::vector<javelin::jmap::cache::CalendarAccount>>(&accountsResult);
         if (accounts == nullptr || accounts->empty())
@@ -1491,6 +1500,8 @@ namespace javelin::gui::shell
                         if (const auto* error =
                                 std::get_if<javelin::jmap::calendar::CalendarServiceError>(&result))
                         {
+                            qCWarning(logUserOperations).noquote()
+                                << "calendar range refresh failed" << error->message;
                             m_statusBar->showMessage(error->message, 10000);
                             return;
                         }
@@ -1541,7 +1552,9 @@ namespace javelin::gui::shell
                                                    .toString(Qt::ISODate)
                                                    .toStdString()},
                             .duration = {.value = "PT1H"},
-                            .timeZone = {.value = QTimeZone::systemTimeZoneId().toStdString()},
+                            .timeZone =
+                                javelin::jmap::calendar::TimeZoneId{
+                                    .value = QTimeZone::systemTimeZoneId().toStdString()},
                             .showWithoutTime = false,
                             .isDraft = false,
                             .isOrigin = true,
@@ -1568,6 +1581,8 @@ namespace javelin::gui::shell
                                         std::get_if<javelin::jmap::calendar::CalendarServiceError>(
                                             &result))
                                 {
+                                    qCWarning(logUserOperations).noquote()
+                                        << "calendar event creation failed" << error->message;
                                     dialog->showMutationError(error->message);
                                     dialog->show();
                                     return;
@@ -1655,6 +1670,8 @@ namespace javelin::gui::shell
                         if (const auto* error =
                                 std::get_if<javelin::jmap::calendar::CalendarServiceError>(&result))
                         {
+                            qCWarning(logUserOperations).noquote()
+                                << "calendar event mutation failed" << error->message;
                             dialog->showMutationError(error->message);
                             dialog->show();
                             return;

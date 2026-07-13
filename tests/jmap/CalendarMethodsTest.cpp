@@ -89,6 +89,16 @@ TEST_CASE("calendar event parsing keeps midnight timed events timed", "[jmap][ca
     CHECK_FALSE(parsed.value->list.front().showWithoutTime);
 }
 
+TEST_CASE("calendar event parsing preserves a floating null time zone", "[jmap][calendar]")
+{
+    const auto parsed = javelin::jmap::api::parseCalendarEventGetResponse(
+        R"({"accountId":"c","state":"e4","list":[{"@type":"Event","id":"floating","uid":"floating-1","calendarIds":{"personal":true},"title":"Floating event","start":"2026-07-13T13:00:00","duration":"PT1H","timeZone":null,"showWithoutTime":false,"isDraft":false,"isOrigin":true}],"notFound":[]})");
+
+    REQUIRE(parsed.ok());
+    REQUIRE(parsed.value->list.size() == 1);
+    CHECK_FALSE(parsed.value->list.front().timeZone.has_value());
+}
+
 TEST_CASE("calendar set exposes scheduling failures as typed errors", "[jmap][calendar]")
 {
     const auto parsed = javelin::jmap::api::parseCalendarEventSetResponse(
@@ -126,7 +136,7 @@ TEST_CASE("calendar set omits server-set event properties", "[jmap][calendar]")
         .location = std::nullopt,
         .start = {.value = "2026-03-03T09:00:00"},
         .duration = {.value = "PT1H"},
-        .timeZone = {.value = "Pacific/Auckland"},
+        .timeZone = javelin::jmap::calendar::TimeZoneId{.value = "Pacific/Auckland"},
         .showWithoutTime = false,
         .isDraft = false,
         .isOrigin = true,

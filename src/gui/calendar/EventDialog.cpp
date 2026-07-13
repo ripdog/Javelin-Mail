@@ -175,7 +175,8 @@ namespace javelin::gui::calendar
                 start.addSecs(seconds.value_or(event.showWithoutTime ? 86400 : 3600)));
         }
         m_endEdited = false;
-        m_timeZone->setCurrentText(QString::fromStdString(event.timeZone.value));
+        if (event.timeZone)
+            m_timeZone->setCurrentText(QString::fromStdString(event.timeZone->value));
         m_description->setPlainText(event.description ? QString::fromStdString(*event.description)
                                                       : QString{});
         m_location->setText(event.location ? QString::fromStdString(*event.location) : QString{});
@@ -195,7 +196,8 @@ namespace javelin::gui::calendar
             (result.showWithoutTime ? QStringLiteral("P%1D").arg(start.date().daysTo(end.date()))
                                     : QStringLiteral("PT%1S").arg(start.secsTo(end)))
                 .toStdString();
-        result.timeZone.value = m_timeZone->currentText().toStdString();
+        result.timeZone =
+            javelin::jmap::calendar::TimeZoneId{.value = m_timeZone->currentText().toStdString()};
         const auto description = m_description->toPlainText().trimmed();
         result.description =
             description.isEmpty() ? std::nullopt : std::optional{description.toStdString()};

@@ -119,7 +119,7 @@ namespace javelin::jmap::calendar
         std::optional<std::string> location;
         LocalDateTime start;
         Duration duration;
-        TimeZoneId timeZone{.value = "Etc/UTC"};
+        std::optional<TimeZoneId> timeZone;
         bool showWithoutTime = false;
         bool isDraft = false;
         bool isOrigin = false;

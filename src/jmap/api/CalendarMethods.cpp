@@ -130,7 +130,7 @@ namespace javelin::jmap::api::detail
         std::unordered_map<std::string, RawLocation> locations;
         std::string start;
         std::string duration;
-        std::string timeZone = "Etc/UTC";
+        std::optional<std::string> timeZone;
         bool showWithoutTime = false;
         bool isDraft = false;
         bool isOrigin = false;
@@ -151,7 +151,7 @@ namespace javelin::jmap::api::detail
         std::unordered_map<std::string, RawLocation> locations;
         std::string start;
         std::string duration;
-        std::string timeZone;
+        std::optional<std::string> timeZone;
         bool showWithoutTime = false;
         bool isDraft = false;
         std::optional<RawRecurrenceRule> recurrenceRule;
@@ -381,7 +381,7 @@ namespace javelin::jmap::api
                 .locations = {},
                 .start = value.start.value,
                 .duration = value.duration.value,
-                .timeZone = value.timeZone.value,
+                .timeZone = value.timeZone ? std::optional{value.timeZone->value} : std::nullopt,
                 .showWithoutTime = value.showWithoutTime,
                 .isDraft = value.isDraft,
                 .isOrigin = value.isOrigin,
@@ -476,7 +476,9 @@ namespace javelin::jmap::api
                                 : std::optional{raw.locations.begin()->second.name},
                 .start = {.value = raw.start},
                 .duration = {.value = raw.duration},
-                .timeZone = {.value = raw.timeZone},
+                .timeZone = raw.timeZone
+                                ? std::optional<calendar::TimeZoneId>{{.value = *raw.timeZone}}
+                                : std::nullopt,
                 .showWithoutTime = isImportedAllDayEvent(raw),
                 .isDraft = raw.isDraft,
                 .isOrigin = raw.isOrigin,
