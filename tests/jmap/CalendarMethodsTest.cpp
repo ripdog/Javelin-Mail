@@ -54,6 +54,20 @@ TEST_CASE("calendar event documents preserve recurrence and attendees", "[jmap][
     CHECK(event.attendees.front().isOwner);
 }
 
+TEST_CASE("calendar event parsing preserves expanded instance identity", "[jmap][calendar]")
+{
+    const auto parsed = javelin::jmap::api::parseCalendarEventGetResponse(
+        R"({"accountId":"a1","state":"e4","list":[{"@type":"Event","id":"synthetic-1","baseEventId":"base-1","recurrenceId":"2026-03-03T09:00:00","uid":"uid-1","calendarIds":{"work":true},"title":"Planning","start":"2026-03-03T09:00:00","duration":"PT1H","timeZone":"Pacific/Auckland","showWithoutTime":false,"isDraft":false,"isOrigin":true}],"notFound":[]})");
+
+    REQUIRE(parsed.ok());
+    REQUIRE(parsed.value->list.size() == 1);
+    const auto& event = parsed.value->list.front();
+    REQUIRE(event.baseEventId.has_value());
+    CHECK(*event.baseEventId == "base-1");
+    REQUIRE(event.recurrenceId.has_value());
+    CHECK(event.recurrenceId->value == "2026-03-03T09:00:00");
+}
+
 TEST_CASE("calendar event parsing normalizes imported midnight date spans as all-day",
           "[jmap][calendar][stalwart]")
 {
@@ -103,6 +117,8 @@ TEST_CASE("calendar set omits server-set event properties", "[jmap][calendar]")
     const javelin::jmap::calendar::CalendarEvent event{
         .accountId = "a1",
         .id = "e1",
+        .baseEventId = std::nullopt,
+        .recurrenceId = std::nullopt,
         .uid = "uid-1",
         .calendarIds = {{"work", true}},
         .title = "Planning",

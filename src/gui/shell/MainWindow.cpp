@@ -1530,6 +1530,8 @@ namespace javelin::gui::shell
                         dialog->setEvent(javelin::jmap::calendar::CalendarEvent{
                             .accountId = account.accountId,
                             .id = {},
+                            .baseEventId = std::nullopt,
+                            .recurrenceId = std::nullopt,
                             .uid = {},
                             .calendarIds = {{destination->id, true}},
                             .title = {},

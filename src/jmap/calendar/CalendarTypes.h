@@ -110,6 +110,8 @@ namespace javelin::jmap::calendar
     {
         std::string accountId;
         std::string id;
+        std::optional<std::string> baseEventId;
+        std::optional<LocalDateTime> recurrenceId;
         std::string uid;
         std::unordered_map<std::string, bool> calendarIds;
         std::string title;

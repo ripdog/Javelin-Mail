@@ -121,6 +121,8 @@ namespace javelin::jmap::api::detail
     {
         std::string type;
         std::string id;
+        std::optional<std::string> baseEventId;
+        std::optional<std::string> recurrenceId;
         std::string uid;
         std::unordered_map<std::string, bool> calendarIds;
         std::string title;
@@ -239,13 +241,14 @@ JAVELIN_GLZ_META(RawParticipant, "@type", &T::type, "name", &T::name, "email", &
                  &T::participationStatus, "roles", &T::roles, "scheduleSequence",
                  &T::scheduleSequence, "scheduleUpdated", &T::scheduleUpdated);
 JAVELIN_GLZ_META(RawLocation, "@type", &T::type, "name", &T::name);
-JAVELIN_GLZ_META(RawEvent, "@type", &T::type, "id", &T::id, "uid", &T::uid, "calendarIds",
-                 &T::calendarIds, "title", &T::title, "description", &T::description, "locations",
-                 &T::locations, "start", &T::start, "duration", &T::duration, "timeZone",
-                 &T::timeZone, "showWithoutTime", &T::showWithoutTime, "isDraft", &T::isDraft,
-                 "isOrigin", &T::isOrigin, "utcStart", &T::utcStart, "utcEnd", &T::utcEnd,
-                 "recurrenceRule", &T::recurrenceRule, "recurrenceOverrides",
-                 &T::recurrenceOverrides, "participants", &T::participants);
+JAVELIN_GLZ_META(RawEvent, "@type", &T::type, "id", &T::id, "baseEventId", &T::baseEventId,
+                 "recurrenceId", &T::recurrenceId, "uid", &T::uid, "calendarIds", &T::calendarIds,
+                 "title", &T::title, "description", &T::description, "locations", &T::locations,
+                 "start", &T::start, "duration", &T::duration, "timeZone", &T::timeZone,
+                 "showWithoutTime", &T::showWithoutTime, "isDraft", &T::isDraft, "isOrigin",
+                 &T::isOrigin, "utcStart", &T::utcStart, "utcEnd", &T::utcEnd, "recurrenceRule",
+                 &T::recurrenceRule, "recurrenceOverrides", &T::recurrenceOverrides, "participants",
+                 &T::participants);
 JAVELIN_GLZ_META(RawEventWrite, "@type", &T::type, "uid", &T::uid, "calendarIds", &T::calendarIds,
                  "title", &T::title, "description", &T::description, "locations", &T::locations,
                  "start", &T::start, "duration", &T::duration, "timeZone", &T::timeZone,
@@ -368,6 +371,9 @@ namespace javelin::jmap::api
             detail::RawEvent raw{
                 .type = "Event",
                 .id = value.id,
+                .baseEventId = value.baseEventId,
+                .recurrenceId =
+                    value.recurrenceId ? std::optional{value.recurrenceId->value} : std::nullopt,
                 .uid = value.uid,
                 .calendarIds = value.calendarIds,
                 .title = value.title,
@@ -456,6 +462,11 @@ namespace javelin::jmap::api
             calendar::CalendarEvent value{
                 .accountId = accountId,
                 .id = raw.id,
+                .baseEventId = raw.baseEventId,
+                .recurrenceId =
+                    raw.recurrenceId
+                        ? std::optional<calendar::LocalDateTime>{{.value = *raw.recurrenceId}}
+                        : std::nullopt,
                 .uid = raw.uid,
                 .calendarIds = raw.calendarIds,
                 .title = raw.title,

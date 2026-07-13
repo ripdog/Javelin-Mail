@@ -31,6 +31,8 @@ namespace
     {
         return {.accountId = "a1",
                 .id = id,
+                .baseEventId = std::nullopt,
+                .recurrenceId = std::nullopt,
                 .uid = "uid-" + id,
                 .calendarIds = {{"work", true}},
                 .title = "Event " + id,
