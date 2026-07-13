@@ -119,6 +119,8 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/api/CalendarMethods.cpp
     src/jmap/api/CalendarMethods.h
     src/jmap/calendar/CalendarTypes.h
+    src/jmap/calendar/CalendarEventEditing.cpp
+    src/jmap/calendar/CalendarEventEditing.h
     src/jmap/calendar/CalendarService.cpp
     src/jmap/calendar/CalendarService.h
     src/jmap/api/MailMethods.cpp
@@ -279,6 +281,8 @@ add_library(javelin_jmap STATIC
     src/jmap/calendar/CalendarTypes.h
     src/jmap/calendar/CalendarService.cpp
     src/jmap/calendar/CalendarService.h
+    src/jmap/calendar/CalendarEventEditing.cpp
+    src/jmap/calendar/CalendarEventEditing.h
     src/jmap/cache/CalendarRepository.cpp
     src/jmap/cache/CalendarRepository.h
     src/jmap/sync/PreferredStateChangeSource.cpp

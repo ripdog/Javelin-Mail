@@ -1,5 +1,7 @@
 #include "gui/calendar/EventDialog.h"
 
+#include "jmap/calendar/CalendarEventEditing.h"
+
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDateEdit>
@@ -115,9 +117,11 @@ namespace javelin::gui::calendar
         m_description = new QPlainTextEdit(this);
         m_location = new QLineEdit(this);
         m_recurrence = new QComboBox(this);
-        m_recurrence->addItems({QStringLiteral("Does not repeat"), QStringLiteral("Daily"),
-                                QStringLiteral("Weekly"), QStringLiteral("Monthly"),
-                                QStringLiteral("Yearly")});
+        m_recurrence->addItem(QStringLiteral("Does not repeat"), QStringLiteral("none"));
+        m_recurrence->addItem(QStringLiteral("Daily"), QStringLiteral("daily"));
+        m_recurrence->addItem(QStringLiteral("Weekly"), QStringLiteral("weekly"));
+        m_recurrence->addItem(QStringLiteral("Monthly"), QStringLiteral("monthly"));
+        m_recurrence->addItem(QStringLiteral("Yearly"), QStringLiteral("yearly"));
         m_attendees = new QPlainTextEdit(this);
         m_attendees->setPlaceholderText(QStringLiteral("One email address per line"));
         m_error = new QLabel(this);
@@ -152,6 +156,11 @@ namespace javelin::gui::calendar
         connect(m_endTime->lineEdit(), &QLineEdit::editingFinished, this,
                 &EventDialog::markEndEdited);
         connect(m_endTime, &QComboBox::activated, this, &EventDialog::markEndEdited);
+        connect(m_calendar, &QComboBox::activated, this, [this]() { m_calendarEdited = true; });
+        connect(m_timeZone, &QComboBox::activated, this, [this]() { m_timeZoneEdited = true; });
+        connect(m_recurrence, &QComboBox::activated, this, [this]() { m_recurrenceEdited = true; });
+        connect(m_attendees, &QPlainTextEdit::textChanged, this,
+                [this]() { m_attendeesEdited = true; });
     }
 
     void EventDialog::setEvent(const javelin::jmap::calendar::CalendarEvent& event)
@@ -180,14 +189,63 @@ namespace javelin::gui::calendar
         m_description->setPlainText(event.description ? QString::fromStdString(*event.description)
                                                       : QString{});
         m_location->setText(event.location ? QString::fromStdString(*event.location) : QString{});
+
+        auto recurrenceKey = QStringLiteral("none");
+        if (event.recurrenceRule)
+        {
+            const auto& rule = *event.recurrenceRule;
+            const auto isSimple = rule.interval == 1 && !rule.count && !rule.until;
+            if (isSimple)
+            {
+                switch (rule.frequency)
+                {
+                case javelin::jmap::calendar::RecurrenceFrequency::Daily:
+                    recurrenceKey = QStringLiteral("daily");
+                    break;
+                case javelin::jmap::calendar::RecurrenceFrequency::Weekly:
+                    recurrenceKey = QStringLiteral("weekly");
+                    break;
+                case javelin::jmap::calendar::RecurrenceFrequency::Monthly:
+                    recurrenceKey = QStringLiteral("monthly");
+                    break;
+                case javelin::jmap::calendar::RecurrenceFrequency::Yearly:
+                    recurrenceKey = QStringLiteral("yearly");
+                    break;
+                default:
+                    recurrenceKey = QStringLiteral("custom");
+                    break;
+                }
+            }
+            else
+            {
+                recurrenceKey = QStringLiteral("custom");
+            }
+        }
+        if (recurrenceKey == QStringLiteral("custom") && m_recurrence->findData(recurrenceKey) < 0)
+            m_recurrence->addItem(QStringLiteral("Custom recurrence (unchanged)"), recurrenceKey);
+        m_recurrence->setCurrentIndex(m_recurrence->findData(recurrenceKey));
+
+        QStringList attendeeLines;
+        for (const auto& address :
+             javelin::jmap::calendar::editableAttendeeAddresses(event.attendees))
+            attendeeLines.push_back(QString::fromStdString(address));
+        m_attendees->setPlainText(attendeeLines.join(QLatin1Char('\n')));
+
+        m_calendarEdited = false;
+        m_timeZoneEdited = false;
+        m_recurrenceEdited = false;
+        m_attendeesEdited = false;
     }
 
     javelin::jmap::calendar::CalendarEvent EventDialog::eventDocument() const
     {
         auto result = m_event;
         result.title = m_title->text().trimmed().toStdString();
-        result.calendarIds.clear();
-        result.calendarIds.emplace(m_calendar->currentData().toString().toStdString(), true);
+        if (m_calendarEdited || result.calendarIds.empty())
+        {
+            result.calendarIds.clear();
+            result.calendarIds.emplace(m_calendar->currentData().toString().toStdString(), true);
+        }
         result.showWithoutTime = m_allDay->isChecked();
         const auto start = enteredDateTime(m_startDate, m_startTime).value();
         const auto end = enteredDateTime(m_endDate, m_endTime).value();
@@ -196,42 +254,40 @@ namespace javelin::gui::calendar
             (result.showWithoutTime ? QStringLiteral("P%1D").arg(start.date().daysTo(end.date()))
                                     : QStringLiteral("PT%1S").arg(start.secsTo(end)))
                 .toStdString();
-        result.timeZone =
-            javelin::jmap::calendar::TimeZoneId{.value = m_timeZone->currentText().toStdString()};
+        if (m_timeZoneEdited || (result.id.empty() && !result.timeZone))
+            result.timeZone = javelin::jmap::calendar::TimeZoneId{
+                .value = m_timeZone->currentText().toStdString()};
         const auto description = m_description->toPlainText().trimmed();
         result.description =
             description.isEmpty() ? std::nullopt : std::optional{description.toStdString()};
         const auto location = m_location->text().trimmed();
         result.location = location.isEmpty() ? std::nullopt : std::optional{location.toStdString()};
-        if (m_recurrence->currentIndex() == 0)
-            result.recurrenceRule = std::nullopt;
-        else
-            result.recurrenceRule = javelin::jmap::calendar::RecurrenceRule{
-                .frequency = static_cast<javelin::jmap::calendar::RecurrenceFrequency>(
-                    m_recurrence->currentIndex() == 1   ? 3
-                    : m_recurrence->currentIndex() == 2 ? 2
-                    : m_recurrence->currentIndex() == 3 ? 1
-                                                        : 0),
-                .interval = 1,
-                .count = std::nullopt,
-                .until = std::nullopt};
-        result.attendees.clear();
-        const auto addresses =
-            m_attendees->toPlainText().split(QLatin1Char('\n'), Qt::SkipEmptyParts);
-        int index = 0;
-        for (const auto& line : addresses)
+        if (m_recurrenceEdited)
         {
-            const auto address = line.trimmed();
-            result.attendees.push_back(
-                {.id = QStringLiteral("attendee-%1").arg(++index).toStdString(),
-                 .name = address.toStdString(),
-                 .email = address.toStdString(),
-                 .calendarAddress = QStringLiteral("mailto:%1").arg(address).toStdString(),
-                 .participationStatus = "needs-action",
-                 .isOwner = false,
-                 .isAttendee = true,
-                 .scheduleSequence = 0,
-                 .scheduleUpdated = std::nullopt});
+            const auto recurrenceKey = m_recurrence->currentData().toString();
+            if (recurrenceKey == QStringLiteral("none"))
+                result.recurrenceRule = std::nullopt;
+            else if (recurrenceKey != QStringLiteral("custom"))
+                result.recurrenceRule = javelin::jmap::calendar::RecurrenceRule{
+                    .frequency = recurrenceKey == QStringLiteral("daily")
+                                     ? javelin::jmap::calendar::RecurrenceFrequency::Daily
+                                 : recurrenceKey == QStringLiteral("weekly")
+                                     ? javelin::jmap::calendar::RecurrenceFrequency::Weekly
+                                 : recurrenceKey == QStringLiteral("monthly")
+                                     ? javelin::jmap::calendar::RecurrenceFrequency::Monthly
+                                     : javelin::jmap::calendar::RecurrenceFrequency::Yearly,
+                    .interval = 1,
+                    .count = std::nullopt,
+                    .until = std::nullopt};
+        }
+        if (m_attendeesEdited)
+        {
+            std::vector<std::string> addresses;
+            for (const auto& line :
+                 m_attendees->toPlainText().split(QLatin1Char('\n'), Qt::SkipEmptyParts))
+                addresses.push_back(line.trimmed().toStdString());
+            result.attendees =
+                javelin::jmap::calendar::reconcileEditableAttendees(result.attendees, addresses);
         }
         return result;
     }

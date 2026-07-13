@@ -54,5 +54,9 @@ namespace javelin::gui::calendar
         QLabel* m_error = nullptr;
         QPushButton* m_delete = nullptr;
         bool m_endEdited = false;
+        bool m_calendarEdited = false;
+        bool m_timeZoneEdited = false;
+        bool m_recurrenceEdited = false;
+        bool m_attendeesEdited = false;
     };
 } // namespace javelin::gui::calendar

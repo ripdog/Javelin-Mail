@@ -5,6 +5,7 @@ add_executable(javelin_jmap_tests
     jmap/AuthTest.cpp
     jmap/CancellationTest.cpp
     jmap/CalendarMethodsTest.cpp
+    jmap/CalendarEventEditingTest.cpp
     jmap/CalendarRepositoryTest.cpp
     jmap/ContactsMethodsTest.cpp
     jmap/ContactRepositoryTest.cpp
