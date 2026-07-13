@@ -1388,35 +1388,12 @@ namespace javelin::gui::shell
         }
 
         auto* widget = new javelin::gui::calendar::MonthCalendarWidget(m_contentStack);
-        std::vector<javelin::gui::calendar::CalendarDisplay> calendarDisplays;
-        std::unordered_map<std::string, QColor> calendarColors;
-        for (const auto& account : *accounts)
-        {
-            const auto listed = m_calendarService.calendars(account.accountId);
-            const auto* calendars =
-                std::get_if<std::vector<javelin::jmap::calendar::Calendar>>(&listed);
-            if (calendars == nullptr)
-                continue;
-            for (const auto& calendar : *calendars)
-            {
-                const auto key = account.accountId + '\n' + calendar.id;
-                const auto color = calendar.color ? QColor{QString::fromStdString(*calendar.color)}
-                                                  : QColor{QStringLiteral("#4f7cac")};
-                calendarColors.emplace(key, color);
-                calendarDisplays.push_back(
-                    {.id = key,
-                     .name = QStringLiteral("%1 — %2").arg(QString::fromStdString(calendar.name),
-                                                           QString::fromStdString(account.name)),
-                     .color = color,
-                     .visible = calendar.isVisible});
-            }
-        }
-        widget->setCalendars(std::move(calendarDisplays));
         const auto loadVisible =
-            [this, widget, accounts = *accounts,
-             calendarColors = std::move(calendarColors)](const QDate& start, const QDate& end)
+            [this, widget, accounts = *accounts](const QDate& start, const QDate& end)
         {
             std::vector<javelin::gui::calendar::MonthEvent> displayEvents;
+            std::vector<javelin::gui::calendar::CalendarDisplay> calendarDisplays;
+            std::unordered_map<std::string, QColor> calendarColors;
             const javelin::jmap::calendar::VisibleInterval interval{
                 .start = {.value = start.toString(Qt::ISODate).toStdString() + "T00:00:00"},
                 .end = {.value = end.toString(Qt::ISODate).toStdString() + "T00:00:00"}};
@@ -1424,6 +1401,26 @@ namespace javelin::gui::shell
                 .value = QTimeZone::systemTimeZoneId().toStdString()};
             for (const auto& account : accounts)
             {
+                const auto listed = m_calendarService.calendars(account.accountId);
+                const auto* calendars =
+                    std::get_if<std::vector<javelin::jmap::calendar::Calendar>>(&listed);
+                if (calendars != nullptr)
+                {
+                    for (const auto& calendar : *calendars)
+                    {
+                        const auto key = account.accountId + '\n' + calendar.id;
+                        const auto color = calendar.color
+                                               ? QColor{QString::fromStdString(*calendar.color)}
+                                               : QColor{QStringLiteral("#4f7cac")};
+                        calendarColors.emplace(key, color);
+                        calendarDisplays.push_back({.id = key,
+                                                    .name = QStringLiteral("%1 — %2").arg(
+                                                        QString::fromStdString(calendar.name),
+                                                        QString::fromStdString(account.name)),
+                                                    .color = color,
+                                                    .visible = calendar.isVisible});
+                    }
+                }
                 const auto loaded =
                     m_calendarService.loadCached(account.accountId, interval, timeZone);
                 const auto* window =
@@ -1465,6 +1462,7 @@ namespace javelin::gui::shell
                                              .recurring = occurrence.recurrenceId.has_value()});
                 }
             }
+            widget->setCalendars(std::move(calendarDisplays));
             widget->setEvents(std::move(displayEvents));
         };
         connect(widget, &javelin::gui::calendar::MonthCalendarWidget::visibleIntervalChanged,
@@ -1882,27 +1880,53 @@ namespace javelin::gui::shell
 
     QString MainWindow::titleForTab(const TabState& tab) const
     {
+        QString title;
+        std::string accountId;
         if (const auto* mailboxTab = std::get_if<MailboxTabState>(&tab.content))
         {
-            return mailboxTab->title;
+            title = mailboxTab->title;
+            accountId = mailboxTab->accountId;
         }
-
-        if (const auto* searchTab = std::get_if<SearchTabState>(&tab.content))
+        else if (const auto* searchTab = std::get_if<SearchTabState>(&tab.content))
         {
-            return searchTab->title;
+            title = searchTab->title;
+            accountId = searchTab->accountId;
         }
-
-        if (const auto* contactsTab = std::get_if<ContactsTabState>(&tab.content))
+        else if (const auto* contactsTab = std::get_if<ContactsTabState>(&tab.content))
         {
-            return contactsTab->title;
+            title = contactsTab->title;
+            accountId = contactsTab->accountId;
         }
-
-        if (const auto* calendarTab = std::get_if<CalendarTabState>(&tab.content))
+        else if (const auto* calendarTab = std::get_if<CalendarTabState>(&tab.content))
         {
-            return calendarTab->title;
+            title = calendarTab->title;
+            accountId = calendarTab->accountId;
+        }
+        else
+        {
+            const auto& composeTab = std::get<ComposeTabState>(tab.content);
+            title = composeTab.title;
+            accountId = composeTab.accountId;
         }
 
-        return std::get<ComposeTabState>(tab.content).title;
+        const auto settings = javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
+            QString::fromStdString(accountId));
+        auto accountName = settings.displayName;
+        if (accountName.isEmpty())
+        {
+            const auto cached = m_accountRepository.listAll();
+            if (const auto* accounts =
+                    std::get_if<std::vector<javelin::jmap::cache::CachedAccount>>(&cached))
+            {
+                const auto account = std::ranges::find(
+                    *accounts, accountId, &javelin::jmap::cache::CachedAccount::accountId);
+                if (account != accounts->end())
+                    accountName = QString::fromStdString(account->name);
+            }
+        }
+        if (accountName.isEmpty())
+            accountName = settings.loginEmail;
+        return accountName.isEmpty() ? title : QStringLiteral("%1 - %2").arg(title, accountName);
     }
 
     QIcon MainWindow::iconForTab(const TabState& tab) const
@@ -2030,26 +2054,7 @@ namespace javelin::gui::shell
             return;
         }
 
-        const auto title = titleForTab(*tab);
-        const auto configuredAccounts = javelin::gui::settings::PreferencesDialog::loadAccounts();
-        if (configuredAccounts.size() <= 1)
-        {
-            setWindowTitle(title);
-            return;
-        }
-
-        const auto accountId = activeAccountId();
-        if (!accountId.has_value())
-        {
-            setWindowTitle(title);
-            return;
-        }
-        const auto settings = javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
-            QString::fromStdString(*accountId));
-        const auto accountName =
-            settings.displayName.isEmpty() ? settings.loginEmail : settings.displayName;
-        setWindowTitle(accountName.isEmpty() ? title
-                                             : QStringLiteral("%1 - %2").arg(title, accountName));
+        setWindowTitle(titleForTab(*tab));
     }
 
     void MainWindow::openOrActivateMailboxTab(std::string accountId, std::string mailboxId,

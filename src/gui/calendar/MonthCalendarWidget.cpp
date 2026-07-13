@@ -56,7 +56,8 @@ namespace javelin::gui::calendar
         explicit DayCellWidget(QWidget* parent = nullptr) : QWidget(parent)
         {
             setMinimumSize(90, 76);
-            setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+            setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
+            setObjectName(QStringLiteral("calendarDayCell"));
             m_layout = new QVBoxLayout(this);
             m_layout->setContentsMargins(4, 3, 4, 3);
             m_layout->setSpacing(2);
@@ -67,10 +68,18 @@ namespace javelin::gui::calendar
 
         void setDate(const QDate& date, const bool adjacent, const bool selected)
         {
-            Q_UNUSED(adjacent);
-            Q_UNUSED(selected);
             m_date = date;
             m_day->setText(QString::number(date.day()));
+            const auto border = date == QDate::currentDate()
+                                    ? QStringLiteral("2px solid palette(highlight)")
+                                    : QStringLiteral("1px solid palette(mid)");
+            const auto background = selected ? QStringLiteral("palette(alternate-base)")
+                                             : QStringLiteral("palette(base)");
+            const auto text =
+                adjacent ? QStringLiteral("palette(mid)") : QStringLiteral("palette(text)");
+            setStyleSheet(QStringLiteral("#calendarDayCell { border: %1; background: %2; } "
+                                         "#calendarDayCell QLabel { color: %3; border: none; }")
+                              .arg(border, background, text));
         }
 
         void clearEvents()
@@ -149,8 +158,11 @@ namespace javelin::gui::calendar
         m_grid->setSpacing(0);
         for (int column = 0; column < 7; ++column)
         {
+            m_grid->setColumnStretch(column, 1);
             m_weekdayHeaders[static_cast<std::size_t>(column)] = new QLabel(this);
             m_weekdayHeaders[static_cast<std::size_t>(column)]->setAlignment(Qt::AlignCenter);
+            m_weekdayHeaders[static_cast<std::size_t>(column)]->setSizePolicy(
+                QSizePolicy::Ignored, QSizePolicy::Preferred);
             m_grid->addWidget(m_weekdayHeaders[static_cast<std::size_t>(column)], 0, column);
         }
         for (int index = 0; index < 42; ++index)
@@ -191,17 +203,27 @@ namespace javelin::gui::calendar
 
     void MonthCalendarWidget::setCalendars(std::vector<CalendarDisplay> calendars)
     {
+        const auto previousHiddenCalendars = m_hiddenCalendars;
+        auto* previousMenu = m_calendarsButton->menu();
         auto* menu = new QMenu(m_calendarsButton);
         m_hiddenCalendars.clear();
+        std::vector<std::string> knownCalendars;
+        knownCalendars.reserve(calendars.size());
         for (auto& calendar : calendars)
         {
+            const auto wasHidden = std::ranges::find(previousHiddenCalendars, calendar.id) !=
+                                   previousHiddenCalendars.end();
+            const auto wasKnown =
+                std::ranges::find(m_knownCalendars, calendar.id) != m_knownCalendars.end();
+            const auto isVisible = wasKnown ? !wasHidden : calendar.visible;
+            knownCalendars.push_back(calendar.id);
             auto* action = menu->addAction(calendar.name);
             action->setCheckable(true);
-            action->setChecked(calendar.visible);
+            action->setChecked(isVisible);
             QPixmap swatch{12, 12};
             swatch.fill(calendar.color);
             action->setIcon(QIcon{swatch});
-            if (!calendar.visible)
+            if (!isVisible)
                 m_hiddenCalendars.push_back(calendar.id);
             connect(action, &QAction::toggled, this,
                     [this, id = std::move(calendar.id)](const bool visible)
@@ -214,7 +236,11 @@ namespace javelin::gui::calendar
                         rebuildEvents();
                     });
         }
+        m_knownCalendars = std::move(knownCalendars);
         m_calendarsButton->setMenu(menu);
+        m_calendarsButton->setEnabled(!calendars.empty());
+        if (previousMenu != nullptr)
+            previousMenu->deleteLater();
         rebuildEvents();
     }
 

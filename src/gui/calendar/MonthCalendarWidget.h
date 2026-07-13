@@ -91,5 +91,6 @@ namespace javelin::gui::calendar
         std::array<DayCellWidget*, 42> m_cells{};
         std::vector<MonthEvent> m_events;
         std::vector<std::string> m_hiddenCalendars;
+        std::vector<std::string> m_knownCalendars;
     };
 } // namespace javelin::gui::calendar

@@ -2,6 +2,7 @@
 
 #include <glaze/glaze.hpp>
 
+#include <algorithm>
 #include <utility>
 
 namespace javelin::jmap::api::detail
@@ -343,6 +344,25 @@ namespace javelin::jmap::api
             return calendar::RecurrenceFrequency::Daily;
         }
 
+        bool isImportedAllDayEvent(const detail::RawEvent& value)
+        {
+            if (value.showWithoutTime)
+                return true;
+            if (value.start.size() < 19 || value.start.compare(11, 8, "00:00:00") != 0)
+                return false;
+            if (value.duration.size() < 3 || value.duration.front() != 'P')
+                return false;
+            const auto unit = value.duration.back();
+            if (unit != 'D' && unit != 'W')
+                return false;
+            const std::string_view amount{value.duration.data() + 1, value.duration.size() - 2};
+            return !amount.empty() &&
+                   std::ranges::all_of(amount, [](const char character)
+                                       { return character >= '0' && character <= '9'; }) &&
+                   std::ranges::any_of(amount,
+                                       [](const char character) { return character != '0'; });
+        }
+
         detail::RawEvent rawEvent(const calendar::CalendarEvent& value)
         {
             detail::RawEvent raw{
@@ -446,7 +466,7 @@ namespace javelin::jmap::api
                 .start = {.value = raw.start},
                 .duration = {.value = raw.duration},
                 .timeZone = {.value = raw.timeZone},
-                .showWithoutTime = raw.showWithoutTime,
+                .showWithoutTime = isImportedAllDayEvent(raw),
                 .isDraft = raw.isDraft,
                 .isOrigin = raw.isOrigin,
                 .utcStart = raw.utcStart

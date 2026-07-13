@@ -54,6 +54,27 @@ TEST_CASE("calendar event documents preserve recurrence and attendees", "[jmap][
     CHECK(event.attendees.front().isOwner);
 }
 
+TEST_CASE("calendar event parsing normalizes imported midnight date spans as all-day",
+          "[jmap][calendar][stalwart]")
+{
+    const auto parsed = javelin::jmap::api::parseCalendarEventGetResponse(
+        R"({"accountId":"c","state":"e4","list":[{"@type":"Event","id":"holiday","uid":"holiday-1","calendarIds":{"holidays":true},"title":"Matariki","start":"2026-07-10T00:00:00","duration":"P1D","timeZone":"Pacific/Auckland","showWithoutTime":false,"isDraft":false,"isOrigin":true}],"notFound":[]})");
+
+    REQUIRE(parsed.ok());
+    REQUIRE(parsed.value->list.size() == 1);
+    CHECK(parsed.value->list.front().showWithoutTime);
+}
+
+TEST_CASE("calendar event parsing keeps midnight timed events timed", "[jmap][calendar]")
+{
+    const auto parsed = javelin::jmap::api::parseCalendarEventGetResponse(
+        R"({"accountId":"c","state":"e4","list":[{"@type":"Event","id":"night","uid":"night-1","calendarIds":{"work":true},"title":"Midnight deployment","start":"2026-07-10T00:00:00","duration":"PT1H","timeZone":"Pacific/Auckland","showWithoutTime":false,"isDraft":false,"isOrigin":true}],"notFound":[]})");
+
+    REQUIRE(parsed.ok());
+    REQUIRE(parsed.value->list.size() == 1);
+    CHECK_FALSE(parsed.value->list.front().showWithoutTime);
+}
+
 TEST_CASE("calendar set exposes scheduling failures as typed errors", "[jmap][calendar]")
 {
     const auto parsed = javelin::jmap::api::parseCalendarEventSetResponse(
