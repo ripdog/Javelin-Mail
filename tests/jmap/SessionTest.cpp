@@ -64,6 +64,35 @@ TEST_CASE("session parser exposes contacts capability metadata", "[jmap][contact
     CHECK(capability->mayCreateAddressBook);
 }
 
+TEST_CASE("session parser exposes strict draft-26 calendar capability metadata", "[jmap][calendar]")
+{
+    const auto result = javelin::jmap::api::parseSession(
+        R"({"username":"alice@example.test","apiUrl":"https://example.test/jmap","downloadUrl":"https://example.test/download/{accountId}/{blobId}/{name}","uploadUrl":"https://example.test/upload/{accountId}","state":"1","capabilities":{"urn:ietf:params:jmap:core":{},"urn:ietf:params:jmap:calendars":{}},"accounts":{"a1":{"name":"Calendar","isPersonal":true,"isReadOnly":false,"accountCapabilities":{"urn:ietf:params:jmap:calendars":{"maxCalendarsPerEvent":4,"minDateTime":"1900-01-01T00:00:00Z","maxDateTime":"2100-01-01T00:00:00Z","maxExpandedQueryDuration":"P1Y","maxParticipantsPerEvent":100,"mayCreateCalendar":false}}}},"primaryAccounts":{"urn:ietf:params:jmap:calendars":"a1"}})",
+        {.calendars = true});
+
+    REQUIRE(result.ok());
+    REQUIRE(result.session->capabilities.calendars);
+    CHECK(result.session->primaryAccounts.calendarsAccountId == "a1");
+    const auto& capability = result.session->accounts.at("a1").accountCapabilities.calendars;
+    REQUIRE(capability.has_value());
+    CHECK(capability->maxCalendarsPerEvent == 4);
+    CHECK(capability->maxExpandedQueryDuration == "P1Y");
+}
+
+TEST_CASE("session parser rejects malformed required calendar account capability",
+          "[jmap][calendar]")
+{
+    const auto result = javelin::jmap::api::parseSession(
+        R"({"username":"alice@example.test","apiUrl":"https://example.test/jmap","downloadUrl":"https://example.test/download/{accountId}/{blobId}/{name}","uploadUrl":"https://example.test/upload/{accountId}","state":"1","capabilities":{"urn:ietf:params:jmap:core":{},"urn:ietf:params:jmap:calendars":{}},"accounts":{"a1":{"name":"Calendar","isPersonal":true,"isReadOnly":false,"accountCapabilities":{"urn:ietf:params:jmap:calendars":{"maxExpandedQueryDuration":"P1Y","mayCreateCalendar":false}}}},"primaryAccounts":{"urn:ietf:params:jmap:calendars":"a1"}})",
+        {.calendars = true});
+
+    REQUIRE_FALSE(result.ok());
+    REQUIRE(result.error.has_value());
+    CHECK_THAT(result.error->capabilityErrors,
+               Catch::Matchers::VectorContains(
+                   javelin::jmap::api::CapabilityError::MissingCalendarsAccountCapability));
+}
+
 TEST_CASE("session capability validation fails when primary mail account is missing", "[jmap]")
 {
     javelin::jmap::api::Session session{
@@ -81,6 +110,7 @@ TEST_CASE("session capability validation fails when primary mail account is miss
                 .mail = true,
                 .submission = false,
                 .contacts = false,
+                .calendars = false,
                 .websocket = std::nullopt,
             },
         .accounts =
@@ -94,7 +124,8 @@ TEST_CASE("session capability validation fails when primary mail account is miss
                         .isReadOnly = false,
                         .accountCapabilities = {.mail = true,
                                                 .submission = false,
-                                                .contacts = std::nullopt},
+                                                .contacts = std::nullopt,
+                                                .calendars = std::nullopt},
                     },
                 },
             },

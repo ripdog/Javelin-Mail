@@ -851,9 +851,11 @@ namespace javelin::jmap::cache
                             QStringLiteral(
                                 "CREATE TABLE jmap_transport_preferences ("
                                 "owner_account_id TEXT PRIMARY KEY REFERENCES accounts(account_id) "
-                                "ON DELETE CASCADE, websocket_url TEXT NOT NULL, mode TEXT NOT NULL "
+                                "ON DELETE CASCADE, websocket_url TEXT NOT NULL, mode TEXT NOT "
+                                "NULL "
                                 "CHECK(mode IN ('unknown','websocket','http_fallback')), "
-                                "retry_after TEXT, last_error TEXT, updated_at TEXT NOT NULL DEFAULT "
+                                "retry_after TEXT, last_error TEXT, updated_at TEXT NOT NULL "
+                                "DEFAULT "
                                 "CURRENT_TIMESTAMP) STRICT"),
                         },
                 },
@@ -871,6 +873,85 @@ namespace javelin::jmap::cache
                             QStringLiteral(
                                 "INSERT INTO observed_notification_emails (account_id,email_id) "
                                 "SELECT account_id,email_id FROM emails"),
+                        },
+                },
+                MigrationStep{
+                    .version = 17,
+                    .name = QStringLiteral("calendar_cache"),
+                    .statements =
+                        {
+                            QStringLiteral("ALTER TABLE accounts ADD COLUMN cap_calendars INTEGER "
+                                           "NOT NULL DEFAULT 0"),
+                            QStringLiteral("ALTER TABLE accounts ADD COLUMN "
+                                           "calendars_capabilities_json TEXT NOT NULL DEFAULT "
+                                           "'null'"),
+                            QStringLiteral("ALTER TABLE sessions ADD COLUMN "
+                                           "has_calendars_capability INTEGER NOT NULL DEFAULT 0"),
+                            QStringLiteral("ALTER TABLE sessions ADD COLUMN "
+                                           "primary_calendars_account_id TEXT"),
+                            QStringLiteral(
+                                "CREATE TABLE calendars (account_id TEXT NOT NULL REFERENCES "
+                                "accounts(account_id) ON DELETE CASCADE, calendar_id TEXT NOT "
+                                "NULL, name TEXT NOT NULL, description TEXT, color TEXT, "
+                                "sort_order INTEGER NOT NULL DEFAULT 0, is_subscribed INTEGER NOT "
+                                "NULL, is_visible INTEGER NOT NULL, is_default INTEGER NOT NULL, "
+                                "time_zone TEXT, rights_json TEXT NOT NULL, state TEXT, PRIMARY "
+                                "KEY(account_id,calendar_id)) STRICT"),
+                            QStringLiteral(
+                                "CREATE TABLE calendar_events (account_id TEXT NOT NULL "
+                                "REFERENCES accounts(account_id) ON DELETE CASCADE, event_id TEXT "
+                                "NOT NULL, uid TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', "
+                                "description TEXT, location TEXT, document_json TEXT NOT NULL, "
+                                "state TEXT, PRIMARY KEY(account_id,event_id)) STRICT"),
+                            QStringLiteral(
+                                "CREATE TABLE calendar_event_calendars (account_id TEXT NOT NULL, "
+                                "event_id TEXT NOT NULL, calendar_id TEXT NOT NULL, PRIMARY KEY"
+                                "(account_id,event_id,calendar_id), FOREIGN "
+                                "KEY(account_id,event_id) "
+                                "REFERENCES calendar_events(account_id,event_id) ON DELETE "
+                                "CASCADE, "
+                                "FOREIGN KEY(account_id,calendar_id) REFERENCES calendars"
+                                "(account_id,calendar_id) ON DELETE CASCADE) STRICT"),
+                            QStringLiteral(
+                                "CREATE TABLE calendar_occurrences (account_id TEXT NOT NULL, "
+                                "occurrence_id TEXT NOT NULL, event_id TEXT NOT NULL, "
+                                "recurrence_id "
+                                "TEXT, start_utc TEXT, end_utc TEXT, local_start TEXT NOT NULL, "
+                                "local_end TEXT NOT NULL, is_all_day INTEGER NOT NULL, PRIMARY KEY"
+                                "(account_id,occurrence_id), FOREIGN KEY(account_id,event_id) "
+                                "REFERENCES calendar_events(account_id,event_id) ON DELETE "
+                                "CASCADE) "
+                                "STRICT"),
+                            QStringLiteral(
+                                "CREATE TABLE calendar_query_windows (account_id TEXT NOT NULL "
+                                "REFERENCES accounts(account_id) ON DELETE CASCADE, range_start "
+                                "TEXT NOT NULL, range_end TEXT NOT NULL, display_time_zone TEXT "
+                                "NOT "
+                                "NULL, query_state TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT "
+                                "CURRENT_TIMESTAMP, PRIMARY KEY(account_id,range_start,range_end,"
+                                "display_time_zone)) STRICT"),
+                            QStringLiteral(
+                                "CREATE TABLE calendar_window_occurrences (account_id TEXT NOT "
+                                "NULL, range_start TEXT NOT NULL, range_end TEXT NOT NULL, "
+                                "display_time_zone TEXT NOT NULL, occurrence_id TEXT NOT NULL, "
+                                "PRIMARY KEY(account_id,range_start,range_end,display_time_zone,"
+                                "occurrence_id), FOREIGN KEY(account_id,range_start,range_end,"
+                                "display_time_zone) REFERENCES calendar_query_windows(account_id,"
+                                "range_start,range_end,display_time_zone) ON DELETE CASCADE, "
+                                "FOREIGN "
+                                "KEY(account_id,occurrence_id) REFERENCES calendar_occurrences"
+                                "(account_id,occurrence_id) ON DELETE CASCADE) STRICT"),
+                            QStringLiteral(
+                                "CREATE TABLE calendar_state_tokens (account_id TEXT NOT NULL "
+                                "REFERENCES accounts(account_id) ON DELETE CASCADE, data_type TEXT "
+                                "NOT NULL CHECK(data_type IN ('Calendar','CalendarEvent')), state "
+                                "TEXT NOT NULL, PRIMARY KEY(account_id,data_type)) STRICT"),
+                            QStringLiteral(
+                                "CREATE INDEX idx_calendar_occurrences_range ON "
+                                "calendar_occurrences(account_id,local_start,local_end)"),
+                            QStringLiteral(
+                                "CREATE INDEX idx_calendar_membership_calendar ON "
+                                "calendar_event_calendars(account_id,calendar_id,event_id)"),
                         },
                 },
             },

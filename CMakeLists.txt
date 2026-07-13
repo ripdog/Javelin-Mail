@@ -84,6 +84,12 @@ set(JAVELIN_FORMAT_FILES
     src/gui/compose/ComposeTabWidget.h
     src/gui/contacts/ContactsManagerWidget.cpp
     src/gui/contacts/ContactsManagerWidget.h
+    src/gui/calendar/MonthCalendarWidget.cpp
+    src/gui/calendar/MonthCalendarWidget.h
+    src/gui/calendar/MonthCalendarLayout.cpp
+    src/gui/calendar/MonthCalendarLayout.h
+    src/gui/calendar/EventDialog.cpp
+    src/gui/calendar/EventDialog.h
     src/gui/messages/MessageListModel.cpp
     src/gui/messages/MessageListModel.h
     src/gui/messages/MessageListDelegate.cpp
@@ -110,6 +116,11 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/api/Error.h
     src/jmap/api/ContactsMethods.cpp
     src/jmap/api/ContactsMethods.h
+    src/jmap/api/CalendarMethods.cpp
+    src/jmap/api/CalendarMethods.h
+    src/jmap/calendar/CalendarTypes.h
+    src/jmap/calendar/CalendarService.cpp
+    src/jmap/calendar/CalendarService.h
     src/jmap/api/MailMethods.cpp
     src/jmap/api/MailMethods.h
     src/jmap/api/MethodCaller.cpp
@@ -136,6 +147,8 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/cache/ComposeSessionRepository.h
     src/jmap/cache/ContactRepository.cpp
     src/jmap/cache/ContactRepository.h
+    src/jmap/cache/CalendarRepository.cpp
+    src/jmap/cache/CalendarRepository.h
     src/jmap/cache/Database.cpp
     src/jmap/cache/Database.h
     src/jmap/cache/EmailRepository.cpp
@@ -225,6 +238,9 @@ set(JAVELIN_FORMAT_FILES
     tests/jmap/ContactsMethodsTest.cpp
     tests/jmap/ContactRepositoryTest.cpp
     tests/jmap/ContactServiceTest.cpp
+    tests/jmap/CalendarMethodsTest.cpp
+    tests/jmap/CalendarRepositoryTest.cpp
+    tests/gui/MonthCalendarWidgetTest.cpp
     tests/jmap/ComposeServiceTest.cpp
     tests/jmap/DatabaseTest.cpp
     tests/jmap/EmailRepositoryTest.cpp
@@ -258,6 +274,13 @@ set(JAVELIN_FORMAT_FILES
 )
 
 add_library(javelin_jmap STATIC
+    src/jmap/api/CalendarMethods.cpp
+    src/jmap/api/CalendarMethods.h
+    src/jmap/calendar/CalendarTypes.h
+    src/jmap/calendar/CalendarService.cpp
+    src/jmap/calendar/CalendarService.h
+    src/jmap/cache/CalendarRepository.cpp
+    src/jmap/cache/CalendarRepository.h
     src/jmap/sync/PreferredStateChangeSource.cpp
     src/jmap/sync/PreferredStateChangeSource.h
     src/jmap/api/Cancellation.cpp
@@ -427,6 +450,12 @@ add_library(javelin_gui STATIC
     src/gui/compose/ComposeTabWidget.h
     src/gui/contacts/ContactsManagerWidget.cpp
     src/gui/contacts/ContactsManagerWidget.h
+    src/gui/calendar/MonthCalendarWidget.cpp
+    src/gui/calendar/MonthCalendarWidget.h
+    src/gui/calendar/MonthCalendarLayout.cpp
+    src/gui/calendar/MonthCalendarLayout.h
+    src/gui/calendar/EventDialog.cpp
+    src/gui/calendar/EventDialog.h
     src/gui/mailboxes/MailboxTreeDelegate.cpp
     src/gui/mailboxes/MailboxTreeDelegate.h
     src/gui/mailboxes/MailboxTreeModel.cpp
@@ -491,6 +520,23 @@ javelin_enable_static_analysis(javelin_gui)
 javelin_enable_sanitizers(javelin_gui)
 # QCoro uses exceptions internally
 target_compile_options(javelin_gui PRIVATE -fexceptions)
+
+add_library(javelin_calendar_gui STATIC
+    src/gui/calendar/MonthCalendarLayout.cpp
+    src/gui/calendar/MonthCalendarLayout.h
+    src/gui/calendar/MonthCalendarWidget.cpp
+    src/gui/calendar/MonthCalendarWidget.h
+    src/gui/calendar/EventDialog.cpp
+    src/gui/calendar/EventDialog.h
+)
+target_include_directories(javelin_calendar_gui PUBLIC
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
+)
+target_link_libraries(javelin_calendar_gui PUBLIC Qt::Widgets PRIVATE javelin_jmap)
+javelin_set_project_warnings(javelin_calendar_gui)
+javelin_enable_static_analysis(javelin_calendar_gui)
+javelin_enable_sanitizers(javelin_calendar_gui)
+target_compile_options(javelin_calendar_gui PRIVATE -fexceptions)
 
 add_library(javelin_app STATIC
     src/app/AccountConnectionSettings.h

@@ -1,0 +1,203 @@
+#pragma once
+
+#include "jmap/api/MailMethods.h"
+#include "jmap/calendar/CalendarTypes.h"
+
+#include <cstdint>
+#include <optional>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+namespace javelin::jmap::api
+{
+    struct CalendarGetResponse
+    {
+        std::string accountId;
+        std::string state;
+        std::vector<calendar::Calendar> list;
+        std::vector<std::string> notFound;
+    };
+
+    struct CalendarChangesResponse : ChangesResponse
+    {
+    };
+
+    struct CalendarEventQueryFilter
+    {
+        std::optional<std::string> inCalendar;
+        calendar::LocalDateTime after;
+        calendar::LocalDateTime before;
+        std::optional<std::string> text;
+    };
+
+    struct CalendarEventQueryRequest
+    {
+        std::string accountId;
+        CalendarEventQueryFilter filter;
+        bool expandRecurrences = true;
+        calendar::TimeZoneId timeZone;
+        std::uint64_t position = 0;
+        std::optional<std::uint64_t> limit;
+        bool calculateTotal = true;
+    };
+
+    struct CalendarEventQueryResponse
+    {
+        std::string accountId;
+        std::string queryState;
+        bool canCalculateChanges = false;
+        std::uint64_t position = 0;
+        std::vector<std::string> ids;
+        std::optional<std::uint64_t> total;
+        std::optional<std::uint64_t> limit;
+    };
+
+    struct CalendarEventGetRequest
+    {
+        std::string accountId;
+        std::optional<std::vector<std::string>> ids;
+        std::optional<std::vector<std::string>> properties;
+        std::optional<calendar::UtcInstant> recurrenceOverridesBefore;
+        std::optional<calendar::UtcInstant> recurrenceOverridesAfter;
+        bool reduceParticipants = false;
+        calendar::TimeZoneId timeZone{.value = "Etc/UTC"};
+    };
+
+    struct CalendarEventGetResponse
+    {
+        std::string accountId;
+        std::string state;
+        std::vector<calendar::CalendarEvent> list;
+        std::vector<std::string> notFound;
+    };
+
+    struct CalendarEventChangesResponse : ChangesResponse
+    {
+    };
+
+    enum class CalendarSetErrorType
+    {
+        InvalidArguments,
+        InvalidProperties,
+        Forbidden,
+        NotFound,
+        StateMismatch,
+        NoSupportedScheduleMethods,
+        Unknown,
+    };
+
+    struct CalendarSetError
+    {
+        CalendarSetErrorType type = CalendarSetErrorType::Unknown;
+        std::optional<std::string> description;
+        std::vector<std::string> properties;
+    };
+
+    struct CalendarEventSetRequest
+    {
+        std::string accountId;
+        std::optional<std::string> ifInState;
+        std::unordered_map<std::string, calendar::CalendarEvent> create;
+        std::unordered_map<std::string, calendar::CalendarEvent> update;
+        std::vector<std::string> destroy;
+        bool sendSchedulingMessages = true;
+    };
+
+    struct CalendarEventSetResponse
+    {
+        struct SetResult
+        {
+            std::optional<std::string> id;
+        };
+
+        std::string accountId;
+        std::string oldState;
+        std::string newState;
+        std::unordered_map<std::string, SetResult> created;
+        std::unordered_map<std::string, std::optional<SetResult>> updated;
+        std::vector<std::string> destroyed;
+        std::unordered_map<std::string, CalendarSetError> notCreated;
+        std::unordered_map<std::string, CalendarSetError> notUpdated;
+        std::unordered_map<std::string, CalendarSetError> notDestroyed;
+    };
+
+    [[nodiscard]] std::optional<MethodRequest<CalendarGetResponse>>
+    calendarGet(const GetRequest& request);
+    [[nodiscard]] std::optional<MethodRequest<CalendarChangesResponse>>
+    calendarChanges(const ChangesRequest& request);
+    [[nodiscard]] std::optional<MethodRequest<CalendarEventQueryResponse>>
+    calendarEventQuery(const CalendarEventQueryRequest& request);
+    [[nodiscard]] std::optional<MethodRequest<CalendarEventGetResponse>>
+    calendarEventGet(const CalendarEventGetRequest& request);
+    [[nodiscard]] std::optional<MethodRequest<CalendarEventChangesResponse>>
+    calendarEventChanges(const ChangesRequest& request);
+    [[nodiscard]] std::optional<MethodRequest<CalendarEventSetResponse>>
+    calendarEventSet(const CalendarEventSetRequest& request);
+
+    [[nodiscard]] ParsedEnvelope<CalendarGetResponse>
+    parseCalendarGetResponse(std::string_view json);
+    [[nodiscard]] ParsedEnvelope<CalendarChangesResponse>
+    parseCalendarChangesResponse(std::string_view json);
+    [[nodiscard]] ParsedEnvelope<CalendarEventQueryResponse>
+    parseCalendarEventQueryResponse(std::string_view json);
+    [[nodiscard]] ParsedEnvelope<CalendarEventGetResponse>
+    parseCalendarEventGetResponse(std::string_view json);
+    [[nodiscard]] ParsedEnvelope<CalendarEventChangesResponse>
+    parseCalendarEventChangesResponse(std::string_view json);
+    [[nodiscard]] ParsedEnvelope<CalendarEventSetResponse>
+    parseCalendarEventSetResponse(std::string_view json);
+    [[nodiscard]] std::optional<std::string>
+    serializeCalendarEventDocument(const calendar::CalendarEvent& event);
+    [[nodiscard]] ParsedEnvelope<calendar::CalendarEvent>
+    parseCalendarEventDocument(std::string_view accountId, std::string_view json);
+
+    template <> struct MethodResponseTraits<CalendarGetResponse>
+    {
+        static constexpr std::string_view methodName = "Calendar/get";
+        static ParsedEnvelope<CalendarGetResponse> parse(std::string_view json)
+        {
+            return parseCalendarGetResponse(json);
+        }
+    };
+    template <> struct MethodResponseTraits<CalendarChangesResponse>
+    {
+        static constexpr std::string_view methodName = "Calendar/changes";
+        static ParsedEnvelope<CalendarChangesResponse> parse(std::string_view json)
+        {
+            return parseCalendarChangesResponse(json);
+        }
+    };
+    template <> struct MethodResponseTraits<CalendarEventQueryResponse>
+    {
+        static constexpr std::string_view methodName = "CalendarEvent/query";
+        static ParsedEnvelope<CalendarEventQueryResponse> parse(std::string_view json)
+        {
+            return parseCalendarEventQueryResponse(json);
+        }
+    };
+    template <> struct MethodResponseTraits<CalendarEventGetResponse>
+    {
+        static constexpr std::string_view methodName = "CalendarEvent/get";
+        static ParsedEnvelope<CalendarEventGetResponse> parse(std::string_view json)
+        {
+            return parseCalendarEventGetResponse(json);
+        }
+    };
+    template <> struct MethodResponseTraits<CalendarEventChangesResponse>
+    {
+        static constexpr std::string_view methodName = "CalendarEvent/changes";
+        static ParsedEnvelope<CalendarEventChangesResponse> parse(std::string_view json)
+        {
+            return parseCalendarEventChangesResponse(json);
+        }
+    };
+    template <> struct MethodResponseTraits<CalendarEventSetResponse>
+    {
+        static constexpr std::string_view methodName = "CalendarEvent/set";
+        static ParsedEnvelope<CalendarEventSetResponse> parse(std::string_view json)
+        {
+            return parseCalendarEventSetResponse(json);
+        }
+    };
+} // namespace javelin::jmap::api

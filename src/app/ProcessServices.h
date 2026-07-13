@@ -46,6 +46,10 @@ namespace javelin::jmap::submission
 {
     class ComposeService;
 }
+namespace javelin::jmap::calendar
+{
+    class CalendarService;
+}
 
 namespace javelin::app
 {
@@ -66,6 +70,7 @@ namespace javelin::app
         [[nodiscard]] javelin::jmap::cache::AccountRepository& accountRepository();
         [[nodiscard]] javelin::jmap::cache::ContactRepository& contactRepository();
         [[nodiscard]] javelin::jmap::contacts::ContactService& contactService();
+        [[nodiscard]] javelin::jmap::calendar::CalendarService& calendarService();
         [[nodiscard]] javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup();
         [[nodiscard]] javelin::jmap::cache::IdentityRepository& identityRepository();
         [[nodiscard]] javelin::jmap::cache::MessageViewService& messageViewService();
@@ -87,6 +92,7 @@ namespace javelin::app
         std::unique_ptr<javelin::jmap::cache::AccountRepository> m_accountRepository;
         std::unique_ptr<javelin::jmap::cache::ContactRepository> m_contactRepository;
         std::unique_ptr<javelin::jmap::contacts::ContactService> m_contactService;
+        std::unique_ptr<javelin::jmap::calendar::CalendarService> m_calendarService;
         std::unique_ptr<javelin::jmap::contacts::ContactIdentityLookup> m_contactIdentityLookup;
         std::unique_ptr<javelin::jmap::cache::IdentityRepository> m_identityRepository;
         std::unique_ptr<javelin::jmap::cache::MessageViewService> m_messageViewService;

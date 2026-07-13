@@ -66,7 +66,8 @@ namespace
                                               .contacts =
                                                   javelin::jmap::api::ContactsCapability{
                                                       .maxAddressBooksPerCard = std::nullopt,
-                                                      .mayCreateAddressBook = true}},
+                                                      .mayCreateAddressBook = true},
+                                              .calendars = std::nullopt},
                   });
         return value;
     }

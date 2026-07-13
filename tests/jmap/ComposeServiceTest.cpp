@@ -68,6 +68,7 @@ namespace
                     .mail = true,
                     .submission = true,
                     .contacts = false,
+                    .calendars = false,
                     .websocket = std::nullopt,
                 },
             .accounts = {},
@@ -76,6 +77,7 @@ namespace
                     .mailAccountId = accountId,
                     .submissionAccountId = accountId,
                     .contactsAccountId = std::nullopt,
+                    .calendarsAccountId = std::nullopt,
                 },
         };
         session.accounts.emplace(accountId, javelin::jmap::api::Account{
@@ -88,6 +90,7 @@ namespace
                                                         .mail = true,
                                                         .submission = true,
                                                         .contacts = std::nullopt,
+                                                        .calendars = std::nullopt,
                                                     },
                                             });
         return session;

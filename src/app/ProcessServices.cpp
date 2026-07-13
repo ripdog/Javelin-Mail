@@ -14,6 +14,7 @@
 #include "jmap/cache/QueryService.h"
 #include "jmap/cache/SubmissionRepository.h"
 #include "jmap/cache/TranslationCacheRepository.h"
+#include "jmap/calendar/CalendarService.h"
 #include "jmap/contacts/ContactIdentityLookup.h"
 #include "jmap/contacts/ContactService.h"
 #include "jmap/render/InlineMessageUrl.h"
@@ -62,9 +63,8 @@ namespace javelin::app
             std::make_unique<javelin::jmap::api::QtNetworkTransport>(*m_networkAccessManager);
         m_httpMethodTransport =
             std::make_unique<javelin::jmap::api::HttpJmapMethodTransport>(*m_transport);
-        m_methodTransport =
-            std::make_unique<javelin::jmap::api::PreferredJmapMethodTransport>(
-                m_databaseConnection, *m_httpMethodTransport);
+        m_methodTransport = std::make_unique<javelin::jmap::api::PreferredJmapMethodTransport>(
+            m_databaseConnection, *m_httpMethodTransport);
         m_inlineMessageSchemeHandler =
             std::make_unique<InlineMessageSchemeHandler>(m_databaseConnection);
         QWebEngineProfile::defaultProfile()->installUrlSchemeHandler(
@@ -78,6 +78,8 @@ namespace javelin::app
             std::make_unique<javelin::jmap::cache::ContactRepository>(m_databaseConnection);
         m_contactService = std::make_unique<javelin::jmap::contacts::ContactService>(
             m_databaseConnection, *m_transport, *m_methodTransport);
+        m_calendarService = std::make_unique<javelin::jmap::calendar::CalendarService>(
+            m_databaseConnection, *m_methodTransport);
         m_contactIdentityLookup =
             std::make_unique<javelin::jmap::contacts::ContactIdentityLookup>(*m_contactRepository);
         m_identityRepository =
@@ -95,8 +97,8 @@ namespace javelin::app
         m_composeService = std::make_unique<ComposeService>(*m_jmapComposeService);
         m_mailService = std::make_unique<MailApplicationService>(
             m_databaseConnection, *m_jmapCore, *m_methodTransport,
-            *m_stateChangeNetworkAccessManager,
-            *m_accountRepository, *m_queryService, *m_contactService);
+            *m_stateChangeNetworkAccessManager, *m_accountRepository, *m_queryService,
+            *m_contactService, *m_calendarService);
     }
 
     ProcessServices::~ProcessServices() = default;
@@ -124,6 +126,11 @@ namespace javelin::app
     javelin::jmap::contacts::ContactService& ProcessServices::contactService()
     {
         return *m_contactService;
+    }
+
+    javelin::jmap::calendar::CalendarService& ProcessServices::calendarService()
+    {
+        return *m_calendarService;
     }
 
     javelin::jmap::contacts::ContactIdentityLookup& ProcessServices::contactIdentityLookup()

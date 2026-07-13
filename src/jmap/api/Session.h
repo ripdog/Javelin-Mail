@@ -14,6 +14,7 @@ namespace javelin::jmap::api
     constexpr std::string_view mailCapabilityUri = "urn:ietf:params:jmap:mail";
     constexpr std::string_view submissionCapabilityUri = "urn:ietf:params:jmap:submission";
     constexpr std::string_view contactsCapabilityUri = "urn:ietf:params:jmap:contacts";
+    constexpr std::string_view calendarsCapabilityUri = "urn:ietf:params:jmap:calendars";
     constexpr std::string_view websocketCapabilityUri = "urn:ietf:params:jmap:websocket";
 
     struct WebSocketCapability
@@ -40,6 +41,7 @@ namespace javelin::jmap::api
         bool mail = false;
         bool submission = false;
         bool contacts = false;
+        bool calendars = false;
         std::optional<WebSocketCapability> websocket;
     };
 
@@ -49,11 +51,22 @@ namespace javelin::jmap::api
         bool mayCreateAddressBook = false;
     };
 
+    struct CalendarsCapability
+    {
+        std::optional<std::uint64_t> maxCalendarsPerEvent;
+        std::string minDateTime;
+        std::string maxDateTime;
+        std::string maxExpandedQueryDuration;
+        std::optional<std::uint64_t> maxParticipantsPerEvent;
+        bool mayCreateCalendar = false;
+    };
+
     struct AccountCapabilities
     {
         bool mail = false;
         bool submission = false;
         std::optional<ContactsCapability> contacts;
+        std::optional<CalendarsCapability> calendars;
     };
 
     struct Account
@@ -70,6 +83,7 @@ namespace javelin::jmap::api
         std::optional<std::string> mailAccountId;
         std::optional<std::string> submissionAccountId;
         std::optional<std::string> contactsAccountId;
+        std::optional<std::string> calendarsAccountId;
     };
 
     struct Session
@@ -94,12 +108,16 @@ namespace javelin::jmap::api
         MissingPrimarySubmissionAccount,
         MissingMailAccountCapability,
         MissingSubmissionAccountCapability,
+        MissingCalendarsCapability,
+        MissingPrimaryCalendarsAccount,
+        MissingCalendarsAccountCapability,
     };
 
     struct RequiredCapabilities
     {
         bool mail = false;
         bool submission = false;
+        bool calendars = false;
     };
 
     struct CapabilityValidationResult

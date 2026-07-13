@@ -166,6 +166,11 @@ namespace javelin::app
         m_lastEventId = event.newState;
         for (auto& [type, state] : event.changedStates)
         {
+            if (type == "Calendar" || type == "CalendarEvent")
+            {
+                Q_EMIT calendarStateChanged(QString::fromStdString(m_accountId));
+                continue;
+            }
             m_pendingStateChanges.insert_or_assign(std::move(type), std::move(state));
         }
         scheduleDebouncedRefresh();
@@ -234,6 +239,13 @@ namespace javelin::app
             }
         }
 
+        bool calendarCapable = false;
+        for (const auto& [accountId, account] : session->value().accounts)
+        {
+            Q_UNUSED(accountId);
+            calendarCapable = calendarCapable || account.accountCapabilities.calendars.has_value();
+        }
+
         return RunConfiguration{
             .settings = *m_settings,
             .accountId = m_accountId,
@@ -243,15 +255,22 @@ namespace javelin::app
             .apiUrl = session->value().apiUrl,
             .eventSourceUrl = session->value().eventSourceUrl.value_or(std::string{}),
             .websocket = session->value().capabilities.websocket,
+            .calendarCapable = calendarCapable,
         };
     }
 
     QCoro::Task<void> AccountSyncCoordinator::runLoop(std::shared_ptr<RunContext> runContext)
     {
+        std::vector<std::string> types{"Email", "Mailbox"};
+        if (runContext->configuration.calendarCapable)
+        {
+            types.emplace_back("Calendar");
+            types.emplace_back("CalendarEvent");
+        }
         javelin::jmap::sync::StateChangeSubscription subscription{
             .accountId = runContext->configuration.accountId,
             .lastState = m_lastEventId,
-            .types = {"Email", "Mailbox"},
+            .types = std::move(types),
         };
 
         co_await runContext->worker->run(subscription, runContext->cancellation);

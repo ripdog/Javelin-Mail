@@ -47,6 +47,10 @@ namespace javelin::jmap::contacts
     class ContactService;
     class ContactIdentityLookup;
 } // namespace javelin::jmap::contacts
+namespace javelin::jmap::calendar
+{
+    class CalendarService;
+}
 
 namespace javelin::jmap::cache
 {
@@ -86,6 +90,10 @@ namespace javelin::gui::contacts
 {
     class ContactsManagerWidget;
 }
+namespace javelin::gui::calendar
+{
+    class MonthCalendarWidget;
+}
 
 namespace javelin::gui::shell
 {
@@ -100,6 +108,7 @@ namespace javelin::gui::shell
             javelin::jmap::cache::AccountRepository& accountRepository,
             javelin::jmap::cache::ContactRepository& contactRepository,
             javelin::jmap::contacts::ContactService& contactService,
+            javelin::jmap::calendar::CalendarService& calendarService,
             javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
             javelin::jmap::cache::IdentityRepository& identityRepository,
             javelin::jmap::cache::MessageViewService& messageViewService,
@@ -175,9 +184,19 @@ namespace javelin::gui::shell
             TabSelectionState selection;
         };
 
+        struct CalendarTabState
+        {
+            std::string accountId;
+            QString title;
+            javelin::gui::calendar::MonthCalendarWidget* widget = nullptr;
+            PageState page;
+            TabSelectionState selection;
+        };
+
         struct TabState
         {
-            std::variant<MailboxTabState, SearchTabState, ComposeTabState, ContactsTabState>
+            std::variant<MailboxTabState, SearchTabState, ComposeTabState, ContactsTabState,
+                         CalendarTabState>
                 content;
         };
 
@@ -196,6 +215,7 @@ namespace javelin::gui::shell
         void connectSelection();
         void composeNewMessage();
         void openContacts();
+        void openCalendar();
         void composeReply();
         void composeReplyAll();
         void composeForward();
@@ -249,6 +269,7 @@ namespace javelin::gui::shell
         [[nodiscard]] bool activeTabIsSearch() const;
         [[nodiscard]] bool activeTabIsCompose() const;
         [[nodiscard]] bool activeTabIsContacts() const;
+        [[nodiscard]] bool activeTabIsCalendar() const;
         [[nodiscard]] std::optional<std::string> activeAccountId() const;
         [[nodiscard]] std::optional<std::string> activeMailboxId() const;
         [[nodiscard]] const TabState* activeTab() const;
@@ -333,6 +354,7 @@ namespace javelin::gui::shell
         javelin::jmap::cache::AccountRepository& m_accountRepository;
         javelin::jmap::cache::ContactRepository& m_contactRepository;
         javelin::jmap::contacts::ContactService& m_contactService;
+        javelin::jmap::calendar::CalendarService& m_calendarService;
         javelin::jmap::contacts::ContactIdentityLookup& m_contactIdentityLookup;
         javelin::jmap::cache::IdentityRepository& m_identityRepository;
         javelin::jmap::cache::MessageViewService& m_messageViewService;
@@ -364,6 +386,7 @@ namespace javelin::gui::shell
         QAction* m_preferencesAction = nullptr;
         QAction* m_newMessageAction = nullptr;
         QAction* m_contactsAction = nullptr;
+        QAction* m_calendarAction = nullptr;
         QAction* m_replyAction = nullptr;
         QAction* m_replyAllAction = nullptr;
         QAction* m_forwardAction = nullptr;

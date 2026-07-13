@@ -10,6 +10,7 @@
       <Action name="refresh_from_server"/>
       <Action name="advanced_search"/>
       <Action name="open_contacts"/>
+      <Action name="open_calendar"/>
     </Menu>
     <Menu name="message"><text>&amp;Message</text>
       <Action name="compose_reply"/>
@@ -45,6 +46,7 @@
     <Action name="refresh_from_server"/>
     <Action name="advanced_search"/>
     <Action name="open_contacts"/>
+    <Action name="open_calendar"/>
     <Separator/>
     <Action name="options_configure"/>
   </ToolBar>

@@ -4,6 +4,8 @@ add_executable(javelin_jmap_tests
     jmap/AccountRepositoryTest.cpp
     jmap/AuthTest.cpp
     jmap/CancellationTest.cpp
+    jmap/CalendarMethodsTest.cpp
+    jmap/CalendarRepositoryTest.cpp
     jmap/ContactsMethodsTest.cpp
     jmap/ContactRepositoryTest.cpp
     jmap/ContactServiceTest.cpp
@@ -46,6 +48,8 @@ add_executable(javelin_jmap_tests
     jmap/SyncReconcilerTest.cpp
     jmap/ThreadRepositoryTest.cpp
     jmap/TranslationCacheRepositoryTest.cpp
+    gui/MonthCalendarWidgetTest.cpp
+    ${PROJECT_SOURCE_DIR}/src/gui/calendar/MonthCalendarLayout.cpp
 )
 
 target_include_directories(javelin_jmap_tests

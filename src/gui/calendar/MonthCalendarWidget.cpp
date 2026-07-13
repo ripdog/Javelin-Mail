@@ -1,0 +1,416 @@
+#include "gui/calendar/MonthCalendarWidget.h"
+#include "gui/calendar/MonthCalendarLayout.h"
+
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QGridLayout>
+#include <QHBoxLayout>
+#include <QKeyEvent>
+#include <QLabel>
+#include <QMenu>
+#include <QMouseEvent>
+#include <QPixmap>
+#include <QPushButton>
+#include <QToolButton>
+#include <QVBoxLayout>
+
+#include <algorithm>
+#include <functional>
+
+namespace javelin::gui::calendar
+{
+    namespace
+    {
+        class EventChip final : public QToolButton
+        {
+          public:
+            EventChip(const MonthEvent& event, QWidget* parent) : QToolButton(parent)
+            {
+                setText((event.allDay ? QString{}
+                                      : event.start.time().toString(QStringLiteral("HH:mm "))) +
+                        event.title + (event.recurring ? QStringLiteral(" ↻") : QString{}));
+                setToolTip(event.title);
+                setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+                setAutoRaise(true);
+                const auto color =
+                    event.color.isValid() ? event.color : QColor{QStringLiteral("#4f7cac")};
+                setStyleSheet(
+                    QStringLiteral("QToolButton { background: %1; color: %2; border-radius: 3px; "
+                                   "padding: 1px 4px; text-align: left; }")
+                        .arg(color.name(), color.lightness() < 140 ? QStringLiteral("white")
+                                                                   : QStringLiteral("black")));
+            }
+        };
+
+        QDate eventLastDate(const MonthEvent& event)
+        {
+            if (event.end.time() == QTime{0, 0} && event.end.date() > event.start.date())
+                return event.end.date().addDays(-1);
+            return event.end.date();
+        }
+    } // namespace
+
+    class DayCellWidget final : public QWidget
+    {
+      public:
+        explicit DayCellWidget(QWidget* parent = nullptr) : QWidget(parent)
+        {
+            setMinimumSize(90, 76);
+            setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+            m_layout = new QVBoxLayout(this);
+            m_layout->setContentsMargins(4, 3, 4, 3);
+            m_layout->setSpacing(2);
+            m_day = new QLabel(this);
+            m_layout->addWidget(m_day);
+            m_layout->addStretch();
+        }
+
+        void setDate(const QDate& date, const bool adjacent, const bool selected)
+        {
+            Q_UNUSED(adjacent);
+            Q_UNUSED(selected);
+            m_date = date;
+            m_day->setText(QString::number(date.day()));
+        }
+
+        void clearEvents()
+        {
+            while (m_layout->count() > 2)
+            {
+                auto* item = m_layout->takeAt(1);
+                delete item->widget();
+                delete item;
+            }
+            m_overflow = 0;
+        }
+
+        void addEvent(const MonthEvent& event, std::function<void()> activated)
+        {
+            auto* chip = new EventChip(event, this);
+            QObject::connect(chip, &QToolButton::clicked, chip, std::move(activated));
+            m_layout->insertWidget(m_layout->count() - 1, chip);
+        }
+
+        void addOverflow(const int count, std::function<void()> activated)
+        {
+            m_overflow = count;
+            auto* button = new QToolButton(this);
+            button->setText(QStringLiteral("+%1 more").arg(count));
+            button->setAutoRaise(true);
+            QObject::connect(button, &QToolButton::clicked, button, std::move(activated));
+            m_layout->insertWidget(m_layout->count() - 1, button);
+        }
+
+        [[nodiscard]] int overflow() const
+        {
+            return m_overflow;
+        }
+        std::function<void(const QDate&)> clicked;
+
+      protected:
+        void mousePressEvent(QMouseEvent* event) override
+        {
+            if (event->button() == Qt::LeftButton && clicked)
+                clicked(m_date);
+            QWidget::mousePressEvent(event);
+        }
+
+      private:
+        QDate m_date;
+        QLabel* m_day = nullptr;
+        QVBoxLayout* m_layout = nullptr;
+        int m_overflow = 0;
+    };
+
+    MonthCalendarWidget::MonthCalendarWidget(QWidget* parent)
+        : QWidget(parent), m_locale(QLocale{}), m_displayedMonth(QDate::currentDate()),
+          m_selectedDate(QDate::currentDate())
+    {
+        setFocusPolicy(Qt::StrongFocus);
+        auto* outer = new QVBoxLayout(this);
+        auto* navigation = new QHBoxLayout;
+        auto* previous = new QPushButton(QStringLiteral("‹"), this);
+        auto* today = new QPushButton(QStringLiteral("Today"), this);
+        auto* next = new QPushButton(QStringLiteral("›"), this);
+        m_title = new QLabel(this);
+        m_title->setAlignment(Qt::AlignCenter);
+        navigation->addWidget(previous);
+        navigation->addWidget(today);
+        navigation->addStretch();
+        navigation->addWidget(m_title);
+        navigation->addStretch();
+        m_calendarsButton = new QToolButton(this);
+        m_calendarsButton->setText(QStringLiteral("Calendars"));
+        m_calendarsButton->setPopupMode(QToolButton::InstantPopup);
+        navigation->addWidget(m_calendarsButton);
+        navigation->addWidget(next);
+        outer->addLayout(navigation);
+        m_grid = new QGridLayout;
+        m_grid->setSpacing(0);
+        for (int column = 0; column < 7; ++column)
+        {
+            m_weekdayHeaders[static_cast<std::size_t>(column)] = new QLabel(this);
+            m_weekdayHeaders[static_cast<std::size_t>(column)]->setAlignment(Qt::AlignCenter);
+            m_grid->addWidget(m_weekdayHeaders[static_cast<std::size_t>(column)], 0, column);
+        }
+        for (int index = 0; index < 42; ++index)
+        {
+            auto* cell = new DayCellWidget(this);
+            cell->clicked = [this](const QDate& date) { selectDate(date, true); };
+            m_cells[static_cast<std::size_t>(index)] = cell;
+            m_grid->addWidget(cell, 1 + index / 7, index % 7);
+        }
+        outer->addLayout(m_grid, 1);
+        connect(previous, &QPushButton::clicked, this, &MonthCalendarWidget::showPreviousMonth);
+        connect(next, &QPushButton::clicked, this, &MonthCalendarWidget::showNextMonth);
+        connect(today, &QPushButton::clicked, this, &MonthCalendarWidget::showToday);
+        connect(this, &MonthCalendarWidget::dayAgendaRequested, this,
+                &MonthCalendarWidget::showDayAgenda);
+        rebuildDates();
+    }
+
+    void MonthCalendarWidget::setLocale(const QLocale& locale)
+    {
+        m_locale = locale;
+        rebuildDates();
+    }
+
+    void MonthCalendarWidget::setDisplayedMonth(const QDate& month)
+    {
+        if (!month.isValid())
+            return;
+        m_displayedMonth = QDate{month.year(), month.month(), 1};
+        rebuildDates();
+    }
+
+    void MonthCalendarWidget::setEvents(std::vector<MonthEvent> events)
+    {
+        m_events = std::move(events);
+        rebuildEvents();
+    }
+
+    void MonthCalendarWidget::setCalendars(std::vector<CalendarDisplay> calendars)
+    {
+        auto* menu = new QMenu(m_calendarsButton);
+        m_hiddenCalendars.clear();
+        for (auto& calendar : calendars)
+        {
+            auto* action = menu->addAction(calendar.name);
+            action->setCheckable(true);
+            action->setChecked(calendar.visible);
+            QPixmap swatch{12, 12};
+            swatch.fill(calendar.color);
+            action->setIcon(QIcon{swatch});
+            if (!calendar.visible)
+                m_hiddenCalendars.push_back(calendar.id);
+            connect(action, &QAction::toggled, this,
+                    [this, id = std::move(calendar.id)](const bool visible)
+                    {
+                        if (visible)
+                            std::erase(m_hiddenCalendars, id);
+                        else if (std::ranges::find(m_hiddenCalendars, id) ==
+                                 m_hiddenCalendars.end())
+                            m_hiddenCalendars.push_back(id);
+                        rebuildEvents();
+                    });
+        }
+        m_calendarsButton->setMenu(menu);
+        rebuildEvents();
+    }
+
+    void MonthCalendarWidget::setHiddenCalendars(std::vector<std::string> calendarIds)
+    {
+        m_hiddenCalendars = std::move(calendarIds);
+        rebuildEvents();
+    }
+
+    QDate MonthCalendarWidget::displayedMonth() const
+    {
+        return m_displayedMonth;
+    }
+    QDate MonthCalendarWidget::selectedDate() const
+    {
+        return m_selectedDate;
+    }
+    QDate MonthCalendarWidget::visibleStart() const
+    {
+        return cellDate(0);
+    }
+    QDate MonthCalendarWidget::visibleEnd() const
+    {
+        return cellDate(41).addDays(1);
+    }
+    QDate MonthCalendarWidget::cellDate(const int index) const
+    {
+        if (index < 0 || index >= 42)
+            return {};
+        return monthGridCellDate(m_displayedMonth, m_locale, index);
+    }
+    int MonthCalendarWidget::cellCount() const
+    {
+        return 42;
+    }
+    int MonthCalendarWidget::overflowCount(const QDate& date) const
+    {
+        for (int index = 0; index < 42; ++index)
+            if (cellDate(index) == date)
+                return m_cells[static_cast<std::size_t>(index)]->overflow();
+        return 0;
+    }
+
+    void MonthCalendarWidget::showPreviousMonth()
+    {
+        setDisplayedMonth(m_displayedMonth.addMonths(-1));
+    }
+    void MonthCalendarWidget::showNextMonth()
+    {
+        setDisplayedMonth(m_displayedMonth.addMonths(1));
+    }
+    void MonthCalendarWidget::showToday()
+    {
+        m_selectedDate = QDate::currentDate();
+        setDisplayedMonth(m_selectedDate);
+    }
+
+    void MonthCalendarWidget::keyPressEvent(QKeyEvent* event)
+    {
+        int days = 0;
+        if (event->key() == Qt::Key_Left)
+            days = -1;
+        else if (event->key() == Qt::Key_Right)
+            days = 1;
+        else if (event->key() == Qt::Key_Up)
+            days = -7;
+        else if (event->key() == Qt::Key_Down)
+            days = 7;
+        else if (event->key() == Qt::Key_PageUp)
+        {
+            setDisplayedMonth(m_displayedMonth.addMonths(-1));
+            return;
+        }
+        else if (event->key() == Qt::Key_PageDown)
+        {
+            setDisplayedMonth(m_displayedMonth.addMonths(1));
+            return;
+        }
+        else if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter)
+        {
+            Q_EMIT emptyTimeActivated(m_selectedDate);
+            return;
+        }
+        else
+        {
+            QWidget::keyPressEvent(event);
+            return;
+        }
+        selectDate(m_selectedDate.addDays(days), false);
+    }
+
+    void MonthCalendarWidget::rebuildDates()
+    {
+        m_title->setText(m_locale.toString(m_displayedMonth, QStringLiteral("MMMM yyyy")));
+        const auto firstDay = static_cast<int>(m_locale.firstDayOfWeek());
+        for (int column = 0; column < 7; ++column)
+        {
+            const auto day = ((firstDay - 1 + column) % 7) + 1;
+            m_weekdayHeaders[static_cast<std::size_t>(column)]->setText(
+                m_locale.dayName(day, QLocale::ShortFormat));
+        }
+        for (int index = 0; index < 42; ++index)
+        {
+            const auto date = cellDate(index);
+            m_cells[static_cast<std::size_t>(index)]->setDate(
+                date, date.month() != m_displayedMonth.month(), date == m_selectedDate);
+        }
+        rebuildEvents();
+        Q_EMIT visibleIntervalChanged(visibleStart(), visibleEnd());
+    }
+
+    void MonthCalendarWidget::rebuildEvents()
+    {
+        for (auto* cell : m_cells)
+            cell->clearEvents();
+        for (int index = 0; index < 42; ++index)
+        {
+            const auto date = cellDate(index);
+            std::vector<const MonthEvent*> matching;
+            for (const auto& event : m_events)
+            {
+                if (std::ranges::find(m_hiddenCalendars, event.calendarId) !=
+                    m_hiddenCalendars.end())
+                    continue;
+                if (event.start.date() <= date && eventLastDate(event) >= date)
+                    matching.push_back(&event);
+            }
+            std::ranges::sort(matching,
+                              [](const auto* left, const auto* right)
+                              {
+                                  if (left->allDay != right->allDay)
+                                      return left->allDay;
+                                  if (left->start != right->start)
+                                      return left->start < right->start;
+                                  return left->title.localeAwareCompare(right->title) < 0;
+                              });
+            constexpr std::size_t capacity = 3;
+            const auto visible = std::min(capacity, matching.size());
+            for (std::size_t eventIndex = 0; eventIndex < visible; ++eventIndex)
+            {
+                const auto* event = matching[eventIndex];
+                m_cells[static_cast<std::size_t>(index)]->addEvent(
+                    *event,
+                    [this, event]
+                    {
+                        Q_EMIT eventActivated(QString::fromStdString(event->accountId),
+                                              QString::fromStdString(event->eventId));
+                    });
+            }
+            if (matching.size() > capacity)
+            {
+                const auto overflow = static_cast<int>(matching.size() - capacity);
+                m_cells[static_cast<std::size_t>(index)]->addOverflow(
+                    overflow, [this, date] { Q_EMIT dayAgendaRequested(date); });
+            }
+        }
+    }
+
+    void MonthCalendarWidget::selectDate(const QDate& date, const bool activate)
+    {
+        if (!date.isValid())
+            return;
+        m_selectedDate = date;
+        if (date < visibleStart() || date >= visibleEnd())
+            m_displayedMonth = QDate{date.year(), date.month(), 1};
+        rebuildDates();
+        Q_EMIT selectionChanged(date);
+        if (activate)
+            Q_EMIT emptyTimeActivated(date);
+    }
+
+    void MonthCalendarWidget::showDayAgenda(const QDate& date)
+    {
+        auto* dialog = new QDialog(this);
+        dialog->setAttribute(Qt::WA_DeleteOnClose);
+        dialog->setWindowTitle(m_locale.toString(date, QLocale::LongFormat));
+        dialog->setModal(true);
+        auto* layout = new QVBoxLayout(dialog);
+        for (const auto& event : m_events)
+        {
+            if (std::ranges::find(m_hiddenCalendars, event.calendarId) != m_hiddenCalendars.end() ||
+                event.start.date() > date || eventLastDate(event) < date)
+                continue;
+            auto* chip = new EventChip(event, dialog);
+            connect(chip, &QToolButton::clicked, dialog,
+                    [this, dialog, accountId = event.accountId, eventId = event.eventId]
+                    {
+                        dialog->close();
+                        Q_EMIT eventActivated(QString::fromStdString(accountId),
+                                              QString::fromStdString(eventId));
+                    });
+            layout->addWidget(chip);
+        }
+        auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, dialog);
+        connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
+        layout->addWidget(buttons);
+        dialog->open();
+    }
+} // namespace javelin::gui::calendar

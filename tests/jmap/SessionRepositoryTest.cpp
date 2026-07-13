@@ -94,6 +94,17 @@ TEST_CASE("session repository round-trips cached session bootstrap", "[jmap][cac
         .maxAddressBooksPerCard = 8,
         .mayCreateAddressBook = true,
     };
+    session.capabilities.calendars = true;
+    session.primaryAccounts.calendarsAccountId = "u1";
+    session.accounts.at("u1").accountCapabilities.calendars =
+        javelin::jmap::api::CalendarsCapability{
+            .maxCalendarsPerEvent = 4,
+            .minDateTime = "1900-01-01T00:00:00Z",
+            .maxDateTime = "2100-01-01T00:00:00Z",
+            .maxExpandedQueryDuration = "P1Y",
+            .maxParticipantsPerEvent = 100,
+            .mayCreateCalendar = false,
+        };
 
     if (const auto error = repository.replace("u1", session))
     {
@@ -110,15 +121,20 @@ TEST_CASE("session repository round-trips cached session bootstrap", "[jmap][cac
     CHECK(loaded.capabilities.mail);
     CHECK(loaded.capabilities.submission);
     CHECK(loaded.capabilities.contacts);
+    CHECK(loaded.capabilities.calendars);
     REQUIRE(loaded.capabilities.coreDetails.has_value());
     CHECK(loaded.capabilities.coreDetails->maxCallsInRequest == 16);
     CHECK(loaded.primaryAccounts.mailAccountId == session.primaryAccounts.mailAccountId);
     CHECK(loaded.primaryAccounts.contactsAccountId == "u1");
+    CHECK(loaded.primaryAccounts.calendarsAccountId == "u1");
     REQUIRE(loaded.accounts.contains("u1"));
     CHECK(loaded.accounts.at("u1").accountCapabilities.mail);
     REQUIRE(loaded.accounts.at("u1").accountCapabilities.contacts.has_value());
     CHECK(loaded.accounts.at("u1").accountCapabilities.contacts->maxAddressBooksPerCard == 8);
     CHECK(loaded.accounts.at("u1").accountCapabilities.contacts->mayCreateAddressBook);
+    REQUIRE(loaded.accounts.at("u1").accountCapabilities.calendars.has_value());
+    CHECK(loaded.accounts.at("u1").accountCapabilities.calendars->maxExpandedQueryDuration ==
+          "P1Y");
 }
 
 TEST_CASE("session repository replacement updates cached session rows", "[jmap][cache][repository]")

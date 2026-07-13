@@ -50,6 +50,16 @@ template <> struct glz::meta<javelin::jmap::api::ContactsCapability>
                                               "mayCreateAddressBook", &T::mayCreateAddressBook);
 };
 
+template <> struct glz::meta<javelin::jmap::api::CalendarsCapability>
+{
+    using T = javelin::jmap::api::CalendarsCapability;
+    static constexpr auto value =
+        glz::object("maxCalendarsPerEvent", &T::maxCalendarsPerEvent, "minDateTime",
+                    &T::minDateTime, "maxDateTime", &T::maxDateTime, "maxExpandedQueryDuration",
+                    &T::maxExpandedQueryDuration, "maxParticipantsPerEvent",
+                    &T::maxParticipantsPerEvent, "mayCreateCalendar", &T::mayCreateCalendar);
+};
+
 template <> struct glz::meta<javelin::jmap::api::WebSocketCapability>
 {
     using T = javelin::jmap::api::WebSocketCapability;
@@ -136,6 +146,29 @@ namespace javelin::jmap::api
             return capability;
         }
 
+        [[nodiscard]] std::optional<CalendarsCapability>
+        parseCalendarsCapability(const std::unordered_map<std::string, glz::generic>& capabilities)
+        {
+            const auto it = capabilities.find(std::string{calendarsCapabilityUri});
+            if (it == capabilities.end())
+            {
+                return std::nullopt;
+            }
+            std::string buffer;
+            if (glz::write_json(it->second, buffer))
+            {
+                return std::nullopt;
+            }
+            CalendarsCapability capability;
+            if (glz::read<glz::opts{.error_on_unknown_keys = false}>(capability, buffer) ||
+                capability.minDateTime.empty() || capability.maxDateTime.empty() ||
+                capability.maxExpandedQueryDuration.empty())
+            {
+                return std::nullopt;
+            }
+            return capability;
+        }
+
         [[nodiscard]] std::optional<WebSocketCapability>
         parseWebSocketCapability(const std::unordered_map<std::string, glz::generic>& capabilities)
         {
@@ -182,6 +215,12 @@ namespace javelin::jmap::api
                 result.contactsAccountId = contactsIt->second;
             }
 
+            if (const auto calendarsIt = primaryAccounts.find(std::string{calendarsCapabilityUri});
+                calendarsIt != primaryAccounts.end())
+            {
+                result.calendarsAccountId = calendarsIt->second;
+            }
+
             return result;
         }
 
@@ -207,6 +246,8 @@ namespace javelin::jmap::api
                                 .submission = capabilityPresent(rawAccount.accountCapabilities,
                                                                 submissionCapabilityUri),
                                 .contacts = parseContactsCapability(rawAccount.accountCapabilities),
+                                .calendars =
+                                    parseCalendarsCapability(rawAccount.accountCapabilities),
                             },
                     });
             }
@@ -232,6 +273,8 @@ namespace javelin::jmap::api
                             capabilityPresent(rawSession.capabilities, submissionCapabilityUri),
                         .contacts =
                             capabilityPresent(rawSession.capabilities, contactsCapabilityUri),
+                        .calendars =
+                            capabilityPresent(rawSession.capabilities, calendarsCapabilityUri),
                         .websocket = parseWebSocketCapability(rawSession.capabilities),
                     },
                 .accounts = parseAccounts(std::move(rawSession.accounts)),

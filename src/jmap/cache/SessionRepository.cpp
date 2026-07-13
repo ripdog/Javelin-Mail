@@ -31,6 +31,16 @@ namespace javelin::jmap::cache
             bool mayCreateAddressBook = false;
         };
 
+        struct RawCalendarsCapability
+        {
+            std::optional<std::uint64_t> maxCalendarsPerEvent;
+            std::string minDateTime;
+            std::string maxDateTime;
+            std::string maxExpandedQueryDuration;
+            std::optional<std::uint64_t> maxParticipantsPerEvent;
+            bool mayCreateCalendar = false;
+        };
+
     } // namespace detail
 
 } // namespace javelin::jmap::cache
@@ -51,6 +61,16 @@ template <> struct glz::meta<javelin::jmap::cache::detail::RawContactsCapability
     using T = javelin::jmap::cache::detail::RawContactsCapability;
     static constexpr auto value = glz::object("maxAddressBooksPerCard", &T::maxAddressBooksPerCard,
                                               "mayCreateAddressBook", &T::mayCreateAddressBook);
+};
+
+template <> struct glz::meta<javelin::jmap::cache::detail::RawCalendarsCapability>
+{
+    using T = javelin::jmap::cache::detail::RawCalendarsCapability;
+    static constexpr auto value =
+        glz::object("maxCalendarsPerEvent", &T::maxCalendarsPerEvent, "minDateTime",
+                    &T::minDateTime, "maxDateTime", &T::maxDateTime, "maxExpandedQueryDuration",
+                    &T::maxExpandedQueryDuration, "maxParticipantsPerEvent",
+                    &T::maxParticipantsPerEvent, "mayCreateCalendar", &T::mayCreateCalendar);
 };
 
 namespace javelin::jmap::cache
@@ -153,6 +173,26 @@ namespace javelin::jmap::cache
             }
             query.bindValue(QStringLiteral(":contacts_capabilities_json"),
                             QString::fromStdString(contactsJson));
+            query.bindValue(QStringLiteral(":cap_calendars"),
+                            account.accountCapabilities.calendars.has_value() ? 1 : 0);
+            std::string calendarsJson = "null";
+            if (const auto& capability = account.accountCapabilities.calendars)
+            {
+                const detail::RawCalendarsCapability raw{
+                    .maxCalendarsPerEvent = capability->maxCalendarsPerEvent,
+                    .minDateTime = capability->minDateTime,
+                    .maxDateTime = capability->maxDateTime,
+                    .maxExpandedQueryDuration = capability->maxExpandedQueryDuration,
+                    .maxParticipantsPerEvent = capability->maxParticipantsPerEvent,
+                    .mayCreateCalendar = capability->mayCreateCalendar,
+                };
+                if (glz::write_json(raw, calendarsJson))
+                {
+                    calendarsJson = "null";
+                }
+            }
+            query.bindValue(QStringLiteral(":calendars_capabilities_json"),
+                            QString::fromStdString(calendarsJson));
         }
 
     } // namespace
@@ -196,11 +236,12 @@ namespace javelin::jmap::cache
             "INSERT INTO accounts ("
             "account_id, email_address, session_url, is_primary, name, is_personal, "
             "is_read_only, owner_account_id, "
-            "cap_mail, cap_submission, cap_contacts, contacts_capabilities_json"
+            "cap_mail, cap_submission, cap_contacts, contacts_capabilities_json, cap_calendars, "
+            "calendars_capabilities_json"
             ") VALUES ("
             ":account_id, :email_address, :session_url, :is_primary, :name, :is_personal, "
             ":is_read_only, :owner_account_id, :cap_mail, :cap_submission, :cap_contacts, "
-            ":contacts_capabilities_json"
+            ":contacts_capabilities_json, :cap_calendars, :calendars_capabilities_json"
             ") ON CONFLICT(account_id) DO UPDATE SET "
             "email_address = excluded.email_address, "
             "session_url = excluded.session_url, "
@@ -212,7 +253,9 @@ namespace javelin::jmap::cache
             "cap_mail = excluded.cap_mail, "
             "cap_submission = excluded.cap_submission, "
             "cap_contacts = excluded.cap_contacts, "
-            "contacts_capabilities_json = excluded.contacts_capabilities_json"));
+            "contacts_capabilities_json = excluded.contacts_capabilities_json, "
+            "cap_calendars = excluded.cap_calendars, "
+            "calendars_capabilities_json = excluded.calendars_capabilities_json"));
         std::unordered_set<std::string> sessionAccountIds;
         sessionAccountIds.reserve(session.accounts.size());
         for (const auto& [accountId, account] : session.accounts)
@@ -224,7 +267,9 @@ namespace javelin::jmap::cache
             insertAccount.bindValue(QStringLiteral(":is_primary"),
                                     (session.primaryAccounts.mailAccountId == accountId ||
                                      session.primaryAccounts.submissionAccountId == accountId) ||
-                                            session.primaryAccounts.contactsAccountId == accountId
+                                            session.primaryAccounts.contactsAccountId ==
+                                                accountId ||
+                                            session.primaryAccounts.calendarsAccountId == accountId
                                         ? 1
                                         : 0);
             insertAccount.bindValue(QStringLiteral(":owner_account_id"),
@@ -241,15 +286,18 @@ namespace javelin::jmap::cache
             "INSERT INTO sessions ("
             "account_id, api_url, download_url, upload_url, event_source_url, state, username, "
             "has_core_capability, has_mail_capability, has_submission_capability, "
-            "has_contacts_capability, core_capabilities_json, primary_mail_account_id, "
-            "primary_submission_account_id, primary_contacts_account_id, websocket_url, "
+            "has_contacts_capability, has_calendars_capability, core_capabilities_json, "
+            "primary_mail_account_id, "
+            "primary_submission_account_id, primary_contacts_account_id, "
+            "primary_calendars_account_id, websocket_url, "
             "websocket_supports_push"
             ") VALUES ("
             ":account_id, :api_url, :download_url, :upload_url, :event_source_url, :state, "
             ":username, :has_core_capability, :has_mail_capability, "
-            ":has_submission_capability, :has_contacts_capability, "
+            ":has_submission_capability, :has_contacts_capability, :has_calendars_capability, "
             ":core_capabilities_json, :primary_mail_account_id, "
-            ":primary_submission_account_id, :primary_contacts_account_id, :websocket_url, "
+            ":primary_submission_account_id, :primary_contacts_account_id, "
+            ":primary_calendars_account_id, :websocket_url, "
             ":websocket_supports_push)"));
         insertSession.bindValue(QStringLiteral(":account_id"),
                                 QString::fromStdString(std::string{ownerAccountId}));
@@ -273,6 +321,8 @@ namespace javelin::jmap::cache
                                 session.capabilities.submission ? 1 : 0);
         insertSession.bindValue(QStringLiteral(":has_contacts_capability"),
                                 session.capabilities.contacts ? 1 : 0);
+        insertSession.bindValue(QStringLiteral(":has_calendars_capability"),
+                                session.capabilities.calendars ? 1 : 0);
         insertSession.bindValue(
             QStringLiteral(":core_capabilities_json"),
             QString::fromStdString(serializeCoreCapability(session.capabilities.coreDetails)));
@@ -290,6 +340,11 @@ namespace javelin::jmap::cache
             QStringLiteral(":primary_contacts_account_id"),
             session.primaryAccounts.contactsAccountId.has_value()
                 ? QVariant{QString::fromStdString(*session.primaryAccounts.contactsAccountId)}
+                : QVariant{});
+        insertSession.bindValue(
+            QStringLiteral(":primary_calendars_account_id"),
+            session.primaryAccounts.calendarsAccountId.has_value()
+                ? QVariant{QString::fromStdString(*session.primaryAccounts.calendarsAccountId)}
                 : QVariant{});
         insertSession.bindValue(
             QStringLiteral(":websocket_url"),
@@ -332,9 +387,10 @@ namespace javelin::jmap::cache
         sessionQuery.prepare(QStringLiteral(
             "SELECT api_url, download_url, upload_url, event_source_url, state, username, "
             "has_core_capability, has_mail_capability, has_submission_capability, "
-            "has_contacts_capability, core_capabilities_json, primary_mail_account_id, "
-            "primary_submission_account_id, primary_contacts_account_id "
-            ", websocket_url, websocket_supports_push "
+            "has_contacts_capability, has_calendars_capability, core_capabilities_json, "
+            "primary_mail_account_id, primary_submission_account_id, "
+            "primary_contacts_account_id, primary_calendars_account_id, websocket_url, "
+            "websocket_supports_push "
             "FROM sessions WHERE account_id = :account_id"));
         sessionQuery.bindValue(QStringLiteral(":account_id"),
                                QString::fromStdString(std::string{ownerAccountId}));
@@ -360,39 +416,45 @@ namespace javelin::jmap::cache
             .capabilities =
                 {
                     .core = sessionQuery.value(6).toInt() != 0,
-                    .coreDetails = deserializeCoreCapability(sessionQuery.value(10).toString()),
+                    .coreDetails = deserializeCoreCapability(sessionQuery.value(11).toString()),
                     .mail = sessionQuery.value(7).toInt() != 0,
                     .submission = sessionQuery.value(8).toInt() != 0,
                     .contacts = sessionQuery.value(9).toInt() != 0,
-                    .websocket = sessionQuery.value(14).isNull()
+                    .calendars = sessionQuery.value(10).toInt() != 0,
+                    .websocket = sessionQuery.value(16).isNull()
                                      ? std::nullopt
                                      : std::optional{javelin::jmap::api::WebSocketCapability{
-                                           .url = sessionQuery.value(14).toString().toStdString(),
-                                           .supportsPush = sessionQuery.value(15).toInt() != 0,
+                                           .url = sessionQuery.value(16).toString().toStdString(),
+                                           .supportsPush = sessionQuery.value(17).toInt() != 0,
                                        }},
                 },
             .accounts = {},
             .primaryAccounts =
                 {
                     .mailAccountId =
-                        sessionQuery.value(11).isNull()
-                            ? std::nullopt
-                            : std::optional{sessionQuery.value(11).toString().toStdString()},
-                    .submissionAccountId =
                         sessionQuery.value(12).isNull()
                             ? std::nullopt
                             : std::optional{sessionQuery.value(12).toString().toStdString()},
-                    .contactsAccountId =
+                    .submissionAccountId =
                         sessionQuery.value(13).isNull()
                             ? std::nullopt
                             : std::optional{sessionQuery.value(13).toString().toStdString()},
+                    .contactsAccountId =
+                        sessionQuery.value(14).isNull()
+                            ? std::nullopt
+                            : std::optional{sessionQuery.value(14).toString().toStdString()},
+                    .calendarsAccountId =
+                        sessionQuery.value(15).isNull()
+                            ? std::nullopt
+                            : std::optional{sessionQuery.value(15).toString().toStdString()},
                 },
         };
 
         QSqlQuery accountQuery{m_connection.database()};
         accountQuery.prepare(QStringLiteral(
             "SELECT account_id, name, is_personal, is_read_only, cap_mail, cap_submission, "
-            "cap_contacts, contacts_capabilities_json "
+            "cap_contacts, contacts_capabilities_json, cap_calendars, "
+            "calendars_capabilities_json "
             "FROM accounts WHERE owner_account_id = :owner_account_id ORDER BY account_id"));
         accountQuery.bindValue(QStringLiteral(":owner_account_id"),
                                QString::fromStdString(std::string{ownerAccountId}));
@@ -413,6 +475,7 @@ namespace javelin::jmap::cache
                         .mail = accountQuery.value(4).toInt() != 0,
                         .submission = accountQuery.value(5).toInt() != 0,
                         .contacts = std::nullopt,
+                        .calendars = std::nullopt,
                     },
             };
             if (accountQuery.value(6).toInt() != 0)
@@ -424,6 +487,22 @@ namespace javelin::jmap::cache
                     account.accountCapabilities.contacts = javelin::jmap::api::ContactsCapability{
                         .maxAddressBooksPerCard = raw.maxAddressBooksPerCard,
                         .mayCreateAddressBook = raw.mayCreateAddressBook,
+                    };
+                }
+            }
+            if (accountQuery.value(8).toInt() != 0)
+            {
+                detail::RawCalendarsCapability raw;
+                auto json = accountQuery.value(9).toString().toStdString();
+                if (!glz::read<glz::opts{.error_on_unknown_keys = false}>(raw, json))
+                {
+                    account.accountCapabilities.calendars = javelin::jmap::api::CalendarsCapability{
+                        .maxCalendarsPerEvent = raw.maxCalendarsPerEvent,
+                        .minDateTime = std::move(raw.minDateTime),
+                        .maxDateTime = std::move(raw.maxDateTime),
+                        .maxExpandedQueryDuration = std::move(raw.maxExpandedQueryDuration),
+                        .maxParticipantsPerEvent = raw.maxParticipantsPerEvent,
+                        .mayCreateCalendar = raw.mayCreateCalendar,
                     };
                 }
             }

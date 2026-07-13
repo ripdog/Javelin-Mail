@@ -80,11 +80,12 @@ namespace javelin::app
         QNetworkAccessManager& networkAccessManager,
         javelin::jmap::cache::AccountRepository& accountRepository,
         javelin::jmap::cache::QueryService& queryService,
-        javelin::jmap::contacts::ContactService& contactService, QObject* parent)
+        javelin::jmap::contacts::ContactService& contactService,
+        javelin::jmap::calendar::CalendarService& calendarService, QObject* parent)
         : QObject(parent), m_databaseConnection(databaseConnection), m_jmapCore(jmapCore),
           m_methodTransport(methodTransport), m_networkAccessManager(networkAccessManager),
           m_accountRepository(accountRepository), m_queryService(queryService),
-          m_contactService(contactService)
+          m_contactService(contactService), m_calendarService(calendarService)
     {
     }
 
@@ -489,6 +490,75 @@ namespace javelin::app
             toLiveConnectionSettings(configuration->second.settings), std::move(accountId));
     }
 
+    QCoro::Task<javelin::jmap::calendar::CalendarRefreshResult>
+    MailApplicationService::requestCalendarRange(
+        std::string ownerAccountId, javelin::jmap::calendar::VisibleInterval interval,
+        javelin::jmap::calendar::TimeZoneId displayTimeZone)
+    {
+        const auto configuration = m_configurations.find(ownerAccountId);
+        if (configuration == m_configurations.end())
+            co_return javelin::jmap::calendar::CalendarServiceError{
+                .code = javelin::jmap::calendar::CalendarServiceErrorCode::Authentication,
+                .message = QStringLiteral("Account synchronization is not configured.")};
+        m_visibleCalendarRanges.insert_or_assign(
+            ownerAccountId,
+            VisibleCalendarRange{.interval = interval, .displayTimeZone = displayTimeZone});
+        auto result = co_await m_calendarService.refresh(
+            toLiveConnectionSettings(configuration->second.settings), ownerAccountId, interval,
+            displayTimeZone);
+        if (const auto* summary = std::get_if<javelin::jmap::calendar::RefreshedRange>(&result))
+        {
+            Q_EMIT calendarCacheCommitted({.ownerAccountId = QString::fromStdString(ownerAccountId),
+                                           .interval = summary->interval,
+                                           .displayTimeZone = summary->displayTimeZone,
+                                           .accountCount = summary->accountCount,
+                                           .eventCount = summary->eventCount});
+        }
+        co_return result;
+    }
+
+    QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
+    MailApplicationService::createCalendarEvent(std::string ownerAccountId,
+                                                javelin::jmap::calendar::CreateEventCommand command)
+    {
+        const auto configuration = m_configurations.find(ownerAccountId);
+        if (configuration == m_configurations.end())
+            co_return javelin::jmap::calendar::CalendarServiceError{
+                .code = javelin::jmap::calendar::CalendarServiceErrorCode::Authentication,
+                .message = QStringLiteral("Account synchronization is not configured.")};
+        co_return co_await m_calendarService.create(
+            toLiveConnectionSettings(configuration->second.settings), std::move(ownerAccountId),
+            std::move(command));
+    }
+
+    QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
+    MailApplicationService::updateCalendarEvent(std::string ownerAccountId,
+                                                javelin::jmap::calendar::UpdateEventCommand command)
+    {
+        const auto configuration = m_configurations.find(ownerAccountId);
+        if (configuration == m_configurations.end())
+            co_return javelin::jmap::calendar::CalendarServiceError{
+                .code = javelin::jmap::calendar::CalendarServiceErrorCode::Authentication,
+                .message = QStringLiteral("Account synchronization is not configured.")};
+        co_return co_await m_calendarService.update(
+            toLiveConnectionSettings(configuration->second.settings), std::move(ownerAccountId),
+            std::move(command));
+    }
+
+    QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
+    MailApplicationService::deleteCalendarEvent(std::string ownerAccountId,
+                                                javelin::jmap::calendar::DeleteEventCommand command)
+    {
+        const auto configuration = m_configurations.find(ownerAccountId);
+        if (configuration == m_configurations.end())
+            co_return javelin::jmap::calendar::CalendarServiceError{
+                .code = javelin::jmap::calendar::CalendarServiceErrorCode::Authentication,
+                .message = QStringLiteral("Account synchronization is not configured.")};
+        co_return co_await m_calendarService.remove(
+            toLiveConnectionSettings(configuration->second.settings), std::move(ownerAccountId),
+            std::move(command));
+    }
+
     QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
     MailApplicationService::setAddressBooks(std::string accountId,
                                             javelin::jmap::api::AddressBookSetRequest request)
@@ -566,6 +636,17 @@ namespace javelin::app
                 { Q_EMIT accountStatusChanged(QString::fromStdString(accountId), status); });
         connect(&coordinator, &AccountSyncCoordinator::cacheCommitted, this,
                 &MailApplicationService::cacheCommitted);
+        connect(&coordinator, &AccountSyncCoordinator::calendarStateChanged, this,
+                [this](const QString& ownerAccountId)
+                {
+                    const auto owner = ownerAccountId.toStdString();
+                    const auto range = m_visibleCalendarRanges.find(owner);
+                    if (range == m_visibleCalendarRanges.end())
+                        return;
+                    auto task = requestCalendarRange(owner, range->second.interval,
+                                                     range->second.displayTimeZone);
+                    QCoro::connect(std::move(task), this, [](const auto&) {});
+                });
         connect(&coordinator, &AccountSyncCoordinator::notificationRaised, this,
                 &MailApplicationService::notificationRaised);
     }

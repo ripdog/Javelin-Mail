@@ -2,6 +2,7 @@
 
 #include "app/AccountConnectionSettings.h"
 #include "app/LongPollService.h"
+#include "jmap/calendar/CalendarService.h"
 #include "jmap/contacts/ContactService.h"
 #include "jmap/query/EmailListSort.h"
 #include "jmap/search/EmailSearch.h"
@@ -67,6 +68,15 @@ namespace javelin::app
 
     using SearchWindowResult = std::variant<SearchWindowSummary, javelin::jmap::LiveRefreshError>;
 
+    struct CalendarCacheChange
+    {
+        QString ownerAccountId;
+        javelin::jmap::calendar::VisibleInterval interval;
+        javelin::jmap::calendar::TimeZoneId displayTimeZone;
+        std::size_t accountCount = 0;
+        std::size_t eventCount = 0;
+    };
+
     struct AccountSyncConfiguration
     {
         AccountConnectionSettings settings;
@@ -94,6 +104,7 @@ namespace javelin::app
                                javelin::jmap::cache::AccountRepository& accountRepository,
                                javelin::jmap::cache::QueryService& queryService,
                                javelin::jmap::contacts::ContactService& contactService,
+                               javelin::jmap::calendar::CalendarService& calendarService,
                                QObject* parent = nullptr);
 
         void applySettings(std::vector<AccountSyncConfiguration> configurations);
@@ -131,6 +142,19 @@ namespace javelin::app
         bootstrapAccount(AccountBootstrapIntent intent);
         [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactRefreshResult>
         requestContacts(std::string accountId);
+        [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarRefreshResult>
+        requestCalendarRange(std::string ownerAccountId,
+                             javelin::jmap::calendar::VisibleInterval interval,
+                             javelin::jmap::calendar::TimeZoneId displayTimeZone);
+        [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
+        createCalendarEvent(std::string ownerAccountId,
+                            javelin::jmap::calendar::CreateEventCommand command);
+        [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
+        updateCalendarEvent(std::string ownerAccountId,
+                            javelin::jmap::calendar::UpdateEventCommand command);
+        [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
+        deleteCalendarEvent(std::string ownerAccountId,
+                            javelin::jmap::calendar::DeleteEventCommand command);
         [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
         setAddressBooks(std::string accountId, javelin::jmap::api::AddressBookSetRequest request);
         [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
@@ -146,6 +170,7 @@ namespace javelin::app
         void accountStatusChanged(const QString& accountId,
                                   javelin::app::AccountSyncCoordinator::Status status);
         void cacheCommitted(javelin::app::MailCacheChange change);
+        void calendarCacheCommitted(javelin::app::CalendarCacheChange change);
         void notificationRaised(const QString& accountId, const QString& mailboxId,
                                 const QString& threadId, const QString& emailId,
                                 const QString& mailboxName, const QString& title,
@@ -169,6 +194,13 @@ namespace javelin::app
         javelin::jmap::cache::AccountRepository& m_accountRepository;
         javelin::jmap::cache::QueryService& m_queryService;
         javelin::jmap::contacts::ContactService& m_contactService;
+        javelin::jmap::calendar::CalendarService& m_calendarService;
+        struct VisibleCalendarRange
+        {
+            javelin::jmap::calendar::VisibleInterval interval;
+            javelin::jmap::calendar::TimeZoneId displayTimeZone;
+        };
+        std::unordered_map<std::string, VisibleCalendarRange> m_visibleCalendarRanges;
         std::unordered_map<std::string, std::unique_ptr<AccountSyncCoordinator>> m_coordinators;
         std::unordered_map<std::string, AccountSyncConfiguration> m_configurations;
         std::unordered_set<std::string> m_sessionRefreshesInFlight;
