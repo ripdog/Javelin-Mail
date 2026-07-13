@@ -1,8 +1,9 @@
+#include "jmap/sync/RefreshNotificationPlanner.h"
 #include "FixtureReader.h"
 #include "jmap/cache/EmailRepository.h"
+#include "jmap/cache/NotificationRepository.h"
 #include "jmap/domain/MailEntityParsers.h"
 #include "jmap/sync/MailboxRefreshExecutor.h"
-#include "jmap/sync/RefreshNotificationPlanner.h"
 
 #include <QCoreApplication>
 #include <QSqlQuery>
@@ -122,25 +123,25 @@ TEST_CASE("refresh notification planner returns inserted unread mailbox emails",
     otherMailbox.subject = "Wrong mailbox";
 
     javelin::jmap::cache::EmailRepository emailRepository{databaseContext.connection};
-    REQUIRE_FALSE(emailRepository.replaceAll("account-1", {unreadInserted, seenInserted, otherMailbox})
-                      .has_value());
+    REQUIRE_FALSE(
+        emailRepository.replaceAll("account-1", {unreadInserted, seenInserted, otherMailbox})
+            .has_value());
 
     const javelin::jmap::sync::RefreshNotificationPlanner planner{databaseContext.connection};
-    const auto result = planner.plan(
-        "account-1", "mbx-inbox",
-        javelin::jmap::sync::MailboxRefreshSummary{
-            .representativeCount = 3,
-            .usedIncrementalRefresh = false,
-            .changedEmailIds = {},
-            .insertedEmailIds = {"eml-new", "eml-seen", "eml-other", "eml-missing"},
-            .removedEmailIds = {},
-            .requiresNotificationScan = true,
-            .notificationCandidates = {},
-        });
+    const auto result =
+        planner.plan("account-1", "mbx-inbox",
+                     javelin::jmap::sync::MailboxRefreshSummary{
+                         .representativeCount = 3,
+                         .usedIncrementalRefresh = false,
+                         .changedEmailIds = {},
+                         .insertedEmailIds = {"eml-new", "eml-seen", "eml-other", "eml-missing"},
+                         .removedEmailIds = {},
+                         .requiresNotificationScan = true,
+                         .notificationCandidates = {},
+                     });
 
-    REQUIRE(
-        std::holds_alternative<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(
-            result));
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(
+        result));
     const auto& candidates =
         std::get<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(result);
     REQUIRE(candidates.size() == 1);
@@ -159,21 +160,57 @@ TEST_CASE("refresh notification planner returns empty candidates when nothing wa
     seedAccount(databaseContext.connection);
 
     const javelin::jmap::sync::RefreshNotificationPlanner planner{databaseContext.connection};
-    const auto result = planner.plan(
-        "account-1", "mbx-inbox",
-        javelin::jmap::sync::MailboxRefreshSummary{
-            .representativeCount = 0,
-            .usedIncrementalRefresh = true,
-            .changedEmailIds = {"eml-1"},
-            .insertedEmailIds = {},
-            .removedEmailIds = {},
-            .requiresNotificationScan = false,
-            .notificationCandidates = {},
-        });
+    const auto result = planner.plan("account-1", "mbx-inbox",
+                                     javelin::jmap::sync::MailboxRefreshSummary{
+                                         .representativeCount = 0,
+                                         .usedIncrementalRefresh = true,
+                                         .changedEmailIds = {"eml-1"},
+                                         .insertedEmailIds = {},
+                                         .removedEmailIds = {},
+                                         .requiresNotificationScan = false,
+                                         .notificationCandidates = {},
+                                     });
 
-    REQUIRE(
-        std::holds_alternative<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(
-            result));
-    CHECK(std::get<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(result)
-              .empty());
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(
+        result));
+    CHECK(std::get<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(result).empty());
+}
+
+TEST_CASE("notification repository claims each mailbox email once", "[jmap][cache][notification]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+
+    auto unread = loadEmailFixture();
+    unread.id = "eml-unread";
+    unread.threadId = "thr-unread";
+    unread.mailboxIds = {"mbx-inbox"};
+    unread.keywords = {};
+
+    auto seen = unread;
+    seen.id = "eml-seen";
+    seen.threadId = "thr-seen";
+    seen.keywords = {"$seen"};
+
+    javelin::jmap::cache::EmailRepository emails{databaseContext.connection};
+    REQUIRE_FALSE(emails.replaceAll("account-1", {unread, seen}).has_value());
+
+    javelin::jmap::cache::NotificationRepository notifications{databaseContext.connection};
+    const auto first = notifications.claimUnreadMailboxEmails("account-1", "mbx-inbox");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(
+        first));
+    const auto& candidates =
+        std::get<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(first);
+    REQUIRE(candidates.size() == 1);
+    CHECK(candidates.front().emailId == "eml-unread");
+
+    seen.keywords = {};
+    REQUIRE_FALSE(emails.upsertMany("account-1", {seen}).has_value());
+    const auto second = notifications.claimUnreadMailboxEmails("account-1", "mbx-inbox");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(
+        second));
+    CHECK(std::get<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(second).empty());
 }

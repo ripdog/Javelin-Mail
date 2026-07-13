@@ -95,10 +95,24 @@ namespace javelin::app
                     {
                         mailboxIds.push_back(mailboxId.toStdString());
                     }
+                    std::vector<std::string> notificationMailboxIds;
+                    for (const auto& mailboxId :
+                         javelin::gui::settings::PreferencesDialog::notificationMailboxIds(
+                             accountId))
+                    {
+                        notificationMailboxIds.push_back(mailboxId.toStdString());
+                    }
+                    mailboxIds.insert(mailboxIds.end(), notificationMailboxIds.begin(),
+                                      notificationMailboxIds.end());
+                    std::ranges::sort(mailboxIds);
+                    mailboxIds.erase(std::ranges::unique(mailboxIds).begin(), mailboxIds.end());
                     configurations.push_back(AccountSyncConfiguration{
                         .settings = toAccountConnectionSettings(settings),
                         .accountId = accountId.toStdString(),
                         .mailboxIds = std::move(mailboxIds),
+                        .notificationMailboxIds = std::move(notificationMailboxIds),
+                        .notificationMailboxSelectionConfigured = javelin::gui::settings::
+                            PreferencesDialog::hasNotificationMailboxSelection(accountId),
                     });
                 }
             }

@@ -204,7 +204,9 @@ namespace javelin::app
             connectCoordinator(coordinatorIt->first, *coordinatorIt->second);
         }
         coordinatorIt->second->applySettings(std::move(configuration.settings), accountId,
-                                             std::move(configuration.mailboxIds));
+                                             std::move(configuration.mailboxIds),
+                                             std::move(configuration.notificationMailboxIds),
+                                             configuration.notificationMailboxSelectionConfigured);
     }
 
     MailboxObservation MailApplicationService::observeMailbox(std::string accountId,

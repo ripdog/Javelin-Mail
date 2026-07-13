@@ -2,6 +2,7 @@
 
 #include <KConfigDialog>
 #include <QHash>
+#include <QSet>
 
 #include <vector>
 
@@ -52,6 +53,8 @@ namespace javelin::gui::settings
         [[nodiscard]] static ConnectionSettings loadSettingsForAccount(QStringView accountId);
         [[nodiscard]] static AttachmentSaveSettings loadAttachmentSaveSettings();
         [[nodiscard]] static QStringList syncedMailboxIds(QStringView accountId);
+        [[nodiscard]] static QStringList notificationMailboxIds(QStringView accountId);
+        [[nodiscard]] static bool hasNotificationMailboxSelection(QStringView accountId);
         static void saveAccounts(const std::vector<ConnectionSettings>& accounts);
         static void associateCachedAccount(const QString& configuredAccountId,
                                            const QString& cachedAccountId);
@@ -79,6 +82,7 @@ namespace javelin::gui::settings
         void refreshMailboxSyncAccounts();
         void refreshMailboxSyncList();
         void storeMailboxSyncSelection();
+        void storeMailboxNotificationSelection();
 
         javelin::jmap::cache::AccountRepository& m_accountRepository;
         javelin::jmap::cache::QueryService& m_queryService;
@@ -108,7 +112,10 @@ namespace javelin::gui::settings
         QPushButton* m_attachmentDirectoryButton = nullptr;
         QComboBox* m_mailboxSyncAccount = nullptr;
         QListWidget* m_mailboxSyncList = nullptr;
+        QListWidget* m_mailboxNotificationList = nullptr;
         QHash<QString, QStringList> m_syncedMailboxIds;
+        QHash<QString, QStringList> m_notificationMailboxIds;
+        QSet<QString> m_configuredNotificationAccounts;
         QString m_mailboxSyncCurrentAccountId;
     };
 

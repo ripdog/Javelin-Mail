@@ -857,6 +857,22 @@ namespace javelin::jmap::cache
                                 "CURRENT_TIMESTAMP) STRICT"),
                         },
                 },
+                MigrationStep{
+                    .version = 16,
+                    .name = QStringLiteral("observed_notification_emails"),
+                    .statements =
+                        {
+                            QStringLiteral(
+                                "CREATE TABLE observed_notification_emails ("
+                                "account_id TEXT NOT NULL REFERENCES accounts(account_id) ON "
+                                "DELETE CASCADE, email_id TEXT NOT NULL, observed_at TEXT NOT NULL "
+                                "DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(account_id,email_id)) "
+                                "STRICT"),
+                            QStringLiteral(
+                                "INSERT INTO observed_notification_emails (account_id,email_id) "
+                                "SELECT account_id,email_id FROM emails"),
+                        },
+                },
             },
         };
     }

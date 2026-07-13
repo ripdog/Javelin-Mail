@@ -77,7 +77,9 @@ namespace javelin::app
         ~AccountSyncCoordinator() override;
 
         void applySettings(AccountConnectionSettings settings, std::string accountId,
-                           std::vector<std::string> mailboxIds);
+                           std::vector<std::string> mailboxIds,
+                           std::vector<std::string> notificationMailboxIds,
+                           bool notificationMailboxSelectionConfigured);
         void stop();
         [[nodiscard]] bool requestSynchronization();
 
@@ -99,6 +101,7 @@ namespace javelin::app
             AccountConnectionSettings settings;
             std::string accountId;
             std::vector<std::pair<std::string, std::string>> mailboxes;
+            std::unordered_set<std::string> notificationMailboxIds;
             std::string apiUrl;
             std::string eventSourceUrl;
             std::optional<javelin::jmap::api::WebSocketCapability> websocket;
@@ -143,8 +146,8 @@ namespace javelin::app
         std::vector<std::string> m_mailboxIds;
         std::shared_ptr<RunContext> m_runContext;
         std::string m_lastEventId;
-        std::deque<std::string> m_recentNotificationKeys;
-        std::unordered_set<std::string> m_notifiedEmailKeys;
+        std::vector<std::string> m_notificationMailboxIds;
+        bool m_notificationMailboxSelectionConfigured = false;
         std::unordered_map<std::string, std::string> m_pendingStateChanges;
         std::size_t m_generation = 0;
         Status m_status = Status::Disconnected;

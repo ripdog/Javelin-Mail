@@ -44,6 +44,8 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/api/Cancellation.h
     src/jmap/cache/SearchWindowRepository.cpp
     src/jmap/cache/SearchWindowRepository.h
+    src/jmap/cache/NotificationRepository.cpp
+    src/jmap/cache/NotificationRepository.h
     src/jmap/sync/StateChangeSource.h
     src/jmap/sync/MailboxInterestRegistry.cpp
     src/jmap/sync/MailboxInterestRegistry.h
@@ -262,6 +264,8 @@ add_library(javelin_jmap STATIC
     src/jmap/api/Cancellation.h
     src/jmap/cache/SearchWindowRepository.cpp
     src/jmap/cache/SearchWindowRepository.h
+    src/jmap/cache/NotificationRepository.cpp
+    src/jmap/cache/NotificationRepository.h
     src/jmap/sync/StateChangeSource.h
     src/jmap/sync/MailboxInterestRegistry.cpp
     src/jmap/sync/MailboxInterestRegistry.h

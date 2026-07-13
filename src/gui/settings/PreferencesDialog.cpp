@@ -48,6 +48,7 @@ namespace javelin::gui::settings
         constexpr auto alwaysAskKey = "alwaysAsk";
         constexpr auto directoryKey = "directory";
         constexpr auto mailboxSyncGroup = "mailboxSync";
+        constexpr auto mailboxNotificationGroup = "mailboxNotifications";
         constexpr auto mailboxIdsKey = "mailboxIds";
         constexpr int remoteContentKindRole = Qt::UserRole + 1;
         constexpr int remoteContentValueRole = Qt::UserRole + 2;
@@ -248,7 +249,18 @@ namespace javelin::gui::settings
         m_mailboxSyncAccount = new QComboBox(mailboxSyncPage);
         mailboxSyncLayout->addWidget(m_mailboxSyncAccount);
         m_mailboxSyncList = new QListWidget(mailboxSyncPage);
-        mailboxSyncLayout->addWidget(m_mailboxSyncList, 1);
+        auto* mailboxLists = new QHBoxLayout();
+        auto* syncListLayout = new QVBoxLayout();
+        syncListLayout->addWidget(new QLabel(QStringLiteral("Synchronize"), mailboxSyncPage));
+        syncListLayout->addWidget(m_mailboxSyncList, 1);
+        mailboxLists->addLayout(syncListLayout, 1);
+        auto* notificationListLayout = new QVBoxLayout();
+        notificationListLayout->addWidget(
+            new QLabel(QStringLiteral("Show notifications"), mailboxSyncPage));
+        m_mailboxNotificationList = new QListWidget(mailboxSyncPage);
+        notificationListLayout->addWidget(m_mailboxNotificationList, 1);
+        mailboxLists->addLayout(notificationListLayout, 1);
+        mailboxSyncLayout->addLayout(mailboxLists, 1);
         addPage(mailboxSyncPage, QStringLiteral("Mailbox Sync"), QStringLiteral("view-refresh"),
                 QString{}, false);
 
@@ -367,6 +379,12 @@ namespace javelin::gui::settings
                 [this](QListWidgetItem*)
                 {
                     storeMailboxSyncSelection();
+                    noteUnsavedChanges();
+                });
+        connect(m_mailboxNotificationList, &QListWidget::itemChanged, this,
+                [this](QListWidgetItem*)
+                {
+                    storeMailboxNotificationSelection();
                     noteUnsavedChanges();
                 });
 
@@ -493,6 +511,28 @@ namespace javelin::gui::settings
                 .toStringList();
         settings.endGroup();
         return ids;
+    }
+
+    QStringList PreferencesDialog::notificationMailboxIds(const QStringView accountId)
+    {
+        QSettings settings;
+        settings.beginGroup(QLatin1StringView{mailboxNotificationGroup});
+        const auto ids =
+            settings
+                .value(accountId.toString() + QLatin1Char('/') + QLatin1StringView{mailboxIdsKey})
+                .toStringList();
+        settings.endGroup();
+        return ids;
+    }
+
+    bool PreferencesDialog::hasNotificationMailboxSelection(const QStringView accountId)
+    {
+        QSettings settings;
+        settings.beginGroup(QLatin1StringView{mailboxNotificationGroup});
+        const bool configured = settings.contains(accountId.toString() + QLatin1Char('/') +
+                                                  QLatin1StringView{mailboxIdsKey});
+        settings.endGroup();
+        return configured;
     }
 
     void PreferencesDialog::saveAccounts(const std::vector<ConnectionSettings>& accounts)
@@ -677,6 +717,16 @@ namespace javelin::gui::settings
         }
         mailboxSettings.endGroup();
         mailboxSettings.sync();
+        QSettings notificationSettings;
+        notificationSettings.beginGroup(QLatin1StringView{mailboxNotificationGroup});
+        for (auto it = m_notificationMailboxIds.cbegin(); it != m_notificationMailboxIds.cend();
+             ++it)
+        {
+            notificationSettings.setValue(
+                it.key() + QLatin1Char('/') + QLatin1StringView{mailboxIdsKey}, it.value());
+        }
+        notificationSettings.endGroup();
+        notificationSettings.sync();
 
         m_loadedAccountIds.clear();
         for (const auto& account : m_accounts)
@@ -712,6 +762,15 @@ namespace javelin::gui::settings
             const auto accountId = QString::fromStdString(account.accountId);
             m_mailboxSyncAccount->addItem(QString::fromStdString(account.name), accountId);
             m_syncedMailboxIds.insert(accountId, syncedMailboxIds(accountId));
+            m_notificationMailboxIds.insert(accountId, notificationMailboxIds(accountId));
+            QSettings notificationSettings;
+            notificationSettings.beginGroup(QLatin1StringView{mailboxNotificationGroup});
+            if (notificationSettings.contains(accountId + QLatin1Char('/') +
+                                              QLatin1StringView{mailboxIdsKey}))
+            {
+                m_configuredNotificationAccounts.insert(accountId);
+            }
+            notificationSettings.endGroup();
         }
         m_mailboxSyncCurrentAccountId = m_mailboxSyncAccount->currentData().toString();
         refreshMailboxSyncList();
@@ -720,7 +779,9 @@ namespace javelin::gui::settings
     void PreferencesDialog::refreshMailboxSyncList()
     {
         QSignalBlocker blocker{m_mailboxSyncList};
+        QSignalBlocker notificationBlocker{m_mailboxNotificationList};
         m_mailboxSyncList->clear();
+        m_mailboxNotificationList->clear();
         const auto accountId = m_mailboxSyncCurrentAccountId;
         if (accountId.isEmpty())
         {
@@ -734,6 +795,17 @@ namespace javelin::gui::settings
             return;
         }
         const auto selected = m_syncedMailboxIds.value(accountId);
+        auto notificationSelected = m_notificationMailboxIds.value(accountId);
+        if (!m_configuredNotificationAccounts.contains(accountId))
+        {
+            const auto inbox = std::ranges::find(*mailboxes, std::optional<std::string>{"inbox"},
+                                                 &javelin::jmap::cache::MailboxTreeItem::role);
+            if (inbox != mailboxes->end())
+            {
+                notificationSelected.push_back(QString::fromStdString(inbox->id));
+                m_notificationMailboxIds.insert(accountId, notificationSelected);
+            }
+        }
         for (const auto& mailbox : *mailboxes)
         {
             auto* item =
@@ -743,7 +815,34 @@ namespace javelin::gui::settings
             item->setCheckState(selected.contains(QString::fromStdString(mailbox.id))
                                     ? Qt::Checked
                                     : Qt::Unchecked);
+            auto* notificationItem = new QListWidgetItem(QString::fromStdString(mailbox.name),
+                                                         m_mailboxNotificationList);
+            notificationItem->setData(Qt::UserRole, QString::fromStdString(mailbox.id));
+            notificationItem->setFlags(notificationItem->flags() | Qt::ItemIsUserCheckable);
+            notificationItem->setCheckState(
+                notificationSelected.contains(QString::fromStdString(mailbox.id)) ? Qt::Checked
+                                                                                  : Qt::Unchecked);
         }
+    }
+
+    void PreferencesDialog::storeMailboxNotificationSelection()
+    {
+        const auto accountId = m_mailboxSyncCurrentAccountId;
+        if (accountId.isEmpty())
+        {
+            return;
+        }
+        QStringList selected;
+        for (int row = 0; row < m_mailboxNotificationList->count(); ++row)
+        {
+            const auto* item = m_mailboxNotificationList->item(row);
+            if (item->checkState() == Qt::Checked)
+            {
+                selected.push_back(item->data(Qt::UserRole).toString());
+            }
+        }
+        m_notificationMailboxIds.insert(accountId, selected);
+        m_configuredNotificationAccounts.insert(accountId);
     }
 
     void PreferencesDialog::storeMailboxSyncSelection()

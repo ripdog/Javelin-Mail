@@ -72,6 +72,8 @@ namespace javelin::app
         AccountConnectionSettings settings;
         std::string accountId;
         std::vector<std::string> mailboxIds;
+        std::vector<std::string> notificationMailboxIds;
+        bool notificationMailboxSelectionConfigured = false;
     };
 
     struct AccountBootstrapIntent
@@ -86,13 +88,13 @@ namespace javelin::app
 
       public:
         MailApplicationService(javelin::jmap::cache::DatabaseConnection& databaseConnection,
-                            javelin::jmap::JmapCore& jmapCore,
-                            javelin::jmap::api::JmapMethodTransport& methodTransport,
-                            QNetworkAccessManager& networkAccessManager,
-                            javelin::jmap::cache::AccountRepository& accountRepository,
-                            javelin::jmap::cache::QueryService& queryService,
-                            javelin::jmap::contacts::ContactService& contactService,
-                            QObject* parent = nullptr);
+                               javelin::jmap::JmapCore& jmapCore,
+                               javelin::jmap::api::JmapMethodTransport& methodTransport,
+                               QNetworkAccessManager& networkAccessManager,
+                               javelin::jmap::cache::AccountRepository& accountRepository,
+                               javelin::jmap::cache::QueryService& queryService,
+                               javelin::jmap::contacts::ContactService& contactService,
+                               QObject* parent = nullptr);
 
         void applySettings(std::vector<AccountSyncConfiguration> configurations);
         [[nodiscard]] MailboxObservation observeMailbox(std::string accountId,

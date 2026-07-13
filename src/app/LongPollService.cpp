@@ -2,6 +2,7 @@
 
 #include "jmap/api/MethodCaller.h"
 #include "jmap/api/Session.h"
+#include "jmap/cache/NotificationRepository.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/cache/SyncStateRepository.h"
 #include "jmap/sync/MailboxRefreshExecutor.h"
@@ -21,7 +22,6 @@ namespace javelin::app
 
     namespace
     {
-        constexpr std::size_t maxRecentNotificationKeys = 512;
         constexpr auto refreshDebounceInterval = std::chrono::milliseconds{750};
         constexpr auto resumeWatchdogInterval = std::chrono::seconds{30};
         constexpr auto resumeWatchdogStallThreshold = std::chrono::seconds{90};
@@ -72,13 +72,17 @@ namespace javelin::app
 
     void AccountSyncCoordinator::applySettings(AccountConnectionSettings settings,
                                                std::string accountId,
-                                               std::vector<std::string> mailboxIds)
+                                               std::vector<std::string> mailboxIds,
+                                               std::vector<std::string> notificationMailboxIds,
+                                               const bool notificationMailboxSelectionConfigured)
     {
         const bool connectionSettingsUnchanged =
             m_settings.has_value() && m_settings->sessionUrl == settings.sessionUrl &&
             m_settings->loginEmail == settings.loginEmail &&
             m_settings->apiKey == settings.apiKey && m_accountId == accountId;
-        if (connectionSettingsUnchanged && m_runContext != nullptr && m_mailboxIds == mailboxIds)
+        if (connectionSettingsUnchanged && m_runContext != nullptr && m_mailboxIds == mailboxIds &&
+            m_notificationMailboxIds == notificationMailboxIds &&
+            m_notificationMailboxSelectionConfigured == notificationMailboxSelectionConfigured)
         {
             return;
         }
@@ -86,6 +90,8 @@ namespace javelin::app
         m_settings = std::move(settings);
         m_accountId = std::move(accountId);
         m_mailboxIds = std::move(mailboxIds);
+        m_notificationMailboxIds = std::move(notificationMailboxIds);
+        m_notificationMailboxSelectionConfigured = notificationMailboxSelectionConfigured;
 
         if (connectionSettingsUnchanged && m_runContext != nullptr)
         {
@@ -104,6 +110,8 @@ namespace javelin::app
                       m_runContext->configuration.websocket->supportsPush)))
             {
                 m_runContext->configuration.mailboxes = updatedConfiguration->mailboxes;
+                m_runContext->configuration.notificationMailboxIds =
+                    updatedConfiguration->notificationMailboxIds;
                 QStringList mailboxNames;
                 for (const auto& mailbox : updatedConfiguration->mailboxes)
                 {
@@ -131,8 +139,6 @@ namespace javelin::app
             m_runContext.reset();
         }
 
-        m_recentNotificationKeys.clear();
-        m_notifiedEmailKeys.clear();
         m_pendingStateChanges.clear();
         m_refreshDebounceTimer.stop();
         m_refreshInFlight = false;
@@ -213,10 +219,27 @@ namespace javelin::app
             }
         }
 
+        auto notificationMailboxIds = m_notificationMailboxIds;
+        if (!m_notificationMailboxSelectionConfigured)
+        {
+            const auto inbox = std::ranges::find(*mailboxTree, std::optional<std::string>{"inbox"},
+                                                 &javelin::jmap::cache::MailboxTreeItem::role);
+            if (inbox != mailboxTree->end())
+            {
+                notificationMailboxIds.push_back(inbox->id);
+                if (std::ranges::find(m_mailboxIds, inbox->id) == m_mailboxIds.end())
+                {
+                    mailboxes.emplace_back(inbox->id, inbox->name);
+                }
+            }
+        }
+
         return RunConfiguration{
             .settings = *m_settings,
             .accountId = m_accountId,
             .mailboxes = std::move(mailboxes),
+            .notificationMailboxIds = {notificationMailboxIds.begin(),
+                                       notificationMailboxIds.end()},
             .apiUrl = session->value().apiUrl,
             .eventSourceUrl = session->value().eventSourceUrl.value_or(std::string{}),
             .websocket = session->value().capabilities.websocket,
@@ -315,8 +338,26 @@ namespace javelin::app
                 watchedMailboxRefreshed = true;
                 refreshedMailboxIds.push_back(QString::fromStdString(mailboxId));
                 hasNewMail = hasNewMail || !summary->insertedEmailIds.empty();
-                publishNotifications(*runContext, mailboxId, mailboxName,
-                                     summary->notificationCandidates);
+                if (runContext->configuration.notificationMailboxIds.contains(mailboxId))
+                {
+                    javelin::jmap::cache::NotificationRepository notifications{
+                        m_databaseConnection};
+                    const auto candidates = notifications.claimUnreadMailboxEmails(
+                        runContext->configuration.accountId, mailboxId);
+                    if (const auto* error =
+                            std::get_if<javelin::jmap::cache::DatabaseError>(&candidates))
+                    {
+                        qWarning().noquote() << "Notification observation failed" << error->message;
+                    }
+                    else
+                    {
+                        publishNotifications(
+                            *runContext, mailboxId, mailboxName,
+                            std::get<
+                                std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(
+                                candidates));
+                    }
+                }
             }
             else if (const auto* error =
                          std::get_if<javelin::jmap::sync::MailboxRefreshError>(&refreshResult))
@@ -602,50 +643,24 @@ namespace javelin::app
             return;
         }
 
-        std::vector<javelin::jmap::sync::RefreshNotificationCandidate> newCandidates;
-        newCandidates.reserve(candidates.size());
-        for (const auto& candidate : candidates)
-        {
-            const auto key = runContext.configuration.accountId + '\n' + std::string{mailboxId} +
-                             '\n' + candidate.emailId;
-            if (m_notifiedEmailKeys.contains(key))
-            {
-                continue;
-            }
-
-            m_notifiedEmailKeys.insert(key);
-            m_recentNotificationKeys.push_back(key);
-            if (m_recentNotificationKeys.size() > maxRecentNotificationKeys)
-            {
-                m_notifiedEmailKeys.erase(m_recentNotificationKeys.front());
-                m_recentNotificationKeys.pop_front();
-            }
-            newCandidates.push_back(candidate);
-        }
-
-        if (newCandidates.empty())
-        {
-            return;
-        }
-
-        const auto& target = newCandidates.front();
+        const auto& target = candidates.front();
 
         QString title;
         QString message;
-        if (newCandidates.size() == 1)
+        if (candidates.size() == 1)
         {
             title = QStringLiteral("New mail in %1")
                         .arg(QString::fromStdString(std::string{mailboxName}));
             message = QString::fromStdString(
-                newCandidates.front().subject.value_or(std::string{"(no subject)"}));
+                candidates.front().subject.value_or(std::string{"(no subject)"}));
         }
         else
         {
             title = QStringLiteral("%1 new messages in %2")
-                        .arg(newCandidates.size())
+                        .arg(candidates.size())
                         .arg(QString::fromStdString(std::string{mailboxName}));
             message = QString::fromStdString(
-                newCandidates.front().subject.value_or(std::string{"(no subject)"}));
+                candidates.front().subject.value_or(std::string{"(no subject)"}));
         }
 
         Q_EMIT notificationRaised(QString::fromStdString(runContext.configuration.accountId),
