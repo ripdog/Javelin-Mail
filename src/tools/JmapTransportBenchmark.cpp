@@ -15,9 +15,13 @@
 #include <QSettings>
 #include <QStandardPaths>
 
+#include <array>
+#include <iomanip>
 #include <iostream>
+#include <numeric>
 #include <ranges>
 #include <stdexcept>
+#include <vector>
 
 namespace
 {
@@ -30,6 +34,22 @@ namespace
         std::string loginEmail;
         std::string apiKey;
         std::string accountId;
+    };
+
+    struct Measurements
+    {
+        qint64 mailboxGetMs = 0;
+        qint64 emailQueryMs = 0;
+        qint64 emailContentGetMs = 0;
+        qint64 sequentialTotalMs = 0;
+        qint64 batchedMs = 0;
+    };
+
+    struct Summary
+    {
+        double averageMs = 0.0;
+        qint64 bestMs = 0;
+        qint64 worstMs = 0;
     };
 
     [[nodiscard]] Account configuredAccount(const QString& displayName)
@@ -76,11 +96,9 @@ namespace
         return std::get<Response>(parsed);
     }
 
-    [[nodiscard]] QCoro::Task<void> runBenchmark(const Account account,
-                                                 javelin::jmap::cache::DatabaseConnection& database,
-                                                 JmapMethodTransport& transport,
-                                                 const JmapTransportPolicy policy,
-                                                 const QString label)
+    [[nodiscard]] QCoro::Task<Measurements>
+    runBenchmark(const Account account, javelin::jmap::cache::DatabaseConnection& database,
+                 JmapMethodTransport& transport, const JmapTransportPolicy policy)
     {
         javelin::jmap::cache::SessionRepository sessions{database};
         const auto sessionResult = sessions.load(account.accountId);
@@ -98,6 +116,7 @@ namespace
                                         .apiUrl = session->value().apiUrl,
                                         .transportPolicy = policy};
         MethodCaller caller{transport};
+        Measurements measurements;
         QElapsedTimer total;
         total.start();
 
@@ -112,8 +131,7 @@ namespace
         const auto mailboxHandle = mailboxesBuilder.call(*mailboxRequest);
         const auto mailboxResponse =
             read(co_await caller.call(context, mailboxesBuilder), mailboxHandle);
-        std::cout << label.toStdString() << " sequential Mailbox/get: " << timer.restart()
-                  << " ms\n";
+        measurements.mailboxGetMs = timer.restart();
         const auto inbox =
             std::ranges::find_if(mailboxResponse.list, [](const auto& mailbox)
                                  { return mailbox.role.has_value() && *mailbox.role == "inbox"; });
@@ -135,8 +153,7 @@ namespace
                                               .calculateTotal = false});
         const auto queryHandle = queryBuilder.call(*queryRequest);
         const auto queryResponse = read(co_await caller.call(context, queryBuilder), queryHandle);
-        std::cout << label.toStdString() << " sequential Email/query: " << timer.restart()
-                  << " ms\n";
+        measurements.emailQueryMs = timer.restart();
         if (queryResponse.ids.empty())
         {
             throw std::runtime_error("Inbox contains no email");
@@ -155,9 +172,8 @@ namespace
                              .maxBodyValueBytes = std::nullopt});
         const auto contentHandle = contentBuilder.call(*contentRequest);
         static_cast<void>(read(co_await caller.call(context, contentBuilder), contentHandle));
-        std::cout << label.toStdString() << " sequential Email/get content: " << timer.restart()
-                  << " ms\n"
-                  << label.toStdString() << " sequential total: " << total.elapsed() << " ms\n";
+        measurements.emailContentGetMs = timer.restart();
+        measurements.sequentialTotalMs = total.elapsed();
 
         RequestBuilder batch;
         batch.useCore().useMail();
@@ -170,7 +186,50 @@ namespace
         {
             throw std::runtime_error("Batched JMAP request failed");
         }
-        std::cout << label.toStdString() << " batched (3 calls): " << timer.elapsed() << " ms\n";
+        measurements.batchedMs = timer.elapsed();
+        co_return measurements;
+    }
+
+    [[nodiscard]] Summary summarize(const std::vector<Measurements>& runs,
+                                    const qint64 Measurements::* member)
+    {
+        const auto [best, worst] = std::ranges::minmax_element(
+            runs, {}, [member](const Measurements& measurements) { return measurements.*member; });
+        const auto total =
+            std::accumulate(runs.begin(), runs.end(), qint64{0},
+                            [member](const qint64 sum, const Measurements& measurements)
+                            { return sum + measurements.*member; });
+        return {.averageMs = static_cast<double>(total) / static_cast<double>(runs.size()),
+                .bestMs = (*best).*member,
+                .worstMs = (*worst).*member};
+    }
+
+    void printTransportReport(const std::string_view name, const std::vector<Measurements>& runs)
+    {
+        struct Row
+        {
+            std::string_view name;
+            qint64 Measurements::* member;
+        };
+        constexpr std::array rows{
+            Row{"Mailbox/get", &Measurements::mailboxGetMs},
+            Row{"Email/query", &Measurements::emailQueryMs},
+            Row{"Email/get content", &Measurements::emailContentGetMs},
+            Row{"Sequential total", &Measurements::sequentialTotalMs},
+            Row{"Batched (3 calls)", &Measurements::batchedMs},
+        };
+
+        std::cout << '\n' << name << "\n";
+        std::cout << std::left << std::setw(22) << "Operation" << std::right << std::setw(12)
+                  << "Average" << std::setw(10) << "Best" << std::setw(10) << "Worst" << '\n';
+        for (const auto& row : rows)
+        {
+            const auto summary = summarize(runs, row.member);
+            std::cout << std::left << std::setw(22) << row.name << std::right << std::fixed
+                      << std::setprecision(1) << std::setw(9) << summary.averageMs << " ms"
+                      << std::setw(7) << summary.bestMs << " ms" << std::setw(7) << summary.worstMs
+                      << " ms\n";
+        }
     }
 } // namespace
 
@@ -203,10 +262,28 @@ int main(int argc, char* argv[])
         javelin::jmap::api::PreferredJmapMethodTransport preferred{database, http};
         auto task = [&]() -> QCoro::Task<void>
         {
-            co_await runBenchmark(account, database, preferred, JmapTransportPolicy::ForceWebSocket,
-                                  QStringLiteral("WebSocket"));
-            co_await runBenchmark(account, database, http, JmapTransportPolicy::Preferred,
-                                  QStringLiteral("HTTP"));
+            constexpr int measuredRunCount = 3;
+            static_cast<void>(co_await runBenchmark(account, database, preferred,
+                                                    JmapTransportPolicy::ForceWebSocket));
+            static_cast<void>(
+                co_await runBenchmark(account, database, http, JmapTransportPolicy::Preferred));
+
+            std::vector<Measurements> webSocketRuns;
+            std::vector<Measurements> httpRuns;
+            webSocketRuns.reserve(measuredRunCount);
+            httpRuns.reserve(measuredRunCount);
+            for (int run = 0; run < measuredRunCount; ++run)
+            {
+                webSocketRuns.push_back(co_await runBenchmark(account, database, preferred,
+                                                              JmapTransportPolicy::ForceWebSocket));
+                httpRuns.push_back(
+                    co_await runBenchmark(account, database, http, JmapTransportPolicy::Preferred));
+            }
+
+            std::cout << "JMAP transport benchmark: " << account.displayName.toStdString()
+                      << "\n1 warmup run (discarded), " << measuredRunCount << " measured runs\n";
+            printTransportReport("WebSocket", webSocketRuns);
+            printTransportReport("HTTP", httpRuns);
         }();
         QCoro::connect(std::move(task), &application, &QCoreApplication::quit);
         return application.exec();
