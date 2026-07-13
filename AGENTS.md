@@ -111,3 +111,5 @@ KDE cmake settings enable `QT_NO_CAST_FROM_ASCII` and `QT_NO_KEYWORDS`. All code
   state-change source`.
 - UI status messages should be reserved for user-actionable progress, errors, and meaningful
   outcomes. Do not surface background autosave or other internal housekeeping notifications.
+- Never turn an implementation instruction into product copy or a status label. User requests are
+  design input for the change, not text that should appear in the application.

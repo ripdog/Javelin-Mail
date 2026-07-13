@@ -805,11 +805,8 @@ namespace javelin::gui::compose
         titleFont.setPointSize(titleFont.pointSize() + 6);
         titleFont.setBold(true);
         titleLabel->setFont(titleFont);
-        m_modeHintLabel = new QLabel(headerFrame);
-        m_modeHintLabel->setStyleSheet(QStringLiteral("color: #9fb2cf;"));
         headingRow->addWidget(titleLabel);
         headingRow->addStretch(1);
-        headingRow->addWidget(m_modeHintLabel);
         headerLayout->addLayout(headingRow);
 
         auto* fromRow = new QHBoxLayout();
@@ -901,15 +898,10 @@ namespace javelin::gui::compose
         rootLayout->addLayout(attachmentRow);
 
         auto* footerRow = new QHBoxLayout();
-        auto* helperLabel = new QLabel(
-            QStringLiteral(
-                "Rich text for everyday composing, raw HTML when you need exact control."),
-            this);
-        helperLabel->setStyleSheet(QStringLiteral("color: #95a6c2;"));
         m_saveDraftButton = new QPushButton(QStringLiteral("Save Draft"), this);
         m_sendButton = new QPushButton(QStringLiteral("Send"), this);
         m_closeButton = new QPushButton(QStringLiteral("Close"), this);
-        footerRow->addWidget(helperLabel, 1);
+        footerRow->addStretch(1);
         footerRow->addWidget(m_saveDraftButton);
         footerRow->addWidget(m_sendButton);
         footerRow->addWidget(m_closeButton);
@@ -1267,10 +1259,6 @@ namespace javelin::gui::compose
             m_editorTabs->currentIndex() == richEditorTabIndex &&
             m_snapshot.editorMode != javelin::jmap::submission::BodyEditorMode::RawHtml;
         m_formatToolbar->setEnabled(!m_operationInFlight && richMode);
-        m_modeHintLabel->setText(m_snapshot.editorMode ==
-                                         javelin::jmap::submission::BodyEditorMode::RawHtml
-                                     ? QStringLiteral("Editing raw HTML")
-                                     : QStringLiteral("Editing rich text"));
     }
 
     void ComposeTabWidget::updateTabTitle()
