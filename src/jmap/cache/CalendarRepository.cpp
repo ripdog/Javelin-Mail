@@ -240,6 +240,46 @@ namespace javelin::jmap::cache
         return std::optional{query.value(0).toString().toStdString()};
     }
 
+    std::optional<DatabaseError>
+    CalendarRepository::storeStateTokens(const std::string_view accountId,
+                                         const std::string_view calendarState,
+                                         const std::string_view eventState)
+    {
+        if (const auto error = m_connection.validate())
+            return error;
+        auto& database = m_connection.database();
+        if (!database.transaction())
+            return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
+                                 .message = QStringLiteral("Begin calendar state update: ") +
+                                            database.lastError().text()};
+        QSqlQuery query{database};
+        query.prepare(QStringLiteral(
+            "INSERT INTO calendar_state_tokens (account_id,data_type,state) VALUES "
+            "(:account,:type,:state) ON CONFLICT(account_id,data_type) DO UPDATE SET "
+            "state=excluded.state"));
+        for (const auto& [type, state] :
+             {std::pair{QStringLiteral("Calendar"),
+                        QString::fromStdString(std::string{calendarState})},
+              std::pair{QStringLiteral("CalendarEvent"),
+                        QString::fromStdString(std::string{eventState})}})
+        {
+            query.bindValue(QStringLiteral(":account"),
+                            QString::fromStdString(std::string{accountId}));
+            query.bindValue(QStringLiteral(":type"), type);
+            query.bindValue(QStringLiteral(":state"), state);
+            if (!query.exec())
+            {
+                database.rollback();
+                return queryError(QStringLiteral("Store calendar states"), query);
+            }
+        }
+        if (!database.commit())
+            return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
+                                 .message = QStringLiteral("Commit calendar state update: ") +
+                                            database.lastError().text()};
+        return std::nullopt;
+    }
+
     std::optional<DatabaseError> CalendarRepository::reconcileWindow(const CalendarWindow& window)
     {
         if (const auto error = m_connection.validate())

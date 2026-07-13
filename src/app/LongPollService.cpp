@@ -159,16 +159,20 @@ namespace javelin::app
     AccountSyncCoordinator::onStateChange(javelin::jmap::sync::StateChangeEvent event)
     {
         m_lastEventId = event.newState;
+        bool calendarChanged = false;
         for (auto& [type, state] : event.changedStates)
         {
             if (type == "Calendar" || type == "CalendarEvent")
             {
-                Q_EMIT calendarStateChanged(QString::fromStdString(m_accountId));
+                calendarChanged = true;
                 continue;
             }
             m_pendingStateChanges.insert_or_assign(std::move(type), std::move(state));
         }
-        scheduleDebouncedRefresh();
+        if (calendarChanged)
+            Q_EMIT calendarStateChanged(QString::fromStdString(m_accountId));
+        if (!m_pendingStateChanges.empty())
+            scheduleDebouncedRefresh();
         co_return;
     }
 

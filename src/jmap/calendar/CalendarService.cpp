@@ -199,6 +199,94 @@ namespace javelin::jmap::calendar
         return std::get<std::vector<Calendar>>(std::move(loaded));
     }
 
+    QCoro::Task<CalendarRefreshResult>
+    CalendarService::refreshChanged(LiveConnectionSettings settings, std::string ownerAccountId,
+                                    VisibleInterval interval, TimeZoneId displayTimeZone)
+    {
+        const auto sessionResult = loadSession(m_connection, ownerAccountId);
+        if (const auto* serviceError = std::get_if<CalendarServiceError>(&sessionResult))
+            co_return *serviceError;
+        const auto& session = std::get<api::Session>(sessionResult);
+        cache::CalendarRepository repository{m_connection};
+        api::MethodCaller caller{m_methodTransport};
+        bool fullRefreshRequired = false;
+        for (const auto& [accountId, account] : session.accounts)
+        {
+            if (!account.accountCapabilities.calendars)
+                continue;
+            const auto calendarStateResult = repository.stateToken(accountId, "Calendar");
+            const auto eventStateResult = repository.stateToken(accountId, "CalendarEvent");
+            if (const auto* cacheError = std::get_if<cache::DatabaseError>(&calendarStateResult))
+                co_return error(CalendarServiceErrorCode::Cache, cacheError->message);
+            if (const auto* cacheError = std::get_if<cache::DatabaseError>(&eventStateResult))
+                co_return error(CalendarServiceErrorCode::Cache, cacheError->message);
+            const auto& calendarState = std::get<std::optional<std::string>>(calendarStateResult);
+            const auto& eventState = std::get<std::optional<std::string>>(eventStateResult);
+            if (!calendarState || !eventState)
+            {
+                fullRefreshRequired = true;
+                break;
+            }
+
+            const auto calendarRequest = api::calendarChanges(
+                {.accountId = accountId, .sinceState = *calendarState, .maxChanges = std::nullopt});
+            const auto eventRequest = api::calendarEventChanges(
+                {.accountId = accountId, .sinceState = *eventState, .maxChanges = std::nullopt});
+            if (!calendarRequest || !eventRequest)
+                co_return error(CalendarServiceErrorCode::Validation,
+                                QStringLiteral("Unable to serialize calendar changes."));
+            api::RequestBuilder builder;
+            builder.useCore().useCapability(std::string{api::calendarsCapabilityUri});
+            const auto calendarHandle = builder.call(*calendarRequest, "calendar-changes");
+            const auto eventHandle = builder.call(*eventRequest, "calendar-event-changes");
+            const auto result =
+                co_await caller.call(context(settings, session, accountId), builder);
+            const auto* envelope = std::get_if<api::ResponseEnvelope>(&result);
+            if (!envelope)
+                co_return callError(result);
+            const api::ResponseReader reader{*envelope};
+            const auto calendarRead = reader.require(calendarHandle);
+            const auto eventRead = reader.require(eventHandle);
+            const auto cannotCalculate = [](const auto& read)
+            {
+                const auto* readError = std::get_if<api::ResponseReaderError>(&read);
+                return readError && readError->methodError &&
+                       readError->methodError->type == "cannotCalculateChanges";
+            };
+            if (cannotCalculate(calendarRead) || cannotCalculate(eventRead))
+            {
+                fullRefreshRequired = true;
+                break;
+            }
+            if (const auto* readError = std::get_if<api::ResponseReaderError>(&calendarRead))
+                co_return responseError(*readError);
+            if (const auto* readError = std::get_if<api::ResponseReaderError>(&eventRead))
+                co_return responseError(*readError);
+            const auto& calendarChanges = std::get<api::CalendarChangesResponse>(calendarRead);
+            const auto& eventChanges = std::get<api::CalendarEventChangesResponse>(eventRead);
+            const auto hasChanges = [](const api::ChangesResponse& changes)
+            {
+                return changes.hasMoreChanges || !changes.created.empty() ||
+                       !changes.updated.empty() || !changes.destroyed.empty();
+            };
+            if (hasChanges(calendarChanges) || hasChanges(eventChanges))
+            {
+                fullRefreshRequired = true;
+                break;
+            }
+            if (const auto cacheError = repository.storeStateTokens(
+                    accountId, calendarChanges.newState, eventChanges.newState))
+                co_return error(CalendarServiceErrorCode::Cache, cacheError->message);
+        }
+        if (fullRefreshRequired)
+            co_return co_await refresh(std::move(settings), std::move(ownerAccountId),
+                                       std::move(interval), std::move(displayTimeZone));
+        co_return RefreshedRange{.interval = std::move(interval),
+                                 .displayTimeZone = std::move(displayTimeZone),
+                                 .accountCount = 0,
+                                 .eventCount = 0};
+    }
+
     QCoro::Task<CalendarRefreshResult> CalendarService::refresh(LiveConnectionSettings settings,
                                                                 std::string ownerAccountId,
                                                                 VisibleInterval interval,

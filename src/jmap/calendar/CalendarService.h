@@ -103,6 +103,9 @@ namespace javelin::jmap::calendar
                                                                  std::string ownerAccountId,
                                                                  VisibleInterval interval,
                                                                  TimeZoneId displayTimeZone);
+        [[nodiscard]] QCoro::Task<CalendarRefreshResult>
+        refreshChanged(LiveConnectionSettings settings, std::string ownerAccountId,
+                       VisibleInterval interval, TimeZoneId displayTimeZone);
         [[nodiscard]] QCoro::Task<CalendarMutationResult> create(LiveConnectionSettings settings,
                                                                  std::string ownerAccountId,
                                                                  CreateEventCommand command);

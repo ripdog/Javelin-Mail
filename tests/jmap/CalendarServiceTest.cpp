@@ -11,6 +11,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <optional>
+#include <vector>
 
 namespace
 {
@@ -18,19 +19,16 @@ namespace
     {
       public:
         std::optional<javelin::jmap::api::JmapMethodRequest> request;
+        std::vector<javelin::jmap::api::JmapMethodTransportResult> results;
 
         QCoro::Task<javelin::jmap::api::JmapMethodTransportResult>
         call(javelin::jmap::api::JmapMethodRequest value) override
         {
             request = std::move(value);
-            co_return javelin::jmap::api::ResponseEnvelope{
-                .methodResponses =
-                    {{.name = "CalendarEvent/set",
-                      .arguments =
-                          R"({"accountId":"a1","oldState":"event-state-7","newState":"event-state-8","created":{},"updated":{"event-1":null},"destroyed":[],"notCreated":{},"notUpdated":{},"notDestroyed":{}})",
-                      .callId = "calendar-event-set"}},
-                .createdIds = std::nullopt,
-                .sessionState = "session-2"};
+            REQUIRE_FALSE(results.empty());
+            auto result = std::move(results.front());
+            results.erase(results.begin());
+            co_return result;
         }
     };
 
@@ -139,6 +137,14 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
                       .has_value());
 
     FakeMethodTransport transport;
+    transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+        .methodResponses =
+            {{.name = "CalendarEvent/set",
+              .arguments =
+                  R"({"accountId":"a1","oldState":"event-state-7","newState":"event-state-8","created":{},"updated":{"event-1":null},"destroyed":[],"notCreated":{},"notUpdated":{},"notDestroyed":{}})",
+              .callId = "calendar-event-set"}},
+        .createdIds = std::nullopt,
+        .sessionState = "session-2"});
     javelin::jmap::calendar::CalendarService service{connection, transport};
     const auto result = QCoro::waitFor(
         service.update({.sessionUrl = "https://example.test/.well-known/jmap",
@@ -151,4 +157,38 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
     REQUIRE(transport.request->envelope.methodCalls.size() == 1);
     CHECK(transport.request->envelope.methodCalls.front().arguments.find(
               R"("ifInState":"event-state-7")") != std::string::npos);
+
+    transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+        .methodResponses =
+            {{.name = "Calendar/changes",
+              .arguments =
+                  R"({"accountId":"a1","oldState":"calendar-state-1","newState":"calendar-state-2","hasMoreChanges":false,"created":[],"updated":[],"destroyed":[]})",
+              .callId = "calendar-changes"},
+             {.name = "CalendarEvent/changes",
+              .arguments =
+                  R"({"accountId":"a1","oldState":"event-state-7","newState":"event-state-8","hasMoreChanges":false,"created":[],"updated":[],"destroyed":[]})",
+              .callId = "calendar-event-changes"}},
+        .createdIds = std::nullopt,
+        .sessionState = "session-3"});
+    const auto unchanged = QCoro::waitFor(service.refreshChanged(
+        {.sessionUrl = "https://example.test/.well-known/jmap",
+         .loginEmail = "alice@example.test",
+         .apiKey = "secret"},
+        "a1", {.start = {.value = "2026-06-29T00:00:00"}, .end = {.value = "2026-08-10T00:00:00"}},
+        {.value = "Pacific/Auckland"}));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::calendar::RefreshedRange>(unchanged));
+    CHECK(std::get<javelin::jmap::calendar::RefreshedRange>(unchanged).accountCount == 0);
+    REQUIRE(transport.request.has_value());
+    REQUIRE(transport.request->envelope.methodCalls.size() == 2);
+    CHECK(transport.request->envelope.methodCalls[0].name == "Calendar/changes");
+    CHECK(transport.request->envelope.methodCalls[1].name == "CalendarEvent/changes");
+    const auto calendarState = calendars.stateToken("a1", "Calendar");
+    REQUIRE(std::holds_alternative<std::optional<std::string>>(calendarState));
+    CHECK(std::get<std::optional<std::string>>(calendarState) ==
+          std::optional<std::string>{"calendar-state-2"});
+    const auto eventState = calendars.stateToken("a1", "CalendarEvent");
+    REQUIRE(std::holds_alternative<std::optional<std::string>>(eventState));
+    CHECK(std::get<std::optional<std::string>>(eventState) ==
+          std::optional<std::string>{"event-state-8"});
 }

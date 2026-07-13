@@ -45,6 +45,9 @@ namespace javelin::jmap::cache
         listAccounts() const;
         [[nodiscard]] std::variant<std::optional<std::string>, DatabaseError>
         stateToken(std::string_view accountId, std::string_view dataType) const;
+        [[nodiscard]] std::optional<DatabaseError> storeStateTokens(std::string_view accountId,
+                                                                    std::string_view calendarState,
+                                                                    std::string_view eventState);
 
         [[nodiscard]] std::optional<DatabaseError> reconcileWindow(const CalendarWindow& window);
 

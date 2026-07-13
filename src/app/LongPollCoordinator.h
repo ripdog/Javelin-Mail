@@ -181,6 +181,8 @@ namespace javelin::app
         friend class MailboxObservation;
 
         void connectCoordinator(const std::string& accountId, AccountSyncCoordinator& coordinator);
+        [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarRefreshResult>
+        requestCalendarChanges(std::string ownerAccountId);
         void applyAccountConfiguration(const std::string& accountId);
         void refreshConfiguredSessions();
         void startSessionRefresh(const std::string& ownerAccountId,

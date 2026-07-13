@@ -518,6 +518,28 @@ namespace javelin::app
         co_return result;
     }
 
+    QCoro::Task<javelin::jmap::calendar::CalendarRefreshResult>
+    MailApplicationService::requestCalendarChanges(std::string ownerAccountId)
+    {
+        const auto configuration = m_configurations.find(ownerAccountId);
+        const auto range = m_visibleCalendarRanges.find(ownerAccountId);
+        if (configuration == m_configurations.end() || range == m_visibleCalendarRanges.end())
+            co_return javelin::jmap::calendar::CalendarServiceError{
+                .code = javelin::jmap::calendar::CalendarServiceErrorCode::Authentication,
+                .message = QStringLiteral("Calendar synchronization is not configured.")};
+        auto result = co_await m_calendarService.refreshChanged(
+            toLiveConnectionSettings(configuration->second.settings), ownerAccountId,
+            range->second.interval, range->second.displayTimeZone);
+        if (const auto* summary = std::get_if<javelin::jmap::calendar::RefreshedRange>(&result);
+            summary != nullptr && summary->accountCount > 0)
+            Q_EMIT calendarCacheCommitted({.ownerAccountId = QString::fromStdString(ownerAccountId),
+                                           .interval = summary->interval,
+                                           .displayTimeZone = summary->displayTimeZone,
+                                           .accountCount = summary->accountCount,
+                                           .eventCount = summary->eventCount});
+        co_return result;
+    }
+
     QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
     MailApplicationService::createCalendarEvent(std::string ownerAccountId,
                                                 javelin::jmap::calendar::CreateEventCommand command)
@@ -637,17 +659,25 @@ namespace javelin::app
                 { Q_EMIT accountStatusChanged(QString::fromStdString(accountId), status); });
         connect(&coordinator, &AccountSyncCoordinator::cacheCommitted, this,
                 &MailApplicationService::cacheCommitted);
-        connect(&coordinator, &AccountSyncCoordinator::calendarStateChanged, this,
-                [this](const QString& ownerAccountId)
-                {
-                    const auto owner = ownerAccountId.toStdString();
-                    const auto range = m_visibleCalendarRanges.find(owner);
-                    if (range == m_visibleCalendarRanges.end())
-                        return;
-                    auto task = requestCalendarRange(owner, range->second.interval,
-                                                     range->second.displayTimeZone);
-                    QCoro::connect(std::move(task), this, [](const auto&) {});
-                });
+        connect(
+            &coordinator, &AccountSyncCoordinator::calendarStateChanged, this,
+            [this](const QString& ownerAccountId)
+            {
+                const auto owner = ownerAccountId.toStdString();
+                const auto range = m_visibleCalendarRanges.find(owner);
+                if (range == m_visibleCalendarRanges.end())
+                    return;
+                auto task = requestCalendarChanges(owner);
+                QCoro::connect(
+                    std::move(task), this,
+                    [](const javelin::jmap::calendar::CalendarRefreshResult& result)
+                    {
+                        if (const auto* error =
+                                std::get_if<javelin::jmap::calendar::CalendarServiceError>(&result))
+                            qWarning().noquote()
+                                << "Calendar state-change refresh failed" << error->message;
+                    });
+            });
         connect(&coordinator, &AccountSyncCoordinator::notificationRaised, this,
                 &MailApplicationService::notificationRaised);
     }
