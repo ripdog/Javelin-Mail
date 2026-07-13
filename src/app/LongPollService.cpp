@@ -45,11 +45,10 @@ namespace javelin::app
 
     AccountSyncCoordinator::AccountSyncCoordinator(
         javelin::jmap::cache::DatabaseConnection& databaseConnection,
-                                     javelin::jmap::api::JmapMethodTransport& methodTransport,
-                                     QNetworkAccessManager& networkAccessManager,
-                                     javelin::jmap::cache::AccountRepository& accountRepository,
-                                     javelin::jmap::cache::QueryService& queryService,
-                                     QObject* parent)
+        javelin::jmap::api::JmapMethodTransport& methodTransport,
+        QNetworkAccessManager& networkAccessManager,
+        javelin::jmap::cache::AccountRepository& accountRepository,
+        javelin::jmap::cache::QueryService& queryService, QObject* parent)
         : QObject(parent), m_databaseConnection(databaseConnection),
           m_methodTransport(methodTransport), m_networkAccessManager(networkAccessManager),
           m_accountRepository(accountRepository), m_queryService(queryService)
@@ -72,13 +71,14 @@ namespace javelin::app
 
     void AccountSyncCoordinator::applySettings(AccountConnectionSettings settings,
                                                std::string accountId,
-                                        std::vector<std::string> mailboxIds)
+                                               std::vector<std::string> mailboxIds)
     {
-        if (m_settings.has_value() && m_runContext != nullptr &&
-            m_settings->sessionUrl == settings.sessionUrl &&
+        const bool connectionSettingsUnchanged =
+            m_settings.has_value() && m_settings->sessionUrl == settings.sessionUrl &&
             m_settings->loginEmail == settings.loginEmail &&
-            m_settings->apiKey == settings.apiKey && m_accountId == accountId &&
-            m_mailboxIds == mailboxIds)
+            m_settings->apiKey == settings.apiKey &&
+            m_settings->forceWebSocket == settings.forceWebSocket && m_accountId == accountId;
+        if (connectionSettingsUnchanged && m_runContext != nullptr && m_mailboxIds == mailboxIds)
         {
             return;
         }
@@ -86,6 +86,30 @@ namespace javelin::app
         m_settings = std::move(settings);
         m_accountId = std::move(accountId);
         m_mailboxIds = std::move(mailboxIds);
+
+        if (connectionSettingsUnchanged && m_runContext != nullptr)
+        {
+            const auto updatedConfiguration = resolveConfiguration();
+            if (updatedConfiguration.has_value() &&
+                updatedConfiguration->accountId == m_runContext->configuration.accountId &&
+                updatedConfiguration->apiUrl == m_runContext->configuration.apiUrl &&
+                updatedConfiguration->eventSourceUrl ==
+                    m_runContext->configuration.eventSourceUrl &&
+                updatedConfiguration->websocket.has_value() ==
+                    m_runContext->configuration.websocket.has_value() &&
+                (!updatedConfiguration->websocket.has_value() ||
+                 (updatedConfiguration->websocket->url ==
+                      m_runContext->configuration.websocket->url &&
+                  updatedConfiguration->websocket->supportsPush ==
+                      m_runContext->configuration.websocket->supportsPush)))
+            {
+                m_runContext->configuration.mailboxes = updatedConfiguration->mailboxes;
+                qInfo() << "Updated watched mailboxes without restarting the state-change source";
+                scheduleDebouncedRefresh();
+                return;
+            }
+        }
+
         restart();
     }
 
@@ -261,6 +285,9 @@ namespace javelin::app
                         },
                 },
             .apiUrl = runContext->configuration.apiUrl,
+            .transportPolicy = runContext->configuration.settings.forceWebSocket
+                                   ? javelin::jmap::api::JmapTransportPolicy::ForceWebSocket
+                                   : javelin::jmap::api::JmapTransportPolicy::Preferred,
         };
 
         javelin::jmap::sync::MailboxRefreshExecutor mailboxRefreshExecutor{
@@ -268,7 +295,8 @@ namespace javelin::app
         bool watchedMailboxRefreshed = false;
         QStringList refreshedMailboxIds;
         bool hasNewMail = false;
-        for (const auto& [mailboxId, mailboxName] : runContext->configuration.mailboxes)
+        const auto watchedMailboxes = runContext->configuration.mailboxes;
+        for (const auto& [mailboxId, mailboxName] : watchedMailboxes)
         {
             const auto refreshResult = co_await mailboxRefreshExecutor.refreshCollapsedMailbox(
                 runContext->configuration.accountId, mailboxId, {});
@@ -331,6 +359,9 @@ namespace javelin::app
                         },
                 },
             .apiUrl = runContext->configuration.apiUrl,
+            .transportPolicy = runContext->configuration.settings.forceWebSocket
+                                   ? javelin::jmap::api::JmapTransportPolicy::ForceWebSocket
+                                   : javelin::jmap::api::JmapTransportPolicy::Preferred,
         };
 
         javelin::jmap::sync::MailboxStateRefreshExecutor executor{m_databaseConnection,
@@ -416,8 +447,9 @@ namespace javelin::app
         const bool sameStream =
             m_runContext != nullptr &&
             m_runContext->configuration.accountId == nextConfiguration->accountId &&
-            m_runContext->configuration.mailboxes == nextConfiguration->mailboxes &&
             m_runContext->configuration.eventSourceUrl == nextConfiguration->eventSourceUrl &&
+            m_runContext->configuration.settings.forceWebSocket ==
+                nextConfiguration->settings.forceWebSocket &&
             m_runContext->configuration.websocket.has_value() ==
                 nextConfiguration->websocket.has_value() &&
             (!nextConfiguration->websocket.has_value() ||
@@ -450,18 +482,18 @@ namespace javelin::app
                     nextConfiguration->websocket->url, nextConfiguration->settings.apiKey,
                     sourceStatusCallback);
             std::unique_ptr<javelin::jmap::sync::StateChangeSource> httpFallbackSource;
-            if (!nextConfiguration->eventSourceUrl.empty())
+            if (!nextConfiguration->settings.forceWebSocket &&
+                !nextConfiguration->eventSourceUrl.empty())
             {
                 httpFallbackSource =
                     std::make_unique<javelin::jmap::sync::EventSourceStateChangeSource>(
                         m_networkAccessManager, nextConfiguration->eventSourceUrl,
                         nextConfiguration->settings.apiKey, sourceStatusCallback);
             }
-            runContext->source =
-                std::make_unique<javelin::jmap::sync::PreferredStateChangeSource>(
-                    m_databaseConnection, nextConfiguration->accountId,
-                    nextConfiguration->websocket->url, std::move(webSocketSource),
-                    std::move(httpFallbackSource));
+            runContext->source = std::make_unique<javelin::jmap::sync::PreferredStateChangeSource>(
+                m_databaseConnection, nextConfiguration->accountId,
+                nextConfiguration->websocket->url, std::move(webSocketSource),
+                std::move(httpFallbackSource));
         }
         else
         {
