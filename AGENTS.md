@@ -100,3 +100,14 @@ KDE cmake settings enable `QT_NO_CAST_FROM_ASCII` and `QT_NO_KEYWORDS`. All code
 - Do not sneak protocol, storage, and UI concerns into the same class.
 - When adding a new subsystem, create the intended boundary first, then implement within it.
 - Update documentation when architecture or workflow expectations change.
+
+## User-Facing And Diagnostic Messages
+
+- Do not emit routine internal lifecycle or procedural messages merely to narrate what the
+  application just did (for example, connection restarts, cache updates, or task completion).
+- Console diagnostics should explain a useful state or outcome, with relevant identifiers or
+  values when they help debugging. Prefer messages such as `Update watched mailboxes to Inbox,
+  Sent` over implementation narration such as `Updated watched mailboxes without restarting the
+  state-change source`.
+- UI status messages should be reserved for user-actionable progress, errors, and meaningful
+  outcomes. Do not surface background autosave or other internal housekeeping notifications.

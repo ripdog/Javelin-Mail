@@ -1240,8 +1240,6 @@ namespace javelin::gui::compose
             Q_EMIT statusMessageRequested(error->message, 10000);
             return;
         }
-
-        Q_EMIT statusMessageRequested(QStringLiteral("Saved working copy locally."), 2500);
     }
 
     void ComposeTabWidget::setBusy(const bool busy)

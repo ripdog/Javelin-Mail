@@ -104,7 +104,13 @@ namespace javelin::app
                       m_runContext->configuration.websocket->supportsPush)))
             {
                 m_runContext->configuration.mailboxes = updatedConfiguration->mailboxes;
-                qInfo() << "Updated watched mailboxes without restarting the state-change source";
+                QStringList mailboxNames;
+                for (const auto& mailbox : updatedConfiguration->mailboxes)
+                {
+                    mailboxNames.push_back(QString::fromStdString(mailbox.second));
+                }
+                qInfo().noquote() << "Update watched mailboxes to"
+                                  << mailboxNames.join(QStringLiteral(", "));
                 scheduleDebouncedRefresh();
                 return;
             }
@@ -428,8 +434,6 @@ namespace javelin::app
         if (m_runContext != nullptr)
         {
             m_shouldCatchUpRefreshOnReconnect = true;
-            qInfo().noquote() << "Account sync scheduling resume catch-up refresh"
-                              << QString::fromStdString(m_runContext->configuration.accountId);
             scheduleDebouncedRefresh();
         }
     }
@@ -555,8 +559,6 @@ namespace javelin::app
         if (status == Status::Connected && m_shouldCatchUpRefreshOnReconnect &&
             m_runContext != nullptr)
         {
-            qInfo().noquote() << "Account sync scheduling reconnect catch-up refresh"
-                              << QString::fromStdString(m_runContext->configuration.accountId);
             scheduleDebouncedRefresh();
         }
         Q_EMIT statusChanged(m_status);

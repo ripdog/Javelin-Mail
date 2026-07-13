@@ -2528,7 +2528,6 @@ namespace javelin::gui::shell
             return;
         }
 
-        m_statusBar->showMessage(QStringLiteral("Preparing compose tab..."));
         auto task =
             m_composeService.open(toAccountConnectionSettings(settings), std::move(request));
         QCoro::connect(
@@ -2546,7 +2545,6 @@ namespace javelin::gui::shell
 
                 openOrActivateComposeTab(
                     std::get<javelin::jmap::submission::DraftSnapshot>(std::move(result)));
-                m_statusBar->showMessage(QStringLiteral("Compose ready."), 3000);
             });
     }
 
