@@ -3,6 +3,7 @@
 #include "jmap/api/MethodCaller.h"
 #include "jmap/api/Session.h"
 #include "jmap/cache/SessionRepository.h"
+#include "jmap/cache/SyncStateRepository.h"
 #include "jmap/sync/MailboxRefreshExecutor.h"
 #include "jmap/sync/MailboxStateRefreshExecutor.h"
 #include "jmap/sync/PreferredStateChangeSource.h"
@@ -132,6 +133,7 @@ namespace javelin::app
 
         m_recentNotificationKeys.clear();
         m_notifiedEmailKeys.clear();
+        m_pendingStateChanges.clear();
         m_refreshDebounceTimer.stop();
         m_refreshInFlight = false;
         m_refreshAgainRequested = false;
@@ -156,6 +158,10 @@ namespace javelin::app
     AccountSyncCoordinator::onStateChange(javelin::jmap::sync::StateChangeEvent event)
     {
         m_lastEventId = event.newState;
+        for (auto& [type, state] : event.changedStates)
+        {
+            m_pendingStateChanges.insert_or_assign(std::move(type), std::move(state));
+        }
         scheduleDebouncedRefresh();
         co_return;
     }
@@ -412,8 +418,40 @@ namespace javelin::app
 
     void AccountSyncCoordinator::scheduleCatchUpRefresh()
     {
+        if (!m_pendingStateChanges.empty())
+        {
+            if (m_refreshInFlight)
+            {
+                m_refreshDebounceTimer.start();
+                return;
+            }
+            if (pendingStateChangesAlreadyApplied())
+            {
+                m_pendingStateChanges.clear();
+                return;
+            }
+            m_pendingStateChanges.clear();
+        }
         auto task = refreshWatchedMailbox();
         QCoro::connect(std::move(task), this, []() {});
+    }
+
+    bool AccountSyncCoordinator::pendingStateChangesAlreadyApplied() const
+    {
+        javelin::jmap::cache::SyncStateRepository states{m_databaseConnection};
+        for (const auto& [type, advertisedState] : m_pendingStateChanges)
+        {
+            const auto cached =
+                states.find({.accountId = m_accountId, .objectType = type, .queryKey = {}});
+            const auto* record =
+                std::get_if<std::optional<javelin::jmap::cache::SyncStateRecord>>(&cached);
+            if (record == nullptr || !record->has_value() ||
+                record->value().stateToken != advertisedState)
+            {
+                return false;
+            }
+        }
+        return true;
     }
 
     void AccountSyncCoordinator::restartForCatchUp()

@@ -21,6 +21,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -68,11 +69,11 @@ namespace javelin::app
         Q_ENUM(Status)
 
         AccountSyncCoordinator(javelin::jmap::cache::DatabaseConnection& databaseConnection,
-                        javelin::jmap::api::JmapMethodTransport& methodTransport,
-                        QNetworkAccessManager& networkAccessManager,
-                        javelin::jmap::cache::AccountRepository& accountRepository,
-                        javelin::jmap::cache::QueryService& queryService,
-                        QObject* parent = nullptr);
+                               javelin::jmap::api::JmapMethodTransport& methodTransport,
+                               QNetworkAccessManager& networkAccessManager,
+                               javelin::jmap::cache::AccountRepository& accountRepository,
+                               javelin::jmap::cache::QueryService& queryService,
+                               QObject* parent = nullptr);
         ~AccountSyncCoordinator() override;
 
         void applySettings(AccountConnectionSettings settings, std::string accountId,
@@ -124,6 +125,7 @@ namespace javelin::app
         void handleResumeWatchdogTimeout();
         void scheduleDebouncedRefresh();
         void scheduleCatchUpRefresh();
+        [[nodiscard]] bool pendingStateChangesAlreadyApplied() const;
         void restartForCatchUp();
         void restart();
         void setStatus(Status status);
@@ -143,6 +145,7 @@ namespace javelin::app
         std::string m_lastEventId;
         std::deque<std::string> m_recentNotificationKeys;
         std::unordered_set<std::string> m_notifiedEmailKeys;
+        std::unordered_map<std::string, std::string> m_pendingStateChanges;
         std::size_t m_generation = 0;
         Status m_status = Status::Disconnected;
         bool m_shouldCatchUpRefreshOnReconnect = false;

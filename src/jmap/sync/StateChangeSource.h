@@ -6,6 +6,7 @@
 
 #include <functional>
 #include <string>
+#include <unordered_map>
 #include <variant>
 #include <vector>
 
@@ -23,6 +24,7 @@ namespace javelin::jmap::sync
     {
         std::string newState;
         std::vector<std::string> changedTypes;
+        std::unordered_map<std::string, std::string> changedStates;
         bool notifyConsumer = true;
     };
 

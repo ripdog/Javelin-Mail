@@ -285,6 +285,7 @@ namespace javelin::jmap::sync
                             .newState =
                                 eventId.empty() ? std::string{fallbackState} : std::string{eventId},
                             .changedTypes = {},
+                            .changedStates = {},
                             .notifyConsumer = false,
                         },
                     .errorMessage = std::nullopt,
@@ -315,10 +316,12 @@ namespace javelin::jmap::sync
 
             std::vector<std::string> changedTypes;
             changedTypes.reserve(accountIt->second.size());
+            std::unordered_map<std::string, std::string> changedStates;
+            changedStates.reserve(accountIt->second.size());
             for (const auto& [typeName, state] : accountIt->second)
             {
-                static_cast<void>(state);
                 changedTypes.push_back(typeName);
+                changedStates.emplace(typeName, state);
             }
 
             return ParsedEvent{
@@ -328,6 +331,7 @@ namespace javelin::jmap::sync
                         .newState =
                             eventId.empty() ? std::string{fallbackState} : std::string{eventId},
                         .changedTypes = std::move(changedTypes),
+                        .changedStates = std::move(changedStates),
                     },
                 .errorMessage = std::nullopt,
                 .pingInterval = std::nullopt,

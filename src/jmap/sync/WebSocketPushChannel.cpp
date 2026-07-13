@@ -210,8 +210,8 @@ namespace javelin::jmap::sync
             event.newState = change.pushState.value_or(summary.lastState);
             for (const auto& [type, state] : account->second)
             {
-                static_cast<void>(state);
                 event.changedTypes.push_back(type);
+                event.changedStates.emplace(type, state);
             }
             QStringList changedTypes;
             for (const auto& type : event.changedTypes)

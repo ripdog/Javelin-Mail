@@ -136,10 +136,12 @@ TEST_CASE("state-change worker resumes from the latest state and stops on cancel
         javelin::jmap::sync::StateChangeEvent{
             .newState = "state-2",
             .changedTypes = {"Mailbox", "Email"},
+            .changedStates = {{"Mailbox", "m2"}, {"Email", "e2"}},
         },
         javelin::jmap::sync::StateChangeEvent{
             .newState = "state-3",
             .changedTypes = {"Email"},
+            .changedStates = {},
         },
     };
 
@@ -156,6 +158,8 @@ TEST_CASE("state-change worker resumes from the latest state and stops on cancel
     CHECK(summary.successfulSubscriptions == 2);
     CHECK(summary.transientFailures == 0);
     CHECK(summary.cancelled);
+    REQUIRE(consumer.updates.size() == 2);
+    CHECK(consumer.updates.front().changedStates.at("Email") == "e2");
     REQUIRE(source.subscriptions.size() == 1);
     CHECK(source.subscriptions.front().lastState == "state-1");
 }
@@ -169,11 +173,13 @@ TEST_CASE("state-change worker advances state without notifying for connect even
         javelin::jmap::sync::StateChangeEvent{
             .newState = "state-2",
             .changedTypes = {},
+            .changedStates = {},
             .notifyConsumer = false,
         },
         javelin::jmap::sync::StateChangeEvent{
             .newState = "state-3",
             .changedTypes = {"Email"},
+            .changedStates = {},
         },
     };
 
@@ -214,6 +220,7 @@ TEST_CASE("state-change worker backs off and retries after transient transport f
         javelin::jmap::sync::StateChangeEvent{
             .newState = "state-2",
             .changedTypes = {"Email"},
+            .changedStates = {},
         },
     };
 
@@ -279,6 +286,7 @@ TEST_CASE("state-change worker reports connection status transitions", "[jmap][s
         javelin::jmap::sync::StateChangeEvent{
             .newState = "state-2",
             .changedTypes = {"Email"},
+            .changedStates = {},
         },
     };
 
