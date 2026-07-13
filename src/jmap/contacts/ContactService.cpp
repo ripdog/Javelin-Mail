@@ -94,7 +94,10 @@ namespace javelin::jmap::contacts
                 const javelin::jmap::api::Session& session, std::string accountId)
         {
             return {.credentials = credentials(settings, std::move(accountId)),
-                    .apiUrl = session.apiUrl};
+                    .apiUrl = session.apiUrl,
+                    .transportPolicy = settings.forceWebSocket
+                                           ? javelin::jmap::api::JmapTransportPolicy::ForceWebSocket
+                                           : javelin::jmap::api::JmapTransportPolicy::Preferred};
         }
 
         [[nodiscard]] std::optional<javelin::jmap::api::MethodInvocation>

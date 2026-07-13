@@ -2,8 +2,8 @@
 
 #include "jmap/cache/Database.h"
 
-#include <string>
 #include <QStringList>
+#include <string>
 #include <variant>
 #include <vector>
 
@@ -31,6 +31,7 @@ namespace javelin::jmap::cache
         [[nodiscard]] std::optional<DatabaseError>
         removeConfiguredAccount(const QString& loginEmail, const QString& sessionUrl,
                                 const QStringList& knownAccountIds);
+        [[nodiscard]] std::optional<DatabaseError> clearMailCache(const QStringList& accountIds);
 
       private:
         DatabaseConnection& m_connection;

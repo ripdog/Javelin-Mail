@@ -333,6 +333,7 @@ namespace javelin::gui::shell
                 .sessionUrl = settings.sessionUrl.toStdString(),
                 .loginEmail = settings.loginEmail.toStdString(),
                 .apiKey = settings.apiKey.toStdString(),
+                .forceWebSocket = settings.forceWebSocket,
             };
         }
 
@@ -4392,8 +4393,8 @@ namespace javelin::gui::shell
             << QString::fromStdString(destinationMailboxId);
         for (const auto& emailId : emailIds)
         {
-            const auto result = m_mailService.queueMoveEmail(
-                accountId, emailId, sourceMailboxId, destinationMailboxId);
+            const auto result = m_mailService.queueMoveEmail(accountId, emailId, sourceMailboxId,
+                                                             destinationMailboxId);
             if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
             {
                 presentError(*error);
@@ -4433,8 +4434,8 @@ namespace javelin::gui::shell
             << QString::fromStdString(destinationMailboxId);
         for (const auto& emailId : emailIds)
         {
-            const auto result = m_mailService.queueCopyEmail(
-                accountId, emailId, sourceMailboxId, destinationMailboxId);
+            const auto result = m_mailService.queueCopyEmail(accountId, emailId, sourceMailboxId,
+                                                             destinationMailboxId);
             if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
             {
                 presentError(*error);

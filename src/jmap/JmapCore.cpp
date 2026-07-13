@@ -566,6 +566,9 @@ namespace javelin::jmap
             return javelin::jmap::api::ApiRequestContext{
                 .credentials = buildAccountCredentials(settings, std::move(accountId)),
                 .apiUrl = session.apiUrl,
+                .transportPolicy = settings.forceWebSocket
+                                       ? javelin::jmap::api::JmapTransportPolicy::ForceWebSocket
+                                       : javelin::jmap::api::JmapTransportPolicy::Preferred,
             };
         }
 
@@ -815,8 +818,8 @@ namespace javelin::jmap
         return m_impl->statusSummary;
     }
 
-    QCoro::Task<SessionRefreshResult>
-    JmapCore::refreshSession(LiveConnectionSettings settings, std::string ownerAccountId)
+    QCoro::Task<SessionRefreshResult> JmapCore::refreshSession(LiveConnectionSettings settings,
+                                                               std::string ownerAccountId)
     {
         if (m_impl->databaseConnection == nullptr || m_impl->resourceTransport == nullptr)
         {

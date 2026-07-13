@@ -143,8 +143,8 @@ namespace javelin::jmap::cache
         QSet<QString> ownerAccountIds{knownAccountIds.begin(), knownAccountIds.end()};
         const QUrl configuredUrl{sessionUrl};
         QSqlQuery sessions{m_connection.database()};
-        sessions.prepare(QStringLiteral(
-            "SELECT account_id, api_url FROM sessions WHERE username = :username"));
+        sessions.prepare(
+            QStringLiteral("SELECT account_id, api_url FROM sessions WHERE username = :username"));
         sessions.bindValue(QStringLiteral(":username"), loginEmail);
         if (!sessions.exec())
         {
@@ -201,6 +201,60 @@ namespace javelin::jmap::cache
             database.rollback();
             return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
                                  .message = QStringLiteral("Commit account removal: ") +
+                                            database.lastError().text()};
+        }
+        return std::nullopt;
+    }
+
+    std::optional<DatabaseError> AccountRepository::clearMailCache(const QStringList& accountIds)
+    {
+        if (const auto error = m_connection.validate())
+        {
+            return error;
+        }
+        if (accountIds.empty())
+        {
+            return std::nullopt;
+        }
+
+        auto& database = m_connection.database();
+        if (!database.transaction())
+        {
+            return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
+                                 .message = QStringLiteral("Begin mail cache clear: ") +
+                                            database.lastError().text()};
+        }
+
+        const QStringList statements{
+            QStringLiteral("DELETE FROM email_addresses WHERE account_id = :account_id"),
+            QStringLiteral("DELETE FROM email_keywords WHERE account_id = :account_id"),
+            QStringLiteral("DELETE FROM email_mailboxes WHERE account_id = :account_id"),
+            QStringLiteral("DELETE FROM raw_message_sources WHERE account_id = :account_id"),
+            QStringLiteral("DELETE FROM search_windows WHERE account_id = :account_id"),
+            QStringLiteral("DELETE FROM emails WHERE account_id = :account_id"),
+            QStringLiteral("DELETE FROM threads WHERE account_id = :account_id"),
+            QStringLiteral("DELETE FROM mailboxes WHERE account_id = :account_id"),
+            QStringLiteral("DELETE FROM sync_state WHERE account_id = :account_id"),
+        };
+        for (const auto& statement : statements)
+        {
+            QSqlQuery query{database};
+            query.prepare(statement);
+            for (const auto& accountId : accountIds)
+            {
+                query.bindValue(QStringLiteral(":account_id"), accountId);
+                if (!query.exec())
+                {
+                    database.rollback();
+                    return makeQueryError(QStringLiteral("Clear account mail cache"), query);
+                }
+            }
+        }
+        if (!database.commit())
+        {
+            database.rollback();
+            return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
+                                 .message = QStringLiteral("Commit mail cache clear: ") +
                                             database.lastError().text()};
         }
         return std::nullopt;

@@ -2,6 +2,7 @@
 
 #include "jmap/api/Cancellation.h"
 #include "jmap/api/Error.h"
+#include "jmap/api/JmapMethodTransport.h"
 #include "jmap/api/MethodEnvelope.h"
 #include "jmap/api/RequestBuilder.h"
 #include "jmap/auth/Auth.h"
@@ -19,6 +20,7 @@ namespace javelin::jmap::api
     {
         javelin::jmap::auth::AccountCredentials credentials;
         std::string apiUrl;
+        JmapTransportPolicy transportPolicy = JmapTransportPolicy::Preferred;
     };
 
     using MethodCallerResult =

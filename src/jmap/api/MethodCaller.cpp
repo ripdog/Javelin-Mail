@@ -46,6 +46,7 @@ namespace javelin::jmap::api
             .accessToken = std::get<javelin::jmap::auth::OAuthToken>(tokenResult).accessToken,
             .envelope = std::move(request),
             .cancellation = std::move(cancellation),
+            .transportPolicy = requestContext.transportPolicy,
         });
         if (std::holds_alternative<TransportError>(transportResult))
         {

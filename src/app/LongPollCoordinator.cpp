@@ -24,6 +24,7 @@ namespace javelin::app
                 .sessionUrl = settings.sessionUrl,
                 .loginEmail = settings.loginEmail,
                 .apiKey = settings.apiKey,
+                .forceWebSocket = settings.forceWebSocket,
             };
         }
     } // namespace
@@ -88,8 +89,7 @@ namespace javelin::app
     {
     }
 
-    void
-    MailApplicationService::applySettings(std::vector<AccountSyncConfiguration> configurations)
+    void MailApplicationService::applySettings(std::vector<AccountSyncConfiguration> configurations)
     {
         std::unordered_set<std::string> configuredAccountIds;
         for (auto& configuration : configurations)
@@ -125,16 +125,14 @@ namespace javelin::app
         for (const auto& [accountId, configuration] : m_configurations)
         {
             const auto loaded = sessions.load(accountId);
-            if (const auto* error =
-                    std::get_if<javelin::jmap::cache::DatabaseError>(&loaded))
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&loaded))
             {
                 qWarning().noquote() << "JMAP startup session lookup failed"
                                      << QString::fromStdString(accountId) << error->message;
                 continue;
             }
 
-            const auto& session =
-                std::get<std::optional<javelin::jmap::api::Session>>(loaded);
+            const auto& session = std::get<std::optional<javelin::jmap::api::Session>>(loaded);
             if (session.has_value())
             {
                 startSessionRefresh(accountId, configuration.settings);
@@ -142,8 +140,8 @@ namespace javelin::app
         }
     }
 
-    void MailApplicationService::startSessionRefresh(
-        const std::string& ownerAccountId, const AccountConnectionSettings& settings)
+    void MailApplicationService::startSessionRefresh(const std::string& ownerAccountId,
+                                                     const AccountConnectionSettings& settings)
     {
         if (!m_sessionRefreshesInFlight.insert(ownerAccountId).second)
         {
@@ -159,8 +157,7 @@ namespace javelin::app
              sessionUrl](javelin::jmap::SessionRefreshResult result)
             {
                 m_sessionRefreshesInFlight.erase(ownerAccountId);
-                if (const auto* error =
-                        std::get_if<javelin::jmap::LiveRefreshError>(&result))
+                if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
                 {
                     qWarning().noquote()
                         << "JMAP startup session discovery failed"
@@ -168,13 +165,11 @@ namespace javelin::app
                     return;
                 }
 
-                const auto& summary =
-                    std::get<javelin::jmap::SessionRefreshSummary>(result);
-                qInfo().noquote()
-                    << "JMAP startup session discovered"
-                    << QString::fromStdString(ownerAccountId)
-                    << (summary.websocketAdvertised ? QStringLiteral("WebSocket")
-                                                    : QStringLiteral("HTTP only"));
+                const auto& summary = std::get<javelin::jmap::SessionRefreshSummary>(result);
+                qInfo().noquote() << "JMAP startup session discovered"
+                                  << QString::fromStdString(ownerAccountId)
+                                  << (summary.websocketAdvertised ? QStringLiteral("WebSocket")
+                                                                  : QStringLiteral("HTTP only"));
                 for (const auto& [accountId, configuration] : m_configurations)
                 {
                     if (configuration.settings.loginEmail == loginEmail &&
@@ -214,7 +209,7 @@ namespace javelin::app
     }
 
     MailboxObservation MailApplicationService::observeMailbox(std::string accountId,
-                                                           std::string mailboxId)
+                                                              std::string mailboxId)
     {
         const auto configuredAccountId = accountId;
         const auto observationId =
@@ -380,8 +375,8 @@ namespace javelin::app
 
     javelin::jmap::QueuedEmailMutationResult
     MailApplicationService::queueMoveEmail(std::string accountId, std::string emailId,
-                                        std::string sourceMailboxId,
-                                        std::string destinationMailboxId)
+                                           std::string sourceMailboxId,
+                                           std::string destinationMailboxId)
     {
         return m_jmapCore.queueMoveEmail(std::move(accountId), std::move(emailId),
                                          std::move(sourceMailboxId),
@@ -390,8 +385,8 @@ namespace javelin::app
 
     javelin::jmap::QueuedEmailMutationResult
     MailApplicationService::queueCopyEmail(std::string accountId, std::string emailId,
-                                        std::string sourceMailboxId,
-                                        std::string destinationMailboxId)
+                                           std::string sourceMailboxId,
+                                           std::string destinationMailboxId)
     {
         return m_jmapCore.queueCopyEmail(std::move(accountId), std::move(emailId),
                                          std::move(sourceMailboxId),
@@ -412,7 +407,7 @@ namespace javelin::app
 
     javelin::jmap::QueuedEmailMutationResult
     MailApplicationService::queueSetEmailFlagged(std::string accountId, std::string emailId,
-                                              const bool flagged)
+                                                 const bool flagged)
     {
         return m_jmapCore.queueSetEmailFlagged(std::move(accountId), std::move(emailId), flagged);
     }
@@ -446,7 +441,7 @@ namespace javelin::app
 
     QCoro::Task<javelin::jmap::AttachmentDownloadResult>
     MailApplicationService::requestAttachment(std::string accountId, std::string emailId,
-                                           std::string partId)
+                                              std::string partId)
     {
         const auto configuration = m_configurations.find(accountId);
         if (configuration == m_configurations.end())
@@ -495,7 +490,7 @@ namespace javelin::app
 
     QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
     MailApplicationService::setAddressBooks(std::string accountId,
-                                         javelin::jmap::api::AddressBookSetRequest request)
+                                            javelin::jmap::api::AddressBookSetRequest request)
     {
         const auto configuration = m_configurations.find(accountId);
         if (configuration == m_configurations.end())
@@ -509,7 +504,7 @@ namespace javelin::app
 
     QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
     MailApplicationService::setContactCards(std::string accountId,
-                                         javelin::jmap::api::ContactCardSetRequest request)
+                                            javelin::jmap::api::ContactCardSetRequest request)
     {
         const auto configuration = m_configurations.find(accountId);
         if (configuration == m_configurations.end())
@@ -523,7 +518,7 @@ namespace javelin::app
 
     QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
     MailApplicationService::copyContactCards(std::string accountId,
-                                          javelin::jmap::api::ContactCardCopyRequest request)
+                                             javelin::jmap::api::ContactCardCopyRequest request)
     {
         const auto configuration = m_configurations.find(accountId);
         if (configuration == m_configurations.end())
@@ -536,9 +531,8 @@ namespace javelin::app
     }
 
     QCoro::Task<javelin::jmap::contacts::ContactUploadResult>
-    MailApplicationService::uploadContactMedia(std::string ownerAccountId,
-                                               std::string accountId,
-                                            QByteArray payload, std::string mediaType)
+    MailApplicationService::uploadContactMedia(std::string ownerAccountId, std::string accountId,
+                                               QByteArray payload, std::string mediaType)
     {
         const auto configuration = m_configurations.find(ownerAccountId);
         if (configuration == m_configurations.end())
@@ -564,7 +558,7 @@ namespace javelin::app
     }
 
     void MailApplicationService::connectCoordinator(const std::string& accountId,
-                                                     AccountSyncCoordinator& coordinator)
+                                                    AccountSyncCoordinator& coordinator)
     {
         connect(&coordinator, &AccountSyncCoordinator::statusChanged, this,
                 [this, accountId](const auto status)

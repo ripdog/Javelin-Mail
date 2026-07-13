@@ -566,6 +566,14 @@ qt_add_executable(Javelin-Mail
     src/app/main.cpp
 )
 
+qt_add_executable(jmap-transport-benchmark
+    src/tools/JmapTransportBenchmark.cpp
+)
+target_link_libraries(jmap-transport-benchmark PRIVATE javelin_jmap Qt::Core Qt::Network)
+target_compile_options(jmap-transport-benchmark PRIVATE -fexceptions)
+javelin_set_project_warnings(jmap-transport-benchmark)
+javelin_enable_sanitizers(jmap-transport-benchmark)
+
 # KDEInstallDirs can leave KDE_INSTALL_KXMLGUIDIR empty in some local/dev
 # configurations; default to the documented DATAROOTDIR/kxmlgui5 location.
 if(NOT KDE_INSTALL_KXMLGUIDIR)

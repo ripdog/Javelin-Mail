@@ -38,14 +38,14 @@ namespace javelin::jmap::api::detail
         std::optional<std::string> detail;
         std::optional<int> status;
     };
-}
+} // namespace javelin::jmap::api::detail
 
 template <> struct glz::meta<javelin::jmap::api::detail::WebSocketMessageHeader>
 {
     using T = javelin::jmap::api::detail::WebSocketMessageHeader;
     static constexpr auto value =
-        glz::object("@type", &T::type, "requestId", &T::requestId, "title", &T::title,
-                    "detail", &T::detail, "status", &T::status);
+        glz::object("@type", &T::type, "requestId", &T::requestId, "title", &T::title, "detail",
+                    &T::detail, "status", &T::status);
 };
 
 namespace javelin::jmap::api
@@ -171,14 +171,13 @@ namespace javelin::jmap::api
                 if (request.cancellation.isCancellationRequested())
                 {
                     co_return WebSocketAttemptResult{
-                        .result = cancelledError(
-                            "JMAP method call cancelled before WebSocket dispatch"),
+                        .result =
+                            cancelledError("JMAP method call cancelled before WebSocket dispatch"),
                     };
                 }
 
-                const auto connected =
-                    co_await ensureConnected(webSocketUrl, request.accessToken,
-                                             request.cancellation);
+                const auto connected = co_await ensureConnected(webSocketUrl, request.accessToken,
+                                                                request.cancellation);
                 if (const auto* error = std::get_if<TransportError>(&connected))
                 {
                     co_return WebSocketAttemptResult{.result = *error};
@@ -189,10 +188,11 @@ namespace javelin::jmap::api
                 if (!payload.has_value())
                 {
                     co_return WebSocketAttemptResult{
-                        .result = ProtocolError{
-                            .code = ProtocolErrorCode::InvalidResponse,
-                            .message = "Failed to serialize RFC 8887 JMAP request envelope",
-                        },
+                        .result =
+                            ProtocolError{
+                                .code = ProtocolErrorCode::InvalidResponse,
+                                .message = "Failed to serialize RFC 8887 JMAP request envelope",
+                            },
                     };
                 }
 
@@ -208,12 +208,13 @@ namespace javelin::jmap::api
                 }
 
                 qCDebug(logJmapWebSocketTransport).noquote()
-                    << "request dispatched" << QString::fromStdString(requestId);
+                    << "request dispatched" << QString::fromStdString(requestId) << "methods"
+                    << request.envelope.methodCalls.size() << "bytes" << bytesQueued;
                 QElapsedTimer elapsed;
                 elapsed.start();
-                while (elapsed.elapsed() <
-                       std::chrono::duration_cast<std::chrono::milliseconds>(responseTimeout)
-                           .count())
+                while (
+                    elapsed.elapsed() <
+                    std::chrono::duration_cast<std::chrono::milliseconds>(responseTimeout).count())
                 {
                     const auto response = m_responses.find(requestId);
                     if (response != m_responses.end())
@@ -221,6 +222,11 @@ namespace javelin::jmap::api
                         auto buffered = std::move(response->second);
                         m_responses.erase(response);
                         m_ignoredRequestIds.erase(requestId);
+
+                        qCInfo(logJmapWebSocketTransport).noquote()
+                            << "response received" << QString::fromStdString(requestId) << "type"
+                            << QString::fromStdString(buffered.type) << "bytes"
+                            << buffered.payload.size() << "elapsed_ms" << elapsed.elapsed();
 
                         if (buffered.type == "RequestError")
                         {
@@ -235,10 +241,11 @@ namespace javelin::jmap::api
                                 };
                             }
                             co_return WebSocketAttemptResult{
-                                .result = ProtocolError{
-                                    .code = ProtocolErrorCode::InvalidResponse,
-                                    .message = requestErrorMessage(header).toStdString(),
-                                },
+                                .result =
+                                    ProtocolError{
+                                        .code = ProtocolErrorCode::InvalidResponse,
+                                        .message = requestErrorMessage(header).toStdString(),
+                                    },
                                 .requestDispatched = true,
                                 .validWebSocketResponse = true,
                             };
@@ -248,9 +255,8 @@ namespace javelin::jmap::api
                         if (!parsed.ok())
                         {
                             co_return WebSocketAttemptResult{
-                                .result = decodingError(
-                                    parsed.error.value_or(
-                                        "Failed to parse JMAP WebSocket response envelope")),
+                                .result = decodingError(parsed.error.value_or(
+                                    "Failed to parse JMAP WebSocket response envelope")),
                                 .requestDispatched = true,
                             };
                         }
@@ -290,9 +296,8 @@ namespace javelin::jmap::api
                         };
                     }
 
-                    static_cast<void>(co_await qCoro(
-                        &m_socket, &QWebSocket::textMessageReceived,
-                        cancellationPollInterval));
+                    static_cast<void>(co_await qCoro(&m_socket, &QWebSocket::textMessageReceived,
+                                                     cancellationPollInterval));
                 }
 
                 m_ignoredRequestIds.insert(requestId);
@@ -308,8 +313,8 @@ namespace javelin::jmap::api
                             const CancellationToken& cancellation)
             {
                 const QUrl url{QString::fromStdString(std::string{webSocketUrl})};
-                if (!url.isValid() || url.scheme().compare(QStringLiteral("wss"),
-                                                           Qt::CaseInsensitive) != 0)
+                if (!url.isValid() ||
+                    url.scheme().compare(QStringLiteral("wss"), Qt::CaseInsensitive) != 0)
                 {
                     co_return decodingError(
                         "The advertised JMAP WebSocket endpoint is not a valid wss URL");
@@ -336,15 +341,14 @@ namespace javelin::jmap::api
                 if (!m_opening)
                 {
                     QNetworkRequest handshake{url};
-                    handshake.setRawHeader(
-                        "Authorization",
-                        QByteArray{"Bearer "} + QByteArray::fromStdString(m_accessToken));
+                    handshake.setRawHeader("Authorization",
+                                           QByteArray{"Bearer "} +
+                                               QByteArray::fromStdString(m_accessToken));
                     QWebSocketHandshakeOptions options;
                     options.setSubprotocols({QStringLiteral("jmap")});
                     m_opening = true;
                     m_socket.open(handshake, options);
-                    qCInfo(logJmapWebSocketTransport).noquote()
-                        << "connecting" << url.toString();
+                    qCInfo(logJmapWebSocketTransport).noquote() << "connecting" << url.toString();
                 }
 
                 QElapsedTimer elapsed;
@@ -373,16 +377,15 @@ namespace javelin::jmap::api
                     {
                         const auto error = m_socket.errorString();
                         co_return networkError(
-                            error.isEmpty()
-                                ? std::string_view{"JMAP WebSocket handshake failed"}
-                                : std::string_view{error.toStdString()});
+                            error.isEmpty() ? std::string_view{"JMAP WebSocket handshake failed"}
+                                            : std::string_view{error.toStdString()});
                     }
 
                     const auto remaining = std::chrono::milliseconds{
                         std::max<qint64>(1, timeoutMs - elapsed.elapsed())};
-                    static_cast<void>(co_await qCoro(
-                        &m_socket, &QWebSocket::stateChanged,
-                        std::min(remaining, cancellationPollInterval)));
+                    static_cast<void>(
+                        co_await qCoro(&m_socket, &QWebSocket::stateChanged,
+                                       std::min(remaining, cancellationPollInterval)));
                 }
 
                 m_opening = false;
@@ -412,8 +415,7 @@ namespace javelin::jmap::api
                 if (!header.requestId.has_value() || header.requestId->empty())
                 {
                     ++m_invalidMessageGeneration;
-                    qCWarning(logJmapWebSocketTransport)
-                        << "response omitted required requestId";
+                    qCWarning(logJmapWebSocketTransport) << "response omitted required requestId";
                     return;
                 }
                 if (m_ignoredRequestIds.erase(*header.requestId) > 0)
@@ -421,12 +423,10 @@ namespace javelin::jmap::api
                     return;
                 }
 
-                m_responses.insert_or_assign(
-                    *header.requestId,
-                    BufferedWebSocketMessage{
-                        .type = *header.type,
-                        .payload = std::move(json),
-                    });
+                m_responses.insert_or_assign(*header.requestId, BufferedWebSocketMessage{
+                                                                    .type = *header.type,
+                                                                    .payload = std::move(json),
+                                                                });
             }
 
             [[nodiscard]] std::string nextRequestId()
@@ -535,21 +535,41 @@ namespace javelin::jmap::api
         javelin::jmap::cache::JmapTransportPreferenceRepository preferences{
             m_impl->databaseConnection};
         const auto targetResult = preferences.resolve(request.accountId);
-        if (const auto* error =
-                std::get_if<javelin::jmap::cache::DatabaseError>(&targetResult))
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&targetResult))
         {
             qCWarning(logJmapWebSocketTransport).noquote()
                 << "could not resolve transport preference; using HTTP" << error->message;
+            if (request.transportPolicy == JmapTransportPolicy::ForceWebSocket)
+            {
+                co_return networkError(
+                    "WebSocket is required, but its endpoint could not be resolved from the cache");
+            }
             co_return co_await m_impl->httpTransport.call(std::move(request));
         }
 
         const auto& target =
             std::get<std::optional<javelin::jmap::cache::JmapTransportTarget>>(targetResult);
-        if (!target.has_value() ||
-            !target->shouldAttemptWebSocket(QDateTime::currentDateTimeUtc()))
+        const bool forceWebSocket = request.transportPolicy == JmapTransportPolicy::ForceWebSocket;
+        if (!target.has_value())
+        {
+            if (forceWebSocket)
+            {
+                qCWarning(logJmapWebSocketTransport)
+                    << "forced WebSocket request has no advertised endpoint";
+                co_return networkError("WebSocket is required, but this account has no advertised "
+                                       "JMAP WebSocket endpoint");
+            }
+            co_return co_await m_impl->httpTransport.call(std::move(request));
+        }
+        if (!forceWebSocket && !target->shouldAttemptWebSocket(QDateTime::currentDateTimeUtc()))
         {
             co_return co_await m_impl->httpTransport.call(std::move(request));
         }
+
+        qCDebug(logJmapWebSocketTransport).noquote()
+            << "transport selected" << (forceWebSocket ? "forced" : "preferred") << "account"
+            << QString::fromStdString(request.accountId) << "methods"
+            << request.envelope.methodCalls.size();
 
         auto& connection = m_impl->connections[target->ownerAccountId];
         if (connection == nullptr)
@@ -561,7 +581,7 @@ namespace javelin::jmap::api
         if (attempt.validWebSocketResponse)
         {
             if (const auto error = preferences.markWebSocketAvailable(target->ownerAccountId,
-                                                                       target->webSocketUrl))
+                                                                      target->webSocketUrl))
             {
                 qCWarning(logJmapWebSocketTransport).noquote()
                     << "could not persist working WebSocket state" << error->message;
@@ -575,9 +595,8 @@ namespace javelin::jmap::api
             co_return std::move(attempt.result);
         }
 
-        const auto retryAfter =
-            QDateTime::currentDateTimeUtc().addSecs(
-                std::chrono::duration_cast<std::chrono::seconds>(fallbackRetryInterval).count());
+        const auto retryAfter = QDateTime::currentDateTimeUtc().addSecs(
+            std::chrono::duration_cast<std::chrono::seconds>(fallbackRetryInterval).count());
         if (const auto error = preferences.markHttpFallback(
                 target->ownerAccountId, target->webSocketUrl, retryAfter,
                 QString::fromStdString(transportError->message)))
@@ -592,6 +611,12 @@ namespace javelin::jmap::api
 
         if (!attempt.requestDispatched)
         {
+            if (forceWebSocket)
+            {
+                qCWarning(logJmapWebSocketTransport)
+                    << "forced WebSocket request failed; HTTP fallback disabled";
+                co_return std::move(attempt.result);
+            }
             co_return co_await m_impl->httpTransport.call(std::move(request));
         }
         co_return std::move(attempt.result);

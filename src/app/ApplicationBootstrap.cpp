@@ -75,6 +75,7 @@ namespace javelin::app
                 .sessionUrl = settings.sessionUrl.toStdString(),
                 .loginEmail = settings.loginEmail.toStdString(),
                 .apiKey = settings.apiKey.toStdString(),
+                .forceWebSocket = settings.forceWebSocket,
             };
         }
 

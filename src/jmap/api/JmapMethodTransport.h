@@ -19,6 +19,12 @@ namespace javelin::jmap::api
 {
     class AbstractTransport;
 
+    enum class JmapTransportPolicy
+    {
+        Preferred,
+        ForceWebSocket,
+    };
+
     struct JmapMethodRequest
     {
         std::string accountId;
@@ -26,6 +32,7 @@ namespace javelin::jmap::api
         std::string accessToken;
         RequestEnvelope envelope;
         CancellationToken cancellation{};
+        JmapTransportPolicy transportPolicy = JmapTransportPolicy::Preferred;
     };
 
     using JmapMethodTransportResult = std::variant<ResponseEnvelope, TransportError, ProtocolError>;

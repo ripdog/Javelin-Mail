@@ -14,6 +14,7 @@ namespace javelin::app
                 .sessionUrl = std::move(settings.sessionUrl),
                 .loginEmail = std::move(settings.loginEmail),
                 .apiKey = std::move(settings.apiKey),
+                .forceWebSocket = settings.forceWebSocket,
             };
         }
     } // namespace

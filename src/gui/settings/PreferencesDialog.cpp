@@ -38,6 +38,7 @@ namespace javelin::gui::settings
         constexpr auto loginEmailKey = "loginEmail";
         constexpr auto apiKeyKey = "apiKey";
         constexpr auto cachedAccountIdsKey = "cachedAccountIds";
+        constexpr auto forceWebSocketKey = "forceWebSocket";
         constexpr auto remoteContentGroup = "remoteContent";
         constexpr auto allowedSendersKey = "allowedSenders";
         constexpr auto allowedDomainsKey = "allowedDomains";
@@ -75,6 +76,7 @@ namespace javelin::gui::settings
                 .loginEmail = {},
                 .apiKey = {},
                 .cachedAccountIds = {},
+                .forceWebSocket = false,
             };
         }
 
@@ -106,6 +108,7 @@ namespace javelin::gui::settings
                 .loginEmail = loginEmail,
                 .apiKey = settings.value(QLatin1StringView{apiKeyKey}).toString().trimmed(),
                 .cachedAccountIds = {},
+                .forceWebSocket = false,
             };
             settings.endGroup();
             if (account.sessionUrl.isEmpty() && account.loginEmail.isEmpty() &&
@@ -230,6 +233,13 @@ namespace javelin::gui::settings
         formLayout->addRow(QStringLiteral("Server"), m_sessionUrlEdit);
         formLayout->addRow(QStringLiteral("Login Email"), m_loginEmailEdit);
         formLayout->addRow(QStringLiteral("API Key"), m_apiKeyEdit);
+        m_forceWebSocketCheck =
+            new QCheckBox(QStringLiteral("Require WebSocket for JMAP requests"), detailsPanel);
+        m_forceWebSocketCheck->setToolTip(QStringLiteral(
+            "Disable HTTP fallback. Requests fail if the server WebSocket is unavailable."));
+        formLayout->addRow(QString{}, m_forceWebSocketCheck);
+        m_clearCacheButton = new QPushButton(QStringLiteral("Clear Mail Cache..."), detailsPanel);
+        formLayout->addRow(QStringLiteral("Local cache"), m_clearCacheButton);
         detailsLayout->addLayout(formLayout);
         detailsLayout->addStretch();
 
@@ -316,6 +326,10 @@ namespace javelin::gui::settings
         connect(m_loginEmailEdit, &QLineEdit::textEdited, this,
                 &PreferencesDialog::noteUnsavedChanges);
         connect(m_apiKeyEdit, &QLineEdit::textEdited, this, &PreferencesDialog::noteUnsavedChanges);
+        connect(m_forceWebSocketCheck, &QCheckBox::toggled, this,
+                &PreferencesDialog::noteUnsavedChanges);
+        connect(m_clearCacheButton, &QPushButton::clicked, this,
+                &PreferencesDialog::clearCurrentAccountCache);
         connect(m_removeRemoteContentButton, &QPushButton::clicked, this,
                 &PreferencesDialog::removeSelectedRemoteContentPermits);
         connect(m_remoteContentList, &QListWidget::itemSelectionChanged, this,
@@ -417,6 +431,7 @@ namespace javelin::gui::settings
         result.sessionUrl = m_sessionUrlEdit->text().trimmed();
         result.loginEmail = m_loginEmailEdit->text().trimmed();
         result.apiKey = m_apiKeyEdit->text().trimmed();
+        result.forceWebSocket = m_forceWebSocketCheck->isChecked();
         return result;
     }
 
@@ -446,6 +461,8 @@ namespace javelin::gui::settings
                 .apiKey = settings.value(QLatin1StringView{apiKeyKey}).toString().trimmed(),
                 .cachedAccountIds =
                     settings.value(QLatin1StringView{cachedAccountIdsKey}).toStringList(),
+                .forceWebSocket =
+                    settings.value(QLatin1StringView{forceWebSocketKey}, false).toBool(),
             });
         }
         settings.endArray();
@@ -510,6 +527,7 @@ namespace javelin::gui::settings
             settings.setValue(QLatin1StringView{loginEmailKey}, account.loginEmail);
             settings.setValue(QLatin1StringView{apiKeyKey}, account.apiKey);
             settings.setValue(QLatin1StringView{cachedAccountIdsKey}, account.cachedAccountIds);
+            settings.setValue(QLatin1StringView{forceWebSocketKey}, account.forceWebSocket);
         }
         settings.endArray();
         settings.endGroup();
@@ -605,20 +623,25 @@ namespace javelin::gui::settings
         m_sessionUrlEdit->setEnabled(hasAccount);
         m_loginEmailEdit->setEnabled(hasAccount);
         m_apiKeyEdit->setEnabled(hasAccount);
+        m_forceWebSocketCheck->setEnabled(hasAccount);
+        m_clearCacheButton->setEnabled(hasAccount);
         if (!hasAccount)
         {
             m_displayNameEdit->clear();
             m_sessionUrlEdit->clear();
             m_loginEmailEdit->clear();
             m_apiKeyEdit->clear();
+            m_forceWebSocketCheck->setChecked(false);
             return;
         }
 
         const auto& account = m_accounts[static_cast<std::size_t>(row)];
+        const QSignalBlocker forceWebSocketBlocker{m_forceWebSocketCheck};
         m_displayNameEdit->setText(account.displayName);
         m_sessionUrlEdit->setText(account.sessionUrl);
         m_loginEmailEdit->setText(account.loginEmail);
         m_apiKeyEdit->setText(account.apiKey);
+        m_forceWebSocketCheck->setChecked(account.forceWebSocket);
     }
 
     void PreferencesDialog::storeCurrentEdits()
@@ -632,10 +655,42 @@ namespace javelin::gui::settings
         account.sessionUrl = m_sessionUrlEdit->text().trimmed();
         account.loginEmail = m_loginEmailEdit->text().trimmed();
         account.apiKey = m_apiKeyEdit->text().trimmed();
+        account.forceWebSocket = m_forceWebSocketCheck->isChecked();
         if (m_accountList->count() > m_currentRow)
         {
             m_accountList->item(m_currentRow)->setText(accountListText(account));
         }
+    }
+
+    void PreferencesDialog::clearCurrentAccountCache()
+    {
+        if (m_currentRow < 0 || m_currentRow >= static_cast<int>(m_accounts.size()))
+        {
+            return;
+        }
+        const auto& account = m_accounts[static_cast<std::size_t>(m_currentRow)];
+        if (account.cachedAccountIds.empty())
+        {
+            QMessageBox::information(this, QStringLiteral("Clear mail cache"),
+                                     QStringLiteral("This account has no local mail cache."));
+            return;
+        }
+        if (QMessageBox::question(
+                this, QStringLiteral("Clear mail cache"),
+                QStringLiteral("Delete locally cached mailboxes and messages for this account? "
+                               "Account configuration and credentials will be kept.")) !=
+            QMessageBox::Yes)
+        {
+            return;
+        }
+        if (const auto error = m_accountRepository.clearMailCache(account.cachedAccountIds))
+        {
+            QMessageBox::critical(this, QStringLiteral("Could not clear mail cache"),
+                                  error->message);
+            return;
+        }
+        QMessageBox::information(this, QStringLiteral("Mail cache cleared"),
+                                 QStringLiteral("Mailboxes and messages will be fetched again."));
     }
 
     void PreferencesDialog::noteUnsavedChanges()
