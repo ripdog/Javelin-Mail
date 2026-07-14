@@ -9,6 +9,7 @@
 
 #include <QUrl>
 
+#include <algorithm>
 #include <optional>
 #include <unordered_map>
 #include <utility>
@@ -18,6 +19,7 @@ namespace javelin::jmap::sieve::detail
     struct GetRequest
     {
         std::string accountId;
+        std::optional<std::vector<std::string>> ids;
     };
 
     struct GetResponse
@@ -84,7 +86,6 @@ namespace javelin::jmap::sieve::detail
         std::optional<std::unordered_map<std::string, SieveScript>> created;
         std::optional<std::unordered_map<std::string, SetError>> notCreated;
         std::optional<std::unordered_map<std::string, SetError>> notDestroyed;
-        std::optional<std::unordered_map<std::string, std::optional<SieveScript>>> updated;
     };
 
     struct ResolvedContext
@@ -108,7 +109,7 @@ template <> struct glz::meta<javelin::jmap::sieve::SieveScript>
 template <> struct glz::meta<javelin::jmap::sieve::detail::GetRequest>
 {
     using T = javelin::jmap::sieve::detail::GetRequest;
-    static constexpr auto value = glz::object("accountId", &T::accountId);
+    static constexpr auto value = glz::object("accountId", &T::accountId, "ids", &T::ids);
 };
 
 template <> struct glz::meta<javelin::jmap::sieve::detail::GetResponse>
@@ -170,7 +171,7 @@ template <> struct glz::meta<javelin::jmap::sieve::detail::SetResponse>
     static constexpr auto value =
         glz::object("accountId", &T::accountId, "oldState", &T::oldState, "newState", &T::newState,
                     "notUpdated", &T::notUpdated, "created", &T::created, "notCreated",
-                    &T::notCreated, "notDestroyed", &T::notDestroyed, "updated", &T::updated);
+                    &T::notCreated, "notDestroyed", &T::notDestroyed);
 };
 
 namespace javelin::jmap::sieve
@@ -379,7 +380,8 @@ namespace javelin::jmap::sieve
         if (const auto* contextError = std::get_if<SieveServiceError>(&contextResult))
             co_return *contextError;
         const auto& context = std::get<detail::ResolvedContext>(contextResult);
-        const auto arguments = serialize(detail::GetRequest{.accountId = context.sieveAccountId});
+        const auto arguments =
+            serialize(detail::GetRequest{.accountId = context.sieveAccountId, .ids = std::nullopt});
         if (!arguments)
             co_return error(SieveServiceErrorCode::Protocol,
                             QStringLiteral("Failed to encode the script list request."));
@@ -627,14 +629,24 @@ namespace javelin::jmap::sieve
             std::get<api::ResponseEnvelope>(called), "sieve-active", sieveSetMethod);
         if (const auto* parseError = std::get_if<SieveServiceError>(&parsed))
             co_return *parseError;
-        const auto& response = std::get<detail::SetResponse>(parsed);
-        if (!response.updated)
+        const auto getArguments = serialize(detail::GetRequest{
+            .accountId = context.sieveAccountId,
+            .ids = std::vector<std::string>{script.id},
+        });
+        if (!getArguments)
             co_return error(SieveServiceErrorCode::Protocol,
-                            active ? QStringLiteral("The server did not activate the script.")
-                                   : QStringLiteral("The server did not deactivate the script."));
-        const auto changed = response.updated->find(script.id);
-        if (changed == response.updated->end() || !changed->second ||
-            changed->second->isActive != active)
+                            QStringLiteral("Failed to encode the script state request."));
+        auto checked = co_await call(m_methodTransport, context, std::string{sieveGetMethod},
+                                     *getArguments, "sieve-active-check");
+        if (const auto* callError = std::get_if<SieveServiceError>(&checked))
+            co_return *callError;
+        auto getResponse = parseMethodResponse<detail::GetResponse>(
+            std::get<api::ResponseEnvelope>(checked), "sieve-active-check", sieveGetMethod);
+        if (const auto* parseError = std::get_if<SieveServiceError>(&getResponse))
+            co_return *parseError;
+        const auto& scripts = std::get<detail::GetResponse>(getResponse).list;
+        const auto changed = std::ranges::find(scripts, script.id, &SieveScript::id);
+        if (changed == scripts.cend() || changed->isActive != active)
             co_return error(SieveServiceErrorCode::Protocol,
                             active ? QStringLiteral("The server did not activate the script.")
                                    : QStringLiteral("The server did not deactivate the script."));
