@@ -16,6 +16,7 @@
 #include "gui/messageview/MessageViewContainer.h"
 #include "gui/search/AdvancedSearchDialog.h"
 #include "gui/settings/PreferencesDialog.h"
+#include "gui/shell/ElidingLabel.h"
 #include "gui/shell/LayeredStatusBar.h"
 #include "gui/shell/MessageFileUtils.h"
 #include "jmap/cache/AccountRepository.h"
@@ -1150,7 +1151,7 @@ namespace javelin::gui::shell
         auto* messageHeaderLayout = new QHBoxLayout(messageHeader);
         messageHeaderLayout->setContentsMargins(8, 3, 8, 3);
         messageHeaderLayout->setSpacing(8);
-        m_messageListTitleLabel = new QLabel(messageHeader);
+        m_messageListTitleLabel = new ElidingLabel(messageHeader);
         m_messageListMetaLabel = new QLabel(messageHeader);
         m_messageQuickFilterButton = new QToolButton(messageHeader);
         m_messageQuickFilterButton->setIcon(

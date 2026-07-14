@@ -72,6 +72,11 @@ namespace javelin::gui::settings
     struct ConnectionSettings;
 }
 
+namespace javelin::gui::shell
+{
+    class ElidingLabel;
+}
+
 namespace javelin::gui::messages
 {
     class MessageListModel;
@@ -385,7 +390,7 @@ namespace javelin::gui::shell
         QLineEdit* m_mailboxSearchEdit = nullptr;
         QTreeView* m_mailboxView = nullptr;
         QListView* m_messageView = nullptr;
-        QLabel* m_messageListTitleLabel = nullptr;
+        ElidingLabel* m_messageListTitleLabel = nullptr;
         QLabel* m_messageListMetaLabel = nullptr;
         QLabel* m_messagePageLabel = nullptr;
         QToolButton* m_messageQuickFilterButton = nullptr;

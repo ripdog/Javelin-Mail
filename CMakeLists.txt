@@ -108,6 +108,8 @@ set(JAVELIN_FORMAT_FILES
     src/gui/search/AdvancedSearchDialog.h
     src/gui/settings/PreferencesDialog.cpp
     src/gui/settings/PreferencesDialog.h
+    src/gui/shell/ElidingLabel.cpp
+    src/gui/shell/ElidingLabel.h
     src/gui/shell/MessageFileUtils.cpp
     src/gui/shell/MessageFileUtils.h
     src/gui/shell/LayeredStatusBar.cpp
@@ -482,6 +484,8 @@ add_library(javelin_gui STATIC
     src/gui/search/AdvancedSearchDialog.h
     src/gui/settings/PreferencesDialog.cpp
     src/gui/settings/PreferencesDialog.h
+    src/gui/shell/ElidingLabel.cpp
+    src/gui/shell/ElidingLabel.h
     src/gui/shell/MessageFileUtils.cpp
     src/gui/shell/MessageFileUtils.h
     src/gui/shell/LayeredStatusBar.cpp
