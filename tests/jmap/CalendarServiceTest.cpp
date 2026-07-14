@@ -348,4 +348,52 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
         CHECK_FALSE(arguments.find(R"("expanded-1","expanded-2")") != std::string::npos);
         CHECK_FALSE(arguments.find(R"("base-1","base-2")") != std::string::npos);
     }
+
+    const auto cachedBeforeFailure = calendars.loadWindow("a1", interval.start, interval.end, zone);
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::CalendarWindow>>(
+        cachedBeforeFailure));
+    REQUIRE(std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(cachedBeforeFailure)
+                .has_value());
+    transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+        .methodResponses =
+            {{.name = "CalendarEvent/set",
+              .arguments =
+                  R"({"accountId":"a1","oldState":"event-batched","newState":"event-batched","created":{},"updated":{},"destroyed":[],"notCreated":{},"notUpdated":{"event-1":{"type":"forbidden","description":"read only"}},"notDestroyed":{}})",
+              .callId = "calendar-event-set"}},
+        .createdIds = std::nullopt,
+        .sessionState = "session-forbidden"});
+
+    const auto forbidden = QCoro::waitFor(service.update(
+        settings, "a1", {.accountId = "a1", .event = event(), .ifInState = std::nullopt}));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::calendar::CalendarServiceError>(forbidden));
+    CHECK(std::get<javelin::jmap::calendar::CalendarServiceError>(forbidden).code ==
+          javelin::jmap::calendar::CalendarServiceErrorCode::Permission);
+    transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+        .methodResponses =
+            {{.name = "CalendarEvent/set",
+              .arguments =
+                  R"({"accountId":"a1","oldState":"event-batched","newState":"event-batched","created":{},"updated":{},"destroyed":[],"notCreated":{"event-1":{"type":"noSupportedScheduleMethods","description":"recipient unsupported"}},"notUpdated":{},"notDestroyed":{}})",
+              .callId = "calendar-event-set"}},
+        .createdIds = std::nullopt,
+        .sessionState = "session-scheduling-failure"});
+    auto scheduledEvent = event();
+    scheduledEvent.id.clear();
+
+    const auto scheduling = QCoro::waitFor(service.create(
+        settings, "a1", {.accountId = "a1", .event = scheduledEvent, .ifInState = std::nullopt}));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::calendar::CalendarServiceError>(scheduling));
+    CHECK(std::get<javelin::jmap::calendar::CalendarServiceError>(scheduling).code ==
+          javelin::jmap::calendar::CalendarServiceErrorCode::Scheduling);
+    const auto cachedAfterFailure = calendars.loadWindow("a1", interval.start, interval.end, zone);
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::CalendarWindow>>(
+        cachedAfterFailure));
+    const auto& before =
+        *std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(cachedBeforeFailure);
+    const auto& after =
+        *std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(cachedAfterFailure);
+    CHECK(after.eventState == before.eventState);
+    REQUIRE(after.events.size() == before.events.size());
+    CHECK(after.events.front().title == before.events.front().title);
 }
