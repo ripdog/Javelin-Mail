@@ -104,6 +104,10 @@ server for the display time zone.
 Acceptance: repeated navigation keeps the database bounded and out-of-order network
 responses cannot corrupt or rewind the visible calendar.
 
+The cache retains the 12 most recently refreshed or loaded windows per account and
+display time zone. Eviction and orphan pruning run in the same reconciliation
+transaction, while occurrences referenced by any retained overlapping window remain.
+
 ## Milestone 5: calendar product and month-view completeness
 
 - Persist per-account calendar visibility and writable default destination.

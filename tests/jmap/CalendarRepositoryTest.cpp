@@ -188,4 +188,46 @@ TEST_CASE("calendar windows retain occurrences referenced by overlapping windows
               ->events.empty());
     CHECK(std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(destroyedSecond)
               ->events.empty());
+
+    REQUIRE(count.exec(
+        QStringLiteral("UPDATE calendar_query_windows SET updated_at=CASE range_start WHEN "
+                       "'2026-03-01T00:00:00' THEN '2000-01-01T00:00:00.000Z' ELSE "
+                       "'2001-01-01T00:00:00.000Z' END")));
+    const auto touchedFirst =
+        repository.loadWindow("a1", first.start, first.end, first.displayTimeZone);
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::cache::CalendarWindow>>(touchedFirst));
+    REQUIRE(
+        std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(touchedFirst).has_value());
+    for (auto month = 1; month <= 11; ++month)
+    {
+        const auto start =
+            QStringLiteral("2030-%1-01T00:00:00").arg(month, 2, 10, QLatin1Char('0'));
+        const auto end = QStringLiteral("2030-%1-28T00:00:00").arg(month, 2, 10, QLatin1Char('0'));
+        const javelin::jmap::cache::CalendarWindow window{.accountId = "a1",
+                                                          .start = {.value = start.toStdString()},
+                                                          .end = {.value = end.toStdString()},
+                                                          .displayTimeZone = zone,
+                                                          .queryState =
+                                                              "bounded-" + std::to_string(month),
+                                                          .eventState = "e4-state",
+                                                          .events = {},
+                                                          .occurrences = {}};
+        REQUIRE_FALSE(repository.reconcileWindow(window).has_value());
+    }
+
+    const auto retainedFirst =
+        repository.loadWindow("a1", first.start, first.end, first.displayTimeZone);
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::cache::CalendarWindow>>(retainedFirst));
+    CHECK(std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(retainedFirst).has_value());
+    const auto evictedSecond =
+        repository.loadWindow("a1", second.start, second.end, second.displayTimeZone);
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::cache::CalendarWindow>>(evictedSecond));
+    CHECK_FALSE(
+        std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(evictedSecond).has_value());
+    REQUIRE(count.exec(QStringLiteral("SELECT COUNT(*) FROM calendar_query_windows")));
+    REQUIRE(count.next());
+    CHECK(count.value(0).toInt() == 12);
 }

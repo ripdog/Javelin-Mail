@@ -11,6 +11,8 @@ namespace javelin::jmap::cache
 {
     namespace
     {
+        constexpr int maxCachedWindowsPerAccountAndTimeZone = 12;
+
         DatabaseError queryError(const QString& operation, const QSqlQuery& query)
         {
             return {.code = DatabaseErrorCode::QueryFailed,
@@ -412,9 +414,10 @@ namespace javelin::jmap::cache
             QSqlQuery upsertWindow{database};
             upsertWindow.prepare(QStringLiteral(
                 "INSERT INTO calendar_query_windows (account_id,range_start,range_end,"
-                "display_time_zone,query_state) VALUES (:account,:start,:end,:zone,:state) ON "
+                "display_time_zone,query_state,updated_at) VALUES "
+                "(:account,:start,:end,:zone,:state,strftime('%Y-%m-%dT%H:%M:%fZ','now')) ON "
                 "CONFLICT(account_id,range_start,range_end,display_time_zone) DO UPDATE SET "
-                "query_state=excluded.query_state,updated_at=CURRENT_TIMESTAMP"));
+                "query_state=excluded.query_state,updated_at=excluded.updated_at"));
             bindWindow(upsertWindow);
             upsertWindow.bindValue(QStringLiteral(":state"),
                                    QString::fromStdString(window.queryState));
@@ -442,6 +445,21 @@ namespace javelin::jmap::cache
                 if (!exec(add, failure, QStringLiteral("Add calendar window membership")))
                     break;
             }
+        }
+        if (!failure)
+        {
+            QSqlQuery pruneWindows{database};
+            pruneWindows.prepare(QStringLiteral(
+                "DELETE FROM calendar_query_windows WHERE rowid IN (SELECT rowid FROM "
+                "calendar_query_windows WHERE account_id=:account AND display_time_zone=:zone "
+                "ORDER BY updated_at DESC,rowid DESC LIMIT -1 OFFSET :retained)"));
+            pruneWindows.bindValue(QStringLiteral(":account"),
+                                   QString::fromStdString(window.accountId));
+            pruneWindows.bindValue(QStringLiteral(":zone"),
+                                   QString::fromStdString(window.displayTimeZone.value));
+            pruneWindows.bindValue(QStringLiteral(":retained"),
+                                   maxCachedWindowsPerAccountAndTimeZone);
+            exec(pruneWindows, failure, QStringLiteral("Prune old calendar windows"));
         }
         if (!failure)
         {
@@ -716,6 +734,19 @@ namespace javelin::jmap::cache
             return queryError(QStringLiteral("Load calendar window"), windowQuery);
         if (!windowQuery.next())
             return std::optional<CalendarWindow>{std::nullopt};
+        QSqlQuery touchWindow{m_connection.database()};
+        touchWindow.prepare(QStringLiteral(
+            "UPDATE calendar_query_windows SET "
+            "updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE account_id=:account AND "
+            "range_start=:start AND range_end=:end AND display_time_zone=:zone"));
+        touchWindow.bindValue(QStringLiteral(":account"),
+                              QString::fromStdString(std::string{accountId}));
+        touchWindow.bindValue(QStringLiteral(":start"), QString::fromStdString(start.value));
+        touchWindow.bindValue(QStringLiteral(":end"), QString::fromStdString(end.value));
+        touchWindow.bindValue(QStringLiteral(":zone"),
+                              QString::fromStdString(displayTimeZone.value));
+        if (!touchWindow.exec())
+            return queryError(QStringLiteral("Touch calendar window"), touchWindow);
         CalendarWindow result{.accountId = std::string{accountId},
                               .start = start,
                               .end = end,
