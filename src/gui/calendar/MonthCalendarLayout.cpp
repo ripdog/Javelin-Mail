@@ -1,6 +1,7 @@
 #include "gui/calendar/MonthCalendarLayout.h"
 
 #include <algorithm>
+#include <utility>
 
 namespace javelin::gui::calendar
 {
@@ -32,5 +33,30 @@ namespace javelin::gui::calendar
         if (eventCount <= slots)
             return eventCount;
         return slots > 1 ? slots - 1 : 0;
+    }
+
+    QDate monthEventLastDate(const QDateTime& start, const QDateTime& end)
+    {
+        if (end.time() == QTime{0, 0} && end.date() > start.date())
+            return end.date().addDays(-1);
+        return end.date();
+    }
+
+    MonthEventSegment monthEventSegment(const QString& title, const QDateTime& start,
+                                        const QDateTime& end, const bool allDay,
+                                        const QDate& cellDate)
+    {
+        const auto firstDate = start.date();
+        const auto lastDate = monthEventLastDate(start, end);
+        const auto begins = cellDate == firstDate;
+        const auto ends = cellDate == lastDate;
+        auto label = title;
+        if (!allDay && begins)
+            label.prepend(start.time().toString(QStringLiteral("HH:mm ")));
+        if (!begins)
+            label.prepend(QStringLiteral("← "));
+        if (!ends)
+            label.append(QStringLiteral(" →"));
+        return {.label = std::move(label), .begins = begins, .ends = ends};
     }
 } // namespace javelin::gui::calendar

@@ -143,6 +143,10 @@ and copyable; the same full detail is always written to the diagnostic log.
 Event-chip capacity is derived from each day cell's live height, font metrics, margins,
 and spacing. One row is reserved for `+N more` when needed, and coalesced resize/font/style
 updates recompute the grid without issuing calendar network requests.
+Multi-day chips now render as connected visual segments: continuation days omit a
+misleading repeated start time, arrows mark continuation across cell boundaries, and
+only the true start/end edges are rounded. Multi-day items sort ahead of ordinary timed
+items after all-day events.
 
 ## Milestone 6: interoperability and quality gates
 

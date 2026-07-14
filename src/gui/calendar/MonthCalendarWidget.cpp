@@ -58,11 +58,12 @@ namespace javelin::gui::calendar
         class EventChip final : public QToolButton
         {
           public:
-            EventChip(const MonthEvent& event, QWidget* parent) : QToolButton(parent)
+            EventChip(const MonthEvent& event, const QDate& cellDate, QWidget* parent)
+                : QToolButton(parent)
             {
-                setText((event.allDay ? QString{}
-                                      : event.start.time().toString(QStringLiteral("HH:mm "))) +
-                        event.title + (event.recurring ? QStringLiteral(" ↻") : QString{}));
+                const auto segment =
+                    monthEventSegment(event.title, event.start, event.end, event.allDay, cellDate);
+                setText(segment.label + (event.recurring ? QStringLiteral(" ↻") : QString{}));
                 setToolTip(event.title);
                 setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
                 setAutoRaise(true);
@@ -72,18 +73,23 @@ namespace javelin::gui::calendar
                 const auto base = palette().color(QPalette::Base);
                 const auto foreground =
                     contrastRatio(color, text) >= contrastRatio(color, base) ? text : base;
+                const auto leftRadius =
+                    segment.begins ? QStringLiteral("3px") : QStringLiteral("0px");
+                const auto rightRadius =
+                    segment.ends ? QStringLiteral("3px") : QStringLiteral("0px");
                 setStyleSheet(
-                    QStringLiteral("QToolButton { background: %1; color: %2; border-radius: 3px; "
+                    QStringLiteral("QToolButton { background: %1; color: %2; "
+                                   "border-top-left-radius: %3; border-bottom-left-radius: %3; "
+                                   "border-top-right-radius: %4; border-bottom-right-radius: %4; "
                                    "padding: 1px 4px; text-align: left; }")
-                        .arg(color.name(QColor::HexArgb), foreground.name(QColor::HexArgb)));
+                        .arg(color.name(QColor::HexArgb), foreground.name(QColor::HexArgb),
+                             leftRadius, rightRadius));
             }
         };
 
         QDate eventLastDate(const MonthEvent& event)
         {
-            if (event.end.time() == QTime{0, 0} && event.end.date() > event.start.date())
-                return event.end.date().addDays(-1);
-            return event.end.date();
+            return monthEventLastDate(event.start, event.end);
         }
     } // namespace
 
@@ -132,9 +138,10 @@ namespace javelin::gui::calendar
             m_overflow = 0;
         }
 
-        void addEvent(const MonthEvent& event, std::function<void()> activated)
+        void addEvent(const MonthEvent& event, const QDate& cellDate,
+                      std::function<void()> activated)
         {
-            auto* chip = new EventChip(event, this);
+            auto* chip = new EventChip(event, cellDate, this);
             QObject::connect(chip, &QToolButton::clicked, chip, std::move(activated));
             m_layout->insertWidget(m_layout->count() - 1, chip);
         }
@@ -566,6 +573,12 @@ namespace javelin::gui::calendar
                               {
                                   if (left->allDay != right->allDay)
                                       return left->allDay;
+                                  const auto leftMultiDay =
+                                      eventLastDate(*left) > left->start.date();
+                                  const auto rightMultiDay =
+                                      eventLastDate(*right) > right->start.date();
+                                  if (leftMultiDay != rightMultiDay)
+                                      return leftMultiDay;
                                   if (left->start != right->start)
                                       return left->start < right->start;
                                   return left->title.localeAwareCompare(right->title) < 0;
@@ -576,7 +589,7 @@ namespace javelin::gui::calendar
             {
                 const auto* event = matching[eventIndex];
                 m_cells[static_cast<std::size_t>(index)]->addEvent(
-                    *event,
+                    *event, date,
                     [this, event]
                     {
                         Q_EMIT eventActivated(
@@ -619,7 +632,7 @@ namespace javelin::gui::calendar
             if (std::ranges::find(m_hiddenCalendars, event.calendarId) != m_hiddenCalendars.end() ||
                 event.start.date() > date || eventLastDate(event) < date)
                 continue;
-            auto* chip = new EventChip(event, dialog);
+            auto* chip = new EventChip(event, date, dialog);
             connect(chip, &QToolButton::clicked, dialog,
                     [this, dialog, accountId = event.accountId, eventId = event.eventId,
                      recurrenceId = event.recurrenceId]
