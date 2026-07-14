@@ -78,21 +78,28 @@ namespace javelin::jmap::cache
         void bindMailbox(QSqlQuery& query, std::string_view accountId,
                          const javelin::jmap::domain::Mailbox& mailbox)
         {
-            query.bindValue(QStringLiteral(":account_id"), QString::fromStdString(std::string{accountId}));
+            query.bindValue(QStringLiteral(":account_id"),
+                            QString::fromStdString(std::string{accountId}));
             query.bindValue(QStringLiteral(":mailbox_id"), QString::fromStdString(mailbox.id));
             query.bindValue(QStringLiteral(":parent_mailbox_id"),
                             mailbox.parentId.has_value()
                                 ? QVariant{QString::fromStdString(*mailbox.parentId)}
                                 : QVariant{});
             query.bindValue(QStringLiteral(":name"), QString::fromStdString(mailbox.name));
-            query.bindValue(QStringLiteral(":role"), mailbox.role.has_value()
-                                         ? QVariant{QString::fromStdString(*mailbox.role)}
-                                         : QVariant{});
-            query.bindValue(QStringLiteral(":sort_order"), static_cast<qulonglong>(mailbox.sortOrder));
-            query.bindValue(QStringLiteral(":total_emails"), static_cast<qulonglong>(mailbox.totalEmails));
-            query.bindValue(QStringLiteral(":unread_emails"), static_cast<qulonglong>(mailbox.unreadEmails));
-            query.bindValue(QStringLiteral(":total_threads"), static_cast<qulonglong>(mailbox.totalThreads));
-            query.bindValue(QStringLiteral(":unread_threads"), static_cast<qulonglong>(mailbox.unreadThreads));
+            query.bindValue(QStringLiteral(":role"),
+                            mailbox.role.has_value()
+                                ? QVariant{QString::fromStdString(*mailbox.role)}
+                                : QVariant{});
+            query.bindValue(QStringLiteral(":sort_order"),
+                            static_cast<qulonglong>(mailbox.sortOrder));
+            query.bindValue(QStringLiteral(":total_emails"),
+                            static_cast<qulonglong>(mailbox.totalEmails));
+            query.bindValue(QStringLiteral(":unread_emails"),
+                            static_cast<qulonglong>(mailbox.unreadEmails));
+            query.bindValue(QStringLiteral(":total_threads"),
+                            static_cast<qulonglong>(mailbox.totalThreads));
+            query.bindValue(QStringLiteral(":unread_threads"),
+                            static_cast<qulonglong>(mailbox.unreadThreads));
             query.bindValue(QStringLiteral(":is_subscribed"), mailbox.isSubscribed ? 1 : 0);
             query.bindValue(QStringLiteral(":rights_json"),
                             QString::fromStdString(serializeRights(mailbox.myRights)));
@@ -100,6 +107,11 @@ namespace javelin::jmap::cache
         }
 
     } // namespace
+
+    javelin::jmap::domain::MailboxRights deserializeMailboxRights(const QString& json)
+    {
+        return deserializeRights(json);
+    }
 
     MailboxRepository::MailboxRepository(DatabaseConnection& connection) : m_connection(connection)
     {
@@ -119,13 +131,15 @@ namespace javelin::jmap::cache
         {
             return DatabaseError{
                 .code = DatabaseErrorCode::QueryFailed,
-                .message = QStringLiteral("Begin mailbox replacement transaction: ") + database.lastError().text(),
+                .message = QStringLiteral("Begin mailbox replacement transaction: ") +
+                           database.lastError().text(),
             };
         }
 
         QSqlQuery deleteQuery{database};
         deleteQuery.prepare(QStringLiteral("DELETE FROM mailboxes WHERE account_id = :account_id"));
-        deleteQuery.bindValue(QStringLiteral(":account_id"), QString::fromStdString(std::string{accountId}));
+        deleteQuery.bindValue(QStringLiteral(":account_id"),
+                              QString::fromStdString(std::string{accountId}));
         if (!deleteQuery.exec())
         {
             database.rollback();
@@ -157,7 +171,8 @@ namespace javelin::jmap::cache
             database.rollback();
             return DatabaseError{
                 .code = DatabaseErrorCode::QueryFailed,
-                .message = QStringLiteral("Commit mailbox replacement transaction: ") + database.lastError().text(),
+                .message = QStringLiteral("Commit mailbox replacement transaction: ") +
+                           database.lastError().text(),
             };
         }
 
@@ -183,7 +198,8 @@ namespace javelin::jmap::cache
         {
             return DatabaseError{
                 .code = DatabaseErrorCode::QueryFailed,
-                .message = QStringLiteral("Begin mailbox upsert transaction: ") + database.lastError().text(),
+                .message = QStringLiteral("Begin mailbox upsert transaction: ") +
+                           database.lastError().text(),
             };
         }
 
@@ -224,7 +240,8 @@ namespace javelin::jmap::cache
             database.rollback();
             return DatabaseError{
                 .code = DatabaseErrorCode::QueryFailed,
-                .message = QStringLiteral("Commit mailbox upsert transaction: ") + database.lastError().text(),
+                .message = QStringLiteral("Commit mailbox upsert transaction: ") +
+                           database.lastError().text(),
             };
         }
 
@@ -250,7 +267,8 @@ namespace javelin::jmap::cache
         {
             return DatabaseError{
                 .code = DatabaseErrorCode::QueryFailed,
-                .message = QStringLiteral("Begin mailbox delete transaction: ") + database.lastError().text(),
+                .message = QStringLiteral("Begin mailbox delete transaction: ") +
+                           database.lastError().text(),
             };
         }
 
@@ -259,7 +277,8 @@ namespace javelin::jmap::cache
             "DELETE FROM mailboxes WHERE account_id = :account_id AND mailbox_id = :mailbox_id"));
         for (const auto& mailboxId : mailboxIds)
         {
-            query.bindValue(QStringLiteral(":account_id"), QString::fromStdString(std::string{accountId}));
+            query.bindValue(QStringLiteral(":account_id"),
+                            QString::fromStdString(std::string{accountId}));
             query.bindValue(QStringLiteral(":mailbox_id"), QString::fromStdString(mailboxId));
             if (!query.exec())
             {
@@ -273,7 +292,8 @@ namespace javelin::jmap::cache
             database.rollback();
             return DatabaseError{
                 .code = DatabaseErrorCode::QueryFailed,
-                .message = QStringLiteral("Commit mailbox delete transaction: ") + database.lastError().text(),
+                .message = QStringLiteral("Commit mailbox delete transaction: ") +
+                           database.lastError().text(),
             };
         }
 
@@ -298,7 +318,8 @@ namespace javelin::jmap::cache
                 "FROM mailboxes "
                 "WHERE account_id = :account_id AND parent_mailbox_id = :parent_mailbox_id "
                 "ORDER BY sort_order, mailbox_id"));
-            query.bindValue(QStringLiteral(":parent_mailbox_id"), QString::fromStdString(std::string{*parentId}));
+            query.bindValue(QStringLiteral(":parent_mailbox_id"),
+                            QString::fromStdString(std::string{*parentId}));
         }
         else
         {
@@ -310,7 +331,8 @@ namespace javelin::jmap::cache
                 "ORDER BY sort_order, mailbox_id"));
         }
 
-        query.bindValue(QStringLiteral(":account_id"), QString::fromStdString(std::string{accountId}));
+        query.bindValue(QStringLiteral(":account_id"),
+                        QString::fromStdString(std::string{accountId}));
         if (!query.exec())
         {
             return makeQueryError(QStringLiteral("Read mailboxes"), query);
@@ -334,7 +356,7 @@ namespace javelin::jmap::cache
                 .totalThreads = query.value(7).toULongLong(),
                 .unreadThreads = query.value(8).toULongLong(),
                 .isSubscribed = query.value(9).toInt() != 0,
-                .myRights = deserializeRights(query.value(10).toString()),
+                .myRights = deserializeMailboxRights(query.value(10).toString()),
             });
         }
 

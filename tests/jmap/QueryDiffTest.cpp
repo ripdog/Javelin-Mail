@@ -19,13 +19,13 @@ namespace
             .totalThreads = 0,
             .unreadThreads = 0,
             .isSubscribed = true,
+            .myRights = {},
             .hasChildren = false,
         };
     }
 
-    [[nodiscard]] javelin::jmap::cache::MessageListItem message(std::string id, std::string threadId,
-                                                                std::string subject,
-                                                                std::string receivedAt)
+    [[nodiscard]] javelin::jmap::cache::MessageListItem
+    message(std::string id, std::string threadId, std::string subject, std::string receivedAt)
     {
         return javelin::jmap::cache::MessageListItem{
             .emailId = std::move(id),

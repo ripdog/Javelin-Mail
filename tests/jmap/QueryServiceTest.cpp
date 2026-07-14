@@ -155,6 +155,10 @@ TEST_CASE("query service returns mailbox tree rows shaped for a tree model", "[j
     REQUIRE(items.size() == 2);
     CHECK(items.front().id == "mbx-inbox");
     CHECK(items.front().hasChildren);
+    CHECK(items.front().isSubscribed);
+    CHECK(items.front().myRights.mayReadItems);
+    CHECK(items.front().myRights.maySubmit);
+    CHECK_FALSE(items.front().myRights.mayCreateChild);
     CHECK_FALSE(items.back().hasChildren);
     REQUIRE(items.back().parentId.has_value());
     CHECK(*items.back().parentId == "mbx-inbox");

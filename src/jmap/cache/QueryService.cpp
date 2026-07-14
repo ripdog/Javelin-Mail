@@ -1,5 +1,6 @@
 #include "jmap/cache/QueryService.h"
 
+#include "jmap/cache/MailboxRepository.h"
 #include "jmap/cache/SearchWindowRepository.h"
 
 #include <glaze/glaze.hpp>
@@ -67,7 +68,7 @@ namespace javelin::jmap::cache
         query.prepare(QStringLiteral(
             "SELECT m.mailbox_id, m.name, m.parent_mailbox_id, m.role, m.sort_order, "
             "m.total_emails, m.unread_emails, m.total_threads, m.unread_threads, "
-            "m.is_subscribed, "
+            "m.is_subscribed, m.rights_json, "
             "EXISTS("
             "  SELECT 1 FROM mailboxes child "
             "  WHERE child.account_id = m.account_id AND child.parent_mailbox_id = m.mailbox_id"
@@ -100,7 +101,8 @@ namespace javelin::jmap::cache
                 .totalThreads = query.value(7).toULongLong(),
                 .unreadThreads = query.value(8).toULongLong(),
                 .isSubscribed = query.value(9).toInt() != 0,
-                .hasChildren = query.value(10).toInt() != 0,
+                .myRights = deserializeMailboxRights(query.value(10).toString()),
+                .hasChildren = query.value(11).toInt() != 0,
             });
         }
 

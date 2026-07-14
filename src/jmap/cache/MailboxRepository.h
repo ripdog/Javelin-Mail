@@ -3,6 +3,8 @@
 #include "jmap/cache/Database.h"
 #include "jmap/domain/MailEntities.h"
 
+#include <QString>
+
 #include <optional>
 #include <span>
 #include <string_view>
@@ -11,6 +13,9 @@
 
 namespace javelin::jmap::cache
 {
+
+    [[nodiscard]] javelin::jmap::domain::MailboxRights
+    deserializeMailboxRights(const QString& json);
 
     class MailboxRepository
     {

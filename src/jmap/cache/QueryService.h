@@ -26,6 +26,7 @@ namespace javelin::jmap::cache
         std::uint64_t totalThreads = 0;
         std::uint64_t unreadThreads = 0;
         bool isSubscribed = false;
+        javelin::jmap::domain::MailboxRights myRights;
         bool hasChildren = false;
     };
 

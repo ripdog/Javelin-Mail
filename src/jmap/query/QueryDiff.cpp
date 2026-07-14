@@ -5,9 +5,8 @@
 
 namespace javelin::jmap::query
 {
-    std::optional<std::size_t>
-    selectionFallbackIndexAfterRemoval(const std::size_t previousIndex,
-                                       const std::size_t currentCount)
+    std::optional<std::size_t> selectionFallbackIndexAfterRemoval(const std::size_t previousIndex,
+                                                                  const std::size_t currentCount)
     {
         if (currentCount == 0)
         {
@@ -29,13 +28,25 @@ namespace javelin::jmap::query
         [[nodiscard]] bool equalItems(const javelin::jmap::cache::MailboxTreeItem& left,
                                       const javelin::jmap::cache::MailboxTreeItem& right)
         {
+            const auto& leftRights = left.myRights;
+            const auto& rightRights = right.myRights;
             return left.id == right.id && left.name == right.name &&
                    left.parentId == right.parentId && left.role == right.role &&
                    left.sortOrder == right.sortOrder && left.totalEmails == right.totalEmails &&
                    left.unreadEmails == right.unreadEmails &&
                    left.totalThreads == right.totalThreads &&
                    left.unreadThreads == right.unreadThreads &&
-                   left.isSubscribed == right.isSubscribed && left.hasChildren == right.hasChildren;
+                   left.isSubscribed == right.isSubscribed &&
+                   leftRights.mayReadItems == rightRights.mayReadItems &&
+                   leftRights.mayAddItems == rightRights.mayAddItems &&
+                   leftRights.mayRemoveItems == rightRights.mayRemoveItems &&
+                   leftRights.maySetSeen == rightRights.maySetSeen &&
+                   leftRights.maySetKeywords == rightRights.maySetKeywords &&
+                   leftRights.mayCreateChild == rightRights.mayCreateChild &&
+                   leftRights.mayRename == rightRights.mayRename &&
+                   leftRights.mayDelete == rightRights.mayDelete &&
+                   leftRights.maySubmit == rightRights.maySubmit &&
+                   left.hasChildren == right.hasChildren;
         }
 
         [[nodiscard]] bool equalItems(const javelin::jmap::cache::MessageListItem& left,

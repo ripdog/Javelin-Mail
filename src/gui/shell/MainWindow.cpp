@@ -9,6 +9,7 @@
 #include "gui/contacts/ContactsManagerWidget.h"
 #include "gui/logging/LogViewerDialog.h"
 #include "gui/mailboxes/MailboxIconUtils.h"
+#include "gui/mailboxes/MailboxPropertiesDialog.h"
 #include "gui/mailboxes/MailboxTreeModel.h"
 #include "gui/mailboxes/MailboxTreeView.h"
 #include "gui/messages/MessageListDelegate.h"
@@ -5469,6 +5470,33 @@ namespace javelin::gui::shell
         auto* openAsTabAction = menu.addAction(QStringLiteral("Open as Tab"));
         connect(openAsTabAction, &QAction::triggered, this,
                 [this] { openMailboxSelectionInTab(true); });
+        menu.addSeparator();
+        auto* propertiesAction = menu.addAction(QStringLiteral("Properties…"));
+        connect(
+            propertiesAction, &QAction::triggered, this,
+            [this, accountId, mailboxId]
+            {
+                const auto result = m_queryService.listMailboxTree(accountId.toStdString());
+                if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
+                {
+                    m_statusBar->showMessage(error->message, 10000);
+                    return;
+                }
+
+                const auto& mailboxes =
+                    std::get<std::vector<javelin::jmap::cache::MailboxTreeItem>>(result);
+                const auto mailbox = std::ranges::find(mailboxes, mailboxId.toStdString(),
+                                                       &javelin::jmap::cache::MailboxTreeItem::id);
+                if (mailbox == mailboxes.cend())
+                {
+                    m_statusBar->showMessage(QStringLiteral("The mailbox is no longer available."),
+                                             5000);
+                    return;
+                }
+
+                javelin::gui::mailboxes::MailboxPropertiesDialog dialog{accountId, *mailbox, this};
+                dialog.exec();
+            });
         menu.exec(m_mailboxView->viewport()->mapToGlobal(position));
     }
 
