@@ -133,6 +133,7 @@ namespace javelin::gui::sieve
         m_currentRow = row;
         m_loaded = false;
         m_dirty = false;
+        m_document->setReadWrite(true);
         m_document->setText(QString{});
         if (m_scripts[static_cast<std::size_t>(row)].id.empty())
         {
@@ -158,6 +159,7 @@ namespace javelin::gui::sieve
                                showError(*error);
                                return;
                            }
+                           m_document->setReadWrite(true);
                            m_document->setText(
                                QString::fromUtf8(std::get<QByteArray>(std::move(result))));
                            m_loaded = true;
@@ -230,6 +232,7 @@ namespace javelin::gui::sieve
         m_dirty = false;
         m_scripts.erase(m_scripts.begin() + row);
         delete m_scriptList->takeItem(row);
+        m_document->setReadWrite(true);
         m_document->setText(QString{});
         if (m_scripts.empty())
             m_statusLabel->setText(QStringLiteral("No Sieve scripts."));

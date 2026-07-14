@@ -500,7 +500,12 @@ namespace javelin::jmap::sieve
             if (created == response.created->end())
                 co_return error(SieveServiceErrorCode::Protocol,
                                 QStringLiteral("The server did not return the new script."));
-            co_return created->second;
+            auto createdScript = created->second;
+            if (createdScript.name.empty())
+                createdScript.name = script.name;
+            if (createdScript.blobId.empty())
+                createdScript.blobId = blobId;
+            co_return createdScript;
         }
         if (response.notUpdated)
         {

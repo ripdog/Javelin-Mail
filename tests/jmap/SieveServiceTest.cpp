@@ -180,7 +180,7 @@ TEST_CASE("new sieve scripts are validated before creation", "[jmap][sieve][serv
             .methodResponses =
                 {{.name = "SieveScript/set",
                   .arguments =
-                      R"({"accountId":"sieve-account","oldState":"a","newState":"b","created":{"new-script":{"id":"script-2","name":"vacation","blobId":"blob-new","isActive":false}},"notCreated":{}})",
+                      R"({"accountId":"sieve-account","oldState":"a","newState":"b","created":{"new-script":{"id":"script-2"}},"notCreated":{}})",
                   .callId = "sieve-save"}},
             .createdIds = std::nullopt,
             .sessionState = "s3"},
@@ -192,7 +192,10 @@ TEST_CASE("new sieve scripts are validated before creation", "[jmap][sieve][serv
                                                     QByteArrayLiteral("keep;")));
 
     REQUIRE(std::holds_alternative<javelin::jmap::sieve::SieveScript>(result));
-    CHECK(std::get<javelin::jmap::sieve::SieveScript>(result).id == "script-2");
+    const auto& created = std::get<javelin::jmap::sieve::SieveScript>(result);
+    CHECK(created.id == "script-2");
+    CHECK(created.name == "vacation");
+    CHECK(created.blobId == "blob-new");
     REQUIRE(methods.requests.size() == 2);
     CHECK(methods.requests[0].envelope.methodCalls.front().name == "SieveScript/validate");
     const auto& creation = methods.requests[1].envelope.methodCalls.front();
