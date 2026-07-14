@@ -159,3 +159,50 @@ TEST_CASE("calendar set omits server-set event properties", "[jmap][calendar]")
     CHECK(method->arguments.find(R"("utcStart")") == std::string::npos);
     CHECK(method->arguments.find(R"("utcEnd")") == std::string::npos);
 }
+
+TEST_CASE("calendar set serializes occurrence edits as base-series overrides",
+          "[jmap][calendar][recurrence]")
+{
+    javelin::jmap::calendar::CalendarEvent series;
+    series.accountId = "a1";
+    series.id = "base-series";
+    series.uid = "uid-series";
+    series.calendarIds = {{"work", true}};
+    series.title = "Planning";
+    series.start = {.value = "2026-07-13T09:00:00"};
+    series.duration = {.value = "PT1H"};
+    series.timeZone = javelin::jmap::calendar::TimeZoneId{.value = "Pacific/Auckland"};
+    series.recurrenceRule = javelin::jmap::calendar::RecurrenceRule{
+        .frequency = javelin::jmap::calendar::RecurrenceFrequency::Weekly,
+        .interval = 1,
+        .count = std::nullopt,
+        .until = std::nullopt};
+    series.recurrenceOverrides.emplace(
+        "2026-07-20T09:00:00",
+        javelin::jmap::calendar::RecurrenceOverride{
+            .excluded = false,
+            .start = javelin::jmap::calendar::LocalDateTime{.value = "2026-07-20T10:30:00"},
+            .duration = javelin::jmap::calendar::Duration{.value = "PT30M"},
+            .title = "Moved planning"});
+    series.recurrenceOverrides.emplace(
+        "2026-07-27T09:00:00", javelin::jmap::calendar::RecurrenceOverride{.excluded = true,
+                                                                           .start = std::nullopt,
+                                                                           .duration = std::nullopt,
+                                                                           .title = std::nullopt});
+
+    const auto method = javelin::jmap::api::calendarEventSet({.accountId = "a1",
+                                                              .ifInState = "event-state-4",
+                                                              .create = {},
+                                                              .update = {{"base-series", series}},
+                                                              .destroy = {},
+                                                              .sendSchedulingMessages = true});
+
+    REQUIRE(method.has_value());
+    CHECK(method->arguments.find(R"("update":{"base-series":)") != std::string::npos);
+    CHECK(method->arguments.find(R"("2026-07-20T09:00:00")") != std::string::npos);
+    CHECK(method->arguments.find(R"("start":"2026-07-20T10:30:00")") != std::string::npos);
+    CHECK(method->arguments.find(R"("duration":"PT30M")") != std::string::npos);
+    CHECK(method->arguments.find(R"("title":"Moved planning")") != std::string::npos);
+    CHECK(method->arguments.find(R"("2026-07-27T09:00:00":{"excluded":true)") != std::string::npos);
+    CHECK(method->arguments.find("synthetic") == std::string::npos);
+}

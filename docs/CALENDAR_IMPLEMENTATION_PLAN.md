@@ -70,6 +70,11 @@ changing only its title, and saving cannot alter those unrelated properties.
 Acceptance: both mutation scopes produce the draft-26 wire shape and refresh the
 visible occurrence set correctly.
 
+Occurrence edit/delete helpers preserve and compose existing overrides, and the typed
+serialization regression verifies that updates target the base series while emitting
+draft-26 override keys for moved/title/duration changes and exclusions. Synthetic
+expanded identifiers are never used as set targets.
+
 ## Milestone 3: incremental synchronization — in progress
 
 - Feed `Calendar/changes` and `CalendarEvent/changes` into the existing synchronization
