@@ -1228,74 +1228,75 @@ namespace javelin::gui::shell
                     openMailboxSelectionInTab(false);
                 });
 
-        connect(
-            m_messageView->selectionModel(), &QItemSelectionModel::currentChanged, this,
-            [this](const QModelIndex& current, const QModelIndex&)
-            {
-                const auto accountId = activeAccountId();
-                const auto mailboxId = activeMailboxId();
-                const bool allowSearchSelection = activeTabIsSearch() && accountId.has_value();
-                if (!accountId.has_value() || (!mailboxId.has_value() && !allowSearchSelection))
-                {
-                    m_messageViewContainer->setSelection(m_messageViewService, accountId, mailboxId,
-                                                         std::nullopt);
-                    updateMessageActions();
-                    return;
-                }
-
-                if (!current.isValid())
-                {
-                    m_messageViewContainer->setSelection(m_messageViewService, accountId, mailboxId,
-                                                         std::nullopt);
-                    updateMessageActions();
-                    return;
-                }
-
-                const auto emailId =
-                    current.data(javelin::gui::messages::MessageListModel::EmailIdRole).toString();
-                const auto threadId =
-                    current.data(javelin::gui::messages::MessageListModel::ThreadIdRole).toString();
-                const bool isUnread = indexIsUnread(current);
-                if (!threadId.isEmpty())
-                {
-                    QTimer::singleShot(0, this,
-                                       [this, threadId = threadId.toStdString()]
-                                       {
-                                           if (currentThreadId(*m_messageView) ==
-                                               std::optional<std::string>{threadId})
-                                           {
-                                               static_cast<void>(m_messageModel->setThreadExpanded(
-                                                   threadId, true));
-                                           }
-                                       });
-                }
-                m_messageViewContainer->setSelection(
-                    m_messageViewService, accountId, mailboxId,
-                    emailId.isEmpty() ? std::optional<std::string>{std::nullopt}
-                                      : std::optional<std::string>{emailId.toStdString()});
-                updateEmptyStates();
-                updateMessageListHeader();
-                updateMessageActions();
-                if (!emailId.isEmpty())
-                {
-                    if (!m_messageViewContainer->hasReadableBody())
-                    {
-                        m_messageViewContainer->setLoadingState(
-                            true, QStringLiteral("Checking your saved copy, then downloading the "
-                                                 "message if needed."));
-                    }
-                    refreshSelectedMessageContent(*accountId, emailId.toStdString());
-                    if (isUnread)
-                    {
-                        queueMarkEmailRead(*accountId, emailId.toStdString());
-                    }
-                }
-
-                syncActiveTabSelectionFromViews();
-            });
+        connect(m_messageView->selectionModel(), &QItemSelectionModel::currentChanged, this,
+                [this](const QModelIndex& current, const QModelIndex&)
+                { handleCurrentMessageChanged(current); });
         connect(m_messageView->selectionModel(), &QItemSelectionModel::selectionChanged, this,
                 [this](const QItemSelection&, const QItemSelection&)
                 { refreshSelectionFromModels(); });
+    }
+
+    void MainWindow::handleCurrentMessageChanged(const QModelIndex& current)
+    {
+        const auto accountId = activeAccountId();
+        const auto mailboxId = activeMailboxId();
+        const bool allowSearchSelection = activeTabIsSearch() && accountId.has_value();
+        if (!accountId.has_value() || (!mailboxId.has_value() && !allowSearchSelection))
+        {
+            m_messageViewContainer->setSelection(m_messageViewService, accountId, mailboxId,
+                                                 std::nullopt);
+            updateMessageActions();
+            return;
+        }
+
+        if (!current.isValid())
+        {
+            m_messageViewContainer->setSelection(m_messageViewService, accountId, mailboxId,
+                                                 std::nullopt);
+            updateMessageActions();
+            return;
+        }
+
+        const auto emailId =
+            current.data(javelin::gui::messages::MessageListModel::EmailIdRole).toString();
+        const auto threadId =
+            current.data(javelin::gui::messages::MessageListModel::ThreadIdRole).toString();
+        const bool isUnread = indexIsUnread(current);
+        if (!threadId.isEmpty())
+        {
+            QTimer::singleShot(
+                0, this,
+                [this, threadId = threadId.toStdString()]
+                {
+                    if (currentThreadId(*m_messageView) == std::optional<std::string>{threadId})
+                    {
+                        static_cast<void>(m_messageModel->setThreadExpanded(threadId, true));
+                    }
+                });
+        }
+        m_messageViewContainer->setSelection(
+            m_messageViewService, accountId, mailboxId,
+            emailId.isEmpty() ? std::optional<std::string>{std::nullopt}
+                              : std::optional<std::string>{emailId.toStdString()});
+        updateEmptyStates();
+        updateMessageListHeader();
+        updateMessageActions();
+        if (!emailId.isEmpty())
+        {
+            if (!m_messageViewContainer->hasReadableBody())
+            {
+                m_messageViewContainer->setLoadingState(
+                    true, QStringLiteral("Checking your saved copy, then downloading the message "
+                                         "if needed."));
+            }
+            refreshSelectedMessageContent(*accountId, emailId.toStdString());
+            if (isUnread)
+            {
+                queueMarkEmailRead(*accountId, emailId.toStdString());
+            }
+        }
+
+        syncActiveTabSelectionFromViews();
     }
 
     void MainWindow::openContacts()
@@ -2630,12 +2631,20 @@ namespace javelin::gui::shell
         }
 
         const auto previousMessageRow = currentMessageRow(*m_messageView);
+        bool autoSelectedFallback = false;
         {
             QSignalBlocker messageSelectionBlocker{m_messageView->selectionModel()};
             applyActiveTabPageToModel();
-            restoreActiveTabMessageSelection(previousMessageRow);
+            autoSelectedFallback = restoreActiveTabMessageSelection(previousMessageRow);
         }
-        refreshSelectionFromModels();
+        if (autoSelectedFallback)
+        {
+            handleCurrentMessageChanged(m_messageView->currentIndex());
+        }
+        else
+        {
+            refreshSelectionFromModels();
+        }
     }
 
     void MainWindow::loadSearchTabFromCache(const std::string_view accountId,
@@ -2665,12 +2674,20 @@ namespace javelin::gui::shell
         }
 
         const auto previousMessageRow = currentMessageRow(*m_messageView);
+        bool autoSelectedFallback = false;
         {
             QSignalBlocker messageSelectionBlocker{m_messageView->selectionModel()};
             applyActiveTabPageToModel();
-            restoreActiveTabMessageSelection(previousMessageRow);
+            autoSelectedFallback = restoreActiveTabMessageSelection(previousMessageRow);
         }
-        refreshSelectionFromModels();
+        if (autoSelectedFallback)
+        {
+            handleCurrentMessageChanged(m_messageView->currentIndex());
+        }
+        else
+        {
+            refreshSelectionFromModels();
+        }
     }
 
     void MainWindow::ensureMailboxObservation(MailboxTabState& tab)
@@ -2724,12 +2741,20 @@ namespace javelin::gui::shell
         }
 
         const auto previousMessageRow = currentMessageRow(*m_messageView);
+        bool autoSelectedFallback = false;
         {
             QSignalBlocker messageSelectionBlocker{m_messageView->selectionModel()};
             applyActiveTabPageToModel();
-            restoreActiveTabMessageSelection(previousMessageRow);
+            autoSelectedFallback = restoreActiveTabMessageSelection(previousMessageRow);
         }
-        refreshSelectionFromModels();
+        if (autoSelectedFallback)
+        {
+            handleCurrentMessageChanged(m_messageView->currentIndex());
+        }
+        else
+        {
+            refreshSelectionFromModels();
+        }
     }
 
     void MainWindow::refreshActiveTabFromServer()
@@ -3570,22 +3595,22 @@ namespace javelin::gui::shell
         }
     }
 
-    void MainWindow::restoreActiveTabMessageSelection(const std::optional<int> previousMessageRow)
+    bool MainWindow::restoreActiveTabMessageSelection(const std::optional<int> previousMessageRow)
     {
         const auto* tab = activeTab();
         if (tab == nullptr)
         {
-            return;
+            return false;
         }
 
         const auto& selection = std::visit([](const auto& content) -> const TabSelectionState&
                                            { return content.selection; }, tab->content);
-        restoreSelectionAfterMessageRefresh(activeAccountId(), activeMailboxId(),
-                                            selection.threadId, selection.emailId,
-                                            selection.selectedEmailIds, previousMessageRow);
+        return restoreSelectionAfterMessageRefresh(activeAccountId(), activeMailboxId(),
+                                                   selection.threadId, selection.emailId,
+                                                   selection.selectedEmailIds, previousMessageRow);
     }
 
-    void MainWindow::restoreSelectionAfterMessageRefresh(
+    bool MainWindow::restoreSelectionAfterMessageRefresh(
         std::optional<std::string> accountId, std::optional<std::string> mailboxId,
         std::optional<std::string> threadId, std::optional<std::string> emailId,
         const std::vector<std::string>& selectedEmailIds,
@@ -3625,18 +3650,33 @@ namespace javelin::gui::shell
                 }
                 selectionModel->setCurrentIndex(currentSelectionIndex,
                                                 QItemSelectionModel::NoUpdate);
-                return;
+                return false;
             }
         }
 
         const QModelIndex selectedMessageIndex = restoreMessageSelection(threadId, emailId);
         if (selectedMessageIndex.isValid())
         {
-            m_messageView->setCurrentIndex(selectedMessageIndex);
+            const auto restoredEmailId =
+                selectedMessageIndex.data(javelin::gui::messages::MessageListModel::EmailIdRole)
+                    .toString()
+                    .toStdString();
+            const bool selectedDifferentEmail = emailId.has_value() && restoredEmailId != *emailId;
+            if (selectedDifferentEmail)
+            {
+                selectionModel->setCurrentIndex(selectedMessageIndex,
+                                                QItemSelectionModel::ClearAndSelect |
+                                                    QItemSelectionModel::Rows);
+            }
+            else
+            {
+                m_messageView->setCurrentIndex(selectedMessageIndex);
+            }
+            return selectedDifferentEmail;
         }
-        if (m_messageView->currentIndex().isValid() || !previousMessageRow.has_value())
+        if (!previousMessageRow.has_value())
         {
-            return;
+            return false;
         }
 
         const auto fallbackRow = javelin::jmap::query::selectionFallbackIndexAfterRemoval(
@@ -3644,17 +3684,19 @@ namespace javelin::gui::shell
             static_cast<std::size_t>(m_messageModel->rowCount()));
         if (!fallbackRow.has_value())
         {
-            return;
+            return false;
         }
 
         const QModelIndex fallbackIndex = m_messageModel->index(static_cast<int>(*fallbackRow), 0);
         if (!fallbackIndex.isValid())
         {
-            return;
+            return false;
         }
 
-        m_messageView->setCurrentIndex(fallbackIndex);
+        selectionModel->setCurrentIndex(fallbackIndex, QItemSelectionModel::ClearAndSelect |
+                                                           QItemSelectionModel::Rows);
         m_messageView->scrollTo(fallbackIndex);
+        return true;
     }
 
     QModelIndex MainWindow::restoreMessageSelection(std::optional<std::string> threadId,

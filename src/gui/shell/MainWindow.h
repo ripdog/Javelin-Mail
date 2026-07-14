@@ -213,6 +213,7 @@ namespace javelin::gui::shell
         void presentUserInterventionError(const QString& message);
         void setupUi();
         void connectSelection();
+        void handleCurrentMessageChanged(const QModelIndex& current);
         void composeNewMessage();
         void openContacts();
         void openCalendar();
@@ -326,13 +327,12 @@ namespace javelin::gui::shell
                               std::optional<std::string> mailboxId,
                               std::optional<std::string> threadId,
                               std::optional<std::string> emailId, bool scrollToSelection = true);
-        void restoreActiveTabMessageSelection(std::optional<int> previousMessageRow);
-        void restoreSelectionAfterMessageRefresh(std::optional<std::string> accountId,
-                                                 std::optional<std::string> mailboxId,
-                                                 std::optional<std::string> threadId,
-                                                 std::optional<std::string> emailId,
-                                                 const std::vector<std::string>& selectedEmailIds,
-                                                 std::optional<int> previousMessageRow);
+        [[nodiscard]] bool restoreActiveTabMessageSelection(std::optional<int> previousMessageRow);
+        [[nodiscard]] bool restoreSelectionAfterMessageRefresh(
+            std::optional<std::string> accountId, std::optional<std::string> mailboxId,
+            std::optional<std::string> threadId, std::optional<std::string> emailId,
+            const std::vector<std::string>& selectedEmailIds,
+            std::optional<int> previousMessageRow);
         [[nodiscard]] QModelIndex restoreMessageSelection(std::optional<std::string> threadId,
                                                           std::optional<std::string> emailId);
         void refreshMessageListPreservingSelection();
