@@ -15,6 +15,7 @@ namespace javelin::jmap::api
     constexpr std::string_view submissionCapabilityUri = "urn:ietf:params:jmap:submission";
     constexpr std::string_view contactsCapabilityUri = "urn:ietf:params:jmap:contacts";
     constexpr std::string_view calendarsCapabilityUri = "urn:ietf:params:jmap:calendars";
+    constexpr std::string_view sieveCapabilityUri = "urn:ietf:params:jmap:sieve";
     constexpr std::string_view websocketCapabilityUri = "urn:ietf:params:jmap:websocket";
 
     struct WebSocketCapability
@@ -42,6 +43,7 @@ namespace javelin::jmap::api
         bool submission = false;
         bool contacts = false;
         bool calendars = false;
+        bool sieve = false;
         std::optional<WebSocketCapability> websocket;
     };
 
@@ -67,6 +69,7 @@ namespace javelin::jmap::api
         bool submission = false;
         std::optional<ContactsCapability> contacts;
         std::optional<CalendarsCapability> calendars;
+        bool sieve = false;
     };
 
     struct Account
@@ -84,6 +87,7 @@ namespace javelin::jmap::api
         std::optional<std::string> submissionAccountId;
         std::optional<std::string> contactsAccountId;
         std::optional<std::string> calendarsAccountId;
+        std::optional<std::string> sieveAccountId;
     };
 
     struct Session
@@ -111,6 +115,9 @@ namespace javelin::jmap::api
         MissingCalendarsCapability,
         MissingPrimaryCalendarsAccount,
         MissingCalendarsAccountCapability,
+        MissingSieveCapability,
+        MissingPrimarySieveAccount,
+        MissingSieveAccountCapability,
     };
 
     struct RequiredCapabilities
@@ -118,6 +125,7 @@ namespace javelin::jmap::api
         bool mail = false;
         bool submission = false;
         bool calendars = false;
+        bool sieve = false;
     };
 
     struct CapabilityValidationResult

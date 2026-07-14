@@ -78,6 +78,7 @@ namespace
                     .submissionAccountId = accountId,
                     .contactsAccountId = std::nullopt,
                     .calendarsAccountId = std::nullopt,
+                    .sieveAccountId = std::nullopt,
                 },
         };
         session.accounts.emplace(accountId, javelin::jmap::api::Account{

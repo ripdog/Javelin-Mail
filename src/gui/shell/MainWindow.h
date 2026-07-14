@@ -233,6 +233,7 @@ namespace javelin::gui::shell
         void composeNewMessage();
         void openContacts();
         void openCalendar();
+        void openSieveEditor();
         void composeReply();
         void composeReplyAll();
         void composeForward();
@@ -405,6 +406,7 @@ namespace javelin::gui::shell
         QAction* m_newMessageAction = nullptr;
         QAction* m_contactsAction = nullptr;
         QAction* m_calendarAction = nullptr;
+        QAction* m_sieveAction = nullptr;
         QAction* m_replyAction = nullptr;
         QAction* m_replyAllAction = nullptr;
         QAction* m_forwardAction = nullptr;

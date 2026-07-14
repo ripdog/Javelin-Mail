@@ -45,6 +45,7 @@ add_executable(javelin_jmap_tests
     jmap/SessionRepositoryTest.cpp
     jmap/SearchWindowRepositoryTest.cpp
     jmap/SessionTest.cpp
+    jmap/SieveServiceTest.cpp
     jmap/SyncStateRepositoryTest.cpp
     jmap/SyncPlannerTest.cpp
     jmap/SyncReconcilerTest.cpp

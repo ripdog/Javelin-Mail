@@ -95,6 +95,26 @@ namespace javelin::jmap::api
             }
         }
 
+        if (required.sieve)
+        {
+            appendIfMissing(result.errors, session.capabilities.sieve,
+                            CapabilityError::MissingSieveCapability);
+            if (session.capabilities.sieve)
+            {
+                const auto accountIt =
+                    session.primaryAccounts.sieveAccountId.has_value()
+                        ? session.accounts.find(*session.primaryAccounts.sieveAccountId)
+                        : session.accounts.end();
+                appendIfMissing(result.errors, accountIt != session.accounts.end(),
+                                CapabilityError::MissingPrimarySieveAccount);
+                if (accountIt != session.accounts.end())
+                {
+                    appendIfMissing(result.errors, accountIt->second.accountCapabilities.sieve,
+                                    CapabilityError::MissingSieveAccountCapability);
+                }
+            }
+        }
+
         return result;
     }
 
@@ -122,6 +142,12 @@ namespace javelin::jmap::api
             return "missing_primary_calendars_account";
         case CapabilityError::MissingCalendarsAccountCapability:
             return "missing_calendars_account_capability";
+        case CapabilityError::MissingSieveCapability:
+            return "missing_sieve_capability";
+        case CapabilityError::MissingPrimarySieveAccount:
+            return "missing_primary_sieve_account";
+        case CapabilityError::MissingSieveAccountCapability:
+            return "missing_sieve_account_capability";
         }
 
         return "unknown_capability_error";

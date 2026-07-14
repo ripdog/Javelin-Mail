@@ -6,6 +6,7 @@
 #include "jmap/contacts/ContactService.h"
 #include "jmap/query/EmailListSort.h"
 #include "jmap/search/EmailSearch.h"
+#include "jmap/sieve/SieveService.h"
 #include "jmap/sync/MailboxInterestRegistry.h"
 
 #include <QObject>
@@ -105,6 +106,7 @@ namespace javelin::app
                                javelin::jmap::cache::QueryService& queryService,
                                javelin::jmap::contacts::ContactService& contactService,
                                javelin::jmap::calendar::CalendarService& calendarService,
+                               javelin::jmap::sieve::SieveService& sieveService,
                                QObject* parent = nullptr);
 
         void applySettings(std::vector<AccountSyncConfiguration> configurations);
@@ -155,6 +157,17 @@ namespace javelin::app
         [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
         deleteCalendarEvent(std::string ownerAccountId,
                             javelin::jmap::calendar::DeleteEventCommand command);
+        [[nodiscard]] QCoro::Task<javelin::jmap::sieve::SieveListResult>
+        requestSieveScripts(std::string ownerAccountId);
+        [[nodiscard]] QCoro::Task<javelin::jmap::sieve::SieveContentResult>
+        requestSieveScript(std::string ownerAccountId, javelin::jmap::sieve::SieveScript script);
+        [[nodiscard]] QCoro::Task<javelin::jmap::sieve::SieveValidationResult>
+        validateSieveScript(std::string ownerAccountId, QByteArray content);
+        [[nodiscard]] QCoro::Task<javelin::jmap::sieve::SieveSaveResult>
+        saveSieveScript(std::string ownerAccountId, javelin::jmap::sieve::SieveScript script,
+                        QByteArray content);
+        [[nodiscard]] QCoro::Task<javelin::jmap::sieve::SieveDeleteResult>
+        deleteSieveScript(std::string ownerAccountId, javelin::jmap::sieve::SieveScript script);
         [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
         setAddressBooks(std::string accountId, javelin::jmap::api::AddressBookSetRequest request);
         [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
@@ -198,6 +211,7 @@ namespace javelin::app
         javelin::jmap::cache::QueryService& m_queryService;
         javelin::jmap::contacts::ContactService& m_contactService;
         javelin::jmap::calendar::CalendarService& m_calendarService;
+        javelin::jmap::sieve::SieveService& m_sieveService;
         struct VisibleCalendarRange
         {
             javelin::jmap::calendar::VisibleInterval interval;

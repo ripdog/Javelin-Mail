@@ -31,7 +31,7 @@ include(KDECMakeSettings)
 include(KDECompilerSettings NO_POLICY_SCOPE)
 include(FeatureSummary)
 
-find_package(KF6 REQUIRED COMPONENTS ConfigWidgets XmlGui CoreAddons)
+find_package(KF6 REQUIRED COMPONENTS ConfigWidgets XmlGui CoreAddons TextEditor)
 find_package(KPim6Mime REQUIRED)
 
 qt_standard_project_setup()
@@ -237,6 +237,10 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/submission/ComposeService.cpp
     src/jmap/submission/ComposeService.h
     src/jmap/submission/ComposeTypes.h
+    src/jmap/sieve/SieveService.cpp
+    src/jmap/sieve/SieveService.h
+    src/gui/sieve/SieveEditorDialog.cpp
+    src/gui/sieve/SieveEditorDialog.h
     tests/FixtureReader.cpp
     tests/FixtureReader.h
     tests/jmap/AccountRepositoryTest.cpp
@@ -273,6 +277,7 @@ set(JAVELIN_FORMAT_FILES
     tests/jmap/SessionClientTest.cpp
     tests/jmap/SessionRepositoryTest.cpp
     tests/jmap/SessionTest.cpp
+    tests/jmap/SieveServiceTest.cpp
     tests/jmap/SyncStateRepositoryTest.cpp
     tests/jmap/SyncPlannerTest.cpp
     tests/jmap/SyncReconcilerTest.cpp
@@ -414,6 +419,8 @@ add_library(javelin_jmap STATIC
     src/jmap/submission/ComposeService.cpp
     src/jmap/submission/ComposeService.h
     src/jmap/submission/ComposeTypes.h
+    src/jmap/sieve/SieveService.cpp
+    src/jmap/sieve/SieveService.h
 )
 target_include_directories(javelin_jmap PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
@@ -492,6 +499,8 @@ add_library(javelin_gui STATIC
     src/gui/shell/LayeredStatusBar.h
     src/gui/shell/MainWindow.cpp
     src/gui/shell/MainWindow.h
+    src/gui/sieve/SieveEditorDialog.cpp
+    src/gui/sieve/SieveEditorDialog.h
 )
 
 file(GLOB_RECURSE javelin_gui_boundary_sources CONFIGURE_DEPENDS
@@ -523,6 +532,7 @@ target_link_libraries(javelin_gui
         Qt::WebEngineWidgets
         KF6::ConfigWidgets
         KF6::XmlGui
+        KF6::TextEditor
     PRIVATE
         Qt::Concurrent
         javelin_jmap

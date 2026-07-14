@@ -447,6 +447,7 @@ namespace javelin::jmap::cache
                         sessionQuery.value(15).isNull()
                             ? std::nullopt
                             : std::optional{sessionQuery.value(15).toString().toStdString()},
+                    .sieveAccountId = std::nullopt,
                 },
         };
 

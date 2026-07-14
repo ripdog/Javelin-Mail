@@ -81,11 +81,13 @@ namespace javelin::app
         javelin::jmap::cache::AccountRepository& accountRepository,
         javelin::jmap::cache::QueryService& queryService,
         javelin::jmap::contacts::ContactService& contactService,
-        javelin::jmap::calendar::CalendarService& calendarService, QObject* parent)
+        javelin::jmap::calendar::CalendarService& calendarService,
+        javelin::jmap::sieve::SieveService& sieveService, QObject* parent)
         : QObject(parent), m_databaseConnection(databaseConnection), m_jmapCore(jmapCore),
           m_methodTransport(methodTransport), m_networkAccessManager(networkAccessManager),
           m_accountRepository(accountRepository), m_queryService(queryService),
-          m_contactService(contactService), m_calendarService(calendarService)
+          m_contactService(contactService), m_calendarService(calendarService),
+          m_sieveService(sieveService)
     {
     }
 
@@ -580,6 +582,72 @@ namespace javelin::app
         co_return co_await m_calendarService.remove(
             toLiveConnectionSettings(configuration->second.settings), std::move(ownerAccountId),
             std::move(command));
+    }
+
+    QCoro::Task<javelin::jmap::sieve::SieveListResult>
+    MailApplicationService::requestSieveScripts(std::string ownerAccountId)
+    {
+        const auto configuration = m_configurations.find(ownerAccountId);
+        if (configuration == m_configurations.end())
+            co_return javelin::jmap::sieve::SieveServiceError{
+                .code = javelin::jmap::sieve::SieveServiceErrorCode::Authentication,
+                .message = QStringLiteral("Account synchronization is not configured.")};
+        co_return co_await m_sieveService.list(
+            toLiveConnectionSettings(configuration->second.settings), std::move(ownerAccountId));
+    }
+
+    QCoro::Task<javelin::jmap::sieve::SieveContentResult>
+    MailApplicationService::requestSieveScript(std::string ownerAccountId,
+                                               javelin::jmap::sieve::SieveScript script)
+    {
+        const auto configuration = m_configurations.find(ownerAccountId);
+        if (configuration == m_configurations.end())
+            co_return javelin::jmap::sieve::SieveServiceError{
+                .code = javelin::jmap::sieve::SieveServiceErrorCode::Authentication,
+                .message = QStringLiteral("Account synchronization is not configured.")};
+        co_return co_await m_sieveService.load(
+            toLiveConnectionSettings(configuration->second.settings), std::move(ownerAccountId),
+            std::move(script));
+    }
+
+    QCoro::Task<javelin::jmap::sieve::SieveValidationResult>
+    MailApplicationService::validateSieveScript(std::string ownerAccountId, QByteArray content)
+    {
+        const auto configuration = m_configurations.find(ownerAccountId);
+        if (configuration == m_configurations.end())
+            co_return javelin::jmap::sieve::SieveServiceError{
+                .code = javelin::jmap::sieve::SieveServiceErrorCode::Authentication,
+                .message = QStringLiteral("Account synchronization is not configured.")};
+        co_return co_await m_sieveService.validate(
+            toLiveConnectionSettings(configuration->second.settings), std::move(ownerAccountId),
+            std::move(content));
+    }
+
+    QCoro::Task<javelin::jmap::sieve::SieveSaveResult> MailApplicationService::saveSieveScript(
+        std::string ownerAccountId, javelin::jmap::sieve::SieveScript script, QByteArray content)
+    {
+        const auto configuration = m_configurations.find(ownerAccountId);
+        if (configuration == m_configurations.end())
+            co_return javelin::jmap::sieve::SieveServiceError{
+                .code = javelin::jmap::sieve::SieveServiceErrorCode::Authentication,
+                .message = QStringLiteral("Account synchronization is not configured.")};
+        co_return co_await m_sieveService.save(
+            toLiveConnectionSettings(configuration->second.settings), std::move(ownerAccountId),
+            std::move(script), std::move(content));
+    }
+
+    QCoro::Task<javelin::jmap::sieve::SieveDeleteResult>
+    MailApplicationService::deleteSieveScript(std::string ownerAccountId,
+                                              javelin::jmap::sieve::SieveScript script)
+    {
+        const auto configuration = m_configurations.find(ownerAccountId);
+        if (configuration == m_configurations.end())
+            co_return javelin::jmap::sieve::SieveServiceError{
+                .code = javelin::jmap::sieve::SieveServiceErrorCode::Authentication,
+                .message = QStringLiteral("Account synchronization is not configured.")};
+        co_return co_await m_sieveService.remove(
+            toLiveConnectionSettings(configuration->second.settings), std::move(ownerAccountId),
+            std::move(script));
     }
 
     QCoro::Task<javelin::jmap::contacts::ContactMutationResult>

@@ -221,6 +221,12 @@ namespace javelin::jmap::api
                 result.calendarsAccountId = calendarsIt->second;
             }
 
+            if (const auto sieveIt = primaryAccounts.find(std::string{sieveCapabilityUri});
+                sieveIt != primaryAccounts.end())
+            {
+                result.sieveAccountId = sieveIt->second;
+            }
+
             return result;
         }
 
@@ -248,6 +254,8 @@ namespace javelin::jmap::api
                                 .contacts = parseContactsCapability(rawAccount.accountCapabilities),
                                 .calendars =
                                     parseCalendarsCapability(rawAccount.accountCapabilities),
+                                .sieve = capabilityPresent(rawAccount.accountCapabilities,
+                                                           sieveCapabilityUri),
                             },
                     });
             }
@@ -275,6 +283,7 @@ namespace javelin::jmap::api
                             capabilityPresent(rawSession.capabilities, contactsCapabilityUri),
                         .calendars =
                             capabilityPresent(rawSession.capabilities, calendarsCapabilityUri),
+                        .sieve = capabilityPresent(rawSession.capabilities, sieveCapabilityUri),
                         .websocket = parseWebSocketCapability(rawSession.capabilities),
                     },
                 .accounts = parseAccounts(std::move(rawSession.accounts)),

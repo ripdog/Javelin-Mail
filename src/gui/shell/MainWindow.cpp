@@ -19,6 +19,7 @@
 #include "gui/shell/ElidingLabel.h"
 #include "gui/shell/LayeredStatusBar.h"
 #include "gui/shell/MessageFileUtils.h"
+#include "gui/sieve/SieveEditorDialog.h"
 #include "jmap/cache/AccountRepository.h"
 #include "jmap/cache/ContactRepository.h"
 #include "jmap/cache/IdentityRepository.h"
@@ -835,6 +836,11 @@ namespace javelin::gui::shell
             !std::get<std::vector<javelin::jmap::cache::CalendarAccount>>(calendarAccounts)
                  .empty());
 
+        m_sieveAction = new QAction(QIcon::fromTheme(QStringLiteral("document-edit")),
+                                    QStringLiteral("Sieve Rules"), this);
+        connect(m_sieveAction, &QAction::triggered, this, &MainWindow::openSieveEditor);
+        actionCollection()->addAction(QStringLiteral("open_sieve_editor"), m_sieveAction);
+
         m_newMessageAction =
             new QAction(thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/new-mail.svg")),
                         QStringLiteral("&New Message"), this);
@@ -1494,6 +1500,19 @@ namespace javelin::gui::shell
         updateTabBar();
         activateTab(*m_activeTabIndex, false);
         widget->requestRefresh();
+    }
+
+    void MainWindow::openSieveEditor()
+    {
+        const auto accountId = activeAccountId();
+        if (!accountId)
+        {
+            m_statusBar->showMessage(QStringLiteral("Select an account to edit its Sieve rules."),
+                                     5000);
+            return;
+        }
+        javelin::gui::sieve::SieveEditorDialog dialog{m_mailService, *accountId, this};
+        dialog.exec();
     }
 
     void MainWindow::openCalendar()

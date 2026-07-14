@@ -18,6 +18,7 @@
 #include "jmap/contacts/ContactIdentityLookup.h"
 #include "jmap/contacts/ContactService.h"
 #include "jmap/render/InlineMessageUrl.h"
+#include "jmap/sieve/SieveService.h"
 #include "jmap/submission/ComposeService.h"
 
 #include <QDir>
@@ -80,6 +81,8 @@ namespace javelin::app
             m_databaseConnection, *m_transport, *m_methodTransport);
         m_calendarService = std::make_unique<javelin::jmap::calendar::CalendarService>(
             m_databaseConnection, *m_methodTransport);
+        m_sieveService =
+            std::make_unique<javelin::jmap::sieve::SieveService>(*m_transport, *m_methodTransport);
         m_contactIdentityLookup =
             std::make_unique<javelin::jmap::contacts::ContactIdentityLookup>(*m_contactRepository);
         m_identityRepository =
@@ -98,7 +101,7 @@ namespace javelin::app
         m_mailService = std::make_unique<MailApplicationService>(
             m_databaseConnection, *m_jmapCore, *m_methodTransport,
             *m_stateChangeNetworkAccessManager, *m_accountRepository, *m_queryService,
-            *m_contactService, *m_calendarService);
+            *m_contactService, *m_calendarService, *m_sieveService);
     }
 
     ProcessServices::~ProcessServices() = default;
@@ -131,6 +134,11 @@ namespace javelin::app
     javelin::jmap::calendar::CalendarService& ProcessServices::calendarService()
     {
         return *m_calendarService;
+    }
+
+    javelin::jmap::sieve::SieveService& ProcessServices::sieveService()
+    {
+        return *m_sieveService;
     }
 
     javelin::jmap::contacts::ContactIdentityLookup& ProcessServices::contactIdentityLookup()
