@@ -12,6 +12,7 @@
 #include <QString>
 #include <QVBoxLayout>
 #include <QWebEngineContextMenuRequest>
+#include <QWebEngineLoadingInfo>
 #include <QWebEnginePage>
 #include <QWebEngineSettings>
 #include <QWebEngineView>
@@ -155,14 +156,16 @@ namespace javelin::gui::messageview
         settings->setAttribute(QWebEngineSettings::ErrorPageEnabled, false);
         settings->setAttribute(QWebEngineSettings::PluginsEnabled, false);
         settings->setAttribute(QWebEngineSettings::PlaybackRequiresUserGesture, true);
-        connect(m_view, &QWebEngineView::loadFinished, this,
-                [this](const bool ok)
+        connect(m_view->page(), &QWebEnginePage::loadingChanged, this,
+                [this](const QWebEngineLoadingInfo& loadingInfo)
                 {
-                    applyRemoteContentPolicy();
-                    if (ok)
+                    if (loadingInfo.status() != QWebEngineLoadingInfo::LoadSucceededStatus ||
+                        loadingInfo.url() != m_expectedDocumentUrl)
                     {
-                        Q_EMIT documentLoaded();
+                        return;
                     }
+                    applyRemoteContentPolicy();
+                    Q_EMIT documentLoaded();
                 });
 
         layout->addWidget(m_view);
@@ -179,14 +182,19 @@ namespace javelin::gui::messageview
     void HtmlMessageView::setDocumentHtml(const std::string_view html)
     {
         m_remoteContentEnabled = false;
+        m_expectedDocumentUrl = QUrl(
+            QStringLiteral("%1://message/").arg(javelin::jmap::render::inlineMessageUrlScheme()));
+        m_expectedDocumentUrl.setFragment(
+            QString::number(static_cast<qulonglong>(++m_documentGeneration)));
         m_view->setHtml(QString::fromUtf8(html.data(), static_cast<qsizetype>(html.size())),
-                        QUrl(QStringLiteral("%1://message/")
-                                 .arg(javelin::jmap::render::inlineMessageUrlScheme())));
+                        m_expectedDocumentUrl);
     }
 
     void HtmlMessageView::clearDocument()
     {
         m_remoteContentEnabled = false;
+        ++m_documentGeneration;
+        m_expectedDocumentUrl = {};
         m_view->setHtml(QString{});
     }
 

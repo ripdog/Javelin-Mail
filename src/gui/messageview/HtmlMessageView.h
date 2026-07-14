@@ -3,8 +3,10 @@
 #include <QWidget>
 
 #include <QStringList>
+#include <QUrl>
 #include <QVector>
 
+#include <cstdint>
 #include <functional>
 #include <string_view>
 
@@ -39,6 +41,8 @@ namespace javelin::gui::messageview
 
         QWebEngineView* m_view = nullptr;
         bool m_remoteContentEnabled = false;
+        std::uint64_t m_documentGeneration = 0;
+        QUrl m_expectedDocumentUrl;
     };
 
 } // namespace javelin::gui::messageview

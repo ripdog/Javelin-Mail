@@ -1394,7 +1394,10 @@ namespace javelin::gui::messageview
         if (reloadBody)
         {
             m_plainTextView->clear();
-            m_htmlView->clearDocument();
+            if (!m_snapshot.has_value() || !m_snapshot->htmlBody.has_value())
+            {
+                m_htmlView->clearDocument();
+            }
             m_translationInProgress = false;
             m_messageTranslated = false;
             m_originalPlainText.clear();
