@@ -137,6 +137,9 @@ error/logging path.
 The same preference record stores one writable default destination per account. The
 calendar menu exposes writable choices, the service rejects read-only selections, and
 new-event creation consumes the effective default without modifying the server Calendar.
+Calendar discovery, refresh, and preference failures now retain a concise status message
+while opening a non-blocking expandable details view whose complete text is selectable
+and copyable; the same full detail is always written to the diagnostic log.
 
 ## Milestone 6: interoperability and quality gates
 

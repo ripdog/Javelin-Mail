@@ -227,6 +227,8 @@ namespace javelin::gui::shell
         void presentError(const javelin::jmap::LiveRefreshError& error,
                           const QString& title = QStringLiteral("Action Required"));
         void presentUserInterventionError(const QString& message);
+        void presentCalendarError(const QString& summary, const QString& details,
+                                  const QString& logContext);
         void setupUi();
         void connectSelection();
         void handleCurrentMessageChanged(const QModelIndex& current);

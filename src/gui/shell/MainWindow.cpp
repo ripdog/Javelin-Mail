@@ -109,6 +109,21 @@ namespace javelin::gui::shell
         presentError({.message = message, .requiresUserIntervention = true});
     }
 
+    void MainWindow::presentCalendarError(const QString& summary, const QString& details,
+                                          const QString& logContext)
+    {
+        qCWarning(logUserOperations).noquote() << logContext << details;
+        m_statusBar->showMessage(summary, 10000);
+        auto* dialog = new QMessageBox(QMessageBox::Warning, QStringLiteral("Calendar Error"),
+                                       summary, QMessageBox::Ok, this);
+        dialog->setInformativeText(
+            QStringLiteral("Expand Details to inspect or copy the complete error."));
+        dialog->setDetailedText(details);
+        dialog->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
+        dialog->setAttribute(Qt::WA_DeleteOnClose);
+        dialog->open();
+    }
+
     namespace
     {
         constexpr auto windowGroup = "mainWindow";
@@ -1532,9 +1547,9 @@ namespace javelin::gui::shell
         if (const auto* error =
                 std::get_if<javelin::jmap::calendar::CalendarServiceError>(&accountsResult))
         {
-            qCWarning(logUserOperations).noquote()
-                << "calendar account discovery failed" << error->message;
-            m_statusBar->showMessage(error->message, 10000);
+            presentCalendarError(QStringLiteral("Calendar accounts could not be loaded."),
+                                 error->message,
+                                 QStringLiteral("calendar account discovery failed"));
             return;
         }
         const auto* accounts =
@@ -1656,9 +1671,9 @@ namespace javelin::gui::shell
                     if (const auto* error =
                             std::get_if<javelin::jmap::calendar::CalendarServiceError>(&result))
                     {
-                        qCWarning(logUserOperations).noquote()
-                            << "calendar visibility update failed" << error->message;
-                        m_statusBar->showMessage(error->message, 10000);
+                        presentCalendarError(
+                            QStringLiteral("Calendar visibility could not be saved."),
+                            error->message, QStringLiteral("calendar visibility update failed"));
                         loadVisible(widget->visibleStart(), widget->visibleEnd());
                     }
                 });
@@ -1675,9 +1690,9 @@ namespace javelin::gui::shell
                     if (const auto* error =
                             std::get_if<javelin::jmap::calendar::CalendarServiceError>(&result))
                     {
-                        qCWarning(logUserOperations).noquote()
-                            << "default calendar update failed" << error->message;
-                        m_statusBar->showMessage(error->message, 10000);
+                        presentCalendarError(
+                            QStringLiteral("The default calendar could not be saved."),
+                            error->message, QStringLiteral("default calendar update failed"));
                         loadVisible(widget->visibleStart(), widget->visibleEnd());
                     }
                 });
@@ -1715,9 +1730,9 @@ namespace javelin::gui::shell
                         if (const auto* error =
                                 std::get_if<javelin::jmap::calendar::CalendarServiceError>(&result))
                         {
-                            qCWarning(logUserOperations).noquote()
-                                << "calendar range refresh failed" << error->message;
-                            m_statusBar->showMessage(error->message, 10000);
+                            presentCalendarError(
+                                QStringLiteral("The calendar could not be refreshed."),
+                                error->message, QStringLiteral("calendar range refresh failed"));
                             return;
                         }
                     });
