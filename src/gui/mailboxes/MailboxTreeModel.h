@@ -21,6 +21,14 @@ namespace javelin::gui::mailboxes
         Q_OBJECT
 
       public:
+        struct Options
+        {
+            std::optional<std::string> accountId;
+            bool showAccount = true;
+            bool checkable = false;
+            QStringList checkedMailboxIds;
+        };
+
         enum Roles
         {
             MailboxIdRole = Qt::UserRole + 1,
@@ -40,6 +48,9 @@ namespace javelin::gui::mailboxes
         explicit MailboxTreeModel(javelin::jmap::cache::AccountRepository& accountRepository,
                                   javelin::jmap::cache::QueryService& queryService,
                                   QObject* parent = nullptr);
+        MailboxTreeModel(javelin::jmap::cache::AccountRepository& accountRepository,
+                         javelin::jmap::cache::QueryService& queryService, Options options,
+                         QObject* parent = nullptr);
         ~MailboxTreeModel() override;
 
         [[nodiscard]] QModelIndex index(int row, int column,
@@ -48,6 +59,8 @@ namespace javelin::gui::mailboxes
         [[nodiscard]] int rowCount(const QModelIndex& parent = QModelIndex{}) const override;
         [[nodiscard]] int columnCount(const QModelIndex& parent = QModelIndex{}) const override;
         [[nodiscard]] QVariant data(const QModelIndex& index, int role) const override;
+        [[nodiscard]] bool setData(const QModelIndex& index, const QVariant& value,
+                                   int role) override;
         [[nodiscard]] Qt::ItemFlags flags(const QModelIndex& index) const override;
         [[nodiscard]] QStringList mimeTypes() const override;
         [[nodiscard]] bool canDropMimeData(const QMimeData* data, Qt::DropAction action, int row,
@@ -57,6 +70,9 @@ namespace javelin::gui::mailboxes
         [[nodiscard]] Qt::DropActions supportedDropActions() const override;
 
         void refresh();
+        void setAccountId(std::optional<std::string> accountId);
+        void setCheckedMailboxIds(QStringList mailboxIds);
+        [[nodiscard]] QStringList checkedMailboxIds() const;
         void setConnectionStatus(QStringView accountId, ConnectionStatus status);
 
       Q_SIGNALS:
@@ -82,6 +98,7 @@ namespace javelin::gui::mailboxes
             std::optional<std::string> role;
             std::uint64_t unreadEmails = 0;
             std::uint64_t totalThreads = 0;
+            bool checked = false;
             Node* parent = nullptr;
             std::vector<std::unique_ptr<Node>> children;
         };
@@ -93,6 +110,7 @@ namespace javelin::gui::mailboxes
 
         javelin::jmap::cache::AccountRepository& m_accountRepository;
         javelin::jmap::cache::QueryService& m_queryService;
+        Options m_options;
         std::vector<std::unique_ptr<Node>> m_rootNodes;
         std::unordered_map<std::string, ConnectionStatus> m_connectionStatuses;
     };

@@ -12,6 +12,12 @@ class QPushButton;
 class QRadioButton;
 class QComboBox;
 
+namespace javelin::gui::mailboxes
+{
+    class MailboxTreeModel;
+    class MailboxTreeView;
+} // namespace javelin::gui::mailboxes
+
 namespace javelin::jmap::cache
 {
     class AccountRepository;
@@ -111,8 +117,10 @@ namespace javelin::gui::settings
         QLineEdit* m_attachmentDirectoryEdit = nullptr;
         QPushButton* m_attachmentDirectoryButton = nullptr;
         QComboBox* m_mailboxSyncAccount = nullptr;
-        QListWidget* m_mailboxSyncList = nullptr;
-        QListWidget* m_mailboxNotificationList = nullptr;
+        javelin::gui::mailboxes::MailboxTreeView* m_mailboxSyncList = nullptr;
+        javelin::gui::mailboxes::MailboxTreeView* m_mailboxNotificationList = nullptr;
+        javelin::gui::mailboxes::MailboxTreeModel* m_mailboxSyncModel = nullptr;
+        javelin::gui::mailboxes::MailboxTreeModel* m_mailboxNotificationModel = nullptr;
         QHash<QString, QStringList> m_syncedMailboxIds;
         QHash<QString, QStringList> m_notificationMailboxIds;
         QSet<QString> m_configuredNotificationAccounts;

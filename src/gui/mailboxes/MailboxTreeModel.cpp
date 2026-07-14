@@ -43,8 +43,15 @@ namespace javelin::gui::mailboxes
     MailboxTreeModel::MailboxTreeModel(javelin::jmap::cache::AccountRepository& accountRepository,
                                        javelin::jmap::cache::QueryService& queryService,
                                        QObject* parent)
+        : MailboxTreeModel(accountRepository, queryService, Options{}, parent)
+    {
+    }
+
+    MailboxTreeModel::MailboxTreeModel(javelin::jmap::cache::AccountRepository& accountRepository,
+                                       javelin::jmap::cache::QueryService& queryService,
+                                       Options options, QObject* parent)
         : QAbstractItemModel(parent), m_accountRepository(accountRepository),
-          m_queryService(queryService)
+          m_queryService(queryService), m_options(std::move(options))
     {
         rebuild();
     }
@@ -200,6 +207,11 @@ namespace javelin::gui::mailboxes
             return mailboxIcon(node->role, QApplication::palette().color(QPalette::Text));
         }
 
+        if (role == Qt::CheckStateRole && m_options.checkable && !node->mailboxId.empty())
+        {
+            return node->checked ? Qt::Checked : Qt::Unchecked;
+        }
+
         if (role == MailboxIdRole)
         {
             // Returns empty string for account-level nodes (selecting an account is not a
@@ -233,6 +245,25 @@ namespace javelin::gui::mailboxes
         return {};
     }
 
+    bool MailboxTreeModel::setData(const QModelIndex& index, const QVariant& value, const int role)
+    {
+        auto* node = index.isValid() ? static_cast<Node*>(index.internalPointer()) : nullptr;
+        if (node == nullptr || role != Qt::CheckStateRole || !m_options.checkable ||
+            node->mailboxId.empty())
+        {
+            return false;
+        }
+
+        const bool checked = value.toInt() == Qt::Checked;
+        if (node->checked == checked)
+        {
+            return true;
+        }
+        node->checked = checked;
+        Q_EMIT dataChanged(index, index, {Qt::CheckStateRole});
+        return true;
+    }
+
     Qt::ItemFlags MailboxTreeModel::flags(const QModelIndex& index) const
     {
         const auto* node = nodeForIndex(index);
@@ -245,6 +276,10 @@ namespace javelin::gui::mailboxes
         if (!node->mailboxId.empty())
         {
             result |= Qt::ItemIsDropEnabled;
+            if (m_options.checkable)
+            {
+                result |= Qt::ItemIsUserCheckable;
+            }
         }
         return result;
     }
@@ -302,6 +337,48 @@ namespace javelin::gui::mailboxes
         rebuild();
     }
 
+    void MailboxTreeModel::setAccountId(std::optional<std::string> accountId)
+    {
+        if (m_options.accountId == accountId)
+        {
+            return;
+        }
+        m_options.accountId = std::move(accountId);
+        rebuild();
+    }
+
+    void MailboxTreeModel::setCheckedMailboxIds(QStringList mailboxIds)
+    {
+        mailboxIds.removeDuplicates();
+        if (m_options.checkedMailboxIds == mailboxIds)
+        {
+            return;
+        }
+        m_options.checkedMailboxIds = std::move(mailboxIds);
+        rebuild();
+    }
+
+    QStringList MailboxTreeModel::checkedMailboxIds() const
+    {
+        QStringList result;
+        const auto collect = [&result](const auto& self, const Node* node) -> void
+        {
+            if (!node->mailboxId.empty() && node->checked)
+            {
+                result.push_back(QString::fromStdString(node->mailboxId));
+            }
+            for (const auto& child : node->children)
+            {
+                self(self, child.get());
+            }
+        };
+        for (const auto& root : m_rootNodes)
+        {
+            collect(collect, root.get());
+        }
+        return result;
+    }
+
     void MailboxTreeModel::setConnectionStatus(const QStringView accountId,
                                                const ConnectionStatus status)
     {
@@ -344,6 +421,10 @@ namespace javelin::gui::mailboxes
 
         for (const auto& account : *accounts)
         {
+            if (m_options.accountId.has_value() && account.accountId != *m_options.accountId)
+            {
+                continue;
+            }
             auto accountNode = std::make_unique<Node>();
             accountNode->kind = Node::Kind::Account;
             accountNode->accountId = account.accountId;
@@ -368,6 +449,7 @@ namespace javelin::gui::mailboxes
                     deferredChildren;
 
                 auto attachChildren = [&nodesById, &deferredChildren,
+                                       &checkedMailboxIds = m_options.checkedMailboxIds,
                                        &accountId = account.accountId](const auto& self,
                                                                        Node* parentNode) -> void
                 {
@@ -388,6 +470,8 @@ namespace javelin::gui::mailboxes
                         child->role = childItem.role;
                         child->unreadEmails = childItem.unreadEmails;
                         child->totalThreads = childItem.totalThreads;
+                        child->checked =
+                            checkedMailboxIds.contains(QString::fromStdString(childItem.id));
                         child->parent = parentNode;
                         nodesById.emplace(child->mailboxId, child.get());
                         parentNode->children.push_back(std::move(child));
@@ -417,6 +501,8 @@ namespace javelin::gui::mailboxes
                     child->role = item.role;
                     child->unreadEmails = item.unreadEmails;
                     child->totalThreads = item.totalThreads;
+                    child->checked =
+                        m_options.checkedMailboxIds.contains(QString::fromStdString(item.id));
                     child->parent = parentIt->second;
                     nodesById.emplace(child->mailboxId, child.get());
                     parentIt->second->children.push_back(std::move(child));
@@ -432,6 +518,8 @@ namespace javelin::gui::mailboxes
                     rootMailboxNode->role = rootItem.role;
                     rootMailboxNode->unreadEmails = rootItem.unreadEmails;
                     rootMailboxNode->totalThreads = rootItem.totalThreads;
+                    rootMailboxNode->checked =
+                        m_options.checkedMailboxIds.contains(QString::fromStdString(rootItem.id));
                     rootMailboxNode->parent = accountNode.get();
                     nodesById.emplace(rootMailboxNode->mailboxId, rootMailboxNode.get());
                     accountNode->children.push_back(std::move(rootMailboxNode));
@@ -478,7 +566,18 @@ namespace javelin::gui::mailboxes
                 }
             }
 
-            m_rootNodes.push_back(std::move(accountNode));
+            if (m_options.showAccount)
+            {
+                m_rootNodes.push_back(std::move(accountNode));
+            }
+            else
+            {
+                for (auto& child : accountNode->children)
+                {
+                    child->parent = nullptr;
+                    m_rootNodes.push_back(std::move(child));
+                }
+            }
         }
 
         endResetModel();

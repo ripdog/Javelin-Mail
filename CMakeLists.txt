@@ -80,6 +80,8 @@ set(JAVELIN_FORMAT_FILES
     src/gui/mailboxes/MailboxTreeDelegate.h
     src/gui/mailboxes/MailboxTreeModel.cpp
     src/gui/mailboxes/MailboxTreeModel.h
+    src/gui/mailboxes/MailboxTreeView.cpp
+    src/gui/mailboxes/MailboxTreeView.h
     src/gui/compose/ComposeTabWidget.cpp
     src/gui/compose/ComposeTabWidget.h
     src/gui/contacts/ContactsManagerWidget.cpp
@@ -464,6 +466,8 @@ add_library(javelin_gui STATIC
     src/gui/mailboxes/MailboxTreeDelegate.h
     src/gui/mailboxes/MailboxTreeModel.cpp
     src/gui/mailboxes/MailboxTreeModel.h
+    src/gui/mailboxes/MailboxTreeView.cpp
+    src/gui/mailboxes/MailboxTreeView.h
     src/gui/messages/MessageListModel.cpp
     src/gui/messages/MessageListModel.h
     src/gui/messages/MessageListDelegate.cpp

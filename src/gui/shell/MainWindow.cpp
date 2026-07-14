@@ -9,8 +9,8 @@
 #include "gui/contacts/ContactsManagerWidget.h"
 #include "gui/logging/LogViewerDialog.h"
 #include "gui/mailboxes/MailboxIconUtils.h"
-#include "gui/mailboxes/MailboxTreeDelegate.h"
 #include "gui/mailboxes/MailboxTreeModel.h"
+#include "gui/mailboxes/MailboxTreeView.h"
 #include "gui/messages/MessageListDelegate.h"
 #include "gui/messages/MessageListModel.h"
 #include "gui/messageview/MessageViewContainer.h"
@@ -1081,13 +1081,8 @@ namespace javelin::gui::shell
             QStringLiteral("QTabBar::tab { max-width: 220px; min-width: 120px; }"));
         m_tabBar->hide();
 
-        m_mailboxView = new QTreeView(this);
+        m_mailboxView = new javelin::gui::mailboxes::MailboxTreeView(this);
         m_mailboxView->setModel(m_mailboxModel);
-        m_mailboxView->setItemDelegate(
-            new javelin::gui::mailboxes::MailboxTreeDelegate(m_mailboxView));
-        m_mailboxView->setIconSize(QSize{20, 20});
-        m_mailboxView->setHeaderHidden(true);
-        m_mailboxView->setExpandsOnDoubleClick(false);
         m_mailboxView->expandAll();
         m_mailboxView->setContextMenuPolicy(Qt::CustomContextMenu);
         m_mailboxView->setAcceptDrops(true);
