@@ -1640,6 +1640,25 @@ namespace javelin::gui::shell
         };
         connect(widget, &javelin::gui::calendar::MonthCalendarWidget::visibleIntervalChanged,
                 widget, loadVisible);
+        connect(widget, &javelin::gui::calendar::MonthCalendarWidget::calendarVisibilityChanged,
+                widget,
+                [this, loadVisible, widget](const QString& displayId, const bool visible)
+                {
+                    const auto separator = displayId.indexOf(QLatin1Char('\n'));
+                    if (separator <= 0 || separator == displayId.size() - 1)
+                        return;
+                    const auto result = m_calendarService.setCalendarVisible(
+                        displayId.first(separator).toStdString(),
+                        displayId.sliced(separator + 1).toStdString(), visible);
+                    if (const auto* error =
+                            std::get_if<javelin::jmap::calendar::CalendarServiceError>(&result))
+                    {
+                        qCWarning(logUserOperations).noquote()
+                            << "calendar visibility update failed" << error->message;
+                        m_statusBar->showMessage(error->message, 10000);
+                        loadVisible(widget->visibleStart(), widget->visibleEnd());
+                    }
+                });
         connect(&m_mailService, &javelin::app::MailApplicationService::calendarCacheCommitted,
                 widget,
                 [widget, accounts = *accounts,

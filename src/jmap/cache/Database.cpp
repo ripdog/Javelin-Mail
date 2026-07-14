@@ -954,6 +954,24 @@ namespace javelin::jmap::cache
                                 "calendar_event_calendars(account_id,calendar_id,event_id)"),
                         },
                 },
+                MigrationStep{
+                    .version = 18,
+                    .name = QStringLiteral("calendar_preferences"),
+                    .statements =
+                        {
+                            QStringLiteral(
+                                "CREATE TABLE calendar_preferences (account_id TEXT NOT NULL, "
+                                "calendar_id TEXT NOT NULL, is_visible INTEGER NOT NULL, "
+                                "is_default_destination INTEGER NOT NULL DEFAULT 0, PRIMARY KEY"
+                                "(account_id,calendar_id), FOREIGN KEY(account_id,calendar_id) "
+                                "REFERENCES calendars(account_id,calendar_id) ON DELETE CASCADE) "
+                                "STRICT"),
+                            QStringLiteral(
+                                "CREATE UNIQUE INDEX idx_calendar_default_destination ON "
+                                "calendar_preferences(account_id) WHERE "
+                                "is_default_destination=1"),
+                        },
+                },
             },
         };
     }

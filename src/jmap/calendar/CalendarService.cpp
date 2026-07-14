@@ -274,6 +274,16 @@ namespace javelin::jmap::calendar
         return std::get<std::vector<Calendar>>(std::move(loaded));
     }
 
+    CalendarPreferenceResult CalendarService::setCalendarVisible(const std::string_view accountId,
+                                                                 const std::string_view calendarId,
+                                                                 const bool visible)
+    {
+        cache::CalendarRepository repository{m_connection};
+        if (const auto cacheError = repository.setCalendarVisible(accountId, calendarId, visible))
+            return error(CalendarServiceErrorCode::Cache, cacheError->message);
+        return std::monostate{};
+    }
+
     std::uint64_t CalendarService::beginRefresh(const std::string_view ownerAccountId)
     {
         return ++m_refreshGenerations[std::string{ownerAccountId}];

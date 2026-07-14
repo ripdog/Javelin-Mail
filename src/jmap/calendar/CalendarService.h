@@ -90,6 +90,7 @@ namespace javelin::jmap::calendar
     using CalendarAccountsResult =
         std::variant<std::vector<cache::CalendarAccount>, CalendarServiceError>;
     using CalendarListResult = std::variant<std::vector<Calendar>, CalendarServiceError>;
+    using CalendarPreferenceResult = std::variant<std::monostate, CalendarServiceError>;
 
     class CalendarService
     {
@@ -102,6 +103,8 @@ namespace javelin::jmap::calendar
                                                     const TimeZoneId& displayTimeZone) const;
         [[nodiscard]] CalendarAccountsResult accounts() const;
         [[nodiscard]] CalendarListResult calendars(std::string_view accountId) const;
+        [[nodiscard]] CalendarPreferenceResult
+        setCalendarVisible(std::string_view accountId, std::string_view calendarId, bool visible);
         [[nodiscard]] QCoro::Task<CalendarRefreshResult> refresh(LiveConnectionSettings settings,
                                                                  std::string ownerAccountId,
                                                                  VisibleInterval interval,

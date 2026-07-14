@@ -130,6 +130,11 @@ returned as typed errors without changing the cached window or its event state.
 Acceptance: preferences survive restart, rights are enforced before a request, and
 the fixed 42-cell view remains legible across font/DPI/locale changes.
 
+Calendar visibility overrides are stored separately from the server-owned Calendar
+document and survive subsequent `Calendar/get` reconciliation. The calendar menu writes
+the per-account override immediately and reports cache failures through the normal typed
+error/logging path.
+
 ## Milestone 6: interoperability and quality gates
 
 - Commit sanitized session and method fixtures captured from the supported Stalwart

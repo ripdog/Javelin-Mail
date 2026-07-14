@@ -103,6 +103,19 @@ TEST_CASE("calendar windows retain occurrences referenced by overlapping windows
                      .mayShare = false,
                      .mayDelete = false}};
     REQUIRE_FALSE(repository.replaceCalendars("a1", "c1", {calendar}).has_value());
+    REQUIRE_FALSE(repository.setCalendarVisible("a1", "work", false).has_value());
+    auto hiddenCalendars = repository.listCalendars("a1");
+    REQUIRE(
+        std::holds_alternative<std::vector<javelin::jmap::calendar::Calendar>>(hiddenCalendars));
+    REQUIRE(std::get<std::vector<javelin::jmap::calendar::Calendar>>(hiddenCalendars).size() == 1);
+    CHECK_FALSE(std::get<std::vector<javelin::jmap::calendar::Calendar>>(hiddenCalendars)
+                    .front()
+                    .isVisible);
+    REQUIRE_FALSE(repository.replaceCalendars("a1", "c1-refreshed", {calendar}).has_value());
+    hiddenCalendars = repository.listCalendars("a1");
+    CHECK_FALSE(std::get<std::vector<javelin::jmap::calendar::Calendar>>(hiddenCalendars)
+                    .front()
+                    .isVisible);
 
     const javelin::jmap::calendar::TimeZoneId zone{.value = "Pacific/Auckland"};
     const javelin::jmap::cache::CalendarWindow first{
@@ -145,7 +158,8 @@ TEST_CASE("calendar windows retain occurrences referenced by overlapping windows
 
     const auto calendarState = repository.stateToken("a1", "Calendar");
     REQUIRE(std::holds_alternative<std::optional<std::string>>(calendarState));
-    CHECK(std::get<std::optional<std::string>>(calendarState) == std::optional<std::string>{"c1"});
+    CHECK(std::get<std::optional<std::string>>(calendarState) ==
+          std::optional<std::string>{"c1-refreshed"});
     const auto eventState = repository.stateToken("a1", "CalendarEvent");
     REQUIRE(std::holds_alternative<std::optional<std::string>>(eventState));
     CHECK(std::get<std::optional<std::string>>(eventState) ==

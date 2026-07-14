@@ -41,6 +41,8 @@ namespace javelin::jmap::cache
 
         [[nodiscard]] std::variant<std::vector<calendar::Calendar>, DatabaseError>
         listCalendars(std::string_view accountId) const;
+        [[nodiscard]] std::optional<DatabaseError>
+        setCalendarVisible(std::string_view accountId, std::string_view calendarId, bool visible);
         [[nodiscard]] std::variant<std::vector<CalendarAccount>, DatabaseError>
         listAccounts() const;
         [[nodiscard]] std::variant<std::optional<std::string>, DatabaseError>

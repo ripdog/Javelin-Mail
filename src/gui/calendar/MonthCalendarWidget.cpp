@@ -296,6 +296,7 @@ namespace javelin::gui::calendar
                                  m_hiddenCalendars.end())
                             m_hiddenCalendars.push_back(id);
                         rebuildEvents();
+                        Q_EMIT calendarVisibilityChanged(QString::fromStdString(id), visible);
                     });
         }
         if (!m_calendars.empty())

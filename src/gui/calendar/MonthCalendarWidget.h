@@ -78,6 +78,7 @@ namespace javelin::gui::calendar
         void eventActivated(const QString& accountId, const QString& eventId,
                             const QString& recurrenceId);
         void emptyTimeActivated(const QDate& date);
+        void calendarVisibilityChanged(const QString& calendarId, bool visible);
 
       protected:
         void keyPressEvent(QKeyEvent* event) override;

@@ -167,9 +167,11 @@ namespace javelin::jmap::cache
             return *error;
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
-            "SELECT calendar_id,name,description,color,sort_order,is_subscribed,is_visible,"
-            "is_default,time_zone,rights_json FROM calendars WHERE account_id=:account ORDER BY "
-            "sort_order,name COLLATE NOCASE,calendar_id"));
+            "SELECT c.calendar_id,c.name,c.description,c.color,c.sort_order,c.is_subscribed,"
+            "COALESCE(p.is_visible,c.is_visible),c.is_default,c.time_zone,c.rights_json FROM "
+            "calendars c LEFT JOIN calendar_preferences p ON p.account_id=c.account_id AND "
+            "p.calendar_id=c.calendar_id WHERE c.account_id=:account ORDER BY c.sort_order,"
+            "c.name COLLATE NOCASE,c.calendar_id"));
         query.bindValue(QStringLiteral(":account"), QString::fromStdString(std::string{accountId}));
         if (!query.exec())
             return queryError(QStringLiteral("List calendars"), query);
@@ -199,6 +201,26 @@ namespace javelin::jmap::cache
                 .myRights = rights(query.value(9).toUInt())});
         }
         return result;
+    }
+
+    std::optional<DatabaseError>
+    CalendarRepository::setCalendarVisible(const std::string_view accountId,
+                                           const std::string_view calendarId, const bool visible)
+    {
+        if (const auto error = m_connection.validate())
+            return error;
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "INSERT INTO calendar_preferences (account_id,calendar_id,is_visible) VALUES "
+            "(:account,:calendar,:visible) ON CONFLICT(account_id,calendar_id) DO UPDATE SET "
+            "is_visible=excluded.is_visible"));
+        query.bindValue(QStringLiteral(":account"), QString::fromStdString(std::string{accountId}));
+        query.bindValue(QStringLiteral(":calendar"),
+                        QString::fromStdString(std::string{calendarId}));
+        query.bindValue(QStringLiteral(":visible"), visible ? 1 : 0);
+        if (!query.exec())
+            return queryError(QStringLiteral("Store calendar visibility"), query);
+        return std::nullopt;
     }
 
     std::variant<std::vector<CalendarAccount>, DatabaseError>
