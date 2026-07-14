@@ -33,6 +33,7 @@ namespace javelin::gui::contacts
                               std::string ownerAccountId, QWidget* parent = nullptr);
 
         [[nodiscard]] bool operationInFlight() const;
+        [[nodiscard]] bool hasSelectedContact() const;
 
       public Q_SLOTS:
         void requestRefresh();
@@ -40,12 +41,14 @@ namespace javelin::gui::contacts
         void beginEditContact();
         void deleteContact();
         void copyContact();
+        void showAddressBookManager();
 
       Q_SIGNALS:
         void statusMessageRequested(const QString& message, int timeoutMs = 5000);
         void userInterventionRequired(const QString& message);
         void composeMailRequested(const QString& accountId, const QString& name,
                                   const QString& email);
+        void toolbarStateChanged(bool busy, bool hasSelectedContact);
 
       private:
         void setupUi();
@@ -57,20 +60,19 @@ namespace javelin::gui::contacts
         void loadEditorDocument(const QString& document);
         void saveContact();
         void uploadPhoto();
-        void createAddressBook();
-        void editAddressBook();
-        void deleteAddressBook();
-        void setDefaultAddressBook();
-        void toggleAddressBookSubscription();
-        void editAddressBookSharing();
+        void createAddressBook(std::string accountId);
+        void editAddressBook(std::string accountId, javelin::jmap::api::AddressBook book);
+        void deleteAddressBook(std::string accountId, javelin::jmap::api::AddressBook book);
+        void setDefaultAddressBook(std::string accountId, javelin::jmap::api::AddressBook book);
+        void toggleAddressBookSubscription(std::string accountId,
+                                           javelin::jmap::api::AddressBook book);
+        void editAddressBookSharing(std::string accountId, javelin::jmap::api::AddressBook book);
         void applyAddressBookSet(javelin::jmap::api::AddressBookSetRequest request,
                                  QString progressMessage);
         void setBusy(bool busy);
         [[nodiscard]] std::optional<std::string> currentAccountId() const;
         [[nodiscard]] std::optional<std::string> currentAddressBookId() const;
         [[nodiscard]] const javelin::jmap::contacts::ContactSummary* currentContact() const;
-        [[nodiscard]] javelin::jmap::api::AddressBook* currentAddressBook();
-        void showAddressBookManager();
         void populateContactCards(const javelin::jmap::contacts::ContactSummary& contact);
 
         javelin::jmap::cache::ContactRepository& m_repository;
@@ -102,20 +104,9 @@ namespace javelin::gui::contacts
         QPlainTextEdit* m_notesEdit = nullptr;
         QListWidget* m_addressBooksEdit = nullptr;
         QToolButton* m_advancedToggle = nullptr;
-        QPushButton* m_newContactButton = nullptr;
-        QPushButton* m_editContactButton = nullptr;
-        QPushButton* m_deleteContactButton = nullptr;
-        QPushButton* m_copyContactButton = nullptr;
         QToolButton* m_refreshButton = nullptr;
-        QToolButton* m_manageBooksButton = nullptr;
         QPushButton* m_saveButton = nullptr;
         QPushButton* m_uploadPhotoButton = nullptr;
         QPushButton* m_cancelButton = nullptr;
-        QPushButton* m_addBookButton = nullptr;
-        QPushButton* m_editBookButton = nullptr;
-        QPushButton* m_deleteBookButton = nullptr;
-        QPushButton* m_defaultBookButton = nullptr;
-        QPushButton* m_subscribeBookButton = nullptr;
-        QPushButton* m_shareBookButton = nullptr;
     };
 } // namespace javelin::gui::contacts

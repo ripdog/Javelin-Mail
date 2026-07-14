@@ -419,11 +419,13 @@ namespace javelin::gui::shell
         QAction* m_contactEditAction = nullptr;
         QAction* m_contactDeleteAction = nullptr;
         QAction* m_contactCopyAction = nullptr;
+        QAction* m_contactManageAddressBooksAction = nullptr;
         QAction* m_contactRefreshAction = nullptr;
         QAction* m_calendarNewEventAction = nullptr;
         QAction* m_calendarPreviousMonthAction = nullptr;
         QAction* m_calendarTodayAction = nullptr;
         QAction* m_calendarNextMonthAction = nullptr;
+        QAction* m_calendarListAction = nullptr;
         QAction* m_calendarRefreshAction = nullptr;
         javelin::jmap::query::EmailListSort m_emailListSort;
         bool m_refreshInFlight = false;

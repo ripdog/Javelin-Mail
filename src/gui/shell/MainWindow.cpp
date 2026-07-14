@@ -989,6 +989,17 @@ namespace javelin::gui::shell
         connect(m_contactCopyAction, &QAction::triggered, this, [invokeContact]
                 { invokeContact(&javelin::gui::contacts::ContactsManagerWidget::copyContact); });
         actionCollection()->addAction(QStringLiteral("contact_copy"), m_contactCopyAction);
+        m_contactManageAddressBooksAction =
+            new QAction(QIcon::fromTheme(QStringLiteral("view-list-details")),
+                        QStringLiteral("Manage Address Books…"), this);
+        connect(m_contactManageAddressBooksAction, &QAction::triggered, this,
+                [invokeContact]
+                {
+                    invokeContact(
+                        &javelin::gui::contacts::ContactsManagerWidget::showAddressBookManager);
+                });
+        actionCollection()->addAction(QStringLiteral("contact_manage_address_books"),
+                                      m_contactManageAddressBooksAction);
         m_contactRefreshAction = new QAction(QIcon::fromTheme(QStringLiteral("view-refresh")),
                                              QStringLiteral("Refresh Contacts"), this);
         connect(m_contactRefreshAction, &QAction::triggered, this, [invokeContact]
@@ -1026,6 +1037,9 @@ namespace javelin::gui::shell
                 { invokeCalendar(&javelin::gui::calendar::MonthCalendarWidget::showNextMonth); });
         actionCollection()->addAction(QStringLiteral("calendar_next_month"),
                                       m_calendarNextMonthAction);
+        m_calendarListAction = new QAction(QIcon::fromTheme(QStringLiteral("view-calendar-list")),
+                                           QStringLiteral("Calendars"), this);
+        actionCollection()->addAction(QStringLiteral("calendar_list"), m_calendarListAction);
         m_calendarRefreshAction = new QAction(QIcon::fromTheme(QStringLiteral("view-refresh")),
                                               QStringLiteral("Refresh Calendar"), this);
         connect(m_calendarRefreshAction, &QAction::triggered, this,
@@ -1465,6 +1479,15 @@ namespace javelin::gui::shell
                                        .email = email.toStdString()}},
                     });
                 });
+        connect(widget, &javelin::gui::contacts::ContactsManagerWidget::toolbarStateChanged, this,
+                [this, widget]
+                {
+                    const auto* tab = activeTab();
+                    const auto* contacts =
+                        tab == nullptr ? nullptr : std::get_if<ContactsTabState>(&tab->content);
+                    if (contacts != nullptr && contacts->widget == widget)
+                        updateToolbarForActiveTab();
+                });
         m_contentStack->addWidget(widget);
         m_tabs.push_back(TabState{.content = ContactsTabState{.accountId = selected->ownerAccountId,
                                                               .title = QStringLiteral("Contacts"),
@@ -1533,7 +1556,7 @@ namespace javelin::gui::shell
                         const auto key = account.accountId + '\n' + calendar.id;
                         const auto color = calendar.color
                                                ? QColor{QString::fromStdString(*calendar.color)}
-                                               : QColor{QStringLiteral("#4f7cac")};
+                                               : widget->palette().color(QPalette::Highlight);
                         calendarColors.emplace(key, color);
                         calendarDisplays.push_back({.id = key,
                                                     .name = QStringLiteral("%1 — %2").arg(
@@ -1585,8 +1608,9 @@ namespace javelin::gui::shell
                          .calendarId = displayCalendarId,
                          .eventId = event->second->id,
                          .title = QString::fromStdString(title),
-                         .color = color == calendarColors.end() ? QColor{QStringLiteral("#4f7cac")}
-                                                                : color->second,
+                         .color = color == calendarColors.end()
+                                      ? widget->palette().color(QPalette::Highlight)
+                                      : color->second,
                          .start = startTime,
                          .end = endTime,
                          .allDay = occurrence.allDay,
@@ -2315,6 +2339,34 @@ namespace javelin::gui::shell
         setToolBarVisible(QStringLiteral("composeToolBar"), context == ToolbarContext::Compose);
         setToolBarVisible(QStringLiteral("contactsToolBar"), context == ToolbarContext::Contacts);
         setToolBarVisible(QStringLiteral("calendarToolBar"), context == ToolbarContext::Calendar);
+        if (context == ToolbarContext::Contacts)
+        {
+            bool busy = true;
+            bool selected = false;
+            if (const auto* tab = activeTab())
+                if (const auto* contacts = std::get_if<ContactsTabState>(&tab->content);
+                    contacts != nullptr && contacts->widget != nullptr)
+                {
+                    busy = contacts->widget->operationInFlight();
+                    selected = contacts->widget->hasSelectedContact();
+                }
+            m_contactNewAction->setEnabled(!busy);
+            m_contactEditAction->setEnabled(!busy && selected);
+            m_contactDeleteAction->setEnabled(!busy && selected);
+            m_contactCopyAction->setEnabled(!busy && selected);
+            m_contactManageAddressBooksAction->setEnabled(!busy);
+            m_contactRefreshAction->setEnabled(!busy);
+        }
+        if (context == ToolbarContext::Calendar)
+        {
+            auto* menu = static_cast<QMenu*>(nullptr);
+            if (const auto* tab = activeTab())
+                if (const auto* calendar = std::get_if<CalendarTabState>(&tab->content);
+                    calendar != nullptr && calendar->widget != nullptr)
+                    menu = calendar->widget->calendarMenu();
+            m_calendarListAction->setMenu(menu);
+            m_calendarListAction->setEnabled(menu != nullptr);
+        }
     }
 
     void MainWindow::saveNewToolbarConfig()

@@ -1,26 +1,56 @@
 #include "gui/calendar/MonthCalendarWidget.h"
 #include "gui/calendar/MonthCalendarLayout.h"
 
+#include <QColorDialog>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QKeyEvent>
 #include <QLabel>
+#include <QListWidget>
 #include <QMenu>
 #include <QMouseEvent>
 #include <QPixmap>
 #include <QPushButton>
+#include <QSettings>
 #include <QToolButton>
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <cmath>
 #include <functional>
 
 namespace javelin::gui::calendar
 {
     namespace
     {
+        [[nodiscard]] double relativeLuminance(const QColor& color)
+        {
+            const auto channel = [](const double value)
+            {
+                const auto normalized = value / 255.0;
+                return normalized <= 0.04045 ? normalized / 12.92
+                                             : std::pow((normalized + 0.055) / 1.055, 2.4);
+            };
+            return 0.2126 * channel(color.red()) + 0.7152 * channel(color.green()) +
+                   0.0722 * channel(color.blue());
+        }
+
+        [[nodiscard]] double contrastRatio(const QColor& left, const QColor& right)
+        {
+            const auto lighter = std::max(relativeLuminance(left), relativeLuminance(right));
+            const auto darker = std::min(relativeLuminance(left), relativeLuminance(right));
+            return (lighter + 0.05) / (darker + 0.05);
+        }
+
+        [[nodiscard]] QIcon colorSwatch(const QColor& color)
+        {
+            QPixmap swatch{12, 12};
+            swatch.fill(color);
+            return QIcon{swatch};
+        }
+
         class EventChip final : public QToolButton
         {
           public:
@@ -33,12 +63,15 @@ namespace javelin::gui::calendar
                 setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
                 setAutoRaise(true);
                 const auto color =
-                    event.color.isValid() ? event.color : QColor{QStringLiteral("#4f7cac")};
+                    event.color.isValid() ? event.color : palette().color(QPalette::Highlight);
+                const auto text = palette().color(QPalette::Text);
+                const auto base = palette().color(QPalette::Base);
+                const auto foreground =
+                    contrastRatio(color, text) >= contrastRatio(color, base) ? text : base;
                 setStyleSheet(
                     QStringLiteral("QToolButton { background: %1; color: %2; border-radius: 3px; "
                                    "padding: 1px 4px; text-align: left; }")
-                        .arg(color.name(), color.lightness() < 140 ? QStringLiteral("white")
-                                                                   : QStringLiteral("black")));
+                        .arg(color.name(QColor::HexArgb), foreground.name(QColor::HexArgb)));
             }
         };
 
@@ -75,11 +108,13 @@ namespace javelin::gui::calendar
                                     : QStringLiteral("1px solid palette(mid)");
             const auto background = selected ? QStringLiteral("palette(alternate-base)")
                                              : QStringLiteral("palette(base)");
-            const auto text =
-                adjacent ? QStringLiteral("palette(mid)") : QStringLiteral("palette(text)");
-            setStyleSheet(QStringLiteral("#calendarDayCell { border: %1; background: %2; } "
-                                         "#calendarDayCell QLabel { color: %3; border: none; }")
-                              .arg(border, background, text));
+            const auto text = adjacent ? palette().color(QPalette::PlaceholderText)
+                                       : palette().color(QPalette::Text);
+            auto dayPalette = m_day->palette();
+            dayPalette.setColor(QPalette::WindowText, text);
+            m_day->setPalette(dayPalette);
+            setStyleSheet(QStringLiteral("#calendarDayCell { border: %1; background: %2; }")
+                              .arg(border, background));
         }
 
         void clearEvents()
@@ -137,23 +172,18 @@ namespace javelin::gui::calendar
     {
         setFocusPolicy(Qt::StrongFocus);
         auto* outer = new QVBoxLayout(this);
-        auto* navigation = new QHBoxLayout;
-        auto* previous = new QPushButton(QStringLiteral("‹"), this);
-        auto* today = new QPushButton(QStringLiteral("Today"), this);
-        auto* next = new QPushButton(QStringLiteral("›"), this);
         m_title = new QLabel(this);
         m_title->setAlignment(Qt::AlignCenter);
-        navigation->addWidget(previous);
-        navigation->addWidget(today);
-        navigation->addStretch();
-        navigation->addWidget(m_title);
-        navigation->addStretch();
-        m_calendarsButton = new QToolButton(this);
-        m_calendarsButton->setText(QStringLiteral("Calendars"));
-        m_calendarsButton->setPopupMode(QToolButton::InstantPopup);
-        navigation->addWidget(m_calendarsButton);
-        navigation->addWidget(next);
-        outer->addLayout(navigation);
+        outer->addWidget(m_title);
+        m_calendarMenu = new QMenu(this);
+        const auto storedColors =
+            QSettings{}.value(QStringLiteral("calendar/colorOverrides")).toMap();
+        for (auto it = storedColors.cbegin(); it != storedColors.cend(); ++it)
+        {
+            const auto color = it.value().value<QColor>();
+            if (color.isValid())
+                m_customCalendarColors.emplace(it.key().toStdString(), color);
+        }
         m_grid = new QGridLayout;
         m_grid->setSpacing(0);
         for (int column = 0; column < 7; ++column)
@@ -173,9 +203,6 @@ namespace javelin::gui::calendar
             m_grid->addWidget(cell, 1 + index / 7, index % 7);
         }
         outer->addLayout(m_grid, 1);
-        connect(previous, &QPushButton::clicked, this, &MonthCalendarWidget::showPreviousMonth);
-        connect(next, &QPushButton::clicked, this, &MonthCalendarWidget::showNextMonth);
-        connect(today, &QPushButton::clicked, this, &MonthCalendarWidget::showToday);
         connect(this, &MonthCalendarWidget::dayAgendaRequested, this,
                 &MonthCalendarWidget::showDayAgenda);
         rebuildDates();
@@ -198,18 +225,18 @@ namespace javelin::gui::calendar
     void MonthCalendarWidget::setEvents(std::vector<MonthEvent> events)
     {
         m_events = std::move(events);
+        applyCalendarColors();
         rebuildEvents();
     }
 
     void MonthCalendarWidget::setCalendars(std::vector<CalendarDisplay> calendars)
     {
         const auto previousHiddenCalendars = m_hiddenCalendars;
-        auto* previousMenu = m_calendarsButton->menu();
-        auto* menu = new QMenu(m_calendarsButton);
+        m_calendars = std::move(calendars);
         m_hiddenCalendars.clear();
         std::vector<std::string> knownCalendars;
-        knownCalendars.reserve(calendars.size());
-        for (auto& calendar : calendars)
+        knownCalendars.reserve(m_calendars.size());
+        for (const auto& calendar : m_calendars)
         {
             const auto wasHidden = std::ranges::find(previousHiddenCalendars, calendar.id) !=
                                    previousHiddenCalendars.end();
@@ -217,16 +244,51 @@ namespace javelin::gui::calendar
                 std::ranges::find(m_knownCalendars, calendar.id) != m_knownCalendars.end();
             const auto isVisible = wasKnown ? !wasHidden : calendar.visible;
             knownCalendars.push_back(calendar.id);
-            auto* action = menu->addAction(calendar.name);
-            action->setCheckable(true);
-            action->setChecked(isVisible);
-            QPixmap swatch{12, 12};
-            swatch.fill(calendar.color);
-            action->setIcon(QIcon{swatch});
             if (!isVisible)
                 m_hiddenCalendars.push_back(calendar.id);
+        }
+        m_knownCalendars = std::move(knownCalendars);
+        applyCalendarColors();
+        rebuildCalendarMenu();
+        rebuildEvents();
+    }
+
+    void MonthCalendarWidget::setHiddenCalendars(std::vector<std::string> calendarIds)
+    {
+        m_hiddenCalendars = std::move(calendarIds);
+        rebuildCalendarMenu();
+        rebuildEvents();
+    }
+
+    QColor MonthCalendarWidget::effectiveCalendarColor(const std::string& calendarId) const
+    {
+        if (const auto custom = m_customCalendarColors.find(calendarId);
+            custom != m_customCalendarColors.end())
+            return custom->second;
+        const auto calendar = std::ranges::find(m_calendars, calendarId, &CalendarDisplay::id);
+        if (calendar != m_calendars.end() && calendar->color.isValid())
+            return calendar->color;
+        return palette().color(QPalette::Highlight);
+    }
+
+    void MonthCalendarWidget::applyCalendarColors()
+    {
+        for (auto& event : m_events)
+            event.color = effectiveCalendarColor(event.calendarId);
+    }
+
+    void MonthCalendarWidget::rebuildCalendarMenu()
+    {
+        m_calendarMenu->clear();
+        for (const auto& calendar : m_calendars)
+        {
+            auto* action = m_calendarMenu->addAction(
+                colorSwatch(effectiveCalendarColor(calendar.id)), calendar.name);
+            action->setCheckable(true);
+            action->setChecked(std::ranges::find(m_hiddenCalendars, calendar.id) ==
+                               m_hiddenCalendars.end());
             connect(action, &QAction::toggled, this,
-                    [this, id = std::move(calendar.id)](const bool visible)
+                    [this, id = calendar.id](const bool visible)
                     {
                         if (visible)
                             std::erase(m_hiddenCalendars, id);
@@ -236,17 +298,86 @@ namespace javelin::gui::calendar
                         rebuildEvents();
                     });
         }
-        m_knownCalendars = std::move(knownCalendars);
-        m_calendarsButton->setMenu(menu);
-        m_calendarsButton->setEnabled(!calendars.empty());
-        if (previousMenu != nullptr)
-            previousMenu->deleteLater();
-        rebuildEvents();
+        if (!m_calendars.empty())
+            m_calendarMenu->addSeparator();
+        auto* manage = m_calendarMenu->addAction(QIcon::fromTheme(QStringLiteral("configure")),
+                                                 QStringLiteral("Manage Calendars…"));
+        connect(manage, &QAction::triggered, this, &MonthCalendarWidget::manageCalendars);
     }
 
-    void MonthCalendarWidget::setHiddenCalendars(std::vector<std::string> calendarIds)
+    void MonthCalendarWidget::manageCalendars()
     {
-        m_hiddenCalendars = std::move(calendarIds);
+        QDialog dialog{this};
+        dialog.setWindowTitle(QStringLiteral("Manage Calendars"));
+        dialog.resize(480, 360);
+        auto* layout = new QVBoxLayout(&dialog);
+        auto* list = new QListWidget(&dialog);
+        auto pendingColors = m_customCalendarColors;
+        for (const auto& calendar : m_calendars)
+        {
+            auto* item = new QListWidgetItem(colorSwatch(effectiveCalendarColor(calendar.id)),
+                                             calendar.name, list);
+            item->setData(Qt::UserRole, QString::fromStdString(calendar.id));
+        }
+        layout->addWidget(list);
+        auto* colorButtons = new QHBoxLayout();
+        auto* chooseColor = new QPushButton(QStringLiteral("Choose Color…"), &dialog);
+        auto* resetColor = new QPushButton(QStringLiteral("Use Calendar Color"), &dialog);
+        chooseColor->setEnabled(false);
+        resetColor->setEnabled(false);
+        colorButtons->addWidget(chooseColor);
+        colorButtons->addWidget(resetColor);
+        colorButtons->addStretch(1);
+        layout->addLayout(colorButtons);
+        connect(list, &QListWidget::currentItemChanged, &dialog,
+                [chooseColor, resetColor](QListWidgetItem* current, QListWidgetItem*)
+                {
+                    chooseColor->setEnabled(current != nullptr);
+                    resetColor->setEnabled(current != nullptr);
+                });
+        connect(chooseColor, &QPushButton::clicked, &dialog,
+                [this, list, &dialog, &pendingColors]
+                {
+                    auto* item = list->currentItem();
+                    if (item == nullptr)
+                        return;
+                    const auto id = item->data(Qt::UserRole).toString().toStdString();
+                    const auto color = QColorDialog::getColor(effectiveCalendarColor(id), &dialog,
+                                                              QStringLiteral("Calendar Color"));
+                    if (!color.isValid())
+                        return;
+                    pendingColors[id] = color;
+                    item->setIcon(colorSwatch(color));
+                });
+        connect(resetColor, &QPushButton::clicked, &dialog,
+                [this, list, &pendingColors]
+                {
+                    auto* item = list->currentItem();
+                    if (item == nullptr)
+                        return;
+                    const auto id = item->data(Qt::UserRole).toString().toStdString();
+                    pendingColors.erase(id);
+                    const auto calendar = std::ranges::find(m_calendars, id, &CalendarDisplay::id);
+                    const auto color = calendar != m_calendars.end() && calendar->color.isValid()
+                                           ? calendar->color
+                                           : palette().color(QPalette::Highlight);
+                    item->setIcon(colorSwatch(color));
+                });
+        auto* buttons =
+            new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, &dialog);
+        connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+        layout->addWidget(buttons);
+        if (dialog.exec() != QDialog::Accepted)
+            return;
+
+        m_customCalendarColors = std::move(pendingColors);
+        QVariantMap storedColors;
+        for (const auto& [id, color] : m_customCalendarColors)
+            storedColors.insert(QString::fromStdString(id), color);
+        QSettings{}.setValue(QStringLiteral("calendar/colorOverrides"), storedColors);
+        applyCalendarColors();
+        rebuildCalendarMenu();
         rebuildEvents();
     }
 
@@ -282,6 +413,11 @@ namespace javelin::gui::calendar
             if (cellDate(index) == date)
                 return m_cells[static_cast<std::size_t>(index)]->overflow();
         return 0;
+    }
+
+    QMenu* MonthCalendarWidget::calendarMenu() const
+    {
+        return m_calendarMenu;
     }
 
     void MonthCalendarWidget::showPreviousMonth()

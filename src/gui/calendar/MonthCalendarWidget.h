@@ -9,11 +9,12 @@
 #include <array>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 class QLabel;
 class QGridLayout;
-class QToolButton;
+class QMenu;
 
 namespace javelin::gui::calendar
 {
@@ -61,9 +62,11 @@ namespace javelin::gui::calendar
         [[nodiscard]] QDate cellDate(int index) const;
         [[nodiscard]] int cellCount() const;
         [[nodiscard]] int overflowCount(const QDate& date) const;
+        [[nodiscard]] QMenu* calendarMenu() const;
 
       public Q_SLOTS:
         void createEvent();
+        void manageCalendars();
         void showPreviousMonth();
         void showNextMonth();
         void showToday();
@@ -82,6 +85,9 @@ namespace javelin::gui::calendar
       private:
         void rebuildDates();
         void rebuildEvents();
+        void rebuildCalendarMenu();
+        void applyCalendarColors();
+        [[nodiscard]] QColor effectiveCalendarColor(const std::string& calendarId) const;
         void selectDate(const QDate& date, bool activate);
         void showDayAgenda(const QDate& date);
 
@@ -90,11 +96,13 @@ namespace javelin::gui::calendar
         QDate m_selectedDate;
         QGridLayout* m_grid = nullptr;
         QLabel* m_title = nullptr;
-        QToolButton* m_calendarsButton = nullptr;
+        QMenu* m_calendarMenu = nullptr;
         std::array<QLabel*, 7> m_weekdayHeaders{};
         std::array<DayCellWidget*, 42> m_cells{};
+        std::vector<CalendarDisplay> m_calendars;
         std::vector<MonthEvent> m_events;
         std::vector<std::string> m_hiddenCalendars;
         std::vector<std::string> m_knownCalendars;
+        std::unordered_map<std::string, QColor> m_customCalendarColors;
     };
 } // namespace javelin::gui::calendar
