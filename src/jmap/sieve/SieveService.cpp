@@ -71,6 +71,7 @@ namespace javelin::jmap::sieve::detail
         std::optional<std::unordered_map<std::string, ScriptCreate>> create;
         std::optional<std::unordered_map<std::string, ScriptUpdate>> update;
         std::optional<std::vector<std::string>> destroy;
+        std::optional<std::string> onSuccessActivateScript;
         std::optional<bool> onSuccessDeactivateScript;
     };
 
@@ -83,6 +84,7 @@ namespace javelin::jmap::sieve::detail
         std::optional<std::unordered_map<std::string, SieveScript>> created;
         std::optional<std::unordered_map<std::string, SetError>> notCreated;
         std::optional<std::unordered_map<std::string, SetError>> notDestroyed;
+        std::optional<std::unordered_map<std::string, std::optional<SieveScript>>> updated;
     };
 
     struct ResolvedContext
@@ -156,9 +158,10 @@ template <> struct glz::meta<javelin::jmap::sieve::detail::ScriptCreate>
 template <> struct glz::meta<javelin::jmap::sieve::detail::SetRequest>
 {
     using T = javelin::jmap::sieve::detail::SetRequest;
-    static constexpr auto value = glz::object(
-        "accountId", &T::accountId, "create", &T::create, "update", &T::update, "destroy",
-        &T::destroy, "onSuccessDeactivateScript", &T::onSuccessDeactivateScript);
+    static constexpr auto value =
+        glz::object("accountId", &T::accountId, "create", &T::create, "update", &T::update,
+                    "destroy", &T::destroy, "onSuccessActivateScript", &T::onSuccessActivateScript,
+                    "onSuccessDeactivateScript", &T::onSuccessDeactivateScript);
 };
 
 template <> struct glz::meta<javelin::jmap::sieve::detail::SetResponse>
@@ -167,7 +170,7 @@ template <> struct glz::meta<javelin::jmap::sieve::detail::SetResponse>
     static constexpr auto value =
         glz::object("accountId", &T::accountId, "oldState", &T::oldState, "newState", &T::newState,
                     "notUpdated", &T::notUpdated, "created", &T::created, "notCreated",
-                    &T::notCreated, "notDestroyed", &T::notDestroyed);
+                    &T::notCreated, "notDestroyed", &T::notDestroyed, "updated", &T::updated);
 };
 
 namespace javelin::jmap::sieve
@@ -466,6 +469,7 @@ namespace javelin::jmap::sieve
                     : std::optional<std::unordered_map<
                           std::string, detail::ScriptUpdate>>{{{script.id, {.blobId = blobId}}}},
             .destroy = std::nullopt,
+            .onSuccessActivateScript = std::nullopt,
             .onSuccessDeactivateScript = std::nullopt,
         });
         if (!arguments)
@@ -541,6 +545,7 @@ namespace javelin::jmap::sieve
                 .create = std::nullopt,
                 .update = std::nullopt,
                 .destroy = std::nullopt,
+                .onSuccessActivateScript = std::nullopt,
                 .onSuccessDeactivateScript = true,
             });
             if (!deactivateArguments)
@@ -563,6 +568,7 @@ namespace javelin::jmap::sieve
             .create = std::nullopt,
             .update = std::nullopt,
             .destroy = std::vector<std::string>{script.id},
+            .onSuccessActivateScript = std::nullopt,
             .onSuccessDeactivateScript = std::nullopt,
         });
         if (!destroyArguments)
@@ -586,6 +592,52 @@ namespace javelin::jmap::sieve
                                     ? QString::fromStdString(*rejected->second.description)
                                     : QStringLiteral("The server rejected the script deletion."));
         }
+        co_return std::monostate{};
+    }
+
+    QCoro::Task<SieveActivationResult> SieveService::setActive(LiveConnectionSettings settings,
+                                                               std::string ownerAccountId,
+                                                               SieveScript script,
+                                                               const bool active) const
+    {
+        if (script.id.empty())
+            co_return error(SieveServiceErrorCode::Protocol,
+                            QStringLiteral("Save the script before activating it."));
+        auto contextResult = co_await resolveContext(m_resourceTransport, std::move(settings),
+                                                     std::move(ownerAccountId));
+        if (const auto* contextError = std::get_if<SieveServiceError>(&contextResult))
+            co_return *contextError;
+        const auto& context = std::get<detail::ResolvedContext>(contextResult);
+        const auto arguments = serialize(detail::SetRequest{
+            .accountId = context.sieveAccountId,
+            .create = std::nullopt,
+            .update = std::nullopt,
+            .destroy = std::nullopt,
+            .onSuccessActivateScript = active ? std::optional{script.id} : std::nullopt,
+            .onSuccessDeactivateScript = active ? std::nullopt : std::optional{true},
+        });
+        if (!arguments)
+            co_return error(SieveServiceErrorCode::Protocol,
+                            QStringLiteral("Failed to encode the script activation request."));
+        auto called = co_await call(m_methodTransport, context, std::string{sieveSetMethod},
+                                    *arguments, "sieve-active");
+        if (const auto* callError = std::get_if<SieveServiceError>(&called))
+            co_return *callError;
+        auto parsed = parseMethodResponse<detail::SetResponse>(
+            std::get<api::ResponseEnvelope>(called), "sieve-active", sieveSetMethod);
+        if (const auto* parseError = std::get_if<SieveServiceError>(&parsed))
+            co_return *parseError;
+        const auto& response = std::get<detail::SetResponse>(parsed);
+        if (!response.updated)
+            co_return error(SieveServiceErrorCode::Protocol,
+                            active ? QStringLiteral("The server did not activate the script.")
+                                   : QStringLiteral("The server did not deactivate the script."));
+        const auto changed = response.updated->find(script.id);
+        if (changed == response.updated->end() || !changed->second ||
+            changed->second->isActive != active)
+            co_return error(SieveServiceErrorCode::Protocol,
+                            active ? QStringLiteral("The server did not activate the script.")
+                                   : QStringLiteral("The server did not deactivate the script."));
         co_return std::monostate{};
     }
 } // namespace javelin::jmap::sieve

@@ -650,6 +650,21 @@ namespace javelin::app
             std::move(script));
     }
 
+    QCoro::Task<javelin::jmap::sieve::SieveActivationResult>
+    MailApplicationService::setSieveScriptActive(std::string ownerAccountId,
+                                                 javelin::jmap::sieve::SieveScript script,
+                                                 const bool active)
+    {
+        const auto configuration = m_configurations.find(ownerAccountId);
+        if (configuration == m_configurations.end())
+            co_return javelin::jmap::sieve::SieveServiceError{
+                .code = javelin::jmap::sieve::SieveServiceErrorCode::Authentication,
+                .message = QStringLiteral("Account synchronization is not configured.")};
+        co_return co_await m_sieveService.setActive(
+            toLiveConnectionSettings(configuration->second.settings), std::move(ownerAccountId),
+            std::move(script), active);
+    }
+
     QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
     MailApplicationService::setAddressBooks(std::string accountId,
                                             javelin::jmap::api::AddressBookSetRequest request)

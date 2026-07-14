@@ -54,6 +54,7 @@ namespace javelin::jmap::sieve
     using SieveValidationResult = std::variant<SieveValidation, SieveServiceError>;
     using SieveSaveResult = std::variant<SieveScript, SieveServiceError>;
     using SieveDeleteResult = std::variant<std::monostate, SieveServiceError>;
+    using SieveActivationResult = std::variant<std::monostate, SieveServiceError>;
 
     class SieveService
     {
@@ -75,6 +76,10 @@ namespace javelin::jmap::sieve
         [[nodiscard]] QCoro::Task<SieveDeleteResult> remove(LiveConnectionSettings settings,
                                                             std::string ownerAccountId,
                                                             SieveScript script) const;
+        [[nodiscard]] QCoro::Task<SieveActivationResult> setActive(LiveConnectionSettings settings,
+                                                                   std::string ownerAccountId,
+                                                                   SieveScript script,
+                                                                   bool active) const;
 
       private:
         api::AbstractTransport& m_resourceTransport;

@@ -10,6 +10,7 @@
 class QLabel;
 class QListWidget;
 class QPushButton;
+class QCheckBox;
 
 namespace KTextEditor
 {
@@ -36,6 +37,7 @@ namespace javelin::gui::sieve
         void selectScript(int row);
         void newScript();
         void deleteScript();
+        void setScriptActive(bool active);
         void removeCurrentScriptFromList();
         void validateScript();
         void saveScript();
@@ -57,5 +59,6 @@ namespace javelin::gui::sieve
         QPushButton* m_saveButton = nullptr;
         QPushButton* m_newButton = nullptr;
         QPushButton* m_deleteButton = nullptr;
+        QCheckBox* m_activeCheckBox = nullptr;
     };
 } // namespace javelin::gui::sieve

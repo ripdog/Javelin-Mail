@@ -168,6 +168,9 @@ namespace javelin::app
                         QByteArray content);
         [[nodiscard]] QCoro::Task<javelin::jmap::sieve::SieveDeleteResult>
         deleteSieveScript(std::string ownerAccountId, javelin::jmap::sieve::SieveScript script);
+        [[nodiscard]] QCoro::Task<javelin::jmap::sieve::SieveActivationResult>
+        setSieveScriptActive(std::string ownerAccountId, javelin::jmap::sieve::SieveScript script,
+                             bool active);
         [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
         setAddressBooks(std::string accountId, javelin::jmap::api::AddressBookSetRequest request);
         [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactMutationResult>

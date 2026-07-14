@@ -8,6 +8,7 @@
 #include <KTextEditor/Editor>
 #include <KTextEditor/View>
 
+#include <QCheckBox>
 #include <QDialogButtonBox>
 #include <QHBoxLayout>
 #include <QInputDialog>
@@ -49,6 +50,8 @@ namespace javelin::gui::sieve
         m_deleteButton = new QPushButton(QStringLiteral("Delete"), this);
         footer->addWidget(m_newButton);
         footer->addWidget(m_deleteButton);
+        m_activeCheckBox = new QCheckBox(QStringLiteral("Active"), this);
+        footer->addWidget(m_activeCheckBox);
         m_statusLabel = new QLabel(QStringLiteral("Loading scripts…"), this);
         m_statusLabel->setWordWrap(true);
         footer->addWidget(m_statusLabel, 1);
@@ -78,39 +81,69 @@ namespace javelin::gui::sieve
         connect(m_saveButton, &QPushButton::clicked, this, &SieveEditorDialog::saveScript);
         connect(m_newButton, &QPushButton::clicked, this, &SieveEditorDialog::newScript);
         connect(m_deleteButton, &QPushButton::clicked, this, &SieveEditorDialog::deleteScript);
+        connect(m_activeCheckBox, &QCheckBox::toggled, this, &SieveEditorDialog::setScriptActive);
         updateActions();
         loadScripts();
     }
 
     void SieveEditorDialog::loadScripts()
     {
+        std::string selectedId;
+        if (m_currentRow >= 0 && m_currentRow < static_cast<int>(m_scripts.size()))
+            selectedId = m_scripts[static_cast<std::size_t>(m_currentRow)].id;
         setBusy(true);
         auto task = m_service.requestSieveScripts(m_ownerAccountId);
-        QCoro::connect(std::move(task), this,
-                       [this](javelin::jmap::sieve::SieveListResult result)
-                       {
-                           setBusy(false);
-                           if (const auto* error =
-                                   std::get_if<javelin::jmap::sieve::SieveServiceError>(&result))
-                           {
-                               showError(*error);
-                               return;
-                           }
-                           m_scripts = std::get<std::vector<javelin::jmap::sieve::SieveScript>>(
-                               std::move(result));
-                           m_scriptList->clear();
-                           for (const auto& script : m_scripts)
-                           {
-                               auto title = QString::fromStdString(script.name);
-                               if (script.isActive)
-                                   title += QStringLiteral(" (active)");
-                               m_scriptList->addItem(title);
-                           }
-                           if (m_scripts.empty())
-                               m_statusLabel->setText(QStringLiteral("No Sieve scripts."));
-                           else
-                               m_scriptList->setCurrentRow(0);
-                       });
+        QCoro::connect(
+            std::move(task), this,
+            [this, selectedId = std::move(selectedId)](javelin::jmap::sieve::SieveListResult result)
+            {
+                setBusy(false);
+                if (const auto* error =
+                        std::get_if<javelin::jmap::sieve::SieveServiceError>(&result))
+                {
+                    showError(*error);
+                    return;
+                }
+                m_scripts =
+                    std::get<std::vector<javelin::jmap::sieve::SieveScript>>(std::move(result));
+                {
+                    const QSignalBlocker blocker{m_scriptList};
+                    m_scriptList->clear();
+                    for (const auto& script : m_scripts)
+                    {
+                        auto title = QString::fromStdString(script.name);
+                        if (script.isActive)
+                            title += QStringLiteral(" (active)");
+                        m_scriptList->addItem(title);
+                    }
+                }
+                m_currentRow = -1;
+                m_loaded = false;
+                m_dirty = false;
+                m_document->setReadWrite(true);
+                m_document->setText(QString{});
+                if (m_scripts.empty())
+                {
+                    const QSignalBlocker blocker{m_activeCheckBox};
+                    m_activeCheckBox->setChecked(false);
+                    m_statusLabel->setText(QStringLiteral("No Sieve scripts."));
+                }
+                else
+                {
+                    auto selectedRow = 0;
+                    if (!selectedId.empty())
+                    {
+                        const auto selected = std::find_if(m_scripts.cbegin(), m_scripts.cend(),
+                                                           [&selectedId](const auto& script)
+                                                           { return script.id == selectedId; });
+                        if (selected != m_scripts.cend())
+                            selectedRow =
+                                static_cast<int>(std::distance(m_scripts.cbegin(), selected));
+                    }
+                    m_scriptList->setCurrentRow(selectedRow);
+                }
+                updateActions();
+            });
     }
 
     void SieveEditorDialog::selectScript(const int row)
@@ -131,6 +164,10 @@ namespace javelin::gui::sieve
         }
 
         m_currentRow = row;
+        {
+            const QSignalBlocker blocker{m_activeCheckBox};
+            m_activeCheckBox->setChecked(m_scripts[static_cast<std::size_t>(row)].isActive);
+        }
         m_loaded = false;
         m_dirty = false;
         m_document->setReadWrite(true);
@@ -224,6 +261,35 @@ namespace javelin::gui::sieve
                        });
     }
 
+    void SieveEditorDialog::setScriptActive(const bool active)
+    {
+        if (m_currentRow < 0 || m_busy)
+            return;
+        const auto script = m_scripts[static_cast<std::size_t>(m_currentRow)];
+        if (script.id.empty() || script.isActive == active)
+            return;
+        setBusy(true);
+        m_statusLabel->setText(active ? QStringLiteral("Activating…")
+                                      : QStringLiteral("Deactivating…"));
+        auto task = m_service.setSieveScriptActive(m_ownerAccountId, script, active);
+        QCoro::connect(std::move(task), this,
+                       [this, active, previous = script.isActive](
+                           javelin::jmap::sieve::SieveActivationResult result)
+                       {
+                           setBusy(false);
+                           if (const auto* error =
+                                   std::get_if<javelin::jmap::sieve::SieveServiceError>(&result))
+                           {
+                               const QSignalBlocker blocker{m_activeCheckBox};
+                               m_activeCheckBox->setChecked(previous);
+                               showError(*error);
+                               return;
+                           }
+                           m_scripts[static_cast<std::size_t>(m_currentRow)].isActive = active;
+                           loadScripts();
+                       });
+    }
+
     void SieveEditorDialog::removeCurrentScriptFromList()
     {
         const auto row = m_currentRow;
@@ -313,6 +379,9 @@ namespace javelin::gui::sieve
         m_document->setReadWrite(m_loaded && !m_busy);
         m_newButton->setEnabled(!m_busy);
         m_deleteButton->setEnabled(m_loaded && !m_busy);
+        const bool canChangeActive = m_loaded && !m_dirty && !m_busy && m_currentRow >= 0 &&
+                                     !m_scripts[static_cast<std::size_t>(m_currentRow)].id.empty();
+        m_activeCheckBox->setEnabled(canChangeActive);
         m_validateButton->setEnabled(m_loaded && !m_busy);
         m_saveButton->setEnabled(m_loaded && m_dirty && !m_busy);
     }

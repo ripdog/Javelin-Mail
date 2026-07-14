@@ -246,3 +246,38 @@ TEST_CASE("deleting an active sieve script deactivates it in a separate call",
     CHECK(destroy.callId == "sieve-delete");
     CHECK(destroy.arguments.find("script-1") != std::string::npos);
 }
+
+TEST_CASE("sieve scripts can be activated and deactivated", "[jmap][sieve][service]")
+{
+    ensureApplication();
+    for (const bool active : {true, false})
+    {
+        FakeResourceTransport resources;
+        resources.results = {
+            javelin::jmap::api::HttpResponse{.statusCode = 200, .body = sessionResponse()},
+        };
+        FakeMethodTransport methods;
+        methods.results.push_back(javelin::jmap::api::ResponseEnvelope{
+            .methodResponses =
+                {{.name = "SieveScript/set",
+                  .arguments =
+                      active
+                          ? R"({"accountId":"sieve-account","oldState":"a","newState":"b","updated":{"script-1":{"isActive":true}}})"
+                          : R"({"accountId":"sieve-account","oldState":"a","newState":"b","updated":{"script-1":{"isActive":false}}})",
+                  .callId = "sieve-active"}},
+            .createdIds = std::nullopt,
+            .sessionState = "s2"});
+
+        javelin::jmap::sieve::SieveService service{resources, methods};
+        const auto result = QCoro::waitFor(service.setActive(
+            settings(), "owner",
+            {.id = "script-1", .name = "main", .blobId = "blob-1", .isActive = !active}, active));
+
+        REQUIRE(std::holds_alternative<std::monostate>(result));
+        REQUIRE(methods.requests.size() == 1);
+        const auto& request = methods.requests.front().envelope.methodCalls.front();
+        CHECK(request.callId == "sieve-active");
+        CHECK(request.arguments.find(active ? "onSuccessActivateScript"
+                                            : "onSuccessDeactivateScript") != std::string::npos);
+    }
+}
