@@ -5,6 +5,7 @@
 #include <QColorDialog>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QEvent>
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QKeyEvent>
@@ -14,7 +15,9 @@
 #include <QMouseEvent>
 #include <QPixmap>
 #include <QPushButton>
+#include <QResizeEvent>
 #include <QSettings>
+#include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
 
@@ -149,6 +152,14 @@ namespace javelin::gui::calendar
         [[nodiscard]] int overflow() const
         {
             return m_overflow;
+        }
+
+        [[nodiscard]] std::size_t visibleEventCount(const std::size_t eventCount) const
+        {
+            const auto margins = m_layout->contentsMargins();
+            return monthCellVisibleEventCount(
+                height(), m_day->sizeHint().height(), fontMetrics().height() + 6,
+                margins.top() + margins.bottom(), m_layout->spacing(), eventCount);
         }
         std::function<void(const QDate&)> clicked;
 
@@ -487,6 +498,33 @@ namespace javelin::gui::calendar
         selectDate(m_selectedDate.addDays(days), false);
     }
 
+    void MonthCalendarWidget::resizeEvent(QResizeEvent* event)
+    {
+        QWidget::resizeEvent(event);
+        scheduleEventRebuild();
+    }
+
+    void MonthCalendarWidget::changeEvent(QEvent* event)
+    {
+        QWidget::changeEvent(event);
+        if (event->type() == QEvent::FontChange || event->type() == QEvent::ApplicationFontChange ||
+            event->type() == QEvent::StyleChange)
+            scheduleEventRebuild();
+    }
+
+    void MonthCalendarWidget::scheduleEventRebuild()
+    {
+        if (m_eventRebuildPending)
+            return;
+        m_eventRebuildPending = true;
+        QTimer::singleShot(0, this,
+                           [this]
+                           {
+                               m_eventRebuildPending = false;
+                               rebuildEvents();
+                           });
+    }
+
     void MonthCalendarWidget::rebuildDates()
     {
         m_title->setText(m_locale.toString(m_displayedMonth, QStringLiteral("MMMM yyyy")));
@@ -532,8 +570,8 @@ namespace javelin::gui::calendar
                                       return left->start < right->start;
                                   return left->title.localeAwareCompare(right->title) < 0;
                               });
-            constexpr std::size_t capacity = 3;
-            const auto visible = std::min(capacity, matching.size());
+            const auto visible =
+                m_cells[static_cast<std::size_t>(index)]->visibleEventCount(matching.size());
             for (std::size_t eventIndex = 0; eventIndex < visible; ++eventIndex)
             {
                 const auto* event = matching[eventIndex];
@@ -547,9 +585,9 @@ namespace javelin::gui::calendar
                             QString::fromStdString(event->recurrenceId.value_or(std::string{})));
                     });
             }
-            if (matching.size() > capacity)
+            if (matching.size() > visible)
             {
-                const auto overflow = static_cast<int>(matching.size() - capacity);
+                const auto overflow = static_cast<int>(matching.size() - visible);
                 m_cells[static_cast<std::size_t>(index)]->addOverflow(
                     overflow, [this, date] { Q_EMIT dayAgendaRequested(date); });
             }

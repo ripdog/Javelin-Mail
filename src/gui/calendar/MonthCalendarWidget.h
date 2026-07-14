@@ -15,6 +15,7 @@
 class QLabel;
 class QGridLayout;
 class QMenu;
+class QResizeEvent;
 
 namespace javelin::gui::calendar
 {
@@ -85,6 +86,8 @@ namespace javelin::gui::calendar
 
       protected:
         void keyPressEvent(QKeyEvent* event) override;
+        void resizeEvent(QResizeEvent* event) override;
+        void changeEvent(QEvent* event) override;
 
       private:
         void rebuildDates();
@@ -94,6 +97,7 @@ namespace javelin::gui::calendar
         [[nodiscard]] QColor effectiveCalendarColor(const std::string& calendarId) const;
         void selectDate(const QDate& date, bool activate);
         void showDayAgenda(const QDate& date);
+        void scheduleEventRebuild();
 
         QLocale m_locale;
         QDate m_displayedMonth;
@@ -108,5 +112,6 @@ namespace javelin::gui::calendar
         std::vector<std::string> m_hiddenCalendars;
         std::vector<std::string> m_knownCalendars;
         std::unordered_map<std::string, QColor> m_customCalendarColors;
+        bool m_eventRebuildPending = false;
     };
 } // namespace javelin::gui::calendar

@@ -140,6 +140,9 @@ new-event creation consumes the effective default without modifying the server C
 Calendar discovery, refresh, and preference failures now retain a concise status message
 while opening a non-blocking expandable details view whose complete text is selectable
 and copyable; the same full detail is always written to the diagnostic log.
+Event-chip capacity is derived from each day cell's live height, font metrics, margins,
+and spacing. One row is reserved for `+N more` when needed, and coalesced resize/font/style
+updates recompute the grid without issuing calendar network requests.
 
 ## Milestone 6: interoperability and quality gates
 
