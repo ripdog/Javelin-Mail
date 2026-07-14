@@ -2,11 +2,13 @@
 
 #include <QFontMetrics>
 #include <QResizeEvent>
+#include <QSizePolicy>
 
 namespace javelin::gui::shell
 {
     ElidingLabel::ElidingLabel(QWidget* parent) : QLabel(parent)
     {
+        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     }
 
     void ElidingLabel::setText(const QString& text)

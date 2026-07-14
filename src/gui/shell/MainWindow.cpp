@@ -1187,9 +1187,8 @@ namespace javelin::gui::shell
         titleFont.setPointSize(titleFont.pointSize() + 4);
         titleFont.setBold(true);
         m_messageListTitleLabel->setFont(titleFont);
-        messageHeaderLayout->addWidget(m_messageListTitleLabel);
+        messageHeaderLayout->addWidget(m_messageListTitleLabel, 1);
         messageHeaderLayout->addWidget(m_messageListMetaLabel);
-        messageHeaderLayout->addStretch(1);
         messageHeaderLayout->addWidget(m_previousPageButton);
         messageHeaderLayout->addWidget(m_messagePageLabel);
         messageHeaderLayout->addWidget(m_nextPageButton);
