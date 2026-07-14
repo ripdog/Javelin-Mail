@@ -2776,13 +2776,14 @@ namespace javelin::gui::shell
         {
             if (const auto* mailboxTab = std::get_if<MailboxTabState>(&tab->content))
             {
-                m_messageModel->setPage(mailboxTab->accountId, mailboxTab->page.items);
+                m_messageModel->setPage(mailboxTab->accountId, mailboxTab->mailboxId,
+                                        mailboxTab->page.items);
                 return;
             }
 
             if (const auto* searchTab = std::get_if<SearchTabState>(&tab->content))
             {
-                m_messageModel->setPage(searchTab->accountId, searchTab->page.items);
+                m_messageModel->setPage(searchTab->accountId, std::nullopt, searchTab->page.items);
                 return;
             }
 
@@ -4706,8 +4707,11 @@ namespace javelin::gui::shell
                 continue;
             }
 
+            const auto mailboxId = activeMailboxId();
             const auto threadMessagesResult =
-                m_queryService.listThreadMessages(accountId, threadId);
+                mailboxId.has_value()
+                    ? m_queryService.listMailboxThreadMessages(accountId, *mailboxId, threadId)
+                    : m_queryService.listThreadMessages(accountId, threadId);
             if (const auto* error =
                     std::get_if<javelin::jmap::cache::DatabaseError>(&threadMessagesResult))
             {

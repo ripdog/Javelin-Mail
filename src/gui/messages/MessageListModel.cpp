@@ -225,12 +225,14 @@ namespace javelin::gui::messages
     }
 
     void MessageListModel::setPage(std::optional<std::string> accountId,
+                                   std::optional<std::string> mailboxId,
                                    std::vector<javelin::jmap::cache::MessageListItem> items)
     {
-        if (m_accountId != accountId || !m_expandedThreadIds.empty())
+        if (m_accountId != accountId || m_mailboxId != mailboxId || !m_expandedThreadIds.empty())
         {
             beginResetModel();
             m_accountId = std::move(accountId);
+            m_mailboxId = std::move(mailboxId);
             m_threads.clear();
             m_threads.reserve(items.size());
 
@@ -256,6 +258,7 @@ namespace javelin::gui::messages
         }
 
         m_accountId = std::move(accountId);
+        m_mailboxId = std::move(mailboxId);
 
         for (int threadIndex = static_cast<int>(m_threads.size()) - 1; threadIndex >= 0;
              --threadIndex)
@@ -333,7 +336,7 @@ namespace javelin::gui::messages
 
     void MessageListModel::clear()
     {
-        setPage(std::nullopt, {});
+        setPage(std::nullopt, std::nullopt, {});
     }
 
     bool MessageListModel::setThreadExpanded(const std::string_view threadId, const bool expanded)
@@ -489,7 +492,10 @@ namespace javelin::gui::messages
         }
 
         const auto result =
-            m_queryService.listThreadMessages(*m_accountId, thread.summary.threadId);
+            m_mailboxId.has_value()
+                ? m_queryService.listMailboxThreadMessages(*m_accountId, *m_mailboxId,
+                                                           thread.summary.threadId)
+                : m_queryService.listThreadMessages(*m_accountId, thread.summary.threadId);
         const auto* items =
             std::get_if<std::vector<javelin::jmap::cache::MessageListItem>>(&result);
         if (items == nullptr)

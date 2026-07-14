@@ -73,6 +73,9 @@ namespace javelin::jmap::cache
                          std::size_t limit) const;
         [[nodiscard]] std::variant<std::vector<MessageListItem>, DatabaseError>
         listThreadMessages(std::string_view accountId, std::string_view threadId) const;
+        [[nodiscard]] std::variant<std::vector<MessageListItem>, DatabaseError>
+        listMailboxThreadMessages(std::string_view accountId, std::string_view mailboxId,
+                                  std::string_view threadId) const;
 
       private:
         DatabaseConnection& m_connection;

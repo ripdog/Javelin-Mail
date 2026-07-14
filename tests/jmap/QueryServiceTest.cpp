@@ -290,6 +290,58 @@ TEST_CASE("query service returns thread messages in cached thread order", "[jmap
     CHECK(items[2].emailId == "eml-3");
 }
 
+TEST_CASE("mailbox thread queries exclude members moved to another mailbox", "[jmap][cache][query]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+
+    auto inboxEmail = loadEmailFixture();
+    inboxEmail.id = "eml-inbox";
+    inboxEmail.threadId = "thr-1";
+    inboxEmail.receivedAt = "2026-03-30T06:06:00Z";
+    inboxEmail.subject = "Inbox member";
+    inboxEmail.mailboxIds = {"mbx-inbox"};
+
+    auto archivedEmail = inboxEmail;
+    archivedEmail.id = "eml-archive";
+    archivedEmail.receivedAt = "2026-04-01T21:56:00Z";
+    archivedEmail.subject = "Archived member";
+    archivedEmail.mailboxIds = {"mbx-archive"};
+
+    javelin::jmap::cache::EmailRepository emailRepository{databaseContext.connection};
+    REQUIRE_FALSE(emailRepository.replaceAll("account-1", {inboxEmail, archivedEmail}).has_value());
+
+    javelin::jmap::cache::ThreadRepository threadRepository{databaseContext.connection};
+    REQUIRE_FALSE(threadRepository
+                      .replaceAll("account-1", {javelin::jmap::domain::Thread{
+                                                   .id = "thr-1",
+                                                   .emailIds = {"eml-inbox", "eml-archive"},
+                                               }})
+                      .has_value());
+
+    javelin::jmap::cache::QueryService queryService{databaseContext.connection};
+    const auto mailboxPage = queryService.listMailboxMessages("account-1", "mbx-inbox", 100, 0);
+    REQUIRE(
+        std::holds_alternative<std::vector<javelin::jmap::cache::MessageListItem>>(mailboxPage));
+    const auto& summaries =
+        std::get<std::vector<javelin::jmap::cache::MessageListItem>>(mailboxPage);
+    REQUIRE(summaries.size() == 1);
+    CHECK(summaries.front().emailId == "eml-inbox");
+    CHECK(summaries.front().threadMessageCount == 1);
+
+    const auto mailboxThread =
+        queryService.listMailboxThreadMessages("account-1", "mbx-inbox", "thr-1");
+    REQUIRE(
+        std::holds_alternative<std::vector<javelin::jmap::cache::MessageListItem>>(mailboxThread));
+    const auto& members =
+        std::get<std::vector<javelin::jmap::cache::MessageListItem>>(mailboxThread);
+    REQUIRE(members.size() == 1);
+    CHECK(members.front().emailId == "eml-inbox");
+}
+
 TEST_CASE("query service rehydrates cached representative rows by email id order",
           "[jmap][cache][query]")
 {
