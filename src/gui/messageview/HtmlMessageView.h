@@ -23,7 +23,7 @@ namespace javelin::gui::messageview
         explicit HtmlMessageView(QWidget* parent = nullptr);
         ~HtmlMessageView() override;
 
-        void setDocumentHtml(std::string_view html);
+        void setDocumentHtml(std::string_view html, std::string_view documentId = {});
         void clearDocument();
         void setRemoteContentEnabled(bool enabled);
         [[nodiscard]] bool remoteContentEnabled() const;
@@ -33,7 +33,7 @@ namespace javelin::gui::messageview
 
       Q_SIGNALS:
         void viewSourceRequested();
-        void documentLoaded();
+        void documentLoaded(QString documentId);
         void hoveredLinkChanged(QString url);
 
       private:
@@ -42,6 +42,7 @@ namespace javelin::gui::messageview
         QWebEngineView* m_view = nullptr;
         bool m_remoteContentEnabled = false;
         std::uint64_t m_documentGeneration = 0;
+        QString m_expectedDocumentId;
         QUrl m_expectedDocumentUrl;
     };
 

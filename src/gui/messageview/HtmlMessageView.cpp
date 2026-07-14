@@ -165,7 +165,7 @@ namespace javelin::gui::messageview
                         return;
                     }
                     applyRemoteContentPolicy();
-                    Q_EMIT documentLoaded();
+                    Q_EMIT documentLoaded(m_expectedDocumentId);
                 });
 
         layout->addWidget(m_view);
@@ -179,13 +179,17 @@ namespace javelin::gui::messageview
         }
     }
 
-    void HtmlMessageView::setDocumentHtml(const std::string_view html)
+    void HtmlMessageView::setDocumentHtml(const std::string_view html,
+                                          const std::string_view documentId)
     {
         m_remoteContentEnabled = false;
+        m_expectedDocumentId =
+            QString::fromUtf8(documentId.data(), static_cast<qsizetype>(documentId.size()));
         m_expectedDocumentUrl = QUrl(
             QStringLiteral("%1://message/").arg(javelin::jmap::render::inlineMessageUrlScheme()));
-        m_expectedDocumentUrl.setFragment(
-            QString::number(static_cast<qulonglong>(++m_documentGeneration)));
+        m_expectedDocumentUrl.setFragment(QStringLiteral("%1:%2").arg(
+            m_expectedDocumentId,
+            QString::number(static_cast<qulonglong>(++m_documentGeneration))));
         m_view->setHtml(QString::fromUtf8(html.data(), static_cast<qsizetype>(html.size())),
                         m_expectedDocumentUrl);
     }
@@ -194,6 +198,7 @@ namespace javelin::gui::messageview
     {
         m_remoteContentEnabled = false;
         ++m_documentGeneration;
+        m_expectedDocumentId.clear();
         m_expectedDocumentUrl = {};
         m_view->setHtml(QString{});
     }

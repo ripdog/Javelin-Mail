@@ -725,8 +725,13 @@ namespace javelin::gui::messageview
         connect(m_htmlView, &HtmlMessageView::hoveredLinkChanged, this,
                 &MessageViewContainer::hoveredLinkChanged);
         connect(m_htmlView, &HtmlMessageView::documentLoaded, this,
-                [this]
+                [this](const QString& documentId)
                 {
+                    if (!m_accountId.has_value() || !m_emailId.has_value() ||
+                        documentId != QString::fromStdString(*m_accountId + "\n" + *m_emailId))
+                    {
+                        return;
+                    }
                     m_htmlDocumentLoaded = true;
                     m_loading = false;
                     updatePresentation(false);
@@ -824,7 +829,7 @@ namespace javelin::gui::messageview
         m_translationWasAutomatic = false;
         m_languageDetectionStarted = false;
         m_htmlDocumentLoaded = false;
-        m_loading = false;
+        m_loading = m_emailId.has_value();
         m_errorMessage.clear();
 
         m_snapshot = std::nullopt;
@@ -867,7 +872,6 @@ namespace javelin::gui::messageview
     void MessageViewContainer::refresh(javelin::jmap::cache::MessageViewService& messageViewService)
     {
         const auto previousRenderedBody = renderedBodyKey(m_snapshot);
-        m_loading = false;
         m_errorMessage.clear();
         m_translationInProgress = false;
         m_messageTranslated = false;
@@ -876,7 +880,6 @@ namespace javelin::gui::messageview
         m_autoTranslateAttempted = false;
         m_translationWasAutomatic = false;
         m_languageDetectionStarted = false;
-        m_htmlDocumentLoaded = false;
         m_snapshot = std::nullopt;
         if (m_accountId.has_value() && m_emailId.has_value())
         {
@@ -1530,7 +1533,8 @@ namespace javelin::gui::messageview
                     : QString::fromStdString(m_snapshot->htmlBody->value);
             m_htmlDocumentLoaded = false;
             m_loading = true;
-            m_htmlView->setDocumentHtml(renderDocument.toStdString());
+            m_htmlView->setDocumentHtml(renderDocument.toStdString(),
+                                        *m_accountId + "\n" + *m_emailId);
         }
         updateSenderRemoteContentPermit();
 
@@ -1557,6 +1561,7 @@ namespace javelin::gui::messageview
         }
         else if (m_snapshot->plainTextBody.has_value())
         {
+            m_loading = false;
             setActiveView(ActiveView::PlainText);
             startLanguageDetection();
         }

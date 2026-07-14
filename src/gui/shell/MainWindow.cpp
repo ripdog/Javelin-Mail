@@ -4616,7 +4616,6 @@ namespace javelin::gui::shell
                     return;
                 }
 
-                m_messageViewContainer->setLoadingState(false);
                 m_messageViewContainer->refresh(m_messageViewService);
                 updateEmptyStates();
                 updateMessageListHeader();
