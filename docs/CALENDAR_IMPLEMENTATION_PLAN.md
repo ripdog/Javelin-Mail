@@ -107,6 +107,9 @@ responses cannot corrupt or rewind the visible calendar.
 The cache retains the 12 most recently refreshed or loaded windows per account and
 display time zone. Eviction and orphan pruning run in the same reconciliation
 transaction, while occurrences referenced by any retained overlapping window remain.
+Each owner account also has a refresh generation: starting a newer range or state-change
+refresh supersedes older in-flight work, which is discarded before it can commit an
+obsolete window or rewind an opaque JMAP state token.
 
 ## Milestone 5: calendar product and month-view completeness
 

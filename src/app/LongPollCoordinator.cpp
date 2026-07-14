@@ -509,7 +509,8 @@ namespace javelin::app
         auto result = co_await m_calendarService.refresh(
             toLiveConnectionSettings(configuration->second.settings), ownerAccountId, interval,
             displayTimeZone);
-        if (const auto* summary = std::get_if<javelin::jmap::calendar::RefreshedRange>(&result))
+        if (const auto* summary = std::get_if<javelin::jmap::calendar::RefreshedRange>(&result);
+            summary != nullptr && summary->accountCount > 0)
         {
             Q_EMIT calendarCacheCommitted({.ownerAccountId = QString::fromStdString(ownerAccountId),
                                            .interval = summary->interval,

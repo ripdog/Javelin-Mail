@@ -10,7 +10,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <functional>
 #include <optional>
+#include <utility>
 #include <vector>
 
 namespace
@@ -20,6 +22,7 @@ namespace
       public:
         std::optional<javelin::jmap::api::JmapMethodRequest> request;
         std::vector<javelin::jmap::api::JmapMethodTransportResult> results;
+        std::function<void()> beforeReturn;
 
         QCoro::Task<javelin::jmap::api::JmapMethodTransportResult>
         call(javelin::jmap::api::JmapMethodRequest value) override
@@ -28,6 +31,8 @@ namespace
             REQUIRE_FALSE(results.empty());
             auto result = std::move(results.front());
             results.erase(results.begin());
+            if (auto callback = std::exchange(beforeReturn, {}))
+                callback();
             co_return result;
         }
     };
@@ -234,4 +239,54 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
     REQUIRE(cached.has_value());
     REQUIRE(cached->events.size() == 1);
     CHECK(cached->events.front().title == "Changed remotely");
+
+    transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+        .methodResponses =
+            {{.name = "Calendar/changes",
+              .arguments =
+                  R"({"accountId":"a1","oldState":"calendar-state-2","newState":"calendar-state-old","hasMoreChanges":false,"created":[],"updated":[],"destroyed":[]})",
+              .callId = "calendar-changes"},
+             {.name = "CalendarEvent/changes",
+              .arguments =
+                  R"({"accountId":"a1","oldState":"event-state-9","newState":"event-state-old","hasMoreChanges":false,"created":[],"updated":[],"destroyed":[]})",
+              .callId = "calendar-event-changes"}},
+        .createdIds = std::nullopt,
+        .sessionState = "session-old"});
+    transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+        .methodResponses =
+            {{.name = "Calendar/changes",
+              .arguments =
+                  R"({"accountId":"a1","oldState":"calendar-state-2","newState":"calendar-state-new","hasMoreChanges":false,"created":[],"updated":[],"destroyed":[]})",
+              .callId = "calendar-changes"},
+             {.name = "CalendarEvent/changes",
+              .arguments =
+                  R"({"accountId":"a1","oldState":"event-state-9","newState":"event-state-new","hasMoreChanges":false,"created":[],"updated":[],"destroyed":[]})",
+              .callId = "calendar-event-changes"}},
+        .createdIds = std::nullopt,
+        .sessionState = "session-new"});
+    const javelin::jmap::LiveConnectionSettings settings{
+        .sessionUrl = "https://example.test/.well-known/jmap",
+        .loginEmail = "alice@example.test",
+        .apiKey = "secret"};
+    const javelin::jmap::calendar::VisibleInterval interval{
+        .start = {.value = "2026-06-29T00:00:00"}, .end = {.value = "2026-08-10T00:00:00"}};
+    const javelin::jmap::calendar::TimeZoneId zone{.value = "Pacific/Auckland"};
+    std::optional<javelin::jmap::calendar::CalendarRefreshResult> newerRefresh;
+    transport.beforeReturn = [&]
+    { newerRefresh = QCoro::waitFor(service.refreshChanged(settings, "a1", interval, zone)); };
+
+    const auto superseded = QCoro::waitFor(service.refreshChanged(settings, "a1", interval, zone));
+
+    REQUIRE(newerRefresh.has_value());
+    REQUIRE(std::holds_alternative<javelin::jmap::calendar::RefreshedRange>(*newerRefresh));
+    REQUIRE(std::holds_alternative<javelin::jmap::calendar::RefreshedRange>(superseded));
+    CHECK(std::get<javelin::jmap::calendar::RefreshedRange>(superseded).accountCount == 0);
+    const auto newestCalendarState = calendars.stateToken("a1", "Calendar");
+    REQUIRE(std::holds_alternative<std::optional<std::string>>(newestCalendarState));
+    CHECK(std::get<std::optional<std::string>>(newestCalendarState) ==
+          std::optional<std::string>{"calendar-state-new"});
+    const auto newestEventState = calendars.stateToken("a1", "CalendarEvent");
+    REQUIRE(std::holds_alternative<std::optional<std::string>>(newestEventState));
+    CHECK(std::get<std::optional<std::string>>(newestEventState) ==
+          std::optional<std::string>{"event-state-new"});
 }

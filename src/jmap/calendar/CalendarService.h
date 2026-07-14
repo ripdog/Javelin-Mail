@@ -6,8 +6,11 @@
 
 #include <QCoroTask>
 
+#include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
+#include <unordered_map>
 #include <variant>
 #include <vector>
 
@@ -117,11 +120,15 @@ namespace javelin::jmap::calendar
                                                                  DeleteEventCommand command);
 
       private:
+        [[nodiscard]] std::uint64_t beginRefresh(std::string_view ownerAccountId);
+        [[nodiscard]] bool isCurrentRefresh(std::string_view ownerAccountId,
+                                            std::uint64_t generation) const;
         [[nodiscard]] QCoro::Task<CalendarMutationResult>
         mutate(LiveConnectionSettings settings, std::string ownerAccountId,
                api::CalendarEventSetRequest request, std::vector<std::string> calendarIds);
 
         cache::DatabaseConnection& m_connection;
         api::JmapMethodTransport& m_methodTransport;
+        std::unordered_map<std::string, std::uint64_t> m_refreshGenerations;
     };
 } // namespace javelin::jmap::calendar

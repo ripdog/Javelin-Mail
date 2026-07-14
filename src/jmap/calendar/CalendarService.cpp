@@ -199,10 +199,23 @@ namespace javelin::jmap::calendar
         return std::get<std::vector<Calendar>>(std::move(loaded));
     }
 
+    std::uint64_t CalendarService::beginRefresh(const std::string_view ownerAccountId)
+    {
+        return ++m_refreshGenerations[std::string{ownerAccountId}];
+    }
+
+    bool CalendarService::isCurrentRefresh(const std::string_view ownerAccountId,
+                                           const std::uint64_t generation) const
+    {
+        const auto current = m_refreshGenerations.find(std::string{ownerAccountId});
+        return current != m_refreshGenerations.end() && current->second == generation;
+    }
+
     QCoro::Task<CalendarRefreshResult>
     CalendarService::refreshChanged(LiveConnectionSettings settings, std::string ownerAccountId,
                                     VisibleInterval interval, TimeZoneId displayTimeZone)
     {
+        const auto generation = beginRefresh(ownerAccountId);
         const auto sessionResult = loadSession(m_connection, ownerAccountId);
         if (const auto* serviceError = std::get_if<CalendarServiceError>(&sessionResult))
             co_return *serviceError;
@@ -245,6 +258,8 @@ namespace javelin::jmap::calendar
             const auto eventHandle = builder.call(*eventRequest, "calendar-event-changes");
             const auto result =
                 co_await caller.call(context(settings, session, accountId), builder);
+            if (!isCurrentRefresh(ownerAccountId, generation))
+                co_return summary;
             const auto* envelope = std::get_if<api::ResponseEnvelope>(&result);
             if (!envelope)
                 co_return callError(result);
@@ -311,6 +326,8 @@ namespace javelin::jmap::calendar
                 const auto getHandle = getBuilder.call(*getRequest, "changed-calendar-events");
                 const auto getResult =
                     co_await caller.call(context(settings, session, accountId), getBuilder);
+                if (!isCurrentRefresh(ownerAccountId, generation))
+                    co_return summary;
                 const auto* getEnvelope = std::get_if<api::ResponseEnvelope>(&getResult);
                 if (!getEnvelope)
                     co_return callError(getResult);
@@ -361,6 +378,7 @@ namespace javelin::jmap::calendar
                                                                 VisibleInterval interval,
                                                                 TimeZoneId displayTimeZone)
     {
+        const auto generation = beginRefresh(ownerAccountId);
         const auto sessionResult = loadSession(m_connection, ownerAccountId);
         if (const auto* serviceError = std::get_if<CalendarServiceError>(&sessionResult))
             co_return *serviceError;
@@ -413,6 +431,8 @@ namespace javelin::jmap::calendar
                 builder.call(*baseQueryRequest, "calendar-base-event-query");
             const auto result =
                 co_await caller.call(context(settings, session, accountId), builder);
+            if (!isCurrentRefresh(ownerAccountId, generation))
+                co_return summary;
             const auto* envelope = std::get_if<api::ResponseEnvelope>(&result);
             if (!envelope)
                 co_return callError(result);
@@ -452,6 +472,8 @@ namespace javelin::jmap::calendar
                 const auto nextHandle = nextBuilder.call(*nextRequest, "calendar-event-query");
                 const auto nextResult =
                     co_await caller.call(context(settings, session, accountId), nextBuilder);
+                if (!isCurrentRefresh(ownerAccountId, generation))
+                    co_return summary;
                 const auto* nextEnvelope = std::get_if<api::ResponseEnvelope>(&nextResult);
                 if (!nextEnvelope)
                     co_return callError(nextResult);
@@ -489,6 +511,8 @@ namespace javelin::jmap::calendar
                 const auto nextHandle = nextBuilder.call(*nextRequest, "calendar-base-event-query");
                 const auto nextResult =
                     co_await caller.call(context(settings, session, accountId), nextBuilder);
+                if (!isCurrentRefresh(ownerAccountId, generation))
+                    co_return summary;
                 const auto* nextEnvelope = std::get_if<api::ResponseEnvelope>(&nextResult);
                 if (!nextEnvelope)
                     co_return callError(nextResult);
@@ -529,6 +553,8 @@ namespace javelin::jmap::calendar
             const auto baseGetHandle = getBuilder.call(*baseGetRequest, "calendar-base-event-get");
             const auto getResult =
                 co_await caller.call(context(settings, session, accountId), getBuilder);
+            if (!isCurrentRefresh(ownerAccountId, generation))
+                co_return summary;
             const auto* getEnvelope = std::get_if<api::ResponseEnvelope>(&getResult);
             if (!getEnvelope)
                 co_return callError(getResult);
