@@ -110,6 +110,9 @@ transaction, while occurrences referenced by any retained overlapping window rem
 Each owner account also has a refresh generation: starting a newer range or state-change
 refresh supersedes older in-flight work, which is discarded before it can commit an
 obsolete window or rewind an opaque JMAP state token.
+Full refreshes split expanded occurrence and stable base-event `CalendarEvent/get`
+requests at the Core capability's `maxObjectsInGet` limit. Each batch uses one method
+call and all batches must report the same event state before reconciliation.
 
 ## Milestone 5: calendar product and month-view completeness
 

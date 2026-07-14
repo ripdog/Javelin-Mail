@@ -11,6 +11,8 @@
 #include <QLoggingCategory>
 #include <QRegularExpression>
 
+#include <algorithm>
+#include <limits>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -21,6 +23,13 @@ namespace javelin::jmap::calendar
     namespace
     {
         using SessionResult = std::variant<api::Session, CalendarServiceError>;
+
+        struct SupersededRefresh
+        {
+        };
+
+        using BatchedCalendarEvents =
+            std::variant<api::CalendarEventGetResponse, CalendarServiceError, SupersededRefresh>;
 
         QString errorCodeName(const CalendarServiceErrorCode code)
         {
@@ -117,6 +126,72 @@ namespace javelin::jmap::calendar
                         QStringLiteral("The server cannot schedule with one or more attendees."));
             }
             return error(CalendarServiceErrorCode::Protocol, QString::fromStdString(value.message));
+        }
+
+        template <typename IsCurrent>
+        QCoro::Task<BatchedCalendarEvents>
+        getCalendarEventsBatched(api::MethodCaller& caller, const LiveConnectionSettings& settings,
+                                 const api::Session& session, const std::string& accountId,
+                                 const std::vector<std::string>& ids,
+                                 const TimeZoneId& displayTimeZone, const std::size_t batchLimit,
+                                 const std::string_view callId, IsCurrent isCurrent)
+        {
+            if (batchLimit == 0)
+                co_return error(CalendarServiceErrorCode::Capability,
+                                QStringLiteral("The server advertises maxObjectsInGet as zero."));
+
+            api::CalendarEventGetResponse combined{
+                .accountId = accountId, .state = {}, .list = {}, .notFound = {}};
+            std::size_t offset = 0;
+            bool firstBatch = true;
+            do
+            {
+                const auto count = std::min(batchLimit, ids.size() - offset);
+                std::vector<std::string> batch{ids.begin() + static_cast<std::ptrdiff_t>(offset),
+                                               ids.begin() +
+                                                   static_cast<std::ptrdiff_t>(offset + count)};
+                const auto request =
+                    api::calendarEventGet({.accountId = accountId,
+                                           .ids = std::move(batch),
+                                           .properties = std::nullopt,
+                                           .recurrenceOverridesBefore = std::nullopt,
+                                           .recurrenceOverridesAfter = std::nullopt,
+                                           .reduceParticipants = false,
+                                           .timeZone = displayTimeZone});
+                if (!request)
+                    co_return error(CalendarServiceErrorCode::Validation,
+                                    QStringLiteral("Unable to serialize the calendar event "
+                                                   "request."));
+                api::RequestBuilder builder;
+                builder.useCore().useCapability(std::string{api::calendarsCapabilityUri});
+                const auto handle = builder.call(*request, std::string{callId});
+                const auto result =
+                    co_await caller.call(context(settings, session, accountId), builder);
+                if (!isCurrent())
+                    co_return SupersededRefresh{};
+                const auto* envelope = std::get_if<api::ResponseEnvelope>(&result);
+                if (!envelope)
+                    co_return callError(result);
+                const auto read = api::ResponseReader{*envelope}.require(handle);
+                if (const auto* readError = std::get_if<api::ResponseReaderError>(&read))
+                    co_return responseError(*readError);
+                auto response = std::get<api::CalendarEventGetResponse>(read);
+                if (!firstBatch && response.state != combined.state)
+                    co_return error(
+                        CalendarServiceErrorCode::Protocol,
+                        QStringLiteral("Calendar event batches returned inconsistent states."));
+                if (firstBatch)
+                    combined.state = response.state;
+                combined.list.insert(combined.list.end(),
+                                     std::make_move_iterator(response.list.begin()),
+                                     std::make_move_iterator(response.list.end()));
+                combined.notFound.insert(combined.notFound.end(),
+                                         std::make_move_iterator(response.notFound.begin()),
+                                         std::make_move_iterator(response.notFound.end()));
+                firstBatch = false;
+                offset += count;
+            } while (offset < ids.size());
+            co_return combined;
         }
 
         bool writable(const std::vector<calendar::Calendar>& calendars,
@@ -528,47 +603,37 @@ namespace javelin::jmap::calendar
                                     std::make_move_iterator(next.ids.end()));
             }
 
-            const auto getRequest =
-                api::calendarEventGet({.accountId = accountId,
-                                       .ids = std::move(eventIds),
-                                       .properties = std::nullopt,
-                                       .recurrenceOverridesBefore = std::nullopt,
-                                       .recurrenceOverridesAfter = std::nullopt,
-                                       .reduceParticipants = false,
-                                       .timeZone = displayTimeZone});
-            const auto baseGetRequest =
-                api::calendarEventGet({.accountId = accountId,
-                                       .ids = std::move(baseEventIds),
-                                       .properties = std::nullopt,
-                                       .recurrenceOverridesBefore = std::nullopt,
-                                       .recurrenceOverridesAfter = std::nullopt,
-                                       .reduceParticipants = false,
-                                       .timeZone = displayTimeZone});
-            if (!getRequest || !baseGetRequest)
-                co_return error(CalendarServiceErrorCode::Validation,
-                                QStringLiteral("Unable to serialize the calendar event request."));
-            api::RequestBuilder getBuilder;
-            getBuilder.useCore().useCapability(std::string{api::calendarsCapabilityUri});
-            const auto getHandle = getBuilder.call(*getRequest, "calendar-event-get");
-            const auto baseGetHandle = getBuilder.call(*baseGetRequest, "calendar-base-event-get");
-            const auto getResult =
-                co_await caller.call(context(settings, session, accountId), getBuilder);
-            if (!isCurrentRefresh(ownerAccountId, generation))
+            const auto batchLimit =
+                session.capabilities.coreDetails &&
+                        session.capabilities.coreDetails->maxObjectsInGet
+                    ? static_cast<std::size_t>(*session.capabilities.coreDetails->maxObjectsInGet)
+                    : std::numeric_limits<std::size_t>::max();
+            auto getResult = co_await getCalendarEventsBatched(
+                caller, settings, session, accountId, eventIds, displayTimeZone, batchLimit,
+                "calendar-event-get", [this, &ownerAccountId, generation]
+                { return isCurrentRefresh(ownerAccountId, generation); });
+            if (std::holds_alternative<SupersededRefresh>(getResult))
                 co_return summary;
-            const auto* getEnvelope = std::get_if<api::ResponseEnvelope>(&getResult);
-            if (!getEnvelope)
-                co_return callError(getResult);
-            const auto getRead = api::ResponseReader{*getEnvelope}.require(getHandle);
-            if (const auto* readError = std::get_if<api::ResponseReaderError>(&getRead))
-                co_return responseError(*readError);
-            const auto baseGetRead = api::ResponseReader{*getEnvelope}.require(baseGetHandle);
-            if (const auto* readError = std::get_if<api::ResponseReaderError>(&baseGetRead))
-                co_return responseError(*readError);
-            const auto& events = std::get<api::CalendarEventGetResponse>(getRead);
-            auto baseResponse = std::get<api::CalendarEventGetResponse>(baseGetRead);
-            if (!baseResponse.notFound.empty())
+            if (const auto* serviceError = std::get_if<CalendarServiceError>(&getResult))
+                co_return *serviceError;
+            auto events = std::get<api::CalendarEventGetResponse>(std::move(getResult));
+            auto baseGetResult = co_await getCalendarEventsBatched(
+                caller, settings, session, accountId, baseEventIds, displayTimeZone, batchLimit,
+                "calendar-base-event-get", [this, &ownerAccountId, generation]
+                { return isCurrentRefresh(ownerAccountId, generation); });
+            if (std::holds_alternative<SupersededRefresh>(baseGetResult))
+                co_return summary;
+            if (const auto* serviceError = std::get_if<CalendarServiceError>(&baseGetResult))
+                co_return *serviceError;
+            auto baseResponse = std::get<api::CalendarEventGetResponse>(std::move(baseGetResult));
+            if (events.state != baseResponse.state)
+                co_return error(
+                    CalendarServiceErrorCode::Protocol,
+                    QStringLiteral("Calendar event batches returned inconsistent states."));
+            if (!events.notFound.empty() || !baseResponse.notFound.empty())
                 co_return error(CalendarServiceErrorCode::Protocol,
-                                QStringLiteral("The server did not return a base calendar event."));
+                                QStringLiteral("The server did not return a calendar event from "
+                                               "the range query."));
 
             std::vector<Occurrence> occurrences;
             occurrences.reserve(events.list.size() + baseResponse.list.size());

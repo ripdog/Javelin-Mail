@@ -21,12 +21,14 @@ namespace
     {
       public:
         std::optional<javelin::jmap::api::JmapMethodRequest> request;
+        std::vector<javelin::jmap::api::JmapMethodRequest> requests;
         std::vector<javelin::jmap::api::JmapMethodTransportResult> results;
         std::function<void()> beforeReturn;
 
         QCoro::Task<javelin::jmap::api::JmapMethodTransportResult>
         call(javelin::jmap::api::JmapMethodRequest value) override
         {
+            requests.push_back(value);
             request = std::move(value);
             REQUIRE_FALSE(results.empty());
             auto result = std::move(results.front());
@@ -57,6 +59,8 @@ namespace
         value.uploadUrl = "https://example.test/upload/{accountId}";
         value.state = "session-1";
         value.capabilities.core = true;
+        value.capabilities.coreDetails = javelin::jmap::api::CoreCapability{};
+        value.capabilities.coreDetails->maxObjectsInGet = 1;
         value.capabilities.calendars = true;
         value.primaryAccounts.calendarsAccountId = "a1";
         value.accounts.emplace(
@@ -289,4 +293,59 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
     REQUIRE(std::holds_alternative<std::optional<std::string>>(newestEventState));
     CHECK(std::get<std::optional<std::string>>(newestEventState) ==
           std::optional<std::string>{"event-state-new"});
+
+    const auto requestCount = transport.requests.size();
+    transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+        .methodResponses =
+            {{.name = "Calendar/get",
+              .arguments =
+                  R"({"accountId":"a1","state":"calendar-batched","list":[{"id":"work","name":"Work","isSubscribed":true,"isVisible":true,"isDefault":true,"myRights":{"mayReadFreeBusy":true,"mayReadItems":true,"mayWriteAll":true,"mayWriteOwn":true,"mayUpdatePrivate":true,"mayRSVP":true,"mayShare":false,"mayDelete":false}}],"notFound":[]})",
+              .callId = "calendar-get"},
+             {.name = "CalendarEvent/query",
+              .arguments =
+                  R"({"accountId":"a1","queryState":"expanded-query","canCalculateChanges":false,"position":0,"ids":["expanded-1","expanded-2"],"total":2,"limit":2})",
+              .callId = "calendar-event-query"},
+             {.name = "CalendarEvent/query",
+              .arguments =
+                  R"({"accountId":"a1","queryState":"base-query","canCalculateChanges":false,"position":0,"ids":["base-1","base-2"],"total":2,"limit":2})",
+              .callId = "calendar-base-event-query"}},
+        .createdIds = std::nullopt,
+        .sessionState = "session-batched-query"});
+    const auto getResponse = [](const std::string& callId, const std::string& id,
+                                const std::string& uid, const std::string& start)
+    {
+        return javelin::jmap::api::ResponseEnvelope{
+            .methodResponses =
+                {{.name = "CalendarEvent/get",
+                  .arguments =
+                      QStringLiteral(
+                          R"({"accountId":"a1","state":"event-batched","list":[{"@type":"Event","id":"%1","uid":"%2","calendarIds":{"work":true},"title":"%1","start":"%3","duration":"PT1H","timeZone":"Pacific/Auckland","showWithoutTime":false,"isDraft":false,"isOrigin":true}],"notFound":[]})")
+                          .arg(QString::fromStdString(id), QString::fromStdString(uid),
+                               QString::fromStdString(start))
+                          .toStdString(),
+                  .callId = callId}},
+            .createdIds = std::nullopt,
+            .sessionState = "session-batched-get"};
+    };
+    transport.results.push_back(
+        getResponse("calendar-event-get", "expanded-1", "expanded-uid-1", "2026-07-20T09:00:00"));
+    transport.results.push_back(
+        getResponse("calendar-event-get", "expanded-2", "expanded-uid-2", "2026-07-21T09:00:00"));
+    transport.results.push_back(
+        getResponse("calendar-base-event-get", "base-1", "base-uid-1", "2026-07-20T09:00:00"));
+    transport.results.push_back(
+        getResponse("calendar-base-event-get", "base-2", "base-uid-2", "2026-07-21T09:00:00"));
+
+    const auto batched = QCoro::waitFor(service.refresh(settings, "a1", interval, zone));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::calendar::RefreshedRange>(batched));
+    CHECK(std::get<javelin::jmap::calendar::RefreshedRange>(batched).eventCount == 2);
+    REQUIRE(transport.requests.size() == requestCount + 5);
+    for (auto index = requestCount + 1; index < transport.requests.size(); ++index)
+    {
+        REQUIRE(transport.requests[index].envelope.methodCalls.size() == 1);
+        const auto& arguments = transport.requests[index].envelope.methodCalls.front().arguments;
+        CHECK_FALSE(arguments.find(R"("expanded-1","expanded-2")") != std::string::npos);
+        CHECK_FALSE(arguments.find(R"("base-1","base-2")") != std::string::npos);
+    }
 }
