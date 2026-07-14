@@ -396,4 +396,26 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
     CHECK(after.eventState == before.eventState);
     REQUIRE(after.events.size() == before.events.size());
     CHECK(after.events.front().title == before.events.front().title);
+
+    auto listedCalendars = calendars.listCalendars("a1");
+    REQUIRE(
+        std::holds_alternative<std::vector<javelin::jmap::calendar::Calendar>>(listedCalendars));
+    auto calendarDocuments =
+        std::get<std::vector<javelin::jmap::calendar::Calendar>>(listedCalendars);
+    REQUIRE(calendarDocuments.size() == 1);
+    auto readOnly = calendarDocuments.front();
+    readOnly.id = "read-only";
+    readOnly.name = "Read only";
+    readOnly.isDefault = false;
+    readOnly.myRights.mayWriteAll = false;
+    readOnly.myRights.mayWriteOwn = false;
+    calendarDocuments.push_back(readOnly);
+    REQUIRE_FALSE(
+        calendars.replaceCalendars("a1", "calendar-with-read-only", calendarDocuments).has_value());
+
+    const auto readOnlyDefault = service.setDefaultCalendar("a1", "read-only");
+
+    REQUIRE(std::holds_alternative<javelin::jmap::calendar::CalendarServiceError>(readOnlyDefault));
+    CHECK(std::get<javelin::jmap::calendar::CalendarServiceError>(readOnlyDefault).code ==
+          javelin::jmap::calendar::CalendarServiceErrorCode::Permission);
 }

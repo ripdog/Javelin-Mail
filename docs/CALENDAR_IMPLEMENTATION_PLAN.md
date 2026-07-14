@@ -134,6 +134,9 @@ Calendar visibility overrides are stored separately from the server-owned Calend
 document and survive subsequent `Calendar/get` reconciliation. The calendar menu writes
 the per-account override immediately and reports cache failures through the normal typed
 error/logging path.
+The same preference record stores one writable default destination per account. The
+calendar menu exposes writable choices, the service rejects read-only selections, and
+new-event creation consumes the effective default without modifying the server Calendar.
 
 ## Milestone 6: interoperability and quality gates
 

@@ -168,7 +168,10 @@ namespace javelin::jmap::cache
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
             "SELECT c.calendar_id,c.name,c.description,c.color,c.sort_order,c.is_subscribed,"
-            "COALESCE(p.is_visible,c.is_visible),c.is_default,c.time_zone,c.rights_json FROM "
+            "COALESCE(p.is_visible,c.is_visible),CASE WHEN EXISTS (SELECT 1 FROM "
+            "calendar_preferences d WHERE d.account_id=c.account_id AND "
+            "d.is_default_destination=1) THEN COALESCE(p.is_default_destination,0) ELSE "
+            "c.is_default END,c.time_zone,c.rights_json FROM "
             "calendars c LEFT JOIN calendar_preferences p ON p.account_id=c.account_id AND "
             "p.calendar_id=c.calendar_id WHERE c.account_id=:account ORDER BY c.sort_order,"
             "c.name COLLATE NOCASE,c.calendar_id"));
@@ -220,6 +223,55 @@ namespace javelin::jmap::cache
         query.bindValue(QStringLiteral(":visible"), visible ? 1 : 0);
         if (!query.exec())
             return queryError(QStringLiteral("Store calendar visibility"), query);
+        return std::nullopt;
+    }
+
+    std::optional<DatabaseError>
+    CalendarRepository::setDefaultCalendar(const std::string_view accountId,
+                                           const std::string_view calendarId)
+    {
+        if (const auto error = m_connection.validate())
+            return error;
+        auto& database = m_connection.database();
+        if (!database.transaction())
+            return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
+                                 .message = QStringLiteral("Begin default calendar update: ") +
+                                            database.lastError().text()};
+        QSqlQuery clear{database};
+        clear.prepare(
+            QStringLiteral("UPDATE calendar_preferences SET is_default_destination=0 WHERE "
+                           "account_id=:account"));
+        clear.bindValue(QStringLiteral(":account"), QString::fromStdString(std::string{accountId}));
+        if (!clear.exec())
+        {
+            database.rollback();
+            return queryError(QStringLiteral("Clear default calendar"), clear);
+        }
+        QSqlQuery select{database};
+        select.prepare(QStringLiteral(
+            "INSERT INTO calendar_preferences (account_id,calendar_id,is_visible,"
+            "is_default_destination) SELECT account_id,calendar_id,is_visible,1 FROM calendars "
+            "WHERE account_id=:account AND calendar_id=:calendar ON CONFLICT(account_id,"
+            "calendar_id) DO UPDATE SET is_default_destination=1"));
+        select.bindValue(QStringLiteral(":account"),
+                         QString::fromStdString(std::string{accountId}));
+        select.bindValue(QStringLiteral(":calendar"),
+                         QString::fromStdString(std::string{calendarId}));
+        if (!select.exec())
+        {
+            database.rollback();
+            return queryError(QStringLiteral("Store default calendar"), select);
+        }
+        if (select.numRowsAffected() != 1)
+        {
+            database.rollback();
+            return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
+                                 .message = QStringLiteral("The default calendar is missing.")};
+        }
+        if (!database.commit())
+            return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
+                                 .message = QStringLiteral("Commit default calendar update: ") +
+                                            database.lastError().text()};
         return std::nullopt;
     }
 

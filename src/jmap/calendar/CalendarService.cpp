@@ -284,6 +284,26 @@ namespace javelin::jmap::calendar
         return std::monostate{};
     }
 
+    CalendarPreferenceResult CalendarService::setDefaultCalendar(const std::string_view accountId,
+                                                                 const std::string_view calendarId)
+    {
+        const auto listed = calendars(accountId);
+        if (const auto* serviceError = std::get_if<CalendarServiceError>(&listed))
+            return *serviceError;
+        const auto& available = std::get<std::vector<Calendar>>(listed);
+        const auto selected = std::ranges::find(available, calendarId, &Calendar::id);
+        if (selected == available.end())
+            return error(CalendarServiceErrorCode::Validation,
+                         QStringLiteral("The selected calendar is no longer available."));
+        if (!selected->myRights.mayWriteAll && !selected->myRights.mayWriteOwn)
+            return error(CalendarServiceErrorCode::Permission,
+                         QStringLiteral("The selected calendar is read-only."));
+        cache::CalendarRepository repository{m_connection};
+        if (const auto cacheError = repository.setDefaultCalendar(accountId, calendarId))
+            return error(CalendarServiceErrorCode::Cache, cacheError->message);
+        return std::monostate{};
+    }
+
     std::uint64_t CalendarService::beginRefresh(const std::string_view ownerAccountId)
     {
         return ++m_refreshGenerations[std::string{ownerAccountId}];

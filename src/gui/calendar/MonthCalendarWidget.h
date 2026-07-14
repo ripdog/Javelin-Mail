@@ -38,6 +38,8 @@ namespace javelin::gui::calendar
         QString name;
         QColor color;
         bool visible = true;
+        bool writable = false;
+        bool defaultDestination = false;
     };
 
     class DayCellWidget;
@@ -79,6 +81,7 @@ namespace javelin::gui::calendar
                             const QString& recurrenceId);
         void emptyTimeActivated(const QDate& date);
         void calendarVisibilityChanged(const QString& calendarId, bool visible);
+        void defaultCalendarChanged(const QString& calendarId);
 
       protected:
         void keyPressEvent(QKeyEvent* event) override;

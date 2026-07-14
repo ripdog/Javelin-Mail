@@ -1578,7 +1578,10 @@ namespace javelin::gui::shell
                                                         QString::fromStdString(calendar.name),
                                                         QString::fromStdString(account.name)),
                                                     .color = color,
-                                                    .visible = calendar.isVisible});
+                                                    .visible = calendar.isVisible,
+                                                    .writable = calendar.myRights.mayWriteAll ||
+                                                                calendar.myRights.mayWriteOwn,
+                                                    .defaultDestination = calendar.isDefault});
                     }
                 }
                 const auto loaded =
@@ -1655,6 +1658,25 @@ namespace javelin::gui::shell
                     {
                         qCWarning(logUserOperations).noquote()
                             << "calendar visibility update failed" << error->message;
+                        m_statusBar->showMessage(error->message, 10000);
+                        loadVisible(widget->visibleStart(), widget->visibleEnd());
+                    }
+                });
+        connect(widget, &javelin::gui::calendar::MonthCalendarWidget::defaultCalendarChanged,
+                widget,
+                [this, loadVisible, widget](const QString& displayId)
+                {
+                    const auto separator = displayId.indexOf(QLatin1Char('\n'));
+                    if (separator <= 0 || separator == displayId.size() - 1)
+                        return;
+                    const auto result = m_calendarService.setDefaultCalendar(
+                        displayId.first(separator).toStdString(),
+                        displayId.sliced(separator + 1).toStdString());
+                    if (const auto* error =
+                            std::get_if<javelin::jmap::calendar::CalendarServiceError>(&result))
+                    {
+                        qCWarning(logUserOperations).noquote()
+                            << "default calendar update failed" << error->message;
                         m_statusBar->showMessage(error->message, 10000);
                         loadVisible(widget->visibleStart(), widget->visibleEnd());
                     }

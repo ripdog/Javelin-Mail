@@ -1,6 +1,7 @@
 #include "gui/calendar/MonthCalendarWidget.h"
 #include "gui/calendar/MonthCalendarLayout.h"
 
+#include <QActionGroup>
 #include <QColorDialog>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -298,6 +299,19 @@ namespace javelin::gui::calendar
                         rebuildEvents();
                         Q_EMIT calendarVisibilityChanged(QString::fromStdString(id), visible);
                     });
+        }
+        auto* destinations = m_calendarMenu->addMenu(QStringLiteral("Default for New Events"));
+        auto* destinationGroup = new QActionGroup(destinations);
+        destinationGroup->setExclusive(true);
+        for (const auto& calendar : m_calendars)
+        {
+            auto* action = destinations->addAction(calendar.name);
+            action->setCheckable(true);
+            action->setChecked(calendar.defaultDestination);
+            action->setEnabled(calendar.writable);
+            destinationGroup->addAction(action);
+            connect(action, &QAction::triggered, this, [this, id = calendar.id]
+                    { Q_EMIT defaultCalendarChanged(QString::fromStdString(id)); });
         }
         if (!m_calendars.empty())
             m_calendarMenu->addSeparator();
