@@ -33,7 +33,13 @@ namespace javelin::gui::contacts
                               std::string ownerAccountId, QWidget* parent = nullptr);
 
         [[nodiscard]] bool operationInFlight() const;
+
+      public Q_SLOTS:
         void requestRefresh();
+        void beginCreateContact();
+        void beginEditContact();
+        void deleteContact();
+        void copyContact();
 
       Q_SIGNALS:
         void statusMessageRequested(const QString& message, int timeoutMs = 5000);
@@ -47,14 +53,10 @@ namespace javelin::gui::contacts
         void reloadAddressBooks();
         void reloadContacts();
         void showSelectedContact();
-        void beginCreateContact();
-        void beginEditContact();
         void cancelEdit();
         void loadEditorDocument(const QString& document);
         void saveContact();
         void uploadPhoto();
-        void deleteContact();
-        void copyContact();
         void createAddressBook();
         void editAddressBook();
         void deleteAddressBook();

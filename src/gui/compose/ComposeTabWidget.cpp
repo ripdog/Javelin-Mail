@@ -1270,6 +1270,22 @@ namespace javelin::gui::compose
         addAttachmentPaths(filePaths);
     }
 
+    void ComposeTabWidget::attachFiles()
+    {
+        if (!m_operationInFlight)
+            addAttachments();
+    }
+
+    void ComposeTabWidget::saveDraft()
+    {
+        startSaveDraft(false);
+    }
+
+    void ComposeTabWidget::sendMessage()
+    {
+        startSend();
+    }
+
     void ComposeTabWidget::addAttachmentPaths(const QStringList& filePaths)
     {
         for (const auto& filePath : filePaths)

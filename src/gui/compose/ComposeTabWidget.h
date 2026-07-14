@@ -71,6 +71,11 @@ namespace javelin::gui::compose
 
         void saveDraftAndClose();
 
+      public Q_SLOTS:
+        void attachFiles();
+        void saveDraft();
+        void sendMessage();
+
       protected:
         void dragEnterEvent(QDragEnterEvent* event) override;
         void dragMoveEvent(QDragMoveEvent* event) override;

@@ -288,6 +288,10 @@ namespace javelin::gui::calendar
     {
         setDisplayedMonth(m_displayedMonth.addMonths(-1));
     }
+    void MonthCalendarWidget::createEvent()
+    {
+        Q_EMIT emptyTimeActivated(m_selectedDate);
+    }
     void MonthCalendarWidget::showNextMonth()
     {
         setDisplayedMonth(m_displayedMonth.addMonths(1));

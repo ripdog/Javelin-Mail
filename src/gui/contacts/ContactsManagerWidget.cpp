@@ -669,6 +669,8 @@ namespace javelin::gui::contacts
 
     void ContactsManagerWidget::beginCreateContact()
     {
+        if (m_busy)
+            return;
         auto bookId = currentAddressBookId();
         if (!bookId.has_value())
         {
@@ -707,6 +709,8 @@ namespace javelin::gui::contacts
 
     void ContactsManagerWidget::beginEditContact()
     {
+        if (m_busy)
+            return;
         const auto* contact = currentContact();
         if (contact == nullptr)
             return;
@@ -839,6 +843,8 @@ namespace javelin::gui::contacts
 
     void ContactsManagerWidget::deleteContact()
     {
+        if (m_busy)
+            return;
         const auto accountId = currentAccountId();
         const auto* contact = currentContact();
         if (!accountId.has_value() || contact == nullptr ||
@@ -866,6 +872,8 @@ namespace javelin::gui::contacts
 
     void ContactsManagerWidget::copyContact()
     {
+        if (m_busy)
+            return;
         const auto sourceAccountId = currentAccountId();
         const auto* contact = currentContact();
         if (!sourceAccountId.has_value() || contact == nullptr || m_accounts.empty())

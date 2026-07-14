@@ -663,7 +663,7 @@ namespace javelin::gui::shell
         setupGUI(KXmlGuiWindow::ToolBar | KXmlGuiWindow::Keys | KXmlGuiWindow::Save |
                      KXmlGuiWindow::Create,
                  QStringLiteral("javelinmailui.rc"));
-        setToolBarVisible(QStringLiteral("mainToolBar"), true);
+        updateToolbarForActiveTab();
         connectSelection();
         connect(&m_mailService, &javelin::app::MailApplicationService::accountStatusChanged, this,
                 [this](const QString& accountId, const auto status)
@@ -920,6 +920,117 @@ namespace javelin::gui::shell
                         QStringLiteral("Advanced Search"), this);
         connect(m_advancedSearchAction, &QAction::triggered, this, &MainWindow::showAdvancedSearch);
         actionCollection()->addAction(QStringLiteral("advanced_search"), m_advancedSearchAction);
+
+        m_composeSendAction = new QAction(QIcon::fromTheme(QStringLiteral("mail-send")),
+                                          QStringLiteral("Send"), this);
+        connect(m_composeSendAction, &QAction::triggered, this,
+                [this]
+                {
+                    if (auto* tab = activeTab())
+                        if (auto* compose = std::get_if<ComposeTabState>(&tab->content);
+                            compose != nullptr && compose->widget != nullptr)
+                            compose->widget->sendMessage();
+                });
+        actionCollection()->addAction(QStringLiteral("compose_send"), m_composeSendAction);
+
+        m_composeSaveDraftAction = new QAction(QIcon::fromTheme(QStringLiteral("document-save")),
+                                               QStringLiteral("Save Draft"), this);
+        connect(m_composeSaveDraftAction, &QAction::triggered, this,
+                [this]
+                {
+                    if (auto* tab = activeTab())
+                        if (auto* compose = std::get_if<ComposeTabState>(&tab->content);
+                            compose != nullptr && compose->widget != nullptr)
+                            compose->widget->saveDraft();
+                });
+        actionCollection()->addAction(QStringLiteral("compose_save_draft"),
+                                      m_composeSaveDraftAction);
+
+        m_composeAttachFilesAction =
+            new QAction(QIcon::fromTheme(QStringLiteral("mail-attachment")),
+                        QStringLiteral("Attach Files"), this);
+        connect(m_composeAttachFilesAction, &QAction::triggered, this,
+                [this]
+                {
+                    if (auto* tab = activeTab())
+                        if (auto* compose = std::get_if<ComposeTabState>(&tab->content);
+                            compose != nullptr && compose->widget != nullptr)
+                            compose->widget->attachFiles();
+                });
+        actionCollection()->addAction(QStringLiteral("compose_attach_files"),
+                                      m_composeAttachFilesAction);
+
+        const auto invokeContact = [this](const auto operation)
+        {
+            if (auto* tab = activeTab())
+                if (auto* contacts = std::get_if<ContactsTabState>(&tab->content);
+                    contacts != nullptr && contacts->widget != nullptr)
+                    (contacts->widget->*operation)();
+        };
+        m_contactNewAction = new QAction(QIcon::fromTheme(QStringLiteral("contact-new")),
+                                         QStringLiteral("New Contact"), this);
+        connect(
+            m_contactNewAction, &QAction::triggered, this, [invokeContact]
+            { invokeContact(&javelin::gui::contacts::ContactsManagerWidget::beginCreateContact); });
+        actionCollection()->addAction(QStringLiteral("contact_new"), m_contactNewAction);
+        m_contactEditAction = new QAction(QIcon::fromTheme(QStringLiteral("document-edit")),
+                                          QStringLiteral("Edit Contact"), this);
+        connect(
+            m_contactEditAction, &QAction::triggered, this, [invokeContact]
+            { invokeContact(&javelin::gui::contacts::ContactsManagerWidget::beginEditContact); });
+        actionCollection()->addAction(QStringLiteral("contact_edit"), m_contactEditAction);
+        m_contactDeleteAction = new QAction(QIcon::fromTheme(QStringLiteral("edit-delete")),
+                                            QStringLiteral("Delete Contact"), this);
+        connect(m_contactDeleteAction, &QAction::triggered, this, [invokeContact]
+                { invokeContact(&javelin::gui::contacts::ContactsManagerWidget::deleteContact); });
+        actionCollection()->addAction(QStringLiteral("contact_delete"), m_contactDeleteAction);
+        m_contactCopyAction = new QAction(QIcon::fromTheme(QStringLiteral("edit-copy")),
+                                          QStringLiteral("Copy Contact"), this);
+        connect(m_contactCopyAction, &QAction::triggered, this, [invokeContact]
+                { invokeContact(&javelin::gui::contacts::ContactsManagerWidget::copyContact); });
+        actionCollection()->addAction(QStringLiteral("contact_copy"), m_contactCopyAction);
+        m_contactRefreshAction = new QAction(QIcon::fromTheme(QStringLiteral("view-refresh")),
+                                             QStringLiteral("Refresh Contacts"), this);
+        connect(m_contactRefreshAction, &QAction::triggered, this, [invokeContact]
+                { invokeContact(&javelin::gui::contacts::ContactsManagerWidget::requestRefresh); });
+        actionCollection()->addAction(QStringLiteral("contact_refresh"), m_contactRefreshAction);
+
+        const auto invokeCalendar = [this](const auto operation)
+        {
+            if (auto* tab = activeTab())
+                if (auto* calendar = std::get_if<CalendarTabState>(&tab->content);
+                    calendar != nullptr && calendar->widget != nullptr)
+                    (calendar->widget->*operation)();
+        };
+        m_calendarNewEventAction = new QAction(QIcon::fromTheme(QStringLiteral("appointment-new")),
+                                               QStringLiteral("New Event"), this);
+        connect(m_calendarNewEventAction, &QAction::triggered, this, [invokeCalendar]
+                { invokeCalendar(&javelin::gui::calendar::MonthCalendarWidget::createEvent); });
+        actionCollection()->addAction(QStringLiteral("calendar_new_event"),
+                                      m_calendarNewEventAction);
+        m_calendarPreviousMonthAction = new QAction(QIcon::fromTheme(QStringLiteral("go-previous")),
+                                                    QStringLiteral("Previous Month"), this);
+        connect(
+            m_calendarPreviousMonthAction, &QAction::triggered, this, [invokeCalendar]
+            { invokeCalendar(&javelin::gui::calendar::MonthCalendarWidget::showPreviousMonth); });
+        actionCollection()->addAction(QStringLiteral("calendar_previous_month"),
+                                      m_calendarPreviousMonthAction);
+        m_calendarTodayAction = new QAction(QIcon::fromTheme(QStringLiteral("go-jump-today")),
+                                            QStringLiteral("Today"), this);
+        connect(m_calendarTodayAction, &QAction::triggered, this, [invokeCalendar]
+                { invokeCalendar(&javelin::gui::calendar::MonthCalendarWidget::showToday); });
+        actionCollection()->addAction(QStringLiteral("calendar_today"), m_calendarTodayAction);
+        m_calendarNextMonthAction = new QAction(QIcon::fromTheme(QStringLiteral("go-next")),
+                                                QStringLiteral("Next Month"), this);
+        connect(m_calendarNextMonthAction, &QAction::triggered, this, [invokeCalendar]
+                { invokeCalendar(&javelin::gui::calendar::MonthCalendarWidget::showNextMonth); });
+        actionCollection()->addAction(QStringLiteral("calendar_next_month"),
+                                      m_calendarNextMonthAction);
+        m_calendarRefreshAction = new QAction(QIcon::fromTheme(QStringLiteral("view-refresh")),
+                                              QStringLiteral("Refresh Calendar"), this);
+        connect(m_calendarRefreshAction, &QAction::triggered, this,
+                [this] { refreshActiveTabFromServer(); });
+        actionCollection()->addAction(QStringLiteral("calendar_refresh"), m_calendarRefreshAction);
 
         auto* logAction = new QAction(QIcon::fromTheme(QStringLiteral("view-list-text")),
                                       QStringLiteral("Application Log"), this);
@@ -2184,6 +2295,34 @@ namespace javelin::gui::shell
         setWindowTitle(titleForTab(*tab));
     }
 
+    MainWindow::ToolbarContext MainWindow::toolbarContextForActiveTab() const
+    {
+        const auto* tab = activeTab();
+        if (tab == nullptr || std::holds_alternative<MailboxTabState>(tab->content) ||
+            std::holds_alternative<SearchTabState>(tab->content))
+            return ToolbarContext::Mail;
+        if (std::holds_alternative<ComposeTabState>(tab->content))
+            return ToolbarContext::Compose;
+        if (std::holds_alternative<ContactsTabState>(tab->content))
+            return ToolbarContext::Contacts;
+        return ToolbarContext::Calendar;
+    }
+
+    void MainWindow::updateToolbarForActiveTab()
+    {
+        const auto context = toolbarContextForActiveTab();
+        setToolBarVisible(QStringLiteral("mainToolBar"), context == ToolbarContext::Mail);
+        setToolBarVisible(QStringLiteral("composeToolBar"), context == ToolbarContext::Compose);
+        setToolBarVisible(QStringLiteral("contactsToolBar"), context == ToolbarContext::Contacts);
+        setToolBarVisible(QStringLiteral("calendarToolBar"), context == ToolbarContext::Calendar);
+    }
+
+    void MainWindow::saveNewToolbarConfig()
+    {
+        KXmlGuiWindow::saveNewToolbarConfig();
+        updateToolbarForActiveTab();
+    }
+
     void MainWindow::openOrActivateMailboxTab(std::string accountId, std::string mailboxId,
                                               const QString title, std::optional<std::string> role,
                                               const bool refreshRemote)
@@ -2341,10 +2480,12 @@ namespace javelin::gui::shell
             updateEmptyStates();
             updateMessageListHeader();
             updateMessageActions();
+            updateToolbarForActiveTab();
             return;
         }
 
         m_activeTabIndex = index;
+        updateToolbarForActiveTab();
         if (m_tabBar->currentIndex() != index)
         {
             QSignalBlocker blocker{m_tabBar};

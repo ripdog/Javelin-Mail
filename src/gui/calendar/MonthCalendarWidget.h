@@ -63,6 +63,7 @@ namespace javelin::gui::calendar
         [[nodiscard]] int overflowCount(const QDate& date) const;
 
       public Q_SLOTS:
+        void createEvent();
         void showPreviousMonth();
         void showNextMonth();
         void showToday();

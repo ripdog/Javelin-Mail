@@ -123,6 +123,9 @@ namespace javelin::gui::shell
       Q_SIGNALS:
         void accountSettingsChanged();
 
+      protected Q_SLOTS:
+        void saveNewToolbarConfig() override;
+
       private:
         static constexpr std::size_t pageSize = 100;
 
@@ -198,6 +201,14 @@ namespace javelin::gui::shell
             std::variant<MailboxTabState, SearchTabState, ComposeTabState, ContactsTabState,
                          CalendarTabState>
                 content;
+        };
+
+        enum class ToolbarContext
+        {
+            Mail,
+            Compose,
+            Contacts,
+            Calendar,
         };
 
         struct MessageContentRequestState
@@ -283,6 +294,8 @@ namespace javelin::gui::shell
         void refreshAccountFromServer(std::string accountId);
         void refreshConnectionSettings(javelin::gui::settings::ConnectionSettings settings);
         void updateWindowTitle();
+        [[nodiscard]] ToolbarContext toolbarContextForActiveTab() const;
+        void updateToolbarForActiveTab();
         void refreshSelectedMessageContent(std::string accountId, std::string emailId);
         [[nodiscard]] std::vector<std::string> selectedEmailIds() const;
         [[nodiscard]] std::variant<std::vector<std::string>, QString>
@@ -399,6 +412,19 @@ namespace javelin::gui::shell
         QAction* m_copyAction = nullptr;
         QAction* m_viewSourceAction = nullptr;
         QAction* m_advancedSearchAction = nullptr;
+        QAction* m_composeSendAction = nullptr;
+        QAction* m_composeSaveDraftAction = nullptr;
+        QAction* m_composeAttachFilesAction = nullptr;
+        QAction* m_contactNewAction = nullptr;
+        QAction* m_contactEditAction = nullptr;
+        QAction* m_contactDeleteAction = nullptr;
+        QAction* m_contactCopyAction = nullptr;
+        QAction* m_contactRefreshAction = nullptr;
+        QAction* m_calendarNewEventAction = nullptr;
+        QAction* m_calendarPreviousMonthAction = nullptr;
+        QAction* m_calendarTodayAction = nullptr;
+        QAction* m_calendarNextMonthAction = nullptr;
+        QAction* m_calendarRefreshAction = nullptr;
         javelin::jmap::query::EmailListSort m_emailListSort;
         bool m_refreshInFlight = false;
         std::uint64_t m_nextMessageContentRequestToken = 1;
