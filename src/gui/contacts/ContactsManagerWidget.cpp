@@ -322,7 +322,7 @@ namespace javelin::gui::contacts
         cardScroll->setFrameShape(QFrame::NoFrame);
         m_cardContainer = new QWidget(cardScroll);
         m_cardLayout = new QVBoxLayout(m_cardContainer);
-        m_cardLayout->setContentsMargins(0, 8, 8, 8);
+        m_cardLayout->setContentsMargins(8, 8, 8, 8);
         m_cardLayout->setSpacing(10);
         cardScroll->setWidget(m_cardContainer);
         auto* fullDocument = new QPlainTextEdit(view);
