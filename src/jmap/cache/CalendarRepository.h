@@ -50,6 +50,12 @@ namespace javelin::jmap::cache
                                                                     std::string_view eventState);
 
         [[nodiscard]] std::optional<DatabaseError> reconcileWindow(const CalendarWindow& window);
+        [[nodiscard]] std::optional<DatabaseError>
+        applyEventDelta(std::string_view accountId, std::string_view calendarState,
+                        std::string_view eventState, const calendar::TimeZoneId& displayTimeZone,
+                        const std::vector<calendar::CalendarEvent>& events,
+                        const std::vector<calendar::Occurrence>& occurrences,
+                        const std::vector<std::string>& destroyedEventIds);
 
         [[nodiscard]] std::variant<std::optional<CalendarWindow>, DatabaseError>
         loadWindow(std::string_view accountId, const calendar::LocalDateTime& start,

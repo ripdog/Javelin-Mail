@@ -155,4 +155,37 @@ TEST_CASE("calendar windows retain occurrences referenced by overlapping windows
     REQUIRE(count.exec(QStringLiteral("SELECT COUNT(*) FROM calendar_occurrences")));
     REQUIRE(count.next());
     CHECK(count.value(0).toInt() == 1);
+
+    auto changedEvent = event("e2", "2026-04-02T10:00:00");
+    changedEvent.title = "Changed event";
+    const auto changedOccurrence = occurrence("e2", "2026-04-02T10:00:00");
+    REQUIRE_FALSE(
+        repository
+            .applyEventDelta("a1", "c2", "e3-state", zone, {changedEvent}, {changedOccurrence}, {})
+            .has_value());
+    const auto updatedFirst =
+        repository.loadWindow("a1", first.start, first.end, first.displayTimeZone);
+    const auto updatedSecond =
+        repository.loadWindow("a1", second.start, second.end, second.displayTimeZone);
+    REQUIRE(std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(updatedFirst)
+                ->events.size() == 1);
+    CHECK(std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(updatedFirst)
+              ->events.front()
+              .title == "Changed event");
+    REQUIRE(std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(updatedSecond)
+                ->events.size() == 1);
+    CHECK(std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(updatedSecond)
+              ->events.front()
+              .title == "Changed event");
+
+    REQUIRE_FALSE(
+        repository.applyEventDelta("a1", "c2", "e4-state", zone, {}, {}, {"e2"}).has_value());
+    const auto destroyedFirst =
+        repository.loadWindow("a1", first.start, first.end, first.displayTimeZone);
+    const auto destroyedSecond =
+        repository.loadWindow("a1", second.start, second.end, second.displayTimeZone);
+    CHECK(std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(destroyedFirst)
+              ->events.empty());
+    CHECK(std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(destroyedSecond)
+              ->events.empty());
 }

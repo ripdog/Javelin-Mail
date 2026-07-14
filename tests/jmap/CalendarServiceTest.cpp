@@ -191,4 +191,47 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
     REQUIRE(std::holds_alternative<std::optional<std::string>>(eventState));
     CHECK(std::get<std::optional<std::string>>(eventState) ==
           std::optional<std::string>{"event-state-8"});
+
+    transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+        .methodResponses =
+            {{.name = "Calendar/changes",
+              .arguments =
+                  R"({"accountId":"a1","oldState":"calendar-state-2","newState":"calendar-state-2","hasMoreChanges":false,"created":[],"updated":[],"destroyed":[]})",
+              .callId = "calendar-changes"},
+             {.name = "CalendarEvent/changes",
+              .arguments =
+                  R"({"accountId":"a1","oldState":"event-state-8","newState":"event-state-9","hasMoreChanges":false,"created":[],"updated":["event-1"],"destroyed":[]})",
+              .callId = "calendar-event-changes"}},
+        .createdIds = std::nullopt,
+        .sessionState = "session-4"});
+    transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+        .methodResponses =
+            {{.name = "CalendarEvent/get",
+              .arguments =
+                  R"({"accountId":"a1","state":"event-state-9","list":[{"@type":"Event","id":"event-1","uid":"uid-1","calendarIds":{"work":true},"title":"Changed remotely","start":"2026-07-13T10:00:00","duration":"PT1H","timeZone":"Pacific/Auckland","showWithoutTime":false,"isDraft":false,"isOrigin":true}],"notFound":[]})",
+              .callId = "changed-calendar-events"}},
+        .createdIds = std::nullopt,
+        .sessionState = "session-5"});
+    const auto changed = QCoro::waitFor(service.refreshChanged(
+        {.sessionUrl = "https://example.test/.well-known/jmap",
+         .loginEmail = "alice@example.test",
+         .apiKey = "secret"},
+        "a1", {.start = {.value = "2026-06-29T00:00:00"}, .end = {.value = "2026-08-10T00:00:00"}},
+        {.value = "Pacific/Auckland"}));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::calendar::RefreshedRange>(changed));
+    CHECK(std::get<javelin::jmap::calendar::RefreshedRange>(changed).accountCount == 1);
+    REQUIRE(transport.request.has_value());
+    REQUIRE(transport.request->envelope.methodCalls.size() == 1);
+    CHECK(transport.request->envelope.methodCalls.front().name == "CalendarEvent/get");
+    const auto changedWindow =
+        calendars.loadWindow("a1", {.value = "2026-06-29T00:00:00"},
+                             {.value = "2026-08-10T00:00:00"}, {.value = "Pacific/Auckland"});
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::cache::CalendarWindow>>(changedWindow));
+    const auto& cached =
+        std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(changedWindow);
+    REQUIRE(cached.has_value());
+    REQUIRE(cached->events.size() == 1);
+    CHECK(cached->events.front().title == "Changed remotely");
 }

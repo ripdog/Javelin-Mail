@@ -479,6 +479,221 @@ namespace javelin::jmap::cache
         return std::nullopt;
     }
 
+    std::optional<DatabaseError> CalendarRepository::applyEventDelta(
+        const std::string_view accountId, const std::string_view calendarState,
+        const std::string_view eventState, const calendar::TimeZoneId& displayTimeZone,
+        const std::vector<calendar::CalendarEvent>& events,
+        const std::vector<calendar::Occurrence>& occurrences,
+        const std::vector<std::string>& destroyedEventIds)
+    {
+        if (const auto error = m_connection.validate())
+            return error;
+        auto& database = m_connection.database();
+        if (!database.transaction())
+            return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
+                                 .message = QStringLiteral("Begin calendar delta: ") +
+                                            database.lastError().text()};
+        std::optional<DatabaseError> failure;
+        QSqlQuery removeOccurrences{database};
+        removeOccurrences.prepare(QStringLiteral(
+            "DELETE FROM calendar_occurrences WHERE account_id=:account AND event_id=:event"));
+        const auto removeEventOccurrences = [&](const std::string_view eventId)
+        {
+            removeOccurrences.bindValue(QStringLiteral(":account"),
+                                        QString::fromStdString(std::string{accountId}));
+            removeOccurrences.bindValue(QStringLiteral(":event"),
+                                        QString::fromStdString(std::string{eventId}));
+            return exec(removeOccurrences, failure, QStringLiteral("Remove event occurrences"));
+        };
+        for (const auto& event : events)
+            if (!removeEventOccurrences(event.id))
+                break;
+        for (const auto& eventId : destroyedEventIds)
+            if (!failure && !removeEventOccurrences(eventId))
+                break;
+
+        QSqlQuery removeEvent{database};
+        removeEvent.prepare(QStringLiteral(
+            "DELETE FROM calendar_events WHERE account_id=:account AND event_id=:event"));
+        for (const auto& eventId : destroyedEventIds)
+        {
+            if (failure)
+                break;
+            removeEvent.bindValue(QStringLiteral(":account"),
+                                  QString::fromStdString(std::string{accountId}));
+            removeEvent.bindValue(QStringLiteral(":event"), QString::fromStdString(eventId));
+            exec(removeEvent, failure, QStringLiteral("Remove calendar event"));
+        }
+
+        QSqlQuery upsertEvent{database};
+        upsertEvent.prepare(QStringLiteral(
+            "INSERT INTO calendar_events (account_id,event_id,uid,title,description,location,"
+            "document_json,state) VALUES (:account,:id,:uid,:title,:description,:location,"
+            ":document,:state) ON CONFLICT(account_id,event_id) DO UPDATE SET uid=excluded.uid,"
+            "title=excluded.title,description=excluded.description,location=excluded.location,"
+            "document_json=excluded.document_json,state=excluded.state"));
+        QSqlQuery clearMembership{database};
+        clearMembership.prepare(QStringLiteral(
+            "DELETE FROM calendar_event_calendars WHERE account_id=:account AND event_id=:event"));
+        QSqlQuery addMembership{database};
+        addMembership.prepare(QStringLiteral(
+            "INSERT INTO calendar_event_calendars (account_id,event_id,calendar_id) VALUES "
+            "(:account,:event,:calendar)"));
+        for (const auto& event : events)
+        {
+            if (failure)
+                break;
+            const auto document = api::serializeCalendarEventDocument(event);
+            if (!document)
+            {
+                failure = DatabaseError{.code = DatabaseErrorCode::QueryFailed,
+                                        .message = QStringLiteral("Serialize calendar event")};
+                break;
+            }
+            upsertEvent.bindValue(QStringLiteral(":account"),
+                                  QString::fromStdString(std::string{accountId}));
+            upsertEvent.bindValue(QStringLiteral(":id"), QString::fromStdString(event.id));
+            upsertEvent.bindValue(QStringLiteral(":uid"), QString::fromStdString(event.uid));
+            upsertEvent.bindValue(QStringLiteral(":title"), QString::fromStdString(event.title));
+            upsertEvent.bindValue(QStringLiteral(":description"),
+                                  optionalString(event.description));
+            upsertEvent.bindValue(QStringLiteral(":location"), optionalString(event.location));
+            upsertEvent.bindValue(QStringLiteral(":document"), QString::fromStdString(*document));
+            upsertEvent.bindValue(QStringLiteral(":state"),
+                                  QString::fromStdString(std::string{eventState}));
+            if (!exec(upsertEvent, failure, QStringLiteral("Upsert changed calendar event")))
+                break;
+            clearMembership.bindValue(QStringLiteral(":account"),
+                                      QString::fromStdString(std::string{accountId}));
+            clearMembership.bindValue(QStringLiteral(":event"), QString::fromStdString(event.id));
+            if (!exec(clearMembership, failure, QStringLiteral("Clear changed event calendars")))
+                break;
+            for (const auto& [calendarId, present] : event.calendarIds)
+            {
+                if (!present)
+                    continue;
+                addMembership.bindValue(QStringLiteral(":account"),
+                                        QString::fromStdString(std::string{accountId}));
+                addMembership.bindValue(QStringLiteral(":event"), QString::fromStdString(event.id));
+                addMembership.bindValue(QStringLiteral(":calendar"),
+                                        QString::fromStdString(calendarId));
+                if (!exec(addMembership, failure, QStringLiteral("Add changed event calendar")))
+                    break;
+            }
+        }
+
+        QSqlQuery upsertOccurrence{database};
+        upsertOccurrence.prepare(QStringLiteral(
+            "INSERT INTO calendar_occurrences (account_id,occurrence_id,event_id,recurrence_id,"
+            "start_utc,end_utc,local_start,local_end,is_all_day) VALUES "
+            "(:account,:id,:event,:recurrence,:start_utc,:end_utc,:local_start,:local_end,:all_"
+            "day)"));
+        QSqlQuery addToWindows{database};
+        addToWindows.prepare(QStringLiteral(
+            "INSERT INTO calendar_window_occurrences (account_id,range_start,range_end,"
+            "display_time_zone,occurrence_id) SELECT account_id,range_start,range_end,"
+            "display_time_zone,:occurrence FROM calendar_query_windows WHERE account_id=:account "
+            "AND display_time_zone=:zone AND range_start < :local_end AND range_end > "
+            ":local_start"));
+        for (const auto& occurrence : occurrences)
+        {
+            if (failure)
+                break;
+            upsertOccurrence.bindValue(QStringLiteral(":account"),
+                                       QString::fromStdString(std::string{accountId}));
+            upsertOccurrence.bindValue(QStringLiteral(":id"),
+                                       QString::fromStdString(occurrence.id));
+            upsertOccurrence.bindValue(QStringLiteral(":event"),
+                                       QString::fromStdString(occurrence.eventId));
+            upsertOccurrence.bindValue(
+                QStringLiteral(":recurrence"),
+                occurrence.recurrenceId
+                    ? QVariant{QString::fromStdString(occurrence.recurrenceId->value)}
+                    : QVariant{});
+            upsertOccurrence.bindValue(
+                QStringLiteral(":start_utc"),
+                occurrence.utcStart ? QVariant{QString::fromStdString(occurrence.utcStart->value)}
+                                    : QVariant{});
+            upsertOccurrence.bindValue(
+                QStringLiteral(":end_utc"),
+                occurrence.utcEnd ? QVariant{QString::fromStdString(occurrence.utcEnd->value)}
+                                  : QVariant{});
+            upsertOccurrence.bindValue(QStringLiteral(":local_start"),
+                                       QString::fromStdString(occurrence.localStart.value));
+            upsertOccurrence.bindValue(QStringLiteral(":local_end"),
+                                       QString::fromStdString(occurrence.localEnd.value));
+            upsertOccurrence.bindValue(QStringLiteral(":all_day"), occurrence.allDay ? 1 : 0);
+            if (!exec(upsertOccurrence, failure, QStringLiteral("Upsert changed occurrence")))
+                break;
+            addToWindows.bindValue(QStringLiteral(":occurrence"),
+                                   QString::fromStdString(occurrence.id));
+            addToWindows.bindValue(QStringLiteral(":account"),
+                                   QString::fromStdString(std::string{accountId}));
+            addToWindows.bindValue(QStringLiteral(":zone"),
+                                   QString::fromStdString(displayTimeZone.value));
+            addToWindows.bindValue(QStringLiteral(":local_start"),
+                                   QString::fromStdString(occurrence.localStart.value));
+            addToWindows.bindValue(QStringLiteral(":local_end"),
+                                   QString::fromStdString(occurrence.localEnd.value));
+            exec(addToWindows, failure, QStringLiteral("Add occurrence to cached windows"));
+        }
+
+        if (!failure)
+        {
+            QSqlQuery pruneOccurrences{database};
+            pruneOccurrences.prepare(QStringLiteral(
+                "DELETE FROM calendar_occurrences WHERE account_id=:account AND NOT EXISTS "
+                "(SELECT 1 FROM calendar_window_occurrences w WHERE w.account_id="
+                "calendar_occurrences.account_id AND w.occurrence_id="
+                "calendar_occurrences.occurrence_id)"));
+            pruneOccurrences.bindValue(QStringLiteral(":account"),
+                                       QString::fromStdString(std::string{accountId}));
+            exec(pruneOccurrences, failure, QStringLiteral("Prune delta occurrences"));
+        }
+        if (!failure)
+        {
+            QSqlQuery pruneEvents{database};
+            pruneEvents.prepare(QStringLiteral(
+                "DELETE FROM calendar_events WHERE account_id=:account AND NOT EXISTS "
+                "(SELECT 1 FROM calendar_occurrences o WHERE o.account_id="
+                "calendar_events.account_id AND o.event_id=calendar_events.event_id)"));
+            pruneEvents.bindValue(QStringLiteral(":account"),
+                                  QString::fromStdString(std::string{accountId}));
+            exec(pruneEvents, failure, QStringLiteral("Prune delta events"));
+        }
+        if (!failure)
+        {
+            QSqlQuery states{database};
+            states.prepare(QStringLiteral(
+                "INSERT INTO calendar_state_tokens (account_id,data_type,state) VALUES "
+                "(:account,:type,:state) ON CONFLICT(account_id,data_type) DO UPDATE SET "
+                "state=excluded.state"));
+            for (const auto& [type, state] :
+                 {std::pair{QStringLiteral("Calendar"),
+                            QString::fromStdString(std::string{calendarState})},
+                  std::pair{QStringLiteral("CalendarEvent"),
+                            QString::fromStdString(std::string{eventState})}})
+            {
+                states.bindValue(QStringLiteral(":account"),
+                                 QString::fromStdString(std::string{accountId}));
+                states.bindValue(QStringLiteral(":type"), type);
+                states.bindValue(QStringLiteral(":state"), state);
+                if (!exec(states, failure, QStringLiteral("Store delta states")))
+                    break;
+            }
+        }
+        if (failure)
+        {
+            database.rollback();
+            return failure;
+        }
+        if (!database.commit())
+            return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
+                                 .message = QStringLiteral("Commit calendar delta: ") +
+                                            database.lastError().text()};
+        return std::nullopt;
+    }
+
     std::variant<std::optional<CalendarWindow>, DatabaseError> CalendarRepository::loadWindow(
         const std::string_view accountId, const calendar::LocalDateTime& start,
         const calendar::LocalDateTime& end, const calendar::TimeZoneId& displayTimeZone) const

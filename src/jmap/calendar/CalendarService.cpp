@@ -209,6 +209,10 @@ namespace javelin::jmap::calendar
         const auto& session = std::get<api::Session>(sessionResult);
         cache::CalendarRepository repository{m_connection};
         api::MethodCaller caller{m_methodTransport};
+        RefreshedRange summary{.interval = interval,
+                               .displayTimeZone = displayTimeZone,
+                               .accountCount = 0,
+                               .eventCount = 0};
         bool fullRefreshRequired = false;
         for (const auto& [accountId, account] : session.accounts)
         {
@@ -269,22 +273,87 @@ namespace javelin::jmap::calendar
                 return changes.hasMoreChanges || !changes.created.empty() ||
                        !changes.updated.empty() || !changes.destroyed.empty();
             };
-            if (hasChanges(calendarChanges) || hasChanges(eventChanges))
+            if (hasChanges(calendarChanges) || eventChanges.hasMoreChanges)
             {
                 fullRefreshRequired = true;
                 break;
             }
-            if (const auto cacheError = repository.storeStateTokens(
-                    accountId, calendarChanges.newState, eventChanges.newState))
+            std::vector<std::string> changedIds = eventChanges.created;
+            changedIds.insert(changedIds.end(), eventChanges.updated.begin(),
+                              eventChanges.updated.end());
+            std::ranges::sort(changedIds);
+            const auto [firstDuplicate, end] = std::ranges::unique(changedIds);
+            changedIds.erase(firstDuplicate, end);
+            if (session.capabilities.coreDetails &&
+                session.capabilities.coreDetails->maxObjectsInGet &&
+                changedIds.size() > *session.capabilities.coreDetails->maxObjectsInGet)
+            {
+                fullRefreshRequired = true;
+                break;
+            }
+
+            std::vector<CalendarEvent> changedEvents;
+            if (!changedIds.empty())
+            {
+                const auto getRequest =
+                    api::calendarEventGet({.accountId = accountId,
+                                           .ids = changedIds,
+                                           .properties = std::nullopt,
+                                           .recurrenceOverridesBefore = std::nullopt,
+                                           .recurrenceOverridesAfter = std::nullopt,
+                                           .reduceParticipants = false,
+                                           .timeZone = displayTimeZone});
+                if (!getRequest)
+                    co_return error(CalendarServiceErrorCode::Validation,
+                                    QStringLiteral("Unable to serialize changed calendar events."));
+                api::RequestBuilder getBuilder;
+                getBuilder.useCore().useCapability(std::string{api::calendarsCapabilityUri});
+                const auto getHandle = getBuilder.call(*getRequest, "changed-calendar-events");
+                const auto getResult =
+                    co_await caller.call(context(settings, session, accountId), getBuilder);
+                const auto* getEnvelope = std::get_if<api::ResponseEnvelope>(&getResult);
+                if (!getEnvelope)
+                    co_return callError(getResult);
+                const auto getRead = api::ResponseReader{*getEnvelope}.require(getHandle);
+                if (const auto* readError = std::get_if<api::ResponseReaderError>(&getRead))
+                    co_return responseError(*readError);
+                auto getResponse = std::get<api::CalendarEventGetResponse>(getRead);
+                if (!getResponse.notFound.empty() ||
+                    std::ranges::any_of(getResponse.list, [](const auto& event)
+                                        { return event.recurrenceRule.has_value(); }))
+                {
+                    fullRefreshRequired = true;
+                    break;
+                }
+                changedEvents = std::move(getResponse.list);
+            }
+
+            std::vector<Occurrence> changedOccurrences;
+            changedOccurrences.reserve(changedEvents.size());
+            for (const auto& event : changedEvents)
+                changedOccurrences.push_back({.accountId = accountId,
+                                              .id = event.id,
+                                              .eventId = event.id,
+                                              .recurrenceId = std::nullopt,
+                                              .localStart = event.start,
+                                              .localEnd = localEnd(event),
+                                              .utcStart = event.utcStart,
+                                              .utcEnd = event.utcEnd,
+                                              .allDay = event.showWithoutTime});
+            if (const auto cacheError = repository.applyEventDelta(
+                    accountId, calendarChanges.newState, eventChanges.newState, displayTimeZone,
+                    changedEvents, changedOccurrences, eventChanges.destroyed))
                 co_return error(CalendarServiceErrorCode::Cache, cacheError->message);
+            if (!changedEvents.empty() || !eventChanges.destroyed.empty())
+            {
+                ++summary.accountCount;
+                summary.eventCount += changedOccurrences.size();
+            }
         }
         if (fullRefreshRequired)
             co_return co_await refresh(std::move(settings), std::move(ownerAccountId),
                                        std::move(interval), std::move(displayTimeZone));
-        co_return RefreshedRange{.interval = std::move(interval),
-                                 .displayTimeZone = std::move(displayTimeZone),
-                                 .accountCount = 0,
-                                 .eventCount = 0};
+        co_return summary;
     }
 
     QCoro::Task<CalendarRefreshResult> CalendarService::refresh(LiveConnectionSettings settings,

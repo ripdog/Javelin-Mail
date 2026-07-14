@@ -86,6 +86,11 @@ visible occurrence set correctly.
 Acceptance: remote calendar changes appear without manual navigation, duplicate
 refreshes are coalesced, and stale writes never overwrite newer server state.
 
+Current incremental coverage applies non-recurring creates/updates and all destroys
+directly across overlapping cached windows. A changed recurring series still uses the
+bounded visible-window refresh because its new occurrences must be expanded by the
+server for the display time zone.
+
 ## Milestone 4: cache bounds and request concurrency
 
 - Define and implement eviction for old covered windows while retaining an event or
