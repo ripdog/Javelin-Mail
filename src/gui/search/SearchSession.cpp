@@ -220,17 +220,12 @@ namespace javelin::gui::search
             return;
         }
 
-        const auto previousSize = m_page.items.size();
-        std::erase_if(m_page.items,
-                      [this](const auto& item)
-                      {
-                          return m_retainedLocalEmailIds.contains(item.emailId) &&
-                                 m_selectedEmailId != std::optional<std::string>{item.emailId};
-                      });
-        std::erase_if(m_retainedLocalEmailIds, [this](const auto& retainedId)
-                      { return m_selectedEmailId != std::optional<std::string>{retainedId}; });
-        if (m_page.items.size() != previousSize)
+        const bool retainedSelectionStillActive =
+            m_selectedEmailId.has_value() && m_retainedLocalEmailIds.contains(*m_selectedEmailId);
+        if (!retainedSelectionStillActive)
         {
+            m_page.items = m_authoritativeServerItems;
+            m_retainedLocalEmailIds.clear();
             Q_EMIT pageChanged();
         }
     }
@@ -276,6 +271,7 @@ namespace javelin::gui::search
     {
         const auto priorItems = m_page.items;
         loadCachedPage(true);
+        m_authoritativeServerItems = m_page.items;
         if (m_authoritativeResultsApplied && javelin::jmap::search::isBasicTextSearch(m_criteria))
         {
             const auto protectedId = m_selectedEmailId.has_value()
@@ -294,6 +290,7 @@ namespace javelin::gui::search
     {
         ++m_generation;
         m_page.items.clear();
+        m_authoritativeServerItems.clear();
         m_page.cacheLoaded = false;
         m_page.refreshInFlight = false;
         m_page.refreshError.clear();

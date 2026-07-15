@@ -1,7 +1,6 @@
 #include "jmap/cache/SearchResultReconciler.h"
 
 #include <algorithm>
-#include <unordered_map>
 
 namespace javelin::jmap::cache
 {
@@ -11,38 +10,38 @@ namespace javelin::jmap::cache
                                  const std::vector<MessageListItem>& server,
                                  const std::optional<std::string_view> protectedEmailId)
     {
-        std::unordered_map<std::string_view, const MessageListItem*> serverByThread;
-        serverByThread.reserve(server.size());
-        for (const auto& item : server)
-        {
-            serverByThread.emplace(item.threadId, &item);
-        }
-
         ReconciledSearchResults result;
         result.items.reserve(server.size() + (protectedEmailId.has_value() ? 1 : 0));
-        std::unordered_set<std::string_view> includedThreads;
-        includedThreads.reserve(server.size());
-        for (const auto& currentItem : current)
-        {
-            if (const auto serverItem = serverByThread.find(currentItem.threadId);
-                serverItem != serverByThread.end())
-            {
-                result.items.push_back(*serverItem->second);
-                includedThreads.insert(currentItem.threadId);
-            }
-            else if (protectedEmailId == std::optional<std::string_view>{currentItem.emailId})
-            {
-                result.items.push_back(currentItem);
-                result.retainedLocalEmailIds.insert(currentItem.emailId);
-            }
-        }
-
+        const auto protectedItem =
+            protectedEmailId.has_value()
+                ? std::ranges::find(current, *protectedEmailId, &MessageListItem::emailId)
+                : current.end();
+        bool protectedThreadIncluded = false;
         for (const auto& serverItem : server)
         {
-            if (!includedThreads.contains(serverItem.threadId))
+            if (protectedItem != current.end() && protectedItem->threadId == serverItem.threadId)
+            {
+                protectedThreadIncluded = true;
+                if (protectedItem->emailId == serverItem.emailId)
+                {
+                    result.items.push_back(serverItem);
+                }
+                else
+                {
+                    result.items.push_back(*protectedItem);
+                    result.retainedLocalEmailIds.insert(protectedItem->emailId);
+                }
+            }
+            else
             {
                 result.items.push_back(serverItem);
             }
+        }
+
+        if (protectedItem != current.end() && !protectedThreadIncluded)
+        {
+            result.items.push_back(*protectedItem);
+            result.retainedLocalEmailIds.insert(protectedItem->emailId);
         }
         return result;
     }

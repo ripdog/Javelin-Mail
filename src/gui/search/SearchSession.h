@@ -78,6 +78,7 @@ namespace javelin::gui::search
         javelin::app::MailApplicationService& m_mailService;
         std::size_t m_pageSize;
         SearchPageState m_page;
+        std::vector<javelin::jmap::cache::MessageListItem> m_authoritativeServerItems;
         std::optional<std::string> m_selectedEmailId;
         std::unordered_set<std::string> m_retainedLocalEmailIds;
         bool m_localSearchInFlight = false;
