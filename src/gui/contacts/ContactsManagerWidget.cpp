@@ -2,6 +2,7 @@
 
 #include "gui/IconUtils.h"
 #include "gui/settings/PreferencesDialog.h"
+#include "jmap/contacts/ContactInterchange.h"
 #include "jmap/contacts/ContactService.h"
 
 #include <QCoroTask>
@@ -27,6 +28,7 @@
 #include <QPixmap>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QSaveFile>
 #include <QScrollArea>
 #include <QSpinBox>
 #include <QSplitter>
@@ -895,10 +897,18 @@ namespace javelin::gui::contacts
         auto* copy = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-copy")),
                                     QStringLiteral("Copy Contact…"));
         connect(copy, &QAction::triggered, this, &ContactsManagerWidget::copyContact);
+        auto* exportAction = menu.addAction(QIcon::fromTheme(QStringLiteral("document-export")),
+                                            QStringLiteral("Export vCard…"));
+        connect(exportAction, &QAction::triggered, this, &ContactsManagerWidget::exportVCard);
+        auto* merge = menu.addAction(QIcon::fromTheme(QStringLiteral("merge")),
+                                     QStringLiteral("Find and Merge Duplicates…"));
+        connect(merge, &QAction::triggered, this, &ContactsManagerWidget::findAndMergeDuplicates);
         auto* remove = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-delete")),
                                       QStringLiteral("Delete Contact"));
         connect(remove, &QAction::triggered, this, &ContactsManagerWidget::deleteContact);
         copy->setEnabled(!m_busy);
+        exportAction->setEnabled(!m_busy);
+        merge->setEnabled(!m_busy && canEditContact());
         remove->setEnabled(!m_busy && canDeleteContact());
         menu.exec(m_contactList->viewport()->mapToGlobal(position));
     }
@@ -1420,6 +1430,291 @@ namespace javelin::gui::contacts
                        });
     }
 
+    void ContactsManagerWidget::exportVCard()
+    {
+        const auto* contact = currentContact();
+        if (m_busy || contact == nullptr)
+            return;
+        const auto parsed = javelin::jmap::contacts::contactEditorData(contact->document);
+        const auto* editorData = std::get_if<javelin::jmap::contacts::ContactEditorData>(&parsed);
+        if (editorData == nullptr)
+        {
+            QMessageBox::warning(this, QStringLiteral("Export vCard"),
+                                 QStringLiteral("This contact cannot be exported."));
+            return;
+        }
+        QString suggestedName = QString::fromStdString(contact->displayName);
+        suggestedName.replace(QLatin1Char('/'), QLatin1Char('-'));
+        const QString path = QFileDialog::getSaveFileName(this, QStringLiteral("Export vCard"),
+                                                          suggestedName + QStringLiteral(".vcf"),
+                                                          QStringLiteral("vCard files (*.vcf)"));
+        if (path.isEmpty())
+            return;
+        QSaveFile file{path};
+        if (!file.open(QIODevice::WriteOnly))
+        {
+            QMessageBox::warning(this, QStringLiteral("Export vCard"), file.errorString());
+            return;
+        }
+        const auto output =
+            QByteArray::fromStdString(javelin::jmap::contacts::exportVCard(*editorData));
+        if (file.write(output) != output.size() || !file.commit())
+        {
+            QMessageBox::warning(this, QStringLiteral("Export vCard"), file.errorString());
+            return;
+        }
+        Q_EMIT statusMessageRequested(QStringLiteral("Contact exported."), 5000);
+    }
+
+    void ContactsManagerWidget::importVCard()
+    {
+        if (m_busy || !canCreateContact())
+            return;
+        std::vector<const javelin::jmap::api::AddressBook*> writableBooks;
+        for (const auto& book : m_addressBooks)
+        {
+            if (book.myRights.mayWrite)
+                writableBooks.push_back(&book);
+        }
+        if (writableBooks.empty())
+            return;
+        const javelin::jmap::api::AddressBook* target = nullptr;
+        if (const auto selected = currentAddressBookId(); selected.has_value())
+        {
+            const auto found =
+                std::ranges::find(m_addressBooks, *selected, &javelin::jmap::api::AddressBook::id);
+            if (found != m_addressBooks.end() && found->myRights.mayWrite)
+                target = &*found;
+        }
+        if (target == nullptr && writableBooks.size() == 1)
+            target = writableBooks.front();
+        if (target == nullptr)
+        {
+            QStringList labels;
+            for (const auto* book : writableBooks)
+                labels.push_back(QString::fromStdString(book->name));
+            bool accepted = false;
+            const QString selected = QInputDialog::getItem(
+                this, QStringLiteral("Import vCard"), QStringLiteral("Destination address book"),
+                labels, 0, false, &accepted);
+            const auto index = labels.indexOf(selected);
+            if (!accepted || index < 0)
+                return;
+            target = writableBooks[static_cast<std::size_t>(index)];
+        }
+        const QString path = QFileDialog::getOpenFileName(
+            this, QStringLiteral("Import vCard"), QString{},
+            QStringLiteral("vCard files (*.vcf *.vcard);;All files (*)"));
+        if (path.isEmpty())
+            return;
+        QFile file{path};
+        if (!file.open(QIODevice::ReadOnly))
+        {
+            QMessageBox::warning(this, QStringLiteral("Import vCard"), file.errorString());
+            return;
+        }
+        if (file.size() > 10 * 1024 * 1024)
+        {
+            QMessageBox::warning(this, QStringLiteral("Import vCard"),
+                                 QStringLiteral("The vCard file exceeds 10 MiB."));
+            return;
+        }
+        const auto imported = javelin::jmap::contacts::importVCards(file.readAll().toStdString());
+        const auto* contacts =
+            std::get_if<std::vector<javelin::jmap::contacts::ContactEditorData>>(&imported);
+        if (contacts == nullptr)
+        {
+            const auto message = std::get<std::string_view>(imported);
+            QMessageBox::warning(
+                this, QStringLiteral("Import vCard"),
+                QString::fromUtf8(message.data(), static_cast<qsizetype>(message.size())));
+            return;
+        }
+        std::unordered_set<std::string> knownUids;
+        const auto accountId = currentAccountId();
+        if (!accountId.has_value())
+            return;
+        const auto cached = m_repository.listContacts(*accountId);
+        if (const auto* values =
+                std::get_if<std::vector<javelin::jmap::contacts::ContactSummary>>(&cached))
+        {
+            for (const auto& contact : *values)
+                knownUids.insert(contact.uid);
+        }
+        javelin::jmap::api::ContactCardSetRequest request;
+        request.accountId = *accountId;
+        for (std::size_t index = 0; index < contacts->size(); ++index)
+        {
+            const auto& importedContact = (*contacts)[index];
+            if (!importedContact.uid.empty() && !knownUids.insert(importedContact.uid).second)
+            {
+                QMessageBox::warning(this, QStringLiteral("Import vCard"),
+                                     QStringLiteral("A contact with UID %1 already exists.")
+                                         .arg(QString::fromStdString(importedContact.uid)));
+                return;
+            }
+            const auto document = javelin::jmap::contacts::importedContactDocument(
+                importedContact, target->id,
+                QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString());
+            if (const auto* message = std::get_if<std::string_view>(&document))
+            {
+                QMessageBox::warning(
+                    this, QStringLiteral("Import vCard"),
+                    QString::fromUtf8(message->data(), static_cast<qsizetype>(message->size())));
+                return;
+            }
+            request.create.emplace(
+                "import-" + std::to_string(index + 1),
+                javelin::jmap::api::ContactDocument{.json = std::get<std::string>(document)});
+        }
+        setBusy(true);
+        auto task = m_service.setContactCards(m_ownerAccountId, std::move(request));
+        QCoro::connect(std::move(task), this,
+                       [this](javelin::jmap::contacts::ContactMutationResult result)
+                       {
+                           setBusy(false);
+                           if (const auto* error =
+                                   std::get_if<javelin::jmap::LiveRefreshError>(&result))
+                               Q_EMIT statusMessageRequested(error->message, 10000);
+                           else
+                               requestRefresh();
+                       });
+    }
+
+    void ContactsManagerWidget::findAndMergeDuplicates()
+    {
+        if (m_busy)
+            return;
+        const auto accountId = currentAccountId();
+        if (!accountId.has_value())
+            return;
+        const auto cached = m_repository.listContacts(*accountId);
+        const auto* contacts =
+            std::get_if<std::vector<javelin::jmap::contacts::ContactSummary>>(&cached);
+        if (contacts == nullptr)
+            return;
+        const auto groups = javelin::jmap::contacts::findDuplicateContacts(*contacts);
+        if (groups.empty())
+        {
+            QMessageBox::information(this, QStringLiteral("Duplicate Contacts"),
+                                     QStringLiteral("No likely duplicates were found."));
+            return;
+        }
+        std::size_t groupIndex = 0;
+        const auto* selectedContact = currentContact();
+        const auto selectedGroup =
+            selectedContact == nullptr
+                ? groups.end()
+                : std::ranges::find_if(groups,
+                                       [selectedContact](const auto& group)
+                                       {
+                                           return std::ranges::find(group.contactIds,
+                                                                    selectedContact->id) !=
+                                                  group.contactIds.end();
+                                       });
+        if (selectedGroup != groups.end())
+            groupIndex = static_cast<std::size_t>(std::distance(groups.begin(), selectedGroup));
+        else if (groups.size() > 1)
+        {
+            QStringList labels;
+            for (const auto& group : groups)
+            {
+                QStringList names;
+                for (const auto& id : group.contactIds)
+                {
+                    const auto found = std::ranges::find(
+                        *contacts, id, &javelin::jmap::contacts::ContactSummary::id);
+                    if (found != contacts->end())
+                        names.push_back(QString::fromStdString(found->displayName));
+                }
+                labels.push_back(names.join(QStringLiteral(", ")));
+            }
+            bool accepted = false;
+            const QString selected = QInputDialog::getItem(
+                this, QStringLiteral("Duplicate Contacts"), QStringLiteral("Duplicate group"),
+                labels, 0, false, &accepted);
+            const auto index = labels.indexOf(selected);
+            if (!accepted || index < 0)
+                return;
+            groupIndex = static_cast<std::size_t>(index);
+        }
+        std::vector<const javelin::jmap::contacts::ContactSummary*> candidates;
+        QStringList candidateNames;
+        for (const auto& id : groups[groupIndex].contactIds)
+        {
+            const auto found =
+                std::ranges::find(*contacts, id, &javelin::jmap::contacts::ContactSummary::id);
+            if (found != contacts->end())
+            {
+                candidates.push_back(&*found);
+                candidateNames.push_back(QString::fromStdString(found->displayName));
+            }
+        }
+        bool accepted = false;
+        const QString primaryName =
+            QInputDialog::getItem(this, QStringLiteral("Merge Duplicate Contacts"),
+                                  QStringLiteral("Keep this contact as the primary"),
+                                  candidateNames, 0, false, &accepted);
+        const auto primaryIndex = candidateNames.indexOf(primaryName);
+        if (!accepted || primaryIndex < 0)
+            return;
+        const auto* account = currentAccount();
+        for (const auto* candidate : candidates)
+        {
+            if (account == nullptr ||
+                !javelin::jmap::contacts::contactActionRights(account->isReadOnly, m_addressBooks,
+                                                              candidate->addressBookIds)
+                     .mayModify)
+            {
+                QMessageBox::information(
+                    this, QStringLiteral("Merge Duplicate Contacts"),
+                    QStringLiteral("Every duplicate must be writable before it can be merged."));
+                return;
+            }
+        }
+        if (QMessageBox::question(
+                this, QStringLiteral("Merge Duplicate Contacts"),
+                QStringLiteral("Merge %1 contacts into %2? This keeps all mapped fields and "
+                               "removes the redundant contacts.")
+                    .arg(candidates.size())
+                    .arg(primaryName)) != QMessageBox::Yes)
+            return;
+        const auto* primary = candidates[static_cast<std::size_t>(primaryIndex)];
+        std::string mergedDocument = primary->document;
+        javelin::jmap::api::ContactCardSetRequest request;
+        request.accountId = *accountId;
+        for (const auto* candidate : candidates)
+        {
+            if (candidate == primary)
+                continue;
+            const auto merged =
+                javelin::jmap::contacts::mergeContactDocuments(mergedDocument, candidate->document);
+            if (const auto* message = std::get_if<std::string_view>(&merged))
+            {
+                QMessageBox::warning(
+                    this, QStringLiteral("Merge Duplicate Contacts"),
+                    QString::fromUtf8(message->data(), static_cast<qsizetype>(message->size())));
+                return;
+            }
+            mergedDocument = std::get<std::string>(merged);
+            request.destroy.push_back(candidate->id);
+        }
+        request.update.emplace(primary->id,
+                               javelin::jmap::api::ContactDocument{.json = mergedDocument});
+        setBusy(true);
+        auto task = m_service.setContactCards(m_ownerAccountId, std::move(request));
+        QCoro::connect(std::move(task), this,
+                       [this](javelin::jmap::contacts::ContactMutationResult result)
+                       {
+                           setBusy(false);
+                           if (const auto* error =
+                                   std::get_if<javelin::jmap::LiveRefreshError>(&result))
+                               Q_EMIT statusMessageRequested(error->message, 10000);
+                           else
+                               requestRefresh();
+                       });
+    }
+
     void ContactsManagerWidget::requestRefresh()
     {
         if (m_busy)
@@ -1452,6 +1747,10 @@ namespace javelin::gui::contacts
 
     void ContactsManagerWidget::createAddressBook(std::string accountId)
     {
+        const auto account = std::ranges::find(m_accounts, accountId,
+                                               &javelin::jmap::cache::ContactAccount::accountId);
+        if (account == m_accounts.end() || account->isReadOnly || !account->mayCreateAddressBook)
+            return;
         javelin::jmap::api::AddressBook book;
         book.isSubscribed = true;
         AddressBookDialog dialog{book, this};
@@ -1467,6 +1766,10 @@ namespace javelin::gui::contacts
     void ContactsManagerWidget::editAddressBook(std::string accountId,
                                                 javelin::jmap::api::AddressBook book)
     {
+        const auto account = std::ranges::find(m_accounts, accountId,
+                                               &javelin::jmap::cache::ContactAccount::accountId);
+        if (account == m_accounts.end() || account->isReadOnly || !book.myRights.mayWrite)
+            return;
         AddressBookDialog dialog{book, this};
         if (dialog.exec() != QDialog::Accepted)
             return;
@@ -1480,6 +1783,10 @@ namespace javelin::gui::contacts
     void ContactsManagerWidget::deleteAddressBook(std::string accountId,
                                                   javelin::jmap::api::AddressBook book)
     {
+        const auto account = std::ranges::find(m_accounts, accountId,
+                                               &javelin::jmap::cache::ContactAccount::accountId);
+        if (account == m_accounts.end() || account->isReadOnly || !book.myRights.mayDelete)
+            return;
         const auto answer = QMessageBox::question(
             this, QStringLiteral("Delete Address Book"),
             QStringLiteral(
@@ -1497,6 +1804,10 @@ namespace javelin::gui::contacts
     void ContactsManagerWidget::setDefaultAddressBook(std::string accountId,
                                                       javelin::jmap::api::AddressBook book)
     {
+        const auto account = std::ranges::find(m_accounts, accountId,
+                                               &javelin::jmap::cache::ContactAccount::accountId);
+        if (account == m_accounts.end() || account->isReadOnly || !book.myRights.mayWrite)
+            return;
         javelin::jmap::api::AddressBookSetRequest request;
         request.accountId = std::move(accountId);
         request.onSuccessSetIsDefault = book.id;
@@ -1506,6 +1817,10 @@ namespace javelin::gui::contacts
     void ContactsManagerWidget::toggleAddressBookSubscription(std::string accountId,
                                                               javelin::jmap::api::AddressBook book)
     {
+        const auto account = std::ranges::find(m_accounts, accountId,
+                                               &javelin::jmap::cache::ContactAccount::accountId);
+        if (account == m_accounts.end() || account->isReadOnly)
+            return;
         auto changed = book;
         changed.isSubscribed = !changed.isSubscribed;
         javelin::jmap::api::AddressBookSetRequest request;
@@ -1517,7 +1832,9 @@ namespace javelin::gui::contacts
     void ContactsManagerWidget::editAddressBookSharing(std::string accountId,
                                                        javelin::jmap::api::AddressBook book)
     {
-        if (!book.myRights.mayShare)
+        const auto account = std::ranges::find(m_accounts, accountId,
+                                               &javelin::jmap::cache::ContactAccount::accountId);
+        if (account == m_accounts.end() || account->isReadOnly || !book.myRights.mayShare)
         {
             QMessageBox::information(
                 this, QStringLiteral("Address Book Sharing"),
@@ -1673,18 +1990,29 @@ namespace javelin::gui::contacts
                 std::ranges::find(dialogBooks, id, &javelin::jmap::api::AddressBook::id);
             return found == dialogBooks.end() ? std::nullopt : std::optional{*found};
         };
-        const auto updateActions = [edit, makeDefault, subscription, sharing, remove, selectedBook]
+        const auto updateActions =
+            [this, account, create, edit, makeDefault, subscription, sharing, remove, selectedBook]
         {
             const auto book = selectedBook();
             const bool selected = book.has_value();
-            edit->setEnabled(selected && book->myRights.mayWrite);
-            makeDefault->setEnabled(selected && !book->isDefault);
-            subscription->setEnabled(selected);
-            sharing->setEnabled(selected && book->myRights.mayShare);
-            remove->setEnabled(selected && book->myRights.mayDelete);
+            const auto id = account->currentData().toString().toStdString();
+            const auto current =
+                std::ranges::find(m_accounts, id, &javelin::jmap::cache::ContactAccount::accountId);
+            const bool writableAccount = current != m_accounts.end() && !current->isReadOnly;
+            create->setEnabled(writableAccount && current->mayCreateAddressBook);
+            edit->setEnabled(writableAccount && selected && book->myRights.mayWrite);
+            makeDefault->setEnabled(writableAccount && selected && !book->isDefault &&
+                                    book->myRights.mayWrite);
+            subscription->setEnabled(writableAccount && selected);
+            sharing->setEnabled(writableAccount && selected && book->myRights.mayShare);
+            remove->setEnabled(writableAccount && selected && book->myRights.mayDelete);
         };
         connect(account, qOverload<int>(&QComboBox::currentIndexChanged), &dialog,
-                [loadBooks] { loadBooks(); });
+                [loadBooks, updateActions]
+                {
+                    loadBooks();
+                    updateActions();
+                });
         connect(books, &QListWidget::currentItemChanged, &dialog,
                 [updateActions](QListWidgetItem*, QListWidgetItem*) { updateActions(); });
         const auto accountId = [account]

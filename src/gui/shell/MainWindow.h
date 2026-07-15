@@ -423,6 +423,9 @@ namespace javelin::gui::shell
         QAction* m_contactEditAction = nullptr;
         QAction* m_contactDeleteAction = nullptr;
         QAction* m_contactCopyAction = nullptr;
+        QAction* m_contactImportAction = nullptr;
+        QAction* m_contactExportAction = nullptr;
+        QAction* m_contactDuplicatesAction = nullptr;
         QAction* m_contactManageAddressBooksAction = nullptr;
         QAction* m_contactRefreshAction = nullptr;
         QAction* m_calendarNewEventAction = nullptr;

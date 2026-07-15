@@ -214,6 +214,7 @@ namespace javelin::jmap::contacts
             "addressBookIds", "keywords",       "emails",  "phones",   "addresses",
             "organizations",  "titles",         "notes",   "media",    "anniversaries",
             "personalInfo",   "onlineServices", "members", "relatedTo"};
+        constexpr std::array setProperties{"addressBookIds", "keywords", "members"};
         for (const auto property : collectionProperties)
         {
             if (!duplicate.contains(property) || !duplicate.at(property).is_object())
@@ -229,6 +230,9 @@ namespace javelin::jmap::contacts
             for (const auto& [sourceKey, sourceValue] : duplicate.at(property).get_object())
             {
                 std::string key = sourceKey;
+                if (std::ranges::find(setProperties, property) != setProperties.end() &&
+                    destination.contains(key))
+                    continue;
                 std::size_t suffix = 2;
                 while (destination.contains(key))
                     key = sourceKey + "-merged-" + std::to_string(suffix++);
@@ -350,5 +354,22 @@ namespace javelin::jmap::contacts
                 contact.kind = "individual";
         }
         return result;
+    }
+
+    std::variant<std::string, std::string_view> importedContactDocument(ContactEditorData contact,
+                                                                        std::string addressBookId,
+                                                                        std::string fallbackUid)
+    {
+        if (contact.uid.empty())
+            contact.uid = std::move(fallbackUid);
+        contact.addressBookIds = {std::move(addressBookId)};
+        glz::generic document;
+        document["uid"] = contact.uid;
+        document["kind"] = contact.kind.empty() ? std::string{"individual"} : contact.kind;
+        document["addressBookIds"][contact.addressBookIds.front()] = true;
+        document["name"]["full"] = contact.fullName;
+        if (glz::write_json(document, contact.document))
+            return std::string_view{"Unable to prepare the imported contact."};
+        return applyContactEditorData(contact, true);
     }
 } // namespace javelin::jmap::contacts

@@ -47,6 +47,9 @@ namespace javelin::gui::contacts
         void beginEditContact();
         void deleteContact();
         void copyContact();
+        void importVCard();
+        void exportVCard();
+        void findAndMergeDuplicates();
         void toggleContactStarred();
         void showAddressBookManager();
 

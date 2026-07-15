@@ -848,6 +848,26 @@ namespace javelin::gui::shell
         connect(m_contactCopyAction, &QAction::triggered, this, [invokeContact]
                 { invokeContact(&javelin::gui::contacts::ContactsManagerWidget::copyContact); });
         actionCollection()->addAction(QStringLiteral("contact_copy"), m_contactCopyAction);
+        m_contactImportAction = new QAction(QIcon::fromTheme(QStringLiteral("document-import")),
+                                            QStringLiteral("Import vCard…"), this);
+        connect(m_contactImportAction, &QAction::triggered, this, [invokeContact]
+                { invokeContact(&javelin::gui::contacts::ContactsManagerWidget::importVCard); });
+        actionCollection()->addAction(QStringLiteral("contact_import"), m_contactImportAction);
+        m_contactExportAction = new QAction(QIcon::fromTheme(QStringLiteral("document-export")),
+                                            QStringLiteral("Export vCard…"), this);
+        connect(m_contactExportAction, &QAction::triggered, this, [invokeContact]
+                { invokeContact(&javelin::gui::contacts::ContactsManagerWidget::exportVCard); });
+        actionCollection()->addAction(QStringLiteral("contact_export"), m_contactExportAction);
+        m_contactDuplicatesAction = new QAction(QIcon::fromTheme(QStringLiteral("merge")),
+                                                QStringLiteral("Find Duplicates…"), this);
+        connect(m_contactDuplicatesAction, &QAction::triggered, this,
+                [invokeContact]
+                {
+                    invokeContact(
+                        &javelin::gui::contacts::ContactsManagerWidget::findAndMergeDuplicates);
+                });
+        actionCollection()->addAction(QStringLiteral("contact_duplicates"),
+                                      m_contactDuplicatesAction);
         m_contactManageAddressBooksAction =
             new QAction(QIcon::fromTheme(QStringLiteral("view-list-details")),
                         QStringLiteral("Manage Address Books…"), this);
@@ -2268,6 +2288,10 @@ namespace javelin::gui::shell
             m_contactDeleteAction->setEnabled(!busy && selected && widget != nullptr &&
                                               widget->canDeleteContact());
             m_contactCopyAction->setEnabled(!busy && selected);
+            m_contactImportAction->setEnabled(!busy && widget != nullptr &&
+                                              widget->canCreateContact());
+            m_contactExportAction->setEnabled(!busy && selected);
+            m_contactDuplicatesAction->setEnabled(!busy);
             m_contactManageAddressBooksAction->setEnabled(!busy);
             m_contactRefreshAction->setEnabled(!busy);
         }

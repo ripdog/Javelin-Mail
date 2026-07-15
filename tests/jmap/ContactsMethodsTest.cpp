@@ -251,7 +251,7 @@ TEST_CASE("contact merge preserves primary identity and both contacts' data",
 {
     const auto merged = javelin::jmap::contacts::mergeContactDocuments(
         R"({"id":"primary-id","uid":"primary-uid","kind":"individual","name":{"full":"Primary"},"addressBookIds":{"one":true},"emails":{"email":{"address":"primary@example.test"}},"x-primary":true})",
-        R"({"id":"duplicate-id","uid":"duplicate-uid","kind":"individual","name":{"full":"Duplicate"},"addressBookIds":{"two":true},"emails":{"email":{"address":"duplicate@example.test"}},"phones":{"phone":{"number":"123"}},"x-duplicate":true})");
+        R"({"id":"duplicate-id","uid":"duplicate-uid","kind":"individual","name":{"full":"Duplicate"},"addressBookIds":{"one":true,"two":true},"emails":{"email":{"address":"duplicate@example.test"}},"phones":{"phone":{"number":"123"}},"x-duplicate":true})");
     REQUIRE(std::holds_alternative<std::string>(merged));
     const auto& json = std::get<std::string>(merged);
     CHECK(json.find("primary-id") == std::string::npos);
@@ -261,6 +261,7 @@ TEST_CASE("contact merge preserves primary identity and both contacts' data",
     CHECK(json.find("duplicate@example.test") != std::string::npos);
     CHECK(json.find(R"("one":true)") != std::string::npos);
     CHECK(json.find(R"("two":true)") != std::string::npos);
+    CHECK(json.find("one-merged") == std::string::npos);
     CHECK(json.find("x-primary") != std::string::npos);
     CHECK(json.find("x-duplicate") != std::string::npos);
 }
@@ -286,6 +287,11 @@ TEST_CASE("vCard import and export preserve typed contact fields", "[jmap][conta
     CHECK(exported.find("VERSION:4.0") != std::string::npos);
     CHECK(exported.find("EMAIL;TYPE=work;PREF=1;LABEL=Office:joe@example.test") !=
           std::string::npos);
+    const auto document =
+        javelin::jmap::contacts::importedContactDocument(contact, "book-1", "fallback-uid");
+    REQUIRE(std::holds_alternative<std::string>(document));
+    CHECK(std::get<std::string>(document).find(R"("uid":"u1")") != std::string::npos);
+    CHECK(std::get<std::string>(document).find(R"("book-1":true)") != std::string::npos);
 }
 
 TEST_CASE("contact starring preserves document extensions and removes legacy importance",

@@ -22,4 +22,7 @@ namespace javelin::jmap::contacts
     [[nodiscard]] std::string exportVCard(const ContactEditorData& contact);
     [[nodiscard]] std::variant<std::vector<ContactEditorData>, std::string_view>
     importVCards(std::string_view text);
+    [[nodiscard]] std::variant<std::string, std::string_view>
+    importedContactDocument(ContactEditorData contact, std::string addressBookId,
+                            std::string fallbackUid);
 } // namespace javelin::jmap::contacts
