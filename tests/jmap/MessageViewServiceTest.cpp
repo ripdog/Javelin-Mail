@@ -138,7 +138,26 @@ namespace
         REQUIRE(addressQuery.exec());
     }
 
-    void seedMessageContent(javelin::jmap::cache::DatabaseConnection& connection)
+    void seedMessageContent(javelin::jmap::cache::DatabaseConnection& connection,
+                            const QByteArray& payload = QByteArrayLiteral(
+                                "Subject: Quarterly update\r\n"
+                                "Content-Type: multipart/related; boundary=\"b\"\r\n"
+                                "\r\n"
+                                "--b\r\n"
+                                "Content-Type: text/plain; charset=utf-8\r\n"
+                                "\r\n"
+                                "Plain body\r\n"
+                                "--b\r\n"
+                                "Content-Type: text/html; charset=utf-8\r\n"
+                                "\r\n"
+                                "<p>HTML body</p>\r\n"
+                                "--b\r\n"
+                                "Content-Type: image/png; name=\"chart.png\"\r\n"
+                                "Content-Disposition: inline; filename=\"chart.png\"\r\n"
+                                "Content-ID: <chart@cid>\r\n"
+                                "\r\n"
+                                "PNGDATA\r\n"
+                                "--b--\r\n"))
     {
         QSqlQuery query{connection.database()};
         query.prepare(QStringLiteral("INSERT INTO raw_message_sources ("
@@ -148,25 +167,7 @@ namespace
         query.bindValue(QStringLiteral(":account_id"), QStringLiteral("account-1"));
         query.bindValue(QStringLiteral(":email_id"), QStringLiteral("eml-1"));
         query.bindValue(QStringLiteral(":blob_id"), QStringLiteral("blob-root"));
-        query.bindValue(QStringLiteral(":payload"),
-                        QByteArrayLiteral("Subject: Quarterly update\r\n"
-                                          "Content-Type: multipart/related; boundary=\"b\"\r\n"
-                                          "\r\n"
-                                          "--b\r\n"
-                                          "Content-Type: text/plain; charset=utf-8\r\n"
-                                          "\r\n"
-                                          "Plain body\r\n"
-                                          "--b\r\n"
-                                          "Content-Type: text/html; charset=utf-8\r\n"
-                                          "\r\n"
-                                          "<p>HTML body</p>\r\n"
-                                          "--b\r\n"
-                                          "Content-Type: image/png; name=\"chart.png\"\r\n"
-                                          "Content-Disposition: inline; filename=\"chart.png\"\r\n"
-                                          "Content-ID: <chart@cid>\r\n"
-                                          "\r\n"
-                                          "PNGDATA\r\n"
-                                          "--b--\r\n"));
+        query.bindValue(QStringLiteral(":payload"), payload);
         REQUIRE(query.exec());
     }
 
@@ -207,6 +208,40 @@ TEST_CASE("message view service loads cached raw email bodies and attachments",
     CHECK(snapshot->attachments.front().name == std::optional<std::string>{"chart.png"});
     CHECK(snapshot->attachments.front().cid == std::optional<std::string>{"chart@cid"});
     CHECK(snapshot->attachments.front().isInlineRenderable);
+}
+
+TEST_CASE("message view service supplies plain text for an email without a body",
+          "[jmap][cache][message-view]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    seedEmail(databaseContext.connection);
+    seedMessageContent(
+        databaseContext.connection,
+        QByteArrayLiteral("Subject: DMARC report\r\n"
+                          "Content-Type: application/zip; name=\"report.zip\"\r\n"
+                          "Content-Disposition: attachment; filename=\"report.zip\"\r\n"
+                          "Content-Transfer-Encoding: base64\r\n"
+                          "\r\n"
+                          "UEsDBAoAAAAA\r\n"));
+
+    javelin::jmap::cache::MessageViewService service{databaseContext.connection};
+    const auto result = service.load("account-1", "eml-1");
+
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::cache::MessageViewSnapshot>>(result));
+    const auto& snapshot =
+        std::get<std::optional<javelin::jmap::cache::MessageViewSnapshot>>(result);
+    REQUIRE(snapshot.has_value());
+    REQUIRE(snapshot->plainTextBody.has_value());
+    CHECK(snapshot->plainTextBody->kind == javelin::jmap::cache::MessageBodyKind::PlainText);
+    CHECK(snapshot->plainTextBody->value == "No content in email body.");
+    CHECK_FALSE(snapshot->htmlBody.has_value());
+    REQUIRE(snapshot->attachments.size() == 1);
+    CHECK(snapshot->attachments.front().name == std::optional<std::string>{"report.zip"});
 }
 
 TEST_CASE("message view service returns no value for missing emails", "[jmap][cache][message-view]")

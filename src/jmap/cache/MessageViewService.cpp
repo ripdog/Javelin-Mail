@@ -43,9 +43,19 @@ namespace javelin::jmap::cache
         }
 
         const auto parsed = parseMessageSource(emailId, source->payload);
+        auto plainTextBody = parsed.plainTextBody;
+        if (!plainTextBody.has_value() && !parsed.htmlBody.has_value())
+        {
+            plainTextBody = MessageBody{
+                .kind = MessageBodyKind::PlainText,
+                .partId = {},
+                .isTruncated = false,
+                .value = "No content in email body.",
+            };
+        }
         MessageViewSnapshot snapshot{
             .email = *email,
-            .plainTextBody = parsed.plainTextBody,
+            .plainTextBody = std::move(plainTextBody),
             .htmlBody = parsed.htmlBody,
             .htmlRenderDocument = std::nullopt,
             .languageDetection = std::nullopt,
