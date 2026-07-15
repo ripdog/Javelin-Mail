@@ -137,6 +137,7 @@ namespace javelin::app
         aboutData.setOrganizationDomain("javelin.app");
         KAboutData::setApplicationData(aboutData);
 
+        m_application.setWindowIcon(QIcon(QStringLiteral(":/icons/icon.svg")));
         m_application.setQuitOnLastWindowClosed(false);
 
         const auto accounts = javelin::gui::settings::PreferencesDialog::loadAccounts();

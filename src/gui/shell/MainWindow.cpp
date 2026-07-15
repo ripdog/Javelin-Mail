@@ -589,6 +589,7 @@ namespace javelin::gui::shell
         reloadAccounts();
         QString mailboxTitle = mailboxId;
         std::optional<std::string> mailboxRole;
+        std::optional<std::size_t> totalThreads;
         const auto mailboxIndex = findMailboxIndexForSelection(*m_mailboxModel, accountId,
                                                                std::optional<QString>{mailboxId});
         if (mailboxIndex.isValid())
@@ -601,9 +602,15 @@ namespace javelin::gui::shell
             {
                 mailboxRole = role.toStdString();
             }
+            const auto totalThreadsValue =
+                mailboxIndex.data(javelin::gui::mailboxes::MailboxTreeModel::TotalThreadsRole);
+            if (totalThreadsValue.isValid())
+            {
+                totalThreads = static_cast<std::size_t>(totalThreadsValue.toULongLong());
+            }
         }
 
-        openOrActivateMailboxTab(account, mailbox, mailboxTitle, mailboxRole, false);
+        activateMailboxInHomeTab(account, mailbox, mailboxTitle, mailboxRole, totalThreads, false);
         if (auto* tab = activeTab())
         {
             if (auto* mailboxTab = std::get_if<MailboxTabState>(&tab->content))
