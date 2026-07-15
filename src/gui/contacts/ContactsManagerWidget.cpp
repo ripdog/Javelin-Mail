@@ -313,6 +313,14 @@ namespace javelin::gui::contacts
         titleFont.setPointSize(titleFont.pointSize() + 5);
         titleFont.setBold(true);
         m_viewTitle->setFont(titleFont);
+        m_starButton = new QToolButton(view);
+        m_starButton->setAutoRaise(true);
+        m_starButton->setIconSize(QSize(22, 22));
+        connect(m_starButton, &QToolButton::clicked, this,
+                &ContactsManagerWidget::toggleContactStarred);
+        auto* titleLayout = new QHBoxLayout();
+        titleLayout->addWidget(m_viewTitle, 1);
+        titleLayout->addWidget(m_starButton);
         auto* cardScroll = new QScrollArea(view);
         cardScroll->setWidgetResizable(true);
         cardScroll->setFrameShape(QFrame::NoFrame);
@@ -336,7 +344,7 @@ namespace javelin::gui::contacts
                     viewAdvanced->setArrowType(expanded ? Qt::DownArrow : Qt::RightArrow);
                     fullDocument->setVisible(expanded);
                 });
-        viewLayout->addWidget(m_viewTitle);
+        viewLayout->addLayout(titleLayout);
         viewLayout->addWidget(cardScroll, 1);
         viewLayout->addWidget(viewAdvanced);
         viewLayout->addWidget(fullDocument, 1);
@@ -356,8 +364,8 @@ namespace javelin::gui::contacts
         heading->setFont(headingFont);
         formLayout->addWidget(heading);
 
-        auto* identityForm = new QFormLayout();
-        identityForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+        auto* contactForm = new QFormLayout();
+        contactForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
         m_kindEdit = new QComboBox(formWidget);
         m_kindEdit->addItem(QStringLiteral("Person"), QStringLiteral("individual"));
         m_kindEdit->addItem(QStringLiteral("Organization"), QStringLiteral("org"));
@@ -368,13 +376,11 @@ namespace javelin::gui::contacts
         m_organizationEdit->setPlaceholderText(QStringLiteral("Company or organization"));
         m_titleEdit = new QLineEdit(formWidget);
         m_titleEdit->setPlaceholderText(QStringLiteral("Role or job title"));
-        identityForm->addRow(QStringLiteral("Type"), m_kindEdit);
-        identityForm->addRow(QStringLiteral("Name"), m_nameEdit);
-        identityForm->addRow(QStringLiteral("Organization"), m_organizationEdit);
-        identityForm->addRow(QStringLiteral("Title"), m_titleEdit);
-        formLayout->addLayout(identityForm);
+        contactForm->addRow(QStringLiteral("Type"), m_kindEdit);
+        contactForm->addRow(QStringLiteral("Name"), m_nameEdit);
+        contactForm->addRow(QStringLiteral("Organization"), m_organizationEdit);
+        contactForm->addRow(QStringLiteral("Title"), m_titleEdit);
 
-        auto* contactForm = new QFormLayout();
         m_emailsEdit = new QPlainTextEdit(formWidget);
         m_emailsEdit->setPlaceholderText(QStringLiteral("One email address per line"));
         m_emailsEdit->setMaximumHeight(86);
@@ -387,9 +393,7 @@ namespace javelin::gui::contacts
         contactForm->addRow(QStringLiteral("Emails"), m_emailsEdit);
         contactForm->addRow(QStringLiteral("Phones"), m_phonesEdit);
         contactForm->addRow(QStringLiteral("Addresses"), m_addressesEdit);
-        formLayout->addLayout(contactForm);
 
-        auto* personalForm = new QFormLayout();
         m_birthdayEdit = new QLineEdit(formWidget);
         m_birthdayEdit->setPlaceholderText(QStringLiteral("YYYY-MM-DD"));
         m_notesEdit = new QPlainTextEdit(formWidget);
@@ -397,10 +401,10 @@ namespace javelin::gui::contacts
         m_notesEdit->setMaximumHeight(100);
         m_addressBooksEdit = new QListWidget(formWidget);
         m_addressBooksEdit->setMaximumHeight(110);
-        personalForm->addRow(QStringLiteral("Birthday"), m_birthdayEdit);
-        personalForm->addRow(QStringLiteral("Notes"), m_notesEdit);
-        personalForm->addRow(QStringLiteral("Address books"), m_addressBooksEdit);
-        formLayout->addLayout(personalForm);
+        contactForm->addRow(QStringLiteral("Birthday"), m_birthdayEdit);
+        contactForm->addRow(QStringLiteral("Notes"), m_notesEdit);
+        contactForm->addRow(QStringLiteral("Address books"), m_addressBooksEdit);
+        formLayout->addLayout(contactForm);
 
         m_advancedToggle = new QToolButton(formWidget);
         m_advancedToggle->setText(QStringLiteral("Advanced and unusual fields"));
@@ -608,11 +612,21 @@ namespace javelin::gui::contacts
         const auto* contact = currentContact();
         if (contact == nullptr)
         {
+            m_starButton->setEnabled(false);
             m_detailStack->setCurrentIndex(0);
             Q_EMIT toolbarStateChanged(m_busy, false);
             return;
         }
         m_viewTitle->setText(QString::fromStdString(contact->displayName));
+        m_starButton->setIcon(javelin::gui::themedSvgIcon(
+            contact->isImportant ? QStringLiteral(":/icons/thunderbird-icons/starred.svg")
+                                 : QStringLiteral(":/icons/thunderbird-icons/star.svg"),
+            m_starButton->palette().color(contact->isImportant ? QPalette::Highlight
+                                                               : QPalette::ButtonText)));
+        m_starButton->setToolTip(contact->isImportant ? QStringLiteral("Remove from Starred")
+                                                      : QStringLiteral("Add to Starred"));
+        m_starButton->setAccessibleName(m_starButton->toolTip());
+        m_starButton->setEnabled(!m_busy);
         populateContactCards(*contact);
         if (auto* document = m_detailStack->widget(1)->findChild<QPlainTextEdit*>(
                 QStringLiteral("contactDocumentView")))
@@ -1162,6 +1176,7 @@ namespace javelin::gui::contacts
         const std::array<QWidget*, 3> buttons{m_saveButton, m_uploadPhotoButton, m_cancelButton};
         for (auto* button : buttons)
             button->setEnabled(!busy);
+        m_starButton->setEnabled(!busy && currentContact() != nullptr);
         m_accountCombo->setEnabled(!busy);
         m_addressBookCombo->setEnabled(!busy);
         Q_EMIT toolbarStateChanged(m_busy, currentContact() != nullptr);

@@ -93,6 +93,7 @@ namespace javelin::gui::contacts
         QListWidget* m_contactList = nullptr;
         QStackedWidget* m_detailStack = nullptr;
         QLabel* m_viewTitle = nullptr;
+        QToolButton* m_starButton = nullptr;
         QWidget* m_cardContainer = nullptr;
         QVBoxLayout* m_cardLayout = nullptr;
         QPlainTextEdit* m_documentEdit = nullptr;
