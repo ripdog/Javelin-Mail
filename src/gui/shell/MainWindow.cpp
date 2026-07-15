@@ -93,35 +93,17 @@ namespace javelin::gui::shell
 {
     Q_LOGGING_CATEGORY(logGuiMailbox, "gui.mailbox")
     Q_LOGGING_CATEGORY(logUserOperations, "user.operations")
-    void MainWindow::presentError(const javelin::jmap::LiveRefreshError& error,
-                                  const QString& title)
+    void MainWindow::presentError(const javelin::jmap::OperationError& error, const QString& title)
     {
         qCWarning(logUserOperations).noquote() << "operation failed" << error.message;
         m_statusBar->showMessage(error.message, 10000);
-        if (error.requiresUserIntervention)
-        {
-            QMessageBox::critical(this, title, error.message);
-        }
+        Q_UNUSED(title);
     }
 
     void MainWindow::presentUserInterventionError(const QString& message)
     {
-        presentError({.message = message, .requiresUserIntervention = true});
-    }
-
-    void MainWindow::presentCalendarError(const QString& summary, const QString& details,
-                                          const QString& logContext)
-    {
-        qCWarning(logUserOperations).noquote() << logContext << details;
-        m_statusBar->showMessage(summary, 10000);
-        auto* dialog = new QMessageBox(QMessageBox::Warning, QStringLiteral("Calendar Error"),
-                                       summary, QMessageBox::Ok, this);
-        dialog->setInformativeText(
-            QStringLiteral("Expand Details to inspect or copy the complete error."));
-        dialog->setDetailedText(details);
-        dialog->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
-        dialog->setAttribute(Qt::WA_DeleteOnClose);
-        dialog->open();
+        m_statusBar->showMessage(message, 10000);
+        QMessageBox::critical(this, QStringLiteral("Action Required"), message);
     }
 
     namespace
@@ -354,6 +336,8 @@ namespace javelin::gui::shell
         toAccountConnectionSettings(const javelin::gui::settings::ConnectionSettings& settings)
         {
             return javelin::app::AccountConnectionSettings{
+                .connectionId = settings.id.toStdString(),
+                .revision = settings.revision,
                 .sessionUrl = settings.sessionUrl.toStdString(),
                 .loginEmail = settings.loginEmail.toStdString(),
                 .apiKey = settings.apiKey.toStdString(),
@@ -530,6 +514,11 @@ namespace javelin::gui::shell
                     else if (status == javelin::app::AccountSyncCoordinator::Status::Connected)
                     {
                         modelStatus = Model::ConnectionStatus::Connected;
+                    }
+                    else if (status ==
+                             javelin::app::AccountSyncCoordinator::Status::AuthenticationPaused)
+                    {
+                        modelStatus = Model::ConnectionStatus::AuthenticationPaused;
                     }
                     m_mailboxModel->setConnectionStatus(accountId, modelStatus);
                 });
@@ -1426,12 +1415,9 @@ namespace javelin::gui::shell
         }
 
         const auto accountsResult = m_calendarService.accounts();
-        if (const auto* error =
-                std::get_if<javelin::jmap::calendar::CalendarServiceError>(&accountsResult))
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&accountsResult))
         {
-            presentCalendarError(QStringLiteral("Calendar accounts could not be loaded."),
-                                 error->message,
-                                 QStringLiteral("calendar account discovery failed"));
+            presentError(*error);
             return;
         }
         const auto* accounts =
@@ -1550,12 +1536,9 @@ namespace javelin::gui::shell
                     const auto result = m_calendarService.setCalendarVisible(
                         displayId.first(separator).toStdString(),
                         displayId.sliced(separator + 1).toStdString(), visible);
-                    if (const auto* error =
-                            std::get_if<javelin::jmap::calendar::CalendarServiceError>(&result))
+                    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
                     {
-                        presentCalendarError(
-                            QStringLiteral("Calendar visibility could not be saved."),
-                            error->message, QStringLiteral("calendar visibility update failed"));
+                        presentError(*error);
                         loadVisible(widget->visibleStart(), widget->visibleEnd());
                     }
                 });
@@ -1569,12 +1552,9 @@ namespace javelin::gui::shell
                     const auto result = m_calendarService.setDefaultCalendar(
                         displayId.first(separator).toStdString(),
                         displayId.sliced(separator + 1).toStdString());
-                    if (const auto* error =
-                            std::get_if<javelin::jmap::calendar::CalendarServiceError>(&result))
+                    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
                     {
-                        presentCalendarError(
-                            QStringLiteral("The default calendar could not be saved."),
-                            error->message, QStringLiteral("default calendar update failed"));
+                        presentError(*error);
                         loadVisible(widget->visibleStart(), widget->visibleEnd());
                     }
                 });
@@ -1605,107 +1585,104 @@ namespace javelin::gui::shell
                     continue;
                 auto task =
                     m_mailService.requestCalendarRange(account.ownerAccountId, interval, timeZone);
-                QCoro::connect(
-                    std::move(task), widget,
-                    [this](javelin::jmap::calendar::CalendarRefreshResult result)
-                    {
-                        if (const auto* error =
-                                std::get_if<javelin::jmap::calendar::CalendarServiceError>(&result))
-                        {
-                            presentCalendarError(
-                                QStringLiteral("The calendar could not be refreshed."),
-                                error->message, QStringLiteral("calendar range refresh failed"));
-                            return;
-                        }
-                    });
+                QCoro::connect(std::move(task), widget,
+                               [this](javelin::jmap::calendar::CalendarRefreshResult result)
+                               {
+                                   if (const auto* error =
+                                           std::get_if<javelin::jmap::OperationError>(&result))
+                                   {
+                                       presentError(*error);
+                                       return;
+                                   }
+                               });
             }
         };
         connect(widget, &javelin::gui::calendar::MonthCalendarWidget::visibleIntervalChanged,
                 widget, refreshVisible);
-        connect(widget, &javelin::gui::calendar::MonthCalendarWidget::emptyTimeActivated, widget,
-                [this, widget, accounts = *accounts, refreshVisible](const QDate& date)
+        connect(
+            widget, &javelin::gui::calendar::MonthCalendarWidget::emptyTimeActivated, widget,
+            [this, widget, accounts = *accounts, refreshVisible](const QDate& date)
+            {
+                for (const auto& account : accounts)
                 {
-                    for (const auto& account : accounts)
-                    {
-                        const auto calendarsResult = m_calendarService.calendars(account.accountId);
-                        const auto* calendars =
-                            std::get_if<std::vector<javelin::jmap::calendar::Calendar>>(
-                                &calendarsResult);
-                        if (calendars == nullptr)
-                            continue;
-                        auto destination = std::ranges::find_if(
-                            *calendars,
-                            [](const auto& item)
-                            {
-                                return item.isDefault &&
-                                       (item.myRights.mayWriteAll || item.myRights.mayWriteOwn);
-                            });
-                        if (destination == calendars->end())
-                            destination = std::ranges::find_if(
-                                *calendars, [](const auto& item)
-                                { return item.myRights.mayWriteAll || item.myRights.mayWriteOwn; });
-                        if (destination == calendars->end())
-                            continue;
+                    const auto calendarsResult = m_calendarService.calendars(account.accountId);
+                    const auto* calendars =
+                        std::get_if<std::vector<javelin::jmap::calendar::Calendar>>(
+                            &calendarsResult);
+                    if (calendars == nullptr)
+                        continue;
+                    auto destination = std::ranges::find_if(*calendars,
+                                                            [](const auto& item)
+                                                            {
+                                                                return item.isDefault &&
+                                                                       (item.myRights.mayWriteAll ||
+                                                                        item.myRights.mayWriteOwn);
+                                                            });
+                    if (destination == calendars->end())
+                        destination = std::ranges::find_if(
+                            *calendars, [](const auto& item)
+                            { return item.myRights.mayWriteAll || item.myRights.mayWriteOwn; });
+                    if (destination == calendars->end())
+                        continue;
 
-                        auto* dialog = new javelin::gui::calendar::EventDialog(*calendars, widget);
-                        dialog->setAttribute(Qt::WA_DeleteOnClose, false);
-                        dialog->setEvent(javelin::jmap::calendar::CalendarEvent{
-                            .accountId = account.accountId,
-                            .id = {},
-                            .baseEventId = std::nullopt,
-                            .recurrenceId = std::nullopt,
-                            .uid = {},
-                            .calendarIds = {{destination->id, true}},
-                            .title = {},
-                            .description = std::nullopt,
-                            .location = std::nullopt,
-                            .start = {.value = QDateTime{date, QTime{9, 0}}
-                                                   .toString(Qt::ISODate)
-                                                   .toStdString()},
-                            .duration = {.value = "PT1H"},
-                            .timeZone =
-                                javelin::jmap::calendar::TimeZoneId{
-                                    .value = QTimeZone::systemTimeZoneId().toStdString()},
-                            .showWithoutTime = false,
-                            .isDraft = false,
-                            .isOrigin = true,
-                            .utcStart = std::nullopt,
-                            .utcEnd = std::nullopt,
-                            .recurrenceRule = std::nullopt,
-                            .recurrenceOverrides = {},
-                            .attendees = {}});
-                        if (dialog->exec() != QDialog::Accepted)
-                        {
-                            dialog->deleteLater();
-                            return;
-                        }
-                        auto task = m_mailService.createCalendarEvent(
-                            account.ownerAccountId, {.accountId = account.accountId,
-                                                     .event = dialog->eventDocument(),
-                                                     .ifInState = std::nullopt});
-                        QCoro::connect(
-                            std::move(task), dialog,
-                            [dialog, widget,
-                             refreshVisible](javelin::jmap::calendar::CalendarMutationResult result)
-                            {
-                                if (const auto* error =
-                                        std::get_if<javelin::jmap::calendar::CalendarServiceError>(
-                                            &result))
-                                {
-                                    qCWarning(logUserOperations).noquote()
-                                        << "calendar event creation failed" << error->message;
-                                    dialog->showMutationError(error->message);
-                                    dialog->show();
-                                    return;
-                                }
-                                dialog->deleteLater();
-                                refreshVisible(widget->visibleStart(), widget->visibleEnd());
-                            });
+                    auto* dialog = new javelin::gui::calendar::EventDialog(*calendars, widget);
+                    dialog->setAttribute(Qt::WA_DeleteOnClose, false);
+                    dialog->setEvent(javelin::jmap::calendar::CalendarEvent{
+                        .accountId = account.accountId,
+                        .id = {},
+                        .baseEventId = std::nullopt,
+                        .recurrenceId = std::nullopt,
+                        .uid = {},
+                        .calendarIds = {{destination->id, true}},
+                        .title = {},
+                        .description = std::nullopt,
+                        .location = std::nullopt,
+                        .start =
+                            {.value =
+                                 QDateTime{date, QTime{9, 0}}.toString(Qt::ISODate).toStdString()},
+                        .duration = {.value = "PT1H"},
+                        .timeZone =
+                            javelin::jmap::calendar::TimeZoneId{
+                                .value = QTimeZone::systemTimeZoneId().toStdString()},
+                        .showWithoutTime = false,
+                        .isDraft = false,
+                        .isOrigin = true,
+                        .utcStart = std::nullopt,
+                        .utcEnd = std::nullopt,
+                        .recurrenceRule = std::nullopt,
+                        .recurrenceOverrides = {},
+                        .attendees = {}});
+                    if (dialog->exec() != QDialog::Accepted)
+                    {
+                        dialog->deleteLater();
                         return;
                     }
-                    m_statusBar->showMessage(QStringLiteral("No writable calendar is available."),
-                                             5000);
-                });
+                    auto task = m_mailService.createCalendarEvent(account.ownerAccountId,
+                                                                  {.accountId = account.accountId,
+                                                                   .event = dialog->eventDocument(),
+                                                                   .ifInState = std::nullopt});
+                    QCoro::connect(std::move(task), dialog,
+                                   [dialog, widget, refreshVisible](
+                                       javelin::jmap::calendar::CalendarMutationResult result)
+                                   {
+                                       if (const auto* error =
+                                               std::get_if<javelin::jmap::OperationError>(&result))
+                                       {
+                                           qCWarning(logUserOperations).noquote()
+                                               << "calendar event creation failed"
+                                               << error->message;
+                                           dialog->showMutationError(error->message);
+                                           dialog->show();
+                                           return;
+                                       }
+                                       dialog->deleteLater();
+                                       refreshVisible(widget->visibleStart(), widget->visibleEnd());
+                                   });
+                    return;
+                }
+                m_statusBar->showMessage(QStringLiteral("No writable calendar is available."),
+                                         5000);
+            });
         connect(
             widget, &javelin::gui::calendar::MonthCalendarWidget::eventActivated, widget,
             [this, widget, accounts = *accounts, refreshVisible](
@@ -1863,8 +1840,7 @@ namespace javelin::gui::shell
                     [dialog, widget,
                      refreshVisible](javelin::jmap::calendar::CalendarMutationResult result)
                     {
-                        if (const auto* error =
-                                std::get_if<javelin::jmap::calendar::CalendarServiceError>(&result))
+                        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
                         {
                             qCWarning(logUserOperations).noquote()
                                 << "calendar event mutation failed" << error->message;
@@ -2503,7 +2479,7 @@ namespace javelin::gui::shell
                     updateMessageListHeader();
                 });
         connect(&session, &javelin::gui::search::SearchSession::refreshFailed, this,
-                [this](const javelin::jmap::LiveRefreshError& error) { presentError(error); });
+                [this](const javelin::jmap::OperationError& error) { presentError(error); });
     }
 
     void MainWindow::activateTab(const int index, const bool refreshRemote)
@@ -2949,7 +2925,7 @@ namespace javelin::gui::shell
             std::move(task), this,
             [this, tabAccountId, tabMailboxId, tabOffset](javelin::app::MailboxWindowResult result)
             {
-                if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
                 {
                     for (auto& tabState : m_tabs)
                     {
@@ -3118,10 +3094,10 @@ namespace javelin::gui::shell
         QCoro::connect(
             std::move(task), this,
             [this](std::variant<javelin::jmap::submission::DraftSnapshot,
-                                javelin::jmap::LiveRefreshError>
+                                javelin::jmap::OperationError>
                        result)
             {
-                if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
                 {
                     qWarning().noquote() << "GUI compose open failed" << error->message;
                     presentError(*error);
@@ -4108,7 +4084,7 @@ namespace javelin::gui::shell
             std::move(task), this,
             [this, attachmentSettings](javelin::jmap::AttachmentDownloadResult result)
             {
-                if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
                 {
                     presentError(*error);
                     return;
@@ -4252,7 +4228,7 @@ namespace javelin::gui::shell
             std::move(task), this,
             [this](javelin::jmap::AttachmentDownloadResult result)
             {
-                if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
                 {
                     presentError(*error);
                     return;
@@ -4293,7 +4269,14 @@ namespace javelin::gui::shell
 
     void MainWindow::openPreferences()
     {
+        openPreferencesForConnection({});
+    }
+
+    void MainWindow::openPreferencesForConnection(const QString& connectionId)
+    {
         javelin::gui::settings::PreferencesDialog dialog{m_accountRepository, m_queryService, this};
+        if (!connectionId.isEmpty())
+            dialog.selectConfiguredAccount(connectionId);
         if (dialog.exec() == QDialog::Accepted)
         {
             m_statusBar->showMessage(QStringLiteral("Saved connection preferences."), 3000);
@@ -4380,7 +4363,7 @@ namespace javelin::gui::shell
                 m_refreshAction->setEnabled(true);
                 m_preferencesAction->setEnabled(true);
 
-                if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
                 {
                     qWarning().noquote() << "GUI refresh failed" << error->message;
                     presentError(*error);
@@ -4429,7 +4412,7 @@ namespace javelin::gui::shell
                     [this](javelin::jmap::contacts::ContactRefreshResult contactsResult)
                     {
                         if (const auto* error =
-                                std::get_if<javelin::jmap::LiveRefreshError>(&contactsResult))
+                                std::get_if<javelin::jmap::OperationError>(&contactsResult))
                         {
                             qWarning().noquote() << "Contacts refresh failed" << error->message;
                             return;
@@ -4494,7 +4477,7 @@ namespace javelin::gui::shell
                     return;
                 }
 
-                if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
                 {
                     m_messageViewContainer->setErrorState(error->message);
                     qWarning().noquote() << "GUI message content refresh failed" << error->message;
@@ -4981,7 +4964,7 @@ namespace javelin::gui::shell
                 .sourceMailboxId = std::move(sourceMailboxId),
                 .destinationMailboxId = std::nullopt,
             });
-        if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
         {
             presentError(*error);
             return;
@@ -5057,7 +5040,7 @@ namespace javelin::gui::shell
         for (const auto& emailId : emailIds)
         {
             const auto result = m_mailService.queueDestroyEmail(accountId, emailId);
-            if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+            if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
             {
                 presentError(*error);
                 return;
@@ -5093,7 +5076,7 @@ namespace javelin::gui::shell
                 .sourceMailboxId = std::move(sourceMailboxId),
                 .destinationMailboxId = std::move(destinationMailboxId),
             });
-        if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
         {
             presentError(*error);
             return;
@@ -5154,7 +5137,7 @@ namespace javelin::gui::shell
                 .sourceMailboxId = std::move(sourceMailboxId),
                 .destinationMailboxId = std::move(destinationMailboxId),
             });
-        if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
         {
             presentError(*error);
             return;
@@ -5212,7 +5195,7 @@ namespace javelin::gui::shell
     {
         qCInfo(logUserOperations) << "mark read requested";
         const auto result = m_mailService.queueMarkEmailRead(accountId, emailId);
-        if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
         {
             presentError(*error);
             return;
@@ -5243,7 +5226,7 @@ namespace javelin::gui::shell
         qCInfo(logUserOperations) << (isFlagged ? "remove star requested" : "add star requested");
         const auto result =
             m_mailService.queueSetEmailFlagged(*accountId, emailId.toStdString(), !isFlagged);
-        if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
         {
             presentError(*error);
             return;
@@ -5275,7 +5258,7 @@ namespace javelin::gui::shell
         qCInfo(logUserOperations) << "mark unread requested";
 
         const auto result = m_mailService.queueMarkEmailUnread(*accountId, *emailId);
-        if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
         {
             presentError(*error);
             return;
@@ -5481,7 +5464,7 @@ namespace javelin::gui::shell
             std::move(task), this,
             [this](javelin::jmap::SubmittedEmailMutationsResult submitResult)
             {
-                if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&submitResult))
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&submitResult))
                 {
                     presentError(*error);
                     return;
@@ -5493,7 +5476,7 @@ namespace javelin::gui::shell
                 {
                     markTabsStaleForAccount(summary.accountId);
                     refreshActiveTabFromServer();
-                    presentError(javelin::jmap::LiveRefreshError{
+                    presentError(javelin::jmap::OperationError{
                         .message = QStringLiteral("The server rejected %1 email mutation(s). "
                                                   "The mailbox has been refreshed to restore "
                                                   "the server state.")
@@ -5534,7 +5517,7 @@ namespace javelin::gui::shell
             std::move(task), this,
             [this](javelin::jmap::MessageSourceDownloadResult result)
             {
-                if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
                 {
                     presentError(*error);
                     return;
@@ -5760,7 +5743,7 @@ namespace javelin::gui::shell
         }
 
         const auto draftResult = m_composeService.loadWorkingCopy(composeSessionId.toStdString());
-        if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&draftResult))
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&draftResult))
         {
             presentError(*error);
             return;

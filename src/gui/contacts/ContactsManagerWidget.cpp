@@ -1004,11 +1004,9 @@ namespace javelin::gui::contacts
                        {
                            setBusy(false);
                            if (const auto* error =
-                                   std::get_if<javelin::jmap::LiveRefreshError>(&result))
+                                   std::get_if<javelin::jmap::OperationError>(&result))
                            {
                                Q_EMIT statusMessageRequested(error->message, 10000);
-                               if (error->requiresUserIntervention)
-                                   Q_EMIT userInterventionRequired(error->message);
                                return;
                            }
                            requestRefresh();
@@ -1229,11 +1227,9 @@ namespace javelin::gui::contacts
                        {
                            setBusy(false);
                            if (const auto* error =
-                                   std::get_if<javelin::jmap::LiveRefreshError>(&result))
+                                   std::get_if<javelin::jmap::OperationError>(&result))
                            {
                                Q_EMIT statusMessageRequested(error->message, 10000);
-                               if (error->requiresUserIntervention)
-                                   Q_EMIT userInterventionRequired(error->message);
                                return;
                            }
                            requestRefresh();
@@ -1276,7 +1272,7 @@ namespace javelin::gui::contacts
             [this, payload](javelin::jmap::contacts::ContactUploadResult result)
             {
                 setBusy(false);
-                if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
                 {
                     Q_EMIT statusMessageRequested(error->message, 10000);
                     return;
@@ -1402,7 +1398,7 @@ namespace javelin::gui::contacts
                        {
                            setBusy(false);
                            if (const auto* error =
-                                   std::get_if<javelin::jmap::LiveRefreshError>(&result))
+                                   std::get_if<javelin::jmap::OperationError>(&result))
                                Q_EMIT statusMessageRequested(error->message, 10000);
                            else
                                requestRefresh();
@@ -1485,7 +1481,7 @@ namespace javelin::gui::contacts
                        {
                            setBusy(false);
                            if (const auto* error =
-                                   std::get_if<javelin::jmap::LiveRefreshError>(&result))
+                                   std::get_if<javelin::jmap::OperationError>(&result))
                                Q_EMIT statusMessageRequested(error->message, 10000);
                            else
                                requestRefresh();
@@ -1636,7 +1632,7 @@ namespace javelin::gui::contacts
                        {
                            setBusy(false);
                            if (const auto* error =
-                                   std::get_if<javelin::jmap::LiveRefreshError>(&result))
+                                   std::get_if<javelin::jmap::OperationError>(&result))
                                Q_EMIT statusMessageRequested(error->message, 10000);
                            else
                                requestRefresh();
@@ -1770,7 +1766,7 @@ namespace javelin::gui::contacts
                        {
                            setBusy(false);
                            if (const auto* error =
-                                   std::get_if<javelin::jmap::LiveRefreshError>(&result))
+                                   std::get_if<javelin::jmap::OperationError>(&result))
                                Q_EMIT statusMessageRequested(error->message, 10000);
                            else
                                requestRefresh();
@@ -1789,11 +1785,9 @@ namespace javelin::gui::contacts
                        {
                            setBusy(false);
                            if (const auto* error =
-                                   std::get_if<javelin::jmap::LiveRefreshError>(&result))
+                                   std::get_if<javelin::jmap::OperationError>(&result))
                            {
                                Q_EMIT statusMessageRequested(error->message, 10000);
-                               if (error->requiresUserIntervention)
-                                   Q_EMIT userInterventionRequired(error->message);
                                return;
                            }
                            reloadAccounts();
@@ -1926,7 +1920,7 @@ namespace javelin::gui::contacts
                        {
                            setBusy(false);
                            if (const auto* error =
-                                   std::get_if<javelin::jmap::LiveRefreshError>(&result))
+                                   std::get_if<javelin::jmap::OperationError>(&result))
                            {
                                Q_EMIT statusMessageRequested(error->message, 10000);
                                return;

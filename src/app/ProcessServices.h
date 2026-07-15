@@ -19,6 +19,7 @@ namespace javelin::jmap::contacts
 
 namespace javelin::app
 {
+    class ApplicationErrorCoordinator;
     class ComposeService;
     class InlineMessageSchemeHandler;
     class MailApplicationService;
@@ -84,6 +85,7 @@ namespace javelin::app
         translationCacheRepository();
         [[nodiscard]] ComposeService& composeService();
         [[nodiscard]] MailApplicationService& mailService();
+        [[nodiscard]] ApplicationErrorCoordinator& errorCoordinator();
 
       private:
         std::unique_ptr<javelin::jmap::JmapCore> m_jmapCore;
@@ -108,6 +110,7 @@ namespace javelin::app
         std::unique_ptr<javelin::jmap::cache::SubmissionRepository> m_submissionRepository;
         std::unique_ptr<javelin::jmap::submission::ComposeService> m_jmapComposeService;
         std::unique_ptr<ComposeService> m_composeService;
+        std::unique_ptr<ApplicationErrorCoordinator> m_errorCoordinator;
         std::unique_ptr<MailApplicationService> m_mailService;
     };
 

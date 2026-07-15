@@ -1,6 +1,7 @@
 #pragma once
 
 #include "jmap/EmailMutation.h"
+#include "jmap/OperationError.h"
 #include "jmap/cache/QueryService.h"
 #include "jmap/query/EmailListSort.h"
 #include "jmap/search/EmailSearch.h"
@@ -47,13 +48,7 @@ namespace javelin::jmap
         std::string resolvedSessionUrl;
     };
 
-    struct LiveRefreshError
-    {
-        QString message;
-        bool requiresUserIntervention = false;
-    };
-
-    using LiveRefreshResult = std::variant<LiveRefreshSummary, LiveRefreshError>;
+    using LiveRefreshResult = std::variant<LiveRefreshSummary, OperationError>;
 
     struct SessionRefreshSummary
     {
@@ -63,7 +58,7 @@ namespace javelin::jmap
         bool websocketPushSupported = false;
     };
 
-    using SessionRefreshResult = std::variant<SessionRefreshSummary, LiveRefreshError>;
+    using SessionRefreshResult = std::variant<SessionRefreshSummary, OperationError>;
 
     struct MessageContentRefreshSummary
     {
@@ -82,7 +77,7 @@ namespace javelin::jmap
     };
 
     using MessageContentRefreshResult =
-        std::variant<MessageContentRefreshSummary, MessageContentUnavailable, LiveRefreshError>;
+        std::variant<MessageContentRefreshSummary, MessageContentUnavailable, OperationError>;
 
     struct MailboxMessagesRefreshSummary
     {
@@ -92,7 +87,7 @@ namespace javelin::jmap
     };
 
     using MailboxMessagesRefreshResult =
-        std::variant<MailboxMessagesRefreshSummary, LiveRefreshError>;
+        std::variant<MailboxMessagesRefreshSummary, OperationError>;
 
     struct MessageSearchSummary
     {
@@ -105,7 +100,7 @@ namespace javelin::jmap
         std::vector<javelin::jmap::cache::MessageListItem> results;
     };
 
-    using MessageSearchResult = std::variant<MessageSearchSummary, LiveRefreshError>;
+    using MessageSearchResult = std::variant<MessageSearchSummary, OperationError>;
 
     struct MailboxPageSummary
     {
@@ -118,7 +113,7 @@ namespace javelin::jmap
         std::vector<javelin::jmap::cache::MessageListItem> results;
     };
 
-    using MailboxPageResult = std::variant<MailboxPageSummary, LiveRefreshError>;
+    using MailboxPageResult = std::variant<MailboxPageSummary, OperationError>;
 
     struct QueuedEmailMutation
     {
@@ -127,7 +122,7 @@ namespace javelin::jmap
         std::string emailId;
     };
 
-    using QueuedEmailMutationResult = std::variant<QueuedEmailMutation, LiveRefreshError>;
+    using QueuedEmailMutationResult = std::variant<QueuedEmailMutation, OperationError>;
 
     struct SubmittedEmailMutations
     {
@@ -137,7 +132,7 @@ namespace javelin::jmap
         std::size_t failedEmailCount = 0;
     };
 
-    using SubmittedEmailMutationsResult = std::variant<SubmittedEmailMutations, LiveRefreshError>;
+    using SubmittedEmailMutationsResult = std::variant<SubmittedEmailMutations, OperationError>;
 
     struct AttachmentDownload
     {
@@ -150,7 +145,7 @@ namespace javelin::jmap
         bool usedCachedInlinePayload = false;
     };
 
-    using AttachmentDownloadResult = std::variant<AttachmentDownload, LiveRefreshError>;
+    using AttachmentDownloadResult = std::variant<AttachmentDownload, OperationError>;
 
     struct MessageSourceDownload
     {
@@ -161,7 +156,7 @@ namespace javelin::jmap
         QByteArray payload;
     };
 
-    using MessageSourceDownloadResult = std::variant<MessageSourceDownload, LiveRefreshError>;
+    using MessageSourceDownloadResult = std::variant<MessageSourceDownload, OperationError>;
 
     class JmapCore
     {

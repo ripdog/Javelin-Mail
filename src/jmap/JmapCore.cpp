@@ -49,35 +49,6 @@ namespace javelin::jmap
     namespace
     {
 
-        [[nodiscard]] QString transportMessage(const javelin::jmap::api::TransportError& error)
-        {
-            const auto code = QString::fromUtf8(javelin::jmap::api::toString(error.code).data());
-            if (error.httpStatus.has_value())
-            {
-                return QStringLiteral("Transport error (%1, HTTP %2): %3")
-                    .arg(code)
-                    .arg(*error.httpStatus)
-                    .arg(QString::fromStdString(error.message));
-            }
-
-            return QStringLiteral("Transport error (%1): %2")
-                .arg(code, QString::fromStdString(error.message));
-        }
-
-        [[nodiscard]] QString authMessage(const javelin::jmap::api::AuthError& error)
-        {
-            return QStringLiteral("Authentication error (%1): %2")
-                .arg(QString::fromUtf8(javelin::jmap::api::toString(error.code).data()),
-                     QString::fromStdString(error.message));
-        }
-
-        [[nodiscard]] QString protocolMessage(const javelin::jmap::api::ProtocolError& error)
-        {
-            return QStringLiteral("Protocol error (%1): %2")
-                .arg(QString::fromUtf8(javelin::jmap::api::toString(error.code).data()),
-                     QString::fromStdString(error.message));
-        }
-
         struct DownloadContext
         {
             javelin::jmap::auth::AccountCredentials credentials;
@@ -87,7 +58,7 @@ namespace javelin::jmap
 
         struct BlobDownloadError
         {
-            LiveRefreshError error;
+            OperationError error;
             std::optional<int> httpStatus;
         };
 
@@ -167,25 +138,24 @@ namespace javelin::jmap
             };
         }
 
-        [[nodiscard]] std::optional<LiveRefreshError>
+        [[nodiscard]] std::optional<OperationError>
         validateLoginSettings(const LiveConnectionSettings& settings, const bool requireSessionUrl)
         {
             if ((requireSessionUrl && settings.sessionUrl.empty()) || settings.loginEmail.empty() ||
                 settings.apiKey.empty())
             {
-                return LiveRefreshError{
+                return OperationError{
                     .message =
                         requireSessionUrl
                             ? QStringLiteral("Session URL, login email, and API key are required.")
                             : QStringLiteral("Login email and API key are required."),
-                    .requiresUserIntervention = true,
                 };
             }
 
             return std::nullopt;
         }
 
-        [[nodiscard]] std::variant<javelin::jmap::api::Session, LiveRefreshError>
+        [[nodiscard]] std::variant<javelin::jmap::api::Session, OperationError>
         loadCachedSession(javelin::jmap::cache::DatabaseConnection& connection,
                           const std::string_view accountId)
         {
@@ -194,14 +164,14 @@ namespace javelin::jmap
             if (const auto* error =
                     std::get_if<javelin::jmap::cache::DatabaseError>(&sessionResult))
             {
-                return LiveRefreshError{.message = error->message};
+                return javelin::jmap::operationError(*error);
             }
 
             const auto& session =
                 std::get<std::optional<javelin::jmap::api::Session>>(sessionResult);
             if (!session.has_value())
             {
-                return LiveRefreshError{
+                return OperationError{
                     .message =
                         QStringLiteral("No cached JMAP session is available for this account."),
                 };
@@ -210,23 +180,20 @@ namespace javelin::jmap
             return *session;
         }
 
-        [[nodiscard]] std::variant<std::string, LiveRefreshError>
+        [[nodiscard]] std::variant<std::string, OperationError>
         resolveAccessToken(const javelin::jmap::auth::AccountCredentials& credentials)
         {
             const javelin::jmap::auth::AccessTokenResolver accessTokenResolver;
             const auto tokenResult = accessTokenResolver.resolve(credentials);
             if (const auto* error = std::get_if<javelin::jmap::api::AuthError>(&tokenResult))
             {
-                return LiveRefreshError{
-                    .message = authMessage(*error),
-                    .requiresUserIntervention = true,
-                };
+                return operationError(*error);
             }
 
             return std::get<javelin::jmap::auth::OAuthToken>(tokenResult).accessToken;
         }
 
-        [[nodiscard]] std::variant<DownloadContext, LiveRefreshError>
+        [[nodiscard]] std::variant<DownloadContext, OperationError>
         prepareDownloadContext(javelin::jmap::cache::DatabaseConnection& connection,
                                const LiveConnectionSettings& settings, const std::string& accountId)
         {
@@ -237,13 +204,13 @@ namespace javelin::jmap
 
             auto credentials = buildAccountCredentials(settings, accountId);
             const auto sessionResult = loadCachedSession(connection, accountId);
-            if (const auto* error = std::get_if<LiveRefreshError>(&sessionResult))
+            if (const auto* error = std::get_if<OperationError>(&sessionResult))
             {
                 return *error;
             }
 
             const auto tokenResult = resolveAccessToken(credentials);
-            if (const auto* error = std::get_if<LiveRefreshError>(&tokenResult))
+            if (const auto* error = std::get_if<OperationError>(&tokenResult))
             {
                 return *error;
             }
@@ -267,7 +234,7 @@ namespace javelin::jmap
                     std::get_if<javelin::jmap::api::TransportError>(&transportResult))
             {
                 co_return BlobDownloadError{
-                    .error = LiveRefreshError{.message = transportMessage(*error)},
+                    .error = operationError(*error),
                     .httpStatus = error->httpStatus,
                 };
             }
@@ -277,7 +244,7 @@ namespace javelin::jmap
             {
                 co_return BlobDownloadError{
                     .error =
-                        LiveRefreshError{
+                        OperationError{
                             .message = QStringLiteral("%1 failed with HTTP status %2.")
                                            .arg(failurePrefix)
                                            .arg(response.statusCode),
@@ -289,7 +256,7 @@ namespace javelin::jmap
             co_return response.body;
         }
 
-        [[nodiscard]] std::variant<javelin::jmap::domain::Email, LiveRefreshError>
+        [[nodiscard]] std::variant<javelin::jmap::domain::Email, OperationError>
         findEmailForDownload(javelin::jmap::cache::DatabaseConnection& connection,
                              const std::string_view accountId, const std::string_view emailId)
         {
@@ -297,20 +264,20 @@ namespace javelin::jmap
             const auto emailResult = emailRepository.find(accountId, emailId);
             if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&emailResult))
             {
-                return LiveRefreshError{.message = error->message};
+                return javelin::jmap::operationError(*error);
             }
 
             const auto& email = std::get<std::optional<javelin::jmap::domain::Email>>(emailResult);
             if (!email.has_value())
             {
-                return LiveRefreshError{
+                return OperationError{
                     .message = QStringLiteral("The selected message is not cached locally."),
                 };
             }
 
             if (email->blobId.empty())
             {
-                return LiveRefreshError{
+                return OperationError{
                     .message = QStringLiteral("The selected message does not expose a blob id."),
                 };
             }
@@ -324,13 +291,13 @@ namespace javelin::jmap
         {
             if (mutation.emailId.empty())
             {
-                return LiveRefreshError{
+                return OperationError{
                     .message = QStringLiteral("An email id is required for an email patch."),
                 };
             }
             if (mutation.addMailboxIds.empty() && mutation.removeMailboxIds.empty())
             {
-                return LiveRefreshError{
+                return OperationError{
                     .message = QStringLiteral("An email mailbox mutation must change a mailbox."),
                 };
             }
@@ -339,7 +306,7 @@ namespace javelin::jmap
                 if (mailboxId.empty() || std::ranges::find(mutation.removeMailboxIds, mailboxId) !=
                                              mutation.removeMailboxIds.end())
                 {
-                    return LiveRefreshError{
+                    return OperationError{
                         .message = QStringLiteral(
                             "Email mailbox additions and removals must be non-empty and disjoint."),
                     };
@@ -348,7 +315,7 @@ namespace javelin::jmap
             if (std::ranges::any_of(mutation.removeMailboxIds,
                                     [](const std::string& mailboxId) { return mailboxId.empty(); }))
             {
-                return LiveRefreshError{
+                return OperationError{
                     .message = QStringLiteral("Email mailbox removals must be non-empty."),
                 };
             }
@@ -357,13 +324,13 @@ namespace javelin::jmap
             const auto emailResult = emailRepository.find(accountId, mutation.emailId);
             if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&emailResult))
             {
-                return LiveRefreshError{.message = error->message};
+                return javelin::jmap::operationError(*error);
             }
 
             const auto& email = std::get<std::optional<javelin::jmap::domain::Email>>(emailResult);
             if (!email.has_value())
             {
-                return LiveRefreshError{
+                return OperationError{
                     .message = QStringLiteral("The selected message is not cached locally."),
                 };
             }
@@ -379,7 +346,7 @@ namespace javelin::jmap
                                        mutation.addMailboxIds.end());
             if (resultingMailboxIds.empty())
             {
-                return LiveRefreshError{
+                return OperationError{
                     .message = QStringLiteral("An email must remain in at least one mailbox."),
                 };
             }
@@ -402,14 +369,14 @@ namespace javelin::jmap
             javelin::jmap::sync::PendingActionRepository pendingActionRepository{connection};
             if (const auto error = pendingActionRepository.put(pendingAction))
             {
-                return LiveRefreshError{.message = error->message};
+                return javelin::jmap::operationError(*error);
             }
 
             const auto reconciledEmail =
                 javelin::jmap::sync::mergePendingEmailPatch(*email, {pendingAction});
             if (const auto error = emailRepository.upsertMany(accountId, {reconciledEmail}))
             {
-                return LiveRefreshError{.message = error->message};
+                return javelin::jmap::operationError(*error);
             }
 
             return QueuedEmailMutation{
@@ -426,13 +393,13 @@ namespace javelin::jmap
         {
             if (sourceMailboxId.empty() || destinationMailboxId.empty())
             {
-                return LiveRefreshError{
+                return OperationError{
                     .message = QStringLiteral("Source and destination mailbox ids are required."),
                 };
             }
             if (sourceMailboxId == destinationMailboxId)
             {
-                return LiveRefreshError{
+                return OperationError{
                     .message =
                         QStringLiteral("Source and destination mailboxes must be different."),
                 };
@@ -457,13 +424,13 @@ namespace javelin::jmap
             const auto emailResult = emailRepository.find(accountId, emailId);
             if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&emailResult))
             {
-                return LiveRefreshError{.message = error->message};
+                return javelin::jmap::operationError(*error);
             }
 
             const auto& email = std::get<std::optional<javelin::jmap::domain::Email>>(emailResult);
             if (!email.has_value())
             {
-                return LiveRefreshError{
+                return OperationError{
                     .message = QStringLiteral("The selected message is not cached locally."),
                 };
             }
@@ -487,14 +454,14 @@ namespace javelin::jmap
             javelin::jmap::sync::PendingActionRepository pendingActionRepository{connection};
             if (const auto error = pendingActionRepository.put(pendingAction))
             {
-                return LiveRefreshError{.message = error->message};
+                return javelin::jmap::operationError(*error);
             }
 
             const auto reconciledEmail =
                 javelin::jmap::sync::mergePendingEmailPatch(*email, {pendingAction});
             if (const auto error = emailRepository.upsertMany(accountId, {reconciledEmail}))
             {
-                return LiveRefreshError{.message = error->message};
+                return javelin::jmap::operationError(*error);
             }
 
             return QueuedEmailMutation{
@@ -511,7 +478,7 @@ namespace javelin::jmap
         {
             if (keyword.empty())
             {
-                return LiveRefreshError{
+                return OperationError{
                     .message = QStringLiteral("A keyword id is required."),
                 };
             }
@@ -520,13 +487,13 @@ namespace javelin::jmap
             const auto emailResult = emailRepository.find(accountId, emailId);
             if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&emailResult))
             {
-                return LiveRefreshError{.message = error->message};
+                return javelin::jmap::operationError(*error);
             }
 
             const auto& email = std::get<std::optional<javelin::jmap::domain::Email>>(emailResult);
             if (!email.has_value())
             {
-                return LiveRefreshError{
+                return OperationError{
                     .message = QStringLiteral("The selected message is not cached locally."),
                 };
             }
@@ -551,14 +518,14 @@ namespace javelin::jmap
             javelin::jmap::sync::PendingActionRepository pendingActionRepository{connection};
             if (const auto error = pendingActionRepository.put(pendingAction))
             {
-                return LiveRefreshError{.message = error->message};
+                return javelin::jmap::operationError(*error);
             }
 
             const auto reconciledEmail =
                 javelin::jmap::sync::mergePendingEmailPatch(*email, {pendingAction});
             if (const auto error = emailRepository.upsertMany(accountId, {reconciledEmail}))
             {
-                return LiveRefreshError{.message = error->message};
+                return javelin::jmap::operationError(*error);
             }
 
             return QueuedEmailMutation{
@@ -636,7 +603,7 @@ namespace javelin::jmap
             std::vector<javelin::jmap::cache::MessageListItem> results;
         };
 
-        [[nodiscard]] QCoro::Task<std::variant<CollapsedQueryPage, LiveRefreshError>>
+        [[nodiscard]] QCoro::Task<std::variant<CollapsedQueryPage, OperationError>>
         performCollapsedQueryPage(javelin::jmap::cache::DatabaseConnection& databaseConnection,
                                   javelin::jmap::api::JmapMethodTransport& methodTransport,
                                   LiveConnectionSettings settings, std::string accountId,
@@ -651,7 +618,7 @@ namespace javelin::jmap
             }
 
             const auto sessionResult = loadCachedSession(databaseConnection, accountId);
-            if (const auto* error = std::get_if<LiveRefreshError>(&sessionResult))
+            if (const auto* error = std::get_if<OperationError>(&sessionResult))
             {
                 co_return *error;
             }
@@ -674,7 +641,7 @@ namespace javelin::jmap
             });
             if (!queryRequest.has_value())
             {
-                co_return LiveRefreshError{
+                co_return OperationError{
                     .message = QStringLiteral("Failed to encode the Email/query request."),
                 };
             }
@@ -684,7 +651,7 @@ namespace javelin::jmap
                 javelin::jmap::api::getRequestFrom(accountId, queryHandle, "/ids"));
             if (!representativeRequest.has_value())
             {
-                co_return LiveRefreshError{
+                co_return OperationError{
                     .message =
                         QStringLiteral("Failed to encode the representative Email/get request."),
                 };
@@ -697,7 +664,7 @@ namespace javelin::jmap
                     accountId, representativeHandle, "/list/*/threadId"));
             if (!threadRequest.has_value())
             {
-                co_return LiveRefreshError{
+                co_return OperationError{
                     .message = QStringLiteral("Failed to encode the Thread/get request."),
                 };
             }
@@ -707,7 +674,7 @@ namespace javelin::jmap
                 javelin::jmap::api::getRequestFrom(accountId, threadHandle, "/list/*/emailIds"));
             if (!emailRequest.has_value())
             {
-                co_return LiveRefreshError{
+                co_return OperationError{
                     .message = QStringLiteral("Failed to encode the page Email/get request."),
                 };
             }
@@ -717,18 +684,15 @@ namespace javelin::jmap
             if (const auto* error =
                     std::get_if<javelin::jmap::api::TransportError>(&envelopeResult))
             {
-                co_return LiveRefreshError{.message = transportMessage(*error)};
+                co_return operationError(*error);
             }
             if (const auto* error = std::get_if<javelin::jmap::api::AuthError>(&envelopeResult))
             {
-                co_return LiveRefreshError{
-                    .message = authMessage(*error),
-                    .requiresUserIntervention = true,
-                };
+                co_return operationError(*error);
             }
             if (const auto* error = std::get_if<javelin::jmap::api::ProtocolError>(&envelopeResult))
             {
-                co_return LiveRefreshError{.message = protocolMessage(*error)};
+                co_return operationError(*error);
             }
 
             const auto& envelope = std::get<javelin::jmap::api::ResponseEnvelope>(envelopeResult);
@@ -738,10 +702,7 @@ namespace javelin::jmap
             if (const auto* error =
                     std::get_if<javelin::jmap::api::ResponseReaderError>(&queryResult))
             {
-                co_return LiveRefreshError{
-                    .message = QStringLiteral("Failed to read Email/query response: %1")
-                                   .arg(QString::fromStdString(error->message)),
-                };
+                co_return operationError(*error);
             }
             const auto& parsedQuery = std::get<javelin::jmap::api::EmailQueryResponse>(queryResult);
             if (reportProgress)
@@ -766,11 +727,7 @@ namespace javelin::jmap
             if (const auto* error =
                     std::get_if<javelin::jmap::api::ResponseReaderError>(&representativeResult))
             {
-                co_return LiveRefreshError{
-                    .message =
-                        QStringLiteral("Failed to read representative Email/get response: %1")
-                            .arg(QString::fromStdString(error->message)),
-                };
+                co_return operationError(*error);
             }
             const auto& parsedRepresentatives =
                 std::get<javelin::jmap::api::EmailGetResponse>(representativeResult);
@@ -779,10 +736,7 @@ namespace javelin::jmap
             if (const auto* error =
                     std::get_if<javelin::jmap::api::ResponseReaderError>(&threadResult))
             {
-                co_return LiveRefreshError{
-                    .message = QStringLiteral("Failed to read Thread/get response: %1")
-                                   .arg(QString::fromStdString(error->message)),
-                };
+                co_return operationError(*error);
             }
             const auto& parsedThreads =
                 std::get<javelin::jmap::api::ThreadGetResponse>(threadResult);
@@ -791,23 +745,20 @@ namespace javelin::jmap
             if (const auto* error =
                     std::get_if<javelin::jmap::api::ResponseReaderError>(&emailResult))
             {
-                co_return LiveRefreshError{
-                    .message = QStringLiteral("Failed to read Email/get response: %1")
-                                   .arg(QString::fromStdString(error->message)),
-                };
+                co_return operationError(*error);
             }
             const auto& parsedEmails = std::get<javelin::jmap::api::EmailGetResponse>(emailResult);
 
             javelin::jmap::cache::EmailRepository emailRepository{databaseConnection};
             if (const auto error = emailRepository.upsertMany(accountId, parsedEmails.list))
             {
-                co_return LiveRefreshError{.message = error->message};
+                co_return javelin::jmap::operationError(*error);
             }
 
             javelin::jmap::cache::ThreadRepository threadRepository{databaseConnection};
             if (const auto error = threadRepository.upsertMany(accountId, parsedThreads.list))
             {
-                co_return LiveRefreshError{.message = error->message};
+                co_return javelin::jmap::operationError(*error);
             }
 
             std::unordered_map<std::string, std::size_t> threadMessageCounts;
@@ -880,7 +831,7 @@ namespace javelin::jmap
     {
         if (m_impl->databaseConnection == nullptr || m_impl->resourceTransport == nullptr)
         {
-            co_return LiveRefreshError{
+            co_return OperationError{
                 .message = QStringLiteral(
                     "Session discovery is unavailable in this process configuration."),
             };
@@ -891,9 +842,8 @@ namespace javelin::jmap
         }
         if (ownerAccountId.empty())
         {
-            co_return LiveRefreshError{
+            co_return OperationError{
                 .message = QStringLiteral("An owner account is required for session discovery."),
-                .requiresUserIntervention = true,
             };
         }
 
@@ -909,25 +859,22 @@ namespace javelin::jmap
         const auto discovered = co_await sessionClient.discover(requestContext);
         if (const auto* error = std::get_if<javelin::jmap::api::TransportError>(&discovered))
         {
-            co_return LiveRefreshError{.message = transportMessage(*error)};
+            co_return operationError(*error);
         }
         if (const auto* error = std::get_if<javelin::jmap::api::AuthError>(&discovered))
         {
-            co_return LiveRefreshError{
-                .message = authMessage(*error),
-                .requiresUserIntervention = true,
-            };
+            co_return operationError(*error);
         }
         if (const auto* error = std::get_if<javelin::jmap::api::ProtocolError>(&discovered))
         {
-            co_return LiveRefreshError{.message = protocolMessage(*error)};
+            co_return operationError(*error);
         }
 
         const auto& session = std::get<javelin::jmap::api::Session>(discovered);
         javelin::jmap::cache::SessionRepository repository{*m_impl->databaseConnection};
         if (const auto error = repository.replace(ownerAccountId, session))
         {
-            co_return LiveRefreshError{.message = error->message};
+            co_return javelin::jmap::operationError(*error);
         }
 
         const bool websocketAdvertised = session.capabilities.websocket.has_value();
@@ -960,7 +907,7 @@ namespace javelin::jmap
         if (m_impl->databaseConnection == nullptr || m_impl->resourceTransport == nullptr ||
             m_impl->methodTransport == nullptr)
         {
-            co_return LiveRefreshError{
+            co_return OperationError{
                 .message =
                     QStringLiteral("Live refresh is unavailable in this process configuration."),
             };
@@ -985,25 +932,22 @@ namespace javelin::jmap
         const auto discovered = co_await sessionClient.discover(sessionRequestContext);
         if (const auto* error = std::get_if<javelin::jmap::api::TransportError>(&discovered))
         {
-            co_return LiveRefreshError{.message = transportMessage(*error)};
+            co_return operationError(*error);
         }
         if (const auto* error = std::get_if<javelin::jmap::api::AuthError>(&discovered))
         {
-            co_return LiveRefreshError{
-                .message = authMessage(*error),
-                .requiresUserIntervention = true,
-            };
+            co_return operationError(*error);
         }
         if (const auto* error = std::get_if<javelin::jmap::api::ProtocolError>(&discovered))
         {
-            co_return LiveRefreshError{.message = protocolMessage(*error)};
+            co_return operationError(*error);
         }
 
         const auto& session = std::get<javelin::jmap::api::Session>(discovered);
         reportProgress(QStringLiteral("Session discovered. Saving account state..."));
         if (!session.primaryAccounts.mailAccountId.has_value())
         {
-            co_return LiveRefreshError{
+            co_return OperationError{
                 .message =
                     QStringLiteral("The server session does not expose a primary mail account."),
             };
@@ -1016,7 +960,7 @@ namespace javelin::jmap
                           << static_cast<qulonglong>(session.accounts.size());
         if (const auto error = sessionRepository.replace(accountId, session))
         {
-            co_return LiveRefreshError{.message = error->message};
+            co_return javelin::jmap::operationError(*error);
         }
         reportProgress(QStringLiteral("Cached session. Fetching mailboxes..."));
         const auto apiRequestContext = buildApiRequestContext(settings, accountId, session);
@@ -1030,7 +974,7 @@ namespace javelin::jmap
                                                                     .properties = std::nullopt});
         if (!mailboxRequest.has_value())
         {
-            co_return LiveRefreshError{
+            co_return OperationError{
                 .message = QStringLiteral("Failed to encode the Mailbox/get request."),
             };
         }
@@ -1046,19 +990,16 @@ namespace javelin::jmap
         if (const auto* error =
                 std::get_if<javelin::jmap::api::TransportError>(&mailboxEnvelopeResult))
         {
-            co_return LiveRefreshError{.message = transportMessage(*error)};
+            co_return operationError(*error);
         }
         if (const auto* error = std::get_if<javelin::jmap::api::AuthError>(&mailboxEnvelopeResult))
         {
-            co_return LiveRefreshError{
-                .message = authMessage(*error),
-                .requiresUserIntervention = true,
-            };
+            co_return operationError(*error);
         }
         if (const auto* error =
                 std::get_if<javelin::jmap::api::ProtocolError>(&mailboxEnvelopeResult))
         {
-            co_return LiveRefreshError{.message = protocolMessage(*error)};
+            co_return operationError(*error);
         }
 
         const auto& mailboxEnvelope =
@@ -1068,10 +1009,7 @@ namespace javelin::jmap
         if (const auto* error =
                 std::get_if<javelin::jmap::api::ResponseReaderError>(&mailboxResult))
         {
-            co_return LiveRefreshError{
-                .message = QStringLiteral("Failed to read Mailbox/get response: %1")
-                               .arg(QString::fromStdString(error->message)),
-            };
+            co_return operationError(*error);
         }
         const auto& parsedMailboxes =
             std::get<javelin::jmap::api::MailboxGetResponse>(mailboxResult);
@@ -1081,7 +1019,7 @@ namespace javelin::jmap
         javelin::jmap::cache::MailboxRepository mailboxRepository{*m_impl->databaseConnection};
         if (const auto error = mailboxRepository.replaceAll(accountId, parsedMailboxes.list))
         {
-            co_return LiveRefreshError{.message = error->message};
+            co_return javelin::jmap::operationError(*error);
         }
 
         javelin::jmap::cache::SyncStateRepository syncStateRepository{*m_impl->databaseConnection};
@@ -1089,7 +1027,7 @@ namespace javelin::jmap
                 {.accountId = accountId, .objectType = "Mailbox", .queryKey = {}},
                 parsedMailboxes.state))
         {
-            co_return LiveRefreshError{.message = error->message};
+            co_return javelin::jmap::operationError(*error);
         }
 
         const auto selectedMailboxId = selectMailboxForInitialSync(parsedMailboxes.list);
@@ -1117,10 +1055,9 @@ namespace javelin::jmap
                 reportProgress(QStringLiteral("Refreshing selected mailbox..."));
                 const auto refreshResult = co_await mailboxRefreshExecutor.refreshCollapsedMailbox(
                     accountId, mailboxId, reportProgress, true);
-                if (const auto* error =
-                        std::get_if<javelin::jmap::sync::MailboxRefreshError>(&refreshResult))
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&refreshResult))
                 {
-                    co_return LiveRefreshError{.message = error->message};
+                    co_return *error;
                 }
 
                 emailCount += std::get<javelin::jmap::sync::MailboxRefreshSummary>(refreshResult)
@@ -1172,7 +1109,7 @@ namespace javelin::jmap
         reportProgress(QStringLiteral("Checking for saved message content..."));
         if (m_impl->databaseConnection == nullptr || m_impl->resourceTransport == nullptr)
         {
-            co_return LiveRefreshError{
+            co_return OperationError{
                 .message =
                     QStringLiteral("Live refresh is unavailable in this process configuration."),
             };
@@ -1187,16 +1124,16 @@ namespace javelin::jmap
             *m_impl->databaseConnection};
         const auto emailResult =
             findEmailForDownload(*m_impl->databaseConnection, accountId, emailId);
-        if (const auto* error = std::get_if<LiveRefreshError>(&emailResult))
+        if (const auto* error = std::get_if<OperationError>(&emailResult))
         {
-            co_return *error;
+            co_return operationError(*error);
         }
         const auto& email = std::get<javelin::jmap::domain::Email>(emailResult);
 
         const auto cachedSource = sourceRepository.find(accountId, emailId);
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&cachedSource))
         {
-            co_return LiveRefreshError{.message = error->message};
+            co_return operationError(*error);
         }
         const auto& source =
             std::get<std::optional<javelin::jmap::cache::RawMessageSource>>(cachedSource);
@@ -1216,7 +1153,7 @@ namespace javelin::jmap
 
         const auto sessionResult =
             prepareDownloadContext(*m_impl->databaseConnection, settings, accountId);
-        if (const auto* error = std::get_if<LiveRefreshError>(&sessionResult))
+        if (const auto* error = std::get_if<OperationError>(&sessionResult))
         {
             co_return *error;
         }
@@ -1262,7 +1199,7 @@ namespace javelin::jmap
                                                                       .payload = payload,
                                                                   }))
         {
-            co_return LiveRefreshError{.message = error->message};
+            co_return operationError(*error);
         }
 
         qInfo().noquote() << "JMAP core message source refresh success"
@@ -1287,7 +1224,7 @@ namespace javelin::jmap
 
         if (m_impl->databaseConnection == nullptr)
         {
-            co_return LiveRefreshError{
+            co_return OperationError{
                 .message = QStringLiteral(
                     "Attachment download is unavailable in this process configuration."),
             };
@@ -1295,7 +1232,7 @@ namespace javelin::jmap
 
         const auto emailResult =
             findEmailForDownload(*m_impl->databaseConnection, accountId, emailId);
-        if (const auto* error = std::get_if<LiveRefreshError>(&emailResult))
+        if (const auto* error = std::get_if<OperationError>(&emailResult))
         {
             co_return *error;
         }
@@ -1306,14 +1243,14 @@ namespace javelin::jmap
         const auto sourceResult = sourceRepository.find(accountId, emailId);
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&sourceResult))
         {
-            co_return LiveRefreshError{.message = error->message};
+            co_return javelin::jmap::operationError(*error);
         }
 
         const auto& source =
             std::get<std::optional<javelin::jmap::cache::RawMessageSource>>(sourceResult);
         if (!source.has_value() || source->blobId != email.blobId)
         {
-            co_return LiveRefreshError{
+            co_return OperationError{
                 .message = QStringLiteral(
                     "The selected attachment is not cached locally. Open the message first."),
             };
@@ -1323,7 +1260,7 @@ namespace javelin::jmap
             javelin::jmap::cache::findMessageSourcePart(emailId, source->payload, partId);
         if (!parsedPart.has_value())
         {
-            co_return LiveRefreshError{
+            co_return OperationError{
                 .message =
                     QStringLiteral("The selected attachment is not present in the cached message."),
             };
@@ -1334,7 +1271,7 @@ namespace javelin::jmap
                                   part.disposition.has_value() || part.cid.has_value();
         if (!isAttachment)
         {
-            co_return LiveRefreshError{
+            co_return OperationError{
                 .message = QStringLiteral("The selected message part is not downloadable."),
             };
         }
@@ -1356,7 +1293,7 @@ namespace javelin::jmap
     {
         if (m_impl->databaseConnection == nullptr || m_impl->resourceTransport == nullptr)
         {
-            co_return LiveRefreshError{
+            co_return OperationError{
                 .message = QStringLiteral(
                     "Message source download is unavailable in this process configuration."),
             };
@@ -1369,7 +1306,7 @@ namespace javelin::jmap
 
         const auto emailResult =
             findEmailForDownload(*m_impl->databaseConnection, accountId, emailId);
-        if (const auto* error = std::get_if<LiveRefreshError>(&emailResult))
+        if (const auto* error = std::get_if<OperationError>(&emailResult))
         {
             co_return *error;
         }
@@ -1378,7 +1315,7 @@ namespace javelin::jmap
 
         const auto downloadContextResult =
             prepareDownloadContext(*m_impl->databaseConnection, settings, accountId);
-        if (const auto* error = std::get_if<LiveRefreshError>(&downloadContextResult))
+        if (const auto* error = std::get_if<OperationError>(&downloadContextResult))
         {
             co_return *error;
         }
@@ -1421,7 +1358,7 @@ namespace javelin::jmap
     {
         if (m_impl->databaseConnection == nullptr)
         {
-            return LiveRefreshError{
+            return OperationError{
                 .message = QStringLiteral("Queued mutations are unavailable in this process."),
             };
         }
@@ -1436,7 +1373,7 @@ namespace javelin::jmap
     {
         if (m_impl->databaseConnection == nullptr)
         {
-            return LiveRefreshError{
+            return OperationError{
                 .message = QStringLiteral("Queued mutations are unavailable in this process."),
             };
         }
@@ -1451,7 +1388,7 @@ namespace javelin::jmap
     {
         if (m_impl->databaseConnection == nullptr)
         {
-            return LiveRefreshError{
+            return OperationError{
                 .message = QStringLiteral("Queued mutations are unavailable in this process."),
             };
         }
@@ -1483,7 +1420,7 @@ namespace javelin::jmap
     {
         if (m_impl->databaseConnection == nullptr)
         {
-            return LiveRefreshError{
+            return OperationError{
                 .message = QStringLiteral("Queued mutations are unavailable in this process."),
             };
         }
@@ -1497,7 +1434,7 @@ namespace javelin::jmap
     {
         if (m_impl->databaseConnection == nullptr)
         {
-            return LiveRefreshError{
+            return OperationError{
                 .message = QStringLiteral("Queued mutations are unavailable in this process."),
             };
         }
@@ -1511,7 +1448,7 @@ namespace javelin::jmap
     {
         if (m_impl->databaseConnection == nullptr)
         {
-            return LiveRefreshError{
+            return OperationError{
                 .message = QStringLiteral("Queued mutations are unavailable in this process."),
             };
         }
@@ -1525,7 +1462,7 @@ namespace javelin::jmap
     {
         if (m_impl->databaseConnection == nullptr)
         {
-            return LiveRefreshError{
+            return OperationError{
                 .message = QStringLiteral("Queued mutations are unavailable in this process."),
             };
         }
@@ -1540,7 +1477,7 @@ namespace javelin::jmap
     {
         if (m_impl->databaseConnection == nullptr || m_impl->methodTransport == nullptr)
         {
-            co_return LiveRefreshError{
+            co_return OperationError{
                 .message = QStringLiteral("JMAP core is not wired to the cache and transport yet."),
             };
         }
@@ -1551,7 +1488,7 @@ namespace javelin::jmap
         }
 
         const auto sessionResult = loadCachedSession(*m_impl->databaseConnection, accountId);
-        if (const auto* error = std::get_if<LiveRefreshError>(&sessionResult))
+        if (const auto* error = std::get_if<OperationError>(&sessionResult))
         {
             co_return *error;
         }
@@ -1563,7 +1500,7 @@ namespace javelin::jmap
             accountId, javelin::jmap::sync::PendingActionStatus::Pending, limit);
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&pendingResult))
         {
-            co_return LiveRefreshError{.message = error->message};
+            co_return javelin::jmap::operationError(*error);
         }
 
         const auto& pendingActions =
@@ -1596,13 +1533,13 @@ namespace javelin::jmap
             const auto emailResult = emailRepository.find(accountId, emailId);
             if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&emailResult))
             {
-                co_return LiveRefreshError{.message = error->message};
+                co_return javelin::jmap::operationError(*error);
             }
 
             const auto& email = std::get<std::optional<javelin::jmap::domain::Email>>(emailResult);
             if (!email.has_value())
             {
-                co_return LiveRefreshError{
+                co_return OperationError{
                     .message = QStringLiteral("A queued email mutation targets a missing email."),
                 };
             }
@@ -1612,7 +1549,7 @@ namespace javelin::jmap
             if (const auto* error =
                     std::get_if<javelin::jmap::cache::DatabaseError>(&allEmailActionsResult))
             {
-                co_return LiveRefreshError{.message = error->message};
+                co_return javelin::jmap::operationError(*error);
             }
 
             const auto allEmailActions = activePendingActions(
@@ -1634,7 +1571,7 @@ namespace javelin::jmap
                 if (const auto error = pendingActionRepository.updateStatus(
                         action.pendingActionId, javelin::jmap::sync::PendingActionStatus::InFlight))
                 {
-                    co_return LiveRefreshError{.message = error->message};
+                    co_return javelin::jmap::operationError(*error);
                 }
             }
         }
@@ -1649,7 +1586,7 @@ namespace javelin::jmap
             if (const auto* error =
                     std::get_if<javelin::jmap::cache::DatabaseError>(&actionsResult))
             {
-                co_return LiveRefreshError{.message = error->message};
+                co_return javelin::jmap::operationError(*error);
             }
             const auto actions = activePendingActions(
                 std::get<std::vector<javelin::jmap::sync::PendingActionRecord>>(actionsResult));
@@ -1675,7 +1612,7 @@ namespace javelin::jmap
         });
         if (!requestMethod.has_value())
         {
-            co_return LiveRefreshError{
+            co_return OperationError{
                 .message = QStringLiteral("Failed to encode the Email/set request."),
             };
         }
@@ -1689,18 +1626,15 @@ namespace javelin::jmap
         const auto envelopeResult = co_await methodCaller.call(apiRequestContext, requestBuilder);
         if (const auto* error = std::get_if<javelin::jmap::api::TransportError>(&envelopeResult))
         {
-            co_return LiveRefreshError{.message = transportMessage(*error)};
+            co_return operationError(*error);
         }
         if (const auto* error = std::get_if<javelin::jmap::api::AuthError>(&envelopeResult))
         {
-            co_return LiveRefreshError{
-                .message = authMessage(*error),
-                .requiresUserIntervention = true,
-            };
+            co_return operationError(*error);
         }
         if (const auto* error = std::get_if<javelin::jmap::api::ProtocolError>(&envelopeResult))
         {
-            co_return LiveRefreshError{.message = protocolMessage(*error)};
+            co_return operationError(*error);
         }
 
         const auto& envelope = std::get<javelin::jmap::api::ResponseEnvelope>(envelopeResult);
@@ -1708,10 +1642,7 @@ namespace javelin::jmap
         const auto parsedResult = reader.require(setHandle);
         if (const auto* error = std::get_if<javelin::jmap::api::ResponseReaderError>(&parsedResult))
         {
-            co_return LiveRefreshError{
-                .message = QStringLiteral("Failed to read Email/set response: %1")
-                               .arg(QString::fromStdString(error->message)),
-            };
+            co_return operationError(*error);
         }
         const auto& parsed = std::get<javelin::jmap::api::EmailSetResponse>(parsedResult);
 
@@ -1744,19 +1675,19 @@ namespace javelin::jmap
                     const std::array destroyed{emailId};
                     if (const auto error = emailRepository.removeMany(accountId, destroyed))
                     {
-                        co_return LiveRefreshError{.message = error->message};
+                        co_return javelin::jmap::operationError(*error);
                     }
                 }
                 else if (const auto error = emailRepository.upsertMany(accountId, {email}))
                 {
-                    co_return LiveRefreshError{.message = error->message};
+                    co_return javelin::jmap::operationError(*error);
                 }
 
                 for (const auto& pendingActionId : idsIt->second)
                 {
                     if (const auto error = pendingActionRepository.remove(pendingActionId))
                     {
-                        co_return LiveRefreshError{.message = error->message};
+                        co_return javelin::jmap::operationError(*error);
                     }
                 }
                 continue;
@@ -1770,7 +1701,7 @@ namespace javelin::jmap
                 if (const auto error =
                         pendingActionRepository.updateStatus(pendingActionId, status))
                 {
-                    co_return LiveRefreshError{.message = error->message};
+                    co_return javelin::jmap::operationError(*error);
                 }
             }
         }
@@ -1801,7 +1732,7 @@ namespace javelin::jmap
         reportProgress(QStringLiteral("Fetching messages for selected mailbox..."));
         if (m_impl->databaseConnection == nullptr || m_impl->methodTransport == nullptr)
         {
-            co_return LiveRefreshError{
+            co_return OperationError{
                 .message = QStringLiteral("JMAP core is not wired to the cache and transport yet."),
             };
         }
@@ -1812,7 +1743,7 @@ namespace javelin::jmap
         }
 
         const auto sessionResult = loadCachedSession(*m_impl->databaseConnection, accountId);
-        if (const auto* error = std::get_if<LiveRefreshError>(&sessionResult))
+        if (const auto* error = std::get_if<OperationError>(&sessionResult))
         {
             co_return *error;
         }
@@ -1825,10 +1756,9 @@ namespace javelin::jmap
             *m_impl->databaseConnection, methodCaller, apiRequestContext};
         const auto refreshResult = co_await mailboxRefreshExecutor.refreshCollapsedMailbox(
             accountId, mailboxId, reportProgress, true);
-        if (const auto* error =
-                std::get_if<javelin::jmap::sync::MailboxRefreshError>(&refreshResult))
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&refreshResult))
         {
-            co_return LiveRefreshError{.message = error->message};
+            co_return javelin::jmap::operationError(*error);
         }
 
         const auto representativeCount =
@@ -1883,14 +1813,14 @@ namespace javelin::jmap
         reportProgress(QStringLiteral("Searching the server..."));
         if (m_impl->databaseConnection == nullptr || m_impl->methodTransport == nullptr)
         {
-            co_return LiveRefreshError{
+            co_return OperationError{
                 .message = QStringLiteral("JMAP core is not wired to the cache and transport yet."),
             };
         }
 
         if (javelin::jmap::search::isEmpty(criteria))
         {
-            co_return LiveRefreshError{
+            co_return OperationError{
                 .message = QStringLiteral("Enter a search term before searching."),
             };
         }
@@ -1899,7 +1829,7 @@ namespace javelin::jmap
             *m_impl->databaseConnection, *m_impl->methodTransport, settings, accountId,
             javelin::jmap::search::toEmailQueryFilter(criteria), offset, limit, std::move(sort),
             reportProgress);
-        if (const auto* error = std::get_if<LiveRefreshError>(&pageResult))
+        if (const auto* error = std::get_if<OperationError>(&pageResult))
         {
             co_return *error;
         }
@@ -1922,7 +1852,7 @@ namespace javelin::jmap
                 .emailIds = std::move(emailIds),
             }))
         {
-            co_return LiveRefreshError{.message = error->message};
+            co_return javelin::jmap::operationError(*error);
         }
 
         co_return MessageSearchSummary{
@@ -1956,7 +1886,7 @@ namespace javelin::jmap
         reportProgress(QStringLiteral("Fetching mailbox page from the server..."));
         if (m_impl->databaseConnection == nullptr || m_impl->methodTransport == nullptr)
         {
-            co_return LiveRefreshError{
+            co_return OperationError{
                 .message = QStringLiteral("JMAP core is not wired to the cache and transport yet."),
             };
         }
@@ -1966,7 +1896,7 @@ namespace javelin::jmap
             co_return *validationError;
         }
         const auto sessionResult = loadCachedSession(*m_impl->databaseConnection, accountId);
-        if (const auto* error = std::get_if<LiveRefreshError>(&sessionResult))
+        if (const auto* error = std::get_if<OperationError>(&sessionResult))
         {
             co_return *error;
         }
@@ -1977,10 +1907,9 @@ namespace javelin::jmap
                                    std::get<javelin::jmap::api::Session>(sessionResult))};
         const auto refreshResult = co_await mailboxRefreshExecutor.refreshCollapsedMailbox(
             accountId, mailboxId, reportProgress, true);
-        if (const auto* error =
-                std::get_if<javelin::jmap::sync::MailboxRefreshError>(&refreshResult))
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&refreshResult))
         {
-            co_return LiveRefreshError{.message = error->message};
+            co_return javelin::jmap::operationError(*error);
         }
 
         const auto pageResult = co_await performCollapsedQueryPage(
@@ -1990,7 +1919,7 @@ namespace javelin::jmap
                 .text = std::nullopt,
             },
             offset, limit, std::move(sort), reportProgress);
-        if (const auto* error = std::get_if<LiveRefreshError>(&pageResult))
+        if (const auto* error = std::get_if<OperationError>(&pageResult))
         {
             co_return *error;
         }

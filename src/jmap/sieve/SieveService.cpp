@@ -95,8 +95,8 @@ namespace javelin::jmap::sieve::detail
         std::string sieveAccountId;
     };
 
-    using ContextResult = std::variant<ResolvedContext, SieveServiceError>;
-    using UploadResult = std::variant<std::string, SieveServiceError>;
+    using ContextResult = std::variant<ResolvedContext, OperationError>;
+    using UploadResult = std::variant<std::string, OperationError>;
 } // namespace javelin::jmap::sieve::detail
 
 template <> struct glz::meta<javelin::jmap::sieve::SieveScript>
@@ -182,7 +182,7 @@ namespace javelin::jmap::sieve
         constexpr std::string_view sieveValidateMethod = "SieveScript/validate";
         constexpr std::string_view sieveSetMethod = "SieveScript/set";
 
-        [[nodiscard]] SieveServiceError error(SieveServiceErrorCode code, QString message)
+        [[nodiscard]] OperationError error(OperationErrorCode code, QString message)
         {
             return {.code = code, .message = std::move(message)};
         }
@@ -196,7 +196,7 @@ namespace javelin::jmap::sieve
         }
 
         template <typename Value>
-        [[nodiscard]] std::variant<Value, SieveServiceError>
+        [[nodiscard]] std::variant<Value, OperationError>
         parseMethodResponse(const api::ResponseEnvelope& envelope, const std::string_view callId,
                             const std::string_view methodName)
         {
@@ -205,21 +205,23 @@ namespace javelin::jmap::sieve
                 if (response.callId != callId)
                     continue;
                 if (response.name == "error")
-                    return error(
-                        SieveServiceErrorCode::Protocol,
-                        QStringLiteral("The server rejected %1.")
-                            .arg(QString::fromUtf8(methodName.data(),
-                                                   static_cast<qsizetype>(methodName.size()))));
+                {
+                    const auto parsed = api::parseMethodError(response.arguments);
+                    if (parsed.value.has_value())
+                        return operationError(*parsed.value);
+                    return error(OperationErrorCode::ProtocolViolation,
+                                 QStringLiteral("The server returned an invalid method error."));
+                }
                 if (response.name != methodName)
                     continue;
                 Value value;
                 auto json = response.arguments;
                 if (glz::read<glz::opts{.error_on_unknown_keys = false}>(value, json))
-                    return error(SieveServiceErrorCode::Protocol,
+                    return error(OperationErrorCode::ProtocolViolation,
                                  QStringLiteral("The server returned an invalid Sieve response."));
                 return value;
             }
-            return error(SieveServiceErrorCode::Protocol,
+            return error(OperationErrorCode::ProtocolViolation,
                          QStringLiteral("The server omitted the Sieve response."));
         }
 
@@ -250,18 +252,10 @@ namespace javelin::jmap::sieve
                                                       *value->primaryAccounts.sieveAccountId};
             }
             if (const auto* authError = std::get_if<api::AuthError>(&result))
-                co_return error(SieveServiceErrorCode::Authentication,
-                                QString::fromStdString(authError->message));
+                co_return operationError(*authError);
             if (const auto* protocolError = std::get_if<api::ProtocolError>(&result))
-            {
-                const auto code =
-                    protocolError->code == api::ProtocolErrorCode::CapabilityNegotiationFailed
-                        ? SieveServiceErrorCode::Unsupported
-                        : SieveServiceErrorCode::Protocol;
-                co_return error(code, QString::fromStdString(protocolError->message));
-            }
-            co_return error(SieveServiceErrorCode::Transport,
-                            QString::fromStdString(std::get<api::TransportError>(result).message));
+                co_return operationError(*protocolError);
+            co_return operationError(std::get<api::TransportError>(result));
         }
 
         [[nodiscard]] api::ApiRequestContext apiContext(const detail::ResolvedContext& context)
@@ -269,7 +263,7 @@ namespace javelin::jmap::sieve
             return {.credentials = context.credentials, .apiUrl = context.session.apiUrl};
         }
 
-        [[nodiscard]] QCoro::Task<std::variant<api::ResponseEnvelope, SieveServiceError>>
+        [[nodiscard]] QCoro::Task<std::variant<api::ResponseEnvelope, OperationError>>
         call(api::JmapMethodTransport& transport, const detail::ResolvedContext& context,
              std::string methodName, std::string arguments, std::string callId)
         {
@@ -284,13 +278,10 @@ namespace javelin::jmap::sieve
             if (const auto* envelope = std::get_if<api::ResponseEnvelope>(&result))
                 co_return *envelope;
             if (const auto* authError = std::get_if<api::AuthError>(&result))
-                co_return error(SieveServiceErrorCode::Authentication,
-                                QString::fromStdString(authError->message));
+                co_return operationError(*authError);
             if (const auto* transportError = std::get_if<api::TransportError>(&result))
-                co_return error(SieveServiceErrorCode::Transport,
-                                QString::fromStdString(transportError->message));
-            co_return error(SieveServiceErrorCode::Protocol,
-                            QString::fromStdString(std::get<api::ProtocolError>(result).message));
+                co_return operationError(*transportError);
+            co_return operationError(std::get<api::ProtocolError>(result));
         }
 
         [[nodiscard]] QString expandUrl(std::string urlTemplate, const std::string& accountId,
@@ -326,13 +317,12 @@ namespace javelin::jmap::sieve
                 .body = std::move(content),
             });
             if (const auto* transportError = std::get_if<api::TransportError>(&result))
-                co_return error(SieveServiceErrorCode::Transport,
-                                QString::fromStdString(transportError->message));
+                co_return operationError(*transportError);
             detail::UploadResponse response;
             auto json = std::get<api::HttpResponse>(result).body.toStdString();
             if (glz::read<glz::opts{.error_on_unknown_keys = false}>(response, json) ||
                 response.blobId.empty())
-                co_return error(SieveServiceErrorCode::Protocol,
+                co_return error(OperationErrorCode::ProtocolViolation,
                                 QStringLiteral("The server returned an invalid upload response."));
             co_return std::move(response.blobId);
         }
@@ -344,15 +334,15 @@ namespace javelin::jmap::sieve
             const auto arguments = serialize(
                 detail::ValidateRequest{.accountId = context.sieveAccountId, .blobId = blobId});
             if (!arguments)
-                co_return error(SieveServiceErrorCode::Protocol,
+                co_return error(OperationErrorCode::ProtocolViolation,
                                 QStringLiteral("Failed to encode the validation request."));
             auto called = co_await call(transport, context, std::string{sieveValidateMethod},
                                         *arguments, "sieve-validate");
-            if (const auto* callError = std::get_if<SieveServiceError>(&called))
+            if (const auto* callError = std::get_if<OperationError>(&called))
                 co_return *callError;
             auto parsed = parseMethodResponse<detail::ValidateResponse>(
                 std::get<api::ResponseEnvelope>(called), "sieve-validate", sieveValidateMethod);
-            if (const auto* parseError = std::get_if<SieveServiceError>(&parsed))
+            if (const auto* parseError = std::get_if<OperationError>(&parsed))
                 co_return *parseError;
             const auto& response = std::get<detail::ValidateResponse>(parsed);
             if (!response.error)
@@ -377,21 +367,21 @@ namespace javelin::jmap::sieve
     {
         auto contextResult = co_await resolveContext(m_resourceTransport, std::move(settings),
                                                      std::move(ownerAccountId));
-        if (const auto* contextError = std::get_if<SieveServiceError>(&contextResult))
+        if (const auto* contextError = std::get_if<OperationError>(&contextResult))
             co_return *contextError;
         const auto& context = std::get<detail::ResolvedContext>(contextResult);
         const auto arguments =
             serialize(detail::GetRequest{.accountId = context.sieveAccountId, .ids = std::nullopt});
         if (!arguments)
-            co_return error(SieveServiceErrorCode::Protocol,
+            co_return error(OperationErrorCode::ProtocolViolation,
                             QStringLiteral("Failed to encode the script list request."));
         auto called = co_await call(m_methodTransport, context, std::string{sieveGetMethod},
                                     *arguments, "sieve-list");
-        if (const auto* callError = std::get_if<SieveServiceError>(&called))
+        if (const auto* callError = std::get_if<OperationError>(&called))
             co_return *callError;
         auto parsed = parseMethodResponse<detail::GetResponse>(
             std::get<api::ResponseEnvelope>(called), "sieve-list", sieveGetMethod);
-        if (const auto* parseError = std::get_if<SieveServiceError>(&parsed))
+        if (const auto* parseError = std::get_if<OperationError>(&parsed))
             co_return *parseError;
         co_return std::move(std::get<detail::GetResponse>(parsed).list);
     }
@@ -402,7 +392,7 @@ namespace javelin::jmap::sieve
     {
         auto contextResult = co_await resolveContext(m_resourceTransport, std::move(settings),
                                                      std::move(ownerAccountId));
-        if (const auto* contextError = std::get_if<SieveServiceError>(&contextResult))
+        if (const auto* contextError = std::get_if<OperationError>(&contextResult))
             co_return *contextError;
         const auto& context = std::get<detail::ResolvedContext>(contextResult);
         auto result = co_await m_resourceTransport.send({
@@ -415,8 +405,7 @@ namespace javelin::jmap::sieve
             .body = {},
         });
         if (const auto* transportError = std::get_if<api::TransportError>(&result))
-            co_return error(SieveServiceErrorCode::Transport,
-                            QString::fromStdString(transportError->message));
+            co_return operationError(*transportError);
         co_return std::get<api::HttpResponse>(std::move(result)).body;
     }
 
@@ -426,11 +415,11 @@ namespace javelin::jmap::sieve
     {
         auto contextResult = co_await resolveContext(m_resourceTransport, std::move(settings),
                                                      std::move(ownerAccountId));
-        if (const auto* contextError = std::get_if<SieveServiceError>(&contextResult))
+        if (const auto* contextError = std::get_if<OperationError>(&contextResult))
             co_return *contextError;
         const auto& context = std::get<detail::ResolvedContext>(contextResult);
         auto uploaded = co_await upload(m_resourceTransport, context, std::move(content));
-        if (const auto* uploadError = std::get_if<SieveServiceError>(&uploaded))
+        if (const auto* uploadError = std::get_if<OperationError>(&uploaded))
             co_return *uploadError;
         co_return co_await validateBlob(m_methodTransport, context,
                                         std::get<std::string>(uploaded));
@@ -442,19 +431,19 @@ namespace javelin::jmap::sieve
     {
         auto contextResult = co_await resolveContext(m_resourceTransport, std::move(settings),
                                                      std::move(ownerAccountId));
-        if (const auto* contextError = std::get_if<SieveServiceError>(&contextResult))
+        if (const auto* contextError = std::get_if<OperationError>(&contextResult))
             co_return *contextError;
         const auto& context = std::get<detail::ResolvedContext>(contextResult);
         auto uploaded = co_await upload(m_resourceTransport, context, std::move(content));
-        if (const auto* uploadError = std::get_if<SieveServiceError>(&uploaded))
+        if (const auto* uploadError = std::get_if<OperationError>(&uploaded))
             co_return *uploadError;
         const auto& blobId = std::get<std::string>(uploaded);
         auto validation = co_await validateBlob(m_methodTransport, context, blobId);
-        if (const auto* validationError = std::get_if<SieveServiceError>(&validation))
+        if (const auto* validationError = std::get_if<OperationError>(&validation))
             co_return *validationError;
         const auto& validationValue = std::get<SieveValidation>(validation);
         if (!validationValue.valid)
-            co_return error(SieveServiceErrorCode::InvalidScript, validationValue.message);
+            co_return error(OperationErrorCode::InvalidUserInput, validationValue.message);
 
         constexpr std::string_view creationId = "new-script";
         const auto arguments = serialize(detail::SetRequest{
@@ -475,15 +464,15 @@ namespace javelin::jmap::sieve
             .onSuccessDeactivateScript = std::nullopt,
         });
         if (!arguments)
-            co_return error(SieveServiceErrorCode::Protocol,
+            co_return error(OperationErrorCode::ProtocolViolation,
                             QStringLiteral("Failed to encode the script update request."));
         auto called = co_await call(m_methodTransport, context, std::string{sieveSetMethod},
                                     *arguments, "sieve-save");
-        if (const auto* callError = std::get_if<SieveServiceError>(&called))
+        if (const auto* callError = std::get_if<OperationError>(&called))
             co_return *callError;
         auto parsed = parseMethodResponse<detail::SetResponse>(
             std::get<api::ResponseEnvelope>(called), "sieve-save", sieveSetMethod);
-        if (const auto* parseError = std::get_if<SieveServiceError>(&parsed))
+        if (const auto* parseError = std::get_if<OperationError>(&parsed))
             co_return *parseError;
         const auto& response = std::get<detail::SetResponse>(parsed);
         if (script.id.empty())
@@ -493,18 +482,18 @@ namespace javelin::jmap::sieve
                 const auto rejected = response.notCreated->find(std::string{creationId});
                 if (rejected != response.notCreated->end())
                     co_return error(rejected->second.type == "invalidSieve"
-                                        ? SieveServiceErrorCode::InvalidScript
-                                        : SieveServiceErrorCode::Protocol,
+                                        ? OperationErrorCode::InvalidUserInput
+                                        : OperationErrorCode::ProtocolViolation,
                                     rejected->second.description
                                         ? QString::fromStdString(*rejected->second.description)
                                         : QStringLiteral("The server rejected the new script."));
             }
             if (!response.created)
-                co_return error(SieveServiceErrorCode::Protocol,
+                co_return error(OperationErrorCode::ProtocolViolation,
                                 QStringLiteral("The server did not return the new script."));
             const auto created = response.created->find(std::string{creationId});
             if (created == response.created->end())
-                co_return error(SieveServiceErrorCode::Protocol,
+                co_return error(OperationErrorCode::ProtocolViolation,
                                 QStringLiteral("The server did not return the new script."));
             auto createdScript = created->second;
             if (createdScript.name.empty())
@@ -518,8 +507,8 @@ namespace javelin::jmap::sieve
             const auto rejected = response.notUpdated->find(script.id);
             if (rejected != response.notUpdated->end())
                 co_return error(rejected->second.type == "invalidSieve"
-                                    ? SieveServiceErrorCode::InvalidScript
-                                    : SieveServiceErrorCode::Protocol,
+                                    ? OperationErrorCode::InvalidUserInput
+                                    : OperationErrorCode::ProtocolViolation,
                                 rejected->second.description
                                     ? QString::fromStdString(*rejected->second.description)
                                     : QStringLiteral("The server rejected the script update."));
@@ -536,7 +525,7 @@ namespace javelin::jmap::sieve
             co_return std::monostate{};
         auto contextResult = co_await resolveContext(m_resourceTransport, std::move(settings),
                                                      std::move(ownerAccountId));
-        if (const auto* contextError = std::get_if<SieveServiceError>(&contextResult))
+        if (const auto* contextError = std::get_if<OperationError>(&contextResult))
             co_return *contextError;
         const auto& context = std::get<detail::ResolvedContext>(contextResult);
 
@@ -552,16 +541,16 @@ namespace javelin::jmap::sieve
             });
             if (!deactivateArguments)
                 co_return error(
-                    SieveServiceErrorCode::Protocol,
+                    OperationErrorCode::ProtocolViolation,
                     QStringLiteral("Failed to encode the script deactivation request."));
             auto deactivated =
                 co_await call(m_methodTransport, context, std::string{sieveSetMethod},
                               *deactivateArguments, "sieve-deactivate");
-            if (const auto* callError = std::get_if<SieveServiceError>(&deactivated))
+            if (const auto* callError = std::get_if<OperationError>(&deactivated))
                 co_return *callError;
             auto parsed = parseMethodResponse<detail::SetResponse>(
                 std::get<api::ResponseEnvelope>(deactivated), "sieve-deactivate", sieveSetMethod);
-            if (const auto* parseError = std::get_if<SieveServiceError>(&parsed))
+            if (const auto* parseError = std::get_if<OperationError>(&parsed))
                 co_return *parseError;
         }
 
@@ -574,22 +563,22 @@ namespace javelin::jmap::sieve
             .onSuccessDeactivateScript = std::nullopt,
         });
         if (!destroyArguments)
-            co_return error(SieveServiceErrorCode::Protocol,
+            co_return error(OperationErrorCode::ProtocolViolation,
                             QStringLiteral("Failed to encode the script deletion request."));
         auto destroyed = co_await call(m_methodTransport, context, std::string{sieveSetMethod},
                                        *destroyArguments, "sieve-delete");
-        if (const auto* callError = std::get_if<SieveServiceError>(&destroyed))
+        if (const auto* callError = std::get_if<OperationError>(&destroyed))
             co_return *callError;
         auto parsed = parseMethodResponse<detail::SetResponse>(
             std::get<api::ResponseEnvelope>(destroyed), "sieve-delete", sieveSetMethod);
-        if (const auto* parseError = std::get_if<SieveServiceError>(&parsed))
+        if (const auto* parseError = std::get_if<OperationError>(&parsed))
             co_return *parseError;
         const auto& response = std::get<detail::SetResponse>(parsed);
         if (response.notDestroyed)
         {
             const auto rejected = response.notDestroyed->find(script.id);
             if (rejected != response.notDestroyed->end())
-                co_return error(SieveServiceErrorCode::Protocol,
+                co_return error(OperationErrorCode::ProtocolViolation,
                                 rejected->second.description
                                     ? QString::fromStdString(*rejected->second.description)
                                     : QStringLiteral("The server rejected the script deletion."));
@@ -603,11 +592,11 @@ namespace javelin::jmap::sieve
                                                                const bool active) const
     {
         if (script.id.empty())
-            co_return error(SieveServiceErrorCode::Protocol,
+            co_return error(OperationErrorCode::ProtocolViolation,
                             QStringLiteral("Save the script before activating it."));
         auto contextResult = co_await resolveContext(m_resourceTransport, std::move(settings),
                                                      std::move(ownerAccountId));
-        if (const auto* contextError = std::get_if<SieveServiceError>(&contextResult))
+        if (const auto* contextError = std::get_if<OperationError>(&contextResult))
             co_return *contextError;
         const auto& context = std::get<detail::ResolvedContext>(contextResult);
         const auto arguments = serialize(detail::SetRequest{
@@ -619,35 +608,35 @@ namespace javelin::jmap::sieve
             .onSuccessDeactivateScript = active ? std::nullopt : std::optional{true},
         });
         if (!arguments)
-            co_return error(SieveServiceErrorCode::Protocol,
+            co_return error(OperationErrorCode::ProtocolViolation,
                             QStringLiteral("Failed to encode the script activation request."));
         auto called = co_await call(m_methodTransport, context, std::string{sieveSetMethod},
                                     *arguments, "sieve-active");
-        if (const auto* callError = std::get_if<SieveServiceError>(&called))
+        if (const auto* callError = std::get_if<OperationError>(&called))
             co_return *callError;
         auto parsed = parseMethodResponse<detail::SetResponse>(
             std::get<api::ResponseEnvelope>(called), "sieve-active", sieveSetMethod);
-        if (const auto* parseError = std::get_if<SieveServiceError>(&parsed))
+        if (const auto* parseError = std::get_if<OperationError>(&parsed))
             co_return *parseError;
         const auto getArguments = serialize(detail::GetRequest{
             .accountId = context.sieveAccountId,
             .ids = std::vector<std::string>{script.id},
         });
         if (!getArguments)
-            co_return error(SieveServiceErrorCode::Protocol,
+            co_return error(OperationErrorCode::ProtocolViolation,
                             QStringLiteral("Failed to encode the script state request."));
         auto checked = co_await call(m_methodTransport, context, std::string{sieveGetMethod},
                                      *getArguments, "sieve-active-check");
-        if (const auto* callError = std::get_if<SieveServiceError>(&checked))
+        if (const auto* callError = std::get_if<OperationError>(&checked))
             co_return *callError;
         auto getResponse = parseMethodResponse<detail::GetResponse>(
             std::get<api::ResponseEnvelope>(checked), "sieve-active-check", sieveGetMethod);
-        if (const auto* parseError = std::get_if<SieveServiceError>(&getResponse))
+        if (const auto* parseError = std::get_if<OperationError>(&getResponse))
             co_return *parseError;
         const auto& scripts = std::get<detail::GetResponse>(getResponse).list;
         const auto changed = std::ranges::find(scripts, script.id, &SieveScript::id);
         if (changed == scripts.cend() || changed->isActive != active)
-            co_return error(SieveServiceErrorCode::Protocol,
+            co_return error(OperationErrorCode::ProtocolViolation,
                             active ? QStringLiteral("The server did not activate the script.")
                                    : QStringLiteral("The server did not deactivate the script."));
         co_return std::monostate{};

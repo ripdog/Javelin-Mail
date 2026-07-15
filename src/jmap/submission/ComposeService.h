@@ -31,20 +31,20 @@ namespace javelin::jmap::submission
                        javelin::jmap::api::JmapMethodTransport& methodTransport,
                        javelin::jmap::JmapCore& jmapCore);
 
-        [[nodiscard]] QCoro::Task<std::variant<DraftSnapshot, javelin::jmap::LiveRefreshError>>
+        [[nodiscard]] QCoro::Task<std::variant<DraftSnapshot, javelin::jmap::OperationError>>
         open(javelin::jmap::LiveConnectionSettings settings, OpenComposeRequest request);
         [[nodiscard]] QCoro::Task<std::variant<std::vector<javelin::jmap::domain::Identity>,
-                                               javelin::jmap::LiveRefreshError>>
+                                               javelin::jmap::OperationError>>
         loadSenderIdentities(javelin::jmap::LiveConnectionSettings settings, std::string accountId);
-        [[nodiscard]] QCoro::Task<std::variant<DraftSaveSummary, javelin::jmap::LiveRefreshError>>
+        [[nodiscard]] QCoro::Task<std::variant<DraftSaveSummary, javelin::jmap::OperationError>>
         saveDraft(javelin::jmap::LiveConnectionSettings settings, DraftSnapshot snapshot);
-        [[nodiscard]] QCoro::Task<std::variant<SendSummary, javelin::jmap::LiveRefreshError>>
+        [[nodiscard]] QCoro::Task<std::variant<SendSummary, javelin::jmap::OperationError>>
         send(javelin::jmap::LiveConnectionSettings settings, DraftSnapshot snapshot);
-        [[nodiscard]] std::variant<std::optional<DraftSnapshot>, javelin::jmap::LiveRefreshError>
+        [[nodiscard]] std::variant<std::optional<DraftSnapshot>, javelin::jmap::OperationError>
         loadWorkingCopy(std::string_view composeSessionId) const;
-        [[nodiscard]] std::optional<javelin::jmap::LiveRefreshError>
+        [[nodiscard]] std::optional<javelin::jmap::OperationError>
         storeWorkingCopy(const DraftSnapshot& snapshot);
-        [[nodiscard]] std::optional<javelin::jmap::LiveRefreshError>
+        [[nodiscard]] std::optional<javelin::jmap::OperationError>
         discard(std::string_view composeSessionId);
 
       private:

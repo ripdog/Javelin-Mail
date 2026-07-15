@@ -1,13 +1,17 @@
 #pragma once
 
+#include "jmap/OperationError.h"
 #include "jmap/sync/StateChangeSource.h"
 
 #include <QCoroTask>
 
 #include <chrono>
+#include <optional>
 
 namespace javelin::jmap::sync
 {
+
+    using StateChangeErrorCallback = std::function<void(const javelin::jmap::OperationError&)>;
 
     struct BackoffPolicy
     {
@@ -32,6 +36,7 @@ namespace javelin::jmap::sync
         std::size_t successfulSubscriptions = 0;
         std::size_t transientFailures = 0;
         bool cancelled = false;
+        std::optional<javelin::jmap::OperationError> terminalError;
     };
 
     class StateChangeWorker
@@ -39,7 +44,8 @@ namespace javelin::jmap::sync
       public:
         StateChangeWorker(StateChangeSource& source, StateChangeConsumer& consumer,
                           StateChangeSleeper& sleeper, BackoffPolicy backoffPolicy = {},
-                          StateChangeStatusCallback statusCallback = {});
+                          StateChangeStatusCallback statusCallback = {},
+                          StateChangeErrorCallback errorCallback = {});
 
         [[nodiscard]] QCoro::Task<StateChangeRunSummary>
         run(StateChangeSubscription subscription, StateChangeCancellation& cancellation) const;
@@ -50,6 +56,7 @@ namespace javelin::jmap::sync
         StateChangeSleeper& m_sleeper;
         BackoffPolicy m_backoffPolicy;
         StateChangeStatusCallback m_statusCallback;
+        StateChangeErrorCallback m_errorCallback;
     };
 
 } // namespace javelin::jmap::sync

@@ -53,13 +53,12 @@ namespace javelin::jmap::contacts
         std::string mediaType;
     };
 
-    using ContactRefreshResult =
-        std::variant<ContactRefreshSummary, javelin::jmap::LiveRefreshError>;
+    using ContactRefreshResult = std::variant<ContactRefreshSummary, javelin::jmap::OperationError>;
     using ContactMutationResult =
-        std::variant<ContactMutationSummary, javelin::jmap::LiveRefreshError>;
-    using ContactUploadResult = std::variant<UploadedContactMedia, javelin::jmap::LiveRefreshError>;
+        std::variant<ContactMutationSummary, javelin::jmap::OperationError>;
+    using ContactUploadResult = std::variant<UploadedContactMedia, javelin::jmap::OperationError>;
     using ContactDownloadResult =
-        std::variant<DownloadedContactMedia, javelin::jmap::LiveRefreshError>;
+        std::variant<DownloadedContactMedia, javelin::jmap::OperationError>;
 
     class ContactService
     {

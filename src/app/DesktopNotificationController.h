@@ -22,11 +22,15 @@ namespace javelin::app
                            const QString& threadId, const QString& emailId,
                            const QString& mailboxName, const QString& title,
                            const QString& message);
+        void notifyError(const QString& connectionId, const QString& title, const QString& message,
+                         bool persistent, bool opensSettings);
 
       Q_SIGNALS:
         void notificationActivated(const QString& accountId, const QString& mailboxId,
                                    const QString& threadId, const QString& emailId,
                                    const QString& activationToken);
+        void errorNotificationActivated(const QString& connectionId,
+                                        const QString& activationToken);
 
       private Q_SLOTS:
         void onActionInvoked(uint notificationId, const QString& actionKey);
@@ -41,10 +45,12 @@ namespace javelin::app
             QString threadId;
             QString emailId;
             QString activationToken;
+            QString connectionId;
+            bool opensSettings = false;
         };
 
         bool connectSignal(const char* signalName, const char* slotName);
-        [[nodiscard]] QVariantMap notificationHints() const;
+        [[nodiscard]] QVariantMap notificationHints(int urgency) const;
         void untrackNotification(uint notificationId);
 
         std::unordered_map<uint, TrackedNotification> m_trackedNotifications;

@@ -1,4 +1,6 @@
 add_executable(javelin_jmap_tests
+    ${PROJECT_SOURCE_DIR}/src/app/ApplicationErrorCoordinator.cpp
+    ${PROJECT_SOURCE_DIR}/src/app/ApplicationErrorCoordinator.h
     ${PROJECT_SOURCE_DIR}/src/app/MailboxSelectionMutation.cpp
     FixtureReader.cpp
     FixtureReader.h
@@ -25,6 +27,7 @@ add_executable(javelin_jmap_tests
     jmap/LongPollMailboxObserverTest.cpp
     jmap/LongPollWorkerTest.cpp
     jmap/MailboxWindowPolicyTest.cpp
+    app/ApplicationErrorCoordinatorTest.cpp
     app/MailboxSelectionMutationTest.cpp
     jmap/MailMethodsTest.cpp
     jmap/MailboxRepositoryTest.cpp
@@ -32,6 +35,7 @@ add_executable(javelin_jmap_tests
     jmap/MailboxQueryDescriptorTest.cpp
     jmap/MailboxStateRefreshExecutorTest.cpp
     jmap/MessageGroupingTest.cpp
+    jmap/OperationErrorTest.cpp
     jmap/MessageViewServiceTest.cpp
     jmap/MethodCallerTest.cpp
     jmap/MethodEnvelopeTest.cpp

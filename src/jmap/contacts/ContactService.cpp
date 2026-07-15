@@ -55,7 +55,7 @@ namespace javelin::jmap::contacts
     namespace
     {
         using SessionResult =
-            std::variant<javelin::jmap::api::Session, javelin::jmap::LiveRefreshError>;
+            std::variant<javelin::jmap::api::Session, javelin::jmap::OperationError>;
 
         struct MethodFailure
         {
@@ -63,7 +63,7 @@ namespace javelin::jmap::contacts
         };
 
         using ContactMethodResult = std::variant<javelin::jmap::api::MethodInvocation,
-                                                 MethodFailure, javelin::jmap::LiveRefreshError>;
+                                                 MethodFailure, javelin::jmap::OperationError>;
 
         struct CannotCalculateChanges
         {
@@ -76,7 +76,7 @@ namespace javelin::jmap::contacts
         };
 
         using IncrementalRefreshResult = std::variant<AccountRefreshSummary, CannotCalculateChanges,
-                                                      javelin::jmap::LiveRefreshError>;
+                                                      javelin::jmap::OperationError>;
 
         struct ContactGetBatch
         {
@@ -84,13 +84,13 @@ namespace javelin::jmap::contacts
             std::vector<std::string> notFound;
         };
 
-        using ContactGetBatchResult =
-            std::variant<ContactGetBatch, javelin::jmap::LiveRefreshError>;
+        using ContactGetBatchResult = std::variant<ContactGetBatch, javelin::jmap::OperationError>;
 
-        [[nodiscard]] javelin::jmap::LiveRefreshError error(QString message,
-                                                            const bool intervention = false)
+        [[nodiscard]] javelin::jmap::OperationError
+        error(QString message, const javelin::jmap::OperationErrorCode code =
+                                   javelin::jmap::OperationErrorCode::ServerFailure)
         {
-            return {.message = std::move(message), .requiresUserIntervention = intervention};
+            return {.code = code, .message = std::move(message)};
         }
 
         [[nodiscard]] SessionResult
@@ -102,12 +102,13 @@ namespace javelin::jmap::contacts
             if (const auto* databaseError =
                     std::get_if<javelin::jmap::cache::DatabaseError>(&result))
             {
-                return error(databaseError->message);
+                return javelin::jmap::operationError(*databaseError);
             }
             const auto& session = std::get<std::optional<javelin::jmap::api::Session>>(result);
             if (!session.has_value())
             {
-                return error(QStringLiteral("No cached JMAP session is available."), true);
+                return error(QStringLiteral("No cached JMAP session is available."),
+                             javelin::jmap::OperationErrorCode::PreconditionFailed);
             }
             return *session;
         }
@@ -145,24 +146,20 @@ namespace javelin::jmap::contacts
             return std::nullopt;
         }
 
-        [[nodiscard]] javelin::jmap::LiveRefreshError
+        [[nodiscard]] javelin::jmap::OperationError
         callError(const javelin::jmap::api::MethodCallerResult& result)
         {
             if (const auto* transport = std::get_if<javelin::jmap::api::TransportError>(&result))
             {
-                return error(QStringLiteral("Contacts transport error: %1")
-                                 .arg(QString::fromStdString(transport->message)));
+                return javelin::jmap::operationError(*transport);
             }
             if (const auto* auth = std::get_if<javelin::jmap::api::AuthError>(&result))
             {
-                return error(QStringLiteral("Contacts authentication error: %1")
-                                 .arg(QString::fromStdString(auth->message)),
-                             true);
+                return javelin::jmap::operationError(*auth);
             }
             if (const auto* protocol = std::get_if<javelin::jmap::api::ProtocolError>(&result))
             {
-                return error(QStringLiteral("Contacts protocol error: %1")
-                                 .arg(QString::fromStdString(protocol->message)));
+                return javelin::jmap::operationError(*protocol);
             }
             return error(QStringLiteral("Unknown Contacts request failure."));
         }
@@ -235,15 +232,10 @@ namespace javelin::jmap::contacts
                 auto callResult = co_await callContactMethod(
                     methodTransport, settings, session, accountId, "ContactCard/get", *arguments);
                 if (const auto* callFailure =
-                        std::get_if<javelin::jmap::LiveRefreshError>(&callResult))
+                        std::get_if<javelin::jmap::OperationError>(&callResult))
                     co_return *callFailure;
                 if (const auto* methodFailure = std::get_if<MethodFailure>(&callResult))
-                {
-                    co_return error(
-                        QStringLiteral("ContactCard/get failed: %1")
-                            .arg(QString::fromStdString(methodFailure->error.description.value_or(
-                                methodFailure->error.type))));
-                }
+                    co_return javelin::jmap::operationError(methodFailure->error);
                 const auto parsed = javelin::jmap::api::parseContactCardGetResponse(
                     std::get<javelin::jmap::api::MethodInvocation>(callResult).arguments);
                 if (!parsed.ok())
@@ -278,15 +270,10 @@ namespace javelin::jmap::contacts
                 co_return error(QStringLiteral("Unable to serialize AddressBook/get."));
             auto booksCall = co_await callContactMethod(
                 methodTransport, settings, session, accountId, "AddressBook/get", *booksArguments);
-            if (const auto* callFailure = std::get_if<javelin::jmap::LiveRefreshError>(&booksCall))
+            if (const auto* callFailure = std::get_if<javelin::jmap::OperationError>(&booksCall))
                 co_return *callFailure;
             if (const auto* methodFailure = std::get_if<MethodFailure>(&booksCall))
-            {
-                co_return error(
-                    QStringLiteral("AddressBook/get failed: %1")
-                        .arg(QString::fromStdString(
-                            methodFailure->error.description.value_or(methodFailure->error.type))));
-            }
+                co_return javelin::jmap::operationError(methodFailure->error);
             const auto books = javelin::jmap::api::parseAddressBookGetResponse(
                 std::get<javelin::jmap::api::MethodInvocation>(booksCall).arguments);
             if (!books.ok())
@@ -306,16 +293,13 @@ namespace javelin::jmap::contacts
                     co_await callContactMethod(methodTransport, settings, session, accountId,
                                                "ContactCard/changes", *changesArguments);
                 if (const auto* callFailure =
-                        std::get_if<javelin::jmap::LiveRefreshError>(&changesCall))
+                        std::get_if<javelin::jmap::OperationError>(&changesCall))
                     co_return *callFailure;
                 if (const auto* methodFailure = std::get_if<MethodFailure>(&changesCall))
                 {
                     if (methodFailure->error.type == "cannotCalculateChanges")
                         co_return CannotCalculateChanges{};
-                    co_return error(
-                        QStringLiteral("ContactCard/changes failed: %1")
-                            .arg(QString::fromStdString(methodFailure->error.description.value_or(
-                                methodFailure->error.type))));
+                    co_return javelin::jmap::operationError(methodFailure->error);
                 }
                 const auto changes = javelin::jmap::api::parseChangesResponse(
                     std::get<javelin::jmap::api::MethodInvocation>(changesCall).arguments);
@@ -339,7 +323,7 @@ namespace javelin::jmap::contacts
                 collectChanged(changes.value->updated);
                 auto fetched = co_await fetchContactCards(methodTransport, settings, session,
                                                           accountId, changedIds);
-                if (const auto* fetchError = std::get_if<javelin::jmap::LiveRefreshError>(&fetched))
+                if (const auto* fetchError = std::get_if<javelin::jmap::OperationError>(&fetched))
                     co_return *fetchError;
                 auto batch = std::get<ContactGetBatch>(std::move(fetched));
                 destroyed.insert(batch.notFound.begin(), batch.notFound.end());
@@ -391,8 +375,7 @@ namespace javelin::jmap::contacts
                 co_return error(QStringLiteral("Unable to serialize the Contacts change."));
             }
             const auto sessionResult = loadSession(connection, ownerAccountId);
-            if (const auto* loadError =
-                    std::get_if<javelin::jmap::LiveRefreshError>(&sessionResult))
+            if (const auto* loadError = std::get_if<javelin::jmap::OperationError>(&sessionResult))
             {
                 co_return *loadError;
             }
@@ -402,7 +385,7 @@ namespace javelin::jmap::contacts
                 !account->second.accountCapabilities.contacts.has_value())
             {
                 co_return error(QStringLiteral("This account does not support JMAP Contacts."),
-                                true);
+                                javelin::jmap::OperationErrorCode::UnsupportedCapability);
             }
 
             javelin::jmap::api::RequestBuilder builder;
@@ -458,7 +441,7 @@ namespace javelin::jmap::contacts
                                std::string ownerAccountId)
     {
         const auto sessionResult = loadSession(m_connection, ownerAccountId);
-        if (const auto* loadError = std::get_if<javelin::jmap::LiveRefreshError>(&sessionResult))
+        if (const auto* loadError = std::get_if<javelin::jmap::OperationError>(&sessionResult))
         {
             co_return *loadError;
         }
@@ -484,7 +467,7 @@ namespace javelin::jmap::contacts
                     m_repository, m_methodTransport, settings, session, accountId,
                     stateRecord->stateToken);
                 if (const auto* incrementalError =
-                        std::get_if<javelin::jmap::LiveRefreshError>(&incremental))
+                        std::get_if<javelin::jmap::OperationError>(&incremental))
                     co_return *incrementalError;
                 if (const auto* refreshed = std::get_if<AccountRefreshSummary>(&incremental))
                 {
@@ -597,7 +580,7 @@ namespace javelin::jmap::contacts
                                 QByteArray payload, std::string mediaType)
     {
         const auto sessionResult = loadSession(m_connection, ownerAccountId);
-        if (const auto* loadError = std::get_if<javelin::jmap::LiveRefreshError>(&sessionResult))
+        if (const auto* loadError = std::get_if<javelin::jmap::OperationError>(&sessionResult))
         {
             co_return *loadError;
         }
@@ -636,7 +619,7 @@ namespace javelin::jmap::contacts
                                   std::string blobId, std::string mediaType)
     {
         const auto sessionResult = loadSession(m_connection, ownerAccountId);
-        if (const auto* loadError = std::get_if<javelin::jmap::LiveRefreshError>(&sessionResult))
+        if (const auto* loadError = std::get_if<javelin::jmap::OperationError>(&sessionResult))
             co_return *loadError;
         const auto& session = std::get<javelin::jmap::api::Session>(sessionResult);
         QString downloadUrl = QString::fromStdString(session.downloadUrl);

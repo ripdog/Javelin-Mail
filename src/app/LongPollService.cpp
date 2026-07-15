@@ -76,6 +76,7 @@ namespace javelin::app
                                                std::vector<std::string> notificationMailboxIds,
                                                const bool notificationMailboxSelectionConfigured)
     {
+        const bool resumingAfterAuthentication = m_status == Status::AuthenticationPaused;
         const bool connectionSettingsUnchanged =
             m_settings.has_value() && m_settings->sessionUrl == settings.sessionUrl &&
             m_settings->loginEmail == settings.loginEmail &&
@@ -120,6 +121,8 @@ namespace javelin::app
         }
 
         restart();
+        if (resumingAfterAuthentication && m_runContext != nullptr)
+            m_shouldCatchUpRefreshOnReconnect = true;
     }
 
     void AccountSyncCoordinator::stop()
@@ -142,6 +145,12 @@ namespace javelin::app
         m_shouldCatchUpRefreshOnReconnect = false;
     }
 
+    void AccountSyncCoordinator::pauseForAuthentication()
+    {
+        stop();
+        setStatus(Status::AuthenticationPaused);
+    }
+
     AccountSyncCoordinator::Status AccountSyncCoordinator::status() const
     {
         return m_status;
@@ -149,6 +158,8 @@ namespace javelin::app
 
     bool AccountSyncCoordinator::requestSynchronization()
     {
+        if (m_status == Status::AuthenticationPaused)
+            return true;
         if (m_runContext == nullptr)
             return false;
         scheduleDebouncedRefresh();
@@ -377,10 +388,12 @@ namespace javelin::app
                     }
                 }
             }
-            else if (const auto* error =
-                         std::get_if<javelin::jmap::sync::MailboxRefreshError>(&refreshResult))
+            else if (const auto* error = std::get_if<javelin::jmap::OperationError>(&refreshResult))
             {
                 qWarning().noquote() << "Push mailbox refresh failed" << error->message;
+                handleOperationError(QStringLiteral("Synchronize mailbox"), *error);
+                if (javelin::jmap::isAuthenticationError(*error))
+                    co_return;
             }
         }
         if (m_runContext == nullptr || m_runContext->generation != runContext->generation ||
@@ -437,10 +450,10 @@ namespace javelin::app
             co_return false;
         }
 
-        if (const auto* error =
-                std::get_if<javelin::jmap::sync::MailboxStateRefreshError>(&refreshResult))
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&refreshResult))
         {
             qWarning().noquote() << "Account sync mailbox state refresh failed" << error->message;
+            handleOperationError(QStringLiteral("Synchronize mailbox state"), *error);
             co_return false;
         }
 
@@ -609,6 +622,12 @@ namespace javelin::app
                 }
 
                 setStatus(toServiceStatus(status));
+            },
+            [this, generation = runContext->generation](const javelin::jmap::OperationError& error)
+            {
+                if (m_runContext == nullptr || m_runContext->generation != generation)
+                    return;
+                handleOperationError(QStringLiteral("Maintain account connection"), error);
             });
 
         m_runContext = runContext;
@@ -649,6 +668,14 @@ namespace javelin::app
             scheduleDebouncedRefresh();
         }
         Q_EMIT statusChanged(m_status);
+    }
+
+    void AccountSyncCoordinator::handleOperationError(const QString& operation,
+                                                      const javelin::jmap::OperationError& error)
+    {
+        Q_EMIT operationFailed(operation, error);
+        if (javelin::jmap::isAuthenticationError(error))
+            pauseForAuthentication();
     }
 
     void AccountSyncCoordinator::publishNotifications(

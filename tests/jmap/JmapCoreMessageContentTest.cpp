@@ -212,7 +212,7 @@ TEST_CASE("JmapCore refreshMessageContent caches raw message sources",
         },
         "u1", "eml-1"));
 
-    if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
     {
         FAIL(error->message.toStdString());
     }
@@ -407,7 +407,7 @@ TEST_CASE("JmapCore searchMessages uses Email/query text filters and caches thre
         },
         "u1", "quarterly", 0));
 
-    if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
     {
         FAIL(error->message.toStdString());
     }
@@ -576,7 +576,7 @@ TEST_CASE("JmapCore permanently destroys queued emails through Email/set",
         },
         "u1"));
 
-    if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&submitResult))
+    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&submitResult))
     {
         FAIL(error->message.toStdString());
     }
@@ -758,7 +758,7 @@ TEST_CASE("JmapCore downloadAttachment reads attachment payloads from cached raw
         },
         "u1", "eml-1", "2"));
 
-    if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
     {
         FAIL(error->message.toStdString());
     }
@@ -819,7 +819,7 @@ TEST_CASE("JmapCore downloadAttachment reads inline payloads from cached raw sou
         },
         "u1", "eml-1", "2"));
 
-    if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
     {
         FAIL(error->message.toStdString());
     }
@@ -873,7 +873,7 @@ TEST_CASE("JmapCore submits queued mailbox mutations through Email/set",
         },
         "u1"));
 
-    if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&submitResult))
+    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&submitResult))
     {
         FAIL(error->message.toStdString());
     }
@@ -946,7 +946,7 @@ TEST_CASE("JmapCore submits queued read keyword mutations through Email/set",
         },
         "u1"));
 
-    if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&submitResult))
+    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&submitResult))
     {
         FAIL(error->message.toStdString());
     }

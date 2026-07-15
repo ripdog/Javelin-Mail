@@ -1,5 +1,6 @@
 #pragma once
 
+#include "jmap/OperationError.h"
 #include "jmap/api/MethodCaller.h"
 #include "jmap/cache/Database.h"
 #include "jmap/sync/RefreshNotificationTypes.h"
@@ -29,12 +30,7 @@ namespace javelin::jmap::sync
         std::vector<RefreshNotificationCandidate> notificationCandidates;
     };
 
-    struct MailboxRefreshError
-    {
-        QString message;
-    };
-
-    using MailboxRefreshResult = std::variant<MailboxRefreshSummary, MailboxRefreshError>;
+    using MailboxRefreshResult = std::variant<MailboxRefreshSummary, OperationError>;
 
     class MailboxRefreshExecutor
     {

@@ -20,6 +20,8 @@
 #include <QScopeGuard>
 #include <QStringList>
 
+#include <chrono>
+
 namespace javelin::jmap::api
 {
     Q_LOGGING_CATEGORY(logTransport, "jmap.transport")
@@ -91,6 +93,16 @@ namespace javelin::jmap::api
             return failures;
         }
 
+        [[nodiscard]] std::optional<std::chrono::seconds> retryAfter(QNetworkReply& reply)
+        {
+            bool parsed = false;
+            const auto seconds =
+                reply.rawHeader(QByteArrayLiteral("Retry-After")).toLongLong(&parsed);
+            if (!parsed || seconds < 0)
+                return std::nullopt;
+            return std::chrono::seconds{seconds};
+        }
+
         [[nodiscard]] TransportError mapReplyError(QNetworkReply& reply)
         {
             if (reply.error() == QNetworkReply::OperationCanceledError)
@@ -99,6 +111,8 @@ namespace javelin::jmap::api
                     .code = TransportErrorCode::Cancelled,
                     .message = reply.errorString().toStdString(),
                     .httpStatus = std::nullopt,
+                    .networkError = static_cast<int>(reply.error()),
+                    .retryAfter = std::nullopt,
                 };
             }
 
@@ -109,6 +123,8 @@ namespace javelin::jmap::api
                 .message = reply.errorString().toStdString(),
                 .httpStatus =
                     statusCode.isValid() ? std::optional{statusCode.toInt()} : std::nullopt,
+                .networkError = static_cast<int>(reply.error()),
+                .retryAfter = retryAfter(reply),
             };
         }
 
@@ -219,6 +235,8 @@ namespace javelin::jmap::api
                 .code = TransportErrorCode::HttpFailure,
                 .message = reply->errorString().toStdString(),
                 .httpStatus = statusCode,
+                .networkError = static_cast<int>(reply->error()),
+                .retryAfter = retryAfter(*reply),
             };
         }
 

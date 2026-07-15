@@ -63,7 +63,7 @@ namespace javelin::gui::search
 
       Q_SIGNALS:
         void pageChanged();
-        void refreshFailed(javelin::jmap::LiveRefreshError error);
+        void refreshFailed(javelin::jmap::OperationError error);
 
       private:
         void startLocalSearch();

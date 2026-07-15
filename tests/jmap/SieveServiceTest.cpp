@@ -101,9 +101,9 @@ TEST_CASE("sieve save never updates a script rejected by server validation",
         service.save(settings(), "owner", {.id = "script-1", .name = "main", .blobId = "blob-old"},
                      QByteArrayLiteral("discard;")));
 
-    REQUIRE(std::holds_alternative<javelin::jmap::sieve::SieveServiceError>(result));
-    const auto& error = std::get<javelin::jmap::sieve::SieveServiceError>(result);
-    CHECK(error.code == javelin::jmap::sieve::SieveServiceErrorCode::InvalidScript);
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
+    const auto& error = std::get<javelin::jmap::OperationError>(result);
+    CHECK(error.code == javelin::jmap::OperationErrorCode::InvalidUserInput);
     CHECK(error.message == QStringLiteral("line 1: missing semicolon"));
     REQUIRE(methods.requests.size() == 1);
     CHECK(methods.requests.front().envelope.methodCalls.front().name == "SieveScript/validate");

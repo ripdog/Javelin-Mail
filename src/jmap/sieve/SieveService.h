@@ -28,33 +28,18 @@ namespace javelin::jmap::sieve
         bool isActive = false;
     };
 
-    enum class SieveServiceErrorCode
-    {
-        Authentication,
-        Unsupported,
-        Transport,
-        Protocol,
-        InvalidScript,
-    };
-
-    struct SieveServiceError
-    {
-        SieveServiceErrorCode code = SieveServiceErrorCode::Protocol;
-        QString message;
-    };
-
     struct SieveValidation
     {
         bool valid = false;
         QString message;
     };
 
-    using SieveListResult = std::variant<std::vector<SieveScript>, SieveServiceError>;
-    using SieveContentResult = std::variant<QByteArray, SieveServiceError>;
-    using SieveValidationResult = std::variant<SieveValidation, SieveServiceError>;
-    using SieveSaveResult = std::variant<SieveScript, SieveServiceError>;
-    using SieveDeleteResult = std::variant<std::monostate, SieveServiceError>;
-    using SieveActivationResult = std::variant<std::monostate, SieveServiceError>;
+    using SieveListResult = std::variant<std::vector<SieveScript>, OperationError>;
+    using SieveContentResult = std::variant<QByteArray, OperationError>;
+    using SieveValidationResult = std::variant<SieveValidation, OperationError>;
+    using SieveSaveResult = std::variant<SieveScript, OperationError>;
+    using SieveDeleteResult = std::variant<std::monostate, OperationError>;
+    using SieveActivationResult = std::variant<std::monostate, OperationError>;
 
     class SieveService
     {

@@ -43,6 +43,7 @@ namespace javelin::gui::mailboxes
             Disconnected,
             Connecting,
             Connected,
+            AuthenticationPaused,
         };
 
         explicit MailboxTreeModel(javelin::jmap::cache::AccountRepository& accountRepository,

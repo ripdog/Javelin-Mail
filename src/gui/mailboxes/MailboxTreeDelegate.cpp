@@ -34,6 +34,9 @@ namespace javelin::gui::mailboxes
         case MailboxTreeModel::ConnectionStatus::Connected:
             color = QColor{QStringLiteral("#69b36f")};
             break;
+        case MailboxTreeModel::ConnectionStatus::AuthenticationPaused:
+            color = QColor{QStringLiteral("#b45bd6")};
+            break;
         }
 
         constexpr int diameter = 9;

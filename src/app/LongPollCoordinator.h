@@ -24,6 +24,7 @@
 
 namespace javelin::app
 {
+    class ApplicationErrorCoordinator;
 
     class MailboxObservation;
 
@@ -56,7 +57,7 @@ namespace javelin::app
         std::optional<std::size_t> total;
     };
 
-    using MailboxWindowResult = std::variant<MailboxWindowSummary, javelin::jmap::LiveRefreshError>;
+    using MailboxWindowResult = std::variant<MailboxWindowSummary, javelin::jmap::OperationError>;
 
     struct SearchWindowSummary
     {
@@ -68,7 +69,7 @@ namespace javelin::app
         std::optional<std::size_t> total;
     };
 
-    using SearchWindowResult = std::variant<SearchWindowSummary, javelin::jmap::LiveRefreshError>;
+    using SearchWindowResult = std::variant<SearchWindowSummary, javelin::jmap::OperationError>;
 
     struct CalendarCacheChange
     {
@@ -102,7 +103,7 @@ namespace javelin::app
     };
 
     using QueuedMailboxSelectionMutationResult =
-        std::variant<QueuedMailboxSelectionMutation, javelin::jmap::LiveRefreshError>;
+        std::variant<QueuedMailboxSelectionMutation, javelin::jmap::OperationError>;
 
     class MailApplicationService final : public QObject
     {
@@ -118,6 +119,7 @@ namespace javelin::app
                                javelin::jmap::contacts::ContactService& contactService,
                                javelin::jmap::calendar::CalendarService& calendarService,
                                javelin::jmap::sieve::SieveService& sieveService,
+                               ApplicationErrorCoordinator& errorCoordinator,
                                QObject* parent = nullptr);
 
         void applySettings(std::vector<AccountSyncConfiguration> configurations);
@@ -231,6 +233,7 @@ namespace javelin::app
         javelin::jmap::contacts::ContactService& m_contactService;
         javelin::jmap::calendar::CalendarService& m_calendarService;
         javelin::jmap::sieve::SieveService& m_sieveService;
+        ApplicationErrorCoordinator& m_errorCoordinator;
         struct VisibleCalendarRange
         {
             javelin::jmap::calendar::VisibleInterval interval;

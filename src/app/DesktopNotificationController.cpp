@@ -21,20 +21,22 @@ namespace javelin::app
         constexpr auto desktopEntryName = "javelinmail";
         constexpr auto defaultTimeoutMs = -1;
         constexpr auto urgencyNormal = 1;
-    }
+        constexpr auto urgencyCritical = 2;
+    } // namespace
 
-    DesktopNotificationController::DesktopNotificationController(QObject* parent)
-        : QObject(parent)
+    DesktopNotificationController::DesktopNotificationController(QObject* parent) : QObject(parent)
     {
-        connectSignal("ActionInvoked", SLOT(onActionInvoked(uint,QString)));
-        connectSignal("ActivationToken", SLOT(onActivationToken(uint,QString)));
-        connectSignal("NotificationClosed", SLOT(onNotificationClosed(uint,uint)));
+        connectSignal("ActionInvoked", SLOT(onActionInvoked(uint, QString)));
+        connectSignal("ActivationToken", SLOT(onActivationToken(uint, QString)));
+        connectSignal("NotificationClosed", SLOT(onNotificationClosed(uint, uint)));
     }
 
-    void DesktopNotificationController::notifyNewMail(
-        const QString& accountId, const QString& mailboxId, const QString& threadId,
-        const QString& emailId, const QString& mailboxName, const QString& title,
-        const QString& message)
+    void DesktopNotificationController::notifyNewMail(const QString& accountId,
+                                                      const QString& mailboxId,
+                                                      const QString& threadId,
+                                                      const QString& emailId,
+                                                      const QString& mailboxName,
+                                                      const QString& title, const QString& message)
     {
         QDBusInterface notifications{
             QString::fromLatin1(notificationsService), QString::fromLatin1(notificationsPath),
@@ -45,8 +47,7 @@ namespace javelin::app
             return;
         }
 
-        const QString summary =
-            mailboxName.isEmpty() ? title : QStringLiteral("%1").arg(title);
+        const QString summary = mailboxName.isEmpty() ? title : QStringLiteral("%1").arg(title);
         const QStringList actions = {
             QString::fromLatin1(defaultActionKey),
             QStringLiteral("Open"),
@@ -54,8 +55,7 @@ namespace javelin::app
         const auto reply = notifications.call(
             QStringLiteral("Notify"), QStringLiteral("Javelin Mail"), static_cast<uint>(0),
             QString::fromLatin1(notificationIconName), summary, message, actions,
-            notificationHints(),
-            defaultTimeoutMs);
+            notificationHints(urgencyNormal), defaultTimeoutMs);
         const QDBusReply<uint> notificationReply{reply};
         if (!notificationReply.isValid())
         {
@@ -65,14 +65,55 @@ namespace javelin::app
         }
 
         const auto notificationId = notificationReply.value();
-        m_trackedNotifications.insert_or_assign(notificationId,
-                                                TrackedNotification{
-                                                    .accountId = accountId,
-                                                    .mailboxId = mailboxId,
-                                                    .threadId = threadId,
-                                                    .emailId = emailId,
-                                                    .activationToken = {},
-                                                });
+        m_trackedNotifications.insert_or_assign(notificationId, TrackedNotification{
+                                                                    .accountId = accountId,
+                                                                    .mailboxId = mailboxId,
+                                                                    .threadId = threadId,
+                                                                    .emailId = emailId,
+                                                                    .activationToken = {},
+                                                                    .connectionId = {},
+                                                                    .opensSettings = false,
+                                                                });
+    }
+
+    void DesktopNotificationController::notifyError(const QString& connectionId,
+                                                    const QString& title, const QString& message,
+                                                    const bool persistent, const bool opensSettings)
+    {
+        QDBusInterface notifications{
+            QString::fromLatin1(notificationsService), QString::fromLatin1(notificationsPath),
+            QString::fromLatin1(notificationsInterface), QDBusConnection::sessionBus()};
+        if (!notifications.isValid())
+        {
+            qWarning() << "Desktop notifications are unavailable on the session bus";
+            return;
+        }
+
+        const QStringList actions = opensSettings
+                                        ? QStringList{QString::fromLatin1(defaultActionKey),
+                                                      QStringLiteral("Open Settings")}
+                                        : QStringList{};
+        const auto reply = notifications.call(
+            QStringLiteral("Notify"), QStringLiteral("Javelin Mail"), static_cast<uint>(0),
+            QStringLiteral("dialog-warning"), title, message, actions,
+            notificationHints(persistent ? urgencyCritical : urgencyNormal),
+            persistent ? 0 : defaultTimeoutMs);
+        const QDBusReply<uint> notificationReply{reply};
+        if (!notificationReply.isValid())
+        {
+            qWarning().noquote() << "Failed to send error notification"
+                                 << notificationReply.error().message();
+            return;
+        }
+
+        m_trackedNotifications.insert_or_assign(
+            notificationReply.value(), TrackedNotification{.accountId = {},
+                                                           .mailboxId = {},
+                                                           .threadId = {},
+                                                           .emailId = {},
+                                                           .activationToken = {},
+                                                           .connectionId = connectionId,
+                                                           .opensSettings = opensSettings});
     }
 
     void DesktopNotificationController::onActionInvoked(const uint notificationId,
@@ -86,6 +127,12 @@ namespace javelin::app
         const auto it = m_trackedNotifications.find(notificationId);
         if (it == m_trackedNotifications.end())
         {
+            return;
+        }
+
+        if (it->second.opensSettings)
+        {
+            Q_EMIT errorNotificationActivated(it->second.connectionId, it->second.activationToken);
             return;
         }
 
@@ -126,12 +173,13 @@ namespace javelin::app
         return connected;
     }
 
-    QVariantMap DesktopNotificationController::notificationHints() const
+    QVariantMap DesktopNotificationController::notificationHints(const int urgency) const
     {
         QVariantMap hints;
         hints.insert(QStringLiteral("desktop-entry"), QString::fromLatin1(desktopEntryName));
-        hints.insert(QStringLiteral("urgency"), urgencyNormal);
-        hints.insert(QStringLiteral("sender-pid"), static_cast<qlonglong>(QCoreApplication::applicationPid()));
+        hints.insert(QStringLiteral("urgency"), urgency);
+        hints.insert(QStringLiteral("sender-pid"),
+                     static_cast<qlonglong>(QCoreApplication::applicationPid()));
         return hints;
     }
 

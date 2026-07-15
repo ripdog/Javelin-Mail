@@ -166,7 +166,7 @@ namespace javelin::gui::shell
         {
             const auto downloadResult =
                 co_await mailService.requestAttachment(accountId, emailId, attachment.partId);
-            if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&downloadResult))
+            if (const auto* error = std::get_if<javelin::jmap::OperationError>(&downloadResult))
             {
                 co_return SaveAllDownloadResult{
                     .files = {},

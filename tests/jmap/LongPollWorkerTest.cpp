@@ -229,13 +229,19 @@ TEST_CASE("state-change worker backs off and retries after transient transport f
     consumer.cancellation = &cancellation;
     consumer.cancelAfterUpdates = 1;
     FakeStateChangeSleeper sleeper;
+    std::vector<javelin::jmap::OperationErrorCode> reportedErrors;
 
     const javelin::jmap::sync::StateChangeWorker worker{
-        source, consumer, sleeper,
+        source,
+        consumer,
+        sleeper,
         javelin::jmap::sync::BackoffPolicy{
             .initialDelay = std::chrono::milliseconds{500},
             .maxDelay = std::chrono::milliseconds{2000},
-        }};
+        },
+        {},
+        [&reportedErrors](const javelin::jmap::OperationError& error)
+        { reportedErrors.push_back(error.code); }};
     const auto summary = QCoro::waitFor(worker.run(makeSubscription(), cancellation));
 
     CHECK(summary.successfulSubscriptions == 1);
@@ -243,6 +249,8 @@ TEST_CASE("state-change worker backs off and retries after transient transport f
     CHECK(summary.lastState == "state-2");
     CHECK(sleeper.delays == std::vector<std::chrono::milliseconds>{
                                 std::chrono::milliseconds{500}, std::chrono::milliseconds{1000}});
+    CHECK(reportedErrors == std::vector{javelin::jmap::OperationErrorCode::NetworkUnavailable,
+                                        javelin::jmap::OperationErrorCode::ServerUnavailable});
 }
 
 TEST_CASE("state-change worker exits immediately when transport reports cancellation",
@@ -270,6 +278,33 @@ TEST_CASE("state-change worker exits immediately when transport reports cancella
     CHECK(summary.successfulSubscriptions == 0);
     CHECK(summary.transientFailures == 0);
     CHECK(sleeper.delays.empty());
+}
+
+TEST_CASE("state-change worker stops retrying when authentication is rejected", "[jmap][sync]")
+{
+    ensureApplication();
+
+    FakeStateChangeSource source;
+    source.queuedResults = {
+        javelin::jmap::api::TransportError{
+            .code = javelin::jmap::api::TransportErrorCode::HttpFailure,
+            .message = "unauthorized",
+            .httpStatus = 401,
+        },
+    };
+    javelin::jmap::sync::StateChangeCancellation cancellation;
+    FakeStateChangeConsumer consumer;
+    FakeStateChangeSleeper sleeper;
+
+    const javelin::jmap::sync::StateChangeWorker worker{source, consumer, sleeper};
+    const auto summary = QCoro::waitFor(worker.run(makeSubscription(), cancellation));
+
+    REQUIRE(summary.terminalError.has_value());
+    CHECK(summary.terminalError->code == javelin::jmap::OperationErrorCode::AuthenticationRequired);
+    CHECK(summary.transientFailures == 0);
+    CHECK_FALSE(summary.cancelled);
+    CHECK(sleeper.delays.empty());
+    CHECK(source.subscriptions.size() == 1);
 }
 
 TEST_CASE("state-change worker reports connection status transitions", "[jmap][sync]")

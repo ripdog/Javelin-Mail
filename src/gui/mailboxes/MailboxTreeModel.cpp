@@ -177,6 +177,9 @@ namespace javelin::gui::mailboxes
             case ConnectionStatus::Connected:
                 statusText = QStringLiteral("Connected");
                 break;
+            case ConnectionStatus::AuthenticationPaused:
+                statusText = QStringLiteral("Sign-in required");
+                break;
             }
             return QStringLiteral("%1 — %2").arg(QString::fromStdString(node->displayName),
                                                  statusText);

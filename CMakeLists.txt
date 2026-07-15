@@ -52,6 +52,8 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/sync/MailboxWindowPolicy.cpp
     src/jmap/sync/MailboxWindowPolicy.h
     src/app/AccountConnectionSettings.h
+    src/app/ApplicationErrorCoordinator.cpp
+    src/app/ApplicationErrorCoordinator.h
     src/app/ComposeService.cpp
     src/app/ComposeService.h
     src/app/ApplicationBootstrap.cpp
@@ -244,6 +246,8 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/auth/Auth.h
     src/jmap/JmapCore.cpp
     src/jmap/JmapCore.h
+    src/jmap/OperationError.cpp
+    src/jmap/OperationError.h
     src/jmap/EmailMutation.h
     src/jmap/language/FastTextLanguageDetector.cpp
     src/jmap/language/FastTextLanguageDetector.h
@@ -434,6 +438,8 @@ add_library(javelin_jmap STATIC
     src/jmap/auth/Auth.h
     src/jmap/JmapCore.cpp
     src/jmap/JmapCore.h
+    src/jmap/OperationError.cpp
+    src/jmap/OperationError.h
     src/jmap/language/FastTextLanguageDetector.cpp
     src/jmap/language/FastTextLanguageDetector.h
     src/jmap/language/LanguageDetection.cpp
@@ -592,6 +598,8 @@ target_compile_options(javelin_calendar_gui PRIVATE -fexceptions)
 
 add_library(javelin_app STATIC
     src/app/AccountConnectionSettings.h
+    src/app/ApplicationErrorCoordinator.cpp
+    src/app/ApplicationErrorCoordinator.h
     src/app/ComposeService.cpp
     src/app/ComposeService.h
     src/app/ApplicationBootstrap.cpp

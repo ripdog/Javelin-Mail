@@ -16,27 +16,6 @@ namespace javelin::jmap::sync
 
     namespace
     {
-        [[nodiscard]] QString transportMessage(const javelin::jmap::api::TransportError& error)
-        {
-            return QStringLiteral("Transport error (%1): %2")
-                .arg(QString::fromUtf8(javelin::jmap::api::toString(error.code).data()),
-                     QString::fromStdString(error.message));
-        }
-
-        [[nodiscard]] QString authMessage(const javelin::jmap::api::AuthError& error)
-        {
-            return QStringLiteral("Authentication error (%1): %2")
-                .arg(QString::fromUtf8(javelin::jmap::api::toString(error.code).data()),
-                     QString::fromStdString(error.message));
-        }
-
-        [[nodiscard]] QString protocolMessage(const javelin::jmap::api::ProtocolError& error)
-        {
-            return QStringLiteral("Protocol error (%1): %2")
-                .arg(QString::fromUtf8(javelin::jmap::api::toString(error.code).data()),
-                     QString::fromStdString(error.message));
-        }
-
         [[nodiscard]] javelin::jmap::cache::SyncStateKey
         mailboxSyncKey(const std::string_view accountId)
         {
@@ -99,7 +78,7 @@ namespace javelin::jmap::sync
         }
 
         [[nodiscard]] QCoro::Task<
-            std::variant<javelin::jmap::api::MailboxGetResponse, MailboxStateRefreshError>>
+            std::variant<javelin::jmap::api::MailboxGetResponse, OperationError>>
         fetchMailboxes(javelin::jmap::api::MethodCaller& methodCaller,
                        javelin::jmap::api::ApiRequestContext apiRequestContext,
                        const std::string_view accountId,
@@ -113,7 +92,7 @@ namespace javelin::jmap::sync
             });
             if (!mailboxRequest.has_value())
             {
-                co_return MailboxStateRefreshError{
+                co_return OperationError{
                     .message = QStringLiteral("Failed to encode the Mailbox/get request."),
                 };
             }
@@ -126,15 +105,15 @@ namespace javelin::jmap::sync
             if (const auto* error =
                     std::get_if<javelin::jmap::api::TransportError>(&envelopeResult))
             {
-                co_return MailboxStateRefreshError{.message = transportMessage(*error)};
+                co_return operationError(*error);
             }
             if (const auto* error = std::get_if<javelin::jmap::api::AuthError>(&envelopeResult))
             {
-                co_return MailboxStateRefreshError{.message = authMessage(*error)};
+                co_return operationError(*error);
             }
             if (const auto* error = std::get_if<javelin::jmap::api::ProtocolError>(&envelopeResult))
             {
-                co_return MailboxStateRefreshError{.message = protocolMessage(*error)};
+                co_return operationError(*error);
             }
 
             const auto& envelope = std::get<javelin::jmap::api::ResponseEnvelope>(envelopeResult);
@@ -143,16 +122,13 @@ namespace javelin::jmap::sync
             if (const auto* error =
                     std::get_if<javelin::jmap::api::ResponseReaderError>(&mailboxResult))
             {
-                co_return MailboxStateRefreshError{
-                    .message = QStringLiteral("Failed to read Mailbox/get response: %1")
-                                   .arg(QString::fromStdString(error->message)),
-                };
+                co_return operationError(*error);
             }
 
             co_return std::get<javelin::jmap::api::MailboxGetResponse>(mailboxResult);
         }
 
-        [[nodiscard]] QCoro::Task<std::variant<IncrementalMailboxFetch, MailboxStateRefreshError>>
+        [[nodiscard]] QCoro::Task<std::variant<IncrementalMailboxFetch, OperationError>>
         fetchMailboxChangesAndMailboxes(javelin::jmap::api::MethodCaller& methodCaller,
                                         javelin::jmap::api::ApiRequestContext apiRequestContext,
                                         const std::string_view accountId,
@@ -165,7 +141,7 @@ namespace javelin::jmap::sync
             });
             if (!changesRequest.has_value())
             {
-                co_return MailboxStateRefreshError{
+                co_return OperationError{
                     .message = QStringLiteral("Failed to encode the Mailbox/changes request."),
                 };
             }
@@ -178,7 +154,7 @@ namespace javelin::jmap::sync
                     std::string{accountId}, changesHandle, "/created"));
             if (!createdRequest.has_value())
             {
-                co_return MailboxStateRefreshError{
+                co_return OperationError{
                     .message = QStringLiteral("Failed to encode the created Mailbox/get request."),
                 };
             }
@@ -189,7 +165,7 @@ namespace javelin::jmap::sync
                     std::string{accountId}, changesHandle, "/updated"));
             if (!updatedRequest.has_value())
             {
-                co_return MailboxStateRefreshError{
+                co_return OperationError{
                     .message = QStringLiteral("Failed to encode the updated Mailbox/get request."),
                 };
             }
@@ -199,15 +175,15 @@ namespace javelin::jmap::sync
             if (const auto* error =
                     std::get_if<javelin::jmap::api::TransportError>(&envelopeResult))
             {
-                co_return MailboxStateRefreshError{.message = transportMessage(*error)};
+                co_return operationError(*error);
             }
             if (const auto* error = std::get_if<javelin::jmap::api::AuthError>(&envelopeResult))
             {
-                co_return MailboxStateRefreshError{.message = authMessage(*error)};
+                co_return operationError(*error);
             }
             if (const auto* error = std::get_if<javelin::jmap::api::ProtocolError>(&envelopeResult))
             {
-                co_return MailboxStateRefreshError{.message = protocolMessage(*error)};
+                co_return operationError(*error);
             }
 
             const auto& envelope = std::get<javelin::jmap::api::ResponseEnvelope>(envelopeResult);
@@ -218,13 +194,10 @@ namespace javelin::jmap::sync
             {
                 if (isRecoverableIncrementalError(*error))
                 {
-                    co_return MailboxStateRefreshError{};
+                    co_return OperationError{};
                 }
 
-                co_return MailboxStateRefreshError{
-                    .message = QStringLiteral("Failed to read Mailbox/changes response: %1")
-                                   .arg(QString::fromStdString(error->message)),
-                };
+                co_return operationError(*error);
             }
 
             const auto& changes =
@@ -233,20 +206,14 @@ namespace javelin::jmap::sync
             if (const auto* error =
                     std::get_if<javelin::jmap::api::ResponseReaderError>(&createdResult))
             {
-                co_return MailboxStateRefreshError{
-                    .message = QStringLiteral("Failed to read created Mailbox/get response: %1")
-                                   .arg(QString::fromStdString(error->message)),
-                };
+                co_return operationError(*error);
             }
 
             const auto updatedResult = reader.require(updatedHandle);
             if (const auto* error =
                     std::get_if<javelin::jmap::api::ResponseReaderError>(&updatedResult))
             {
-                co_return MailboxStateRefreshError{
-                    .message = QStringLiteral("Failed to read updated Mailbox/get response: %1")
-                                   .arg(QString::fromStdString(error->message)),
-                };
+                co_return operationError(*error);
             }
 
             co_return IncrementalMailboxFetch{
@@ -278,7 +245,7 @@ namespace javelin::jmap::sync
         const auto planResult = syncPlanner.plan(key);
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&planResult))
         {
-            co_return MailboxStateRefreshError{.message = error->message};
+            co_return javelin::jmap::operationError(*error);
         }
 
         const auto& plan = std::get<SyncPlan>(planResult);
@@ -295,7 +262,7 @@ namespace javelin::jmap::sync
                 if (const auto error = reconciler.applyMailboxChanges(
                         key, incrementalFetch->changes, incrementalFetch->fetched))
                 {
-                    co_return MailboxStateRefreshError{.message = error->message};
+                    co_return javelin::jmap::operationError(*error);
                 }
 
                 co_return MailboxStateRefreshSummary{
@@ -304,7 +271,7 @@ namespace javelin::jmap::sync
                 };
             }
 
-            if (const auto* error = std::get_if<MailboxStateRefreshError>(&changesResult);
+            if (const auto* error = std::get_if<OperationError>(&changesResult);
                 error != nullptr && !error->message.isEmpty())
             {
                 co_return *error;
@@ -313,7 +280,7 @@ namespace javelin::jmap::sync
 
         const auto fetchedResult =
             co_await fetchMailboxes(m_methodCaller, m_apiRequestContext, accountId, std::nullopt);
-        if (const auto* error = std::get_if<MailboxStateRefreshError>(&fetchedResult))
+        if (const auto* error = std::get_if<OperationError>(&fetchedResult))
         {
             co_return *error;
         }
@@ -322,11 +289,11 @@ namespace javelin::jmap::sync
         javelin::jmap::cache::MailboxRepository mailboxRepository{m_databaseConnection};
         if (const auto error = mailboxRepository.replaceAll(accountId, fetched.list))
         {
-            co_return MailboxStateRefreshError{.message = error->message};
+            co_return javelin::jmap::operationError(*error);
         }
         if (const auto error = syncStateRepository.upsert(key, fetched.state))
         {
-            co_return MailboxStateRefreshError{.message = error->message};
+            co_return javelin::jmap::operationError(*error);
         }
 
         co_return MailboxStateRefreshSummary{

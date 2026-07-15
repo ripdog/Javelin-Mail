@@ -1,5 +1,6 @@
 #pragma once
 
+#include "jmap/OperationError.h"
 #include "jmap/api/MethodCaller.h"
 #include "jmap/api/Session.h"
 #include "jmap/cache/Database.h"
@@ -20,13 +21,7 @@ namespace javelin::jmap::sync
         bool usedIncrementalRefresh = false;
     };
 
-    struct MailboxStateRefreshError
-    {
-        QString message;
-    };
-
-    using MailboxStateRefreshResult =
-        std::variant<MailboxStateRefreshSummary, MailboxStateRefreshError>;
+    using MailboxStateRefreshResult = std::variant<MailboxStateRefreshSummary, OperationError>;
 
     class MailboxStateRefreshExecutor
     {

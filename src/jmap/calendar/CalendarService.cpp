@@ -22,45 +22,19 @@ namespace javelin::jmap::calendar
 
     namespace
     {
-        using SessionResult = std::variant<api::Session, CalendarServiceError>;
+        using SessionResult = std::variant<api::Session, OperationError>;
 
         struct SupersededRefresh
         {
         };
 
         using BatchedCalendarEvents =
-            std::variant<api::CalendarEventGetResponse, CalendarServiceError, SupersededRefresh>;
+            std::variant<api::CalendarEventGetResponse, OperationError, SupersededRefresh>;
 
-        QString errorCodeName(const CalendarServiceErrorCode code)
-        {
-            switch (code)
-            {
-            case CalendarServiceErrorCode::Capability:
-                return QStringLiteral("capability");
-            case CalendarServiceErrorCode::Permission:
-                return QStringLiteral("permission");
-            case CalendarServiceErrorCode::Scheduling:
-                return QStringLiteral("scheduling");
-            case CalendarServiceErrorCode::StaleState:
-                return QStringLiteral("stale-state");
-            case CalendarServiceErrorCode::Transport:
-                return QStringLiteral("transport");
-            case CalendarServiceErrorCode::Authentication:
-                return QStringLiteral("authentication");
-            case CalendarServiceErrorCode::Protocol:
-                return QStringLiteral("protocol");
-            case CalendarServiceErrorCode::Cache:
-                return QStringLiteral("cache");
-            case CalendarServiceErrorCode::Validation:
-                return QStringLiteral("validation");
-            }
-            return QStringLiteral("unknown");
-        }
-
-        CalendarServiceError error(const CalendarServiceErrorCode code, QString message)
+        OperationError error(const OperationErrorCode code, QString message)
         {
             qCWarning(logCalendarService).noquote()
-                << "calendar error" << errorCodeName(code) << message;
+                << "calendar error" << QString::fromUtf8(toString(code).data()) << message;
             return {.code = code, .message = std::move(message)};
         }
 
@@ -70,14 +44,14 @@ namespace javelin::jmap::calendar
             cache::SessionRepository repository{connection};
             const auto loaded = repository.load(ownerAccountId);
             if (const auto* databaseError = std::get_if<cache::DatabaseError>(&loaded))
-                return error(CalendarServiceErrorCode::Cache, databaseError->message);
+                return error(OperationErrorCode::LocalStorageFailure, databaseError->message);
             const auto& session = std::get<std::optional<api::Session>>(loaded);
             if (!session)
-                return error(CalendarServiceErrorCode::Capability,
+                return error(OperationErrorCode::UnsupportedCapability,
                              QStringLiteral("No cached JMAP session is available."));
             if (!session->capabilities.calendars)
                 return error(
-                    CalendarServiceErrorCode::Capability,
+                    OperationErrorCode::UnsupportedCapability,
                     QStringLiteral("The server does not advertise JMAP Calendars draft-26."));
             return *session;
         }
@@ -94,38 +68,21 @@ namespace javelin::jmap::calendar
                     .apiUrl = session.apiUrl};
         }
 
-        CalendarServiceError callError(const api::MethodCallerResult& result)
+        OperationError callError(const api::MethodCallerResult& result)
         {
             if (const auto* value = std::get_if<api::TransportError>(&result))
-                return error(CalendarServiceErrorCode::Transport,
-                             QString::fromStdString(value->message));
+                return operationError(*value);
             if (const auto* value = std::get_if<api::AuthError>(&result))
-                return error(CalendarServiceErrorCode::Authentication,
-                             QString::fromStdString(value->message));
+                return operationError(*value);
             if (const auto* value = std::get_if<api::ProtocolError>(&result))
-                return error(CalendarServiceErrorCode::Protocol,
-                             QString::fromStdString(value->message));
-            return error(CalendarServiceErrorCode::Protocol,
+                return operationError(*value);
+            return error(OperationErrorCode::ProtocolViolation,
                          QStringLiteral("The calendar request failed."));
         }
 
-        CalendarServiceError responseError(const api::ResponseReaderError& value)
+        OperationError responseError(const api::ResponseReaderError& value)
         {
-            if (value.methodError)
-            {
-                if (value.methodError->type == "stateMismatch")
-                    return error(
-                        CalendarServiceErrorCode::StaleState,
-                        QStringLiteral("The event changed on the server. Refresh and try again."));
-                if (value.methodError->type == "forbidden")
-                    return error(CalendarServiceErrorCode::Permission,
-                                 QStringLiteral("The server denied this calendar operation."));
-                if (value.methodError->type == "noSupportedScheduleMethods")
-                    return error(
-                        CalendarServiceErrorCode::Scheduling,
-                        QStringLiteral("The server cannot schedule with one or more attendees."));
-            }
-            return error(CalendarServiceErrorCode::Protocol, QString::fromStdString(value.message));
+            return operationError(value);
         }
 
         template <typename IsCurrent>
@@ -137,7 +94,7 @@ namespace javelin::jmap::calendar
                                  const std::string_view callId, IsCurrent isCurrent)
         {
             if (batchLimit == 0)
-                co_return error(CalendarServiceErrorCode::Capability,
+                co_return error(OperationErrorCode::UnsupportedCapability,
                                 QStringLiteral("The server advertises maxObjectsInGet as zero."));
 
             api::CalendarEventGetResponse combined{
@@ -159,7 +116,7 @@ namespace javelin::jmap::calendar
                                            .reduceParticipants = false,
                                            .timeZone = displayTimeZone});
                 if (!request)
-                    co_return error(CalendarServiceErrorCode::Validation,
+                    co_return error(OperationErrorCode::InvalidRequest,
                                     QStringLiteral("Unable to serialize the calendar event "
                                                    "request."));
                 api::RequestBuilder builder;
@@ -178,7 +135,7 @@ namespace javelin::jmap::calendar
                 auto response = std::get<api::CalendarEventGetResponse>(read);
                 if (!firstBatch && response.state != combined.state)
                     co_return error(
-                        CalendarServiceErrorCode::Protocol,
+                        OperationErrorCode::ProtocolViolation,
                         QStringLiteral("Calendar event batches returned inconsistent states."));
                 if (firstBatch)
                     combined.state = response.state;
@@ -208,16 +165,16 @@ namespace javelin::jmap::calendar
             return required.empty();
         }
 
-        std::variant<std::string, CalendarServiceError>
+        std::variant<std::string, OperationError>
         currentEventState(cache::DatabaseConnection& connection, const std::string_view accountId)
         {
             cache::CalendarRepository repository{connection};
             const auto loaded = repository.stateToken(accountId, "CalendarEvent");
             if (const auto* databaseError = std::get_if<cache::DatabaseError>(&loaded))
-                return error(CalendarServiceErrorCode::Cache, databaseError->message);
+                return error(OperationErrorCode::LocalStorageFailure, databaseError->message);
             const auto& state = std::get<std::optional<std::string>>(loaded);
             if (!state)
-                return error(CalendarServiceErrorCode::Validation,
+                return error(OperationErrorCode::InvalidRequest,
                              QStringLiteral("Refresh the calendar before modifying an event."));
             return *state;
         }
@@ -252,7 +209,7 @@ namespace javelin::jmap::calendar
         auto loaded =
             repository.loadWindow(accountId, interval.start, interval.end, displayTimeZone);
         if (const auto* cacheError = std::get_if<cache::DatabaseError>(&loaded))
-            return error(CalendarServiceErrorCode::Cache, cacheError->message);
+            return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
         return std::get<std::optional<cache::CalendarWindow>>(std::move(loaded));
     }
 
@@ -261,7 +218,7 @@ namespace javelin::jmap::calendar
         cache::CalendarRepository repository{m_connection};
         auto loaded = repository.listAccounts();
         if (const auto* cacheError = std::get_if<cache::DatabaseError>(&loaded))
-            return error(CalendarServiceErrorCode::Cache, cacheError->message);
+            return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
         return std::get<std::vector<cache::CalendarAccount>>(std::move(loaded));
     }
 
@@ -270,7 +227,7 @@ namespace javelin::jmap::calendar
         cache::CalendarRepository repository{m_connection};
         auto loaded = repository.listCalendars(accountId);
         if (const auto* cacheError = std::get_if<cache::DatabaseError>(&loaded))
-            return error(CalendarServiceErrorCode::Cache, cacheError->message);
+            return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
         return std::get<std::vector<Calendar>>(std::move(loaded));
     }
 
@@ -280,7 +237,7 @@ namespace javelin::jmap::calendar
     {
         cache::CalendarRepository repository{m_connection};
         if (const auto cacheError = repository.setCalendarVisible(accountId, calendarId, visible))
-            return error(CalendarServiceErrorCode::Cache, cacheError->message);
+            return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
         return std::monostate{};
     }
 
@@ -288,19 +245,19 @@ namespace javelin::jmap::calendar
                                                                  const std::string_view calendarId)
     {
         const auto listed = calendars(accountId);
-        if (const auto* serviceError = std::get_if<CalendarServiceError>(&listed))
+        if (const auto* serviceError = std::get_if<OperationError>(&listed))
             return *serviceError;
         const auto& available = std::get<std::vector<Calendar>>(listed);
         const auto selected = std::ranges::find(available, calendarId, &Calendar::id);
         if (selected == available.end())
-            return error(CalendarServiceErrorCode::Validation,
+            return error(OperationErrorCode::InvalidRequest,
                          QStringLiteral("The selected calendar is no longer available."));
         if (!selected->myRights.mayWriteAll && !selected->myRights.mayWriteOwn)
-            return error(CalendarServiceErrorCode::Permission,
+            return error(OperationErrorCode::PermissionDenied,
                          QStringLiteral("The selected calendar is read-only."));
         cache::CalendarRepository repository{m_connection};
         if (const auto cacheError = repository.setDefaultCalendar(accountId, calendarId))
-            return error(CalendarServiceErrorCode::Cache, cacheError->message);
+            return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
         return std::monostate{};
     }
 
@@ -322,7 +279,7 @@ namespace javelin::jmap::calendar
     {
         const auto generation = beginRefresh(ownerAccountId);
         const auto sessionResult = loadSession(m_connection, ownerAccountId);
-        if (const auto* serviceError = std::get_if<CalendarServiceError>(&sessionResult))
+        if (const auto* serviceError = std::get_if<OperationError>(&sessionResult))
             co_return *serviceError;
         const auto& session = std::get<api::Session>(sessionResult);
         cache::CalendarRepository repository{m_connection};
@@ -339,9 +296,9 @@ namespace javelin::jmap::calendar
             const auto calendarStateResult = repository.stateToken(accountId, "Calendar");
             const auto eventStateResult = repository.stateToken(accountId, "CalendarEvent");
             if (const auto* cacheError = std::get_if<cache::DatabaseError>(&calendarStateResult))
-                co_return error(CalendarServiceErrorCode::Cache, cacheError->message);
+                co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
             if (const auto* cacheError = std::get_if<cache::DatabaseError>(&eventStateResult))
-                co_return error(CalendarServiceErrorCode::Cache, cacheError->message);
+                co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
             const auto& calendarState = std::get<std::optional<std::string>>(calendarStateResult);
             const auto& eventState = std::get<std::optional<std::string>>(eventStateResult);
             if (!calendarState || !eventState)
@@ -355,7 +312,7 @@ namespace javelin::jmap::calendar
             const auto eventRequest = api::calendarEventChanges(
                 {.accountId = accountId, .sinceState = *eventState, .maxChanges = std::nullopt});
             if (!calendarRequest || !eventRequest)
-                co_return error(CalendarServiceErrorCode::Validation,
+                co_return error(OperationErrorCode::InvalidRequest,
                                 QStringLiteral("Unable to serialize calendar changes."));
             api::RequestBuilder builder;
             builder.useCore().useCapability(std::string{api::calendarsCapabilityUri});
@@ -424,7 +381,7 @@ namespace javelin::jmap::calendar
                                            .reduceParticipants = false,
                                            .timeZone = displayTimeZone});
                 if (!getRequest)
-                    co_return error(CalendarServiceErrorCode::Validation,
+                    co_return error(OperationErrorCode::InvalidRequest,
                                     QStringLiteral("Unable to serialize changed calendar events."));
                 api::RequestBuilder getBuilder;
                 getBuilder.useCore().useCapability(std::string{api::calendarsCapabilityUri});
@@ -465,7 +422,7 @@ namespace javelin::jmap::calendar
             if (const auto cacheError = repository.applyEventDelta(
                     accountId, calendarChanges.newState, eventChanges.newState, displayTimeZone,
                     changedEvents, changedOccurrences, eventChanges.destroyed))
-                co_return error(CalendarServiceErrorCode::Cache, cacheError->message);
+                co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
             if (!changedEvents.empty() || !eventChanges.destroyed.empty())
             {
                 ++summary.accountCount;
@@ -485,7 +442,7 @@ namespace javelin::jmap::calendar
     {
         const auto generation = beginRefresh(ownerAccountId);
         const auto sessionResult = loadSession(m_connection, ownerAccountId);
-        if (const auto* serviceError = std::get_if<CalendarServiceError>(&sessionResult))
+        if (const auto* serviceError = std::get_if<OperationError>(&sessionResult))
             co_return *serviceError;
         const auto& session = std::get<api::Session>(sessionResult);
         RefreshedRange summary{.interval = interval,
@@ -526,7 +483,7 @@ namespace javelin::jmap::calendar
                                          .limit = std::nullopt,
                                          .calculateTotal = true});
             if (!calendarRequest || !queryRequest || !baseQueryRequest)
-                co_return error(CalendarServiceErrorCode::Validation,
+                co_return error(OperationErrorCode::InvalidRequest,
                                 QStringLiteral("Unable to serialize the calendar range request."));
             api::RequestBuilder builder;
             builder.useCore().useCapability(std::string{api::calendarsCapabilityUri});
@@ -570,7 +527,7 @@ namespace javelin::jmap::calendar
                                              .limit = query.limit,
                                              .calculateTotal = false});
                 if (!nextRequest)
-                    co_return error(CalendarServiceErrorCode::Validation,
+                    co_return error(OperationErrorCode::InvalidRequest,
                                     QStringLiteral("Unable to serialize calendar pagination."));
                 api::RequestBuilder nextBuilder;
                 nextBuilder.useCore().useCapability(std::string{api::calendarsCapabilityUri});
@@ -587,7 +544,7 @@ namespace javelin::jmap::calendar
                     co_return responseError(*readError);
                 auto next = std::get<api::CalendarEventQueryResponse>(nextRead);
                 if (next.ids.empty())
-                    co_return error(CalendarServiceErrorCode::Protocol,
+                    co_return error(OperationErrorCode::ProtocolViolation,
                                     QStringLiteral("Calendar query pagination stopped early."));
                 eventIds.insert(eventIds.end(), std::make_move_iterator(next.ids.begin()),
                                 std::make_move_iterator(next.ids.end()));
@@ -609,7 +566,7 @@ namespace javelin::jmap::calendar
                                              .limit = baseQuery.limit,
                                              .calculateTotal = false});
                 if (!nextRequest)
-                    co_return error(CalendarServiceErrorCode::Validation,
+                    co_return error(OperationErrorCode::InvalidRequest,
                                     QStringLiteral("Unable to serialize base event pagination."));
                 api::RequestBuilder nextBuilder;
                 nextBuilder.useCore().useCapability(std::string{api::calendarsCapabilityUri});
@@ -627,7 +584,7 @@ namespace javelin::jmap::calendar
                 auto next = std::get<api::CalendarEventQueryResponse>(nextRead);
                 if (next.ids.empty())
                     co_return error(
-                        CalendarServiceErrorCode::Protocol,
+                        OperationErrorCode::ProtocolViolation,
                         QStringLiteral("Base calendar query pagination stopped early."));
                 baseEventIds.insert(baseEventIds.end(), std::make_move_iterator(next.ids.begin()),
                                     std::make_move_iterator(next.ids.end()));
@@ -644,7 +601,7 @@ namespace javelin::jmap::calendar
                 { return isCurrentRefresh(ownerAccountId, generation); });
             if (std::holds_alternative<SupersededRefresh>(getResult))
                 co_return summary;
-            if (const auto* serviceError = std::get_if<CalendarServiceError>(&getResult))
+            if (const auto* serviceError = std::get_if<OperationError>(&getResult))
                 co_return *serviceError;
             auto events = std::get<api::CalendarEventGetResponse>(std::move(getResult));
             auto baseGetResult = co_await getCalendarEventsBatched(
@@ -653,15 +610,15 @@ namespace javelin::jmap::calendar
                 { return isCurrentRefresh(ownerAccountId, generation); });
             if (std::holds_alternative<SupersededRefresh>(baseGetResult))
                 co_return summary;
-            if (const auto* serviceError = std::get_if<CalendarServiceError>(&baseGetResult))
+            if (const auto* serviceError = std::get_if<OperationError>(&baseGetResult))
                 co_return *serviceError;
             auto baseResponse = std::get<api::CalendarEventGetResponse>(std::move(baseGetResult));
             if (events.state != baseResponse.state)
                 co_return error(
-                    CalendarServiceErrorCode::Protocol,
+                    OperationErrorCode::ProtocolViolation,
                     QStringLiteral("Calendar event batches returned inconsistent states."));
             if (!events.notFound.empty() || !baseResponse.notFound.empty())
-                co_return error(CalendarServiceErrorCode::Protocol,
+                co_return error(OperationErrorCode::ProtocolViolation,
                                 QStringLiteral("The server did not return a calendar event from "
                                                "the range query."));
 
@@ -715,7 +672,7 @@ namespace javelin::jmap::calendar
             cache::CalendarRepository repository{m_connection};
             if (const auto cacheError =
                     repository.replaceCalendars(accountId, calendars.state, calendars.list))
-                co_return error(CalendarServiceErrorCode::Cache, cacheError->message);
+                co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
             cache::CalendarWindow window{.accountId = accountId,
                                          .start = interval.start,
                                          .end = interval.end,
@@ -725,7 +682,7 @@ namespace javelin::jmap::calendar
                                          .events = std::move(baseResponse.list),
                                          .occurrences = std::move(occurrences)};
             if (const auto cacheError = repository.reconcileWindow(window))
-                co_return error(CalendarServiceErrorCode::Cache, cacheError->message);
+                co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
             ++summary.accountCount;
             summary.eventCount += window.occurrences.size();
         }
@@ -739,7 +696,7 @@ namespace javelin::jmap::calendar
         if (!command.ifInState)
         {
             const auto state = currentEventState(m_connection, command.accountId);
-            if (const auto* serviceError = std::get_if<CalendarServiceError>(&state))
+            if (const auto* serviceError = std::get_if<OperationError>(&state))
                 co_return *serviceError;
             command.ifInState = std::get<std::string>(state);
         }
@@ -765,7 +722,7 @@ namespace javelin::jmap::calendar
         if (!command.ifInState)
         {
             const auto state = currentEventState(m_connection, command.accountId);
-            if (const auto* serviceError = std::get_if<CalendarServiceError>(&state))
+            if (const auto* serviceError = std::get_if<OperationError>(&state))
                 co_return *serviceError;
             command.ifInState = std::get<std::string>(state);
         }
@@ -791,7 +748,7 @@ namespace javelin::jmap::calendar
         if (!command.ifInState)
         {
             const auto state = currentEventState(m_connection, command.accountId);
-            if (const auto* serviceError = std::get_if<CalendarServiceError>(&state))
+            if (const auto* serviceError = std::get_if<OperationError>(&state))
                 co_return *serviceError;
             command.ifInState = std::get<std::string>(state);
         }
@@ -811,24 +768,24 @@ namespace javelin::jmap::calendar
                             std::vector<std::string> calendarIds)
     {
         const auto sessionResult = loadSession(m_connection, ownerAccountId);
-        if (const auto* serviceError = std::get_if<CalendarServiceError>(&sessionResult))
+        if (const auto* serviceError = std::get_if<OperationError>(&sessionResult))
             co_return *serviceError;
         const auto& session = std::get<api::Session>(sessionResult);
         const auto account = session.accounts.find(request.accountId);
         if (account == session.accounts.end() || !account->second.accountCapabilities.calendars)
             co_return error(
-                CalendarServiceErrorCode::Capability,
+                OperationErrorCode::UnsupportedCapability,
                 QStringLiteral("This account does not support JMAP Calendars draft-26."));
         cache::CalendarRepository repository{m_connection};
         const auto calendarsResult = repository.listCalendars(request.accountId);
         if (const auto* cacheError = std::get_if<cache::DatabaseError>(&calendarsResult))
-            co_return error(CalendarServiceErrorCode::Cache, cacheError->message);
+            co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
         if (!writable(std::get<std::vector<Calendar>>(calendarsResult), calendarIds))
-            co_return error(CalendarServiceErrorCode::Permission,
+            co_return error(OperationErrorCode::PermissionDenied,
                             QStringLiteral("You do not have permission to modify this event."));
         const auto method = api::calendarEventSet(request);
         if (!method)
-            co_return error(CalendarServiceErrorCode::Validation,
+            co_return error(OperationErrorCode::InvalidRequest,
                             QStringLiteral("Unable to serialize the calendar change."));
         api::RequestBuilder builder;
         builder.useCore().useCapability(std::string{api::calendarsCapabilityUri});
@@ -852,16 +809,16 @@ namespace javelin::jmap::calendar
         {
             if (setError->type == api::CalendarSetErrorType::StateMismatch)
                 co_return error(
-                    CalendarServiceErrorCode::StaleState,
+                    OperationErrorCode::Conflict,
                     QStringLiteral("The event changed on the server. Refresh and try again."));
             if (setError->type == api::CalendarSetErrorType::Forbidden)
-                co_return error(CalendarServiceErrorCode::Permission,
+                co_return error(OperationErrorCode::PermissionDenied,
                                 QStringLiteral("The server denied this calendar operation."));
             if (setError->type == api::CalendarSetErrorType::NoSupportedScheduleMethods)
                 co_return error(
-                    CalendarServiceErrorCode::Scheduling,
+                    OperationErrorCode::SchedulingUnsupported,
                     QStringLiteral("The server cannot schedule with one or more attendees."));
-            co_return error(CalendarServiceErrorCode::Protocol,
+            co_return error(OperationErrorCode::ProtocolViolation,
                             QString::fromStdString(setError->description.value_or(
                                 "The server rejected the calendar change.")));
         }

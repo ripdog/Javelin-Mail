@@ -37,9 +37,11 @@ namespace javelin::jmap::sync
     StateChangeWorker::StateChangeWorker(StateChangeSource& source, StateChangeConsumer& consumer,
                                          StateChangeSleeper& sleeper,
                                          const BackoffPolicy backoffPolicy,
-                                         StateChangeStatusCallback statusCallback)
+                                         StateChangeStatusCallback statusCallback,
+                                         StateChangeErrorCallback errorCallback)
         : m_source(source), m_consumer(consumer), m_sleeper(sleeper),
-          m_backoffPolicy(backoffPolicy), m_statusCallback(std::move(statusCallback))
+          m_backoffPolicy(backoffPolicy), m_statusCallback(std::move(statusCallback)),
+          m_errorCallback(std::move(errorCallback))
     {
     }
 
@@ -52,6 +54,7 @@ namespace javelin::jmap::sync
             .successfulSubscriptions = 0,
             .transientFailures = 0,
             .cancelled = false,
+            .terminalError = std::nullopt,
         };
 
         std::size_t consecutiveFailures = 0;
@@ -76,6 +79,17 @@ namespace javelin::jmap::sync
                         m_statusCallback(StateChangeConnectionStatus::Disconnected);
                     }
                     summary.cancelled = true;
+                    break;
+                }
+
+                const auto classified = javelin::jmap::operationError(error);
+                if (m_errorCallback)
+                    m_errorCallback(classified);
+                if (!javelin::jmap::isTransientError(classified))
+                {
+                    if (m_statusCallback)
+                        m_statusCallback(StateChangeConnectionStatus::Disconnected);
+                    summary.terminalError = classified;
                     break;
                 }
 

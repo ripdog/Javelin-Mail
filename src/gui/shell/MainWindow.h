@@ -35,7 +35,7 @@ class QWidget;
 
 namespace javelin::jmap
 {
-    struct LiveRefreshError;
+    struct OperationError;
 } // namespace javelin::jmap
 
 namespace javelin::app
@@ -128,6 +128,7 @@ namespace javelin::gui::shell
         ~MainWindow() override = default;
         void openMessageFromNotification(const QString& accountId, const QString& mailboxId,
                                          const QString& threadId, const QString& emailId);
+        void openPreferencesForConnection(const QString& connectionId);
 
       Q_SIGNALS:
         void accountSettingsChanged();
@@ -224,11 +225,9 @@ namespace javelin::gui::shell
         };
 
         void createActions();
-        void presentError(const javelin::jmap::LiveRefreshError& error,
+        void presentError(const javelin::jmap::OperationError& error,
                           const QString& title = QStringLiteral("Action Required"));
         void presentUserInterventionError(const QString& message);
-        void presentCalendarError(const QString& summary, const QString& details,
-                                  const QString& logContext);
         void setupUi();
         void connectSelection();
         void handleCurrentMessageChanged(const QModelIndex& current);

@@ -42,7 +42,7 @@ namespace javelin::gui::sieve
         void validateScript();
         void saveScript();
         void setBusy(bool busy);
-        void showError(const javelin::jmap::sieve::SieveServiceError& error);
+        void showError(const javelin::jmap::OperationError& error);
         void updateActions();
 
         javelin::app::MailApplicationService& m_service;

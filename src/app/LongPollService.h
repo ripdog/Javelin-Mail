@@ -65,6 +65,7 @@ namespace javelin::app
             Disconnected,
             Connecting,
             Connected,
+            AuthenticationPaused,
         };
         Q_ENUM(Status)
 
@@ -81,6 +82,7 @@ namespace javelin::app
                            std::vector<std::string> notificationMailboxIds,
                            bool notificationMailboxSelectionConfigured);
         void stop();
+        void pauseForAuthentication();
         [[nodiscard]] bool requestSynchronization();
 
         [[nodiscard]] Status status() const;
@@ -95,6 +97,7 @@ namespace javelin::app
                                 const QString& threadId, const QString& emailId,
                                 const QString& mailboxName, const QString& title,
                                 const QString& message);
+        void operationFailed(const QString& operation, javelin::jmap::OperationError error);
 
       private:
         struct RunConfiguration
@@ -134,6 +137,8 @@ namespace javelin::app
         void restartForCatchUp();
         void restart();
         void setStatus(Status status);
+        void handleOperationError(const QString& operation,
+                                  const javelin::jmap::OperationError& error);
         void publishNotifications(
             const RunContext& runContext, std::string_view mailboxId, std::string_view mailboxName,
             const std::vector<javelin::jmap::sync::RefreshNotificationCandidate>& candidates);

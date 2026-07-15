@@ -21,25 +21,6 @@ namespace javelin::jmap::api
 
 namespace javelin::jmap::calendar
 {
-    enum class CalendarServiceErrorCode
-    {
-        Cache,
-        Capability,
-        Permission,
-        Transport,
-        Authentication,
-        Protocol,
-        Scheduling,
-        StaleState,
-        Validation,
-    };
-
-    struct CalendarServiceError
-    {
-        CalendarServiceErrorCode code = CalendarServiceErrorCode::Protocol;
-        QString message;
-    };
-
     struct VisibleInterval
     {
         LocalDateTime start;
@@ -83,14 +64,13 @@ namespace javelin::jmap::calendar
         std::optional<std::string> ifInState;
     };
 
-    using CalendarLoadResult =
-        std::variant<std::optional<cache::CalendarWindow>, CalendarServiceError>;
-    using CalendarRefreshResult = std::variant<RefreshedRange, CalendarServiceError>;
-    using CalendarMutationResult = std::variant<CommittedMutation, CalendarServiceError>;
+    using CalendarLoadResult = std::variant<std::optional<cache::CalendarWindow>, OperationError>;
+    using CalendarRefreshResult = std::variant<RefreshedRange, OperationError>;
+    using CalendarMutationResult = std::variant<CommittedMutation, OperationError>;
     using CalendarAccountsResult =
-        std::variant<std::vector<cache::CalendarAccount>, CalendarServiceError>;
-    using CalendarListResult = std::variant<std::vector<Calendar>, CalendarServiceError>;
-    using CalendarPreferenceResult = std::variant<std::monostate, CalendarServiceError>;
+        std::variant<std::vector<cache::CalendarAccount>, OperationError>;
+    using CalendarListResult = std::variant<std::vector<Calendar>, OperationError>;
+    using CalendarPreferenceResult = std::variant<std::monostate, OperationError>;
 
     class CalendarService
     {

@@ -4,6 +4,7 @@
 #include <QHash>
 #include <QSet>
 
+#include <cstdint>
 #include <vector>
 
 class QLineEdit;
@@ -30,6 +31,7 @@ namespace javelin::gui::settings
     struct ConnectionSettings
     {
         QString id;
+        std::uint64_t revision = 0;
         QString displayName;
         QString sessionUrl;
         QString loginEmail;
@@ -54,6 +56,7 @@ namespace javelin::gui::settings
         ~PreferencesDialog() override;
 
         [[nodiscard]] ConnectionSettings settings() const;
+        void selectConfiguredAccount(const QString& connectionId);
 
         [[nodiscard]] static std::vector<ConnectionSettings> loadAccounts();
         [[nodiscard]] static ConnectionSettings loadSettingsForAccount(QStringView accountId);
@@ -75,6 +78,7 @@ namespace javelin::gui::settings
         void removeCurrentAccount();
         void selectAccount(int row);
         void noteUnsavedChanges();
+        void noteConnectionSettingsChanged();
         void saveCurrentSettings();
         void storeCurrentEdits();
         void refreshAccountList();
@@ -124,6 +128,7 @@ namespace javelin::gui::settings
         QHash<QString, QStringList> m_syncedMailboxIds;
         QHash<QString, QStringList> m_notificationMailboxIds;
         QSet<QString> m_configuredNotificationAccounts;
+        QSet<QString> m_dirtyConnectionIds;
         QString m_mailboxSyncCurrentAccountId;
     };
 

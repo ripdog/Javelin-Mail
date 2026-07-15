@@ -1,5 +1,6 @@
 #include "app/ApplicationBootstrap.h"
 
+#include "app/ApplicationErrorCoordinator.h"
 #include "app/DesktopNotificationController.h"
 #include "app/LongPollCoordinator.h"
 #include "app/ProcessServices.h"
@@ -72,6 +73,8 @@ namespace javelin::app
         toAccountConnectionSettings(const javelin::gui::settings::ConnectionSettings& settings)
         {
             return AccountConnectionSettings{
+                .connectionId = settings.id.toStdString(),
+                .revision = settings.revision,
                 .sessionUrl = settings.sessionUrl.toStdString(),
                 .loginEmail = settings.loginEmail.toStdString(),
                 .apiKey = settings.apiKey.toStdString(),
@@ -246,6 +249,15 @@ namespace javelin::app
                 m_notificationController->notifyNewMail(accountId, mailboxId, threadId, emailId,
                                                         mailboxName, title, message);
             });
+        QObject::connect(
+            &m_processServices->errorCoordinator(), &ApplicationErrorCoordinator::incidentRaised,
+            m_notificationController.get(),
+            [this](const QString& connectionId, const QString&, const QString& title,
+                   const QString& message, const bool persistent, const bool opensSettings)
+            {
+                m_notificationController->notifyError(connectionId, title, message, persistent,
+                                                      opensSettings);
+            });
         QObject::connect(m_notificationController.get(),
                          &DesktopNotificationController::notificationActivated, &m_application,
                          [this](const QString& accountId, const QString& mailboxId,
@@ -258,6 +270,14 @@ namespace javelin::app
                                  m_mainWindow->openMessageFromNotification(accountId, mailboxId,
                                                                            threadId, emailId);
                              }
+                         });
+        QObject::connect(m_notificationController.get(),
+                         &DesktopNotificationController::errorNotificationActivated, &m_application,
+                         [this](const QString& connectionId, const QString& activationToken)
+                         {
+                             restoreMainWindow(activationToken);
+                             if (m_mainWindow != nullptr)
+                                 m_mainWindow->openPreferencesForConnection(connectionId);
                          });
 
         QObject::connect(m_trayIcon.get(), &QSystemTrayIcon::activated,

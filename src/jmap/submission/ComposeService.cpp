@@ -60,16 +60,16 @@ namespace javelin::jmap::submission
                      QString::fromStdString(error.message));
         }
 
-        [[nodiscard]] std::optional<javelin::jmap::LiveRefreshError>
+        [[nodiscard]] std::optional<javelin::jmap::OperationError>
         validateSettings(const javelin::jmap::LiveConnectionSettings& settings)
         {
             if (settings.sessionUrl.empty() || settings.loginEmail.empty() ||
                 settings.apiKey.empty())
             {
-                return javelin::jmap::LiveRefreshError{
+                return javelin::jmap::OperationError{
+                    .code = javelin::jmap::OperationErrorCode::PreconditionFailed,
                     .message =
                         QStringLiteral("Session URL, login email, and API key are required."),
-                    .requiresUserIntervention = true,
                 };
             }
 
@@ -93,7 +93,7 @@ namespace javelin::jmap::submission
             };
         }
 
-        [[nodiscard]] std::variant<javelin::jmap::api::Session, javelin::jmap::LiveRefreshError>
+        [[nodiscard]] std::variant<javelin::jmap::api::Session, javelin::jmap::OperationError>
         loadCachedSession(javelin::jmap::cache::DatabaseConnection& connection,
                           const std::string_view accountId)
         {
@@ -101,13 +101,13 @@ namespace javelin::jmap::submission
             const auto result = sessionRepository.load(accountId);
             if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
             {
-                return javelin::jmap::LiveRefreshError{.message = error->message};
+                return javelin::jmap::operationError(*error);
             }
 
             const auto& session = std::get<std::optional<javelin::jmap::api::Session>>(result);
             if (!session.has_value())
             {
-                return javelin::jmap::LiveRefreshError{
+                return javelin::jmap::OperationError{
                     .message =
                         QStringLiteral("No cached JMAP session is available for this account."),
                 };
@@ -116,17 +116,14 @@ namespace javelin::jmap::submission
             return *session;
         }
 
-        [[nodiscard]] std::variant<std::string, javelin::jmap::LiveRefreshError>
+        [[nodiscard]] std::variant<std::string, javelin::jmap::OperationError>
         resolveAccessToken(const javelin::jmap::auth::AccountCredentials& credentials)
         {
             const javelin::jmap::auth::AccessTokenResolver resolver;
             const auto result = resolver.resolve(credentials);
             if (const auto* error = std::get_if<javelin::jmap::api::AuthError>(&result))
             {
-                return javelin::jmap::LiveRefreshError{
-                    .message = authMessage(*error),
-                    .requiresUserIntervention = true,
-                };
+                return javelin::jmap::operationError(*error);
             }
 
             return std::get<javelin::jmap::auth::OAuthToken>(result).accessToken;
@@ -409,7 +406,7 @@ namespace javelin::jmap::submission
         }
 
         [[nodiscard]] QCoro::Task<std::variant<std::vector<javelin::jmap::domain::Identity>,
-                                               javelin::jmap::LiveRefreshError>>
+                                               javelin::jmap::OperationError>>
         ensureIdentities(javelin::jmap::cache::DatabaseConnection& connection,
                          javelin::jmap::api::JmapMethodTransport& methodTransport,
                          javelin::jmap::LiveConnectionSettings settings, std::string accountId)
@@ -418,7 +415,7 @@ namespace javelin::jmap::submission
             const auto cachedResult = identityRepository.listByAccount(accountId);
             if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&cachedResult))
             {
-                co_return javelin::jmap::LiveRefreshError{.message = error->message};
+                co_return javelin::jmap::operationError(*error);
             }
 
             const auto& cached =
@@ -429,7 +426,7 @@ namespace javelin::jmap::submission
             }
 
             const auto sessionResult = loadCachedSession(connection, accountId);
-            if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&sessionResult))
+            if (const auto* error = std::get_if<javelin::jmap::OperationError>(&sessionResult))
             {
                 co_return *error;
             }
@@ -437,7 +434,7 @@ namespace javelin::jmap::submission
 
             if (!session.capabilities.submission)
             {
-                co_return javelin::jmap::LiveRefreshError{
+                co_return javelin::jmap::OperationError{
                     .message =
                         QStringLiteral("This account does not advertise JMAP submission support."),
                 };
@@ -453,7 +450,7 @@ namespace javelin::jmap::submission
                                                                   .properties = std::nullopt});
             if (!request.has_value())
             {
-                co_return javelin::jmap::LiveRefreshError{
+                co_return javelin::jmap::OperationError{
                     .message = QStringLiteral("Failed to encode the Identity/get request."),
                 };
             }
@@ -463,18 +460,15 @@ namespace javelin::jmap::submission
             if (const auto* error =
                     std::get_if<javelin::jmap::api::TransportError>(&envelopeResult))
             {
-                co_return javelin::jmap::LiveRefreshError{.message = transportMessage(*error)};
+                co_return javelin::jmap::operationError(*error);
             }
             if (const auto* error = std::get_if<javelin::jmap::api::AuthError>(&envelopeResult))
             {
-                co_return javelin::jmap::LiveRefreshError{
-                    .message = authMessage(*error),
-                    .requiresUserIntervention = true,
-                };
+                co_return javelin::jmap::operationError(*error);
             }
             if (const auto* error = std::get_if<javelin::jmap::api::ProtocolError>(&envelopeResult))
             {
-                co_return javelin::jmap::LiveRefreshError{.message = protocolMessage(*error)};
+                co_return javelin::jmap::operationError(*error);
             }
 
             const auto& envelope = std::get<javelin::jmap::api::ResponseEnvelope>(envelopeResult);
@@ -492,17 +486,14 @@ namespace javelin::jmap::submission
                         << QString::fromStdString(response.callId) << "arguments"
                         << QString::fromStdString(response.arguments);
                 }
-                co_return javelin::jmap::LiveRefreshError{
-                    .message = QStringLiteral("Failed to read Identity/get response: %1")
-                                   .arg(QString::fromStdString(error->message)),
-                };
+                co_return javelin::jmap::operationError(*error);
             }
 
             const auto& identities =
                 std::get<javelin::jmap::api::IdentityGetResponse>(identityResult).list;
             if (const auto error = identityRepository.replaceAll(accountId, identities))
             {
-                co_return javelin::jmap::LiveRefreshError{.message = error->message};
+                co_return javelin::jmap::operationError(*error);
             }
 
             co_return identities;
@@ -526,7 +517,7 @@ namespace javelin::jmap::submission
             std::uint64_t size = 0;
         };
 
-        [[nodiscard]] QCoro::Task<std::variant<UploadSummary, javelin::jmap::LiveRefreshError>>
+        [[nodiscard]] QCoro::Task<std::variant<UploadSummary, javelin::jmap::OperationError>>
         uploadAttachment(javelin::jmap::api::AbstractTransport& transport,
                          javelin::jmap::LiveConnectionSettings settings,
                          javelin::jmap::api::Session session, std::string accountId,
@@ -535,14 +526,14 @@ namespace javelin::jmap::submission
             QFile file{QString::fromStdString(attachment.localFilePath)};
             if (!file.open(QIODevice::ReadOnly))
             {
-                co_return javelin::jmap::LiveRefreshError{
+                co_return javelin::jmap::OperationError{
                     .message = QStringLiteral("Failed to read attachment file %1.")
                                    .arg(QString::fromStdString(attachment.localFilePath)),
                 };
             }
 
             const auto tokenResult = resolveAccessToken(buildCredentials(settings, accountId));
-            if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&tokenResult))
+            if (const auto* error = std::get_if<javelin::jmap::OperationError>(&tokenResult))
             {
                 co_return *error;
             }
@@ -573,14 +564,14 @@ namespace javelin::jmap::submission
             if (const auto* error =
                     std::get_if<javelin::jmap::api::TransportError>(&transportResult))
             {
-                co_return javelin::jmap::LiveRefreshError{.message = transportMessage(*error)};
+                co_return javelin::jmap::operationError(*error);
             }
 
             const auto response = std::get<javelin::jmap::api::HttpResponse>(transportResult);
             const auto document = QJsonDocument::fromJson(response.body);
             if (!document.isObject())
             {
-                co_return javelin::jmap::LiveRefreshError{
+                co_return javelin::jmap::OperationError{
                     .message = QStringLiteral("Failed to decode the attachment upload response."),
                 };
             }
@@ -589,7 +580,7 @@ namespace javelin::jmap::submission
             const auto blobId = object.value(QStringLiteral("blobId")).toString();
             if (blobId.isEmpty())
             {
-                co_return javelin::jmap::LiveRefreshError{
+                co_return javelin::jmap::OperationError{
                     .message = QStringLiteral("The upload response did not contain a blob id."),
                 };
             }
@@ -820,7 +811,7 @@ namespace javelin::jmap::submission
     }
 
     QCoro::Task<
-        std::variant<std::vector<javelin::jmap::domain::Identity>, javelin::jmap::LiveRefreshError>>
+        std::variant<std::vector<javelin::jmap::domain::Identity>, javelin::jmap::OperationError>>
     ComposeService::loadSenderIdentities(javelin::jmap::LiveConnectionSettings settings,
                                          std::string accountId)
     {
@@ -831,7 +822,7 @@ namespace javelin::jmap::submission
 
         const auto identitiesResult = co_await ensureIdentities(
             m_connection, m_methodTransport, std::move(settings), std::move(accountId));
-        if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&identitiesResult))
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&identitiesResult))
         {
             co_return *error;
         }
@@ -840,7 +831,7 @@ namespace javelin::jmap::submission
             std::get<std::vector<javelin::jmap::domain::Identity>>(identitiesResult));
     }
 
-    QCoro::Task<std::variant<DraftSnapshot, javelin::jmap::LiveRefreshError>>
+    QCoro::Task<std::variant<DraftSnapshot, javelin::jmap::OperationError>>
     ComposeService::open(javelin::jmap::LiveConnectionSettings settings, OpenComposeRequest request)
     {
         if (const auto validationError = validateSettings(settings))
@@ -855,7 +846,7 @@ namespace javelin::jmap::submission
             if (const auto* error =
                     std::get_if<javelin::jmap::cache::DatabaseError>(&composeSessionsResult))
             {
-                co_return javelin::jmap::LiveRefreshError{.message = error->message};
+                co_return javelin::jmap::operationError(*error);
             }
 
             const auto& sessions = std::get<std::vector<DraftSnapshot>>(composeSessionsResult);
@@ -870,7 +861,7 @@ namespace javelin::jmap::submission
 
         const auto identitiesResult =
             co_await ensureIdentities(m_connection, m_methodTransport, settings, request.accountId);
-        if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&identitiesResult))
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&identitiesResult))
         {
             co_return *error;
         }
@@ -879,7 +870,7 @@ namespace javelin::jmap::submission
         const auto availableSenderIdentities = senderIdentities(identities);
         if (availableSenderIdentities.empty())
         {
-            co_return javelin::jmap::LiveRefreshError{
+            co_return javelin::jmap::OperationError{
                 .message = QStringLiteral("No sender identities are available for this account."),
             };
         }
@@ -909,7 +900,7 @@ namespace javelin::jmap::submission
         {
             if (const auto error = composeRepository.upsert(snapshot))
             {
-                co_return javelin::jmap::LiveRefreshError{.message = error->message};
+                co_return javelin::jmap::operationError(*error);
             }
             co_return snapshot;
         }
@@ -918,14 +909,14 @@ namespace javelin::jmap::submission
             request.draftEmailId.has_value() ? request.draftEmailId : request.referenceEmailId;
         if (!sourceEmailId.has_value())
         {
-            co_return javelin::jmap::LiveRefreshError{
+            co_return javelin::jmap::OperationError{
                 .message = QStringLiteral("A source message id is required."),
             };
         }
 
         const auto refreshResult =
             co_await m_jmapCore.refreshMessageContent(settings, request.accountId, *sourceEmailId);
-        if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&refreshResult))
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&refreshResult))
         {
             co_return *error;
         }
@@ -934,14 +925,14 @@ namespace javelin::jmap::submission
         const auto messageResult = messageViewService.load(request.accountId, *sourceEmailId);
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&messageResult))
         {
-            co_return javelin::jmap::LiveRefreshError{.message = error->message};
+            co_return javelin::jmap::operationError(*error);
         }
 
         const auto& messageSnapshot =
             std::get<std::optional<javelin::jmap::cache::MessageViewSnapshot>>(messageResult);
         if (!messageSnapshot.has_value())
         {
-            co_return javelin::jmap::LiveRefreshError{
+            co_return javelin::jmap::OperationError{
                 .message = QStringLiteral("The selected message is unavailable."),
             };
         }
@@ -1029,13 +1020,13 @@ namespace javelin::jmap::submission
 
         if (const auto error = composeRepository.upsert(snapshot))
         {
-            co_return javelin::jmap::LiveRefreshError{.message = error->message};
+            co_return javelin::jmap::operationError(*error);
         }
 
         co_return snapshot;
     }
 
-    QCoro::Task<std::variant<DraftSaveSummary, javelin::jmap::LiveRefreshError>>
+    QCoro::Task<std::variant<DraftSaveSummary, javelin::jmap::OperationError>>
     ComposeService::saveDraft(javelin::jmap::LiveConnectionSettings settings,
                               DraftSnapshot snapshot)
     {
@@ -1045,7 +1036,7 @@ namespace javelin::jmap::submission
         }
 
         const auto sessionResult = loadCachedSession(m_connection, snapshot.accountId);
-        if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&sessionResult))
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&sessionResult))
         {
             co_return *error;
         }
@@ -1054,14 +1045,14 @@ namespace javelin::jmap::submission
         const auto draftsMailbox = findMailboxByRole(m_connection, snapshot.accountId, "drafts");
         if (!draftsMailbox.has_value())
         {
-            co_return javelin::jmap::LiveRefreshError{
+            co_return javelin::jmap::OperationError{
                 .message = QStringLiteral("No Drafts mailbox is available for this account."),
             };
         }
 
         const auto identitiesResult = co_await ensureIdentities(m_connection, m_methodTransport,
                                                                 settings, snapshot.accountId);
-        if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&identitiesResult))
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&identitiesResult))
         {
             co_return *error;
         }
@@ -1072,7 +1063,7 @@ namespace javelin::jmap::submission
             { return identity.id == snapshot.identityId && !isWildcardSenderIdentity(identity); });
         if (identityIt == identities.cend())
         {
-            co_return javelin::jmap::LiveRefreshError{
+            co_return javelin::jmap::OperationError{
                 .message = QStringLiteral("The selected sender identity is unavailable."),
             };
         }
@@ -1119,7 +1110,7 @@ namespace javelin::jmap::submission
 
             const auto uploadResult = co_await uploadAttachment(
                 m_resourceTransport, settings, session, snapshot.accountId, attachment);
-            if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&uploadResult))
+            if (const auto* error = std::get_if<javelin::jmap::OperationError>(&uploadResult))
             {
                 co_return *error;
             }
@@ -1194,7 +1185,7 @@ namespace javelin::jmap::submission
         const auto methodRequest = javelin::jmap::api::emailSet(request);
         if (!methodRequest.has_value())
         {
-            co_return javelin::jmap::LiveRefreshError{
+            co_return javelin::jmap::OperationError{
                 .message = QStringLiteral("Failed to encode the Email/set draft request."),
             };
         }
@@ -1203,18 +1194,15 @@ namespace javelin::jmap::submission
             buildApiRequestContext(settings, snapshot.accountId, session), builder);
         if (const auto* error = std::get_if<javelin::jmap::api::TransportError>(&result))
         {
-            co_return javelin::jmap::LiveRefreshError{.message = transportMessage(*error)};
+            co_return javelin::jmap::operationError(*error);
         }
         if (const auto* error = std::get_if<javelin::jmap::api::AuthError>(&result))
         {
-            co_return javelin::jmap::LiveRefreshError{
-                .message = authMessage(*error),
-                .requiresUserIntervention = true,
-            };
+            co_return javelin::jmap::operationError(*error);
         }
         if (const auto* error = std::get_if<javelin::jmap::api::ProtocolError>(&result))
         {
-            co_return javelin::jmap::LiveRefreshError{.message = protocolMessage(*error)};
+            co_return javelin::jmap::operationError(*error);
         }
 
         const auto& envelope = std::get<javelin::jmap::api::ResponseEnvelope>(result);
@@ -1223,15 +1211,12 @@ namespace javelin::jmap::submission
         if (const auto* error =
                 std::get_if<javelin::jmap::api::ResponseReaderError>(&responseResult))
         {
-            co_return javelin::jmap::LiveRefreshError{
-                .message = QStringLiteral("Failed to read Email/set draft response: %1")
-                               .arg(QString::fromStdString(error->message)),
-            };
+            co_return javelin::jmap::operationError(*error);
         }
         const auto& response = std::get<javelin::jmap::api::EmailSetResponse>(responseResult);
         if (!response.notCreated.empty() || response.created.empty())
         {
-            co_return javelin::jmap::LiveRefreshError{
+            co_return javelin::jmap::OperationError{
                 .message = QStringLiteral("The server rejected the draft save request."),
             };
         }
@@ -1239,7 +1224,7 @@ namespace javelin::jmap::submission
         const auto createdIt = response.created.find("draft");
         if (createdIt == response.created.end())
         {
-            co_return javelin::jmap::LiveRefreshError{
+            co_return javelin::jmap::OperationError{
                 .message = QStringLiteral("The draft save response did not include the new draft."),
             };
         }
@@ -1249,14 +1234,14 @@ namespace javelin::jmap::submission
             emailFromDraft(snapshot, *identityIt, draftsMailbox->id, createdIt->second);
         if (const auto error = emailRepository.upsertMany(snapshot.accountId, {synthesizedEmail}))
         {
-            co_return javelin::jmap::LiveRefreshError{.message = error->message};
+            co_return javelin::jmap::operationError(*error);
         }
         if (snapshot.draftEmailId.has_value() && *snapshot.draftEmailId != createdIt->second.id)
         {
             const std::vector<std::string> staleDraftIds{*snapshot.draftEmailId};
             if (const auto error = emailRepository.removeMany(snapshot.accountId, staleDraftIds))
             {
-                co_return javelin::jmap::LiveRefreshError{.message = error->message};
+                co_return javelin::jmap::operationError(*error);
             }
         }
 
@@ -1264,7 +1249,7 @@ namespace javelin::jmap::submission
         javelin::jmap::cache::ComposeSessionRepository composeRepository{m_connection};
         if (const auto error = composeRepository.upsert(snapshot))
         {
-            co_return javelin::jmap::LiveRefreshError{.message = error->message};
+            co_return javelin::jmap::operationError(*error);
         }
 
         co_return DraftSaveSummary{
@@ -1274,18 +1259,18 @@ namespace javelin::jmap::submission
         };
     }
 
-    QCoro::Task<std::variant<SendSummary, javelin::jmap::LiveRefreshError>>
+    QCoro::Task<std::variant<SendSummary, javelin::jmap::OperationError>>
     ComposeService::send(javelin::jmap::LiveConnectionSettings settings, DraftSnapshot snapshot)
     {
         const auto draftSaveResult = co_await saveDraft(settings, std::move(snapshot));
-        if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&draftSaveResult))
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&draftSaveResult))
         {
             co_return *error;
         }
         const auto& draftSummary = std::get<DraftSaveSummary>(draftSaveResult);
 
         const auto sessionResult = loadCachedSession(m_connection, draftSummary.accountId);
-        if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&sessionResult))
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&sessionResult))
         {
             co_return *error;
         }
@@ -1296,21 +1281,21 @@ namespace javelin::jmap::submission
         const auto sentMailbox = findMailboxByRole(m_connection, draftSummary.accountId, "sent");
         if (!draftsMailbox.has_value() || !sentMailbox.has_value())
         {
-            co_return javelin::jmap::LiveRefreshError{
+            co_return javelin::jmap::OperationError{
                 .message =
                     QStringLiteral("Both Drafts and Sent mailboxes are required to send mail."),
             };
         }
 
         const auto draftResult = loadWorkingCopy(draftSummary.composeSessionId);
-        if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&draftResult))
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&draftResult))
         {
             co_return *error;
         }
         const auto draftSnapshot = std::get<std::optional<DraftSnapshot>>(draftResult);
         if (!draftSnapshot.has_value())
         {
-            co_return javelin::jmap::LiveRefreshError{
+            co_return javelin::jmap::OperationError{
                 .message = QStringLiteral("The compose session is unavailable."),
             };
         }
@@ -1342,7 +1327,7 @@ namespace javelin::jmap::submission
         });
         if (!request.has_value())
         {
-            co_return javelin::jmap::LiveRefreshError{
+            co_return javelin::jmap::OperationError{
                 .message = QStringLiteral("Failed to encode the EmailSubmission/set request."),
             };
         }
@@ -1357,18 +1342,15 @@ namespace javelin::jmap::submission
             buildApiRequestContext(settings, draftSummary.accountId, session), builder);
         if (const auto* error = std::get_if<javelin::jmap::api::TransportError>(&result))
         {
-            co_return javelin::jmap::LiveRefreshError{.message = transportMessage(*error)};
+            co_return javelin::jmap::operationError(*error);
         }
         if (const auto* error = std::get_if<javelin::jmap::api::AuthError>(&result))
         {
-            co_return javelin::jmap::LiveRefreshError{
-                .message = authMessage(*error),
-                .requiresUserIntervention = true,
-            };
+            co_return javelin::jmap::operationError(*error);
         }
         if (const auto* error = std::get_if<javelin::jmap::api::ProtocolError>(&result))
         {
-            co_return javelin::jmap::LiveRefreshError{.message = protocolMessage(*error)};
+            co_return javelin::jmap::operationError(*error);
         }
 
         const auto& envelope = std::get<javelin::jmap::api::ResponseEnvelope>(result);
@@ -1384,10 +1366,7 @@ namespace javelin::jmap::submission
         if (const auto* error =
                 std::get_if<javelin::jmap::api::ResponseReaderError>(&submissionResult))
         {
-            co_return javelin::jmap::LiveRefreshError{
-                .message = QStringLiteral("Failed to read EmailSubmission/set response: %1")
-                               .arg(QString::fromStdString(error->message)),
-            };
+            co_return javelin::jmap::operationError(*error);
         }
 
         const auto& submissionResponse =
@@ -1398,7 +1377,7 @@ namespace javelin::jmap::submission
                           << joinStrings(submissionResponse.notCreated);
         if (!submissionResponse.notCreated.empty() || submissionResponse.created.empty())
         {
-            co_return javelin::jmap::LiveRefreshError{
+            co_return javelin::jmap::OperationError{
                 .message = QStringLiteral("The server rejected the send request."),
             };
         }
@@ -1410,10 +1389,7 @@ namespace javelin::jmap::submission
         if (const auto* error =
                 std::get_if<javelin::jmap::api::ResponseReaderError>(&implicitEmailResult))
         {
-            co_return javelin::jmap::LiveRefreshError{
-                .message = QStringLiteral("Failed to read the implicit Email/set send response: %1")
-                               .arg(QString::fromStdString(error->message)),
-            };
+            co_return javelin::jmap::operationError(*error);
         }
         const auto& implicitEmailResponse =
             std::get<javelin::jmap::api::EmailSetResponse>(implicitEmailResult);
@@ -1515,7 +1491,7 @@ namespace javelin::jmap::submission
                 .deliveryStatusJson = std::nullopt,
             }))
         {
-            co_return javelin::jmap::LiveRefreshError{.message = error->message};
+            co_return javelin::jmap::operationError(*error);
         }
 
         javelin::jmap::cache::EmailRepository emailRepository{m_connection};
@@ -1523,7 +1499,7 @@ namespace javelin::jmap::submission
             emailRepository.find(draftSummary.accountId, draftSummary.draftEmailId);
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&emailResult))
         {
-            co_return javelin::jmap::LiveRefreshError{.message = error->message};
+            co_return javelin::jmap::operationError(*error);
         }
         if (const auto& email = std::get<std::optional<javelin::jmap::domain::Email>>(emailResult);
             email.has_value())
@@ -1549,7 +1525,7 @@ namespace javelin::jmap::submission
             if (const auto error =
                     emailRepository.upsertMany(draftSummary.accountId, {updatedEmail}))
             {
-                co_return javelin::jmap::LiveRefreshError{.message = error->message};
+                co_return javelin::jmap::operationError(*error);
             }
             qDebug().noquote() << "Compose send local cache after update"
                                << QString::fromStdString(draftSummary.accountId)
@@ -1577,38 +1553,38 @@ namespace javelin::jmap::submission
         };
     }
 
-    std::variant<std::optional<DraftSnapshot>, javelin::jmap::LiveRefreshError>
+    std::variant<std::optional<DraftSnapshot>, javelin::jmap::OperationError>
     ComposeService::loadWorkingCopy(const std::string_view composeSessionId) const
     {
         javelin::jmap::cache::ComposeSessionRepository repository{m_connection};
         const auto result = repository.find(composeSessionId);
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
         {
-            return javelin::jmap::LiveRefreshError{.message = error->message};
+            return javelin::jmap::operationError(*error);
         }
 
         return std::get<std::optional<DraftSnapshot>>(result);
     }
 
-    std::optional<javelin::jmap::LiveRefreshError>
+    std::optional<javelin::jmap::OperationError>
     ComposeService::storeWorkingCopy(const DraftSnapshot& snapshot)
     {
         javelin::jmap::cache::ComposeSessionRepository repository{m_connection};
         if (const auto error = repository.upsert(snapshot))
         {
-            return javelin::jmap::LiveRefreshError{.message = error->message};
+            return javelin::jmap::operationError(*error);
         }
 
         return std::nullopt;
     }
 
-    std::optional<javelin::jmap::LiveRefreshError>
+    std::optional<javelin::jmap::OperationError>
     ComposeService::discard(const std::string_view composeSessionId)
     {
         javelin::jmap::cache::ComposeSessionRepository repository{m_connection};
         if (const auto error = repository.remove(composeSessionId))
         {
-            return javelin::jmap::LiveRefreshError{.message = error->message};
+            return javelin::jmap::operationError(*error);
         }
 
         return std::nullopt;

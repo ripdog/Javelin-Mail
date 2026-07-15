@@ -1,5 +1,6 @@
 #include "app/ProcessServices.h"
 
+#include "app/ApplicationErrorCoordinator.h"
 #include "app/ComposeService.h"
 #include "app/InlineMessageSchemeHandler.h"
 #include "app/LongPollCoordinator.h"
@@ -97,11 +98,13 @@ namespace javelin::app
             std::make_unique<javelin::jmap::cache::SubmissionRepository>(m_databaseConnection);
         m_jmapComposeService = std::make_unique<javelin::jmap::submission::ComposeService>(
             m_databaseConnection, *m_transport, *m_methodTransport, *m_jmapCore);
-        m_composeService = std::make_unique<ComposeService>(*m_jmapComposeService);
+        m_errorCoordinator = std::make_unique<ApplicationErrorCoordinator>();
+        m_composeService =
+            std::make_unique<ComposeService>(*m_jmapComposeService, *m_errorCoordinator);
         m_mailService = std::make_unique<MailApplicationService>(
             m_databaseConnection, *m_jmapCore, *m_methodTransport,
             *m_stateChangeNetworkAccessManager, *m_accountRepository, *m_queryService,
-            *m_contactService, *m_calendarService, *m_sieveService);
+            *m_contactService, *m_calendarService, *m_sieveService, *m_errorCoordinator);
     }
 
     ProcessServices::~ProcessServices() = default;
@@ -174,6 +177,11 @@ namespace javelin::app
     MailApplicationService& ProcessServices::mailService()
     {
         return *m_mailService;
+    }
+
+    ApplicationErrorCoordinator& ProcessServices::errorCoordinator()
+    {
+        return *m_errorCoordinator;
     }
 
 } // namespace javelin::app

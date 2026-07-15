@@ -480,6 +480,8 @@ namespace javelin::gui::compose
             }
 
             return javelin::app::AccountConnectionSettings{
+                .connectionId = settings.id.toStdString(),
+                .revision = settings.revision,
                 .sessionUrl = settings.sessionUrl.toStdString(),
                 .loginEmail = settings.loginEmail.toStdString(),
                 .apiKey = settings.apiKey.toStdString(),
@@ -1048,25 +1050,26 @@ namespace javelin::gui::compose
                     m_identityLoadsStarted.insert(accountId);
                     auto task = m_composeService.loadSenderIdentities(
                         javelin::app::AccountConnectionSettings{
+                            .connectionId = connection.id.toStdString(),
+                            .revision = connection.revision,
                             .sessionUrl = connection.sessionUrl.toStdString(),
                             .loginEmail = connection.loginEmail.toStdString(),
                             .apiKey = connection.apiKey.toStdString(),
                         },
                         accountId);
-                    QCoro::connect(
-                        std::move(task), this,
-                        [this](std::variant<std::vector<javelin::jmap::domain::Identity>,
-                                            javelin::jmap::LiveRefreshError>
-                                   result)
-                        {
-                            if (const auto* error =
-                                    std::get_if<javelin::jmap::LiveRefreshError>(&result))
-                            {
-                                Q_EMIT statusMessageRequested(error->message, 10000);
-                                return;
-                            }
-                            loadIdentities();
-                        });
+                    QCoro::connect(std::move(task), this,
+                                   [this](std::variant<std::vector<javelin::jmap::domain::Identity>,
+                                                       javelin::jmap::OperationError>
+                                              result)
+                                   {
+                                       if (const auto* error =
+                                               std::get_if<javelin::jmap::OperationError>(&result))
+                                       {
+                                           Q_EMIT statusMessageRequested(error->message, 10000);
+                                           return;
+                                       }
+                                       loadIdentities();
+                                   });
                 }
             }
         }
@@ -1480,17 +1483,13 @@ namespace javelin::gui::compose
         QCoro::connect(
             std::move(task), this,
             [this](std::variant<javelin::jmap::submission::DraftSaveSummary,
-                                javelin::jmap::LiveRefreshError>
+                                javelin::jmap::OperationError>
                        result)
             {
                 setBusy(false);
-                if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
                 {
                     Q_EMIT statusMessageRequested(error->message, 10000);
-                    if (error->requiresUserIntervention)
-                    {
-                        Q_EMIT userInterventionRequired(error->message);
-                    }
                     m_closeAfterSave = false;
                     return;
                 }
@@ -1548,18 +1547,14 @@ namespace javelin::gui::compose
         auto task = m_composeService.send(*settings, m_snapshot);
         QCoro::connect(
             std::move(task), this,
-            [this](std::variant<javelin::jmap::submission::SendSummary,
-                                javelin::jmap::LiveRefreshError>
-                       result)
+            [this](
+                std::variant<javelin::jmap::submission::SendSummary, javelin::jmap::OperationError>
+                    result)
             {
                 setBusy(false);
-                if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
                 {
                     Q_EMIT statusMessageRequested(error->message, 10000);
-                    if (error->requiresUserIntervention)
-                    {
-                        Q_EMIT userInterventionRequired(error->message);
-                    }
                     return;
                 }
 

@@ -154,7 +154,7 @@ namespace javelin::gui::search
                 {
                     return;
                 }
-                if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
                 {
                     m_page.refreshInFlight = false;
                     m_page.refreshError = error->message;

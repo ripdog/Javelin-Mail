@@ -98,8 +98,7 @@ namespace javelin::gui::sieve
             [this, selectedId = std::move(selectedId)](javelin::jmap::sieve::SieveListResult result)
             {
                 setBusy(false);
-                if (const auto* error =
-                        std::get_if<javelin::jmap::sieve::SieveServiceError>(&result))
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
                 {
                     showError(*error);
                     return;
@@ -184,26 +183,25 @@ namespace javelin::gui::sieve
         m_statusLabel->setText(QStringLiteral("Loading script…"));
         auto task = m_service.requestSieveScript(m_ownerAccountId,
                                                  m_scripts[static_cast<std::size_t>(row)]);
-        QCoro::connect(std::move(task), this,
-                       [this, row](javelin::jmap::sieve::SieveContentResult result)
-                       {
-                           setBusy(false);
-                           if (row != m_currentRow)
-                               return;
-                           if (const auto* error =
-                                   std::get_if<javelin::jmap::sieve::SieveServiceError>(&result))
-                           {
-                               showError(*error);
-                               return;
-                           }
-                           m_document->setReadWrite(true);
-                           m_document->setText(
-                               QString::fromUtf8(std::get<QByteArray>(std::move(result))));
-                           m_loaded = true;
-                           m_dirty = false;
-                           m_statusLabel->setText(QStringLiteral("Ready"));
-                           updateActions();
-                       });
+        QCoro::connect(
+            std::move(task), this,
+            [this, row](javelin::jmap::sieve::SieveContentResult result)
+            {
+                setBusy(false);
+                if (row != m_currentRow)
+                    return;
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                {
+                    showError(*error);
+                    return;
+                }
+                m_document->setReadWrite(true);
+                m_document->setText(QString::fromUtf8(std::get<QByteArray>(std::move(result))));
+                m_loaded = true;
+                m_dirty = false;
+                m_statusLabel->setText(QStringLiteral("Ready"));
+                updateActions();
+            });
     }
 
     void SieveEditorDialog::newScript()
@@ -252,7 +250,7 @@ namespace javelin::gui::sieve
                        {
                            setBusy(false);
                            if (const auto* error =
-                                   std::get_if<javelin::jmap::sieve::SieveServiceError>(&result))
+                                   std::get_if<javelin::jmap::OperationError>(&result))
                            {
                                showError(*error);
                                return;
@@ -272,22 +270,22 @@ namespace javelin::gui::sieve
         m_statusLabel->setText(active ? QStringLiteral("Activating…")
                                       : QStringLiteral("Deactivating…"));
         auto task = m_service.setSieveScriptActive(m_ownerAccountId, script, active);
-        QCoro::connect(std::move(task), this,
-                       [this, active, previous = script.isActive](
-                           javelin::jmap::sieve::SieveActivationResult result)
-                       {
-                           setBusy(false);
-                           if (const auto* error =
-                                   std::get_if<javelin::jmap::sieve::SieveServiceError>(&result))
-                           {
-                               const QSignalBlocker blocker{m_activeCheckBox};
-                               m_activeCheckBox->setChecked(previous);
-                               showError(*error);
-                               return;
-                           }
-                           m_scripts[static_cast<std::size_t>(m_currentRow)].isActive = active;
-                           loadScripts();
-                       });
+        QCoro::connect(
+            std::move(task), this,
+            [this, active,
+             previous = script.isActive](javelin::jmap::sieve::SieveActivationResult result)
+            {
+                setBusy(false);
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                {
+                    const QSignalBlocker blocker{m_activeCheckBox};
+                    m_activeCheckBox->setChecked(previous);
+                    showError(*error);
+                    return;
+                }
+                m_scripts[static_cast<std::size_t>(m_currentRow)].isActive = active;
+                loadScripts();
+            });
     }
 
     void SieveEditorDialog::removeCurrentScriptFromList()
@@ -312,20 +310,19 @@ namespace javelin::gui::sieve
         setBusy(true);
         m_statusLabel->setText(QStringLiteral("Validating…"));
         auto task = m_service.validateSieveScript(m_ownerAccountId, m_document->text().toUtf8());
-        QCoro::connect(std::move(task), this,
-                       [this](javelin::jmap::sieve::SieveValidationResult result)
-                       {
-                           setBusy(false);
-                           if (const auto* error =
-                                   std::get_if<javelin::jmap::sieve::SieveServiceError>(&result))
-                           {
-                               showError(*error);
-                               return;
-                           }
-                           const auto& validation =
-                               std::get<javelin::jmap::sieve::SieveValidation>(result);
-                           m_statusLabel->setText(validation.message);
-                       });
+        QCoro::connect(
+            std::move(task), this,
+            [this](javelin::jmap::sieve::SieveValidationResult result)
+            {
+                setBusy(false);
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                {
+                    showError(*error);
+                    return;
+                }
+                const auto& validation = std::get<javelin::jmap::sieve::SieveValidation>(result);
+                m_statusLabel->setText(validation.message);
+            });
     }
 
     void SieveEditorDialog::saveScript()
@@ -337,27 +334,27 @@ namespace javelin::gui::sieve
         auto task = m_service.saveSieveScript(m_ownerAccountId,
                                               m_scripts[static_cast<std::size_t>(m_currentRow)],
                                               m_document->text().toUtf8());
-        QCoro::connect(std::move(task), this,
-                       [this](javelin::jmap::sieve::SieveSaveResult result)
-                       {
-                           setBusy(false);
-                           if (const auto* error =
-                                   std::get_if<javelin::jmap::sieve::SieveServiceError>(&result))
-                           {
-                               showError(*error);
-                               return;
-                           }
-                           m_scripts[static_cast<std::size_t>(m_currentRow)] =
-                               std::get<javelin::jmap::sieve::SieveScript>(std::move(result));
-                           auto title = QString::fromStdString(
-                               m_scripts[static_cast<std::size_t>(m_currentRow)].name);
-                           if (m_scripts[static_cast<std::size_t>(m_currentRow)].isActive)
-                               title += QStringLiteral(" (active)");
-                           m_scriptList->item(m_currentRow)->setText(title);
-                           m_dirty = false;
-                           m_statusLabel->setText(QStringLiteral("Saved"));
-                           updateActions();
-                       });
+        QCoro::connect(
+            std::move(task), this,
+            [this](javelin::jmap::sieve::SieveSaveResult result)
+            {
+                setBusy(false);
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                {
+                    showError(*error);
+                    return;
+                }
+                m_scripts[static_cast<std::size_t>(m_currentRow)] =
+                    std::get<javelin::jmap::sieve::SieveScript>(std::move(result));
+                auto title =
+                    QString::fromStdString(m_scripts[static_cast<std::size_t>(m_currentRow)].name);
+                if (m_scripts[static_cast<std::size_t>(m_currentRow)].isActive)
+                    title += QStringLiteral(" (active)");
+                m_scriptList->item(m_currentRow)->setText(title);
+                m_dirty = false;
+                m_statusLabel->setText(QStringLiteral("Saved"));
+                updateActions();
+            });
     }
 
     void SieveEditorDialog::setBusy(const bool busy)
@@ -367,11 +364,11 @@ namespace javelin::gui::sieve
         updateActions();
     }
 
-    void SieveEditorDialog::showError(const javelin::jmap::sieve::SieveServiceError& error)
+    void SieveEditorDialog::showError(const javelin::jmap::OperationError& error)
     {
-        m_statusLabel->setText(error.message);
-        if (error.code != javelin::jmap::sieve::SieveServiceErrorCode::InvalidScript)
-            QMessageBox::warning(this, QStringLiteral("Sieve Rules"), error.message);
+        m_statusLabel->setText(error.code == javelin::jmap::OperationErrorCode::InvalidUserInput
+                                   ? error.message
+                                   : QStringLiteral("The operation failed."));
     }
 
     void SieveEditorDialog::updateActions()

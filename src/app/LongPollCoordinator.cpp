@@ -1,4 +1,5 @@
 #include "app/LongPollCoordinator.h"
+#include "app/ApplicationErrorCoordinator.h"
 
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/SessionRepository.h"
@@ -26,6 +27,19 @@ namespace javelin::app
                 .loginEmail = settings.loginEmail,
                 .apiKey = settings.apiKey,
             };
+        }
+
+        template <typename Result>
+        [[nodiscard]] Result observeResult(ApplicationErrorCoordinator& coordinator,
+                                           const AccountConnectionSettings& settings,
+                                           const std::string_view accountId, QString operation,
+                                           Result result)
+        {
+            if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                coordinator.reportFailure(settings, accountId, std::move(operation), *error);
+            else
+                coordinator.reportSuccess(settings.connectionId);
+            return result;
         }
     } // namespace
 
@@ -83,23 +97,54 @@ namespace javelin::app
         javelin::jmap::cache::QueryService& queryService,
         javelin::jmap::contacts::ContactService& contactService,
         javelin::jmap::calendar::CalendarService& calendarService,
-        javelin::jmap::sieve::SieveService& sieveService, QObject* parent)
+        javelin::jmap::sieve::SieveService& sieveService,
+        ApplicationErrorCoordinator& errorCoordinator, QObject* parent)
         : QObject(parent), m_databaseConnection(databaseConnection), m_jmapCore(jmapCore),
           m_methodTransport(methodTransport), m_networkAccessManager(networkAccessManager),
           m_accountRepository(accountRepository), m_queryService(queryService),
           m_contactService(contactService), m_calendarService(calendarService),
-          m_sieveService(sieveService)
+          m_sieveService(sieveService), m_errorCoordinator(errorCoordinator)
     {
+        connect(&m_errorCoordinator, &ApplicationErrorCoordinator::authenticationPauseChanged, this,
+                [this](const QString& connectionId, const bool paused)
+                {
+                    for (const auto& [accountId, configuration] : m_configurations)
+                    {
+                        if (configuration.settings.connectionId != connectionId.toStdString())
+                            continue;
+                        if (paused)
+                        {
+                            const auto coordinator = m_coordinators.find(accountId);
+                            if (coordinator != m_coordinators.end())
+                                coordinator->second->pauseForAuthentication();
+                        }
+                        else
+                        {
+                            applyAccountConfiguration(accountId);
+                        }
+                    }
+                });
     }
 
     void MailApplicationService::applySettings(std::vector<AccountSyncConfiguration> configurations)
     {
+        std::unordered_set<std::string> previousConnectionIds;
+        for (const auto& [accountId, configuration] : m_configurations)
+        {
+            static_cast<void>(accountId);
+            previousConnectionIds.insert(configuration.settings.connectionId);
+        }
         std::unordered_set<std::string> configuredAccountIds;
+        std::unordered_set<std::string> configuredConnectionIds;
         for (auto& configuration : configurations)
         {
+            configuredConnectionIds.insert(configuration.settings.connectionId);
+            const auto connectionId = configuration.settings.connectionId;
+            const auto revision = configuration.settings.revision;
             configuredAccountIds.insert(configuration.accountId);
             const auto accountId = configuration.accountId;
             m_configurations.insert_or_assign(accountId, std::move(configuration));
+            m_errorCoordinator.settingsApplied(connectionId, revision);
             applyAccountConfiguration(accountId);
         }
 
@@ -119,6 +164,11 @@ namespace javelin::app
         std::erase_if(m_configurations, [&configuredAccountIds](const auto& entry)
                       { return !configuredAccountIds.contains(entry.first); });
         m_mailboxInterests.eraseAccountsNotIn(configuredAccountIds);
+        for (const auto& connectionId : previousConnectionIds)
+        {
+            if (!configuredConnectionIds.contains(connectionId))
+                m_errorCoordinator.forgetConnection(connectionId);
+        }
         refreshConfiguredSessions();
     }
 
@@ -127,6 +177,9 @@ namespace javelin::app
         javelin::jmap::cache::SessionRepository sessions{m_databaseConnection};
         for (const auto& [accountId, configuration] : m_configurations)
         {
+            if (m_errorCoordinator.authenticationPaused(configuration.settings.connectionId,
+                                                        configuration.settings.revision))
+                continue;
             const auto loaded = sessions.load(accountId);
             if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&loaded))
             {
@@ -151,22 +204,25 @@ namespace javelin::app
             return;
         }
 
-        const auto loginEmail = settings.loginEmail;
-        const auto sessionUrl = settings.sessionUrl;
+        const auto appliedSettings = settings;
         auto task = m_jmapCore.refreshSession(toLiveConnectionSettings(settings), ownerAccountId);
         QCoro::connect(
             std::move(task), this,
-            [this, ownerAccountId, loginEmail,
-             sessionUrl](javelin::jmap::SessionRefreshResult result)
+            [this, ownerAccountId, appliedSettings](javelin::jmap::SessionRefreshResult result)
             {
                 m_sessionRefreshesInFlight.erase(ownerAccountId);
-                if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
                 {
                     qWarning().noquote()
                         << "JMAP startup session discovery failed"
                         << QString::fromStdString(ownerAccountId) << error->message;
+                    m_errorCoordinator.reportFailure(appliedSettings, ownerAccountId,
+                                                     QStringLiteral("Discover server session"),
+                                                     *error);
                     return;
                 }
+
+                m_errorCoordinator.reportSuccess(appliedSettings.connectionId);
 
                 const auto& summary = std::get<javelin::jmap::SessionRefreshSummary>(result);
                 qInfo().noquote() << "JMAP startup session discovered"
@@ -175,8 +231,7 @@ namespace javelin::app
                                                                   : QStringLiteral("HTTP only"));
                 for (const auto& [accountId, configuration] : m_configurations)
                 {
-                    if (configuration.settings.loginEmail == loginEmail &&
-                        configuration.settings.sessionUrl == sessionUrl)
+                    if (configuration.settings.connectionId == appliedSettings.connectionId)
                     {
                         applyAccountConfiguration(accountId);
                     }
@@ -207,6 +262,12 @@ namespace javelin::app
                 m_databaseConnection, m_methodTransport, m_networkAccessManager,
                 m_accountRepository, m_queryService, this);
             connectCoordinator(coordinatorIt->first, *coordinatorIt->second);
+        }
+        if (m_errorCoordinator.authenticationPaused(configuration.settings.connectionId,
+                                                    configuration.settings.revision))
+        {
+            coordinatorIt->second->pauseForAuthentication();
+            return;
         }
         coordinatorIt->second->applySettings(std::move(configuration.settings), accountId,
                                              std::move(configuration.mailboxIds),
@@ -254,9 +315,8 @@ namespace javelin::app
         const auto configuration = m_configurations.find(intent.accountId);
         if (configuration == m_configurations.end())
         {
-            co_return javelin::jmap::LiveRefreshError{
+            co_return javelin::jmap::OperationError{
                 .message = QStringLiteral("Account synchronization is not configured."),
-                .requiresUserIntervention = true,
             };
         }
 
@@ -299,10 +359,13 @@ namespace javelin::app
         auto result = co_await m_jmapCore.queryMailboxPage(
             toLiveConnectionSettings(configuration->second.settings), intent.accountId,
             intent.mailboxId, intent.offset, intent.limit, intent.sort);
-        if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
         {
+            m_errorCoordinator.reportFailure(configuration->second.settings, intent.accountId,
+                                             QStringLiteral("Load mailbox messages"), *error);
             co_return *error;
         }
+        m_errorCoordinator.reportSuccess(configuration->second.settings.connectionId);
 
         auto page = std::get<javelin::jmap::MailboxPageSummary>(std::move(result));
         MailboxWindowSummary summary{
@@ -334,9 +397,8 @@ namespace javelin::app
         const auto configuration = m_configurations.find(intent.accountId);
         if (configuration == m_configurations.end())
         {
-            co_return javelin::jmap::LiveRefreshError{
+            co_return javelin::jmap::OperationError{
                 .message = QStringLiteral("Account synchronization is not configured."),
-                .requiresUserIntervention = true,
             };
         }
 
@@ -344,10 +406,13 @@ namespace javelin::app
         auto result = co_await m_jmapCore.searchMessages(
             toLiveConnectionSettings(configuration->second.settings), intent.accountId,
             intent.criteria, intent.offset, intent.limit, intent.sort);
-        if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
         {
+            m_errorCoordinator.reportFailure(configuration->second.settings, intent.accountId,
+                                             QStringLiteral("Search messages"), *error);
             co_return *error;
         }
+        m_errorCoordinator.reportSuccess(configuration->second.settings.connectionId);
 
         const auto& page = std::get<javelin::jmap::MessageSearchSummary>(result);
         SearchWindowSummary summary{
@@ -405,7 +470,7 @@ namespace javelin::app
         const auto mailboxesResult = m_queryService.listMailboxTree(intent.accountId);
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&mailboxesResult))
         {
-            return javelin::jmap::LiveRefreshError{.message = error->message};
+            return javelin::jmap::OperationError{.message = error->message};
         }
 
         javelin::jmap::cache::EmailRepository emailRepository{m_databaseConnection};
@@ -421,12 +486,12 @@ namespace javelin::app
             const auto emailResult = emailRepository.find(intent.accountId, emailId);
             if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&emailResult))
             {
-                return javelin::jmap::LiveRefreshError{.message = error->message};
+                return javelin::jmap::OperationError{.message = error->message};
             }
             const auto& email = std::get<std::optional<javelin::jmap::domain::Email>>(emailResult);
             if (!email.has_value())
             {
-                return javelin::jmap::LiveRefreshError{
+                return javelin::jmap::OperationError{
                     .message = QStringLiteral("Message %1 is not available in the local cache.")
                                    .arg(QString::fromStdString(emailId)),
                 };
@@ -439,7 +504,7 @@ namespace javelin::app
             std::get<std::vector<javelin::jmap::cache::MailboxTreeItem>>(mailboxesResult));
         if (const auto* error = std::get_if<QString>(&planResult))
         {
-            return javelin::jmap::LiveRefreshError{.message = *error};
+            return javelin::jmap::OperationError{.message = *error};
         }
 
         auto plan = std::get<PlannedMailboxSelectionMutation>(std::move(planResult));
@@ -448,7 +513,7 @@ namespace javelin::app
         {
             const auto result =
                 m_jmapCore.queueEmailMailboxMutation(intent.accountId, std::move(mutation));
-            if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+            if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
             {
                 return *error;
             }
@@ -485,12 +550,14 @@ namespace javelin::app
     {
         const auto configuration = m_configurations.find(accountId);
         if (configuration == m_configurations.end())
-            co_return javelin::jmap::LiveRefreshError{
+            co_return javelin::jmap::OperationError{
                 .message = QStringLiteral("Account synchronization is not configured."),
-                .requiresUserIntervention = true,
             };
-        co_return co_await m_jmapCore.submitPendingEmailMutations(
-            toLiveConnectionSettings(configuration->second.settings), std::move(accountId));
+        co_return observeResult(
+            m_errorCoordinator, configuration->second.settings, accountId,
+            QStringLiteral("Submit pending mail changes"),
+            co_await m_jmapCore.submitPendingEmailMutations(
+                toLiveConnectionSettings(configuration->second.settings), accountId));
     }
 
     QCoro::Task<javelin::jmap::MessageContentRefreshResult>
@@ -498,13 +565,14 @@ namespace javelin::app
     {
         const auto configuration = m_configurations.find(accountId);
         if (configuration == m_configurations.end())
-            co_return javelin::jmap::LiveRefreshError{
+            co_return javelin::jmap::OperationError{
                 .message = QStringLiteral("Account synchronization is not configured."),
-                .requiresUserIntervention = true,
             };
-        co_return co_await m_jmapCore.refreshMessageContent(
-            toLiveConnectionSettings(configuration->second.settings), std::move(accountId),
-            std::move(emailId));
+        co_return observeResult(m_errorCoordinator, configuration->second.settings, accountId,
+                                QStringLiteral("Load message content"),
+                                co_await m_jmapCore.refreshMessageContent(
+                                    toLiveConnectionSettings(configuration->second.settings),
+                                    accountId, std::move(emailId)));
     }
 
     QCoro::Task<javelin::jmap::AttachmentDownloadResult>
@@ -513,13 +581,14 @@ namespace javelin::app
     {
         const auto configuration = m_configurations.find(accountId);
         if (configuration == m_configurations.end())
-            co_return javelin::jmap::LiveRefreshError{
+            co_return javelin::jmap::OperationError{
                 .message = QStringLiteral("Account synchronization is not configured."),
-                .requiresUserIntervention = true,
             };
-        co_return co_await m_jmapCore.downloadAttachment(
-            toLiveConnectionSettings(configuration->second.settings), std::move(accountId),
-            std::move(emailId), std::move(partId));
+        co_return observeResult(m_errorCoordinator, configuration->second.settings, accountId,
+                                QStringLiteral("Download attachment"),
+                                co_await m_jmapCore.downloadAttachment(
+                                    toLiveConnectionSettings(configuration->second.settings),
+                                    accountId, std::move(emailId), std::move(partId)));
     }
 
     QCoro::Task<javelin::jmap::MessageSourceDownloadResult>
@@ -527,20 +596,23 @@ namespace javelin::app
     {
         const auto configuration = m_configurations.find(accountId);
         if (configuration == m_configurations.end())
-            co_return javelin::jmap::LiveRefreshError{
+            co_return javelin::jmap::OperationError{
                 .message = QStringLiteral("Account synchronization is not configured."),
-                .requiresUserIntervention = true,
             };
-        co_return co_await m_jmapCore.downloadMessageSource(
-            toLiveConnectionSettings(configuration->second.settings), std::move(accountId),
-            std::move(emailId));
+        co_return observeResult(m_errorCoordinator, configuration->second.settings, accountId,
+                                QStringLiteral("Download message source"),
+                                co_await m_jmapCore.downloadMessageSource(
+                                    toLiveConnectionSettings(configuration->second.settings),
+                                    accountId, std::move(emailId)));
     }
 
     QCoro::Task<javelin::jmap::LiveRefreshResult>
     MailApplicationService::bootstrapAccount(AccountBootstrapIntent intent)
     {
-        co_return co_await m_jmapCore.refreshFromServer(toLiveConnectionSettings(intent.settings),
-                                                        {}, std::move(intent.mailboxIds));
+        auto result = co_await m_jmapCore.refreshFromServer(
+            toLiveConnectionSettings(intent.settings), {}, std::move(intent.mailboxIds));
+        co_return observeResult(m_errorCoordinator, intent.settings, {},
+                                QStringLiteral("Synchronize account"), std::move(result));
     }
 
     QCoro::Task<javelin::jmap::contacts::ContactRefreshResult>
@@ -548,12 +620,14 @@ namespace javelin::app
     {
         const auto configuration = m_configurations.find(accountId);
         if (configuration == m_configurations.end())
-            co_return javelin::jmap::LiveRefreshError{
+            co_return javelin::jmap::OperationError{
                 .message = QStringLiteral("Account synchronization is not configured."),
-                .requiresUserIntervention = true,
             };
-        co_return co_await m_contactService.refreshAll(
-            toLiveConnectionSettings(configuration->second.settings), std::move(accountId));
+        co_return observeResult(
+            m_errorCoordinator, configuration->second.settings, accountId,
+            QStringLiteral("Synchronize contacts"),
+            co_await m_contactService.refreshAll(
+                toLiveConnectionSettings(configuration->second.settings), accountId));
     }
 
     QCoro::Task<javelin::jmap::calendar::CalendarRefreshResult>
@@ -563,8 +637,8 @@ namespace javelin::app
     {
         const auto configuration = m_configurations.find(ownerAccountId);
         if (configuration == m_configurations.end())
-            co_return javelin::jmap::calendar::CalendarServiceError{
-                .code = javelin::jmap::calendar::CalendarServiceErrorCode::Authentication,
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = QStringLiteral("Account synchronization is not configured.")};
         m_visibleCalendarRanges.insert_or_assign(
             ownerAccountId,
@@ -581,7 +655,8 @@ namespace javelin::app
                                            .accountCount = summary->accountCount,
                                            .eventCount = summary->eventCount});
         }
-        co_return result;
+        co_return observeResult(m_errorCoordinator, configuration->second.settings, ownerAccountId,
+                                QStringLiteral("Synchronize calendar"), std::move(result));
     }
 
     QCoro::Task<javelin::jmap::calendar::CalendarRefreshResult>
@@ -590,8 +665,8 @@ namespace javelin::app
         const auto configuration = m_configurations.find(ownerAccountId);
         const auto range = m_visibleCalendarRanges.find(ownerAccountId);
         if (configuration == m_configurations.end() || range == m_visibleCalendarRanges.end())
-            co_return javelin::jmap::calendar::CalendarServiceError{
-                .code = javelin::jmap::calendar::CalendarServiceErrorCode::Authentication,
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = QStringLiteral("Calendar synchronization is not configured.")};
         auto result = co_await m_calendarService.refreshChanged(
             toLiveConnectionSettings(configuration->second.settings), ownerAccountId,
@@ -603,7 +678,8 @@ namespace javelin::app
                                            .displayTimeZone = summary->displayTimeZone,
                                            .accountCount = summary->accountCount,
                                            .eventCount = summary->eventCount});
-        co_return result;
+        co_return observeResult(m_errorCoordinator, configuration->second.settings, ownerAccountId,
+                                QStringLiteral("Synchronize calendar changes"), std::move(result));
     }
 
     QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
@@ -612,12 +688,14 @@ namespace javelin::app
     {
         const auto configuration = m_configurations.find(ownerAccountId);
         if (configuration == m_configurations.end())
-            co_return javelin::jmap::calendar::CalendarServiceError{
-                .code = javelin::jmap::calendar::CalendarServiceErrorCode::Authentication,
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = QStringLiteral("Account synchronization is not configured.")};
-        co_return co_await m_calendarService.create(
-            toLiveConnectionSettings(configuration->second.settings), std::move(ownerAccountId),
-            std::move(command));
+        co_return observeResult(m_errorCoordinator, configuration->second.settings, ownerAccountId,
+                                QStringLiteral("Create calendar event"),
+                                co_await m_calendarService.create(
+                                    toLiveConnectionSettings(configuration->second.settings),
+                                    ownerAccountId, std::move(command)));
     }
 
     QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
@@ -626,12 +704,14 @@ namespace javelin::app
     {
         const auto configuration = m_configurations.find(ownerAccountId);
         if (configuration == m_configurations.end())
-            co_return javelin::jmap::calendar::CalendarServiceError{
-                .code = javelin::jmap::calendar::CalendarServiceErrorCode::Authentication,
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = QStringLiteral("Account synchronization is not configured.")};
-        co_return co_await m_calendarService.update(
-            toLiveConnectionSettings(configuration->second.settings), std::move(ownerAccountId),
-            std::move(command));
+        co_return observeResult(m_errorCoordinator, configuration->second.settings, ownerAccountId,
+                                QStringLiteral("Update calendar event"),
+                                co_await m_calendarService.update(
+                                    toLiveConnectionSettings(configuration->second.settings),
+                                    ownerAccountId, std::move(command)));
     }
 
     QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
@@ -640,12 +720,14 @@ namespace javelin::app
     {
         const auto configuration = m_configurations.find(ownerAccountId);
         if (configuration == m_configurations.end())
-            co_return javelin::jmap::calendar::CalendarServiceError{
-                .code = javelin::jmap::calendar::CalendarServiceErrorCode::Authentication,
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = QStringLiteral("Account synchronization is not configured.")};
-        co_return co_await m_calendarService.remove(
-            toLiveConnectionSettings(configuration->second.settings), std::move(ownerAccountId),
-            std::move(command));
+        co_return observeResult(m_errorCoordinator, configuration->second.settings, ownerAccountId,
+                                QStringLiteral("Delete calendar event"),
+                                co_await m_calendarService.remove(
+                                    toLiveConnectionSettings(configuration->second.settings),
+                                    ownerAccountId, std::move(command)));
     }
 
     QCoro::Task<javelin::jmap::sieve::SieveListResult>
@@ -653,11 +735,14 @@ namespace javelin::app
     {
         const auto configuration = m_configurations.find(ownerAccountId);
         if (configuration == m_configurations.end())
-            co_return javelin::jmap::sieve::SieveServiceError{
-                .code = javelin::jmap::sieve::SieveServiceErrorCode::Authentication,
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = QStringLiteral("Account synchronization is not configured.")};
-        co_return co_await m_sieveService.list(
-            toLiveConnectionSettings(configuration->second.settings), std::move(ownerAccountId));
+        co_return observeResult(
+            m_errorCoordinator, configuration->second.settings, ownerAccountId,
+            QStringLiteral("Load Sieve scripts"),
+            co_await m_sieveService.list(toLiveConnectionSettings(configuration->second.settings),
+                                         ownerAccountId));
     }
 
     QCoro::Task<javelin::jmap::sieve::SieveContentResult>
@@ -666,12 +751,14 @@ namespace javelin::app
     {
         const auto configuration = m_configurations.find(ownerAccountId);
         if (configuration == m_configurations.end())
-            co_return javelin::jmap::sieve::SieveServiceError{
-                .code = javelin::jmap::sieve::SieveServiceErrorCode::Authentication,
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = QStringLiteral("Account synchronization is not configured.")};
-        co_return co_await m_sieveService.load(
-            toLiveConnectionSettings(configuration->second.settings), std::move(ownerAccountId),
-            std::move(script));
+        co_return observeResult(
+            m_errorCoordinator, configuration->second.settings, ownerAccountId,
+            QStringLiteral("Load Sieve script"),
+            co_await m_sieveService.load(toLiveConnectionSettings(configuration->second.settings),
+                                         ownerAccountId, std::move(script)));
     }
 
     QCoro::Task<javelin::jmap::sieve::SieveValidationResult>
@@ -679,12 +766,14 @@ namespace javelin::app
     {
         const auto configuration = m_configurations.find(ownerAccountId);
         if (configuration == m_configurations.end())
-            co_return javelin::jmap::sieve::SieveServiceError{
-                .code = javelin::jmap::sieve::SieveServiceErrorCode::Authentication,
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = QStringLiteral("Account synchronization is not configured.")};
-        co_return co_await m_sieveService.validate(
-            toLiveConnectionSettings(configuration->second.settings), std::move(ownerAccountId),
-            std::move(content));
+        co_return observeResult(m_errorCoordinator, configuration->second.settings, ownerAccountId,
+                                QStringLiteral("Validate Sieve script"),
+                                co_await m_sieveService.validate(
+                                    toLiveConnectionSettings(configuration->second.settings),
+                                    ownerAccountId, std::move(content)));
     }
 
     QCoro::Task<javelin::jmap::sieve::SieveSaveResult> MailApplicationService::saveSieveScript(
@@ -692,12 +781,14 @@ namespace javelin::app
     {
         const auto configuration = m_configurations.find(ownerAccountId);
         if (configuration == m_configurations.end())
-            co_return javelin::jmap::sieve::SieveServiceError{
-                .code = javelin::jmap::sieve::SieveServiceErrorCode::Authentication,
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = QStringLiteral("Account synchronization is not configured.")};
-        co_return co_await m_sieveService.save(
-            toLiveConnectionSettings(configuration->second.settings), std::move(ownerAccountId),
-            std::move(script), std::move(content));
+        co_return observeResult(
+            m_errorCoordinator, configuration->second.settings, ownerAccountId,
+            QStringLiteral("Save Sieve script"),
+            co_await m_sieveService.save(toLiveConnectionSettings(configuration->second.settings),
+                                         ownerAccountId, std::move(script), std::move(content)));
     }
 
     QCoro::Task<javelin::jmap::sieve::SieveDeleteResult>
@@ -706,12 +797,14 @@ namespace javelin::app
     {
         const auto configuration = m_configurations.find(ownerAccountId);
         if (configuration == m_configurations.end())
-            co_return javelin::jmap::sieve::SieveServiceError{
-                .code = javelin::jmap::sieve::SieveServiceErrorCode::Authentication,
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = QStringLiteral("Account synchronization is not configured.")};
-        co_return co_await m_sieveService.remove(
-            toLiveConnectionSettings(configuration->second.settings), std::move(ownerAccountId),
-            std::move(script));
+        co_return observeResult(
+            m_errorCoordinator, configuration->second.settings, ownerAccountId,
+            QStringLiteral("Delete Sieve script"),
+            co_await m_sieveService.remove(toLiveConnectionSettings(configuration->second.settings),
+                                           ownerAccountId, std::move(script)));
     }
 
     QCoro::Task<javelin::jmap::sieve::SieveActivationResult>
@@ -721,12 +814,14 @@ namespace javelin::app
     {
         const auto configuration = m_configurations.find(ownerAccountId);
         if (configuration == m_configurations.end())
-            co_return javelin::jmap::sieve::SieveServiceError{
-                .code = javelin::jmap::sieve::SieveServiceErrorCode::Authentication,
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = QStringLiteral("Account synchronization is not configured.")};
-        co_return co_await m_sieveService.setActive(
-            toLiveConnectionSettings(configuration->second.settings), std::move(ownerAccountId),
-            std::move(script), active);
+        co_return observeResult(m_errorCoordinator, configuration->second.settings, ownerAccountId,
+                                QStringLiteral("Change active Sieve script"),
+                                co_await m_sieveService.setActive(
+                                    toLiveConnectionSettings(configuration->second.settings),
+                                    ownerAccountId, std::move(script), active));
     }
 
     QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
@@ -735,12 +830,15 @@ namespace javelin::app
     {
         const auto configuration = m_configurations.find(accountId);
         if (configuration == m_configurations.end())
-            co_return javelin::jmap::LiveRefreshError{
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::PreconditionFailed,
                 .message = QStringLiteral("Account synchronization is not configured."),
-                .requiresUserIntervention = true};
-        co_return co_await m_contactService.setAddressBooks(
-            toLiveConnectionSettings(configuration->second.settings), std::move(accountId),
-            std::move(request));
+            };
+        co_return observeResult(m_errorCoordinator, configuration->second.settings, accountId,
+                                QStringLiteral("Change address books"),
+                                co_await m_contactService.setAddressBooks(
+                                    toLiveConnectionSettings(configuration->second.settings),
+                                    accountId, std::move(request)));
     }
 
     QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
@@ -749,12 +847,15 @@ namespace javelin::app
     {
         const auto configuration = m_configurations.find(accountId);
         if (configuration == m_configurations.end())
-            co_return javelin::jmap::LiveRefreshError{
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::PreconditionFailed,
                 .message = QStringLiteral("Account synchronization is not configured."),
-                .requiresUserIntervention = true};
-        co_return co_await m_contactService.setContactCards(
-            toLiveConnectionSettings(configuration->second.settings), std::move(accountId),
-            std::move(request));
+            };
+        co_return observeResult(m_errorCoordinator, configuration->second.settings, accountId,
+                                QStringLiteral("Change contacts"),
+                                co_await m_contactService.setContactCards(
+                                    toLiveConnectionSettings(configuration->second.settings),
+                                    accountId, std::move(request)));
     }
 
     QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
@@ -763,12 +864,15 @@ namespace javelin::app
     {
         const auto configuration = m_configurations.find(accountId);
         if (configuration == m_configurations.end())
-            co_return javelin::jmap::LiveRefreshError{
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::PreconditionFailed,
                 .message = QStringLiteral("Account synchronization is not configured."),
-                .requiresUserIntervention = true};
-        co_return co_await m_contactService.copyContactCards(
-            toLiveConnectionSettings(configuration->second.settings), std::move(accountId),
-            std::move(request));
+            };
+        co_return observeResult(m_errorCoordinator, configuration->second.settings, accountId,
+                                QStringLiteral("Copy contacts"),
+                                co_await m_contactService.copyContactCards(
+                                    toLiveConnectionSettings(configuration->second.settings),
+                                    accountId, std::move(request)));
     }
 
     QCoro::Task<javelin::jmap::contacts::ContactUploadResult>
@@ -777,12 +881,16 @@ namespace javelin::app
     {
         const auto configuration = m_configurations.find(ownerAccountId);
         if (configuration == m_configurations.end())
-            co_return javelin::jmap::LiveRefreshError{
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::PreconditionFailed,
                 .message = QStringLiteral("Account synchronization is not configured."),
-                .requiresUserIntervention = true};
-        co_return co_await m_contactService.uploadMedia(
-            toLiveConnectionSettings(configuration->second.settings), std::move(ownerAccountId),
-            std::move(accountId), std::move(payload), std::move(mediaType));
+            };
+        co_return observeResult(m_errorCoordinator, configuration->second.settings, ownerAccountId,
+                                QStringLiteral("Upload contact media"),
+                                co_await m_contactService.uploadMedia(
+                                    toLiveConnectionSettings(configuration->second.settings),
+                                    ownerAccountId, std::move(accountId), std::move(payload),
+                                    std::move(mediaType)));
     }
 
     QCoro::Task<javelin::jmap::contacts::ContactDownloadResult>
@@ -791,12 +899,16 @@ namespace javelin::app
     {
         const auto configuration = m_configurations.find(ownerAccountId);
         if (configuration == m_configurations.end())
-            co_return javelin::jmap::LiveRefreshError{
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::PreconditionFailed,
                 .message = QStringLiteral("Account synchronization is not configured."),
-                .requiresUserIntervention = true};
-        co_return co_await m_contactService.downloadMedia(
-            toLiveConnectionSettings(configuration->second.settings), std::move(ownerAccountId),
-            std::move(accountId), std::move(blobId), std::move(mediaType));
+            };
+        co_return observeResult(m_errorCoordinator, configuration->second.settings, ownerAccountId,
+                                QStringLiteral("Download contact media"),
+                                co_await m_contactService.downloadMedia(
+                                    toLiveConnectionSettings(configuration->second.settings),
+                                    ownerAccountId, std::move(accountId), std::move(blobId),
+                                    std::move(mediaType)));
     }
 
     void MailApplicationService::stop()
@@ -820,27 +932,35 @@ namespace javelin::app
                 { Q_EMIT accountStatusChanged(QString::fromStdString(accountId), status); });
         connect(&coordinator, &AccountSyncCoordinator::cacheCommitted, this,
                 &MailApplicationService::cacheCommitted);
-        connect(
-            &coordinator, &AccountSyncCoordinator::calendarStateChanged, this,
-            [this](const QString& ownerAccountId)
-            {
-                const auto owner = ownerAccountId.toStdString();
-                const auto range = m_visibleCalendarRanges.find(owner);
-                if (range == m_visibleCalendarRanges.end())
-                    return;
-                auto task = requestCalendarChanges(owner);
-                QCoro::connect(
-                    std::move(task), this,
-                    [](const javelin::jmap::calendar::CalendarRefreshResult& result)
-                    {
-                        if (const auto* error =
-                                std::get_if<javelin::jmap::calendar::CalendarServiceError>(&result))
-                            qWarning().noquote()
-                                << "Calendar state-change refresh failed" << error->message;
-                    });
-            });
+        connect(&coordinator, &AccountSyncCoordinator::calendarStateChanged, this,
+                [this](const QString& ownerAccountId)
+                {
+                    const auto owner = ownerAccountId.toStdString();
+                    const auto range = m_visibleCalendarRanges.find(owner);
+                    if (range == m_visibleCalendarRanges.end())
+                        return;
+                    auto task = requestCalendarChanges(owner);
+                    QCoro::connect(std::move(task), this,
+                                   [](const javelin::jmap::calendar::CalendarRefreshResult& result)
+                                   {
+                                       if (const auto* error =
+                                               std::get_if<javelin::jmap::OperationError>(&result))
+                                           qWarning().noquote()
+                                               << "Calendar state-change refresh failed"
+                                               << error->message;
+                                   });
+                });
         connect(&coordinator, &AccountSyncCoordinator::notificationRaised, this,
                 &MailApplicationService::notificationRaised);
+        connect(
+            &coordinator, &AccountSyncCoordinator::operationFailed, this,
+            [this, accountId](const QString& operation, const javelin::jmap::OperationError& error)
+            {
+                const auto configuration = m_configurations.find(accountId);
+                if (configuration != m_configurations.end())
+                    m_errorCoordinator.reportFailure(configuration->second.settings, accountId,
+                                                     operation, error);
+            });
     }
 
 } // namespace javelin::app

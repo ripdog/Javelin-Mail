@@ -366,9 +366,9 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
     const auto forbidden = QCoro::waitFor(service.update(
         settings, "a1", {.accountId = "a1", .event = event(), .ifInState = std::nullopt}));
 
-    REQUIRE(std::holds_alternative<javelin::jmap::calendar::CalendarServiceError>(forbidden));
-    CHECK(std::get<javelin::jmap::calendar::CalendarServiceError>(forbidden).code ==
-          javelin::jmap::calendar::CalendarServiceErrorCode::Permission);
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(forbidden));
+    CHECK(std::get<javelin::jmap::OperationError>(forbidden).code ==
+          javelin::jmap::OperationErrorCode::PermissionDenied);
     transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
         .methodResponses =
             {{.name = "CalendarEvent/set",
@@ -383,9 +383,9 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
     const auto scheduling = QCoro::waitFor(service.create(
         settings, "a1", {.accountId = "a1", .event = scheduledEvent, .ifInState = std::nullopt}));
 
-    REQUIRE(std::holds_alternative<javelin::jmap::calendar::CalendarServiceError>(scheduling));
-    CHECK(std::get<javelin::jmap::calendar::CalendarServiceError>(scheduling).code ==
-          javelin::jmap::calendar::CalendarServiceErrorCode::Scheduling);
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(scheduling));
+    CHECK(std::get<javelin::jmap::OperationError>(scheduling).code ==
+          javelin::jmap::OperationErrorCode::SchedulingUnsupported);
     const auto cachedAfterFailure = calendars.loadWindow("a1", interval.start, interval.end, zone);
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::CalendarWindow>>(
         cachedAfterFailure));
@@ -415,7 +415,7 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
 
     const auto readOnlyDefault = service.setDefaultCalendar("a1", "read-only");
 
-    REQUIRE(std::holds_alternative<javelin::jmap::calendar::CalendarServiceError>(readOnlyDefault));
-    CHECK(std::get<javelin::jmap::calendar::CalendarServiceError>(readOnlyDefault).code ==
-          javelin::jmap::calendar::CalendarServiceErrorCode::Permission);
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(readOnlyDefault));
+    CHECK(std::get<javelin::jmap::OperationError>(readOnlyDefault).code ==
+          javelin::jmap::OperationErrorCode::PermissionDenied);
 }

@@ -35,6 +35,7 @@ namespace javelin::gui::settings
         constexpr auto legacyConnectionGroup = "connection";
         constexpr auto sizeKey = "size";
         constexpr auto idKey = "id";
+        constexpr auto revisionKey = "revision";
         constexpr auto displayNameKey = "displayName";
         constexpr auto sessionUrlKey = "sessionUrl";
         constexpr auto loginEmailKey = "loginEmail";
@@ -73,6 +74,7 @@ namespace javelin::gui::settings
         {
             return ConnectionSettings{
                 .id = QUuid::createUuid().toString(QUuid::WithoutBraces),
+                .revision = 1,
                 .displayName = {},
                 .sessionUrl = {},
                 .loginEmail = {},
@@ -104,6 +106,7 @@ namespace javelin::gui::settings
                 settings.value(QLatin1StringView{loginEmailKey}).toString().trimmed();
             const ConnectionSettings account{
                 .id = QUuid::createUuid().toString(QUuid::WithoutBraces),
+                .revision = 1,
                 .displayName = loginEmail,
                 .sessionUrl = settings.value(QLatin1StringView{sessionUrlKey}).toString().trimmed(),
                 .loginEmail = loginEmail,
@@ -342,10 +345,11 @@ namespace javelin::gui::settings
         connect(m_displayNameEdit, &QLineEdit::textEdited, this,
                 &PreferencesDialog::noteUnsavedChanges);
         connect(m_sessionUrlEdit, &QLineEdit::textEdited, this,
-                &PreferencesDialog::noteUnsavedChanges);
+                &PreferencesDialog::noteConnectionSettingsChanged);
         connect(m_loginEmailEdit, &QLineEdit::textEdited, this,
-                &PreferencesDialog::noteUnsavedChanges);
-        connect(m_apiKeyEdit, &QLineEdit::textEdited, this, &PreferencesDialog::noteUnsavedChanges);
+                &PreferencesDialog::noteConnectionSettingsChanged);
+        connect(m_apiKeyEdit, &QLineEdit::textEdited, this,
+                &PreferencesDialog::noteConnectionSettingsChanged);
         connect(m_removeRemoteContentButton, &QPushButton::clicked, this,
                 &PreferencesDialog::removeSelectedRemoteContentPermits);
         connect(m_remoteContentList, &QListWidget::itemSelectionChanged, this,
@@ -456,6 +460,14 @@ namespace javelin::gui::settings
         return result;
     }
 
+    void PreferencesDialog::selectConfiguredAccount(const QString& connectionId)
+    {
+        const auto found = std::ranges::find(m_accounts, connectionId, &ConnectionSettings::id);
+        if (found == m_accounts.end())
+            return;
+        m_accountList->setCurrentRow(static_cast<int>(std::distance(m_accounts.begin(), found)));
+    }
+
     std::vector<ConnectionSettings> PreferencesDialog::loadAccounts()
     {
         QSettings settings;
@@ -476,6 +488,7 @@ namespace javelin::gui::settings
             }
             accounts.push_back(ConnectionSettings{
                 .id = settings.value(QLatin1StringView{idKey}).toString(),
+                .revision = settings.value(QLatin1StringView{revisionKey}).toULongLong(),
                 .displayName = displayName,
                 .sessionUrl = settings.value(QLatin1StringView{sessionUrlKey}).toString().trimmed(),
                 .loginEmail = loginEmail,
@@ -563,6 +576,8 @@ namespace javelin::gui::settings
             settings.setArrayIndex(index);
             const auto& account = accounts[static_cast<std::size_t>(index)];
             settings.setValue(QLatin1StringView{idKey}, account.id);
+            settings.setValue(QLatin1StringView{revisionKey},
+                              static_cast<qulonglong>(account.revision));
             settings.setValue(QLatin1StringView{displayNameKey}, account.displayName);
             settings.setValue(QLatin1StringView{sessionUrlKey}, account.sessionUrl);
             settings.setValue(QLatin1StringView{loginEmailKey}, account.loginEmail);
@@ -702,9 +717,21 @@ namespace javelin::gui::settings
         updateButtons();
     }
 
+    void PreferencesDialog::noteConnectionSettingsChanged()
+    {
+        if (m_currentRow >= 0 && m_currentRow < static_cast<int>(m_accounts.size()))
+            m_dirtyConnectionIds.insert(m_accounts[static_cast<std::size_t>(m_currentRow)].id);
+        noteUnsavedChanges();
+    }
+
     void PreferencesDialog::saveCurrentSettings()
     {
         storeCurrentEdits();
+        for (auto& account : m_accounts)
+        {
+            if (m_dirtyConnectionIds.contains(account.id))
+                ++account.revision;
+        }
         for (const auto& account : m_removedAccounts)
         {
             if (const auto error = m_accountRepository.removeConfiguredAccount(
@@ -716,6 +743,7 @@ namespace javelin::gui::settings
             }
         }
         m_removedAccounts.clear();
+        m_dirtyConnectionIds.clear();
 
         saveAccounts(m_accounts);
         saveRemoteContentAllowList(QLatin1StringView{allowedSendersKey}, m_remoteContentSenders);

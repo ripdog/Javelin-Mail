@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -21,7 +22,9 @@ namespace javelin::jmap::api
     {
         TransportErrorCode code;
         std::string message;
-        std::optional<int> httpStatus;
+        std::optional<int> httpStatus = std::nullopt;
+        std::optional<int> networkError = std::nullopt;
+        std::optional<std::chrono::seconds> retryAfter = std::nullopt;
     };
 
     enum class AuthErrorCode
@@ -55,7 +58,7 @@ namespace javelin::jmap::api
     struct MethodError
     {
         std::string type;
-        std::optional<std::string> description;
+        std::optional<std::string> description = std::nullopt;
     };
 
     [[nodiscard]] std::string_view toString(TransportErrorCode code);
