@@ -1,6 +1,7 @@
 #include "gui/contacts/ContactsManagerWidget.h"
 
 #include "gui/IconUtils.h"
+#include "gui/settings/PreferencesDialog.h"
 #include "jmap/contacts/ContactService.h"
 
 #include <QCoroTask>
@@ -215,6 +216,10 @@ namespace javelin::gui::contacts
 
         [[nodiscard]] QString accountLabel(const javelin::jmap::cache::ContactAccount& account)
         {
+            const auto settings = javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
+                QString::fromStdString(account.accountId));
+            if (!settings.displayName.isEmpty())
+                return settings.displayName;
             return account.name.empty() ? QString::fromStdString(account.accountId)
                                         : QString::fromStdString(account.name);
         }
@@ -264,11 +269,6 @@ namespace javelin::gui::contacts
     {
         setObjectName(QStringLiteral("contactsManager"));
         setStyleSheet(QStringLiteral(
-            "#contactsManager QLineEdit, #contactsManager QPlainTextEdit, #contactsManager "
-            "QComboBox, #contactsManager QListWidget { border: 1px solid palette(mid); "
-            "border-radius: 7px; padding: 6px; background: palette(base); }"
-            "#contactsManager QPushButton { padding: 7px 11px; border-radius: 7px; }"
-            "#contactsManager QToolButton { padding: 7px; font-weight: 600; }"
             "#contactCard { background: palette(base); border: 1px solid palette(mid); "
             "border-radius: 10px; }"
             "#contactCardTitle { color: palette(text); font-weight: 600; }"));
