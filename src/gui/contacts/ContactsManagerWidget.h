@@ -24,6 +24,8 @@ class QStackedWidget;
 
 namespace javelin::gui::contacts
 {
+    class ContactFieldEditor;
+
     class ContactsManagerWidget final : public QWidget
     {
         Q_OBJECT
@@ -101,9 +103,10 @@ namespace javelin::gui::contacts
         QLineEdit* m_nameEdit = nullptr;
         QLineEdit* m_organizationEdit = nullptr;
         QLineEdit* m_titleEdit = nullptr;
-        QPlainTextEdit* m_emailsEdit = nullptr;
-        QPlainTextEdit* m_phonesEdit = nullptr;
-        QPlainTextEdit* m_addressesEdit = nullptr;
+        ContactFieldEditor* m_emailsEdit = nullptr;
+        ContactFieldEditor* m_phonesEdit = nullptr;
+        ContactFieldEditor* m_addressesEdit = nullptr;
+        QListWidget* m_membersEdit = nullptr;
         QLineEdit* m_birthdayEdit = nullptr;
         QPlainTextEdit* m_notesEdit = nullptr;
         QListWidget* m_addressBooksEdit = nullptr;

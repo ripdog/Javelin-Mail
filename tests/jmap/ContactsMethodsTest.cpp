@@ -95,9 +95,21 @@ TEST_CASE("contact document editing removes immutable ids and retains extensions
     auto fields = std::get<javelin::jmap::contacts::ContactEditorData>(editor);
     fields.fullName = "Joe Bloggs";
     fields.organization = "Example Ltd";
-    fields.emails = {"joe@example.test"};
-    fields.phones = {"+64 21 555 0100"};
-    fields.addresses = {"1 Example Street, Auckland"};
+    fields.emails = {{.key = {},
+                      .value = "joe@example.test",
+                      .label = std::nullopt,
+                      .preference = std::nullopt,
+                      .contexts = {}}};
+    fields.phones = {{.key = {},
+                      .value = "+64 21 555 0100",
+                      .label = std::nullopt,
+                      .preference = std::nullopt,
+                      .contexts = {}}};
+    fields.addresses = {{.key = {},
+                         .value = "1 Example Street, Auckland",
+                         .label = std::nullopt,
+                         .preference = std::nullopt,
+                         .contexts = {}}};
     fields.birthday = "--04-15";
     fields.notes = "Met at the JMAP conference.";
     const auto edited = javelin::jmap::contacts::applyContactEditorData(fields, false);
@@ -108,6 +120,37 @@ TEST_CASE("contact document editing removes immutable ids and retains extensions
     const auto reparsed = javelin::jmap::contacts::contactEditorData(std::get<std::string>(edited));
     REQUIRE(std::holds_alternative<javelin::jmap::contacts::ContactEditorData>(reparsed));
     CHECK(std::get<javelin::jmap::contacts::ContactEditorData>(reparsed).birthday == "--04-15");
+}
+
+TEST_CASE("structured contact fields and unresolved group members survive editing",
+          "[jmap][contacts][document]")
+{
+    const std::string document =
+        R"({"id":"g1","uid":"group-uid","kind":"group","addressBookIds":{"b1":true},"name":{"full":"Friends"},"emails":{"email-work":{"address":"old@example.test","label":"Office","pref":7,"contexts":{"work":true},"x-field":"preserved"}},"phones":{"phone-home":{"number":"123","contexts":{"private":true,"voice":true}}},"addresses":{"address-home":{"components":[{"kind":"street","value":"1 Example Street"},{"kind":"locality","value":"Auckland"}],"label":"Home"}},"members":{"known-uid":true,"temporarily-unavailable-uid":true},"x-card":"preserved"})";
+    const auto parsed = javelin::jmap::contacts::contactEditorData(document);
+    REQUIRE(std::holds_alternative<javelin::jmap::contacts::ContactEditorData>(parsed));
+    auto fields = std::get<javelin::jmap::contacts::ContactEditorData>(parsed);
+    REQUIRE(fields.emails.size() == 1);
+    CHECK(fields.emails.front().key == "email-work");
+    CHECK(fields.emails.front().label == std::optional<std::string>{"Office"});
+    CHECK(fields.emails.front().preference == std::optional<std::uint32_t>{7});
+    CHECK(fields.emails.front().contexts.at("work"));
+    REQUIRE(fields.addresses.size() == 1);
+    CHECK(fields.addresses.front().value == "1 Example Street, Auckland");
+    REQUIRE(fields.members.size() == 2);
+
+    fields.emails.front().value = "new@example.test";
+    fields.emails.front().preference = 1;
+    fields.members.erase(fields.members.begin());
+    const auto edited = javelin::jmap::contacts::applyContactEditorData(fields, false);
+    REQUIRE(std::holds_alternative<std::string>(edited));
+    const auto& json = std::get<std::string>(edited);
+    CHECK(json.find("new@example.test") != std::string::npos);
+    CHECK(json.find(R"("pref":1)") != std::string::npos);
+    CHECK(json.find("x-field") != std::string::npos);
+    CHECK(json.find("x-card") != std::string::npos);
+    CHECK(json.find("temporarily-unavailable-uid") != std::string::npos);
+    CHECK(json.find("known-uid") == std::string::npos);
 }
 
 TEST_CASE("contact starring preserves document extensions and removes legacy importance",

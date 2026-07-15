@@ -19,6 +19,15 @@ namespace javelin::jmap::contacts
         std::unordered_map<std::string, bool> contexts;
     };
 
+    struct ContactEditorField
+    {
+        std::string key;
+        std::string value;
+        std::optional<std::string> label;
+        std::optional<std::uint32_t> preference;
+        std::unordered_map<std::string, bool> contexts;
+    };
+
     struct ContactSummary
     {
         std::string accountId;
@@ -35,13 +44,15 @@ namespace javelin::jmap::contacts
 
     struct ContactEditorData
     {
+        std::string uid;
         std::string kind;
         std::string fullName;
         std::string organization;
         std::string title;
-        std::vector<std::string> emails;
-        std::vector<std::string> phones;
-        std::vector<std::string> addresses;
+        std::vector<ContactEditorField> emails;
+        std::vector<ContactEditorField> phones;
+        std::vector<ContactEditorField> addresses;
+        std::vector<std::string> members;
         std::string birthday;
         std::string notes;
         std::vector<std::string> addressBookIds;

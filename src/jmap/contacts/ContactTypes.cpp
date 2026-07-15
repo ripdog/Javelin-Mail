@@ -7,6 +7,8 @@
 #include <cctype>
 #include <format>
 #include <span>
+#include <tuple>
+#include <unordered_set>
 #include <utility>
 
 namespace javelin::jmap::contacts::detail
@@ -101,6 +103,102 @@ namespace javelin::jmap::contacts
                     result.push_back(text);
             }
             return result;
+        }
+
+        [[nodiscard]] std::vector<ContactEditorField> mappedFields(const glz::generic& root,
+                                                                   const std::string_view mapName,
+                                                                   const std::string_view property)
+        {
+            std::vector<ContactEditorField> result;
+            if (!root.is_object() || !root.contains(mapName) || !root.at(mapName).is_object())
+                return result;
+            for (const auto& [key, entry] : root.at(mapName).get_object())
+            {
+                if (!entry.is_object())
+                    continue;
+                ContactEditorField field{.key = key,
+                                         .value = stringProperty(entry, property),
+                                         .label = std::nullopt,
+                                         .preference = std::nullopt,
+                                         .contexts = {}};
+                const auto label = stringProperty(entry, "label");
+                if (!label.empty())
+                    field.label = label;
+                if (entry.contains("pref") && entry.at("pref").is_number())
+                {
+                    const auto preference = entry.at("pref").get_number();
+                    if (preference >= 1 && preference <= UINT32_MAX)
+                        field.preference = static_cast<std::uint32_t>(preference);
+                }
+                if (entry.contains("contexts") && entry.at("contexts").is_object())
+                {
+                    for (const auto& [context, enabled] : entry.at("contexts").get_object())
+                    {
+                        if (enabled.is_boolean())
+                            field.contexts.emplace(context, enabled.get_boolean());
+                    }
+                }
+                result.push_back(std::move(field));
+            }
+            std::ranges::sort(
+                result,
+                [](const ContactEditorField& left, const ContactEditorField& right)
+                {
+                    return std::tuple{left.preference.value_or(UINT32_MAX), left.key} <
+                           std::tuple{right.preference.value_or(UINT32_MAX), right.key};
+                });
+            return result;
+        }
+
+        void setMappedFields(glz::generic& root, const std::string_view mapName,
+                             const std::string_view property,
+                             const std::span<const ContactEditorField> fields)
+        {
+            auto& mapValue = root[mapName];
+            if (!mapValue.is_object())
+                mapValue.data = glz::generic::object_t{};
+            auto& map = mapValue.get_object();
+            std::unordered_set<std::string> retainedKeys;
+            retainedKeys.reserve(fields.size());
+            std::size_t generatedIndex = 1;
+            for (const auto& field : fields)
+            {
+                std::string key = field.key;
+                while (key.empty() || retainedKeys.contains(key))
+                    key = "javelin-" + std::to_string(generatedIndex++);
+                retainedKeys.insert(key);
+                auto& entry = mapValue[key];
+                if (!entry.is_object())
+                    entry.data = glz::generic::object_t{};
+                entry[property] = field.value;
+                if (field.label.has_value() && !field.label->empty())
+                    entry["label"] = *field.label;
+                else
+                    entry.get_object().erase("label");
+                if (field.preference.has_value())
+                    entry["pref"] = *field.preference;
+                else
+                    entry.get_object().erase("pref");
+                if (field.contexts.empty())
+                    entry.get_object().erase("contexts");
+                else
+                {
+                    auto& contexts = entry["contexts"];
+                    contexts.data = glz::generic::object_t{};
+                    for (const auto& [context, enabled] : field.contexts)
+                        contexts[context] = enabled;
+                }
+            }
+            std::vector<std::string> removedKeys;
+            for (const auto& entry : map)
+            {
+                if (!retainedKeys.contains(entry.first))
+                    removedKeys.push_back(entry.first);
+            }
+            for (const auto& key : removedKeys)
+                map.erase(key);
+            if (map.empty())
+                root.get_object().erase(mapName);
         }
 
         void setMappedStrings(glz::generic& root, const std::string_view mapName,
@@ -336,6 +434,7 @@ namespace javelin::jmap::contacts
 
         ContactEditorData data;
         data.document = buffer;
+        data.uid = stringProperty(value, "uid");
         data.kind = stringProperty(value, "kind");
         if (value.contains("name"))
         {
@@ -362,32 +461,37 @@ namespace javelin::jmap::contacts
         const auto titles = mappedStrings(value, "titles", "name");
         if (!titles.empty())
             data.title = titles.front();
-        data.emails = mappedStrings(value, "emails", "address");
-        data.phones = mappedStrings(value, "phones", "number");
-        data.addresses = mappedStrings(value, "addresses", "full");
-        if (data.addresses.empty() && value.contains("addresses") &&
-            value.at("addresses").is_object())
+        data.emails = mappedFields(value, "emails", "address");
+        data.phones = mappedFields(value, "phones", "number");
+        data.addresses = mappedFields(value, "addresses", "full");
+        for (auto& address : data.addresses)
         {
-            for (const auto& entry : value.at("addresses").get_object())
+            if (!address.value.empty())
+                continue;
+            const auto& entry = value.at("addresses").at(address.key);
+            if (entry.is_object() && entry.contains("components") &&
+                entry.at("components").is_array())
             {
-                std::string address;
-                if (entry.second.is_object() && entry.second.contains("components") &&
-                    entry.second.at("components").is_array())
+                for (const auto& component : entry.at("components").get_array())
                 {
-                    for (const auto& component : entry.second.at("components").get_array())
+                    const auto text = stringProperty(component, "value");
+                    if (!text.empty())
                     {
-                        const auto text = stringProperty(component, "value");
-                        if (!text.empty())
-                        {
-                            if (!address.empty())
-                                address += ", ";
-                            address += text;
-                        }
+                        if (!address.value.empty())
+                            address.value += ", ";
+                        address.value += text;
                     }
                 }
-                if (!address.empty())
-                    data.addresses.push_back(std::move(address));
             }
+        }
+        if (value.contains("members") && value.at("members").is_object())
+        {
+            for (const auto& [uid, included] : value.at("members").get_object())
+            {
+                if (included.is_boolean() && included.get_boolean())
+                    data.members.push_back(uid);
+            }
+            std::ranges::sort(data.members);
         }
         const auto notes = mappedStrings(value, "notes", "note");
         if (!notes.empty())
@@ -452,14 +556,18 @@ namespace javelin::jmap::contacts
         name["full"] = data.fullName;
         setFirstMappedString(value, "organizations", "name", data.organization);
         setFirstMappedString(value, "titles", "name", data.title);
-        setMappedStrings(value, "emails", "address", data.emails);
-        setMappedStrings(value, "phones", "number", data.phones);
-        const bool hasUnprojectedAddresses = value.contains("addresses") &&
-                                             value.at("addresses").is_object() &&
-                                             !value.at("addresses").get_object().empty() &&
-                                             mappedStrings(value, "addresses", "full").empty();
-        if (!data.addresses.empty() || !hasUnprojectedAddresses)
-            setMappedStrings(value, "addresses", "full", data.addresses);
+        setMappedFields(value, "emails", "address", data.emails);
+        setMappedFields(value, "phones", "number", data.phones);
+        setMappedFields(value, "addresses", "full", data.addresses);
+        if (data.kind == "group")
+        {
+            auto& members = value["members"];
+            members.data = glz::generic::object_t{};
+            for (const auto& uid : data.members)
+                members[uid] = true;
+        }
+        else
+            value.get_object().erase("members");
         setFirstMappedString(value, "notes", "note", data.notes);
 
         if (data.addressBookIds.empty())
