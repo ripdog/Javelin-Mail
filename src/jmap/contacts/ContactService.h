@@ -19,8 +19,9 @@ namespace javelin::jmap::api
 } // namespace javelin::jmap::api
 namespace javelin::jmap::cache
 {
+    class ContactRepository;
     class DatabaseConnection;
-}
+} // namespace javelin::jmap::cache
 
 namespace javelin::jmap::contacts
 {
@@ -56,6 +57,7 @@ namespace javelin::jmap::contacts
     {
       public:
         ContactService(javelin::jmap::cache::DatabaseConnection& connection,
+                       javelin::jmap::cache::ContactRepository& repository,
                        javelin::jmap::api::AbstractTransport& resourceTransport,
                        javelin::jmap::api::JmapMethodTransport& methodTransport);
 
@@ -76,6 +78,7 @@ namespace javelin::jmap::contacts
 
       private:
         javelin::jmap::cache::DatabaseConnection& m_connection;
+        javelin::jmap::cache::ContactRepository& m_repository;
         javelin::jmap::api::AbstractTransport& m_resourceTransport;
         javelin::jmap::api::JmapMethodTransport& m_methodTransport;
     };

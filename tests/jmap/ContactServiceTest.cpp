@@ -95,7 +95,12 @@ TEST_CASE("contact service greedily refreshes every contact into the cache",
                 R"({"methodResponses":[["AddressBook/get",{"accountId":"a1","state":"b1","list":[{"id":"book-1","name":"Personal","description":null,"sortOrder":0,"isDefault":true,"isSubscribed":true,"shareWith":null,"myRights":{"mayRead":true,"mayWrite":true,"mayShare":false,"mayDelete":true}}],"notFound":[]},"address-books"],["ContactCard/get",{"accountId":"a1","state":"c1","list":[{"id":"card-1","uid":"uid-1","kind":"individual","addressBookIds":{"book-1":true},"name":{"full":"Joe Bloggs"},"emails":{"e1":{"address":"joe@example.test"}}}],"notFound":[]},"contact-cards"]],"sessionState":"s2"})"},
     });
     javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
-    javelin::jmap::contacts::ContactService service{connection, transport, methodTransport};
+    javelin::jmap::cache::ContactRepository contacts{connection};
+    QString changedAccount;
+    QObject::connect(&contacts, &javelin::jmap::cache::ContactRepository::contactsChanged,
+                     [&changedAccount](const QString& accountId) { changedAccount = accountId; });
+    javelin::jmap::contacts::ContactService service{connection, contacts, transport,
+                                                    methodTransport};
     const auto result =
         QCoro::waitFor(service.refreshAll({.sessionUrl = "https://example.test/.well-known/jmap",
                                            .loginEmail = "alice@example.test",
@@ -105,8 +110,8 @@ TEST_CASE("contact service greedily refreshes every contact into the cache",
     CHECK(std::get<javelin::jmap::contacts::ContactRefreshSummary>(result).contactCount == 1);
     CHECK(transport.lastRequest.body.contains("AddressBook/get"));
     CHECK(transport.lastRequest.body.contains("ContactCard/get"));
+    CHECK(changedAccount == QStringLiteral("a1"));
 
-    javelin::jmap::cache::ContactRepository contacts{connection};
     const auto found = contacts.findByEmail("joe@example.test");
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::contacts::ContactSummary>>(found));
     REQUIRE(std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(found).has_value());

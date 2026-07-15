@@ -109,3 +109,23 @@ TEST_CASE("contact document editing removes immutable ids and retains extensions
     REQUIRE(std::holds_alternative<javelin::jmap::contacts::ContactEditorData>(reparsed));
     CHECK(std::get<javelin::jmap::contacts::ContactEditorData>(reparsed).birthday == "--04-15");
 }
+
+TEST_CASE("contact starring preserves document extensions and removes legacy importance",
+          "[jmap][contacts][document]")
+{
+    const auto starred = javelin::jmap::contacts::setContactStarred(
+        R"({"id":"server-id","uid":"u1","kind":"individual","keywords":{"important":true,"other":true},"x-extension":{"answer":42}})",
+        true);
+    REQUIRE(std::holds_alternative<std::string>(starred));
+    const auto& starredJson = std::get<std::string>(starred);
+    CHECK(starredJson.find("server-id") == std::string::npos);
+    CHECK(starredJson.find(R"("starred":true)") != std::string::npos);
+    CHECK(starredJson.find("x-extension") != std::string::npos);
+
+    const auto unstarred = javelin::jmap::contacts::setContactStarred(starredJson, false);
+    REQUIRE(std::holds_alternative<std::string>(unstarred));
+    const auto& unstarredJson = std::get<std::string>(unstarred);
+    CHECK(unstarredJson.find("starred") == std::string::npos);
+    CHECK(unstarredJson.find("important") == std::string::npos);
+    CHECK(unstarredJson.find(R"("other":true)") != std::string::npos);
+}

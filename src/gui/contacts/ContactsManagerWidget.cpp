@@ -518,6 +518,10 @@ namespace javelin::gui::contacts
     void ContactsManagerWidget::reloadContacts()
     {
         const auto accountId = currentAccountId();
+        const QString selectedId =
+            m_contactList->currentItem() == nullptr
+                ? QString{}
+                : m_contactList->currentItem()->data(Qt::UserRole).toString();
         m_contacts.clear();
         m_contactList->clear();
         if (!accountId.has_value())
@@ -552,19 +556,26 @@ namespace javelin::gui::contacts
                               };
                               return sort == 1 ? key(left) > key(right) : key(left) < key(right);
                           });
+        const bool hasStarred =
+            std::ranges::any_of(m_contacts, &javelin::jmap::contacts::ContactSummary::isImportant);
+        const auto addSection = [this](const QString& label)
+        {
+            auto* separator = new QListWidgetItem(label, m_contactList);
+            separator->setFlags(Qt::NoItemFlags);
+            QFont font = separator->font();
+            font.setBold(true);
+            separator->setFont(font);
+        };
+        if (hasStarred)
+            addSection(QStringLiteral("STARRED"));
         bool addedRegularSeparator = false;
+        QListWidgetItem* firstContactItem = nullptr;
+        QListWidgetItem* selectedItem = nullptr;
         for (const auto& contact : m_contacts)
         {
-            if (!contact.isImportant && !addedRegularSeparator &&
-                std::ranges::any_of(m_contacts,
-                                    &javelin::jmap::contacts::ContactSummary::isImportant))
+            if (!contact.isImportant && !addedRegularSeparator && hasStarred)
             {
-                auto* separator =
-                    new QListWidgetItem(QStringLiteral("ALL CONTACTS"), m_contactList);
-                separator->setFlags(Qt::NoItemFlags);
-                QFont font = separator->font();
-                font.setBold(true);
-                separator->setFont(font);
+                addSection(QStringLiteral("ALL CONTACTS"));
                 addedRegularSeparator = true;
             }
             auto* item =
@@ -580,9 +591,14 @@ namespace javelin::gui::contacts
                 detail = QString::fromStdString(contact.emails.front().address);
             item->setToolTip(detail);
             item->setData(Qt::UserRole, QString::fromStdString(contact.id));
+            if (firstContactItem == nullptr)
+                firstContactItem = item;
+            if (item->data(Qt::UserRole).toString() == selectedId)
+                selectedItem = item;
         }
-        if (!m_contacts.empty())
-            m_contactList->setCurrentRow(0);
+        if (firstContactItem != nullptr)
+            m_contactList->setCurrentItem(selectedItem == nullptr ? firstContactItem
+                                                                  : selectedItem);
         else
             showSelectedContact();
     }
@@ -638,6 +654,13 @@ namespace javelin::gui::contacts
             connect(copyEmail, &QAction::triggered, this,
                     [email] { QApplication::clipboard()->setText(email); });
         }
+        auto* starred = menu.addAction(
+            javelin::gui::themedSvgIcon(QStringLiteral(":/icons/thunderbird-icons/starred.svg"),
+                                        m_contactList->palette().color(QPalette::Highlight)),
+            contact->isImportant ? QStringLiteral("Remove from Starred")
+                                 : QStringLiteral("Add to Starred"));
+        starred->setEnabled(!m_busy);
+        connect(starred, &QAction::triggered, this, &ContactsManagerWidget::toggleContactStarred);
         menu.addSeparator();
         auto* edit = menu.addAction(QIcon::fromTheme(QStringLiteral("document-edit")),
                                     QStringLiteral("Edit Contact"));
@@ -651,6 +674,46 @@ namespace javelin::gui::contacts
         for (auto* action : {edit, copy, remove})
             action->setEnabled(!m_busy);
         menu.exec(m_contactList->viewport()->mapToGlobal(position));
+    }
+
+    void ContactsManagerWidget::toggleContactStarred()
+    {
+        if (m_busy)
+            return;
+        const auto accountId = currentAccountId();
+        const auto* contact = currentContact();
+        if (!accountId.has_value() || contact == nullptr)
+            return;
+        const auto document =
+            javelin::jmap::contacts::setContactStarred(contact->document, !contact->isImportant);
+        if (const auto* message = std::get_if<std::string_view>(&document))
+        {
+            QMessageBox::warning(
+                this, QStringLiteral("Star Contact"),
+                QString::fromUtf8(message->data(), static_cast<qsizetype>(message->size())));
+            return;
+        }
+
+        javelin::jmap::api::ContactCardSetRequest request;
+        request.accountId = *accountId;
+        request.update.emplace(contact->id, javelin::jmap::api::ContactDocument{
+                                                .json = std::get<std::string>(document)});
+        setBusy(true);
+        auto task = m_service.setContactCards(m_ownerAccountId, std::move(request));
+        QCoro::connect(std::move(task), this,
+                       [this](javelin::jmap::contacts::ContactMutationResult result)
+                       {
+                           setBusy(false);
+                           if (const auto* error =
+                                   std::get_if<javelin::jmap::LiveRefreshError>(&result))
+                           {
+                               Q_EMIT statusMessageRequested(error->message, 10000);
+                               if (error->requiresUserIntervention)
+                                   Q_EMIT userInterventionRequired(error->message);
+                               return;
+                           }
+                           requestRefresh();
+                       });
     }
 
     void ContactsManagerWidget::loadEditorDocument(const QString& document)

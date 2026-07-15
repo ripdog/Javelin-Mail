@@ -42,6 +42,7 @@ namespace javelin::gui::contacts
         void beginEditContact();
         void deleteContact();
         void copyContact();
+        void toggleContactStarred();
         void showAddressBookManager();
 
       Q_SIGNALS:

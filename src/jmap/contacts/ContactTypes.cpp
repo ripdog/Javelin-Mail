@@ -168,6 +168,11 @@ namespace javelin::jmap::contacts
             return std::nullopt;
         }
 
+        const auto keywordEnabled = [&parsed](const std::string_view keyword)
+        {
+            const auto found = parsed.keywords.find(std::string{keyword});
+            return found != parsed.keywords.end() && found->second;
+        };
         ContactSummary summary{.accountId = std::move(accountId),
                                .id = card.id,
                                .uid = card.uid,
@@ -176,8 +181,8 @@ namespace javelin::jmap::contacts
                                .organization = std::nullopt,
                                .emails = {},
                                .addressBookIds = {},
-                               .isImportant = parsed.keywords.contains("important") ||
-                                              parsed.keywords.contains("starred"),
+                               .isImportant =
+                                   keywordEnabled("important") || keywordEnabled("starred"),
                                .document = card.document};
         if (parsed.name.has_value())
         {
@@ -286,6 +291,39 @@ namespace javelin::jmap::contacts
         {
             return std::string_view{"Unable to update the contact photo."};
         }
+        return result;
+    }
+
+    std::variant<std::string, std::string_view> setContactStarred(const std::string_view json,
+                                                                  const bool starred)
+    {
+        std::string buffer{json};
+        glz::generic value;
+        if (glz::read_json(value, buffer) || !value.is_object())
+            return std::string_view{"The contact document must be valid before starring it."};
+
+        value.get_object().erase("id");
+        if (value.contains("keywords") && !value.at("keywords").is_object())
+            return std::string_view{"The contact keywords property is not an object."};
+        if (starred)
+        {
+            auto& keywords = value["keywords"];
+            if (keywords.is_null())
+                keywords.data = glz::generic::object_t{};
+            keywords["starred"] = true;
+        }
+        else if (value.contains("keywords"))
+        {
+            auto& keywords = value.at("keywords").get_object();
+            keywords.erase("starred");
+            keywords.erase("important");
+            if (keywords.empty())
+                value.get_object().erase("keywords");
+        }
+
+        std::string result;
+        if (glz::write_json(value, result))
+            return std::string_view{"Unable to update the starred contact state."};
         return result;
     }
 

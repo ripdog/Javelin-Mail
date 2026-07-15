@@ -216,10 +216,11 @@ namespace javelin::jmap::contacts
     } // namespace
 
     ContactService::ContactService(javelin::jmap::cache::DatabaseConnection& connection,
+                                   javelin::jmap::cache::ContactRepository& repository,
                                    javelin::jmap::api::AbstractTransport& resourceTransport,
                                    javelin::jmap::api::JmapMethodTransport& methodTransport)
-        : m_connection(connection), m_resourceTransport(resourceTransport),
-          m_methodTransport(methodTransport)
+        : m_connection(connection), m_repository(repository),
+          m_resourceTransport(resourceTransport), m_methodTransport(methodTransport)
     {
     }
 
@@ -292,8 +293,7 @@ namespace javelin::jmap::contacts
                 }
                 contacts.push_back(std::move(*contact));
             }
-            javelin::jmap::cache::ContactRepository repository{m_connection};
-            if (const auto cacheError = repository.replaceAll(
+            if (const auto cacheError = m_repository.replaceAll(
                     accountId, books.value->list, contacts, books.value->state, cards.value->state))
             {
                 co_return error(cacheError->message);
