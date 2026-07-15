@@ -455,6 +455,52 @@ namespace javelin::gui::contacts
             .mayDestroy;
     }
 
+    ContactsViewState ContactsManagerWidget::viewState() const
+    {
+        return {
+            .accountId = currentAccountId().value_or(std::string{}),
+            .addressBookId = currentAddressBookId().value_or(std::string{}),
+            .contactId = currentContact() == nullptr ? std::string{} : currentContact()->id,
+            .filter = m_filterEdit->text(),
+            .sortMode = m_sortCombo->currentData().toInt(),
+        };
+    }
+
+    void ContactsManagerWidget::restoreViewState(const ContactsViewState& state)
+    {
+        if (!state.accountId.empty())
+        {
+            const int accountIndex =
+                m_accountCombo->findData(QString::fromStdString(state.accountId));
+            if (accountIndex >= 0)
+                m_accountCombo->setCurrentIndex(accountIndex);
+        }
+        if (!state.addressBookId.empty())
+        {
+            const int addressBookIndex =
+                m_addressBookCombo->findData(QString::fromStdString(state.addressBookId));
+            if (addressBookIndex >= 0)
+                m_addressBookCombo->setCurrentIndex(addressBookIndex);
+        }
+        m_filterEdit->setText(state.filter);
+        const int sortIndex = m_sortCombo->findData(state.sortMode);
+        if (sortIndex >= 0)
+            m_sortCombo->setCurrentIndex(sortIndex);
+        if (!state.contactId.empty())
+        {
+            const QString contactId = QString::fromStdString(state.contactId);
+            for (int row = 0; row < m_contactList->count(); ++row)
+            {
+                auto* item = m_contactList->item(row);
+                if (item->data(Qt::UserRole).toString() == contactId)
+                {
+                    m_contactList->setCurrentItem(item);
+                    break;
+                }
+            }
+        }
+    }
+
     void ContactsManagerWidget::setupUi()
     {
         setObjectName(QStringLiteral("contactsManager"));

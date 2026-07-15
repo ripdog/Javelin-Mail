@@ -358,6 +358,9 @@ namespace javelin::gui::shell
         void restoreMailboxTab(const QSettings& settings, const QString& accountId);
         void restoreSearchTab(const QSettings& settings, const QString& accountId);
         void restoreComposeTab(const QSettings& settings);
+        void restoreContactsTab(const QSettings& settings, const QString& accountId);
+        [[nodiscard]] javelin::gui::contacts::ContactsManagerWidget*
+        appendContactsTab(std::string ownerAccountId, QString title);
         void savePersistentState() const;
         void writePersistentTab(QSettings& settings, const TabState& tab) const;
         void updateEmptyStates();

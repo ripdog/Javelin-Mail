@@ -1330,10 +1330,25 @@ namespace javelin::gui::shell
                 selected = match;
             }
         }
-        const auto settings = javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
-            QString::fromStdString(selected->accountId));
+        auto* widget = appendContactsTab(selected->ownerAccountId, QStringLiteral("Contacts"));
+        if (widget == nullptr)
+            return;
+        m_activeTabIndex = static_cast<int>(m_tabs.size() - 1);
+        updateTabBar();
+        activateTab(*m_activeTabIndex, false);
+        widget->requestRefresh();
+    }
+
+    javelin::gui::contacts::ContactsManagerWidget*
+    MainWindow::appendContactsTab(std::string ownerAccountId, QString title)
+    {
+        const auto availableAccounts = m_contactRepository.listAccounts(ownerAccountId);
+        const auto* accounts =
+            std::get_if<std::vector<javelin::jmap::cache::ContactAccount>>(&availableAccounts);
+        if (accounts == nullptr || accounts->empty())
+            return nullptr;
         auto* widget = new javelin::gui::contacts::ContactsManagerWidget(
-            m_contactRepository, m_mailService, selected->ownerAccountId, m_contentStack);
+            m_contactRepository, m_mailService, ownerAccountId, m_contentStack);
         connect(widget, &javelin::gui::contacts::ContactsManagerWidget::statusMessageRequested,
                 m_statusBar, &LayeredStatusBar::showMessage);
         connect(widget, &javelin::gui::contacts::ContactsManagerWidget::userInterventionRequired,
@@ -1375,15 +1390,13 @@ namespace javelin::gui::shell
                         updateToolbarForActiveTab();
                 });
         m_contentStack->addWidget(widget);
-        m_tabs.push_back(TabState{.content = ContactsTabState{.accountId = selected->ownerAccountId,
-                                                              .title = QStringLiteral("Contacts"),
-                                                              .widget = widget,
-                                                              .page = {},
-                                                              .selection = {}}});
-        m_activeTabIndex = static_cast<int>(m_tabs.size() - 1);
-        updateTabBar();
-        activateTab(*m_activeTabIndex, false);
-        widget->requestRefresh();
+        m_tabs.push_back(
+            TabState{.content = ContactsTabState{.accountId = std::move(ownerAccountId),
+                                                 .title = std::move(title),
+                                                 .widget = widget,
+                                                 .page = {},
+                                                 .selection = {}}});
+        return widget;
     }
 
     void MainWindow::openSieveEditor()
@@ -5623,6 +5636,12 @@ namespace javelin::gui::shell
                 continue;
             }
 
+            if (type == QStringLiteral("contacts"))
+            {
+                restoreContactsTab(settings, accountId);
+                continue;
+            }
+
             if (type == QStringLiteral("calendar"))
             {
                 openCalendar();
@@ -5772,6 +5791,24 @@ namespace javelin::gui::shell
         attachComposeWidget(widget, static_cast<int>(m_tabs.size() - 1));
     }
 
+    void MainWindow::restoreContactsTab(const QSettings& settings, const QString& accountId)
+    {
+        auto* widget = appendContactsTab(
+            accountId.toStdString(),
+            settings.value(QStringLiteral("title"), QStringLiteral("Contacts")).toString());
+        if (widget == nullptr)
+            return;
+        widget->restoreViewState({
+            .accountId =
+                settings.value(QStringLiteral("contactAccountId")).toString().toStdString(),
+            .addressBookId =
+                settings.value(QStringLiteral("addressBookId")).toString().toStdString(),
+            .contactId = settings.value(QStringLiteral("contactId")).toString().toStdString(),
+            .filter = settings.value(QStringLiteral("contactFilter")).toString(),
+            .sortMode = settings.value(QStringLiteral("contactSortMode"), 0).toInt(),
+        });
+    }
+
     void MainWindow::savePersistentState() const
     {
         QSettings settings;
@@ -5841,9 +5878,22 @@ namespace javelin::gui::shell
                                           ? content.widget->displayedMonth().toString(Qt::ISODate)
                                           : QString{});
                 }
-                else
+                else if constexpr (std::is_same_v<std::decay_t<decltype(content)>,
+                                                  ContactsTabState>)
                 {
                     settings.setValue(QStringLiteral("type"), QStringLiteral("contacts"));
+                    if (content.widget != nullptr)
+                    {
+                        const auto state = content.widget->viewState();
+                        settings.setValue(QStringLiteral("contactAccountId"),
+                                          QString::fromStdString(state.accountId));
+                        settings.setValue(QStringLiteral("addressBookId"),
+                                          QString::fromStdString(state.addressBookId));
+                        settings.setValue(QStringLiteral("contactId"),
+                                          QString::fromStdString(state.contactId));
+                        settings.setValue(QStringLiteral("contactFilter"), state.filter);
+                        settings.setValue(QStringLiteral("contactSortMode"), state.sortMode);
+                    }
                 }
             },
             tab.content);

@@ -26,6 +26,15 @@ namespace javelin::gui::contacts
 {
     class ContactFieldEditor;
 
+    struct ContactsViewState
+    {
+        std::string accountId;
+        std::string addressBookId;
+        std::string contactId;
+        QString filter;
+        int sortMode = 0;
+    };
+
     class ContactsManagerWidget final : public QWidget
     {
         Q_OBJECT
@@ -40,6 +49,8 @@ namespace javelin::gui::contacts
         [[nodiscard]] bool canCreateContact() const;
         [[nodiscard]] bool canEditContact() const;
         [[nodiscard]] bool canDeleteContact() const;
+        [[nodiscard]] ContactsViewState viewState() const;
+        void restoreViewState(const ContactsViewState& state);
 
       public Q_SLOTS:
         void requestRefresh();
