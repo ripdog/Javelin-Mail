@@ -89,6 +89,22 @@ TEST_CASE("contact document editing removes immutable ids and retains extensions
     const auto photo = javelin::jmap::contacts::setContactPhoto(json, "blob-1", "image/png");
     REQUIRE(std::holds_alternative<std::string>(photo));
     CHECK(std::get<std::string>(photo).find("blob-1") != std::string::npos);
+    const auto parsedPhoto = javelin::jmap::contacts::contactPhoto(std::get<std::string>(photo));
+    REQUIRE(parsedPhoto.has_value());
+    CHECK(parsedPhoto->blobId == std::optional<std::string>{"blob-1"});
+
+    const auto replacedPhoto = javelin::jmap::contacts::setContactPhoto(
+        R"({"media":{"server-photo":{"kind":"photo","blobId":"old"},"sound":{"kind":"sound","uri":"data:audio/wav;base64,AA=="}}})",
+        "blob-2", "image/jpeg");
+    REQUIRE(std::holds_alternative<std::string>(replacedPhoto));
+    CHECK(std::get<std::string>(replacedPhoto).find("server-photo") != std::string::npos);
+    CHECK(std::get<std::string>(replacedPhoto).find("javelin-photo") == std::string::npos);
+    CHECK(std::get<std::string>(replacedPhoto).find("sound") != std::string::npos);
+    const auto removedPhoto =
+        javelin::jmap::contacts::removeContactPhoto(std::get<std::string>(replacedPhoto));
+    REQUIRE(std::holds_alternative<std::string>(removedPhoto));
+    CHECK(std::get<std::string>(removedPhoto).find("server-photo") == std::string::npos);
+    CHECK(std::get<std::string>(removedPhoto).find("sound") != std::string::npos);
 
     const auto editor = javelin::jmap::contacts::contactEditorData(json);
     REQUIRE(std::holds_alternative<javelin::jmap::contacts::ContactEditorData>(editor));

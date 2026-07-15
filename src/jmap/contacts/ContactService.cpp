@@ -629,4 +629,43 @@ namespace javelin::jmap::contacts
                                        .mediaType = std::move(responseValue.type),
                                        .size = responseValue.size};
     }
+
+    QCoro::Task<ContactDownloadResult>
+    ContactService::downloadMedia(javelin::jmap::LiveConnectionSettings settings,
+                                  std::string ownerAccountId, std::string accountId,
+                                  std::string blobId, std::string mediaType)
+    {
+        const auto sessionResult = loadSession(m_connection, ownerAccountId);
+        if (const auto* loadError = std::get_if<javelin::jmap::LiveRefreshError>(&sessionResult))
+            co_return *loadError;
+        const auto& session = std::get<javelin::jmap::api::Session>(sessionResult);
+        QString downloadUrl = QString::fromStdString(session.downloadUrl);
+        const auto replaceTemplate = [&downloadUrl](const QString& name, const std::string& value)
+        {
+            downloadUrl.replace(
+                name, QString::fromUtf8(QUrl::toPercentEncoding(QString::fromStdString(value))));
+        };
+        replaceTemplate(QStringLiteral("{accountId}"), accountId);
+        replaceTemplate(QStringLiteral("{blobId}"), blobId);
+        replaceTemplate(QStringLiteral("{name}"), "contact-photo");
+        replaceTemplate(QStringLiteral("{type}"), mediaType);
+        const auto result = co_await m_resourceTransport.send({
+            .method = javelin::jmap::api::HttpMethod::Get,
+            .url = QUrl{downloadUrl},
+            .headers = {{.name = "Authorization",
+                         .value =
+                             QByteArray{"Bearer "} + QByteArray::fromStdString(settings.apiKey)}},
+            .body = {},
+            .cancellation = {},
+        });
+        if (const auto* transportError = std::get_if<javelin::jmap::api::TransportError>(&result))
+            co_return error(QString::fromStdString(transportError->message));
+        const auto& http = std::get<javelin::jmap::api::HttpResponse>(result);
+        if (http.statusCode < 200 || http.statusCode >= 300)
+        {
+            co_return error(QStringLiteral("Contact photo download failed with HTTP status %1.")
+                                .arg(http.statusCode));
+        }
+        co_return DownloadedContactMedia{.data = http.body, .mediaType = std::move(mediaType)};
+    }
 } // namespace javelin::jmap::contacts

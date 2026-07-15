@@ -24,6 +24,7 @@
 #include <QMenu>
 #include <QMessageBox>
 #include <QMimeDatabase>
+#include <QPixmap>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QScrollArea>
@@ -500,12 +501,18 @@ namespace javelin::gui::contacts
         titleFont.setPointSize(titleFont.pointSize() + 5);
         titleFont.setBold(true);
         m_viewTitle->setFont(titleFont);
+        m_photoLabel = new QLabel(view);
+        m_photoLabel->setFixedSize(88, 88);
+        m_photoLabel->setAlignment(Qt::AlignCenter);
+        m_photoLabel->setScaledContents(false);
+        m_photoLabel->setVisible(false);
         m_starButton = new QToolButton(view);
         m_starButton->setAutoRaise(true);
         m_starButton->setIconSize(QSize(22, 22));
         connect(m_starButton, &QToolButton::clicked, this,
                 &ContactsManagerWidget::toggleContactStarred);
         auto* titleLayout = new QHBoxLayout();
+        titleLayout->addWidget(m_photoLabel);
         titleLayout->addWidget(m_viewTitle, 1);
         titleLayout->addWidget(m_starButton);
         auto* cardScroll = new QScrollArea(view);
@@ -620,8 +627,15 @@ namespace javelin::gui::contacts
         formLayout->addStretch(1);
         scroll->setWidget(formWidget);
         auto* editButtons = new QHBoxLayout();
-        m_uploadPhotoButton = new QPushButton(QStringLiteral("Upload Photo"), edit);
+        m_editorPhotoLabel = new QLabel(edit);
+        m_editorPhotoLabel->setFixedSize(64, 64);
+        m_editorPhotoLabel->setAlignment(Qt::AlignCenter);
+        m_editorPhotoLabel->setVisible(false);
+        editButtons->addWidget(m_editorPhotoLabel);
+        m_uploadPhotoButton = new QPushButton(QStringLiteral("Replace Photo…"), edit);
+        m_removePhotoButton = new QPushButton(QStringLiteral("Remove Photo"), edit);
         editButtons->addWidget(m_uploadPhotoButton);
+        editButtons->addWidget(m_removePhotoButton);
         editButtons->addStretch(1);
         m_cancelButton = new QPushButton(QStringLiteral("Cancel"), edit);
         m_saveButton = new QPushButton(QStringLiteral("Save"), edit);
@@ -650,6 +664,8 @@ namespace javelin::gui::contacts
         connect(m_saveButton, &QPushButton::clicked, this, &ContactsManagerWidget::saveContact);
         connect(m_uploadPhotoButton, &QPushButton::clicked, this,
                 &ContactsManagerWidget::uploadPhoto);
+        connect(m_removePhotoButton, &QPushButton::clicked, this,
+                &ContactsManagerWidget::removePhoto);
         connect(m_cancelButton, &QPushButton::clicked, this, &ContactsManagerWidget::cancelEdit);
     }
 
@@ -823,6 +839,7 @@ namespace javelin::gui::contacts
         m_starButton->setAccessibleName(m_starButton->toolTip());
         m_starButton->setEnabled(!m_busy && canEditContact());
         populateContactCards(*contact);
+        showContactPhoto(*contact);
         if (auto* document = m_detailStack->widget(1)->findChild<QPlainTextEdit*>(
                 QStringLiteral("contactDocumentView")))
             document->setPlainText(QString::fromStdString(contact->document));
@@ -949,6 +966,14 @@ namespace javelin::gui::contacts
         m_birthdayEdit->setText(QString::fromStdString(editorData->birthday));
         m_notesEdit->setPlainText(QString::fromStdString(editorData->notes));
         m_documentEdit->setPlainText(document);
+        const bool hasPhoto =
+            javelin::jmap::contacts::contactPhoto(document.toStdString()).has_value();
+        m_removePhotoButton->setEnabled(hasPhoto);
+        if (!hasPhoto)
+        {
+            m_editorPhotoLabel->clear();
+            m_editorPhotoLabel->setVisible(false);
+        }
         m_addressBooksEdit->clear();
         for (const auto& book : m_addressBooks)
         {
@@ -1176,7 +1201,7 @@ namespace javelin::gui::contacts
                                                  mimeType.name().toStdString());
         QCoro::connect(
             std::move(task), this,
-            [this](javelin::jmap::contacts::ContactUploadResult result)
+            [this, payload](javelin::jmap::contacts::ContactUploadResult result)
             {
                 setBusy(false);
                 if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
@@ -1196,8 +1221,90 @@ namespace javelin::gui::contacts
                 }
                 m_documentEdit->setPlainText(
                     QString::fromStdString(std::get<std::string>(document)));
+                QPixmap pixmap;
+                if (pixmap.loadFromData(payload))
+                {
+                    m_editorPhotoLabel->setPixmap(pixmap.scaled(
+                        m_editorPhotoLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+                    m_editorPhotoLabel->setVisible(true);
+                }
+                m_removePhotoButton->setEnabled(true);
                 Q_EMIT statusMessageRequested(
                     QStringLiteral("Photo uploaded; save the contact to apply it."), 5000);
+            });
+    }
+
+    void ContactsManagerWidget::removePhoto()
+    {
+        const auto document = javelin::jmap::contacts::removeContactPhoto(
+            m_documentEdit->toPlainText().toStdString());
+        if (const auto* message = std::get_if<std::string_view>(&document))
+        {
+            QMessageBox::warning(
+                this, QStringLiteral("Remove Photo"),
+                QString::fromUtf8(message->data(), static_cast<qsizetype>(message->size())));
+            return;
+        }
+        m_documentEdit->setPlainText(QString::fromStdString(std::get<std::string>(document)));
+        m_editorPhotoLabel->clear();
+        m_editorPhotoLabel->setVisible(false);
+        m_removePhotoButton->setEnabled(false);
+    }
+
+    void
+    ContactsManagerWidget::showContactPhoto(const javelin::jmap::contacts::ContactSummary& contact)
+    {
+        m_photoLabel->clear();
+        m_photoLabel->setVisible(false);
+        m_editorPhotoLabel->clear();
+        m_editorPhotoLabel->setVisible(false);
+        const auto photo = javelin::jmap::contacts::contactPhoto(contact.document);
+        if (!photo.has_value())
+            return;
+        const auto show = [this](const QByteArray& payloadBytes)
+        {
+            QPixmap pixmap;
+            if (!pixmap.loadFromData(payloadBytes))
+                return;
+            m_photoLabel->setPixmap(
+                pixmap.scaled(m_photoLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+            m_photoLabel->setVisible(true);
+            m_editorPhotoLabel->setPixmap(pixmap.scaled(
+                m_editorPhotoLabel->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+            m_editorPhotoLabel->setVisible(true);
+        };
+        if (photo->uri.has_value() && photo->uri->starts_with("data:"))
+        {
+            const QByteArray uri = QByteArray::fromStdString(*photo->uri);
+            const auto separator = uri.indexOf(',');
+            if (separator > 0)
+            {
+                const auto metadata = uri.first(separator);
+                const auto payload = uri.sliced(separator + 1);
+                show(metadata.contains(";base64") ? QByteArray::fromBase64(payload)
+                                                  : QByteArray::fromPercentEncoding(payload));
+            }
+            return;
+        }
+        if (!photo->blobId.has_value())
+            return;
+        const auto accountId = currentAccountId();
+        if (!accountId.has_value())
+            return;
+        const std::string contactId = contact.id;
+        auto task =
+            m_service.downloadContactMedia(m_ownerAccountId, *accountId, *photo->blobId,
+                                           photo->mediaType.value_or("application/octet-stream"));
+        QCoro::connect(
+            std::move(task), this,
+            [this, contactId, show](javelin::jmap::contacts::ContactDownloadResult result)
+            {
+                const auto* selected = currentContact();
+                if (selected == nullptr || selected->id != contactId)
+                    return;
+                if (const auto* media =
+                        std::get_if<javelin::jmap::contacts::DownloadedContactMedia>(&result))
+                    show(media->data);
             });
     }
 
@@ -1452,9 +1559,13 @@ namespace javelin::gui::contacts
     void ContactsManagerWidget::setBusy(const bool busy)
     {
         m_busy = busy;
-        const std::array<QWidget*, 3> buttons{m_saveButton, m_uploadPhotoButton, m_cancelButton};
+        const std::array<QWidget*, 4> buttons{m_saveButton, m_uploadPhotoButton,
+                                              m_removePhotoButton, m_cancelButton};
         for (auto* button : buttons)
             button->setEnabled(!busy);
+        m_removePhotoButton->setEnabled(!busy && javelin::jmap::contacts::contactPhoto(
+                                                     m_documentEdit->toPlainText().toStdString())
+                                                     .has_value());
         m_starButton->setEnabled(!busy && canEditContact());
         m_accountCombo->setEnabled(!busy);
         m_addressBookCombo->setEnabled(!busy);

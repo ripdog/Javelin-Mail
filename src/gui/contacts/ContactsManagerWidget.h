@@ -68,6 +68,8 @@ namespace javelin::gui::contacts
         void loadEditorDocument(const QString& document);
         void saveContact();
         void uploadPhoto();
+        void removePhoto();
+        void showContactPhoto(const javelin::jmap::contacts::ContactSummary& contact);
         void createAddressBook(std::string accountId);
         void editAddressBook(std::string accountId, javelin::jmap::api::AddressBook book);
         void deleteAddressBook(std::string accountId, javelin::jmap::api::AddressBook book);
@@ -99,6 +101,8 @@ namespace javelin::gui::contacts
         QListWidget* m_contactList = nullptr;
         QStackedWidget* m_detailStack = nullptr;
         QLabel* m_viewTitle = nullptr;
+        QLabel* m_photoLabel = nullptr;
+        QLabel* m_editorPhotoLabel = nullptr;
         QToolButton* m_starButton = nullptr;
         QWidget* m_cardContainer = nullptr;
         QVBoxLayout* m_cardLayout = nullptr;
@@ -117,6 +121,7 @@ namespace javelin::gui::contacts
         QToolButton* m_advancedToggle = nullptr;
         QPushButton* m_saveButton = nullptr;
         QPushButton* m_uploadPhotoButton = nullptr;
+        QPushButton* m_removePhotoButton = nullptr;
         QPushButton* m_cancelButton = nullptr;
     };
 } // namespace javelin::gui::contacts

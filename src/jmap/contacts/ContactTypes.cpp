@@ -379,16 +379,78 @@ namespace javelin::jmap::contacts
         {
             return std::string_view{"The contact media property is not an object."};
         }
+        std::string photoKey = "javelin-photo";
+        for (const auto& [key, existing] : media.get_object())
+        {
+            if (stringProperty(existing, "kind") == "photo")
+            {
+                photoKey = key;
+                break;
+            }
+        }
         glz::generic photo;
         photo["kind"] = std::string{"photo"};
         photo["blobId"] = std::move(blobId);
         photo["mediaType"] = std::move(mediaType);
-        media["javelin-photo"] = std::move(photo);
+        media[photoKey] = std::move(photo);
         std::string result;
         if (glz::write_json(value, result))
         {
             return std::string_view{"Unable to update the contact photo."};
         }
+        return result;
+    }
+
+    std::optional<ContactPhoto> contactPhoto(const std::string_view json)
+    {
+        std::string buffer{json};
+        glz::generic value;
+        if (glz::read_json(value, buffer) || !value.is_object() || !value.contains("media") ||
+            !value.at("media").is_object())
+            return std::nullopt;
+        for (const auto& [key, media] : value.at("media").get_object())
+        {
+            if (stringProperty(media, "kind") != "photo")
+                continue;
+            const auto optionalProperty =
+                [&media](const std::string_view property) -> std::optional<std::string>
+            {
+                const auto result = stringProperty(media, property);
+                return result.empty() ? std::nullopt : std::optional{result};
+            };
+            return ContactPhoto{.key = key,
+                                .blobId = optionalProperty("blobId"),
+                                .uri = optionalProperty("uri"),
+                                .mediaType = optionalProperty("mediaType")};
+        }
+        return std::nullopt;
+    }
+
+    std::variant<std::string, std::string_view> removeContactPhoto(const std::string_view json)
+    {
+        std::string buffer{json};
+        glz::generic value;
+        if (glz::read_json(value, buffer) || !value.is_object())
+            return std::string_view{"The contact document must be valid before removing a photo."};
+        if (value.contains("media") && !value.at("media").is_object())
+            return std::string_view{"The contact media property is not an object."};
+        if (value.contains("media"))
+        {
+            auto& media = value.at("media").get_object();
+            std::vector<std::string> photoKeys;
+            for (const auto& [key, entry] : media)
+            {
+                if (stringProperty(entry, "kind") == "photo")
+                    photoKeys.push_back(key);
+            }
+            for (const auto& key : photoKeys)
+                media.erase(key);
+            if (media.empty())
+                value.get_object().erase("media");
+        }
+        std::string result;
+        if (glz::write_json(value, result))
+            return std::string_view{"Unable to remove the contact photo."};
         return result;
     }
 

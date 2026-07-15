@@ -67,6 +67,14 @@ namespace javelin::jmap::contacts
         bool mayDestroy = false;
     };
 
+    struct ContactPhoto
+    {
+        std::string key;
+        std::optional<std::string> blobId;
+        std::optional<std::string> uri;
+        std::optional<std::string> mediaType;
+    };
+
     [[nodiscard]] std::optional<ContactSummary>
     summarizeContact(std::string accountId, const javelin::jmap::api::ContactCard& card);
     [[nodiscard]] std::string normalizeEmail(std::string_view email);
@@ -74,6 +82,9 @@ namespace javelin::jmap::contacts
     prepareContactDocument(std::string_view json, bool creating);
     [[nodiscard]] std::variant<std::string, std::string_view>
     setContactPhoto(std::string_view json, std::string blobId, std::string mediaType);
+    [[nodiscard]] std::optional<ContactPhoto> contactPhoto(std::string_view json);
+    [[nodiscard]] std::variant<std::string, std::string_view>
+    removeContactPhoto(std::string_view json);
     [[nodiscard]] std::variant<std::string, std::string_view>
     setContactStarred(std::string_view json, bool starred);
     [[nodiscard]] std::variant<ContactEditorData, std::string_view>

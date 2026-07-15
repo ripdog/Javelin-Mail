@@ -47,11 +47,19 @@ namespace javelin::jmap::contacts
         std::uint64_t size = 0;
     };
 
+    struct DownloadedContactMedia
+    {
+        QByteArray data;
+        std::string mediaType;
+    };
+
     using ContactRefreshResult =
         std::variant<ContactRefreshSummary, javelin::jmap::LiveRefreshError>;
     using ContactMutationResult =
         std::variant<ContactMutationSummary, javelin::jmap::LiveRefreshError>;
     using ContactUploadResult = std::variant<UploadedContactMedia, javelin::jmap::LiveRefreshError>;
+    using ContactDownloadResult =
+        std::variant<DownloadedContactMedia, javelin::jmap::LiveRefreshError>;
 
     class ContactService
     {
@@ -75,6 +83,9 @@ namespace javelin::jmap::contacts
         [[nodiscard]] QCoro::Task<ContactUploadResult>
         uploadMedia(javelin::jmap::LiveConnectionSettings settings, std::string ownerAccountId,
                     std::string accountId, QByteArray payload, std::string mediaType);
+        [[nodiscard]] QCoro::Task<ContactDownloadResult>
+        downloadMedia(javelin::jmap::LiveConnectionSettings settings, std::string ownerAccountId,
+                      std::string accountId, std::string blobId, std::string mediaType);
 
       private:
         javelin::jmap::cache::DatabaseConnection& m_connection;

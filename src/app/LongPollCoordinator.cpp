@@ -785,6 +785,20 @@ namespace javelin::app
             std::move(accountId), std::move(payload), std::move(mediaType));
     }
 
+    QCoro::Task<javelin::jmap::contacts::ContactDownloadResult>
+    MailApplicationService::downloadContactMedia(std::string ownerAccountId, std::string accountId,
+                                                 std::string blobId, std::string mediaType)
+    {
+        const auto configuration = m_configurations.find(ownerAccountId);
+        if (configuration == m_configurations.end())
+            co_return javelin::jmap::LiveRefreshError{
+                .message = QStringLiteral("Account synchronization is not configured."),
+                .requiresUserIntervention = true};
+        co_return co_await m_contactService.downloadMedia(
+            toLiveConnectionSettings(configuration->second.settings), std::move(ownerAccountId),
+            std::move(accountId), std::move(blobId), std::move(mediaType));
+    }
+
     void MailApplicationService::stop()
     {
         for (const auto& [accountId, coordinator] : m_coordinators)

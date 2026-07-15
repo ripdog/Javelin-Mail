@@ -193,6 +193,9 @@ namespace javelin::app
         [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactUploadResult>
         uploadContactMedia(std::string ownerAccountId, std::string accountId, QByteArray payload,
                            std::string mediaType);
+        [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactDownloadResult>
+        downloadContactMedia(std::string ownerAccountId, std::string accountId, std::string blobId,
+                             std::string mediaType);
         void stop();
 
       Q_SIGNALS:

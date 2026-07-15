@@ -305,3 +305,38 @@ TEST_CASE("contact service falls back to a full fetch when changes cannot be cal
     CHECK(std::get<std::vector<javelin::jmap::contacts::ContactSummary>>(cached).front().id ==
           "fresh");
 }
+
+TEST_CASE("contact service downloads contact media through the session template",
+          "[jmap][contacts][service][media]")
+{
+    ensureApplication();
+    QTemporaryDir directory;
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("contact-service-media-test"),
+        .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    javelin::jmap::cache::SessionRepository sessions{connection};
+    REQUIRE_FALSE(sessions.replace("a1", session()).has_value());
+    javelin::jmap::cache::ContactRepository contacts{connection};
+    FakeTransport transport;
+    transport.results = {javelin::jmap::api::HttpResponse{
+        .statusCode = 200, .body = QByteArray::fromHex("89504e470d0a1a0a")}};
+    javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
+    javelin::jmap::contacts::ContactService service{connection, contacts, transport,
+                                                    methodTransport};
+    const auto result =
+        QCoro::waitFor(service.downloadMedia({.sessionUrl = "https://example.test/.well-known/jmap",
+                                              .loginEmail = "alice@example.test",
+                                              .apiKey = "secret"},
+                                             "a1", "a1", "blob with spaces", "image/png"));
+    REQUIRE(std::holds_alternative<javelin::jmap::contacts::DownloadedContactMedia>(result));
+    CHECK(std::get<javelin::jmap::contacts::DownloadedContactMedia>(result).data ==
+          QByteArray::fromHex("89504e470d0a1a0a"));
+    REQUIRE(transport.requests.size() == 1);
+    CHECK(transport.requests.front().method == javelin::jmap::api::HttpMethod::Get);
+    CHECK(transport.requests.front().url.toEncoded().contains("blob%20with%20spaces"));
+    REQUIRE(transport.requests.front().headers.size() == 1);
+    CHECK(transport.requests.front().headers.front().value == QByteArray{"Bearer secret"});
+}
