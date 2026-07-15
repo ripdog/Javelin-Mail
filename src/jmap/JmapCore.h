@@ -1,5 +1,6 @@
 #pragma once
 
+#include "jmap/EmailMutation.h"
 #include "jmap/cache/QueryService.h"
 #include "jmap/query/EmailListSort.h"
 #include "jmap/search/EmailSearch.h"
@@ -216,6 +217,8 @@ namespace javelin::jmap
                                                                std::string emailId,
                                                                std::string sourceMailboxId,
                                                                std::string destinationMailboxId);
+        [[nodiscard]] QueuedEmailMutationResult
+        queueEmailMailboxMutation(std::string accountId, EmailMailboxMutation mutation);
         [[nodiscard]] QueuedEmailMutationResult queueCopyEmail(std::string accountId,
                                                                std::string emailId,
                                                                std::string sourceMailboxId,

@@ -1,5 +1,6 @@
 #include "app/LongPollCoordinator.h"
 
+#include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/sync/MailboxWindowPolicy.h"
 
@@ -396,6 +397,68 @@ namespace javelin::app
         return m_jmapCore.queueCopyEmail(std::move(accountId), std::move(emailId),
                                          std::move(sourceMailboxId),
                                          std::move(destinationMailboxId));
+    }
+
+    QueuedMailboxSelectionMutationResult
+    MailApplicationService::queueMailboxSelectionMutation(MailboxSelectionMutationIntent intent)
+    {
+        const auto mailboxesResult = m_queryService.listMailboxTree(intent.accountId);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&mailboxesResult))
+        {
+            return javelin::jmap::LiveRefreshError{.message = error->message};
+        }
+
+        javelin::jmap::cache::EmailRepository emailRepository{m_databaseConnection};
+        std::vector<javelin::jmap::domain::Email> emails;
+        emails.reserve(intent.emailIds.size());
+        std::unordered_set<std::string_view> seenEmailIds;
+        for (const auto& emailId : intent.emailIds)
+        {
+            if (!seenEmailIds.insert(emailId).second)
+            {
+                continue;
+            }
+            const auto emailResult = emailRepository.find(intent.accountId, emailId);
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&emailResult))
+            {
+                return javelin::jmap::LiveRefreshError{.message = error->message};
+            }
+            const auto& email = std::get<std::optional<javelin::jmap::domain::Email>>(emailResult);
+            if (!email.has_value())
+            {
+                return javelin::jmap::LiveRefreshError{
+                    .message = QStringLiteral("Message %1 is not available in the local cache.")
+                                   .arg(QString::fromStdString(emailId)),
+                };
+            }
+            emails.push_back(*email);
+        }
+
+        auto planResult = planMailboxSelectionMutation(
+            intent, emails,
+            std::get<std::vector<javelin::jmap::cache::MailboxTreeItem>>(mailboxesResult));
+        if (const auto* error = std::get_if<QString>(&planResult))
+        {
+            return javelin::jmap::LiveRefreshError{.message = *error};
+        }
+
+        auto plan = std::get<PlannedMailboxSelectionMutation>(std::move(planResult));
+        const auto queuedEmailCount = plan.mutations.size();
+        for (auto& mutation : plan.mutations)
+        {
+            const auto result =
+                m_jmapCore.queueEmailMailboxMutation(intent.accountId, std::move(mutation));
+            if (const auto* error = std::get_if<javelin::jmap::LiveRefreshError>(&result))
+            {
+                return *error;
+            }
+        }
+
+        return QueuedMailboxSelectionMutation{
+            .accountId = std::move(intent.accountId),
+            .queuedEmailCount = queuedEmailCount,
+            .skippedEmailCount = plan.skippedEmailCount,
+        };
     }
 
     javelin::jmap::QueuedEmailMutationResult

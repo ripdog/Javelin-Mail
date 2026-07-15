@@ -2,6 +2,7 @@
 
 #include "app/AccountConnectionSettings.h"
 #include "app/LongPollService.h"
+#include "app/MailboxSelectionMutation.h"
 #include "jmap/calendar/CalendarService.h"
 #include "jmap/contacts/ContactService.h"
 #include "jmap/query/EmailListSort.h"
@@ -93,6 +94,16 @@ namespace javelin::app
         std::vector<std::string> mailboxIds;
     };
 
+    struct QueuedMailboxSelectionMutation
+    {
+        std::string accountId;
+        std::size_t queuedEmailCount = 0;
+        std::size_t skippedEmailCount = 0;
+    };
+
+    using QueuedMailboxSelectionMutationResult =
+        std::variant<QueuedMailboxSelectionMutation, javelin::jmap::LiveRefreshError>;
+
     class MailApplicationService final : public QObject
     {
         Q_OBJECT
@@ -126,6 +137,8 @@ namespace javelin::app
         [[nodiscard]] javelin::jmap::QueuedEmailMutationResult
         queueCopyEmail(std::string accountId, std::string emailId, std::string sourceMailboxId,
                        std::string destinationMailboxId);
+        [[nodiscard]] QueuedMailboxSelectionMutationResult
+        queueMailboxSelectionMutation(MailboxSelectionMutationIntent intent);
         [[nodiscard]] javelin::jmap::QueuedEmailMutationResult
         queueMarkEmailRead(std::string accountId, std::string emailId);
         [[nodiscard]] javelin::jmap::QueuedEmailMutationResult

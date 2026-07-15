@@ -2,6 +2,7 @@
 #include "gui/IconUtils.h"
 #include "gui/messageview/GoogleHtmlTranslator.h"
 #include "gui/messageview/HtmlMessageView.h"
+#include "gui/messageview/MessageViewPresentation.h"
 #include "gui/settings/PreferencesDialog.h"
 #include "jmap/cache/TranslationCacheRepository.h"
 #include "jmap/contacts/ContactIdentityLookup.h"
@@ -1418,7 +1419,11 @@ namespace javelin::gui::messageview
         updateLanguageBanner();
         m_loadingIndicator->setVisible(false);
 
-        if (!m_accountId.has_value())
+        const auto presentation =
+            messageViewPresentation(m_accountId.has_value(), m_mailboxId.has_value(),
+                                    m_emailId.has_value(), m_multipleMessages.size());
+
+        if (presentation == MessageViewPresentation::NoAccount)
         {
             m_detailLabel->setVisible(true);
             m_metadataWidget->setVisible(false);
@@ -1432,7 +1437,19 @@ namespace javelin::gui::messageview
             return;
         }
 
-        if (!m_mailboxId.has_value() && !m_emailId.has_value())
+        if (presentation == MessageViewPresentation::MultipleSelection)
+        {
+            m_detailLabel->setVisible(true);
+            m_metadataWidget->setVisible(false);
+            m_titleLabel->setText(QStringLiteral("%1 messages selected")
+                                      .arg(static_cast<qulonglong>(m_multipleMessages.size())));
+            m_detailLabel->clear();
+            m_bodyControlsWidget->setVisible(false);
+            setActiveView(ActiveView::Multiple);
+            return;
+        }
+
+        if (presentation == MessageViewPresentation::NoMailbox)
         {
             m_detailLabel->setVisible(true);
             m_metadataWidget->setVisible(false);
@@ -1446,19 +1463,7 @@ namespace javelin::gui::messageview
             return;
         }
 
-        if (!m_multipleMessages.empty())
-        {
-            m_detailLabel->setVisible(true);
-            m_metadataWidget->setVisible(false);
-            m_titleLabel->setText(QStringLiteral("%1 messages selected")
-                                      .arg(static_cast<qulonglong>(m_multipleMessages.size())));
-            m_detailLabel->clear();
-            m_bodyControlsWidget->setVisible(false);
-            setActiveView(ActiveView::Multiple);
-            return;
-        }
-
-        if (!m_emailId.has_value())
+        if (presentation == MessageViewPresentation::NoMessage)
         {
             m_detailLabel->setVisible(true);
             m_metadataWidget->setVisible(false);

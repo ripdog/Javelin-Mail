@@ -319,26 +319,42 @@ namespace javelin::jmap
         }
 
         [[nodiscard]] QueuedEmailMutationResult
-        queueMailboxPatch(javelin::jmap::cache::DatabaseConnection& connection,
-                          std::string accountId, std::string emailId, std::string sourceMailboxId,
-                          std::string destinationMailboxId, const bool removeSourceMailbox)
+        queueEmailPatch(javelin::jmap::cache::DatabaseConnection& connection, std::string accountId,
+                        EmailMailboxMutation mutation)
         {
-            if (sourceMailboxId.empty() || destinationMailboxId.empty())
+            if (mutation.emailId.empty())
             {
                 return LiveRefreshError{
-                    .message = QStringLiteral("Source and destination mailbox ids are required."),
+                    .message = QStringLiteral("An email id is required for an email patch."),
                 };
             }
-            if (sourceMailboxId == destinationMailboxId)
+            if (mutation.addMailboxIds.empty() && mutation.removeMailboxIds.empty())
             {
                 return LiveRefreshError{
-                    .message =
-                        QStringLiteral("Source and destination mailboxes must be different."),
+                    .message = QStringLiteral("An email mailbox mutation must change a mailbox."),
+                };
+            }
+            for (const auto& mailboxId : mutation.addMailboxIds)
+            {
+                if (mailboxId.empty() || std::ranges::find(mutation.removeMailboxIds, mailboxId) !=
+                                             mutation.removeMailboxIds.end())
+                {
+                    return LiveRefreshError{
+                        .message = QStringLiteral(
+                            "Email mailbox additions and removals must be non-empty and disjoint."),
+                    };
+                }
+            }
+            if (std::ranges::any_of(mutation.removeMailboxIds,
+                                    [](const std::string& mailboxId) { return mailboxId.empty(); }))
+            {
+                return LiveRefreshError{
+                    .message = QStringLiteral("Email mailbox removals must be non-empty."),
                 };
             }
 
             javelin::jmap::cache::EmailRepository emailRepository{connection};
-            const auto emailResult = emailRepository.find(accountId, emailId);
+            const auto emailResult = emailRepository.find(accountId, mutation.emailId);
             if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&emailResult))
             {
                 return LiveRefreshError{.message = error->message};
@@ -352,6 +368,22 @@ namespace javelin::jmap
                 };
             }
 
+            auto resultingMailboxIds = email->mailboxIds;
+            std::erase_if(resultingMailboxIds,
+                          [&mutation](const std::string& mailboxId)
+                          {
+                              return std::ranges::find(mutation.removeMailboxIds, mailboxId) !=
+                                     mutation.removeMailboxIds.end();
+                          });
+            resultingMailboxIds.insert(resultingMailboxIds.end(), mutation.addMailboxIds.begin(),
+                                       mutation.addMailboxIds.end());
+            if (resultingMailboxIds.empty())
+            {
+                return LiveRefreshError{
+                    .message = QStringLiteral("An email must remain in at least one mailbox."),
+                };
+            }
+
             const auto pendingActionId = QUuid::createUuid().toString(QUuid::WithoutBraces);
             const javelin::jmap::sync::PendingActionRecord pendingAction{
                 .pendingActionId = pendingActionId.toStdString(),
@@ -359,11 +391,9 @@ namespace javelin::jmap
                 .status = javelin::jmap::sync::PendingActionStatus::Pending,
                 .emailPatch =
                     {
-                        .emailId = emailId,
-                        .addMailboxIds = {destinationMailboxId},
-                        .removeMailboxIds = removeSourceMailbox
-                                                ? std::vector<std::string>{sourceMailboxId}
-                                                : std::vector<std::string>{},
+                        .emailId = mutation.emailId,
+                        .addMailboxIds = mutation.addMailboxIds,
+                        .removeMailboxIds = mutation.removeMailboxIds,
                         .addKeywords = {},
                         .removeKeywords = {},
                     },
@@ -385,8 +415,38 @@ namespace javelin::jmap
             return QueuedEmailMutation{
                 .pendingActionId = pendingActionId.toStdString(),
                 .accountId = std::move(accountId),
-                .emailId = std::move(emailId),
+                .emailId = std::move(mutation.emailId),
             };
+        }
+
+        [[nodiscard]] QueuedEmailMutationResult
+        queueMailboxPatch(javelin::jmap::cache::DatabaseConnection& connection,
+                          std::string accountId, std::string emailId, std::string sourceMailboxId,
+                          std::string destinationMailboxId, const bool removeSourceMailbox)
+        {
+            if (sourceMailboxId.empty() || destinationMailboxId.empty())
+            {
+                return LiveRefreshError{
+                    .message = QStringLiteral("Source and destination mailbox ids are required."),
+                };
+            }
+            if (sourceMailboxId == destinationMailboxId)
+            {
+                return LiveRefreshError{
+                    .message =
+                        QStringLiteral("Source and destination mailboxes must be different."),
+                };
+            }
+
+            return queueEmailPatch(
+                connection, std::move(accountId),
+                EmailMailboxMutation{
+                    .emailId = std::move(emailId),
+                    .addMailboxIds = {std::move(destinationMailboxId)},
+                    .removeMailboxIds = removeSourceMailbox
+                                            ? std::vector<std::string>{std::move(sourceMailboxId)}
+                                            : std::vector<std::string>{},
+                });
         }
 
         [[nodiscard]] QueuedEmailMutationResult
@@ -1369,6 +1429,20 @@ namespace javelin::jmap
         return queueMailboxPatch(*m_impl->databaseConnection, std::move(accountId),
                                  std::move(emailId), std::move(sourceMailboxId),
                                  std::move(destinationMailboxId), true);
+    }
+
+    QueuedEmailMutationResult JmapCore::queueEmailMailboxMutation(std::string accountId,
+                                                                  EmailMailboxMutation mutation)
+    {
+        if (m_impl->databaseConnection == nullptr)
+        {
+            return LiveRefreshError{
+                .message = QStringLiteral("Queued mutations are unavailable in this process."),
+            };
+        }
+
+        return ::javelin::jmap::queueEmailPatch(*m_impl->databaseConnection, std::move(accountId),
+                                                std::move(mutation));
     }
 
     QueuedEmailMutationResult JmapCore::queueCopyEmail(std::string accountId, std::string emailId,

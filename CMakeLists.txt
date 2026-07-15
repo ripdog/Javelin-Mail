@@ -66,6 +66,8 @@ set(JAVELIN_FORMAT_FILES
     src/app/LongPollService.h
     src/app/LongPollCoordinator.cpp
     src/app/LongPollCoordinator.h
+    src/app/MailboxSelectionMutation.cpp
+    src/app/MailboxSelectionMutation.h
     src/app/WebEngineSetup.h
     src/app/main.cpp
     src/app/ProcessServices.cpp
@@ -106,6 +108,7 @@ set(JAVELIN_FORMAT_FILES
     src/gui/messageview/HtmlMessageView.h
     src/gui/messageview/MessageViewContainer.cpp
     src/gui/messageview/MessageViewContainer.h
+    src/gui/messageview/MessageViewPresentation.h
     src/gui/search/AdvancedSearchDialog.cpp
     src/gui/search/AdvancedSearchDialog.h
     src/gui/search/SearchSession.cpp
@@ -238,6 +241,7 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/auth/Auth.h
     src/jmap/JmapCore.cpp
     src/jmap/JmapCore.h
+    src/jmap/EmailMutation.h
     src/jmap/language/FastTextLanguageDetector.cpp
     src/jmap/language/FastTextLanguageDetector.h
     src/jmap/language/LanguageDetection.cpp
@@ -259,6 +263,7 @@ set(JAVELIN_FORMAT_FILES
     tests/jmap/CalendarMethodsTest.cpp
     tests/jmap/CalendarRepositoryTest.cpp
     tests/gui/MonthCalendarWidgetTest.cpp
+    tests/gui/MessageViewPresentationTest.cpp
     tests/jmap/ComposeServiceTest.cpp
     tests/jmap/DatabaseTest.cpp
     tests/jmap/EmailRepositoryTest.cpp
@@ -294,6 +299,7 @@ set(JAVELIN_FORMAT_FILES
 )
 
 add_library(javelin_jmap STATIC
+    src/jmap/EmailMutation.h
     src/jmap/api/CalendarMethods.cpp
     src/jmap/api/CalendarMethods.h
     src/jmap/calendar/CalendarTypes.h
@@ -500,6 +506,7 @@ add_library(javelin_gui STATIC
     src/gui/messageview/HtmlMessageView.h
     src/gui/messageview/MessageViewContainer.cpp
     src/gui/messageview/MessageViewContainer.h
+    src/gui/messageview/MessageViewPresentation.h
     src/gui/search/AdvancedSearchDialog.cpp
     src/gui/search/AdvancedSearchDialog.h
     src/gui/search/SearchSession.cpp
@@ -591,6 +598,8 @@ add_library(javelin_app STATIC
     src/app/LongPollService.h
     src/app/LongPollCoordinator.cpp
     src/app/LongPollCoordinator.h
+    src/app/MailboxSelectionMutation.cpp
+    src/app/MailboxSelectionMutation.h
     src/app/WebEngineSetup.h
     src/app/ProcessServices.cpp
     src/app/ProcessServices.h

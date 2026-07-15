@@ -307,17 +307,16 @@ namespace javelin::gui::shell
         [[nodiscard]] std::vector<javelin::jmap::cache::MessageListItem>
         selectedMessageSummaries() const;
         void selectMessageAlone(const QString& emailId);
-        void queueArchiveEmail(std::string accountId, std::string mailboxId, std::string emailId);
         void queueDeleteEmail(std::string accountId, std::string mailboxId, std::string emailId);
-        void queueArchiveEmails(std::string accountId, std::string mailboxId,
+        void queueArchiveEmails(std::string accountId, std::optional<std::string> sourceMailboxId,
                                 std::vector<std::string> emailIds);
         void queueDeleteEmails(std::string accountId, std::string mailboxId,
                                std::vector<std::string> emailIds);
         void queueDestroyEmails(std::string accountId, std::vector<std::string> emailIds);
-        void queueMoveEmails(std::string accountId, std::string sourceMailboxId,
+        void queueMoveEmails(std::string accountId, std::optional<std::string> sourceMailboxId,
                              std::string destinationMailboxId, std::vector<std::string> emailIds,
                              QString successMessage);
-        void queueCopyEmails(std::string accountId, std::string sourceMailboxId,
+        void queueCopyEmails(std::string accountId, std::optional<std::string> sourceMailboxId,
                              std::string destinationMailboxId, std::vector<std::string> emailIds,
                              QString successMessage);
         void queueMoveEmail(std::string accountId, std::string sourceMailboxId,
