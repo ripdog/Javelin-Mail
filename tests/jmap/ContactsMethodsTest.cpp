@@ -1,4 +1,5 @@
 #include "jmap/api/ContactsMethods.h"
+#include "jmap/contacts/ContactInterchange.h"
 #include "jmap/contacts/ContactTypes.h"
 
 #include <catch2/catch_test_macros.hpp>
@@ -212,6 +213,79 @@ TEST_CASE("contact action rights require every membership to be writable",
     CHECK_FALSE(readOnlyAccount.mayCreate);
     CHECK_FALSE(readOnlyAccount.mayModify);
     CHECK_FALSE(readOnlyAccount.mayDestroy);
+}
+
+TEST_CASE("duplicate detection links contacts by normalized email or phone",
+          "[jmap][contacts][duplicates]")
+{
+    const auto contact = [](std::string id, std::string email, std::string phone)
+    {
+        return javelin::jmap::contacts::ContactSummary{
+            .accountId = "a1",
+            .id = id,
+            .uid = "uid-" + id,
+            .kind = "individual",
+            .displayName = id,
+            .organization = std::nullopt,
+            .emails = {{.key = "email",
+                        .address = email,
+                        .label = std::nullopt,
+                        .preference = std::nullopt,
+                        .contexts = {}}},
+            .addressBookIds = {"book"},
+            .isImportant = false,
+            .document = R"({"uid":"uid-)" + id +
+                        R"(","kind":"individual","phones":{"phone":{"number":")" + phone +
+                        R"("}}})"};
+    };
+    const std::vector contacts{contact("one", "Same@Example.test", "021 111 111"),
+                               contact("two", "same@example.test", "+64 22 222 222"),
+                               contact("three", "other@example.test", "(021) 111-111")};
+    const auto groups = javelin::jmap::contacts::findDuplicateContacts(contacts);
+    REQUIRE(groups.size() == 1);
+    CHECK(groups.front().contactIds.size() == 3);
+}
+
+TEST_CASE("contact merge preserves primary identity and both contacts' data",
+          "[jmap][contacts][duplicates]")
+{
+    const auto merged = javelin::jmap::contacts::mergeContactDocuments(
+        R"({"id":"primary-id","uid":"primary-uid","kind":"individual","name":{"full":"Primary"},"addressBookIds":{"one":true},"emails":{"email":{"address":"primary@example.test"}},"x-primary":true})",
+        R"({"id":"duplicate-id","uid":"duplicate-uid","kind":"individual","name":{"full":"Duplicate"},"addressBookIds":{"two":true},"emails":{"email":{"address":"duplicate@example.test"}},"phones":{"phone":{"number":"123"}},"x-duplicate":true})");
+    REQUIRE(std::holds_alternative<std::string>(merged));
+    const auto& json = std::get<std::string>(merged);
+    CHECK(json.find("primary-id") == std::string::npos);
+    CHECK(json.find("primary-uid") != std::string::npos);
+    CHECK(json.find("duplicate-uid") == std::string::npos);
+    CHECK(json.find("primary@example.test") != std::string::npos);
+    CHECK(json.find("duplicate@example.test") != std::string::npos);
+    CHECK(json.find(R"("one":true)") != std::string::npos);
+    CHECK(json.find(R"("two":true)") != std::string::npos);
+    CHECK(json.find("x-primary") != std::string::npos);
+    CHECK(json.find("x-duplicate") != std::string::npos);
+}
+
+TEST_CASE("vCard import and export preserve typed contact fields", "[jmap][contacts][vcard]")
+{
+    const auto imported = javelin::jmap::contacts::importVCards(
+        "BEGIN:VCARD\r\nVERSION:4.0\r\nUID:u1\r\nFN:Joe Bloggs\r\nORG:Example Ltd\r\n"
+        "EMAIL;TYPE=work;PREF=1;LABEL=Office:joe@example.test\r\n"
+        "TEL;TYPE=home:+64 21 555 0100\r\nNOTE:Line one\\nLine two\r\nEND:VCARD\r\n");
+    REQUIRE(
+        std::holds_alternative<std::vector<javelin::jmap::contacts::ContactEditorData>>(imported));
+    const auto& contact =
+        std::get<std::vector<javelin::jmap::contacts::ContactEditorData>>(imported).front();
+    CHECK(contact.uid == "u1");
+    CHECK(contact.organization == "Example Ltd");
+    REQUIRE(contact.emails.size() == 1);
+    CHECK(contact.emails.front().preference == std::optional<std::uint32_t>{1});
+    CHECK(contact.emails.front().contexts.at("work"));
+    CHECK(contact.emails.front().label == std::optional<std::string>{"Office"});
+    CHECK(contact.notes == "Line one\nLine two");
+    const auto exported = javelin::jmap::contacts::exportVCard(contact);
+    CHECK(exported.find("VERSION:4.0") != std::string::npos);
+    CHECK(exported.find("EMAIL;TYPE=work;PREF=1;LABEL=Office:joe@example.test") !=
+          std::string::npos);
 }
 
 TEST_CASE("contact starring preserves document extensions and removes legacy importance",
