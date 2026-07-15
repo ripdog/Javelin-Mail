@@ -1,6 +1,7 @@
 #include "gui/mailboxes/MailboxTreeModel.h"
 
 #include "gui/mailboxes/MailboxIconUtils.h"
+#include "gui/mailboxes/MailboxSort.h"
 #include "gui/settings/PreferencesDialog.h"
 
 #include <QApplication>
@@ -11,7 +12,6 @@
 #include <QSize>
 
 #include <algorithm>
-#include <array>
 #include <unordered_map>
 
 namespace javelin::gui::mailboxes
@@ -19,24 +19,6 @@ namespace javelin::gui::mailboxes
     namespace
     {
         constexpr auto emailDragMimeType = "application/x-javelin-mail-email-ids";
-
-        [[nodiscard]] int primaryMailboxRank(const std::optional<std::string>& role)
-        {
-            if (!role.has_value())
-            {
-                return 100;
-            }
-
-            static constexpr std::array roles{
-                std::string_view{"inbox"},  std::string_view{"archive"},
-                std::string_view{"drafts"}, std::string_view{"scheduled"},
-                std::string_view{"sent"},   std::string_view{"junk"},
-                std::string_view{"trash"},
-            };
-
-            const auto it = std::ranges::find(roles, *role);
-            return it == roles.end() ? 100 : static_cast<int>(std::distance(roles.begin(), it));
-        }
 
     } // namespace
 
@@ -61,9 +43,7 @@ namespace javelin::gui::mailboxes
     bool MailboxTreeModel::mailboxNameLess(const std::unique_ptr<Node>& left,
                                            const std::unique_ptr<Node>& right)
     {
-        return QString::compare(QString::fromStdString(left->displayName),
-                                QString::fromStdString(right->displayName),
-                                Qt::CaseInsensitive) < 0;
+        return mailboxDisplayLess(left->role, left->displayName, right->role, right->displayName);
     }
 
     QModelIndex MailboxTreeModel::index(const int row, const int column,
@@ -539,22 +519,11 @@ namespace javelin::gui::mailboxes
                     sortChildrenAlphabetically(sortChildrenAlphabetically, child.get());
                 }
 
-                std::ranges::sort(
-                    accountNode->children,
-                    [](const std::unique_ptr<Node>& left, const std::unique_ptr<Node>& right)
-                    {
-                        const int leftRank = primaryMailboxRank(left->role);
-                        const int rightRank = primaryMailboxRank(right->role);
-                        if (leftRank != rightRank)
-                        {
-                            return leftRank < rightRank;
-                        }
-                        return mailboxNameLess(left, right);
-                    });
+                std::ranges::sort(accountNode->children, mailboxNameLess);
 
                 const auto firstOther = std::ranges::find_if(
                     accountNode->children, [](const std::unique_ptr<Node>& child)
-                    { return primaryMailboxRank(child->role) >= 100; });
+                    { return specialUseMailboxRank(child->role) >= 100; });
                 if (firstOther != accountNode->children.begin() &&
                     firstOther != accountNode->children.end())
                 {

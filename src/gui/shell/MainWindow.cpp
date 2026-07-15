@@ -10,6 +10,7 @@
 #include "gui/logging/LogViewerDialog.h"
 #include "gui/mailboxes/MailboxIconUtils.h"
 #include "gui/mailboxes/MailboxPropertiesDialog.h"
+#include "gui/mailboxes/MailboxSort.h"
 #include "gui/mailboxes/MailboxTreeModel.h"
 #include "gui/mailboxes/MailboxTreeView.h"
 #include "gui/messages/MessageListDelegate.h"
@@ -4818,18 +4819,18 @@ namespace javelin::gui::shell
             std::get_if<std::vector<javelin::jmap::cache::MailboxTreeItem>>(&mailboxesResult);
         if (mailboxes != nullptr)
         {
-            for (const auto& mailbox : *mailboxes)
+            for (const auto* mailbox : javelin::gui::mailboxes::mailboxesInDisplayOrder(*mailboxes))
             {
-                if ((sourceMailboxId.has_value() && mailbox.id == *sourceMailboxId) ||
-                    !mailbox.myRights.mayAddItems)
+                if ((sourceMailboxId.has_value() && mailbox->id == *sourceMailboxId) ||
+                    !mailbox->myRights.mayAddItems)
                 {
                     continue;
                 }
 
-                auto* action = menu.addAction(QString::fromStdString(mailbox.name));
+                auto* action = menu.addAction(QString::fromStdString(mailbox->name));
                 connect(action, &QAction::triggered, this,
                         [this, accountId = *accountId, sourceMailboxId,
-                         destinationMailboxId = mailbox.id, emailIds]
+                         destinationMailboxId = mailbox->id, emailIds]
                         {
                             queueMoveEmails(accountId, sourceMailboxId, destinationMailboxId,
                                             emailIds, QStringLiteral("Queued move."));
@@ -4877,18 +4878,18 @@ namespace javelin::gui::shell
             std::get_if<std::vector<javelin::jmap::cache::MailboxTreeItem>>(&mailboxesResult);
         if (mailboxes != nullptr)
         {
-            for (const auto& mailbox : *mailboxes)
+            for (const auto* mailbox : javelin::gui::mailboxes::mailboxesInDisplayOrder(*mailboxes))
             {
-                if ((sourceMailboxId.has_value() && mailbox.id == *sourceMailboxId) ||
-                    !mailbox.myRights.mayAddItems)
+                if ((sourceMailboxId.has_value() && mailbox->id == *sourceMailboxId) ||
+                    !mailbox->myRights.mayAddItems)
                 {
                     continue;
                 }
 
-                auto* action = menu.addAction(QString::fromStdString(mailbox.name));
+                auto* action = menu.addAction(QString::fromStdString(mailbox->name));
                 connect(action, &QAction::triggered, this,
                         [this, accountId = *accountId, sourceMailboxId,
-                         destinationMailboxId = mailbox.id, emailIds]
+                         destinationMailboxId = mailbox->id, emailIds]
                         {
                             queueCopyEmails(accountId, sourceMailboxId, destinationMailboxId,
                                             emailIds, QStringLiteral("Queued copy."));
@@ -5300,26 +5301,27 @@ namespace javelin::gui::shell
                 std::get_if<std::vector<javelin::jmap::cache::MailboxTreeItem>>(&mailboxesResult);
             if (mailboxes != nullptr)
             {
-                for (const auto& mailbox : *mailboxes)
+                for (const auto* mailbox :
+                     javelin::gui::mailboxes::mailboxesInDisplayOrder(*mailboxes))
                 {
-                    if ((sourceMailboxId.has_value() && mailbox.id == *sourceMailboxId) ||
-                        !mailbox.myRights.mayAddItems)
+                    if ((sourceMailboxId.has_value() && mailbox->id == *sourceMailboxId) ||
+                        !mailbox->myRights.mayAddItems)
                     {
                         continue;
                     }
 
-                    auto* action = moveMenu->addAction(QString::fromStdString(mailbox.name));
+                    auto* action = moveMenu->addAction(QString::fromStdString(mailbox->name));
                     connect(action, &QAction::triggered, this,
                             [this, accountId = *accountId, sourceMailboxId,
-                             destinationMailboxId = mailbox.id, emailIds]
+                             destinationMailboxId = mailbox->id, emailIds]
                             {
                                 queueMoveEmails(accountId, sourceMailboxId, destinationMailboxId,
                                                 emailIds, QStringLiteral("Queued move."));
                             });
-                    auto* copyAction = copyMenu->addAction(QString::fromStdString(mailbox.name));
+                    auto* copyAction = copyMenu->addAction(QString::fromStdString(mailbox->name));
                     connect(copyAction, &QAction::triggered, this,
                             [this, accountId = *accountId, sourceMailboxId,
-                             destinationMailboxId = mailbox.id, emailIds]
+                             destinationMailboxId = mailbox->id, emailIds]
                             {
                                 queueCopyEmails(accountId, sourceMailboxId, destinationMailboxId,
                                                 emailIds, QStringLiteral("Queued copy."));
