@@ -15,7 +15,6 @@
 #include <optional>
 #include <string>
 #include <type_traits>
-#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -42,6 +41,10 @@ namespace javelin::jmap
 namespace javelin::app
 {
     class ComposeService;
+}
+namespace javelin::gui::search
+{
+    class SearchSession;
 }
 namespace javelin::jmap::contacts
 {
@@ -166,15 +169,8 @@ namespace javelin::gui::shell
 
         struct SearchTabState
         {
-            std::string accountId;
-            std::string query;
-            javelin::jmap::search::EmailSearchCriteria criteria;
-            QString title;
-            PageState page;
+            javelin::gui::search::SearchSession* session = nullptr;
             TabSelectionState selection;
-            bool localSearchInFlight = false;
-            bool authoritativeResultsApplied = false;
-            std::unordered_set<std::string> retainedLocalEmailIds;
         };
 
         struct ComposeTabState
@@ -276,19 +272,13 @@ namespace javelin::gui::shell
         void loadMailboxTabFromCache(std::string_view accountId, std::string_view mailboxId,
                                      bool applyIfActive,
                                      std::optional<std::size_t> requiredOffset = std::nullopt);
-        void loadSearchTabFromCache(std::string_view accountId, std::string_view queryKey,
-                                    std::size_t offset, bool applyIfActive);
         void loadMailboxTabPageFromCache(MailboxTabState& tab, bool forceReload = false);
         void ensureMailboxObservation(MailboxTabState& tab);
         void releaseMailboxObservation(MailboxTabState& tab);
-        void applySearchTabCachedPage(SearchTabState& tab, bool forceReload = false);
-        void startLocalQuickSearch(SearchTabState& tab);
-        void pruneUnselectedLocalSearchMatches();
         void refreshActiveTabFromServer();
         void refreshTabFromServer(std::size_t tabIndex);
         void refreshMailboxTabFromServer(MailboxTabState& tab);
-        void refreshSearchTabFromServer(SearchTabState& tab);
-        [[nodiscard]] bool shouldRefreshSearchTabFromServer(const SearchTabState& tab) const;
+        void connectSearchSession(javelin::gui::search::SearchSession& session);
         [[nodiscard]] QString titleForTab(const TabState& tab) const;
         [[nodiscard]] QIcon iconForTab(const TabState& tab) const;
         [[nodiscard]] bool activeTabIsMailbox() const;

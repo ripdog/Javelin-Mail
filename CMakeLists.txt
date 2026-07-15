@@ -108,6 +108,10 @@ set(JAVELIN_FORMAT_FILES
     src/gui/messageview/MessageViewContainer.h
     src/gui/search/AdvancedSearchDialog.cpp
     src/gui/search/AdvancedSearchDialog.h
+    src/gui/search/SearchSession.cpp
+    src/gui/search/SearchSession.h
+    src/gui/search/SearchSessionPersistence.cpp
+    src/gui/search/SearchSessionPersistence.h
     src/gui/settings/PreferencesDialog.cpp
     src/gui/settings/PreferencesDialog.h
     src/gui/shell/ElidingLabel.cpp
@@ -498,6 +502,10 @@ add_library(javelin_gui STATIC
     src/gui/messageview/MessageViewContainer.h
     src/gui/search/AdvancedSearchDialog.cpp
     src/gui/search/AdvancedSearchDialog.h
+    src/gui/search/SearchSession.cpp
+    src/gui/search/SearchSession.h
+    src/gui/search/SearchSessionPersistence.cpp
+    src/gui/search/SearchSessionPersistence.h
     src/gui/settings/PreferencesDialog.cpp
     src/gui/settings/PreferencesDialog.h
     src/gui/shell/ElidingLabel.cpp
