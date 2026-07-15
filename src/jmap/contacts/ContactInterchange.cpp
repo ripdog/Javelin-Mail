@@ -70,6 +70,37 @@ namespace javelin::jmap::contacts
             return {};
         }
 
+        [[nodiscard]] std::string foldedVCard(const std::string_view input)
+        {
+            std::string result;
+            std::size_t lineStart = 0;
+            while (lineStart < input.size())
+            {
+                const auto lineEnd = input.find("\r\n", lineStart);
+                const auto end = lineEnd == std::string_view::npos ? input.size() : lineEnd;
+                std::string_view line = input.substr(lineStart, end - lineStart);
+                std::size_t limit = 75;
+                while (line.size() > limit)
+                {
+                    std::size_t split = limit;
+                    while (split > 0 && (static_cast<unsigned char>(line[split]) & 0xc0U) == 0x80U)
+                        --split;
+                    if (split == 0)
+                        split = limit;
+                    result.append(line.substr(0, split));
+                    result += "\r\n ";
+                    line.remove_prefix(split);
+                    limit = 74;
+                }
+                result.append(line);
+                result += "\r\n";
+                if (lineEnd == std::string_view::npos)
+                    break;
+                lineStart = lineEnd + 2;
+            }
+            return result;
+        }
+
         void appendField(std::ostringstream& output, const std::string_view property,
                          const ContactEditorField& field)
         {
@@ -165,8 +196,8 @@ namespace javelin::jmap::contacts
         {
             for (const auto& email : contacts[index].emails)
             {
-                const auto key = "email:" + normalizeEmail(email.address);
-                if (key == "email:")
+                const auto key = contacts[index].kind + ":email:" + normalizeEmail(email.address);
+                if (key.ends_with("email:"))
                     continue;
                 const auto [found, inserted] = identities.emplace(key, index);
                 if (!inserted)
@@ -180,7 +211,8 @@ namespace javelin::jmap::contacts
                     const auto number = normalizedPhone(phone.value);
                     if (number.empty())
                         continue;
-                    const auto [found, inserted] = identities.emplace("phone:" + number, index);
+                    const auto [found, inserted] =
+                        identities.emplace(contacts[index].kind + ":phone:" + number, index);
                     if (!inserted)
                         unite(index, found->second);
                 }
@@ -271,13 +303,23 @@ namespace javelin::jmap::contacts
         for (const auto& phone : contact.phones)
             appendField(output, "TEL", phone);
         for (const auto& address : contact.addresses)
-            appendField(output, "ADR", address);
+        {
+            output << "ADR" << contextParameter(address);
+            if (address.preference.has_value())
+                output << ";PREF=" << *address.preference;
+            output << ";LABEL=" << escapedVCard(address.value);
+            if (address.label.has_value() && !address.label->empty())
+                output << ";X-JAVELIN-LABEL=" << escapedVCard(*address.label);
+            output << ":;;;;;;\r\n";
+        }
+        for (const auto& member : contact.members)
+            output << "MEMBER:urn:uuid:" << escapedVCard(member) << "\r\n";
         if (!contact.birthday.empty())
             output << "BDAY:" << contact.birthday << "\r\n";
         if (!contact.notes.empty())
             output << "NOTE:" << escapedVCard(contact.notes) << "\r\n";
         output << "END:VCARD\r\n";
-        return output.str();
+        return foldedVCard(output.str());
     }
 
     std::variant<std::vector<ContactEditorData>, std::string_view>
@@ -338,7 +380,23 @@ namespace javelin::jmap::contacts
             else if (property == "TEL")
                 current->phones.push_back(parsedField(prefix, value));
             else if (property == "ADR")
-                current->addresses.push_back(parsedField(prefix, value));
+            {
+                auto field = parsedField(prefix, value);
+                const auto values = parameters(prefix);
+                if (const auto label = values.find("LABEL"); label != values.end())
+                    field.value = unescapedVCard(label->second);
+                if (const auto label = values.find("X-JAVELIN-LABEL"); label != values.end())
+                    field.label = unescapedVCard(label->second);
+                else
+                    field.label.reset();
+                current->addresses.push_back(std::move(field));
+            }
+            else if (property == "MEMBER")
+            {
+                constexpr std::string_view prefixValue{"urn:uuid:"};
+                current->members.push_back(unescapedVCard(
+                    value.starts_with(prefixValue) ? value.substr(prefixValue.size()) : value));
+            }
             else if (property == "BDAY")
                 current->birthday = std::string{value};
             else if (property == "NOTE")

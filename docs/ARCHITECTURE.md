@@ -56,3 +56,17 @@ atomic full ContactCard replacement, as required by RFC 8620.
 Contact cache commits publish through the process-owned `ContactRepository`. Compose completion,
 message sender identity rendering, and the contacts view then reload from SQLite; they do not
 retain a second contact data store.
+
+Contact editing projects common JSContact maps into repeatable typed fields while retaining each
+map key, label, preference rank, context set, and any unprojected properties in the original
+document. Group members are stored as JSContact UIDs, including unresolved UIDs, so temporarily
+inaccessible shared contacts are not silently removed. Photos use RFC 9610 blob-backed Media
+objects and are fetched on demand rather than retained in the long-lived contact cache.
+
+The application coordination layer evaluates account and AddressBook rights before exposing or
+submitting create, update, move, star, merge, copy, and destroy operations. Duplicate discovery is
+deliberately high-confidence: normalized email addresses and sufficiently long normalized phone
+numbers connect cards of the same kind. A merge keeps the chosen primary UID and name, unions set
+properties, preserves colliding mapped entries under new keys, and submits the update and redundant
+card destruction together. vCard 4.0 import/export, line unfolding/folding, typed field parameters,
+group members, and JSContact document preparation live in the non-GUI contacts layer.

@@ -271,7 +271,8 @@ TEST_CASE("vCard import and export preserve typed contact fields", "[jmap][conta
     const auto imported = javelin::jmap::contacts::importVCards(
         "BEGIN:VCARD\r\nVERSION:4.0\r\nUID:u1\r\nFN:Joe Bloggs\r\nORG:Example Ltd\r\n"
         "EMAIL;TYPE=work;PREF=1;LABEL=Office:joe@example.test\r\n"
-        "TEL;TYPE=home:+64 21 555 0100\r\nNOTE:Line one\\nLine two\r\nEND:VCARD\r\n");
+        "TEL;TYPE=home:+64 21 555 0100\r\nADR;TYPE=home;LABEL=1 Example Street:;;;;;;\r\n"
+        "MEMBER:urn:uuid:member-uid\r\nNOTE:Line one\\nLine two\r\nEND:VCARD\r\n");
     REQUIRE(
         std::holds_alternative<std::vector<javelin::jmap::contacts::ContactEditorData>>(imported));
     const auto& contact =
@@ -283,6 +284,9 @@ TEST_CASE("vCard import and export preserve typed contact fields", "[jmap][conta
     CHECK(contact.emails.front().contexts.at("work"));
     CHECK(contact.emails.front().label == std::optional<std::string>{"Office"});
     CHECK(contact.notes == "Line one\nLine two");
+    REQUIRE(contact.addresses.size() == 1);
+    CHECK(contact.addresses.front().value == "1 Example Street");
+    CHECK(contact.members == std::vector<std::string>{"member-uid"});
     const auto exported = javelin::jmap::contacts::exportVCard(contact);
     CHECK(exported.find("VERSION:4.0") != std::string::npos);
     CHECK(exported.find("EMAIL;TYPE=work;PREF=1;LABEL=Office:joe@example.test") !=
