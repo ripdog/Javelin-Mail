@@ -69,6 +69,10 @@ namespace javelin::jmap::cache
         [[nodiscard]] std::variant<std::vector<MessageListItem>, DatabaseError>
         listMessagesByEmailIds(std::string_view accountId,
                                const std::vector<std::string>& emailIds) const;
+        [[nodiscard]] std::variant<std::vector<MessageListItem>, DatabaseError>
+        searchCachedMessageText(std::string_view accountId, std::string_view text,
+                                std::size_t limit, std::size_t offset = 0) const;
+        [[nodiscard]] QString databasePath() const;
         [[nodiscard]] std::variant<std::optional<SearchWindowPage>, DatabaseError>
         loadSearchWindow(std::string_view accountId, std::string_view queryKey, std::size_t offset,
                          std::size_t limit) const;

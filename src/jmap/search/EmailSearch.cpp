@@ -93,13 +93,18 @@ namespace javelin::jmap::search
                !normalized(criteria.subject).has_value() && !normalized(criteria.body).has_value();
     }
 
+    bool isBasicTextSearch(const EmailSearchCriteria& criteria)
+    {
+        return normalized(criteria.text).has_value() && !normalized(criteria.with).has_value() &&
+               !normalized(criteria.from).has_value() && !normalized(criteria.to).has_value() &&
+               !normalized(criteria.cc).has_value() && !normalized(criteria.bcc).has_value() &&
+               !normalized(criteria.subject).has_value() && !normalized(criteria.body).has_value();
+    }
+
     std::string displayString(const EmailSearchCriteria& criteria)
     {
         const auto text = normalized(criteria.text);
-        if (text.has_value() && !normalized(criteria.with).has_value() &&
-            !normalized(criteria.from).has_value() && !normalized(criteria.to).has_value() &&
-            !normalized(criteria.cc).has_value() && !normalized(criteria.bcc).has_value() &&
-            !normalized(criteria.subject).has_value() && !normalized(criteria.body).has_value())
+        if (isBasicTextSearch(criteria))
         {
             return *text;
         }

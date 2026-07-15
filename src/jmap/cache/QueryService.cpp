@@ -1,12 +1,15 @@
 #include "jmap/cache/QueryService.h"
 
 #include "jmap/cache/MailboxRepository.h"
+#include "jmap/cache/MimeMessageParser.h"
 #include "jmap/cache/SearchWindowRepository.h"
 
 #include <glaze/glaze.hpp>
 
 #include <QSqlError>
 #include <QSqlQuery>
+
+#include <unordered_set>
 
 namespace javelin::jmap::cache
 {
@@ -346,6 +349,121 @@ namespace javelin::jmap::cache
         }
 
         return items;
+    }
+
+    std::variant<std::vector<MessageListItem>, DatabaseError>
+    QueryService::searchCachedMessageText(const std::string_view accountId,
+                                          const std::string_view text, const std::size_t limit,
+                                          const std::size_t offset) const
+    {
+        if (const auto error = m_connection.validate())
+        {
+            return *error;
+        }
+        if (text.empty() || limit == 0)
+        {
+            return std::vector<MessageListItem>{};
+        }
+
+        QSqlQuery missingBodyQuery{m_connection.database()};
+        missingBodyQuery.prepare(
+            QStringLiteral("SELECT r.email_id,r.blob_id,r.payload FROM raw_message_sources r "
+                           "INNER JOIN email_search_fts f ON f.account_id=r.account_id AND "
+                           "f.email_id=r.email_id WHERE r.account_id=:account_id AND "
+                           "f.body_blob_id<>r.blob_id"));
+        missingBodyQuery.bindValue(QStringLiteral(":account_id"),
+                                   QString::fromStdString(std::string{accountId}));
+        if (!missingBodyQuery.exec())
+        {
+            return makeQueryError(QStringLiteral("Read unindexed cached message bodies"),
+                                  missingBodyQuery);
+        }
+        while (missingBodyQuery.next())
+        {
+            const auto emailId = missingBodyQuery.value(0).toString();
+            const auto blobId = missingBodyQuery.value(1).toString();
+            const auto parsed =
+                parseMessageSource(emailId.toStdString(), missingBodyQuery.value(2).toByteArray());
+            QString body;
+            if (parsed.plainTextBody.has_value())
+            {
+                body += QString::fromStdString(parsed.plainTextBody->value);
+            }
+            if (parsed.htmlBody.has_value())
+            {
+                if (!body.isEmpty())
+                {
+                    body += QLatin1Char('\n');
+                }
+                body += QString::fromStdString(parsed.htmlBody->value);
+            }
+            QSqlQuery update{m_connection.database()};
+            update.prepare(
+                QStringLiteral("UPDATE email_search_fts SET body=:body,body_blob_id=:blob_id WHERE "
+                               "account_id=:account_id AND email_id=:email_id"));
+            update.bindValue(QStringLiteral(":body"), body);
+            update.bindValue(QStringLiteral(":blob_id"), blobId);
+            update.bindValue(QStringLiteral(":account_id"),
+                             QString::fromStdString(std::string{accountId}));
+            update.bindValue(QStringLiteral(":email_id"), emailId);
+            if (!update.exec())
+            {
+                return makeQueryError(QStringLiteral("Index cached message body"), update);
+            }
+        }
+
+        QString match = QStringLiteral("\"");
+        match += QString::fromStdString(std::string{text})
+                     .replace(QLatin1String("\""), QStringLiteral("\"\""));
+        match += QLatin1Char('"');
+
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "SELECT email_id FROM email_search_fts WHERE email_search_fts MATCH :match AND "
+            "account_id = :account_id ORDER BY bm25(email_search_fts) LIMIT :candidate_limit"));
+        query.bindValue(QStringLiteral(":match"), match);
+        query.bindValue(QStringLiteral(":account_id"),
+                        QString::fromStdString(std::string{accountId}));
+        query.bindValue(QStringLiteral(":candidate_limit"),
+                        static_cast<qulonglong>((limit + offset) * 4));
+        if (!query.exec())
+        {
+            return makeQueryError(QStringLiteral("Search cached message text"), query);
+        }
+
+        std::vector<std::string> emailIds;
+        while (query.next())
+        {
+            emailIds.push_back(query.value(0).toString().toStdString());
+        }
+        const auto itemResult = listMessagesByEmailIds(accountId, emailIds);
+        if (const auto* error = std::get_if<DatabaseError>(&itemResult))
+        {
+            return *error;
+        }
+
+        std::vector<MessageListItem> results;
+        std::unordered_set<std::string> threadIds;
+        for (const auto& item : std::get<std::vector<MessageListItem>>(itemResult))
+        {
+            if (threadIds.insert(item.threadId).second)
+            {
+                if (threadIds.size() > offset)
+                {
+                    results.push_back(item);
+                }
+                if (results.size() == limit)
+                {
+                    break;
+                }
+            }
+        }
+        return results;
+    }
+
+    QString QueryService::databasePath() const
+    {
+        return m_connection.database().databaseName();
     }
 
     std::variant<std::optional<SearchWindowPage>, DatabaseError>

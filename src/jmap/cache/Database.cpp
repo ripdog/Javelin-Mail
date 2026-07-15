@@ -972,6 +972,38 @@ namespace javelin::jmap::cache
                                 "is_default_destination=1"),
                         },
                 },
+                MigrationStep{
+                    .version = 19,
+                    .name = QStringLiteral("email_full_text_search"),
+                    .statements =
+                        {
+                            QStringLiteral("CREATE VIRTUAL TABLE email_search_fts USING fts5("
+                                           "account_id UNINDEXED,email_id UNINDEXED,subject,body,"
+                                           "body_blob_id UNINDEXED,"
+                                           "tokenize='unicode61')"),
+                            QStringLiteral(
+                                "INSERT INTO email_search_fts(account_id,email_id,subject,body,"
+                                "body_blob_id) SELECT "
+                                "account_id,email_id,COALESCE(subject,''),'','' "
+                                "FROM emails"),
+                            QStringLiteral(
+                                "CREATE TRIGGER emails_search_insert AFTER INSERT ON emails BEGIN "
+                                "INSERT INTO email_search_fts(account_id,email_id,subject,body,"
+                                "body_blob_id) VALUES(new.account_id,new.email_id,"
+                                "COALESCE(new.subject,''),'',''); "
+                                "END"),
+                            QStringLiteral(
+                                "CREATE TRIGGER emails_search_subject_update AFTER UPDATE OF "
+                                "subject "
+                                "ON emails BEGIN UPDATE email_search_fts SET "
+                                "subject=COALESCE(new.subject,'') WHERE account_id=old.account_id "
+                                "AND email_id=old.email_id; END"),
+                            QStringLiteral(
+                                "CREATE TRIGGER emails_search_delete AFTER DELETE ON emails BEGIN "
+                                "DELETE FROM email_search_fts WHERE account_id=old.account_id AND "
+                                "email_id=old.email_id; END"),
+                        },
+                },
             },
         };
     }

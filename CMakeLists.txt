@@ -174,6 +174,8 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/cache/QueryService.h
     src/jmap/cache/RawMessageSourceRepository.cpp
     src/jmap/cache/RawMessageSourceRepository.h
+    src/jmap/cache/SearchResultReconciler.cpp
+    src/jmap/cache/SearchResultReconciler.h
     src/jmap/cache/SessionRepository.cpp
     src/jmap/cache/SessionRepository.h
     src/jmap/cache/JmapTransportPreferenceRepository.cpp
@@ -274,6 +276,7 @@ set(JAVELIN_FORMAT_FILES
     tests/jmap/PreferredJmapMethodTransportTest.cpp
     tests/jmap/QueryDiffTest.cpp
     tests/jmap/QueryServiceTest.cpp
+    tests/jmap/SearchResultReconcilerTest.cpp
     tests/jmap/RefreshNotificationPlannerTest.cpp
     tests/jmap/MailEntityParsersTest.cpp
     tests/jmap/SessionClientTest.cpp
@@ -362,6 +365,8 @@ add_library(javelin_jmap STATIC
     src/jmap/cache/QueryService.h
     src/jmap/cache/RawMessageSourceRepository.cpp
     src/jmap/cache/RawMessageSourceRepository.h
+    src/jmap/cache/SearchResultReconciler.cpp
+    src/jmap/cache/SearchResultReconciler.h
     src/jmap/cache/SessionRepository.cpp
     src/jmap/cache/SessionRepository.h
     src/jmap/cache/JmapTransportPreferenceRepository.cpp

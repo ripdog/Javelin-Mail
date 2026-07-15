@@ -15,6 +15,7 @@
 #include <optional>
 #include <string>
 #include <type_traits>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -171,6 +172,9 @@ namespace javelin::gui::shell
             QString title;
             PageState page;
             TabSelectionState selection;
+            bool localSearchInFlight = false;
+            bool authoritativeResultsApplied = false;
+            std::unordered_set<std::string> retainedLocalEmailIds;
         };
 
         struct ComposeTabState
@@ -278,6 +282,8 @@ namespace javelin::gui::shell
         void ensureMailboxObservation(MailboxTabState& tab);
         void releaseMailboxObservation(MailboxTabState& tab);
         void applySearchTabCachedPage(SearchTabState& tab, bool forceReload = false);
+        void startLocalQuickSearch(SearchTabState& tab);
+        void pruneUnselectedLocalSearchMatches();
         void refreshActiveTabFromServer();
         void refreshTabFromServer(std::size_t tabIndex);
         void refreshMailboxTabFromServer(MailboxTabState& tab);

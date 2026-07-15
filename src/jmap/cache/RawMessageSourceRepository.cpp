@@ -1,5 +1,7 @@
 #include "jmap/cache/RawMessageSourceRepository.h"
 
+#include "jmap/cache/MimeMessageParser.h"
+
 #include <QSqlError>
 #include <QSqlQuery>
 
@@ -33,7 +35,15 @@ namespace javelin::jmap::cache
             return error;
         }
 
-        QSqlQuery query{m_connection.database()};
+        auto& database = m_connection.database();
+        if (!database.transaction())
+        {
+            return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
+                                 .message = QStringLiteral("Begin raw message source update: ") +
+                                            database.lastError().text()};
+        }
+
+        QSqlQuery query{database};
         query.prepare(QStringLiteral("INSERT INTO raw_message_sources ("
                                      "account_id, email_id, blob_id, payload, fetched_at"
                                      ") VALUES ("
@@ -49,7 +59,46 @@ namespace javelin::jmap::cache
         query.bindValue(QStringLiteral(":payload"), source.payload);
         if (!query.exec())
         {
+            database.rollback();
             return makeQueryError(QStringLiteral("Upsert raw message source"), query);
+        }
+
+        const auto parsed = parseMessageSource(source.emailId, source.payload);
+        QString body;
+        if (parsed.plainTextBody.has_value())
+        {
+            body += QString::fromStdString(parsed.plainTextBody->value);
+        }
+        if (parsed.htmlBody.has_value())
+        {
+            if (!body.isEmpty())
+            {
+                body += QLatin1Char('\n');
+            }
+            body += QString::fromStdString(parsed.htmlBody->value);
+        }
+
+        QSqlQuery indexQuery{database};
+        indexQuery.prepare(QStringLiteral(
+            "UPDATE email_search_fts SET body = :body, body_blob_id = :blob_id WHERE "
+            "account_id = :account_id AND "
+            "email_id = :email_id"));
+        indexQuery.bindValue(QStringLiteral(":body"), body);
+        indexQuery.bindValue(QStringLiteral(":blob_id"), QString::fromStdString(source.blobId));
+        indexQuery.bindValue(QStringLiteral(":account_id"),
+                             QString::fromStdString(std::string{accountId}));
+        indexQuery.bindValue(QStringLiteral(":email_id"), QString::fromStdString(source.emailId));
+        if (!indexQuery.exec())
+        {
+            database.rollback();
+            return makeQueryError(QStringLiteral("Index raw message source"), indexQuery);
+        }
+
+        if (!database.commit())
+        {
+            return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
+                                 .message = QStringLiteral("Commit raw message source update: ") +
+                                            database.lastError().text()};
         }
 
         return std::nullopt;
@@ -64,7 +113,14 @@ namespace javelin::jmap::cache
             return error;
         }
 
-        QSqlQuery query{m_connection.database()};
+        auto& database = m_connection.database();
+        if (!database.transaction())
+        {
+            return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
+                                 .message = QStringLiteral("Begin raw message source removal: ") +
+                                            database.lastError().text()};
+        }
+        QSqlQuery query{database};
         query.prepare(QStringLiteral(
             "DELETE FROM raw_message_sources WHERE account_id = :account_id AND email_id = "
             ":email_id"));
@@ -73,7 +129,29 @@ namespace javelin::jmap::cache
         query.bindValue(QStringLiteral(":email_id"), QString::fromStdString(std::string{emailId}));
         if (!query.exec())
         {
+            database.rollback();
             return makeQueryError(QStringLiteral("Delete raw message source"), query);
+        }
+
+        QSqlQuery indexQuery{database};
+        indexQuery.prepare(
+            QStringLiteral("UPDATE email_search_fts SET body = '', body_blob_id = '' WHERE "
+                           "account_id = :account_id AND "
+                           "email_id = :email_id"));
+        indexQuery.bindValue(QStringLiteral(":account_id"),
+                             QString::fromStdString(std::string{accountId}));
+        indexQuery.bindValue(QStringLiteral(":email_id"),
+                             QString::fromStdString(std::string{emailId}));
+        if (!indexQuery.exec())
+        {
+            database.rollback();
+            return makeQueryError(QStringLiteral("Remove raw message source index"), indexQuery);
+        }
+        if (!database.commit())
+        {
+            return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
+                                 .message = QStringLiteral("Commit raw message source removal: ") +
+                                            database.lastError().text()};
         }
 
         return std::nullopt;

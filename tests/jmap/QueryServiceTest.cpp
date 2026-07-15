@@ -2,6 +2,7 @@
 #include "FixtureReader.h"
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/MailboxRepository.h"
+#include "jmap/cache/RawMessageSourceRepository.h"
 #include "jmap/cache/ThreadRepository.h"
 #include "jmap/domain/MailEntityParsers.h"
 
@@ -243,6 +244,49 @@ TEST_CASE("query service returns paged compact message list rows", "[jmap][cache
     REQUIRE(subjectItems.size() == 2);
     CHECK(subjectItems[0].emailId == "eml-3");
     CHECK(subjectItems[1].emailId == "eml-2");
+}
+
+TEST_CASE("query service full text search covers cached subjects and bodies",
+          "[jmap][cache][query][search]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+
+    auto subjectMatch = loadEmailFixture();
+    subjectMatch.id = "subject-match";
+    subjectMatch.threadId = "subject-thread";
+    subjectMatch.subject = "A rare albatross sighting";
+    auto bodyMatch = subjectMatch;
+    bodyMatch.id = "body-match";
+    bodyMatch.threadId = "body-thread";
+    bodyMatch.subject = "Ordinary update";
+
+    javelin::jmap::cache::EmailRepository emailRepository{databaseContext.connection};
+    REQUIRE_FALSE(emailRepository.replaceAll("account-1", {subjectMatch, bodyMatch}).has_value());
+    javelin::jmap::cache::RawMessageSourceRepository sourceRepository{databaseContext.connection};
+    REQUIRE_FALSE(
+        sourceRepository
+            .upsert("account-1", {.emailId = bodyMatch.id,
+                                  .blobId = bodyMatch.blobId,
+                                  .payload = QByteArrayLiteral(
+                                      "From: alice@example.com\r\nSubject: Ordinary update\r\n"
+                                      "Content-Type: text/plain; charset=utf-8\r\n\r\n"
+                                      "The telescope found a rare albatross.\r\n")})
+            .has_value());
+
+    javelin::jmap::cache::QueryService queryService{databaseContext.connection};
+    const auto result = queryService.searchCachedMessageText("account-1", "rare albatross", 10);
+
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MessageListItem>>(result));
+    const auto& items = std::get<std::vector<javelin::jmap::cache::MessageListItem>>(result);
+    REQUIRE(items.size() == 2);
+    CHECK(std::ranges::any_of(items,
+                              [](const auto& item) { return item.emailId == "subject-match"; }));
+    CHECK(
+        std::ranges::any_of(items, [](const auto& item) { return item.emailId == "body-match"; }));
 }
 
 TEST_CASE("query service returns thread messages in cached thread order", "[jmap][cache][query]")

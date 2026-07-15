@@ -22,6 +22,7 @@ namespace javelin::jmap::search
     };
 
     [[nodiscard]] bool isEmpty(const EmailSearchCriteria& criteria);
+    [[nodiscard]] bool isBasicTextSearch(const EmailSearchCriteria& criteria);
     [[nodiscard]] std::string displayString(const EmailSearchCriteria& criteria);
     [[nodiscard]] std::string cacheKey(const EmailSearchCriteria& criteria,
                                        const javelin::jmap::query::EmailListSort& sort);

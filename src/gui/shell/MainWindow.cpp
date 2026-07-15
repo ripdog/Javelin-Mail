@@ -26,6 +26,7 @@
 #include "jmap/cache/IdentityRepository.h"
 #include "jmap/cache/MessageViewService.h"
 #include "jmap/cache/QueryService.h"
+#include "jmap/cache/SearchResultReconciler.h"
 #include "jmap/calendar/CalendarEventEditing.h"
 #include "jmap/calendar/CalendarService.h"
 #include "jmap/contacts/ContactIdentityLookup.h"
@@ -91,6 +92,31 @@
 
 namespace javelin::gui::shell
 {
+    namespace
+    {
+        using CachedSearchResult = std::variant<std::vector<javelin::jmap::cache::MessageListItem>,
+                                                javelin::jmap::cache::DatabaseError>;
+
+        [[nodiscard]] CachedSearchResult
+        runCachedSearch(const QString& databasePath, const std::string& accountId,
+                        const std::string& text, const std::size_t offset, const std::size_t limit)
+        {
+            javelin::jmap::cache::ThreadConnectionFactory factory{
+                {.connectionNamePrefix = QStringLiteral("javelin-quick-search"),
+                 .databasePath = databasePath}};
+            auto connectionResult = factory.openForCurrentThread("query");
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&connectionResult))
+            {
+                return *error;
+            }
+            auto connection =
+                std::get<javelin::jmap::cache::DatabaseConnection>(std::move(connectionResult));
+            javelin::jmap::cache::QueryService queryService{connection};
+            return queryService.searchCachedMessageText(accountId, text, limit, offset);
+        }
+    } // namespace
+
     Q_LOGGING_CATEGORY(logGuiMailbox, "gui.mailbox")
     Q_LOGGING_CATEGORY(logUserOperations, "user.operations")
     void MainWindow::presentError(const javelin::jmap::LiveRefreshError& error,
@@ -1404,7 +1430,7 @@ namespace javelin::gui::shell
         const auto threadId =
             current.data(javelin::gui::messages::MessageListModel::ThreadIdRole).toString();
         const bool isUnread = indexIsUnread(current);
-        if (!threadId.isEmpty())
+        if (!threadId.isEmpty() && !activeTabIsSearch())
         {
             QTimer::singleShot(
                 0, this,
@@ -1439,6 +1465,7 @@ namespace javelin::gui::shell
         }
 
         syncActiveTabSelectionFromViews();
+        pruneUnselectedLocalSearchMatches();
     }
 
     void MainWindow::openContacts()
@@ -2578,6 +2605,9 @@ namespace javelin::gui::shell
                     .title = QStringLiteral("Search: %1").arg(query),
                     .page = {},
                     .selection = {},
+                    .localSearchInFlight = false,
+                    .authoritativeResultsApplied = false,
+                    .retainedLocalEmailIds = {},
                 },
         });
         m_activeTabIndex = static_cast<int>(m_tabs.size() - 1);
@@ -2837,12 +2867,97 @@ namespace javelin::gui::shell
             tab.page.items.clear();
             tab.page.total.reset();
             tab.page.cacheLoaded = page != nullptr;
+            tab.authoritativeResultsApplied = false;
             return;
         }
 
         tab.page.items = (*page)->items;
         tab.page.total = (*page)->total;
         tab.page.cacheLoaded = true;
+        tab.authoritativeResultsApplied = true;
+    }
+
+    void MainWindow::startLocalQuickSearch(SearchTabState& tab)
+    {
+        if (!javelin::jmap::search::isBasicTextSearch(tab.criteria) || tab.localSearchInFlight ||
+            tab.authoritativeResultsApplied || !tab.criteria.text.has_value())
+        {
+            return;
+        }
+
+        tab.localSearchInFlight = true;
+        const auto accountId = tab.accountId;
+        const auto query = tab.query;
+        const auto text = *tab.criteria.text;
+        const auto offset = tab.page.offset;
+        auto* watcher = new QFutureWatcher<CachedSearchResult>(this);
+        connect(watcher, &QFutureWatcher<CachedSearchResult>::finished, this,
+                [this, watcher, accountId, query, offset]
+                {
+                    const auto result = watcher->result();
+                    watcher->deleteLater();
+                    for (auto& tabState : m_tabs)
+                    {
+                        auto* searchTab = std::get_if<SearchTabState>(&tabState.content);
+                        if (searchTab == nullptr || searchTab->accountId != accountId ||
+                            searchTab->query != query || searchTab->page.offset != offset)
+                        {
+                            continue;
+                        }
+                        searchTab->localSearchInFlight = false;
+                        if (searchTab->authoritativeResultsApplied)
+                        {
+                            return;
+                        }
+                        if (const auto* error =
+                                std::get_if<javelin::jmap::cache::DatabaseError>(&result))
+                        {
+                            qCWarning(logGuiMailbox).noquote()
+                                << "Local quick search failed" << error->message;
+                            return;
+                        }
+
+                        searchTab->page.items =
+                            std::get<std::vector<javelin::jmap::cache::MessageListItem>>(result);
+                        searchTab->page.cacheLoaded = true;
+                        if (&tabState != activeTab())
+                        {
+                            return;
+                        }
+                        const auto previousMessageRow = currentMessageRow(*m_messageView);
+                        QSignalBlocker blocker{m_messageView->selectionModel()};
+                        applyActiveTabPageToModel();
+                        static_cast<void>(restoreActiveTabMessageSelection(previousMessageRow));
+                        refreshSelectionFromModels();
+                        return;
+                    }
+                });
+        watcher->setFuture(QtConcurrent::run(runCachedSearch, m_queryService.databasePath(),
+                                             accountId, text, offset, pageSize));
+    }
+
+    void MainWindow::pruneUnselectedLocalSearchMatches()
+    {
+        auto* tab = activeTab();
+        auto* searchTab = tab == nullptr ? nullptr : std::get_if<SearchTabState>(&tab->content);
+        if (searchTab == nullptr || searchTab->retainedLocalEmailIds.empty())
+        {
+            return;
+        }
+
+        const auto selectedEmailId = searchTab->selection.emailId;
+        std::erase_if(searchTab->page.items,
+                      [searchTab, &selectedEmailId](const auto& item)
+                      {
+                          return searchTab->retainedLocalEmailIds.contains(item.emailId) &&
+                                 selectedEmailId != std::optional<std::string>{item.emailId};
+                      });
+        std::erase_if(searchTab->retainedLocalEmailIds, [&selectedEmailId](const auto& emailId)
+                      { return selectedEmailId != std::optional<std::string>{emailId}; });
+
+        QSignalBlocker blocker{m_messageView->selectionModel()};
+        applyActiveTabPageToModel();
+        static_cast<void>(restoreActiveTabMessageSelection(currentMessageRow(*m_messageView)));
     }
 
     void MainWindow::applyActiveTabPageToModel()
@@ -2928,7 +3043,20 @@ namespace javelin::gui::shell
                 continue;
             }
 
+            const auto priorItems = searchTab->page.items;
             applySearchTabCachedPage(*searchTab, true);
+            if (searchTab->authoritativeResultsApplied &&
+                javelin::jmap::search::isBasicTextSearch(searchTab->criteria))
+            {
+                const auto protectedEmailId =
+                    searchTab->selection.emailId.has_value()
+                        ? std::optional<std::string_view>{*searchTab->selection.emailId}
+                        : std::nullopt;
+                auto reconciled = javelin::jmap::cache::reconcileServerSearchResults(
+                    priorItems, searchTab->page.items, protectedEmailId);
+                searchTab->page.items = std::move(reconciled.items);
+                searchTab->retainedLocalEmailIds = std::move(reconciled.retainedLocalEmailIds);
+            }
             searchTab->page.stale = false;
             activeTabReloaded = activeTabReloaded || &tabState == active;
         }
@@ -3141,6 +3269,7 @@ namespace javelin::gui::shell
             return;
         }
 
+        startLocalQuickSearch(tab);
         tab.page.refreshInFlight = true;
         tab.page.refreshError.clear();
         updateEmptyStates();
@@ -3694,6 +3823,13 @@ namespace javelin::gui::shell
                         content.page.items.clear();
                         content.page.cacheLoaded = false;
                         content.page.stale = true;
+                        if constexpr (std::is_same_v<std::decay_t<decltype(content)>,
+                                                     SearchTabState>)
+                        {
+                            content.authoritativeResultsApplied = false;
+                            content.localSearchInFlight = false;
+                            content.retainedLocalEmailIds.clear();
+                        }
                     }
                 },
                 tabState.content);
@@ -3737,6 +3873,12 @@ namespace javelin::gui::shell
                 content.page.items.clear();
                 content.page.cacheLoaded = false;
                 content.selection = {};
+                if constexpr (std::is_same_v<std::decay_t<decltype(content)>, SearchTabState>)
+                {
+                    content.authoritativeResultsApplied = false;
+                    content.localSearchInFlight = false;
+                    content.retainedLocalEmailIds.clear();
+                }
                 return true;
             }
             return false;
@@ -3774,6 +3916,12 @@ namespace javelin::gui::shell
             content.page.items.clear();
             content.page.cacheLoaded = false;
             content.selection = {};
+            if constexpr (std::is_same_v<std::decay_t<decltype(content)>, SearchTabState>)
+            {
+                content.authoritativeResultsApplied = false;
+                content.localSearchInFlight = false;
+                content.retainedLocalEmailIds.clear();
+            }
             return true;
         };
         if (!std::visit(moveToNext, tab->content))
@@ -5852,6 +6000,9 @@ namespace javelin::gui::shell
                                     optionalStringSetting(settings, QStringLiteral("emailId")),
                                 .selectedEmailIds = {},
                             },
+                        .localSearchInFlight = false,
+                        .authoritativeResultsApplied = true,
+                        .retainedLocalEmailIds = {},
                     },
             });
     }
