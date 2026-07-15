@@ -1352,6 +1352,19 @@ namespace javelin::gui::shell
                                        .email = email.toStdString()}},
                     });
                 });
+        connect(widget, &javelin::gui::contacts::ContactsManagerWidget::searchMailFromRequested,
+                this,
+                [this](const QString& accountId, const QString& email)
+                {
+                    const auto normalizedAccountId = accountId.trimmed();
+                    const auto normalizedEmail = email.trimmed();
+                    if (normalizedAccountId.isEmpty() || normalizedEmail.isEmpty())
+                        return;
+                    openOrActivateSearchTab(normalizedAccountId.toStdString(),
+                                            javelin::jmap::search::EmailSearchCriteria{
+                                                .from = normalizedEmail.toStdString()},
+                                            true);
+                });
         connect(widget, &javelin::gui::contacts::ContactsManagerWidget::toolbarStateChanged, this,
                 [this, widget]
                 {

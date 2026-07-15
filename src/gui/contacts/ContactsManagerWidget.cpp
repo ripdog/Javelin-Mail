@@ -882,6 +882,22 @@ namespace javelin::gui::contacts
             connect(copyEmail, &QAction::triggered, this,
                     [email] { QApplication::clipboard()->setText(email); });
         }
+        if (!contact->emails.empty())
+        {
+            auto* searchMenu = menu.addMenu(QIcon::fromTheme(QStringLiteral("edit-find")),
+                                            QStringLiteral("Find Mail From"));
+            for (const auto& contactEmail : contact->emails)
+            {
+                const QString email = QString::fromStdString(contactEmail.address);
+                auto* search = searchMenu->addAction(email);
+                connect(search, &QAction::triggered, this,
+                        [this, email]
+                        {
+                            Q_EMIT searchMailFromRequested(m_accountCombo->currentData().toString(),
+                                                           email);
+                        });
+            }
+        }
         auto* starred = menu.addAction(
             javelin::gui::themedSvgIcon(QStringLiteral(":/icons/thunderbird-icons/starred.svg"),
                                         m_contactList->palette().color(QPalette::Highlight)),
@@ -2118,6 +2134,17 @@ namespace javelin::gui::contacts
                                                         name, email);
                         });
                 header->addWidget(compose);
+                auto* search = new QToolButton(card);
+                search->setIcon(QIcon::fromTheme(QStringLiteral("edit-find")));
+                search->setToolTip(QStringLiteral("Find mail from this address"));
+                search->setAccessibleName(search->toolTip());
+                connect(search, &QToolButton::clicked, this,
+                        [this, email = *email]
+                        {
+                            Q_EMIT searchMailFromRequested(m_accountCombo->currentData().toString(),
+                                                           email);
+                        });
+                header->addWidget(search);
             }
             auto* copy = new QToolButton(card);
             copy->setText(QStringLiteral("Copy"));

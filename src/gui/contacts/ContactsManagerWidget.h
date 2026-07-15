@@ -58,6 +58,7 @@ namespace javelin::gui::contacts
         void userInterventionRequired(const QString& message);
         void composeMailRequested(const QString& accountId, const QString& name,
                                   const QString& email);
+        void searchMailFromRequested(const QString& accountId, const QString& email);
         void toolbarStateChanged(bool busy, bool hasSelectedContact);
 
       private:
