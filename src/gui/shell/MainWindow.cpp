@@ -4297,6 +4297,12 @@ namespace javelin::gui::shell
 
     void MainWindow::refreshFromServer()
     {
+        if (activeTabIsSearch())
+        {
+            refreshActiveTabFromServer();
+            return;
+        }
+
         const auto accountId =
             activeAccountId().has_value() ? activeAccountId() : currentAccountId(*m_mailboxView);
         if (!accountId.has_value())
