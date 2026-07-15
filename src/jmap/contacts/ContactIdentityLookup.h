@@ -2,6 +2,8 @@
 
 #include "jmap/cache/Database.h"
 
+#include <QObject>
+
 #include <optional>
 #include <string>
 #include <string_view>
@@ -23,8 +25,10 @@ namespace javelin::jmap::contacts
         std::string email;
     };
 
-    class ContactIdentityLookup
+    class ContactIdentityLookup : public QObject
     {
+        Q_OBJECT
+
       public:
         explicit ContactIdentityLookup(javelin::jmap::cache::ContactRepository& repository);
 
@@ -34,6 +38,9 @@ namespace javelin::jmap::contacts
         [[nodiscard]] std::variant<std::vector<ContactIdentity>,
                                    javelin::jmap::cache::DatabaseError>
         suggestions(std::optional<std::string_view> accountId = std::nullopt) const;
+
+      Q_SIGNALS:
+        void contactDataChanged(const QString& accountId);
 
       private:
         javelin::jmap::cache::ContactRepository& m_repository;

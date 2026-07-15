@@ -95,6 +95,15 @@ TEST_CASE("contact repository greedily caches, filters, and resolves email addre
           "Joe Bloggs");
 
     javelin::jmap::contacts::ContactIdentityLookup identities{repository};
+    QString changedAccount;
+    QObject::connect(&identities,
+                     &javelin::jmap::contacts::ContactIdentityLookup::contactDataChanged,
+                     [&changedAccount](const QString& accountId) { changedAccount = accountId; });
+    REQUIRE_FALSE(
+        repository
+            .upsertContacts("a1", {contact("c1", "Joseph Bloggs", "Joe@Example.test")}, {}, "c2")
+            .has_value());
+    CHECK(changedAccount == QStringLiteral("a1"));
     const auto resolved = identities.resolve("a1", "JOE@example.test");
     REQUIRE(
         std::holds_alternative<std::optional<javelin::jmap::contacts::ContactIdentity>>(resolved));
@@ -102,7 +111,7 @@ TEST_CASE("contact repository greedily caches, filters, and resolves email addre
         std::get<std::optional<javelin::jmap::contacts::ContactIdentity>>(resolved).has_value());
     CHECK(
         std::get<std::optional<javelin::jmap::contacts::ContactIdentity>>(resolved)->displayName ==
-        "Joe Bloggs");
+        "Joseph Bloggs");
     const auto suggestions = identities.suggestions("a1");
     REQUIRE(
         std::holds_alternative<std::vector<javelin::jmap::contacts::ContactIdentity>>(suggestions));

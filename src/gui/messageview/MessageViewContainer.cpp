@@ -801,6 +801,14 @@ namespace javelin::gui::messageview
         layout->addWidget(m_bodyStack, 1);
         layout->addWidget(m_attachmentHeaderWidget);
 
+        connect(&m_contactIdentityLookup,
+                &javelin::jmap::contacts::ContactIdentityLookup::contactDataChanged, this,
+                [this]
+                {
+                    if (m_snapshot.has_value())
+                        m_fromLabel->setText(
+                            QStringLiteral("From: %1").arg(contactAwareSenderLabel()));
+                });
         updatePresentation();
     }
 

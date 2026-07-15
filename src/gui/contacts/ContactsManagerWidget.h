@@ -15,6 +15,7 @@ class QComboBox;
 class QLabel;
 class QLineEdit;
 class QListWidget;
+class QPoint;
 class QPlainTextEdit;
 class QVBoxLayout;
 class QToolButton;
@@ -56,6 +57,7 @@ namespace javelin::gui::contacts
         void reloadAddressBooks();
         void reloadContacts();
         void showSelectedContact();
+        void showContactContextMenu(const QPoint& position);
         void cancelEdit();
         void loadEditorDocument(const QString& document);
         void saveContact();
@@ -104,7 +106,6 @@ namespace javelin::gui::contacts
         QPlainTextEdit* m_notesEdit = nullptr;
         QListWidget* m_addressBooksEdit = nullptr;
         QToolButton* m_advancedToggle = nullptr;
-        QToolButton* m_refreshButton = nullptr;
         QPushButton* m_saveButton = nullptr;
         QPushButton* m_uploadPhotoButton = nullptr;
         QPushButton* m_cancelButton = nullptr;

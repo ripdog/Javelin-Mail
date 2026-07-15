@@ -499,6 +499,9 @@ namespace javelin::gui::compose
     {
         setAcceptDrops(true);
         setupUi();
+        connect(&m_contactIdentityLookup,
+                &javelin::jmap::contacts::ContactIdentityLookup::contactDataChanged, this,
+                &ComposeTabWidget::setupContactCompletion);
         setupContactCompletion();
         createToolbarActions();
         loadIdentities();
@@ -728,10 +731,16 @@ namespace javelin::gui::compose
                 QStringLiteral("%1 <%2>").arg(name, QString::fromStdString(contact.email)));
         }
 
+        if (m_contactCompletionModel != nullptr)
+        {
+            m_contactCompletionModel->setStringList(values);
+            return;
+        }
+
+        m_contactCompletionModel = new QStringListModel(values, this);
         for (auto* edit : {m_toEdit, m_ccEdit, m_bccEdit})
         {
-            auto* model = new QStringListModel(values, edit);
-            auto* completer = new QCompleter(model, edit);
+            auto* completer = new QCompleter(m_contactCompletionModel, edit);
             completer->setWidget(edit);
             completer->setCaseSensitivity(Qt::CaseInsensitive);
             completer->setCompletionMode(QCompleter::PopupCompletion);

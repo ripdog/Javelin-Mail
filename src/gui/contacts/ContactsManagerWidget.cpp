@@ -20,6 +20,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QMenu>
 #include <QMessageBox>
 #include <QMimeDatabase>
 #include <QPlainTextEdit>
@@ -294,16 +295,11 @@ namespace javelin::gui::contacts
         m_sortCombo->addItem(QStringLiteral("Name Z–A"), 1);
         m_sortCombo->addItem(QStringLiteral("Organization"), 2);
         m_sortCombo->addItem(QStringLiteral("Email"), 3);
-        m_refreshButton = new QToolButton(left);
-        m_refreshButton->setIcon(
-            QIcon(QStringLiteral(":/icons/thunderbird-icons/cloud-download.svg")));
-        m_refreshButton->setToolTip(QStringLiteral("Refresh contacts"));
-        m_refreshButton->setAccessibleName(QStringLiteral("Refresh contacts"));
         searchRow->addWidget(m_filterEdit, 1);
         searchRow->addWidget(m_sortCombo);
-        searchRow->addWidget(m_refreshButton);
         leftLayout->addLayout(searchRow);
         m_contactList = new QListWidget(left);
+        m_contactList->setContextMenuPolicy(Qt::CustomContextMenu);
         leftLayout->addWidget(m_contactList, 1);
 
         m_detailStack = new QStackedWidget(splitter);
@@ -450,12 +446,12 @@ namespace javelin::gui::contacts
                 [this] { reloadContacts(); });
         connect(m_contactList, &QListWidget::currentRowChanged, this,
                 [this] { showSelectedContact(); });
+        connect(m_contactList, &QListWidget::customContextMenuRequested, this,
+                &ContactsManagerWidget::showContactContextMenu);
         connect(m_saveButton, &QPushButton::clicked, this, &ContactsManagerWidget::saveContact);
         connect(m_uploadPhotoButton, &QPushButton::clicked, this,
                 &ContactsManagerWidget::uploadPhoto);
         connect(m_cancelButton, &QPushButton::clicked, this, &ContactsManagerWidget::cancelEdit);
-        connect(m_refreshButton, &QToolButton::clicked, this,
-                &ContactsManagerWidget::requestRefresh);
     }
 
     void ContactsManagerWidget::reloadAccounts()
@@ -574,7 +570,9 @@ namespace javelin::gui::contacts
             auto* item =
                 new QListWidgetItem(QString::fromStdString(contact.displayName), m_contactList);
             if (contact.isImportant)
-                item->setIcon(QIcon(QStringLiteral(":/icons/thunderbird-icons/starred.svg")));
+                item->setIcon(javelin::gui::themedSvgIcon(
+                    QStringLiteral(":/icons/thunderbird-icons/starred.svg"),
+                    m_contactList->palette().color(QPalette::Highlight)));
             QString detail;
             if (contact.organization.has_value())
                 detail = QString::fromStdString(*contact.organization);
@@ -605,6 +603,54 @@ namespace javelin::gui::contacts
             document->setPlainText(QString::fromStdString(contact->document));
         m_detailStack->setCurrentIndex(1);
         Q_EMIT toolbarStateChanged(m_busy, true);
+    }
+
+    void ContactsManagerWidget::showContactContextMenu(const QPoint& position)
+    {
+        auto* item = m_contactList->itemAt(position);
+        if (item == nullptr || !(item->flags() & Qt::ItemIsSelectable))
+            return;
+        m_contactList->setCurrentItem(item);
+        const auto* contact = currentContact();
+        if (contact == nullptr)
+            return;
+
+        QMenu menu{this};
+        auto* compose = menu.addAction(QIcon::fromTheme(QStringLiteral("mail-message-new")),
+                                       QStringLiteral("Write Message"));
+        compose->setEnabled(!contact->emails.empty());
+        connect(compose, &QAction::triggered, this,
+                [this]
+                {
+                    const auto* selected = currentContact();
+                    if (selected == nullptr || selected->emails.empty())
+                        return;
+                    Q_EMIT composeMailRequested(
+                        m_accountCombo->currentData().toString(),
+                        QString::fromStdString(selected->displayName),
+                        QString::fromStdString(selected->emails.front().address));
+                });
+        if (!contact->emails.empty())
+        {
+            const QString email = QString::fromStdString(contact->emails.front().address);
+            auto* copyEmail = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-copy")),
+                                             QStringLiteral("Copy Email Address"));
+            connect(copyEmail, &QAction::triggered, this,
+                    [email] { QApplication::clipboard()->setText(email); });
+        }
+        menu.addSeparator();
+        auto* edit = menu.addAction(QIcon::fromTheme(QStringLiteral("document-edit")),
+                                    QStringLiteral("Edit Contact"));
+        connect(edit, &QAction::triggered, this, &ContactsManagerWidget::beginEditContact);
+        auto* copy = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-copy")),
+                                    QStringLiteral("Copy Contact…"));
+        connect(copy, &QAction::triggered, this, &ContactsManagerWidget::copyContact);
+        auto* remove = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-delete")),
+                                      QStringLiteral("Delete Contact"));
+        connect(remove, &QAction::triggered, this, &ContactsManagerWidget::deleteContact);
+        for (auto* action : {edit, copy, remove})
+            action->setEnabled(!m_busy);
+        menu.exec(m_contactList->viewport()->mapToGlobal(position));
     }
 
     void ContactsManagerWidget::loadEditorDocument(const QString& document)
@@ -1050,8 +1096,7 @@ namespace javelin::gui::contacts
     void ContactsManagerWidget::setBusy(const bool busy)
     {
         m_busy = busy;
-        const std::array<QWidget*, 4> buttons{m_refreshButton, m_saveButton, m_uploadPhotoButton,
-                                              m_cancelButton};
+        const std::array<QWidget*, 3> buttons{m_saveButton, m_uploadPhotoButton, m_cancelButton};
         for (auto* button : buttons)
             button->setEnabled(!busy);
         m_accountCombo->setEnabled(!busy);

@@ -4,6 +4,8 @@
 #include "jmap/cache/Database.h"
 #include "jmap/contacts/ContactTypes.h"
 
+#include <QObject>
+
 #include <optional>
 #include <string_view>
 #include <variant>
@@ -19,8 +21,10 @@ namespace javelin::jmap::cache
         bool mayCreateAddressBook = false;
     };
 
-    class ContactRepository
+    class ContactRepository : public QObject
     {
+        Q_OBJECT
+
       public:
         explicit ContactRepository(DatabaseConnection& connection);
 
@@ -46,6 +50,9 @@ namespace javelin::jmap::cache
                                    DatabaseError>
         findByEmail(std::string_view normalizedEmail,
                     std::optional<std::string_view> accountId = std::nullopt) const;
+
+      Q_SIGNALS:
+        void contactsChanged(const QString& accountId);
 
       private:
         DatabaseConnection& m_connection;

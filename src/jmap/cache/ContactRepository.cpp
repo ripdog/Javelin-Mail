@@ -226,6 +226,7 @@ namespace javelin::jmap::cache
             database.rollback();
             return queryError(QStringLiteral("Store contacts state"), state);
         }
+        Q_EMIT contactsChanged(QString::fromStdString(std::string{accountId}));
         return std::nullopt;
     }
 
@@ -285,6 +286,7 @@ namespace javelin::jmap::cache
             return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
                                  .message = QStringLiteral("Commit contact update")};
         }
+        Q_EMIT contactsChanged(QString::fromStdString(std::string{accountId}));
         return std::nullopt;
     }
 

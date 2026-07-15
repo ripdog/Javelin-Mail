@@ -12,6 +12,8 @@ namespace javelin::jmap::contacts
         javelin::jmap::cache::ContactRepository& repository)
         : m_repository(repository)
     {
+        connect(&m_repository, &javelin::jmap::cache::ContactRepository::contactsChanged, this,
+                &ContactIdentityLookup::contactDataChanged);
     }
 
     std::variant<std::optional<ContactIdentity>, javelin::jmap::cache::DatabaseError>
