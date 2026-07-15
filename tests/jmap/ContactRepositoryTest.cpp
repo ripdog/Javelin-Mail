@@ -76,9 +76,14 @@ TEST_CASE("contact repository greedily caches, filters, and resolves email addre
         .shareWith = std::nullopt,
         .myRights = {.mayRead = true, .mayWrite = true, .mayShare = false, .mayDelete = true},
     };
+    auto secondaryBook = book;
+    secondaryBook.id = "book-2";
+    secondaryBook.name = "Shared";
+    secondaryBook.isDefault = false;
     const std::vector contacts{contact("c1", "Joe Bloggs", "Joe@Example.test"),
                                contact("c2", "Alex Smith", "alex@example.test")};
-    REQUIRE_FALSE(repository.replaceAll("a1", {book}, contacts, "b1", "c1").has_value());
+    REQUIRE_FALSE(
+        repository.replaceAll("a1", {book, secondaryBook}, contacts, "b1", "c1").has_value());
 
     const auto books = repository.listAddressBooks("a1");
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::api::AddressBook>>(books));
@@ -116,4 +121,19 @@ TEST_CASE("contact repository greedily caches, filters, and resolves email addre
     REQUIRE(
         std::holds_alternative<std::vector<javelin::jmap::contacts::ContactIdentity>>(suggestions));
     CHECK(std::get<std::vector<javelin::jmap::contacts::ContactIdentity>>(suggestions).size() == 2);
+
+    auto renamedBook = book;
+    renamedBook.name = "Private";
+    REQUIRE_FALSE(repository.replaceAddressBooks("a1", {renamedBook}, "b2").has_value());
+    const auto reconciledBooks = repository.listAddressBooks("a1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::api::AddressBook>>(reconciledBooks));
+    REQUIRE(std::get<std::vector<javelin::jmap::api::AddressBook>>(reconciledBooks).size() == 1);
+    CHECK(std::get<std::vector<javelin::jmap::api::AddressBook>>(reconciledBooks).front().name ==
+          "Private");
+    const auto retainedMembership = repository.listContacts("a1", "book-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::contacts::ContactSummary>>(
+        retainedMembership));
+    CHECK(
+        std::get<std::vector<javelin::jmap::contacts::ContactSummary>>(retainedMembership).size() ==
+        2);
 }

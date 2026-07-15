@@ -34,6 +34,10 @@ namespace javelin::jmap::cache
                    const std::vector<javelin::jmap::contacts::ContactSummary>& contacts,
                    std::string_view addressBookState, std::string_view contactState);
         [[nodiscard]] std::optional<DatabaseError>
+        replaceAddressBooks(std::string_view accountId,
+                            const std::vector<javelin::jmap::api::AddressBook>& books,
+                            std::string_view state);
+        [[nodiscard]] std::optional<DatabaseError>
         upsertContacts(std::string_view accountId,
                        const std::vector<javelin::jmap::contacts::ContactSummary>& contacts,
                        std::span<const std::string> destroyed, std::string_view state);

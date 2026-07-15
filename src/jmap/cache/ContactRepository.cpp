@@ -6,6 +6,8 @@
 #include <QSqlError>
 #include <QSqlQuery>
 
+#include <unordered_set>
+
 namespace javelin::jmap::cache
 {
     namespace
@@ -30,6 +32,43 @@ namespace javelin::jmap::cache
             std::string json;
             static_cast<void>(glz::write_json(shareWith, json));
             return json;
+        }
+
+        [[nodiscard]] std::optional<DatabaseError>
+        insertAddressBook(QSqlDatabase& database, const std::string_view accountId,
+                          const javelin::jmap::api::AddressBook& item, const std::string_view state)
+        {
+            QSqlQuery book{database};
+            book.prepare(
+                QStringLiteral("INSERT INTO address_books (account_id, address_book_id, name, "
+                               "description, sort_order, is_default, is_subscribed, "
+                               "share_with_json, my_rights_json, state) VALUES (:account,:id,"
+                               ":name,:description,:sort,:default,:subscribed,:share,:rights,"
+                               ":state) ON CONFLICT(account_id,address_book_id) DO UPDATE SET "
+                               "name=excluded.name,description=excluded.description,"
+                               "sort_order=excluded.sort_order,is_default=excluded.is_default,"
+                               "is_subscribed=excluded.is_subscribed,"
+                               "share_with_json=excluded.share_with_json,"
+                               "my_rights_json=excluded.my_rights_json,state=excluded.state"));
+            book.bindValue(QStringLiteral(":account"),
+                           QString::fromStdString(std::string{accountId}));
+            book.bindValue(QStringLiteral(":id"), QString::fromStdString(item.id));
+            book.bindValue(QStringLiteral(":name"), QString::fromStdString(item.name));
+            book.bindValue(QStringLiteral(":description"),
+                           item.description.has_value()
+                               ? QVariant{QString::fromStdString(*item.description)}
+                               : QVariant{});
+            book.bindValue(QStringLiteral(":sort"), item.sortOrder);
+            book.bindValue(QStringLiteral(":default"), item.isDefault ? 1 : 0);
+            book.bindValue(QStringLiteral(":subscribed"), item.isSubscribed ? 1 : 0);
+            book.bindValue(QStringLiteral(":share"),
+                           QString::fromStdString(shareWithJson(item.shareWith)));
+            book.bindValue(QStringLiteral(":rights"),
+                           QString::fromStdString(rightsJson(item.myRights)));
+            book.bindValue(QStringLiteral(":state"), QString::fromStdString(std::string{state}));
+            if (!book.exec())
+                return queryError(QStringLiteral("Upsert address book"), book);
+            return std::nullopt;
         }
 
         [[nodiscard]] std::optional<DatabaseError>
@@ -173,35 +212,12 @@ namespace javelin::jmap::cache
             database.rollback();
             return queryError(QStringLiteral("Clear address books"), clear);
         }
-        QSqlQuery book{database};
-        book.prepare(
-            QStringLiteral("INSERT INTO address_books (account_id, address_book_id, name, "
-                           "description, sort_order, is_default, is_subscribed, share_with_json, "
-                           "my_rights_json, state) VALUES (:account,:id,:name,:description,:sort,"
-                           ":default,:subscribed,:share,:rights,:state)"));
         for (const auto& item : books)
         {
-            book.bindValue(QStringLiteral(":account"),
-                           QString::fromStdString(std::string{accountId}));
-            book.bindValue(QStringLiteral(":id"), QString::fromStdString(item.id));
-            book.bindValue(QStringLiteral(":name"), QString::fromStdString(item.name));
-            book.bindValue(QStringLiteral(":description"),
-                           item.description.has_value()
-                               ? QVariant{QString::fromStdString(*item.description)}
-                               : QVariant{});
-            book.bindValue(QStringLiteral(":sort"), item.sortOrder);
-            book.bindValue(QStringLiteral(":default"), item.isDefault ? 1 : 0);
-            book.bindValue(QStringLiteral(":subscribed"), item.isSubscribed ? 1 : 0);
-            book.bindValue(QStringLiteral(":share"),
-                           QString::fromStdString(shareWithJson(item.shareWith)));
-            book.bindValue(QStringLiteral(":rights"),
-                           QString::fromStdString(rightsJson(item.myRights)));
-            book.bindValue(QStringLiteral(":state"),
-                           QString::fromStdString(std::string{addressBookState}));
-            if (!book.exec())
+            if (const auto error = insertAddressBook(database, accountId, item, addressBookState))
             {
                 database.rollback();
-                return queryError(QStringLiteral("Insert address book"), book);
+                return error;
             }
         }
         for (const auto& contact : contacts)
@@ -225,6 +241,72 @@ namespace javelin::jmap::cache
         {
             database.rollback();
             return queryError(QStringLiteral("Store contacts state"), state);
+        }
+        Q_EMIT contactsChanged(QString::fromStdString(std::string{accountId}));
+        return std::nullopt;
+    }
+
+    std::optional<DatabaseError> ContactRepository::replaceAddressBooks(
+        const std::string_view accountId, const std::vector<javelin::jmap::api::AddressBook>& books,
+        const std::string_view state)
+    {
+        auto& database = m_connection.database();
+        if (!database.transaction())
+        {
+            return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
+                                 .message = QStringLiteral("Begin address book replacement")};
+        }
+
+        std::unordered_set<std::string> retainedIds;
+        retainedIds.reserve(books.size());
+        for (const auto& book : books)
+        {
+            retainedIds.insert(book.id);
+            if (const auto error = insertAddressBook(database, accountId, book, state))
+            {
+                database.rollback();
+                return error;
+            }
+        }
+
+        QSqlQuery existing{database};
+        existing.prepare(
+            QStringLiteral("SELECT address_book_id FROM address_books WHERE account_id=:account"));
+        existing.bindValue(QStringLiteral(":account"),
+                           QString::fromStdString(std::string{accountId}));
+        if (!existing.exec())
+        {
+            database.rollback();
+            return queryError(QStringLiteral("List cached address books"), existing);
+        }
+        std::vector<std::string> removedIds;
+        while (existing.next())
+        {
+            auto id = existing.value(0).toString().toStdString();
+            if (!retainedIds.contains(id))
+                removedIds.push_back(std::move(id));
+        }
+
+        QSqlQuery remove{database};
+        remove.prepare(QStringLiteral("DELETE FROM address_books WHERE account_id=:account AND "
+                                      "address_book_id=:id"));
+        for (const auto& id : removedIds)
+        {
+            remove.bindValue(QStringLiteral(":account"),
+                             QString::fromStdString(std::string{accountId}));
+            remove.bindValue(QStringLiteral(":id"), QString::fromStdString(id));
+            if (!remove.exec())
+            {
+                database.rollback();
+                return queryError(QStringLiteral("Remove stale address book"), remove);
+            }
+        }
+
+        if (!database.commit())
+        {
+            database.rollback();
+            return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
+                                 .message = QStringLiteral("Commit address book replacement")};
         }
         Q_EMIT contactsChanged(QString::fromStdString(std::string{accountId}));
         return std::nullopt;

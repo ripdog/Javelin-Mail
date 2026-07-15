@@ -42,3 +42,17 @@ an explicit protocol review, fixture update, and architecture change.
 Calendar protocol envelopes and JSCalendar wire documents remain inside `javelin_jmap`.
 The GUI consumes typed calendar domain values and commands through `CalendarService` and
 renders committed SQLite state; it never constructs method names or raw JSON.
+
+## Contacts synchronization
+
+Contacts support follows RFC 9610 and preserves complete JSContact documents at the protocol
+boundary. The initial synchronization fetches all AddressBooks and ContactCards. Later explicit
+refreshes reconcile the small AddressBook set and advance the cached ContactCard state with
+`ContactCard/changes`, fetching only created or updated ids in batches bounded by the server's
+`maxObjectsInGet` capability. Every intermediate state is committed before requesting the next
+changes page. A `cannotCalculateChanges` response invalidates the delta path and performs an
+atomic full ContactCard replacement, as required by RFC 8620.
+
+Contact cache commits publish through the process-owned `ContactRepository`. Compose completion,
+message sender identity rendering, and the contacts view then reload from SQLite; they do not
+retain a second contact data store.
