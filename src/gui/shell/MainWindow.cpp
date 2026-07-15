@@ -2257,9 +2257,16 @@ namespace javelin::gui::shell
                     busy = contacts->widget->operationInFlight();
                     selected = contacts->widget->hasSelectedContact();
                 }
-            m_contactNewAction->setEnabled(!busy);
-            m_contactEditAction->setEnabled(!busy && selected);
-            m_contactDeleteAction->setEnabled(!busy && selected);
+            const auto* contacts = activeTab() == nullptr
+                                       ? nullptr
+                                       : std::get_if<ContactsTabState>(&activeTab()->content);
+            const auto* widget = contacts == nullptr ? nullptr : contacts->widget;
+            m_contactNewAction->setEnabled(!busy && widget != nullptr &&
+                                           widget->canCreateContact());
+            m_contactEditAction->setEnabled(!busy && selected && widget != nullptr &&
+                                            widget->canEditContact());
+            m_contactDeleteAction->setEnabled(!busy && selected && widget != nullptr &&
+                                              widget->canDeleteContact());
             m_contactCopyAction->setEnabled(!busy && selected);
             m_contactManageAddressBooksAction->setEnabled(!busy);
             m_contactRefreshAction->setEnabled(!busy);

@@ -3,6 +3,7 @@
 #include "jmap/api/ContactsMethods.h"
 
 #include <optional>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <variant>
@@ -59,6 +60,13 @@ namespace javelin::jmap::contacts
         std::string document;
     };
 
+    struct ContactActionRights
+    {
+        bool mayCreate = false;
+        bool mayModify = false;
+        bool mayDestroy = false;
+    };
+
     [[nodiscard]] std::optional<ContactSummary>
     summarizeContact(std::string accountId, const javelin::jmap::api::ContactCard& card);
     [[nodiscard]] std::string normalizeEmail(std::string_view email);
@@ -72,4 +80,8 @@ namespace javelin::jmap::contacts
     contactEditorData(std::string_view json);
     [[nodiscard]] std::variant<std::string, std::string_view>
     applyContactEditorData(const ContactEditorData& data, bool creating);
+    [[nodiscard]] ContactActionRights
+    contactActionRights(bool accountReadOnly,
+                        std::span<const javelin::jmap::api::AddressBook> addressBooks,
+                        std::span<const std::string> contactAddressBookIds = {});
 } // namespace javelin::jmap::contacts

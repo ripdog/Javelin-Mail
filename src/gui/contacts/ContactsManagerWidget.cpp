@@ -36,6 +36,7 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <iterator>
 #include <unordered_set>
 
 namespace javelin::gui::contacts
@@ -413,6 +414,44 @@ namespace javelin::gui::contacts
         return currentContact() != nullptr;
     }
 
+    bool ContactsManagerWidget::canCreateContact() const
+    {
+        const auto* account = currentAccount();
+        if (account == nullptr)
+            return false;
+        const auto selectedBook = currentAddressBookId();
+        if (selectedBook.has_value())
+        {
+            const auto book = std::ranges::find(m_addressBooks, *selectedBook,
+                                                &javelin::jmap::api::AddressBook::id);
+            return !account->isReadOnly && book != m_addressBooks.end() && book->myRights.mayWrite;
+        }
+        return javelin::jmap::contacts::contactActionRights(account->isReadOnly, m_addressBooks)
+            .mayCreate;
+    }
+
+    bool ContactsManagerWidget::canEditContact() const
+    {
+        const auto* account = currentAccount();
+        const auto* contact = currentContact();
+        if (account == nullptr || contact == nullptr)
+            return false;
+        return javelin::jmap::contacts::contactActionRights(account->isReadOnly, m_addressBooks,
+                                                            contact->addressBookIds)
+            .mayModify;
+    }
+
+    bool ContactsManagerWidget::canDeleteContact() const
+    {
+        const auto* account = currentAccount();
+        const auto* contact = currentContact();
+        if (account == nullptr || contact == nullptr)
+            return false;
+        return javelin::jmap::contacts::contactActionRights(account->isReadOnly, m_addressBooks,
+                                                            contact->addressBookIds)
+            .mayDestroy;
+    }
+
     void ContactsManagerWidget::setupUi()
     {
         setObjectName(QStringLiteral("contactsManager"));
@@ -782,7 +821,7 @@ namespace javelin::gui::contacts
         m_starButton->setToolTip(contact->isImportant ? QStringLiteral("Remove from Starred")
                                                       : QStringLiteral("Add to Starred"));
         m_starButton->setAccessibleName(m_starButton->toolTip());
-        m_starButton->setEnabled(!m_busy);
+        m_starButton->setEnabled(!m_busy && canEditContact());
         populateContactCards(*contact);
         if (auto* document = m_detailStack->widget(1)->findChild<QPlainTextEdit*>(
                 QStringLiteral("contactDocumentView")))
@@ -829,11 +868,12 @@ namespace javelin::gui::contacts
                                         m_contactList->palette().color(QPalette::Highlight)),
             contact->isImportant ? QStringLiteral("Remove from Starred")
                                  : QStringLiteral("Add to Starred"));
-        starred->setEnabled(!m_busy);
+        starred->setEnabled(!m_busy && canEditContact());
         connect(starred, &QAction::triggered, this, &ContactsManagerWidget::toggleContactStarred);
         menu.addSeparator();
         auto* edit = menu.addAction(QIcon::fromTheme(QStringLiteral("document-edit")),
                                     QStringLiteral("Edit Contact"));
+        edit->setEnabled(!m_busy && canEditContact());
         connect(edit, &QAction::triggered, this, &ContactsManagerWidget::beginEditContact);
         auto* copy = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-copy")),
                                     QStringLiteral("Copy Contact…"));
@@ -841,14 +881,14 @@ namespace javelin::gui::contacts
         auto* remove = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-delete")),
                                       QStringLiteral("Delete Contact"));
         connect(remove, &QAction::triggered, this, &ContactsManagerWidget::deleteContact);
-        for (auto* action : {edit, copy, remove})
-            action->setEnabled(!m_busy);
+        copy->setEnabled(!m_busy);
+        remove->setEnabled(!m_busy && canDeleteContact());
         menu.exec(m_contactList->viewport()->mapToGlobal(position));
     }
 
     void ContactsManagerWidget::toggleContactStarred()
     {
-        if (m_busy)
+        if (m_busy || !canEditContact())
             return;
         const auto accountId = currentAccountId();
         const auto* contact = currentContact();
@@ -915,6 +955,8 @@ namespace javelin::gui::contacts
             auto* item = new QListWidgetItem(QString::fromStdString(book.name), m_addressBooksEdit);
             item->setData(Qt::UserRole, QString::fromStdString(book.id));
             item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+            if (!book.myRights.mayWrite)
+                item->setFlags(item->flags() & ~Qt::ItemIsEnabled);
             item->setCheckState(std::ranges::find(editorData->addressBookIds, book.id) !=
                                         editorData->addressBookIds.end()
                                     ? Qt::Checked
@@ -963,13 +1005,17 @@ namespace javelin::gui::contacts
 
     void ContactsManagerWidget::beginCreateContact()
     {
-        if (m_busy)
+        if (m_busy || !canCreateContact())
             return;
         auto bookId = currentAddressBookId();
         if (!bookId.has_value())
         {
-            const auto defaultBook = std::ranges::find_if(m_addressBooks, [](const auto& book)
-                                                          { return book.isDefault; });
+            auto defaultBook =
+                std::ranges::find_if(m_addressBooks, [](const auto& book)
+                                     { return book.isDefault && book.myRights.mayWrite; });
+            if (defaultBook == m_addressBooks.end())
+                defaultBook = std::ranges::find_if(m_addressBooks, [](const auto& book)
+                                                   { return book.myRights.mayWrite; });
             if (defaultBook == m_addressBooks.end())
             {
                 QMessageBox::information(this, QStringLiteral("No Address Book"),
@@ -1003,7 +1049,7 @@ namespace javelin::gui::contacts
 
     void ContactsManagerWidget::beginEditContact()
     {
-        if (m_busy)
+        if (m_busy || !canEditContact())
             return;
         const auto* contact = currentContact();
         if (contact == nullptr)
@@ -1038,6 +1084,17 @@ namespace javelin::gui::contacts
             const auto* item = m_addressBooksEdit->item(row);
             if (item->checkState() == Qt::Checked)
                 editor.addressBookIds.push_back(item->data(Qt::UserRole).toString().toStdString());
+        }
+        const auto* account = currentAccount();
+        if (account == nullptr || !javelin::jmap::contacts::contactActionRights(
+                                       account->isReadOnly, m_addressBooks, editor.addressBookIds)
+                                       .mayModify)
+        {
+            QMessageBox::information(
+                this, QStringLiteral("Read-only Contact"),
+                QStringLiteral(
+                    "You do not have write permission for every selected address book."));
+            return;
         }
         if (editor.kind == "group")
         {
@@ -1150,7 +1207,7 @@ namespace javelin::gui::contacts
             return;
         const auto accountId = currentAccountId();
         const auto* contact = currentContact();
-        if (!accountId.has_value() || contact == nullptr ||
+        if (!accountId.has_value() || contact == nullptr || !canDeleteContact() ||
             QMessageBox::question(
                 this, QStringLiteral("Delete Contact"),
                 QStringLiteral("Delete %1?").arg(QString::fromStdString(contact->displayName))) !=
@@ -1182,9 +1239,37 @@ namespace javelin::gui::contacts
         if (!sourceAccountId.has_value() || contact == nullptr || m_accounts.empty())
             return;
 
+        struct Destination
+        {
+            javelin::jmap::cache::ContactAccount account;
+            std::vector<javelin::jmap::api::AddressBook> books;
+        };
+        std::vector<Destination> destinations;
         QStringList accountLabels;
         for (const auto& account : m_accounts)
+        {
+            if (account.isReadOnly)
+                continue;
+            const auto booksResult = m_repository.listAddressBooks(account.accountId);
+            const auto* books =
+                std::get_if<std::vector<javelin::jmap::api::AddressBook>>(&booksResult);
+            if (books == nullptr)
+                continue;
+            Destination destination{.account = account, .books = {}};
+            std::ranges::copy_if(*books, std::back_inserter(destination.books),
+                                 [](const auto& book) { return book.myRights.mayWrite; });
+            if (destination.books.empty())
+                continue;
             accountLabels.push_back(accountLabel(account));
+            destinations.push_back(std::move(destination));
+        }
+        if (destinations.empty())
+        {
+            QMessageBox::information(
+                this, QStringLiteral("Copy Contact"),
+                QStringLiteral("There is no writable destination address book."));
+            return;
+        }
         bool accepted = false;
         const QString selectedAccount = QInputDialog::getItem(this, QStringLiteral("Copy Contact"),
                                                               QStringLiteral("Destination account"),
@@ -1192,17 +1277,9 @@ namespace javelin::gui::contacts
         const qsizetype accountIndex = accountLabels.indexOf(selectedAccount);
         if (!accepted || accountIndex < 0)
             return;
-        const auto& destinationAccount = m_accounts[static_cast<std::size_t>(accountIndex)];
-        const auto booksResult = m_repository.listAddressBooks(destinationAccount.accountId);
-        const auto* books = std::get_if<std::vector<javelin::jmap::api::AddressBook>>(&booksResult);
-        if (books == nullptr || books->empty())
-        {
-            QMessageBox::information(this, QStringLiteral("Copy Contact"),
-                                     QStringLiteral("The destination has no address book."));
-            return;
-        }
+        const auto& destination = destinations[static_cast<std::size_t>(accountIndex)];
         QStringList bookLabels;
-        for (const auto& book : *books)
+        for (const auto& book : destination.books)
             bookLabels.push_back(QString::fromStdString(book.name));
         const QString selectedBook = QInputDialog::getItem(
             this, QStringLiteral("Copy Contact"), QStringLiteral("Destination address book"),
@@ -1210,11 +1287,11 @@ namespace javelin::gui::contacts
         const qsizetype bookIndex = bookLabels.indexOf(selectedBook);
         if (!accepted || bookIndex < 0)
             return;
-        const auto& book = (*books)[static_cast<std::size_t>(bookIndex)];
+        const auto& book = destination.books[static_cast<std::size_t>(bookIndex)];
 
         javelin::jmap::api::ContactCardCopyRequest request;
         request.fromAccountId = *sourceAccountId;
-        request.accountId = destinationAccount.accountId;
+        request.accountId = destination.account.accountId;
         request.create.emplace(
             "copy-contact",
             javelin::jmap::api::ContactDocument{
@@ -1378,7 +1455,7 @@ namespace javelin::gui::contacts
         const std::array<QWidget*, 3> buttons{m_saveButton, m_uploadPhotoButton, m_cancelButton};
         for (auto* button : buttons)
             button->setEnabled(!busy);
-        m_starButton->setEnabled(!busy && currentContact() != nullptr);
+        m_starButton->setEnabled(!busy && canEditContact());
         m_accountCombo->setEnabled(!busy);
         m_addressBookCombo->setEnabled(!busy);
         Q_EMIT toolbarStateChanged(m_busy, currentContact() != nullptr);
@@ -1394,6 +1471,16 @@ namespace javelin::gui::contacts
     {
         const QString value = m_addressBookCombo->currentData().toString();
         return value.isEmpty() ? std::nullopt : std::optional{value.toStdString()};
+    }
+
+    const javelin::jmap::cache::ContactAccount* ContactsManagerWidget::currentAccount() const
+    {
+        const auto accountId = currentAccountId();
+        if (!accountId.has_value())
+            return nullptr;
+        const auto found = std::ranges::find(m_accounts, *accountId,
+                                             &javelin::jmap::cache::ContactAccount::accountId);
+        return found == m_accounts.end() ? nullptr : &*found;
     }
 
     const javelin::jmap::contacts::ContactSummary* ContactsManagerWidget::currentContact() const

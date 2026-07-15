@@ -153,6 +153,51 @@ TEST_CASE("structured contact fields and unresolved group members survive editin
     CHECK(json.find("known-uid") == std::string::npos);
 }
 
+TEST_CASE("contact action rights require every membership to be writable",
+          "[jmap][contacts][rights]")
+{
+    const std::vector books{
+        javelin::jmap::api::AddressBook{
+            .id = "writable",
+            .name = "Writable",
+            .description = std::nullopt,
+            .sortOrder = 0,
+            .isDefault = true,
+            .isSubscribed = true,
+            .shareWith = std::nullopt,
+            .myRights = {.mayRead = true, .mayWrite = true, .mayShare = false, .mayDelete = false}},
+        javelin::jmap::api::AddressBook{.id = "shared-read-only",
+                                        .name = "Shared",
+                                        .description = std::nullopt,
+                                        .sortOrder = 1,
+                                        .isDefault = false,
+                                        .isSubscribed = true,
+                                        .shareWith = std::nullopt,
+                                        .myRights = {.mayRead = true,
+                                                     .mayWrite = false,
+                                                     .mayShare = false,
+                                                     .mayDelete = false}},
+    };
+    const std::vector writableMembership{std::string{"writable"}};
+    const auto writable =
+        javelin::jmap::contacts::contactActionRights(false, books, writableMembership);
+    CHECK(writable.mayCreate);
+    CHECK(writable.mayModify);
+    CHECK(writable.mayDestroy);
+
+    const std::vector mixedMembership{std::string{"writable"}, std::string{"shared-read-only"}};
+    const auto mixed = javelin::jmap::contacts::contactActionRights(false, books, mixedMembership);
+    CHECK(mixed.mayCreate);
+    CHECK_FALSE(mixed.mayModify);
+    CHECK_FALSE(mixed.mayDestroy);
+
+    const auto readOnlyAccount =
+        javelin::jmap::contacts::contactActionRights(true, books, writableMembership);
+    CHECK_FALSE(readOnlyAccount.mayCreate);
+    CHECK_FALSE(readOnlyAccount.mayModify);
+    CHECK_FALSE(readOnlyAccount.mayDestroy);
+}
+
 TEST_CASE("contact starring preserves document extensions and removes legacy importance",
           "[jmap][contacts][document]")
 {

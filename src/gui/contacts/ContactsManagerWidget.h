@@ -37,6 +37,9 @@ namespace javelin::gui::contacts
 
         [[nodiscard]] bool operationInFlight() const;
         [[nodiscard]] bool hasSelectedContact() const;
+        [[nodiscard]] bool canCreateContact() const;
+        [[nodiscard]] bool canEditContact() const;
+        [[nodiscard]] bool canDeleteContact() const;
 
       public Q_SLOTS:
         void requestRefresh();
@@ -77,6 +80,7 @@ namespace javelin::gui::contacts
         void setBusy(bool busy);
         [[nodiscard]] std::optional<std::string> currentAccountId() const;
         [[nodiscard]] std::optional<std::string> currentAddressBookId() const;
+        [[nodiscard]] const javelin::jmap::cache::ContactAccount* currentAccount() const;
         [[nodiscard]] const javelin::jmap::contacts::ContactSummary* currentContact() const;
         void populateContactCards(const javelin::jmap::contacts::ContactSummary& contact);
 

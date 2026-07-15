@@ -654,4 +654,28 @@ namespace javelin::jmap::contacts
             return std::string_view{"Unable to serialize the contact."};
         return result;
     }
+
+    ContactActionRights
+    contactActionRights(const bool accountReadOnly,
+                        const std::span<const javelin::jmap::api::AddressBook> addressBooks,
+                        const std::span<const std::string> contactAddressBookIds)
+    {
+        if (accountReadOnly)
+            return {};
+        const bool mayCreate = std::ranges::any_of(addressBooks, [](const auto& book)
+                                                   { return book.myRights.mayWrite; });
+        if (contactAddressBookIds.empty())
+            return {.mayCreate = mayCreate, .mayModify = false, .mayDestroy = false};
+        const bool mayWriteEveryMembership =
+            std::ranges::all_of(contactAddressBookIds,
+                                [&addressBooks](const std::string& id)
+                                {
+                                    const auto book = std::ranges::find(
+                                        addressBooks, id, &javelin::jmap::api::AddressBook::id);
+                                    return book != addressBooks.end() && book->myRights.mayWrite;
+                                });
+        return {.mayCreate = mayCreate,
+                .mayModify = mayWriteEveryMembership,
+                .mayDestroy = mayWriteEveryMembership};
+    }
 } // namespace javelin::jmap::contacts
