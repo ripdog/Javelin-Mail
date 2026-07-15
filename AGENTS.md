@@ -69,6 +69,24 @@ KDE cmake settings enable `QT_NO_CAST_FROM_ASCII` and `QT_NO_KEYWORDS`. All code
 - Keep transport, sync, cache, and domain logic testable without starting a GUI.
 - Authentication, token refresh, and secret storage policy belong to the non-GUI service layers, not to ad hoc dialog code.
 
+### Application Coordination Boundary
+
+- Keep application and product logic out of the internal JMAP library. The library owns JMAP
+  protocol mechanics, typed protocol/domain data, capability handling, cache primitives, sync
+  primitives, and exact mutations requested by its callers.
+- The application coordination layer owns interpretation of user intent and UI context. This
+  includes workflow policy, multi-object orchestration, selection expansion, role-based actions,
+  batching decisions, partial-failure policy, refresh coordination, and deciding which exact JMAP
+  or cache mutations implement an application command.
+- Prefer typed, policy-neutral library APIs. For example, the library may apply an explicit email
+  mailbox patch containing mailbox IDs to add and remove; it must not decide what "move from a
+  search tab" or another UI-specific command means.
+- GUI code should raise typed application commands and render their outcomes. It must not bypass
+  the coordination layer to assemble protocol operations or embed cross-service workflow policy.
+- When responsibility is ambiguous, place protocol validity and transactional cache integrity in
+  the JMAP library, application semantics and orchestration in the coordination layer, and visual
+  interaction only in the GUI.
+
 ## Static Analysis And Quality Gates
 
 - Keep the codebase `clang-format` clean. Do NOT run clang-format on non-code, such as CMakeLists.txt
