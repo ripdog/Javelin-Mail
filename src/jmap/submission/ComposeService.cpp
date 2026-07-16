@@ -15,6 +15,9 @@
 #include "jmap/cache/QueryService.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/cache/SubmissionRepository.h"
+#include "jmap/sync/ConsistencyDomain.h"
+#include "jmap/sync/EmailMutationJournal.h"
+#include "jmap/sync/MutationJournal.h"
 
 #include <QDateTime>
 #include <QDebug>
@@ -39,27 +42,6 @@ namespace javelin::jmap::submission
 
     namespace
     {
-
-        [[nodiscard]] QString authMessage(const javelin::jmap::api::AuthError& error)
-        {
-            return QStringLiteral("Authentication error (%1): %2")
-                .arg(QString::fromUtf8(javelin::jmap::api::toString(error.code).data()),
-                     QString::fromStdString(error.message));
-        }
-
-        [[nodiscard]] QString transportMessage(const javelin::jmap::api::TransportError& error)
-        {
-            return QStringLiteral("Transport error (%1): %2")
-                .arg(QString::fromUtf8(javelin::jmap::api::toString(error.code).data()),
-                     QString::fromStdString(error.message));
-        }
-
-        [[nodiscard]] QString protocolMessage(const javelin::jmap::api::ProtocolError& error)
-        {
-            return QStringLiteral("Protocol error (%1): %2")
-                .arg(QString::fromUtf8(javelin::jmap::api::toString(error.code).data()),
-                     QString::fromStdString(error.message));
-        }
 
         [[nodiscard]] std::optional<javelin::jmap::OperationError>
         validateSettings(const javelin::jmap::LiveConnectionSettings& settings)
@@ -210,16 +192,6 @@ namespace javelin::jmap::submission
                 parts.push_back(QString::fromStdString(addressLabel(address)));
             }
             return parts.join(QStringLiteral(", ")).toStdString();
-        }
-
-        [[nodiscard]] QString joinStrings(const std::vector<std::string>& values)
-        {
-            QStringList parts;
-            for (const auto& value : values)
-            {
-                parts.push_back(QString::fromStdString(value));
-            }
-            return parts.join(QStringLiteral(","));
         }
 
         [[nodiscard]] std::string buildReplyPlainText(const javelin::jmap::domain::Email& email,
@@ -1301,6 +1273,122 @@ namespace javelin::jmap::submission
             };
         }
 
+        javelin::jmap::cache::EmailRepository emailRepository{m_connection};
+        const auto cachedEmailResult =
+            emailRepository.find(draftSummary.accountId, draftSummary.draftEmailId);
+        if (const auto* error =
+                std::get_if<javelin::jmap::cache::DatabaseError>(&cachedEmailResult))
+            co_return javelin::jmap::operationError(*error);
+        const auto& cachedEmail =
+            std::get<std::optional<javelin::jmap::domain::Email>>(cachedEmailResult);
+        if (!cachedEmail.has_value())
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::LocalStorageFailure,
+                .message = QStringLiteral("The saved draft is missing from the local cache."),
+            };
+
+        const auto operationGroupId =
+            QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
+        const auto emailMutationId =
+            QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
+        const auto submissionMutationId =
+            QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
+        const javelin::jmap::sync::EmailMutationRecord emailMutation{
+            .mutationId = emailMutationId,
+            .operationGroupId = operationGroupId,
+            .accountId = draftSummary.accountId,
+            .status = javelin::jmap::sync::MutationStatus::Pending,
+            .patch =
+                {
+                    .emailId = draftSummary.draftEmailId,
+                    .addMailboxIds = {sentMailbox->id},
+                    .removeMailboxIds = {draftsMailbox->id},
+                    .addKeywords = {"$seen"},
+                    .removeKeywords = {"$draft"},
+                    .destroy = false,
+                },
+            .baseMailboxIds = cachedEmail->mailboxIds,
+            .baseKeywords = cachedEmail->keywords,
+            .baseState = std::nullopt,
+            .acceptedState = std::nullopt,
+            .errorJson = std::nullopt,
+        };
+        const auto submissionObjectId = std::string{"local-"} + submissionMutationId;
+        const std::array companionRecords{javelin::jmap::sync::MutationRecord{
+            .mutationId = submissionMutationId,
+            .operationGroupId = operationGroupId,
+            .domain =
+                {
+                    .accountId = draftSummary.accountId,
+                    .dataType = "EmailSubmission",
+                },
+            .objectId = submissionObjectId,
+            .mutationKind = "email_submission_create",
+            .status = javelin::jmap::sync::MutationStatus::Pending,
+            .payloadJson =
+                QJsonDocument{QJsonObject{{QStringLiteral("emailId"),
+                                           QString::fromStdString(draftSummary.draftEmailId)}}}
+                    .toJson(QJsonDocument::Compact)
+                    .toStdString(),
+            .baseState = std::nullopt,
+            .acceptedState = std::nullopt,
+            .errorJson = std::nullopt,
+        }};
+        javelin::jmap::sync::EmailMutationJournal emailJournal{m_connection};
+        const auto projectedEmail =
+            javelin::jmap::sync::projectEmailMutations(*cachedEmail, {emailMutation});
+        if (const auto error =
+                emailJournal.queueGroup(emailMutation, projectedEmail, companionRecords))
+            co_return javelin::jmap::operationError(*error);
+        const auto transitionGroup = [this, &emailMutationId, &submissionMutationId](
+                                         const javelin::jmap::sync::MutationStatus status)
+            -> std::optional<javelin::jmap::OperationError>
+        {
+            auto transactionResult = javelin::jmap::sync::MutationProjectionTransaction::begin(
+                m_connection, QStringLiteral("Transition Email submission operation"));
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&transactionResult))
+                return javelin::jmap::operationError(*error);
+            auto transaction = std::get<javelin::jmap::sync::MutationProjectionTransaction>(
+                std::move(transactionResult));
+            for (const auto& mutationId : {emailMutationId, submissionMutationId})
+            {
+                if (const auto error = transaction.transition(mutationId, status))
+                    return javelin::jmap::operationError(*error);
+            }
+            if (const auto error = transaction.commit())
+                return javelin::jmap::operationError(*error);
+            return std::nullopt;
+        };
+        const auto rejectGroup = [this, &emailMutation, &submissionMutationId,
+                                  &cachedEmail](const std::optional<std::string_view> errorJson)
+            -> std::optional<javelin::jmap::OperationError>
+        {
+            auto transactionResult = javelin::jmap::sync::MutationProjectionTransaction::begin(
+                m_connection, QStringLiteral("Reject Email submission operation"));
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&transactionResult))
+                return javelin::jmap::operationError(*error);
+            auto transaction = std::get<javelin::jmap::sync::MutationProjectionTransaction>(
+                std::move(transactionResult));
+            for (const auto& mutationId : {emailMutation.mutationId, submissionMutationId})
+            {
+                if (const auto error = transaction.transition(
+                        mutationId, javelin::jmap::sync::MutationStatus::Rejected, std::nullopt,
+                        errorJson))
+                    return javelin::jmap::operationError(*error);
+            }
+            javelin::jmap::cache::EmailRepository emails{m_connection};
+            if (const auto error = emails.upsertMany(transaction.cacheTransaction(),
+                                                     emailMutation.accountId, {*cachedEmail}))
+                return javelin::jmap::operationError(*error);
+            if (const auto error = transaction.commit())
+                return javelin::jmap::operationError(*error);
+            return std::nullopt;
+        };
+        if (const auto error = transitionGroup(javelin::jmap::sync::MutationStatus::InFlight))
+            co_return *error;
+
         javelin::jmap::api::MethodCaller methodCaller{m_methodTransport};
         javelin::jmap::api::RequestBuilder builder;
         builder.useCore().useMail().useCapability(
@@ -1334,51 +1422,63 @@ namespace javelin::jmap::submission
         }
 
         const auto handle = builder.call(*request, "send-message");
-        qInfo().noquote() << "Compose send submitting draft"
-                          << QString::fromStdString(draftSummary.accountId)
-                          << QString::fromStdString(draftSummary.draftEmailId) << "draftsMailbox"
-                          << QString::fromStdString(draftsMailbox->id) << "sentMailbox"
-                          << QString::fromStdString(sentMailbox->id);
         const auto result = co_await methodCaller.call(
             buildApiRequestContext(settings, draftSummary.accountId, session), builder);
         if (const auto* error = std::get_if<javelin::jmap::api::TransportError>(&result))
         {
+            if (const auto transitionError =
+                    transitionGroup(javelin::jmap::sync::MutationStatus::Unknown))
+                co_return *transitionError;
             co_return javelin::jmap::operationError(*error);
         }
         if (const auto* error = std::get_if<javelin::jmap::api::AuthError>(&result))
         {
+            if (const auto transitionError =
+                    transitionGroup(javelin::jmap::sync::MutationStatus::Pending))
+                co_return *transitionError;
             co_return javelin::jmap::operationError(*error);
         }
         if (const auto* error = std::get_if<javelin::jmap::api::ProtocolError>(&result))
         {
+            if (const auto transitionError =
+                    transitionGroup(javelin::jmap::sync::MutationStatus::Unknown))
+                co_return *transitionError;
             co_return javelin::jmap::operationError(*error);
         }
 
         const auto& envelope = std::get<javelin::jmap::api::ResponseEnvelope>(result);
         const javelin::jmap::api::ResponseReader reader{envelope};
-        for (const auto& response : reader.rawAll(handle.callId))
-        {
-            qDebug().noquote() << "Compose send raw response"
-                               << QString::fromStdString(response.name) << "callId"
-                               << QString::fromStdString(response.callId) << "arguments"
-                               << QString::fromStdString(response.arguments);
-        }
         const auto submissionResult = reader.require(handle);
         if (const auto* error =
                 std::get_if<javelin::jmap::api::ResponseReaderError>(&submissionResult))
         {
+            if (error->code == javelin::jmap::api::ResponseReaderErrorCode::MethodError)
+            {
+                const auto errorJson =
+                    error->methodError.has_value()
+                        ? std::optional<std::string_view>{error->methodError->type}
+                        : std::nullopt;
+                if (const auto rejectionError = rejectGroup(errorJson))
+                    co_return *rejectionError;
+            }
+            else if (const auto transitionError =
+                         transitionGroup(javelin::jmap::sync::MutationStatus::Unknown))
+                co_return *transitionError;
             co_return javelin::jmap::operationError(*error);
         }
 
         const auto& submissionResponse =
             std::get<javelin::jmap::api::EmailSubmissionSetResponse>(submissionResult);
-        qInfo().noquote() << "Compose send submission response"
-                          << QString::fromStdString(draftSummary.accountId) << "created"
-                          << submissionResponse.created.size() << "notCreated"
-                          << joinStrings(submissionResponse.notCreated);
         if (!submissionResponse.notCreated.empty() || submissionResponse.created.empty())
         {
+            const auto errorJson =
+                submissionResponse.notCreated.empty()
+                    ? std::optional<std::string_view>{}
+                    : std::optional<std::string_view>{submissionResponse.notCreated.front()};
+            if (const auto rejectionError = rejectGroup(errorJson))
+                co_return *rejectionError;
             co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::Conflict,
                 .message = QStringLiteral("The server rejected the send request."),
             };
         }
@@ -1390,170 +1490,133 @@ namespace javelin::jmap::submission
         if (const auto* error =
                 std::get_if<javelin::jmap::api::ResponseReaderError>(&implicitEmailResult))
         {
-            co_return javelin::jmap::operationError(*error);
+            auto transactionResult = javelin::jmap::sync::MutationProjectionTransaction::begin(
+                m_connection, QStringLiteral("Reconcile partial Email submission"));
+            if (const auto* cacheError =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&transactionResult))
+                co_return javelin::jmap::operationError(*cacheError);
+            auto transaction = std::get<javelin::jmap::sync::MutationProjectionTransaction>(
+                std::move(transactionResult));
+            if (const auto cacheError = transaction.transition(
+                    submissionMutationId, javelin::jmap::sync::MutationStatus::Accepted,
+                    submissionResponse.newState))
+                co_return javelin::jmap::operationError(*cacheError);
+            const bool emailRejected =
+                error->code == javelin::jmap::api::ResponseReaderErrorCode::MethodError;
+            if (const auto cacheError = transaction.transition(
+                    emailMutationId,
+                    emailRejected ? javelin::jmap::sync::MutationStatus::Rejected
+                                  : javelin::jmap::sync::MutationStatus::Unknown,
+                    std::nullopt,
+                    error->methodError.has_value()
+                        ? std::optional<std::string_view>{error->methodError->type}
+                        : std::nullopt))
+                co_return javelin::jmap::operationError(*cacheError);
+            const std::array submissionDomain{javelin::jmap::sync::ConsistencyDomain{
+                .accountId = draftSummary.accountId,
+                .dataType = "EmailSubmission",
+            }};
+            if (const auto cacheError = transaction.advance(submissionDomain))
+                co_return javelin::jmap::operationError(*cacheError);
+            const auto createdSubmission = submissionResponse.created.begin()->second;
+            javelin::jmap::cache::SubmissionRepository submissions{m_connection};
+            if (const auto cacheError = submissions.upsert(transaction.cacheTransaction(),
+                                                           {
+                                                               .accountId = draftSummary.accountId,
+                                                               .submissionId = createdSubmission.id,
+                                                               .emailId = draftSummary.draftEmailId,
+                                                               .threadId = std::nullopt,
+                                                               .undoStatus = std::nullopt,
+                                                               .deliveryStatusJson = std::nullopt,
+                                                           }))
+                co_return javelin::jmap::operationError(*cacheError);
+            if (emailRejected)
+            {
+                if (const auto cacheError = emailRepository.upsertMany(
+                        transaction.cacheTransaction(), draftSummary.accountId, {*cachedEmail}))
+                    co_return javelin::jmap::operationError(*cacheError);
+            }
+            if (const auto cacheError = transaction.remove(submissionMutationId))
+                co_return javelin::jmap::operationError(*cacheError);
+            if (const auto cacheError = transaction.commit())
+                co_return javelin::jmap::operationError(*cacheError);
+            if (const auto discardError = discard(draftSummary.composeSessionId))
+                co_return *discardError;
+            co_return SendSummary{
+                .composeSessionId = draftSummary.composeSessionId,
+                .accountId = draftSummary.accountId,
+                .draftEmailId = draftSummary.draftEmailId,
+                .submissionId = createdSubmission.id,
+            };
         }
         const auto& implicitEmailResponse =
             std::get<javelin::jmap::api::EmailSetResponse>(implicitEmailResult);
-        qInfo().noquote() << "Compose send implicit Email/set response"
-                          << QString::fromStdString(draftSummary.accountId) << "updated"
-                          << joinStrings(implicitEmailResponse.updated) << "destroyed"
-                          << joinStrings(implicitEmailResponse.destroyed) << "notUpdated"
-                          << joinStrings(implicitEmailResponse.notUpdated) << "notDestroyed"
-                          << joinStrings(implicitEmailResponse.notDestroyed);
 
-        const auto
-            cleanupRequest =
-                javelin::jmap::api::emailSet(
-                    {
-                        .accountId = draftSummary.accountId,
-                        .create = {},
-                        .update =
-                            {
-                                {draftSummary.draftEmailId,
-                                 javelin::jmap::api::EmailSetUpdate{
-                                     .patch =
-                                         {
-                                             {javelin::jmap::api::patchPath("mailboxIds",
-                                                                            draftsMailbox->id),
-                                              nullptr},
-                                             {javelin::jmap::api::patchPath("mailboxIds",
-                                                                            sentMailbox->id),
-                                              true},
-                                             {javelin::jmap::api::patchPath("keywords", "$draft"),
-                                              nullptr},
-                                             {javelin::jmap::api::patchPath("keywords", "$seen"),
-                                              true},
-                                         },
-                                 }},
-                            },
-                        .destroy = {},
-                    });
-        if (!cleanupRequest.has_value())
-        {
-            qWarning().noquote() << "Compose send failed to encode explicit draft cleanup"
-                                 << QString::fromStdString(draftSummary.accountId)
-                                 << QString::fromStdString(draftSummary.draftEmailId);
-        }
-        else
-        {
-            javelin::jmap::api::RequestBuilder cleanupBuilder;
-            cleanupBuilder.useCore().useMail();
-            const auto cleanupHandle = cleanupBuilder.call(*cleanupRequest, "send-cleanup");
-            const auto cleanupResult = co_await methodCaller.call(
-                buildApiRequestContext(settings, draftSummary.accountId, session), cleanupBuilder);
-            if (const auto* transportError =
-                    std::get_if<javelin::jmap::api::TransportError>(&cleanupResult))
-            {
-                qWarning().noquote() << "Compose send explicit draft cleanup transport failure"
-                                     << transportMessage(*transportError);
-            }
-            else if (const auto* authError =
-                         std::get_if<javelin::jmap::api::AuthError>(&cleanupResult))
-            {
-                qWarning().noquote() << "Compose send explicit draft cleanup auth failure"
-                                     << authMessage(*authError);
-            }
-            else if (const auto* protocolError =
-                         std::get_if<javelin::jmap::api::ProtocolError>(&cleanupResult))
-            {
-                qWarning().noquote() << "Compose send explicit draft cleanup protocol failure"
-                                     << protocolMessage(*protocolError);
-            }
-            else
-            {
-                const auto& cleanupEnvelope =
-                    std::get<javelin::jmap::api::ResponseEnvelope>(cleanupResult);
-                const javelin::jmap::api::ResponseReader cleanupReader{cleanupEnvelope};
-                for (const auto& response : cleanupReader.rawAll(cleanupHandle.callId))
-                {
-                    qDebug().noquote() << "Compose send cleanup raw response"
-                                       << QString::fromStdString(response.name) << "callId"
-                                       << QString::fromStdString(response.callId) << "arguments"
-                                       << QString::fromStdString(response.arguments);
-                }
-                const auto cleanupResponseResult = cleanupReader.require(cleanupHandle);
-                if (const auto* readerError = std::get_if<javelin::jmap::api::ResponseReaderError>(
-                        &cleanupResponseResult))
-                {
-                    qWarning().noquote() << "Compose send explicit draft cleanup response failure"
-                                         << QString::fromStdString(readerError->message);
-                }
-                else
-                {
-                    const auto& cleanupResponse =
-                        std::get<javelin::jmap::api::EmailSetResponse>(cleanupResponseResult);
-                    qInfo().noquote() << "Compose send explicit draft cleanup response"
-                                      << QString::fromStdString(draftSummary.accountId) << "updated"
-                                      << joinStrings(cleanupResponse.updated) << "notUpdated"
-                                      << joinStrings(cleanupResponse.notUpdated);
-                    if (!cleanupResponse.notUpdated.empty())
-                    {
-                        qWarning().noquote() << "Compose send explicit draft cleanup rejected for"
-                                             << joinStrings(cleanupResponse.notUpdated);
-                    }
-                }
-            }
-        }
-
-        javelin::jmap::cache::SubmissionRepository submissionRepository{m_connection};
         const auto createdSubmission = submissionResponse.created.begin()->second;
-        if (const auto error = submissionRepository.upsert({
+        const bool emailAccepted =
+            std::ranges::find(implicitEmailResponse.updated, draftSummary.draftEmailId) !=
+            implicitEmailResponse.updated.end();
+        const bool emailRejected =
+            std::ranges::find(implicitEmailResponse.notUpdated, draftSummary.draftEmailId) !=
+            implicitEmailResponse.notUpdated.end();
+        auto transactionResult = javelin::jmap::sync::MutationProjectionTransaction::begin(
+            m_connection, QStringLiteral("Accept Email submission operation"));
+        if (const auto* cacheError =
+                std::get_if<javelin::jmap::cache::DatabaseError>(&transactionResult))
+            co_return javelin::jmap::operationError(*cacheError);
+        auto transaction = std::get<javelin::jmap::sync::MutationProjectionTransaction>(
+            std::move(transactionResult));
+        if (const auto cacheError = transaction.transition(
+                submissionMutationId, javelin::jmap::sync::MutationStatus::Accepted,
+                submissionResponse.newState))
+            co_return javelin::jmap::operationError(*cacheError);
+        if (const auto cacheError = transaction.transition(
+                emailMutationId,
+                emailAccepted   ? javelin::jmap::sync::MutationStatus::Accepted
+                : emailRejected ? javelin::jmap::sync::MutationStatus::Rejected
+                                : javelin::jmap::sync::MutationStatus::Unknown,
+                emailAccepted ? std::optional<std::string_view>{implicitEmailResponse.newState}
+                              : std::nullopt))
+            co_return javelin::jmap::operationError(*cacheError);
+        std::vector<javelin::jmap::sync::ConsistencyDomain> acceptedDomains{
+            {
                 .accountId = draftSummary.accountId,
-                .submissionId = createdSubmission.id,
-                .emailId = draftSummary.draftEmailId,
-                .threadId = std::nullopt,
-                .undoStatus = std::nullopt,
-                .deliveryStatusJson = std::nullopt,
-            }))
+                .dataType = "EmailSubmission",
+            },
+        };
+        if (emailAccepted)
+            acceptedDomains.push_back({
+                .accountId = draftSummary.accountId,
+                .dataType = "Email",
+            });
+        if (const auto cacheError = transaction.advance(acceptedDomains))
+            co_return javelin::jmap::operationError(*cacheError);
+        javelin::jmap::cache::SubmissionRepository submissionRepository{m_connection};
+        if (const auto cacheError = submissionRepository.upsert(
+                transaction.cacheTransaction(), {
+                                                    .accountId = draftSummary.accountId,
+                                                    .submissionId = createdSubmission.id,
+                                                    .emailId = draftSummary.draftEmailId,
+                                                    .threadId = std::nullopt,
+                                                    .undoStatus = std::nullopt,
+                                                    .deliveryStatusJson = std::nullopt,
+                                                }))
+            co_return javelin::jmap::operationError(*cacheError);
+        if (emailRejected)
         {
-            co_return javelin::jmap::operationError(*error);
+            if (const auto cacheError = emailRepository.upsertMany(
+                    transaction.cacheTransaction(), draftSummary.accountId, {*cachedEmail}))
+                co_return javelin::jmap::operationError(*cacheError);
         }
-
-        javelin::jmap::cache::EmailRepository emailRepository{m_connection};
-        const auto emailResult =
-            emailRepository.find(draftSummary.accountId, draftSummary.draftEmailId);
-        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&emailResult))
+        if (const auto cacheError = transaction.remove(submissionMutationId))
+            co_return javelin::jmap::operationError(*cacheError);
+        if (emailAccepted)
         {
-            co_return javelin::jmap::operationError(*error);
+            if (const auto cacheError = transaction.remove(emailMutationId))
+                co_return javelin::jmap::operationError(*cacheError);
         }
-        if (const auto& email = std::get<std::optional<javelin::jmap::domain::Email>>(emailResult);
-            email.has_value())
-        {
-            qDebug().noquote() << "Compose send local cache before update"
-                               << QString::fromStdString(draftSummary.accountId)
-                               << QString::fromStdString(draftSummary.draftEmailId) << "mailboxes"
-                               << joinStrings(email->mailboxIds) << "keywords"
-                               << joinStrings(email->keywords);
-            auto updatedEmail = *email;
-            updatedEmail.mailboxIds.erase(std::remove(updatedEmail.mailboxIds.begin(),
-                                                      updatedEmail.mailboxIds.end(),
-                                                      draftsMailbox->id),
-                                          updatedEmail.mailboxIds.end());
-            if (std::find(updatedEmail.mailboxIds.cbegin(), updatedEmail.mailboxIds.cend(),
-                          sentMailbox->id) == updatedEmail.mailboxIds.cend())
-            {
-                updatedEmail.mailboxIds.push_back(sentMailbox->id);
-            }
-            updatedEmail.keywords.erase(
-                std::remove(updatedEmail.keywords.begin(), updatedEmail.keywords.end(), "$draft"),
-                updatedEmail.keywords.end());
-            if (const auto error =
-                    emailRepository.upsertMany(draftSummary.accountId, {updatedEmail}))
-            {
-                co_return javelin::jmap::operationError(*error);
-            }
-            qDebug().noquote() << "Compose send local cache after update"
-                               << QString::fromStdString(draftSummary.accountId)
-                               << QString::fromStdString(draftSummary.draftEmailId) << "mailboxes"
-                               << joinStrings(updatedEmail.mailboxIds) << "keywords"
-                               << joinStrings(updatedEmail.keywords);
-        }
-        else
-        {
-            qWarning().noquote() << "Compose send local draft missing after submission"
-                                 << QString::fromStdString(draftSummary.accountId)
-                                 << QString::fromStdString(draftSummary.draftEmailId);
-        }
+        if (const auto cacheError = transaction.commit())
+            co_return javelin::jmap::operationError(*cacheError);
 
         if (const auto error = discard(draftSummary.composeSessionId))
         {

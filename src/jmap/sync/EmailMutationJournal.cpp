@@ -171,6 +171,14 @@ namespace javelin::jmap::sync
     EmailMutationJournal::queue(const EmailMutationRecord& record,
                                 const javelin::jmap::domain::Email& projectedEmail)
     {
+        return queueGroup(record, projectedEmail, {});
+    }
+
+    std::optional<javelin::jmap::cache::DatabaseError>
+    EmailMutationJournal::queueGroup(const EmailMutationRecord& record,
+                                     const javelin::jmap::domain::Email& projectedEmail,
+                                     const std::span<const MutationRecord> companionRecords)
+    {
         auto transactionResult = MutationProjectionTransaction::begin(
             m_connection, QStringLiteral("Begin Email mutation projection"));
         if (const auto* error =
@@ -187,6 +195,13 @@ namespace javelin::jmap::sync
         if (const auto error = transaction.append(std::get<MutationRecord>(generic)))
         {
             return error;
+        }
+        for (const auto& companion : companionRecords)
+        {
+            if (const auto error = transaction.append(companion))
+            {
+                return error;
+            }
         }
         javelin::jmap::cache::EmailRepository emails{m_connection};
         if (const auto error = emails.upsertMany(transaction.cacheTransaction(), record.accountId,

@@ -30,7 +30,26 @@ namespace javelin::jmap::cache
         {
             return error;
         }
+        auto transactionResult =
+            DatabaseTransaction::begin(m_connection, QStringLiteral("Store submission"));
+        if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
+            return *error;
+        auto transaction = std::get<DatabaseTransaction>(std::move(transactionResult));
+        if (const auto error = upsert(transaction, record))
+            return error;
+        return transaction.commit();
+    }
 
+    std::optional<DatabaseError> SubmissionRepository::upsert(DatabaseTransaction& transaction,
+                                                              const SubmissionRecord& record)
+    {
+        if (const auto error = m_connection.validate())
+            return error;
+        if (!transaction.isActive() || &transaction.connection() != &m_connection)
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message = QStringLiteral("Submission update requires a matching transaction"),
+            };
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
             "INSERT INTO submissions ("
@@ -55,9 +74,8 @@ namespace javelin::jmap::cache
         query.bindValue(QStringLiteral(":undo_status"),
                         record.undoStatus.has_value() ? QVariant{*record.undoStatus} : QVariant{});
         query.bindValue(QStringLiteral(":delivery_status"),
-                        record.deliveryStatusJson.has_value()
-                            ? QVariant{*record.deliveryStatusJson}
-                            : QVariant{});
+                        record.deliveryStatusJson.has_value() ? QVariant{*record.deliveryStatusJson}
+                                                              : QVariant{});
         if (!query.exec())
         {
             return makeQueryError(QStringLiteral("Upsert submission"), query);

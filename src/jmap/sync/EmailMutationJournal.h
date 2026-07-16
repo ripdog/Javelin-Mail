@@ -46,6 +46,10 @@ namespace javelin::jmap::sync
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
         queue(const EmailMutationRecord& record,
               const javelin::jmap::domain::Email& projectedEmail);
+        [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
+        queueGroup(const EmailMutationRecord& record,
+                   const javelin::jmap::domain::Email& projectedEmail,
+                   std::span<const MutationRecord> companionRecords);
         [[nodiscard]]
         std::variant<std::vector<EmailMutationRecord>, javelin::jmap::cache::DatabaseError>
         listForEmail(std::string_view accountId, std::string_view emailId) const;
