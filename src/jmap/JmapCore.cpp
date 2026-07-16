@@ -1706,25 +1706,23 @@ namespace javelin::jmap
                                  << static_cast<qulonglong>(parsed.notDestroyed.size());
         }
 
-        auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+        auto transactionResult = javelin::jmap::sync::MutationProjectionTransaction::begin(
             *m_impl->databaseConnection, QStringLiteral("Apply Email mutation response"));
         if (const auto* error =
                 std::get_if<javelin::jmap::cache::DatabaseError>(&transactionResult))
         {
             co_return javelin::jmap::operationError(*error);
         }
-        auto transaction =
-            std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
+        auto transaction = std::get<javelin::jmap::sync::MutationProjectionTransaction>(
+            std::move(transactionResult));
 
         if (!updatedEmailIds.empty() || !destroyedEmailIds.empty())
         {
-            javelin::jmap::sync::ConsistencyDomainRepository consistencyRepository{
-                *m_impl->databaseConnection};
-            const auto generation = consistencyRepository.advanceMutation({
+            const std::array domains{javelin::jmap::sync::ConsistencyDomain{
                 .accountId = accountId,
                 .dataType = "Email",
-            });
-            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&generation))
+            }};
+            if (const auto error = transaction.advance(domains))
             {
                 co_return javelin::jmap::operationError(*error);
             }
@@ -1742,7 +1740,7 @@ namespace javelin::jmap
             {
                 for (const auto& mutationId : idsIt->second)
                 {
-                    if (const auto error = emailMutationJournal.transition(
+                    if (const auto error = transaction.transition(
                             mutationId, javelin::jmap::sync::MutationStatus::Accepted,
                             parsed.newState))
                     {
@@ -1753,21 +1751,21 @@ namespace javelin::jmap
                 if (destroyedEmailIds.contains(emailId))
                 {
                     const std::array destroyed{emailId};
-                    if (const auto error =
-                            emailRepository.removeMany(transaction, accountId, destroyed))
+                    if (const auto error = emailRepository.removeMany(
+                            transaction.cacheTransaction(), accountId, destroyed))
                     {
                         co_return javelin::jmap::operationError(*error);
                     }
                 }
-                else if (const auto error =
-                             emailRepository.upsertMany(transaction, accountId, {email}))
+                else if (const auto error = emailRepository.upsertMany(
+                             transaction.cacheTransaction(), accountId, {email}))
                 {
                     co_return javelin::jmap::operationError(*error);
                 }
 
                 for (const auto& mutationId : idsIt->second)
                 {
-                    if (const auto error = emailMutationJournal.remove(mutationId))
+                    if (const auto error = transaction.remove(mutationId))
                     {
                         co_return javelin::jmap::operationError(*error);
                     }
@@ -1780,7 +1778,7 @@ namespace javelin::jmap
                 const auto status = failedEmailIds.contains(emailId)
                                         ? javelin::jmap::sync::MutationStatus::Rejected
                                         : javelin::jmap::sync::MutationStatus::Pending;
-                if (const auto error = emailMutationJournal.transition(mutationId, status))
+                if (const auto error = transaction.transition(mutationId, status))
                 {
                     co_return javelin::jmap::operationError(*error);
                 }

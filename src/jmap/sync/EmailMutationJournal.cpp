@@ -70,6 +70,31 @@ namespace javelin::jmap::sync
             };
         }
 
+        [[nodiscard]] std::variant<MutationRecord, javelin::jmap::cache::DatabaseError>
+        genericRecord(const EmailMutationRecord& record)
+        {
+            const auto payload = serializePayload(record.patch);
+            if (!payload.has_value())
+            {
+                return javelin::jmap::cache::DatabaseError{
+                    .code = javelin::jmap::cache::DatabaseErrorCode::QueryFailed,
+                    .message = QStringLiteral("Unable to serialize an Email mutation."),
+                };
+            }
+            return MutationRecord{
+                .mutationId = record.mutationId,
+                .operationGroupId = record.operationGroupId,
+                .domain = {.accountId = record.accountId, .dataType = "Email"},
+                .objectId = record.patch.emailId,
+                .mutationKind = "email_patch",
+                .status = record.status,
+                .payloadJson = *payload,
+                .baseState = record.baseState,
+                .acceptedState = record.acceptedState,
+                .errorJson = record.errorJson,
+            };
+        }
+
         [[nodiscard]] std::variant<std::vector<EmailMutationRecord>,
                                    javelin::jmap::cache::DatabaseError>
         typedRecords(
@@ -133,47 +158,38 @@ namespace javelin::jmap::sync
     std::optional<javelin::jmap::cache::DatabaseError>
     EmailMutationJournal::put(const EmailMutationRecord& record)
     {
-        const auto payload = serializePayload(record.patch);
-        if (!payload.has_value())
+        const auto generic = genericRecord(record);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&generic))
         {
-            return javelin::jmap::cache::DatabaseError{
-                .code = javelin::jmap::cache::DatabaseErrorCode::QueryFailed,
-                .message = QStringLiteral("Unable to serialize an Email mutation."),
-            };
+            return *error;
         }
-        return m_repository.put({
-            .mutationId = record.mutationId,
-            .operationGroupId = record.operationGroupId,
-            .domain = {.accountId = record.accountId, .dataType = "Email"},
-            .objectId = record.patch.emailId,
-            .mutationKind = "email_patch",
-            .status = record.status,
-            .payloadJson = *payload,
-            .baseState = record.baseState,
-            .acceptedState = record.acceptedState,
-            .errorJson = record.errorJson,
-        });
+        return m_repository.put(std::get<MutationRecord>(generic));
     }
 
     std::optional<javelin::jmap::cache::DatabaseError>
     EmailMutationJournal::queue(const EmailMutationRecord& record,
                                 const javelin::jmap::domain::Email& projectedEmail)
     {
-        auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+        auto transactionResult = MutationProjectionTransaction::begin(
             m_connection, QStringLiteral("Begin Email mutation projection"));
         if (const auto* error =
                 std::get_if<javelin::jmap::cache::DatabaseError>(&transactionResult))
         {
             return *error;
         }
-        auto transaction =
-            std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
-        if (const auto error = put(record))
+        auto transaction = std::get<MutationProjectionTransaction>(std::move(transactionResult));
+        const auto generic = genericRecord(record);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&generic))
+        {
+            return *error;
+        }
+        if (const auto error = transaction.append(std::get<MutationRecord>(generic)))
         {
             return error;
         }
         javelin::jmap::cache::EmailRepository emails{m_connection};
-        if (const auto error = emails.upsertMany(transaction, record.accountId, {projectedEmail}))
+        if (const auto error = emails.upsertMany(transaction.cacheTransaction(), record.accountId,
+                                                 {projectedEmail}))
         {
             return error;
         }

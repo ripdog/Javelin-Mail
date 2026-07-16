@@ -315,6 +315,79 @@ namespace javelin::jmap::sync
         return std::nullopt;
     }
 
+    MutationProjectionTransaction::MutationProjectionTransaction(
+        javelin::jmap::cache::DatabaseConnection& connection,
+        javelin::jmap::cache::DatabaseTransaction transaction)
+        : m_connection(&connection), m_transaction(std::move(transaction))
+    {
+    }
+
+    std::variant<MutationProjectionTransaction, javelin::jmap::cache::DatabaseError>
+    MutationProjectionTransaction::begin(javelin::jmap::cache::DatabaseConnection& connection,
+                                         QString operation)
+    {
+        auto transactionResult =
+            javelin::jmap::cache::DatabaseTransaction::begin(connection, std::move(operation));
+        if (const auto* error =
+                std::get_if<javelin::jmap::cache::DatabaseError>(&transactionResult))
+        {
+            return *error;
+        }
+        return MutationProjectionTransaction{
+            connection,
+            std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult)),
+        };
+    }
+
+    std::optional<javelin::jmap::cache::DatabaseError>
+    MutationProjectionTransaction::append(const MutationRecord& record)
+    {
+        MutationJournalRepository journal{*m_connection};
+        return journal.put(record);
+    }
+
+    std::optional<javelin::jmap::cache::DatabaseError>
+    MutationProjectionTransaction::transition(const std::string_view mutationId,
+                                              const MutationStatus status,
+                                              const std::optional<std::string_view> acceptedState,
+                                              const std::optional<std::string_view> errorJson)
+    {
+        MutationJournalRepository journal{*m_connection};
+        return journal.transition(mutationId, status, acceptedState, errorJson);
+    }
+
+    std::optional<javelin::jmap::cache::DatabaseError>
+    MutationProjectionTransaction::remove(const std::string_view mutationId)
+    {
+        MutationJournalRepository journal{*m_connection};
+        return journal.remove(mutationId);
+    }
+
+    std::optional<javelin::jmap::cache::DatabaseError>
+    MutationProjectionTransaction::advance(const std::span<const ConsistencyDomain> domains)
+    {
+        ConsistencyDomainRepository consistency{*m_connection};
+        for (const auto& domain : domains)
+        {
+            const auto generation = consistency.advanceMutation(domain);
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&generation))
+            {
+                return *error;
+            }
+        }
+        return std::nullopt;
+    }
+
+    javelin::jmap::cache::DatabaseTransaction& MutationProjectionTransaction::cacheTransaction()
+    {
+        return m_transaction;
+    }
+
+    std::optional<javelin::jmap::cache::DatabaseError> MutationProjectionTransaction::commit()
+    {
+        return m_transaction.commit();
+    }
+
     std::string_view toString(const MutationStatus status)
     {
         switch (status)

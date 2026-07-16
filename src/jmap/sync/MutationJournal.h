@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -62,6 +63,40 @@ namespace javelin::jmap::sync
 
       private:
         javelin::jmap::cache::DatabaseConnection& m_connection;
+    };
+
+    class MutationProjectionTransaction
+    {
+      public:
+        MutationProjectionTransaction(const MutationProjectionTransaction&) = delete;
+        MutationProjectionTransaction& operator=(const MutationProjectionTransaction&) = delete;
+        MutationProjectionTransaction(MutationProjectionTransaction&&) noexcept = default;
+        MutationProjectionTransaction&
+        operator=(MutationProjectionTransaction&&) noexcept = default;
+
+        [[nodiscard]] static std::variant<MutationProjectionTransaction,
+                                          javelin::jmap::cache::DatabaseError>
+        begin(javelin::jmap::cache::DatabaseConnection& connection, QString operation);
+
+        [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
+        append(const MutationRecord& record);
+        [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
+        transition(std::string_view mutationId, MutationStatus status,
+                   std::optional<std::string_view> acceptedState = std::nullopt,
+                   std::optional<std::string_view> errorJson = std::nullopt);
+        [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
+        remove(std::string_view mutationId);
+        [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
+        advance(std::span<const ConsistencyDomain> domains);
+        [[nodiscard]] javelin::jmap::cache::DatabaseTransaction& cacheTransaction();
+        [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError> commit();
+
+      private:
+        MutationProjectionTransaction(javelin::jmap::cache::DatabaseConnection& connection,
+                                      javelin::jmap::cache::DatabaseTransaction transaction);
+
+        javelin::jmap::cache::DatabaseConnection* m_connection;
+        javelin::jmap::cache::DatabaseTransaction m_transaction;
     };
 
     [[nodiscard]] std::string_view toString(MutationStatus status);
