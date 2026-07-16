@@ -55,6 +55,8 @@ namespace javelin::jmap::cache
                         std::span<const std::string> destroyed);
         [[nodiscard]] std::variant<std::vector<javelin::jmap::api::AddressBook>, DatabaseError>
         listAddressBooks(std::string_view accountId, bool includeUnsubscribed = true) const;
+        [[nodiscard]] std::variant<std::optional<std::string>, DatabaseError>
+        addressBookState(std::string_view accountId) const;
         [[nodiscard]] std::variant<std::vector<ContactAccount>, DatabaseError>
         listAccounts(std::optional<std::string_view> ownerAccountId = std::nullopt) const;
         [[nodiscard]] std::variant<std::vector<javelin::jmap::contacts::ContactSummary>,

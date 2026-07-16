@@ -185,6 +185,10 @@ namespace javelin::jmap::api
     serializeContactCardCopyRequest(const ContactCardCopyRequest& request);
     [[nodiscard]] ContactDocument addressBookCreateDocument(const AddressBook& addressBook);
     [[nodiscard]] ContactDocument addressBookUpdateDocument(const AddressBook& addressBook);
+    [[nodiscard]] std::optional<std::string>
+    serializeAddressBookDocument(const AddressBook& addressBook);
+    [[nodiscard]] ParsedEnvelope<AddressBook> parseAddressBookDocument(std::string_view id,
+                                                                       std::string_view json);
 
     [[nodiscard]] ParsedEnvelope<AddressBookGetResponse>
     parseAddressBookGetResponse(std::string_view json);

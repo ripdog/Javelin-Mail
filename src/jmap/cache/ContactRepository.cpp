@@ -491,6 +491,21 @@ namespace javelin::jmap::cache
         return result;
     }
 
+    std::variant<std::optional<std::string>, DatabaseError>
+    ContactRepository::addressBookState(const std::string_view accountId) const
+    {
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "SELECT state FROM address_books WHERE account_id=:account ORDER BY address_book_id "
+            "LIMIT 1"));
+        query.bindValue(QStringLiteral(":account"), QString::fromStdString(std::string{accountId}));
+        if (!query.exec())
+            return queryError(QStringLiteral("Read AddressBook state"), query);
+        if (!query.next() || query.value(0).isNull())
+            return std::optional<std::string>{};
+        return std::optional<std::string>{query.value(0).toString().toStdString()};
+    }
+
     std::variant<std::vector<ContactAccount>, DatabaseError>
     ContactRepository::listAccounts(const std::optional<std::string_view> ownerAccountId) const
     {

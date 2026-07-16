@@ -11,6 +11,7 @@
 #include "jmap/cache/ContactRepository.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/cache/SyncStateRepository.h"
+#include "jmap/contacts/AddressBookMutationJournal.h"
 #include "jmap/contacts/ContactMutationJournal.h"
 #include "jmap/contacts/ContactTypes.h"
 #include "jmap/sync/ConsistencyDomain.h"
@@ -430,6 +431,130 @@ namespace javelin::jmap::contacts
             return createdObjectId(result.created.begin()->second);
         }
 
+        struct PreparedAddressBookMutations
+        {
+            std::vector<AddressBookMutationRecord> records;
+            std::vector<javelin::jmap::api::AddressBook> projectedBooks;
+        };
+
+        [[nodiscard]]
+        std::variant<PreparedAddressBookMutations, javelin::jmap::OperationError>
+        prepareAddressBookMutations(javelin::jmap::cache::ContactRepository& repository,
+                                    const javelin::jmap::api::AddressBookSetRequest& request)
+        {
+            const auto listed = repository.listAddressBooks(request.accountId);
+            if (const auto* cacheError = std::get_if<javelin::jmap::cache::DatabaseError>(&listed))
+                return error(cacheError->message,
+                             javelin::jmap::OperationErrorCode::LocalStorageFailure);
+            PreparedAddressBookMutations prepared{
+                .records = {},
+                .projectedBooks = std::get<std::vector<javelin::jmap::api::AddressBook>>(listed),
+            };
+            prepared.records.reserve(request.create.size() + request.update.size() +
+                                     request.destroy.size());
+
+            for (const auto& [creationId, document] : request.create)
+            {
+                const auto mutationId =
+                    QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
+                const auto temporaryId = "local-" + mutationId;
+                const auto projected =
+                    javelin::jmap::api::parseAddressBookDocument(temporaryId, document.json);
+                if (!projected.ok() || !projected.value.has_value())
+                    return error(QStringLiteral("The AddressBook creation document is invalid."),
+                                 javelin::jmap::OperationErrorCode::InvalidRequest);
+                const auto projectedDocument =
+                    javelin::jmap::api::serializeAddressBookDocument(*projected.value);
+                if (!projectedDocument.has_value())
+                    return error(QStringLiteral("Unable to serialize the AddressBook projection."),
+                                 javelin::jmap::OperationErrorCode::InvalidRequest);
+                prepared.records.push_back({
+                    .mutationId = mutationId,
+                    .operationGroupId = std::nullopt,
+                    .accountId = request.accountId,
+                    .objectId = temporaryId,
+                    .creationId = creationId,
+                    .kind = AddressBookMutationKind::Create,
+                    .status = javelin::jmap::sync::MutationStatus::Pending,
+                    .requestedDocument = document.json,
+                    .baseDocument = std::nullopt,
+                    .projectedDocument = *projectedDocument,
+                    .baseState = request.ifInState,
+                    .acceptedState = std::nullopt,
+                    .errorJson = std::nullopt,
+                });
+                prepared.projectedBooks.push_back(*projected.value);
+            }
+            for (const auto& [addressBookId, patch] : request.update)
+            {
+                const auto found = std::ranges::find(prepared.projectedBooks, addressBookId,
+                                                     &javelin::jmap::api::AddressBook::id);
+                std::optional<std::string> baseDocument;
+                std::optional<std::string> projectedDocument;
+                if (found != prepared.projectedBooks.end())
+                {
+                    baseDocument = javelin::jmap::api::serializeAddressBookDocument(*found);
+                    if (!baseDocument.has_value())
+                        return error(QStringLiteral("Unable to serialize the cached AddressBook."),
+                                     javelin::jmap::OperationErrorCode::LocalStorageFailure);
+                    auto applied = javelin::jmap::api::applyPatchObject(*baseDocument, patch.json);
+                    const auto* json = std::get_if<std::string>(&applied);
+                    if (json != nullptr)
+                    {
+                        auto projected =
+                            javelin::jmap::api::parseAddressBookDocument(addressBookId, *json);
+                        if (projected.ok() && projected.value.has_value())
+                        {
+                            *found = *projected.value;
+                            projectedDocument = *json;
+                        }
+                    }
+                }
+                prepared.records.push_back({
+                    .mutationId = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString(),
+                    .operationGroupId = std::nullopt,
+                    .accountId = request.accountId,
+                    .objectId = addressBookId,
+                    .creationId = std::nullopt,
+                    .kind = AddressBookMutationKind::Update,
+                    .status = javelin::jmap::sync::MutationStatus::Pending,
+                    .requestedDocument = patch.json,
+                    .baseDocument = std::move(baseDocument),
+                    .projectedDocument = std::move(projectedDocument),
+                    .baseState = request.ifInState,
+                    .acceptedState = std::nullopt,
+                    .errorJson = std::nullopt,
+                });
+            }
+            for (const auto& addressBookId : request.destroy)
+            {
+                const auto found = std::ranges::find(prepared.projectedBooks, addressBookId,
+                                                     &javelin::jmap::api::AddressBook::id);
+                std::optional<std::string> baseDocument;
+                if (found != prepared.projectedBooks.end())
+                {
+                    baseDocument = javelin::jmap::api::serializeAddressBookDocument(*found);
+                    prepared.projectedBooks.erase(found);
+                }
+                prepared.records.push_back({
+                    .mutationId = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString(),
+                    .operationGroupId = std::nullopt,
+                    .accountId = request.accountId,
+                    .objectId = addressBookId,
+                    .creationId = std::nullopt,
+                    .kind = AddressBookMutationKind::Destroy,
+                    .status = javelin::jmap::sync::MutationStatus::Pending,
+                    .requestedDocument = "{}",
+                    .baseDocument = std::move(baseDocument),
+                    .projectedDocument = std::nullopt,
+                    .baseState = request.ifInState,
+                    .acceptedState = std::nullopt,
+                    .errorJson = std::nullopt,
+                });
+            }
+            return prepared;
+        }
+
         struct PreparedContactMutations
         {
             std::vector<ContactMutationRecord> records;
@@ -673,6 +798,196 @@ namespace javelin::jmap::contacts
             return ContactMutationSummary{.accountId = result.accountId,
                                           .newState = result.newState,
                                           .createdId = createdId(result)};
+        }
+
+        [[nodiscard]] ContactMutationResult
+        reconcileAddressBookMutations(javelin::jmap::cache::DatabaseConnection& connection,
+                                      javelin::jmap::cache::ContactRepository& repository,
+                                      const std::vector<AddressBookMutationRecord>& records,
+                                      const javelin::jmap::api::SetResult& result)
+        {
+            const auto listed = repository.listAddressBooks(result.accountId);
+            if (const auto* cacheError = std::get_if<javelin::jmap::cache::DatabaseError>(&listed))
+                return error(cacheError->message,
+                             javelin::jmap::OperationErrorCode::LocalStorageFailure);
+            auto books = std::get<std::vector<javelin::jmap::api::AddressBook>>(listed);
+            struct RejectedMutation
+            {
+                const AddressBookMutationRecord* record;
+                std::string errorJson;
+            };
+            std::vector<const AddressBookMutationRecord*> acceptedRecords;
+            std::vector<RejectedMutation> rejectedRecords;
+            const auto eraseBook = [&books](const std::string_view id)
+            {
+                std::erase_if(books, [id](const javelin::jmap::api::AddressBook& book)
+                              { return book.id == id; });
+            };
+            const auto restoreBook = [&books, &eraseBook](const AddressBookMutationRecord& record,
+                                                          const std::string_view document)
+                -> std::optional<javelin::jmap::OperationError>
+            {
+                const auto parsed =
+                    javelin::jmap::api::parseAddressBookDocument(record.objectId, document);
+                if (!parsed.ok() || !parsed.value.has_value())
+                    return error(QStringLiteral("An AddressBook rollback document is invalid."),
+                                 javelin::jmap::OperationErrorCode::LocalStorageFailure);
+                eraseBook(record.objectId);
+                books.push_back(*parsed.value);
+                return std::nullopt;
+            };
+
+            for (const auto& record : records)
+            {
+                if (record.kind == AddressBookMutationKind::Create)
+                {
+                    if (!record.creationId.has_value())
+                        return error(
+                            QStringLiteral("An AddressBook creation lost its creation id."));
+                    const auto created = result.created.find(*record.creationId);
+                    if (created == result.created.end())
+                    {
+                        const auto rejected = result.notCreated.find(*record.creationId);
+                        if (rejected == result.notCreated.end())
+                            return error(
+                                QStringLiteral("The AddressBook/set response omitted a creation."));
+                        rejectedRecords.push_back(
+                            {.record = &record, .errorJson = rejected->second.json});
+                        eraseBook(record.objectId);
+                        continue;
+                    }
+                    const auto serverId = createdObjectId(created->second);
+                    if (!serverId.has_value() || !record.projectedDocument.has_value())
+                        return error(QStringLiteral(
+                            "The AddressBook/set response omitted the created object id."));
+                    const auto transformed = javelin::jmap::api::applyPatchObject(
+                        *record.projectedDocument, created->second.json);
+                    const auto* document = std::get_if<std::string>(&transformed);
+                    if (document == nullptr)
+                        return error(
+                            QStringLiteral("The AddressBook creation transformation is invalid."));
+                    const auto parsed =
+                        javelin::jmap::api::parseAddressBookDocument(*serverId, *document);
+                    if (!parsed.ok() || !parsed.value.has_value())
+                        return error(
+                            QStringLiteral("The created AddressBook could not be materialized."));
+                    eraseBook(record.objectId);
+                    books.push_back(*parsed.value);
+                    acceptedRecords.push_back(&record);
+                    continue;
+                }
+                if (record.kind == AddressBookMutationKind::Update)
+                {
+                    const auto updated = result.updated.find(record.objectId);
+                    if (updated == result.updated.end())
+                    {
+                        const auto rejected = result.notUpdated.find(record.objectId);
+                        if (rejected == result.notUpdated.end())
+                            return error(
+                                QStringLiteral("The AddressBook/set response omitted an update."));
+                        rejectedRecords.push_back(
+                            {.record = &record, .errorJson = rejected->second.json});
+                        if (record.baseDocument.has_value())
+                        {
+                            if (const auto restoreError = restoreBook(record, *record.baseDocument))
+                                return *restoreError;
+                        }
+                        else
+                            eraseBook(record.objectId);
+                        continue;
+                    }
+                    acceptedRecords.push_back(&record);
+                    if (!record.projectedDocument.has_value())
+                        continue;
+                    const auto transformed = javelin::jmap::api::applyPatchObject(
+                        *record.projectedDocument, updated->second.json);
+                    const auto* document = std::get_if<std::string>(&transformed);
+                    if (document == nullptr)
+                        return error(
+                            QStringLiteral("The AddressBook update transformation is invalid."));
+                    const auto parsed =
+                        javelin::jmap::api::parseAddressBookDocument(record.objectId, *document);
+                    if (!parsed.ok() || !parsed.value.has_value())
+                        return error(
+                            QStringLiteral("The updated AddressBook could not be materialized."));
+                    eraseBook(record.objectId);
+                    books.push_back(*parsed.value);
+                    continue;
+                }
+                if (std::ranges::find(result.destroyed, record.objectId) == result.destroyed.end())
+                {
+                    const auto rejected = result.notDestroyed.find(record.objectId);
+                    if (rejected == result.notDestroyed.end())
+                        return error(
+                            QStringLiteral("The AddressBook/set response omitted a deletion."));
+                    rejectedRecords.push_back(
+                        {.record = &record, .errorJson = rejected->second.json});
+                    if (record.baseDocument.has_value())
+                    {
+                        if (const auto restoreError = restoreBook(record, *record.baseDocument))
+                            return *restoreError;
+                    }
+                    continue;
+                }
+                acceptedRecords.push_back(&record);
+            }
+
+            auto transactionResult = javelin::jmap::sync::MutationProjectionTransaction::begin(
+                connection, QStringLiteral("Reconcile AddressBook mutations"));
+            if (const auto* cacheError =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&transactionResult))
+                return error(cacheError->message,
+                             javelin::jmap::OperationErrorCode::LocalStorageFailure);
+            auto transaction = std::get<javelin::jmap::sync::MutationProjectionTransaction>(
+                std::move(transactionResult));
+            for (const auto* record : acceptedRecords)
+            {
+                if (const auto cacheError = transaction.transition(
+                        record->mutationId, javelin::jmap::sync::MutationStatus::Accepted,
+                        result.newState))
+                    return error(cacheError->message,
+                                 javelin::jmap::OperationErrorCode::LocalStorageFailure);
+            }
+            for (const auto& rejected : rejectedRecords)
+            {
+                if (const auto cacheError = transaction.transition(
+                        rejected.record->mutationId, javelin::jmap::sync::MutationStatus::Rejected,
+                        std::nullopt, rejected.errorJson))
+                    return error(cacheError->message,
+                                 javelin::jmap::OperationErrorCode::LocalStorageFailure);
+            }
+            if (!acceptedRecords.empty())
+            {
+                const std::array domains{javelin::jmap::sync::ConsistencyDomain{
+                    .accountId = result.accountId,
+                    .dataType = "AddressBook",
+                }};
+                if (const auto cacheError = transaction.advance(domains))
+                    return error(cacheError->message,
+                                 javelin::jmap::OperationErrorCode::LocalStorageFailure);
+            }
+            if (const auto cacheError = repository.replaceAddressBooks(
+                    transaction.cacheTransaction(), result.accountId, books, result.newState))
+                return error(cacheError->message,
+                             javelin::jmap::OperationErrorCode::LocalStorageFailure);
+            for (const auto* record : acceptedRecords)
+            {
+                if (const auto cacheError = transaction.remove(record->mutationId))
+                    return error(cacheError->message,
+                                 javelin::jmap::OperationErrorCode::LocalStorageFailure);
+            }
+            if (const auto cacheError = transaction.commit())
+                return error(cacheError->message,
+                             javelin::jmap::OperationErrorCode::LocalStorageFailure);
+            repository.notifyChanged(result.accountId);
+            if (!rejectedRecords.empty())
+                return error(QStringLiteral("The server rejected one or more Contacts changes."),
+                             javelin::jmap::OperationErrorCode::Conflict);
+            return ContactMutationSummary{
+                .accountId = result.accountId,
+                .newState = result.newState,
+                .createdId = createdId(result),
+            };
         }
 
         [[nodiscard]] ContactMutationResult
@@ -1043,18 +1358,75 @@ namespace javelin::jmap::contacts
                                     javelin::jmap::api::AddressBookSetRequest request)
     {
         const auto accountId = request.accountId;
-        const auto result =
-            co_await setObjects(m_methodTransport, m_connection, std::move(settings),
-                                std::move(ownerAccountId), accountId, "AddressBook/set",
-                                javelin::jmap::api::serializeAddressBookSetRequest(request));
-        if (const auto* operationError = std::get_if<javelin::jmap::OperationError>(&result))
+        if (!request.ifInState.has_value())
+        {
+            const auto state = m_repository.addressBookState(accountId);
+            if (const auto* cacheError = std::get_if<javelin::jmap::cache::DatabaseError>(&state))
+                co_return error(cacheError->message,
+                                javelin::jmap::OperationErrorCode::LocalStorageFailure);
+            request.ifInState = std::get<std::optional<std::string>>(state);
+        }
+        const auto serialized = javelin::jmap::api::serializeAddressBookSetRequest(request);
+        if (!serialized.has_value())
+            co_return error(QStringLiteral("Unable to serialize the Contacts change."));
+        const auto sessionResult = loadSession(m_connection, ownerAccountId);
+        if (const auto* loadError = std::get_if<javelin::jmap::OperationError>(&sessionResult))
+            co_return *loadError;
+        const auto& session = std::get<javelin::jmap::api::Session>(sessionResult);
+        const auto account = session.accounts.find(accountId);
+        if (account == session.accounts.end() ||
+            !account->second.accountCapabilities.contacts.has_value())
+            co_return error(QStringLiteral("This account does not support JMAP Contacts."),
+                            javelin::jmap::OperationErrorCode::UnsupportedCapability);
+
+        const auto preparedResult = prepareAddressBookMutations(m_repository, request);
+        if (const auto* operationError =
+                std::get_if<javelin::jmap::OperationError>(&preparedResult))
             co_return *operationError;
-        const std::array domains{javelin::jmap::sync::ConsistencyDomain{
-            .accountId = accountId,
-            .dataType = "AddressBook",
-        }};
-        co_return commitSetResult(m_connection, std::get<javelin::jmap::api::SetResult>(result),
-                                  domains);
+        auto prepared = std::get<PreparedAddressBookMutations>(preparedResult);
+        AddressBookMutationJournal journal{m_connection, m_repository};
+        if (!prepared.records.empty())
+        {
+            if (const auto cacheError = journal.queue(prepared.records, prepared.projectedBooks,
+                                                      request.ifInState.value_or(std::string{})))
+                co_return error(cacheError->message,
+                                javelin::jmap::OperationErrorCode::LocalStorageFailure);
+            if (const auto cacheError = journal.transition(
+                    prepared.records, javelin::jmap::sync::MutationStatus::InFlight))
+                co_return error(cacheError->message,
+                                javelin::jmap::OperationErrorCode::LocalStorageFailure);
+        }
+
+        const auto result = co_await setObjects(m_methodTransport, m_connection,
+                                                std::move(settings), std::move(ownerAccountId),
+                                                accountId, "AddressBook/set", serialized);
+        if (const auto* operationError = std::get_if<javelin::jmap::OperationError>(&result))
+        {
+            if (const auto cacheError = journal.transition(
+                    prepared.records, javelin::jmap::sync::MutationStatus::Unknown))
+                co_return error(cacheError->message,
+                                javelin::jmap::OperationErrorCode::LocalStorageFailure);
+            co_return *operationError;
+        }
+        if (prepared.records.empty())
+        {
+            const std::array domains{javelin::jmap::sync::ConsistencyDomain{
+                .accountId = accountId,
+                .dataType = "AddressBook",
+            }};
+            co_return commitSetResult(m_connection, std::get<javelin::jmap::api::SetResult>(result),
+                                      domains);
+        }
+        auto reconciled =
+            reconcileAddressBookMutations(m_connection, m_repository, prepared.records,
+                                          std::get<javelin::jmap::api::SetResult>(result));
+        if (const auto* reconciliationError =
+                std::get_if<javelin::jmap::OperationError>(&reconciled);
+            reconciliationError != nullptr &&
+            reconciliationError->code != javelin::jmap::OperationErrorCode::Conflict)
+            static_cast<void>(
+                journal.transition(prepared.records, javelin::jmap::sync::MutationStatus::Unknown));
+        co_return reconciled;
     }
 
     QCoro::Task<ContactMutationResult>

@@ -316,6 +316,20 @@ namespace javelin::jmap::api
         return addressBookCreateDocument(addressBook);
     }
 
+    std::optional<std::string> serializeAddressBookDocument(const AddressBook& addressBook)
+    {
+        return serialize(addressBook);
+    }
+
+    ParsedEnvelope<AddressBook> parseAddressBookDocument(const std::string_view id,
+                                                         const std::string_view json)
+    {
+        auto parsed = parse<AddressBook>(json);
+        if (parsed.value.has_value())
+            parsed.value->id = std::string{id};
+        return parsed;
+    }
+
     ParsedEnvelope<AddressBookGetResponse> parseAddressBookGetResponse(std::string_view json)
     {
         return parse<AddressBookGetResponse>(json);

@@ -13,6 +13,15 @@ TEST_CASE("contacts methods parse address books and preserve complete contact ca
     REQUIRE(books.value->list.size() == 1);
     CHECK(books.value->list.front().isDefault);
     CHECK(books.value->list.front().myRights.mayWrite);
+    const auto bookDocument =
+        javelin::jmap::api::serializeAddressBookDocument(books.value->list.front());
+    REQUIRE(bookDocument.has_value());
+    const auto parsedBook =
+        javelin::jmap::api::parseAddressBookDocument("book-projected", *bookDocument);
+    REQUIRE(parsedBook.ok());
+    CHECK(parsedBook.value->id == "book-projected");
+    CHECK(parsedBook.value->name == "Personal");
+    CHECK(parsedBook.value->myRights.mayWrite);
 
     const auto cards = javelin::jmap::api::parseContactCardGetResponse(
         R"({"accountId":"a0x9","state":"c1","list":[{"id":"3","uid":"urn:uuid:3","kind":"individual","addressBookIds":{"book-1":true},"name":{"full":"Joe Bloggs"},"x-company-extension":{"value":42}}],"notFound":[]})");

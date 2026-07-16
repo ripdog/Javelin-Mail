@@ -5,6 +5,7 @@
 #include "jmap/cache/ContactRepository.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/cache/SyncStateRepository.h"
+#include "jmap/contacts/AddressBookMutationJournal.h"
 #include "jmap/contacts/ContactMutationJournal.h"
 #include "jmap/sync/ConsistencyDomain.h"
 
@@ -301,6 +302,165 @@ TEST_CASE("successful ContactCard sets advance only the ContactCard consistency 
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(
         mutations));
     CHECK(std::get<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(mutations).empty());
+}
+
+TEST_CASE("AddressBook mutations project, reconcile rejection, and preserve uncertainty",
+          "[jmap][contacts][service][consistency]")
+{
+    ensureApplication();
+    QTemporaryDir directory;
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("address-book-optimistic-mutation-test"),
+        .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    javelin::jmap::cache::SessionRepository sessions{connection};
+    REQUIRE_FALSE(sessions.replace("a1", session()).has_value());
+    javelin::jmap::cache::ContactRepository contacts{connection};
+    REQUIRE_FALSE(contacts.replaceAll("a1", {addressBook()}, {}, "b1", "c1").has_value());
+
+    FakeTransport transport;
+    transport.results.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body =
+            QByteArray{
+                R"({"methodResponses":[["AddressBook/set",{"accountId":"a1","oldState":"b1","newState":"b2","created":{},"updated":{"book-1":{}},"destroyed":[],"notCreated":{},"notUpdated":{},"notDestroyed":{}},"contacts-set"]],"sessionState":"s2"})"},
+    });
+    transport.beforeReturn = [&connection, &contacts]
+    {
+        const auto books = contacts.listAddressBooks("a1");
+        REQUIRE(std::holds_alternative<std::vector<javelin::jmap::api::AddressBook>>(books));
+        REQUIRE(std::get<std::vector<javelin::jmap::api::AddressBook>>(books).size() == 1);
+        CHECK(std::get<std::vector<javelin::jmap::api::AddressBook>>(books).front().name ==
+              "Renamed");
+        javelin::jmap::contacts::AddressBookMutationJournal journal{connection, contacts};
+        const auto records = journal.listForAddressBook("a1", "book-1");
+        REQUIRE(
+            std::holds_alternative<std::vector<javelin::jmap::contacts::AddressBookMutationRecord>>(
+                records));
+        REQUIRE(std::get<std::vector<javelin::jmap::contacts::AddressBookMutationRecord>>(records)
+                    .size() == 1);
+        CHECK(std::get<std::vector<javelin::jmap::contacts::AddressBookMutationRecord>>(records)
+                  .front()
+                  .status == javelin::jmap::sync::MutationStatus::InFlight);
+    };
+    javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
+    javelin::jmap::contacts::ContactService service{connection, contacts, transport,
+                                                    methodTransport};
+    const auto accepted = QCoro::waitFor(
+        service.setAddressBooks({.sessionUrl = "https://example.test/.well-known/jmap",
+                                 .loginEmail = "alice@example.test",
+                                 .apiKey = "secret"},
+                                "a1",
+                                {.accountId = "a1",
+                                 .ifInState = std::nullopt,
+                                 .create = {},
+                                 .update = {{"book-1", {.json = R"({"name":"Renamed"})"}}},
+                                 .destroy = {},
+                                 .onDestroyRemoveContents = false,
+                                 .onSuccessSetIsDefault = std::nullopt}));
+    REQUIRE(std::holds_alternative<javelin::jmap::contacts::ContactMutationSummary>(accepted));
+    REQUIRE_FALSE(transport.requests.empty());
+    CHECK(transport.requests.front().body.contains("\"ifInState\":\"b1\""));
+    auto books = contacts.listAddressBooks("a1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::api::AddressBook>>(books));
+    CHECK(std::get<std::vector<javelin::jmap::api::AddressBook>>(books).front().name == "Renamed");
+
+    transport.results.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body =
+            QByteArray{
+                R"({"methodResponses":[["AddressBook/set",{"accountId":"a1","oldState":"b2","newState":"b3","created":{"create-1":{"id":"book-2"}},"updated":{},"destroyed":[],"notCreated":{},"notUpdated":{},"notDestroyed":{}},"contacts-set"]],"sessionState":"s-create"})"},
+    });
+    transport.beforeReturn = [&contacts]
+    {
+        const auto projected = contacts.listAddressBooks("a1");
+        REQUIRE(std::holds_alternative<std::vector<javelin::jmap::api::AddressBook>>(projected));
+        CHECK(std::ranges::any_of(std::get<std::vector<javelin::jmap::api::AddressBook>>(projected),
+                                  [](const auto& book) { return book.id.starts_with("local-"); }));
+    };
+    const auto created = QCoro::waitFor(service.setAddressBooks(
+        {.sessionUrl = "https://example.test/.well-known/jmap",
+         .loginEmail = "alice@example.test",
+         .apiKey = "secret"},
+        "a1",
+        {.accountId = "a1",
+         .ifInState = std::nullopt,
+         .create = {{"create-1", {.json = R"({"name":"Projects","isSubscribed":true})"}}},
+         .update = {},
+         .destroy = {},
+         .onDestroyRemoveContents = false,
+         .onSuccessSetIsDefault = std::nullopt}));
+    REQUIRE(std::holds_alternative<javelin::jmap::contacts::ContactMutationSummary>(created));
+    CHECK(std::get<javelin::jmap::contacts::ContactMutationSummary>(created).createdId ==
+          std::optional<std::string>{"book-2"});
+    books = contacts.listAddressBooks("a1");
+    const auto& createdBooks = std::get<std::vector<javelin::jmap::api::AddressBook>>(books);
+    CHECK(std::ranges::none_of(createdBooks,
+                               [](const auto& book) { return book.id.starts_with("local-"); }));
+    CHECK(std::ranges::any_of(createdBooks, [](const auto& book)
+                              { return book.id == "book-2" && book.name == "Projects"; }));
+
+    transport.results.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body =
+            QByteArray{
+                R"({"methodResponses":[["AddressBook/set",{"accountId":"a1","oldState":"b3","newState":"b3","created":{},"updated":{},"destroyed":[],"notCreated":{},"notUpdated":{"book-1":{"type":"forbidden"}},"notDestroyed":{}},"contacts-set"]],"sessionState":"s3"})"},
+    });
+    const auto rejected = QCoro::waitFor(
+        service.setAddressBooks({.sessionUrl = "https://example.test/.well-known/jmap",
+                                 .loginEmail = "alice@example.test",
+                                 .apiKey = "secret"},
+                                "a1",
+                                {.accountId = "a1",
+                                 .ifInState = std::nullopt,
+                                 .create = {},
+                                 .update = {{"book-1", {.json = R"({"name":"Rejected"})"}}},
+                                 .destroy = {},
+                                 .onDestroyRemoveContents = false,
+                                 .onSuccessSetIsDefault = std::nullopt}));
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(rejected));
+    CHECK(std::get<javelin::jmap::OperationError>(rejected).code ==
+          javelin::jmap::OperationErrorCode::Conflict);
+    books = contacts.listAddressBooks("a1");
+    const auto& rejectedBooks = std::get<std::vector<javelin::jmap::api::AddressBook>>(books);
+    const auto restoredBook =
+        std::ranges::find(rejectedBooks, "book-1", &javelin::jmap::api::AddressBook::id);
+    REQUIRE(restoredBook != rejectedBooks.end());
+    CHECK(restoredBook->name == "Renamed");
+
+    transport.results.push_back(javelin::jmap::api::TransportError{
+        .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
+        .message = "Connection closed after dispatch",
+    });
+    const auto uncertain = QCoro::waitFor(
+        service.setAddressBooks({.sessionUrl = "https://example.test/.well-known/jmap",
+                                 .loginEmail = "alice@example.test",
+                                 .apiKey = "secret"},
+                                "a1",
+                                {.accountId = "a1",
+                                 .ifInState = std::nullopt,
+                                 .create = {},
+                                 .update = {{"book-1", {.json = R"({"name":"Uncertain"})"}}},
+                                 .destroy = {},
+                                 .onDestroyRemoveContents = false,
+                                 .onSuccessSetIsDefault = std::nullopt}));
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(uncertain));
+    books = contacts.listAddressBooks("a1");
+    const auto& uncertainBooks = std::get<std::vector<javelin::jmap::api::AddressBook>>(books);
+    const auto uncertainBook =
+        std::ranges::find(uncertainBooks, "book-1", &javelin::jmap::api::AddressBook::id);
+    REQUIRE(uncertainBook != uncertainBooks.end());
+    CHECK(uncertainBook->name == "Uncertain");
+    javelin::jmap::contacts::AddressBookMutationJournal journal{connection, contacts};
+    const auto records = journal.listForAddressBook("a1", "book-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::contacts::AddressBookMutationRecord>>(
+        records));
+    CHECK(std::ranges::any_of(
+        std::get<std::vector<javelin::jmap::contacts::AddressBookMutationRecord>>(records),
+        [](const auto& record)
+        { return record.status == javelin::jmap::sync::MutationStatus::Unknown; }));
 }
 
 TEST_CASE("rejected ContactCard sets restore the confirmed contact",

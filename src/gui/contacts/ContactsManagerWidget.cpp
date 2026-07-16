@@ -404,6 +404,14 @@ namespace javelin::gui::contacts
           m_ownerAccountId(std::move(ownerAccountId))
     {
         setupUi();
+        connect(&m_repository, &javelin::jmap::cache::ContactRepository::contactsChanged, this,
+                [this](const QString& accountId)
+                {
+                    if (currentAccountId() != std::optional<std::string>{accountId.toStdString()})
+                        return;
+                    reloadAddressBooks();
+                    reloadContacts();
+                });
         reloadAccounts();
     }
 
