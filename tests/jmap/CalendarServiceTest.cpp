@@ -2,6 +2,7 @@
 
 #include "jmap/api/JmapMethodTransport.h"
 #include "jmap/cache/SessionRepository.h"
+#include "jmap/calendar/CalendarMutationJournal.h"
 #include "jmap/sync/ConsistencyDomain.h"
 
 #include <QCoroTask>
@@ -11,6 +12,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <functional>
 #include <optional>
 #include <utility>
@@ -155,14 +157,37 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
               .callId = "calendar-event-set"}},
         .createdIds = std::nullopt,
         .sessionState = "session-2"});
+    transport.beforeReturn = [&connection, &calendars]
+    {
+        const auto projected = calendars.findEvent("a1", "event-1");
+        REQUIRE(std::holds_alternative<std::optional<javelin::jmap::calendar::CalendarEvent>>(
+            projected));
+        REQUIRE(
+            std::get<std::optional<javelin::jmap::calendar::CalendarEvent>>(projected).has_value());
+        CHECK(std::get<std::optional<javelin::jmap::calendar::CalendarEvent>>(projected)->title ==
+              "Updated");
+        javelin::jmap::calendar::CalendarMutationJournal journal{connection, calendars};
+        const auto records = journal.listForEvent("a1", "event-1");
+        REQUIRE(
+            std::holds_alternative<std::vector<javelin::jmap::calendar::CalendarMutationRecord>>(
+                records));
+        REQUIRE(std::get<std::vector<javelin::jmap::calendar::CalendarMutationRecord>>(records)
+                    .size() == 1);
+        CHECK(std::get<std::vector<javelin::jmap::calendar::CalendarMutationRecord>>(records)
+                  .front()
+                  .status == javelin::jmap::sync::MutationStatus::InFlight);
+    };
     javelin::jmap::calendar::CalendarService service{connection, transport};
+    std::size_t projectionNotifications = 0;
     const auto result = QCoro::waitFor(
         service.update({.sessionUrl = "https://example.test/.well-known/jmap",
                         .loginEmail = "alice@example.test",
                         .apiKey = "secret"},
-                       "a1", {.accountId = "a1", .event = event(), .ifInState = std::nullopt}));
+                       "a1", {.accountId = "a1", .event = event(), .ifInState = std::nullopt},
+                       [&projectionNotifications] { ++projectionNotifications; }));
 
     REQUIRE(std::holds_alternative<javelin::jmap::calendar::CommittedMutation>(result));
+    CHECK(projectionNotifications == 2);
     REQUIRE(transport.request.has_value());
     REQUIRE(transport.request->envelope.methodCalls.size() == 1);
     CHECK(transport.request->envelope.methodCalls.front().arguments.find(
@@ -172,6 +197,11 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
         consistency.mutationGeneration({.accountId = "a1", .dataType = "CalendarEvent"});
     REQUIRE(std::holds_alternative<std::uint64_t>(mutationGeneration));
     CHECK(std::get<std::uint64_t>(mutationGeneration) == 1);
+    javelin::jmap::calendar::CalendarMutationJournal journal{connection, calendars};
+    const auto records = journal.listForEvent("a1", "event-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::calendar::CalendarMutationRecord>>(
+        records));
+    CHECK(std::get<std::vector<javelin::jmap::calendar::CalendarMutationRecord>>(records).empty());
 
     transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
         .methodResponses =
@@ -402,6 +432,42 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
     CHECK(after.eventState == before.eventState);
     REQUIRE(after.events.size() == before.events.size());
     CHECK(after.events.front().title == before.events.front().title);
+
+    const auto rejectedRecords =
+        javelin::jmap::calendar::CalendarMutationJournal{connection, calendars}.listForEvent(
+            "a1", "event-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::calendar::CalendarMutationRecord>>(
+        rejectedRecords));
+    CHECK(std::ranges::any_of(
+        std::get<std::vector<javelin::jmap::calendar::CalendarMutationRecord>>(rejectedRecords),
+        [](const auto& record)
+        { return record.status == javelin::jmap::sync::MutationStatus::Rejected; }));
+
+    transport.results.push_back(javelin::jmap::api::TransportError{
+        .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
+        .message = "Connection closed after dispatch",
+    });
+    auto uncertainEvent = event();
+    uncertainEvent.title = "Uncertain";
+    const auto uncertain = QCoro::waitFor(service.update(
+        settings, "a1", {.accountId = "a1", .event = uncertainEvent, .ifInState = std::nullopt}));
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(uncertain));
+    const auto uncertainCached = calendars.findEvent("a1", "event-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::calendar::CalendarEvent>>(
+        uncertainCached));
+    REQUIRE(std::get<std::optional<javelin::jmap::calendar::CalendarEvent>>(uncertainCached)
+                .has_value());
+    CHECK(std::get<std::optional<javelin::jmap::calendar::CalendarEvent>>(uncertainCached)->title ==
+          "Uncertain");
+    const auto uncertainRecords =
+        javelin::jmap::calendar::CalendarMutationJournal{connection, calendars}.listForEvent(
+            "a1", "event-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::calendar::CalendarMutationRecord>>(
+        uncertainRecords));
+    CHECK(std::ranges::any_of(
+        std::get<std::vector<javelin::jmap::calendar::CalendarMutationRecord>>(uncertainRecords),
+        [](const auto& record)
+        { return record.status == javelin::jmap::sync::MutationStatus::Unknown; }));
 
     auto listedCalendars = calendars.listCalendars("a1");
     REQUIRE(

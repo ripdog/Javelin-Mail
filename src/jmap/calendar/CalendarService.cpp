@@ -6,13 +6,17 @@
 #include "jmap/api/ResponseReader.h"
 #include "jmap/auth/Auth.h"
 #include "jmap/cache/SessionRepository.h"
+#include "jmap/calendar/CalendarMutationJournal.h"
 #include "jmap/sync/ConsistencyDomain.h"
+#include "jmap/sync/MutationJournal.h"
 
 #include <QDateTime>
 #include <QLoggingCategory>
 #include <QRegularExpression>
+#include <QUuid>
 
 #include <algorithm>
+#include <array>
 #include <limits>
 #include <unordered_map>
 #include <unordered_set>
@@ -218,6 +222,283 @@ namespace javelin::jmap::calendar
                 match.captured(1).toLongLong() * 86400 + match.captured(2).toLongLong() * 3600 +
                 match.captured(3).toLongLong() * 60 + qRound64(match.captured(4).toDouble());
             return {.value = start.addSecs(seconds).toString(Qt::ISODate).toStdString()};
+        }
+
+        [[nodiscard]] std::optional<Occurrence> nonRecurringOccurrence(const CalendarEvent& event)
+        {
+            if (event.recurrenceRule.has_value())
+                return std::nullopt;
+            return Occurrence{
+                .accountId = event.accountId,
+                .id = event.id,
+                .eventId = event.id,
+                .recurrenceId = std::nullopt,
+                .localStart = event.start,
+                .localEnd = localEnd(event),
+                .utcStart = event.utcStart,
+                .utcEnd = event.utcEnd,
+                .allDay = event.showWithoutTime,
+            };
+        }
+
+        struct PreparedCalendarMutations
+        {
+            std::vector<CalendarMutationRecord> records;
+            std::vector<CalendarEvent> projectedEvents;
+            std::vector<Occurrence> projectedOccurrences;
+            std::vector<std::string> destroyedIds;
+        };
+
+        [[nodiscard]] std::variant<PreparedCalendarMutations, OperationError>
+        prepareCalendarMutations(cache::CalendarRepository& repository,
+                                 const api::CalendarEventSetRequest& request)
+        {
+            PreparedCalendarMutations prepared;
+            prepared.records.reserve(request.create.size() + request.update.size() +
+                                     request.destroy.size());
+            for (const auto& [creationId, requested] : request.create)
+            {
+                auto projected = requested;
+                const auto mutationId =
+                    QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
+                projected.accountId = request.accountId;
+                projected.id = "local-" + mutationId;
+                const auto requestedDocument = api::serializeCalendarEventDocument(requested);
+                const auto projectedDocument = api::serializeCalendarEventDocument(projected);
+                if (!requestedDocument.has_value() || !projectedDocument.has_value())
+                    return error(OperationErrorCode::InvalidRequest,
+                                 QStringLiteral("Unable to serialize the calendar change."));
+                prepared.records.push_back({
+                    .mutationId = mutationId,
+                    .operationGroupId = std::nullopt,
+                    .accountId = request.accountId,
+                    .objectId = projected.id,
+                    .creationId = creationId,
+                    .kind = CalendarMutationKind::Create,
+                    .status = javelin::jmap::sync::MutationStatus::Pending,
+                    .requestedDocument = *requestedDocument,
+                    .baseDocument = std::nullopt,
+                    .projectedDocument = *projectedDocument,
+                    .baseState = request.ifInState,
+                    .acceptedState = std::nullopt,
+                    .errorJson = std::nullopt,
+                });
+                if (auto occurrence = nonRecurringOccurrence(projected))
+                    prepared.projectedOccurrences.push_back(std::move(*occurrence));
+                prepared.projectedEvents.push_back(std::move(projected));
+            }
+            for (const auto& [eventId, requested] : request.update)
+            {
+                auto projected = requested;
+                projected.accountId = request.accountId;
+                projected.id = eventId;
+                const auto cached = repository.findEvent(request.accountId, eventId);
+                if (const auto* cacheError = std::get_if<cache::DatabaseError>(&cached))
+                    return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+                const auto& base = std::get<std::optional<CalendarEvent>>(cached);
+                const auto requestedDocument = api::serializeCalendarEventDocument(projected);
+                if (!requestedDocument.has_value())
+                    return error(OperationErrorCode::InvalidRequest,
+                                 QStringLiteral("Unable to serialize the calendar change."));
+                prepared.records.push_back({
+                    .mutationId = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString(),
+                    .operationGroupId = std::nullopt,
+                    .accountId = request.accountId,
+                    .objectId = eventId,
+                    .creationId = std::nullopt,
+                    .kind = CalendarMutationKind::Update,
+                    .status = javelin::jmap::sync::MutationStatus::Pending,
+                    .requestedDocument = *requestedDocument,
+                    .baseDocument = base.has_value() ? api::serializeCalendarEventDocument(*base)
+                                                     : std::nullopt,
+                    .projectedDocument = *requestedDocument,
+                    .baseState = request.ifInState,
+                    .acceptedState = std::nullopt,
+                    .errorJson = std::nullopt,
+                });
+                if (auto occurrence = nonRecurringOccurrence(projected))
+                    prepared.projectedOccurrences.push_back(std::move(*occurrence));
+                prepared.projectedEvents.push_back(std::move(projected));
+            }
+            for (const auto& eventId : request.destroy)
+            {
+                const auto cached = repository.findEvent(request.accountId, eventId);
+                if (const auto* cacheError = std::get_if<cache::DatabaseError>(&cached))
+                    return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+                const auto& base = std::get<std::optional<CalendarEvent>>(cached);
+                prepared.records.push_back({
+                    .mutationId = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString(),
+                    .operationGroupId = std::nullopt,
+                    .accountId = request.accountId,
+                    .objectId = eventId,
+                    .creationId = std::nullopt,
+                    .kind = CalendarMutationKind::Destroy,
+                    .status = javelin::jmap::sync::MutationStatus::Pending,
+                    .requestedDocument = "{}",
+                    .baseDocument = base.has_value() ? api::serializeCalendarEventDocument(*base)
+                                                     : std::nullopt,
+                    .projectedDocument = std::nullopt,
+                    .baseState = request.ifInState,
+                    .acceptedState = std::nullopt,
+                    .errorJson = std::nullopt,
+                });
+                if (base.has_value())
+                    prepared.destroyedIds.push_back(eventId);
+            }
+            return prepared;
+        }
+
+        [[nodiscard]] std::variant<CalendarEvent, OperationError>
+        eventFromMutationDocument(const CalendarMutationRecord& record,
+                                  const std::string_view document, const std::string_view eventId)
+        {
+            const auto parsed = api::parseCalendarEventDocument(record.accountId, document);
+            if (!parsed.ok() || !parsed.value.has_value())
+                return error(OperationErrorCode::LocalStorageFailure,
+                             QStringLiteral("A CalendarEvent mutation document is invalid."));
+            auto event = *parsed.value;
+            event.accountId = record.accountId;
+            event.id = std::string{eventId};
+            return event;
+        }
+
+        [[nodiscard]] std::optional<OperationError> restoreCalendarMutations(
+            cache::DatabaseConnection& connection, cache::CalendarRepository& repository,
+            const std::vector<CalendarMutationRecord>& records, const std::string_view eventState,
+            const std::optional<std::string_view> errorJson)
+        {
+            auto transactionResult = javelin::jmap::sync::MutationProjectionTransaction::begin(
+                connection, QStringLiteral("Reject CalendarEvent mutations"));
+            if (const auto* cacheError = std::get_if<cache::DatabaseError>(&transactionResult))
+                return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+            auto transaction = std::get<javelin::jmap::sync::MutationProjectionTransaction>(
+                std::move(transactionResult));
+            std::vector<CalendarEvent> restoredEvents;
+            std::vector<Occurrence> restoredOccurrences;
+            std::vector<std::string> removedIds;
+            for (const auto& record : records)
+            {
+                if (const auto cacheError = transaction.transition(
+                        record.mutationId, javelin::jmap::sync::MutationStatus::Rejected,
+                        std::nullopt, errorJson))
+                    return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+                if (record.kind == CalendarMutationKind::Create)
+                {
+                    removedIds.push_back(record.objectId);
+                    continue;
+                }
+                if (!record.baseDocument.has_value())
+                {
+                    if (record.kind == CalendarMutationKind::Update)
+                        removedIds.push_back(record.objectId);
+                    continue;
+                }
+                auto restored =
+                    eventFromMutationDocument(record, *record.baseDocument, record.objectId);
+                if (const auto* operationError = std::get_if<OperationError>(&restored))
+                    return *operationError;
+                auto event = std::get<CalendarEvent>(std::move(restored));
+                if (auto occurrence = nonRecurringOccurrence(event))
+                    restoredOccurrences.push_back(std::move(*occurrence));
+                restoredEvents.push_back(std::move(event));
+            }
+            if (const auto cacheError = repository.projectEvents(
+                    transaction.cacheTransaction(), records.front().accountId, eventState,
+                    restoredEvents, restoredOccurrences, removedIds))
+                return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+            if (const auto cacheError = transaction.commit())
+                return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+            return std::nullopt;
+        }
+
+        [[nodiscard]] CalendarMutationResult
+        acceptCalendarMutations(cache::DatabaseConnection& connection,
+                                cache::CalendarRepository& repository,
+                                const std::vector<CalendarMutationRecord>& records,
+                                const api::CalendarEventSetResponse& response)
+        {
+            std::vector<CalendarEvent> acceptedEvents;
+            std::vector<Occurrence> acceptedOccurrences;
+            std::vector<std::string> removedTemporaryIds;
+            for (const auto& record : records)
+            {
+                if (record.kind == CalendarMutationKind::Update)
+                {
+                    if (!response.updated.contains(record.objectId))
+                        return error(
+                            OperationErrorCode::ProtocolViolation,
+                            QStringLiteral(
+                                "The CalendarEvent/set response omitted an updated event."));
+                    continue;
+                }
+                if (record.kind == CalendarMutationKind::Destroy)
+                {
+                    if (std::ranges::find(response.destroyed, record.objectId) ==
+                        response.destroyed.end())
+                        return error(
+                            OperationErrorCode::ProtocolViolation,
+                            QStringLiteral(
+                                "The CalendarEvent/set response omitted a destroyed event."));
+                    continue;
+                }
+                if (!record.creationId.has_value())
+                    return error(OperationErrorCode::ProtocolViolation,
+                                 QStringLiteral("A CalendarEvent creation lost its creation id."));
+                const auto created = response.created.find(*record.creationId);
+                if (created == response.created.end() || !created->second.id.has_value())
+                    return error(
+                        OperationErrorCode::ProtocolViolation,
+                        QStringLiteral("The CalendarEvent/set response omitted a created id."));
+                if (!record.projectedDocument.has_value())
+                    return error(OperationErrorCode::LocalStorageFailure,
+                                 QStringLiteral("A CalendarEvent creation lost its projection."));
+                auto accepted = eventFromMutationDocument(record, *record.projectedDocument,
+                                                          *created->second.id);
+                if (const auto* operationError = std::get_if<OperationError>(&accepted))
+                    return *operationError;
+                auto event = std::get<CalendarEvent>(std::move(accepted));
+                if (auto occurrence = nonRecurringOccurrence(event))
+                    acceptedOccurrences.push_back(std::move(*occurrence));
+                acceptedEvents.push_back(std::move(event));
+                removedTemporaryIds.push_back(record.objectId);
+            }
+
+            auto transactionResult = javelin::jmap::sync::MutationProjectionTransaction::begin(
+                connection, QStringLiteral("Accept CalendarEvent mutations"));
+            if (const auto* cacheError = std::get_if<cache::DatabaseError>(&transactionResult))
+                return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+            auto transaction = std::get<javelin::jmap::sync::MutationProjectionTransaction>(
+                std::move(transactionResult));
+            for (const auto& record : records)
+            {
+                if (const auto cacheError = transaction.transition(
+                        record.mutationId, javelin::jmap::sync::MutationStatus::Accepted,
+                        response.newState))
+                    return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+            }
+            const std::array domains{javelin::jmap::sync::ConsistencyDomain{
+                .accountId = response.accountId,
+                .dataType = "CalendarEvent",
+            }};
+            if (const auto cacheError = transaction.advance(domains))
+                return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+            if (const auto cacheError = repository.projectEvents(
+                    transaction.cacheTransaction(), response.accountId, response.newState,
+                    acceptedEvents, acceptedOccurrences, removedTemporaryIds))
+                return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+            for (const auto& record : records)
+            {
+                if (const auto cacheError = transaction.remove(record.mutationId))
+                    return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+            }
+            if (const auto cacheError = transaction.commit())
+                return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+            return CommittedMutation{
+                .accountId = response.accountId,
+                .newState = response.newState,
+                .createdId =
+                    response.created.empty() ? std::nullopt : response.created.begin()->second.id,
+            };
         }
     } // namespace
 
@@ -749,9 +1030,9 @@ namespace javelin::jmap::calendar
         co_return summary;
     }
 
-    QCoro::Task<CalendarMutationResult> CalendarService::create(LiveConnectionSettings settings,
-                                                                std::string ownerAccountId,
-                                                                CreateEventCommand command)
+    QCoro::Task<CalendarMutationResult>
+    CalendarService::create(LiveConnectionSettings settings, std::string ownerAccountId,
+                            CreateEventCommand command, std::function<void()> projectionCommitted)
     {
         if (!command.ifInState)
         {
@@ -772,12 +1053,13 @@ namespace javelin::jmap::calendar
                                              .destroy = {},
                                              .sendSchedulingMessages = true};
         co_return co_await mutate(std::move(settings), std::move(ownerAccountId),
-                                  std::move(request), std::move(calendarIds));
+                                  std::move(request), std::move(calendarIds),
+                                  std::move(projectionCommitted));
     }
 
-    QCoro::Task<CalendarMutationResult> CalendarService::update(LiveConnectionSettings settings,
-                                                                std::string ownerAccountId,
-                                                                UpdateEventCommand command)
+    QCoro::Task<CalendarMutationResult>
+    CalendarService::update(LiveConnectionSettings settings, std::string ownerAccountId,
+                            UpdateEventCommand command, std::function<void()> projectionCommitted)
     {
         if (!command.ifInState)
         {
@@ -798,12 +1080,13 @@ namespace javelin::jmap::calendar
                                              .destroy = {},
                                              .sendSchedulingMessages = true};
         co_return co_await mutate(std::move(settings), std::move(ownerAccountId),
-                                  std::move(request), std::move(calendarIds));
+                                  std::move(request), std::move(calendarIds),
+                                  std::move(projectionCommitted));
     }
 
-    QCoro::Task<CalendarMutationResult> CalendarService::remove(LiveConnectionSettings settings,
-                                                                std::string ownerAccountId,
-                                                                DeleteEventCommand command)
+    QCoro::Task<CalendarMutationResult>
+    CalendarService::remove(LiveConnectionSettings settings, std::string ownerAccountId,
+                            DeleteEventCommand command, std::function<void()> projectionCommitted)
     {
         if (!command.ifInState)
         {
@@ -819,13 +1102,15 @@ namespace javelin::jmap::calendar
                                              .destroy = {command.eventId},
                                              .sendSchedulingMessages = true};
         co_return co_await mutate(std::move(settings), std::move(ownerAccountId),
-                                  std::move(request), std::move(command.calendarIds));
+                                  std::move(request), std::move(command.calendarIds),
+                                  std::move(projectionCommitted));
     }
 
     QCoro::Task<CalendarMutationResult>
     CalendarService::mutate(LiveConnectionSettings settings, std::string ownerAccountId,
                             api::CalendarEventSetRequest request,
-                            std::vector<std::string> calendarIds)
+                            std::vector<std::string> calendarIds,
+                            std::function<void()> projectionCommitted)
     {
         const auto sessionResult = loadSession(m_connection, ownerAccountId);
         if (const auto* serviceError = std::get_if<OperationError>(&sessionResult))
@@ -847,6 +1132,23 @@ namespace javelin::jmap::calendar
         if (!method)
             co_return error(OperationErrorCode::InvalidRequest,
                             QStringLiteral("Unable to serialize the calendar change."));
+        const auto preparedResult = prepareCalendarMutations(repository, request);
+        if (const auto* operationError = std::get_if<OperationError>(&preparedResult))
+            co_return *operationError;
+        auto prepared = std::get<PreparedCalendarMutations>(preparedResult);
+        CalendarMutationJournal journal{m_connection, repository};
+        if (!prepared.records.empty())
+        {
+            if (const auto cacheError = journal.queue(
+                    prepared.records, request.ifInState.value_or(std::string{}),
+                    prepared.projectedEvents, prepared.projectedOccurrences, prepared.destroyedIds))
+                co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+            if (projectionCommitted)
+                projectionCommitted();
+            if (const auto cacheError = journal.transition(
+                    prepared.records, javelin::jmap::sync::MutationStatus::InFlight))
+                co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+        }
         api::RequestBuilder builder;
         builder.useCore().useCapability(std::string{api::calendarsCapabilityUri});
         const auto handle = builder.call(*method, "calendar-event-set");
@@ -855,10 +1157,20 @@ namespace javelin::jmap::calendar
             co_await caller.call(context(settings, session, request.accountId), builder);
         const auto* envelope = std::get_if<api::ResponseEnvelope>(&result);
         if (!envelope)
+        {
+            if (const auto cacheError = journal.transition(
+                    prepared.records, javelin::jmap::sync::MutationStatus::Unknown))
+                co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
             co_return callError(result);
+        }
         const auto read = api::ResponseReader{*envelope}.require(handle);
         if (const auto* readError = std::get_if<api::ResponseReaderError>(&read))
+        {
+            if (const auto cacheError = journal.transition(
+                    prepared.records, javelin::jmap::sync::MutationStatus::Unknown))
+                co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
             co_return responseError(*readError);
+        }
         const auto& response = std::get<api::CalendarEventSetResponse>(read);
         const auto* setError = !response.notCreated.empty()   ? &response.notCreated.begin()->second
                                : !response.notUpdated.empty() ? &response.notUpdated.begin()->second
@@ -867,6 +1179,13 @@ namespace javelin::jmap::calendar
                                    : nullptr;
         if (setError)
         {
+            const auto errorJson = setError->description.value_or("CalendarEvent/set rejected");
+            if (const auto restoreError =
+                    restoreCalendarMutations(m_connection, repository, prepared.records,
+                                             request.ifInState.value_or(std::string{}), errorJson))
+                co_return *restoreError;
+            if (projectionCommitted)
+                projectionCommitted();
             if (setError->type == api::CalendarSetErrorType::StateMismatch)
                 co_return error(
                     OperationErrorCode::Conflict,
@@ -882,16 +1201,17 @@ namespace javelin::jmap::calendar
                             QString::fromStdString(setError->description.value_or(
                                 "The server rejected the calendar change.")));
         }
-        javelin::jmap::sync::ConsistencyDomainRepository consistencyRepository{m_connection};
-        const auto generation = consistencyRepository.advanceMutation(
-            {.accountId = request.accountId, .dataType = "CalendarEvent"});
-        if (const auto* cacheError = std::get_if<cache::DatabaseError>(&generation))
-            co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+        auto accepted =
+            acceptCalendarMutations(m_connection, repository, prepared.records, response);
+        if (const auto* operationError = std::get_if<OperationError>(&accepted))
+        {
+            static_cast<void>(
+                journal.transition(prepared.records, javelin::jmap::sync::MutationStatus::Unknown));
+            co_return *operationError;
+        }
+        if (projectionCommitted)
+            projectionCommitted();
         static_cast<void>(beginRefresh(ownerAccountId));
-        co_return CommittedMutation{.accountId = request.accountId,
-                                    .newState = response.newState,
-                                    .createdId = response.created.empty()
-                                                     ? std::nullopt
-                                                     : response.created.begin()->second.id};
+        co_return accepted;
     }
 } // namespace javelin::jmap::calendar

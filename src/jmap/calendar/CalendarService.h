@@ -7,6 +7,7 @@
 #include <QCoroTask>
 
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -94,15 +95,15 @@ namespace javelin::jmap::calendar
         [[nodiscard]] QCoro::Task<CalendarRefreshResult>
         refreshChanged(LiveConnectionSettings settings, std::string ownerAccountId,
                        VisibleInterval interval, TimeZoneId displayTimeZone);
-        [[nodiscard]] QCoro::Task<CalendarMutationResult> create(LiveConnectionSettings settings,
-                                                                 std::string ownerAccountId,
-                                                                 CreateEventCommand command);
-        [[nodiscard]] QCoro::Task<CalendarMutationResult> update(LiveConnectionSettings settings,
-                                                                 std::string ownerAccountId,
-                                                                 UpdateEventCommand command);
-        [[nodiscard]] QCoro::Task<CalendarMutationResult> remove(LiveConnectionSettings settings,
-                                                                 std::string ownerAccountId,
-                                                                 DeleteEventCommand command);
+        [[nodiscard]] QCoro::Task<CalendarMutationResult>
+        create(LiveConnectionSettings settings, std::string ownerAccountId,
+               CreateEventCommand command, std::function<void()> projectionCommitted = {});
+        [[nodiscard]] QCoro::Task<CalendarMutationResult>
+        update(LiveConnectionSettings settings, std::string ownerAccountId,
+               UpdateEventCommand command, std::function<void()> projectionCommitted = {});
+        [[nodiscard]] QCoro::Task<CalendarMutationResult>
+        remove(LiveConnectionSettings settings, std::string ownerAccountId,
+               DeleteEventCommand command, std::function<void()> projectionCommitted = {});
 
       private:
         [[nodiscard]] std::uint64_t beginRefresh(std::string_view ownerAccountId);
@@ -110,7 +111,8 @@ namespace javelin::jmap::calendar
                                             std::uint64_t generation) const;
         [[nodiscard]] QCoro::Task<CalendarMutationResult>
         mutate(LiveConnectionSettings settings, std::string ownerAccountId,
-               api::CalendarEventSetRequest request, std::vector<std::string> calendarIds);
+               api::CalendarEventSetRequest request, std::vector<std::string> calendarIds,
+               std::function<void()> projectionCommitted);
 
         cache::DatabaseConnection& m_connection;
         api::JmapMethodTransport& m_methodTransport;

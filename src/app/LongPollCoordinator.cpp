@@ -691,11 +691,22 @@ namespace javelin::app
             co_return javelin::jmap::OperationError{
                 .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = QStringLiteral("Account synchronization is not configured.")};
+        const auto projectionCommitted = [this, ownerAccountId]
+        {
+            const auto range = m_visibleCalendarRanges.find(ownerAccountId);
+            if (range == m_visibleCalendarRanges.end())
+                return;
+            Q_EMIT calendarCacheCommitted({.ownerAccountId = QString::fromStdString(ownerAccountId),
+                                           .interval = range->second.interval,
+                                           .displayTimeZone = range->second.displayTimeZone,
+                                           .accountCount = 1,
+                                           .eventCount = 0});
+        };
         co_return observeResult(m_errorCoordinator, configuration->second.settings, ownerAccountId,
                                 QStringLiteral("Create calendar event"),
                                 co_await m_calendarService.create(
                                     toLiveConnectionSettings(configuration->second.settings),
-                                    ownerAccountId, std::move(command)));
+                                    ownerAccountId, std::move(command), projectionCommitted));
     }
 
     QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
@@ -707,11 +718,22 @@ namespace javelin::app
             co_return javelin::jmap::OperationError{
                 .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = QStringLiteral("Account synchronization is not configured.")};
+        const auto projectionCommitted = [this, ownerAccountId]
+        {
+            const auto range = m_visibleCalendarRanges.find(ownerAccountId);
+            if (range == m_visibleCalendarRanges.end())
+                return;
+            Q_EMIT calendarCacheCommitted({.ownerAccountId = QString::fromStdString(ownerAccountId),
+                                           .interval = range->second.interval,
+                                           .displayTimeZone = range->second.displayTimeZone,
+                                           .accountCount = 1,
+                                           .eventCount = 0});
+        };
         co_return observeResult(m_errorCoordinator, configuration->second.settings, ownerAccountId,
                                 QStringLiteral("Update calendar event"),
                                 co_await m_calendarService.update(
                                     toLiveConnectionSettings(configuration->second.settings),
-                                    ownerAccountId, std::move(command)));
+                                    ownerAccountId, std::move(command), projectionCommitted));
     }
 
     QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
@@ -723,11 +745,22 @@ namespace javelin::app
             co_return javelin::jmap::OperationError{
                 .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = QStringLiteral("Account synchronization is not configured.")};
+        const auto projectionCommitted = [this, ownerAccountId]
+        {
+            const auto range = m_visibleCalendarRanges.find(ownerAccountId);
+            if (range == m_visibleCalendarRanges.end())
+                return;
+            Q_EMIT calendarCacheCommitted({.ownerAccountId = QString::fromStdString(ownerAccountId),
+                                           .interval = range->second.interval,
+                                           .displayTimeZone = range->second.displayTimeZone,
+                                           .accountCount = 1,
+                                           .eventCount = 0});
+        };
         co_return observeResult(m_errorCoordinator, configuration->second.settings, ownerAccountId,
                                 QStringLiteral("Delete calendar event"),
                                 co_await m_calendarService.remove(
                                     toLiveConnectionSettings(configuration->second.settings),
-                                    ownerAccountId, std::move(command)));
+                                    ownerAccountId, std::move(command), projectionCommitted));
     }
 
     QCoro::Task<javelin::jmap::sieve::SieveListResult>
