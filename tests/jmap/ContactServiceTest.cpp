@@ -5,6 +5,7 @@
 #include "jmap/cache/ContactRepository.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/cache/SyncStateRepository.h"
+#include "jmap/sync/ConsistencyDomain.h"
 
 #include <QCoroTask>
 
@@ -12,6 +13,9 @@
 #include <QTemporaryDir>
 
 #include <catch2/catch_test_macros.hpp>
+
+#include <functional>
+#include <utility>
 
 namespace
 {
@@ -21,6 +25,7 @@ namespace
         javelin::jmap::api::HttpRequest lastRequest;
         std::vector<javelin::jmap::api::HttpRequest> requests;
         std::vector<javelin::jmap::api::TransportResult> results;
+        std::function<void()> beforeReturn;
 
         QCoro::Task<javelin::jmap::api::TransportResult>
         send(javelin::jmap::api::HttpRequest request) override
@@ -30,6 +35,8 @@ namespace
             REQUIRE_FALSE(results.empty());
             auto result = std::move(results.front());
             results.erase(results.begin());
+            if (auto callback = std::exchange(beforeReturn, {}))
+                callback();
             co_return result;
         }
     };
@@ -162,6 +169,102 @@ TEST_CASE("contact service greedily refreshes every contact into the cache",
     const auto found = contacts.findByEmail("joe@example.test");
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::contacts::ContactSummary>>(found));
     REQUIRE(std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(found).has_value());
+}
+
+TEST_CASE("contact refresh discards a snapshot superseded by a ContactCard mutation",
+          "[jmap][contacts][service][consistency]")
+{
+    ensureApplication();
+    QTemporaryDir directory;
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("contact-service-consistency-test"),
+        .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    javelin::jmap::cache::SessionRepository sessions{connection};
+    REQUIRE_FALSE(sessions.replace("a1", session()).has_value());
+
+    FakeTransport transport;
+    transport.results.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body =
+            QByteArray{
+                R"({"methodResponses":[["AddressBook/get",{"accountId":"a1","state":"b1","list":[{"id":"book-1","name":"Stale","description":null,"sortOrder":0,"isDefault":true,"isSubscribed":true,"shareWith":null,"myRights":{"mayRead":true,"mayWrite":true,"mayShare":false,"mayDelete":true}}],"notFound":[]},"address-books"],["ContactCard/get",{"accountId":"a1","state":"c1","list":[{"id":"card-1","uid":"uid-1","kind":"individual","addressBookIds":{"book-1":true},"name":{"full":"Stale Contact"},"emails":{}}],"notFound":[]},"contact-cards"]],"sessionState":"s2"})"},
+    });
+    transport.beforeReturn = [&connection]
+    {
+        javelin::jmap::sync::ConsistencyDomainRepository consistency{connection};
+        const auto generation =
+            consistency.advanceMutation({.accountId = "a1", .dataType = "ContactCard"});
+        REQUIRE(std::holds_alternative<std::uint64_t>(generation));
+    };
+
+    javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
+    javelin::jmap::cache::ContactRepository contacts{connection};
+    javelin::jmap::contacts::ContactService service{connection, contacts, transport,
+                                                    methodTransport};
+    const auto result =
+        QCoro::waitFor(service.refreshAll({.sessionUrl = "https://example.test/.well-known/jmap",
+                                           .loginEmail = "alice@example.test",
+                                           .apiKey = "secret"},
+                                          "a1"));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::contacts::ContactRefreshSummary>(result));
+    CHECK(std::get<javelin::jmap::contacts::ContactRefreshSummary>(result).contactCount == 0);
+    const auto cached = contacts.listContacts("a1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::contacts::ContactSummary>>(cached));
+    CHECK(std::get<std::vector<javelin::jmap::contacts::ContactSummary>>(cached).empty());
+}
+
+TEST_CASE("successful ContactCard sets advance only the ContactCard consistency domain",
+          "[jmap][contacts][service][consistency]")
+{
+    ensureApplication();
+    QTemporaryDir directory;
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("contact-service-mutation-consistency-test"),
+        .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    javelin::jmap::cache::SessionRepository sessions{connection};
+    REQUIRE_FALSE(sessions.replace("a1", session()).has_value());
+
+    FakeTransport transport;
+    transport.results.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body =
+            QByteArray{
+                R"({"methodResponses":[["ContactCard/set",{"accountId":"a1","oldState":"c1","newState":"c2","created":{},"updated":{"card-1":{"updated":"2026-07-17T00:00:00Z"}},"destroyed":[],"notCreated":{},"notUpdated":{},"notDestroyed":{}},"contacts-set"]],"sessionState":"s2"})"},
+    });
+    javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
+    javelin::jmap::cache::ContactRepository contacts{connection};
+    javelin::jmap::contacts::ContactService service{connection, contacts, transport,
+                                                    methodTransport};
+    javelin::jmap::api::ContactCardSetRequest request{
+        .accountId = "a1",
+        .ifInState = "c1",
+        .create = {},
+        .update = {{"card-1", {.json = R"({"name":{"full":"Updated"}})"}}},
+        .destroy = {},
+    };
+    const auto result = QCoro::waitFor(
+        service.setContactCards({.sessionUrl = "https://example.test/.well-known/jmap",
+                                 .loginEmail = "alice@example.test",
+                                 .apiKey = "secret"},
+                                "a1", std::move(request)));
+    REQUIRE(std::holds_alternative<javelin::jmap::contacts::ContactMutationSummary>(result));
+
+    javelin::jmap::sync::ConsistencyDomainRepository consistency{connection};
+    const auto contactGeneration =
+        consistency.mutationGeneration({.accountId = "a1", .dataType = "ContactCard"});
+    const auto addressBookGeneration =
+        consistency.mutationGeneration({.accountId = "a1", .dataType = "AddressBook"});
+    REQUIRE(std::holds_alternative<std::uint64_t>(contactGeneration));
+    REQUIRE(std::holds_alternative<std::uint64_t>(addressBookGeneration));
+    CHECK(std::get<std::uint64_t>(contactGeneration) == 1);
+    CHECK(std::get<std::uint64_t>(addressBookGeneration) == 0);
 }
 
 TEST_CASE("contact service incrementally applies paged changes with bounded gets",

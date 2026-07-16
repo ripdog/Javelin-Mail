@@ -6,6 +6,7 @@
 #include "jmap/api/ResponseReader.h"
 #include "jmap/auth/Auth.h"
 #include "jmap/cache/SessionRepository.h"
+#include "jmap/sync/ConsistencyDomain.h"
 
 #include <QDateTime>
 #include <QLoggingCategory>
@@ -22,6 +23,31 @@ namespace javelin::jmap::calendar
 
     namespace
     {
+        [[nodiscard]] OperationError error(OperationErrorCode code, QString message);
+
+        [[nodiscard]] std::variant<javelin::jmap::sync::RefreshFence, OperationError>
+        captureFence(cache::DatabaseConnection& connection, const std::string_view accountId,
+                     const std::string_view dataType)
+        {
+            javelin::jmap::sync::ConsistencyDomainRepository repository{connection};
+            const auto result = repository.captureRefresh(
+                {.accountId = std::string{accountId}, .dataType = std::string{dataType}});
+            if (const auto* cacheError = std::get_if<cache::DatabaseError>(&result))
+                return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+            return std::get<javelin::jmap::sync::RefreshFence>(result);
+        }
+
+        [[nodiscard]] std::variant<bool, OperationError>
+        fenceIsCurrent(cache::DatabaseConnection& connection,
+                       const javelin::jmap::sync::RefreshFence& fence)
+        {
+            javelin::jmap::sync::ConsistencyDomainRepository repository{connection};
+            const auto result = repository.isCurrent(fence);
+            if (const auto* cacheError = std::get_if<cache::DatabaseError>(&result))
+                return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+            return std::get<bool>(result);
+        }
+
         using SessionResult = std::variant<api::Session, OperationError>;
 
         struct SupersededRefresh
@@ -293,6 +319,15 @@ namespace javelin::jmap::calendar
         {
             if (!account.accountCapabilities.calendars)
                 continue;
+            const auto calendarFenceResult = captureFence(m_connection, accountId, "Calendar");
+            const auto eventFenceResult = captureFence(m_connection, accountId, "CalendarEvent");
+            if (const auto* serviceError = std::get_if<OperationError>(&calendarFenceResult))
+                co_return *serviceError;
+            if (const auto* serviceError = std::get_if<OperationError>(&eventFenceResult))
+                co_return *serviceError;
+            const auto calendarFence =
+                std::get<javelin::jmap::sync::RefreshFence>(calendarFenceResult);
+            const auto eventFence = std::get<javelin::jmap::sync::RefreshFence>(eventFenceResult);
             const auto calendarStateResult = repository.stateToken(accountId, "Calendar");
             const auto eventStateResult = repository.stateToken(accountId, "CalendarEvent");
             if (const auto* cacheError = std::get_if<cache::DatabaseError>(&calendarStateResult))
@@ -419,6 +454,14 @@ namespace javelin::jmap::calendar
                                               .utcStart = event.utcStart,
                                               .utcEnd = event.utcEnd,
                                               .allDay = event.showWithoutTime});
+            const auto calendarCurrent = fenceIsCurrent(m_connection, calendarFence);
+            const auto eventCurrent = fenceIsCurrent(m_connection, eventFence);
+            if (const auto* serviceError = std::get_if<OperationError>(&calendarCurrent))
+                co_return *serviceError;
+            if (const auto* serviceError = std::get_if<OperationError>(&eventCurrent))
+                co_return *serviceError;
+            if (!std::get<bool>(calendarCurrent) || !std::get<bool>(eventCurrent))
+                co_return summary;
             if (const auto cacheError = repository.applyEventDelta(
                     accountId, calendarChanges.newState, eventChanges.newState, displayTimeZone,
                     changedEvents, changedOccurrences, eventChanges.destroyed))
@@ -454,6 +497,15 @@ namespace javelin::jmap::calendar
         {
             if (!account.accountCapabilities.calendars)
                 continue;
+            const auto calendarFenceResult = captureFence(m_connection, accountId, "Calendar");
+            const auto eventFenceResult = captureFence(m_connection, accountId, "CalendarEvent");
+            if (const auto* serviceError = std::get_if<OperationError>(&calendarFenceResult))
+                co_return *serviceError;
+            if (const auto* serviceError = std::get_if<OperationError>(&eventFenceResult))
+                co_return *serviceError;
+            const auto calendarFence =
+                std::get<javelin::jmap::sync::RefreshFence>(calendarFenceResult);
+            const auto eventFence = std::get<javelin::jmap::sync::RefreshFence>(eventFenceResult);
             const auto calendarRequest = api::calendarGet({.accountId = accountId,
                                                            .ids = std::nullopt,
                                                            .idsReference = std::nullopt,
@@ -669,6 +721,14 @@ namespace javelin::jmap::calendar
                                        .allDay = event.showWithoutTime});
             }
 
+            const auto calendarCurrent = fenceIsCurrent(m_connection, calendarFence);
+            const auto eventCurrent = fenceIsCurrent(m_connection, eventFence);
+            if (const auto* serviceError = std::get_if<OperationError>(&calendarCurrent))
+                co_return *serviceError;
+            if (const auto* serviceError = std::get_if<OperationError>(&eventCurrent))
+                co_return *serviceError;
+            if (!std::get<bool>(calendarCurrent) || !std::get<bool>(eventCurrent))
+                co_return summary;
             cache::CalendarRepository repository{m_connection};
             if (const auto cacheError =
                     repository.replaceCalendars(accountId, calendars.state, calendars.list))
@@ -822,6 +882,12 @@ namespace javelin::jmap::calendar
                             QString::fromStdString(setError->description.value_or(
                                 "The server rejected the calendar change.")));
         }
+        javelin::jmap::sync::ConsistencyDomainRepository consistencyRepository{m_connection};
+        const auto generation = consistencyRepository.advanceMutation(
+            {.accountId = request.accountId, .dataType = "CalendarEvent"});
+        if (const auto* cacheError = std::get_if<cache::DatabaseError>(&generation))
+            co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+        static_cast<void>(beginRefresh(ownerAccountId));
         co_return CommittedMutation{.accountId = request.accountId,
                                     .newState = response.newState,
                                     .createdId = response.created.empty()

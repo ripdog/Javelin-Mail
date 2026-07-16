@@ -11,6 +11,7 @@
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/cache/SyncStateRepository.h"
 #include "jmap/contacts/ContactTypes.h"
+#include "jmap/sync/ConsistencyDomain.h"
 
 #include <glaze/glaze.hpp>
 
@@ -69,14 +70,19 @@ namespace javelin::jmap::contacts
         {
         };
 
+        struct SupersededRefresh
+        {
+        };
+
         struct AccountRefreshSummary
         {
             std::size_t addressBookCount = 0;
             std::size_t contactCount = 0;
         };
 
-        using IncrementalRefreshResult = std::variant<AccountRefreshSummary, CannotCalculateChanges,
-                                                      javelin::jmap::OperationError>;
+        using IncrementalRefreshResult =
+            std::variant<AccountRefreshSummary, CannotCalculateChanges, SupersededRefresh,
+                         javelin::jmap::OperationError>;
 
         struct ContactGetBatch
         {
@@ -91,6 +97,31 @@ namespace javelin::jmap::contacts
                                    javelin::jmap::OperationErrorCode::ServerFailure)
         {
             return {.code = code, .message = std::move(message)};
+        }
+
+        [[nodiscard]] std::variant<javelin::jmap::sync::RefreshFence, javelin::jmap::OperationError>
+        captureFence(javelin::jmap::cache::DatabaseConnection& connection,
+                     const std::string_view accountId, const std::string_view dataType)
+        {
+            javelin::jmap::sync::ConsistencyDomainRepository repository{connection};
+            const auto result = repository.captureRefresh(
+                {.accountId = std::string{accountId}, .dataType = std::string{dataType}});
+            if (const auto* cacheError = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
+                return error(cacheError->message,
+                             javelin::jmap::OperationErrorCode::LocalStorageFailure);
+            return std::get<javelin::jmap::sync::RefreshFence>(result);
+        }
+
+        [[nodiscard]] std::variant<bool, javelin::jmap::OperationError>
+        fenceIsCurrent(javelin::jmap::cache::DatabaseConnection& connection,
+                       const javelin::jmap::sync::RefreshFence& fence)
+        {
+            javelin::jmap::sync::ConsistencyDomainRepository repository{connection};
+            const auto result = repository.isCurrent(fence);
+            if (const auto* cacheError = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
+                return error(cacheError->message,
+                             javelin::jmap::OperationErrorCode::LocalStorageFailure);
+            return std::get<bool>(result);
         }
 
         [[nodiscard]] SessionResult
@@ -256,11 +287,24 @@ namespace javelin::jmap::contacts
 
         [[nodiscard]] QCoro::Task<IncrementalRefreshResult>
         refreshAccountIncrementally(javelin::jmap::cache::ContactRepository& repository,
+                                    javelin::jmap::cache::DatabaseConnection& connection,
                                     javelin::jmap::api::JmapMethodTransport& methodTransport,
                                     const javelin::jmap::LiveConnectionSettings& settings,
                                     const javelin::jmap::api::Session& session,
                                     const std::string& accountId, std::string state)
         {
+            const auto addressBookFenceResult = captureFence(connection, accountId, "AddressBook");
+            const auto contactFenceResult = captureFence(connection, accountId, "ContactCard");
+            if (const auto* serviceError =
+                    std::get_if<javelin::jmap::OperationError>(&addressBookFenceResult))
+                co_return *serviceError;
+            if (const auto* serviceError =
+                    std::get_if<javelin::jmap::OperationError>(&contactFenceResult))
+                co_return *serviceError;
+            const auto addressBookFence =
+                std::get<javelin::jmap::sync::RefreshFence>(addressBookFenceResult);
+            const auto contactFence =
+                std::get<javelin::jmap::sync::RefreshFence>(contactFenceResult);
             const auto booksArguments =
                 javelin::jmap::api::serializeGetRequest({.accountId = accountId,
                                                          .ids = std::nullopt,
@@ -278,6 +322,12 @@ namespace javelin::jmap::contacts
                 std::get<javelin::jmap::api::MethodInvocation>(booksCall).arguments);
             if (!books.ok())
                 co_return error(QStringLiteral("Unable to parse AddressBook/get response."));
+            const auto addressBooksCurrent = fenceIsCurrent(connection, addressBookFence);
+            if (const auto* serviceError =
+                    std::get_if<javelin::jmap::OperationError>(&addressBooksCurrent))
+                co_return *serviceError;
+            if (!std::get<bool>(addressBooksCurrent))
+                co_return SupersededRefresh{};
             if (const auto cacheError = repository.replaceAddressBooks(accountId, books.value->list,
                                                                        books.value->state))
                 co_return error(cacheError->message);
@@ -328,6 +378,12 @@ namespace javelin::jmap::contacts
                 auto batch = std::get<ContactGetBatch>(std::move(fetched));
                 destroyed.insert(batch.notFound.begin(), batch.notFound.end());
                 const std::vector<std::string> destroyedIds(destroyed.begin(), destroyed.end());
+                const auto contactsCurrent = fenceIsCurrent(connection, contactFence);
+                if (const auto* serviceError =
+                        std::get_if<javelin::jmap::OperationError>(&contactsCurrent))
+                    co_return *serviceError;
+                if (!std::get<bool>(contactsCurrent))
+                    co_return SupersededRefresh{};
                 if (const auto cacheError = repository.upsertContacts(
                         accountId, batch.contacts, destroyedIds, changes.value->newState))
                     co_return error(cacheError->message);
@@ -368,7 +424,8 @@ namespace javelin::jmap::contacts
                    javelin::jmap::cache::DatabaseConnection& connection,
                    javelin::jmap::LiveConnectionSettings settings, std::string ownerAccountId,
                    std::string accountId, std::string methodName,
-                   std::optional<std::string> serialized)
+                   std::optional<std::string> serialized,
+                   std::vector<javelin::jmap::sync::ConsistencyDomain> affectedDomains)
         {
             if (!serialized.has_value())
             {
@@ -421,6 +478,21 @@ namespace javelin::jmap::contacts
                 co_return error(QStringLiteral("Invalid Contacts set response: %1")
                                     .arg(QString::fromStdString(parsed.error.value_or("unknown"))));
             }
+            if (!parsed.value->notCreated.empty() || !parsed.value->notUpdated.empty() ||
+                !parsed.value->notDestroyed.empty())
+            {
+                co_return error(QStringLiteral("The server rejected one or more Contacts changes."),
+                                javelin::jmap::OperationErrorCode::Conflict);
+            }
+            javelin::jmap::sync::ConsistencyDomainRepository consistencyRepository{connection};
+            for (const auto& domain : affectedDomains)
+            {
+                const auto generation = consistencyRepository.advanceMutation(domain);
+                if (const auto* cacheError =
+                        std::get_if<javelin::jmap::cache::DatabaseError>(&generation))
+                    co_return error(cacheError->message,
+                                    javelin::jmap::OperationErrorCode::LocalStorageFailure);
+            }
             co_return ContactMutationSummary{.accountId = accountId,
                                              .newState = parsed.value->newState,
                                              .createdId = createdId(*parsed.value)};
@@ -464,7 +536,7 @@ namespace javelin::jmap::contacts
             if (stateRecord.has_value() && !stateRecord->stateToken.empty())
             {
                 auto incremental = co_await refreshAccountIncrementally(
-                    m_repository, m_methodTransport, settings, session, accountId,
+                    m_repository, m_connection, m_methodTransport, settings, session, accountId,
                     stateRecord->stateToken);
                 if (const auto* incrementalError =
                         std::get_if<javelin::jmap::OperationError>(&incremental))
@@ -476,7 +548,22 @@ namespace javelin::jmap::contacts
                     summary.contactCount += refreshed->contactCount;
                     continue;
                 }
+                if (std::holds_alternative<SupersededRefresh>(incremental))
+                    continue;
             }
+            const auto addressBookFenceResult =
+                captureFence(m_connection, accountId, "AddressBook");
+            const auto contactFenceResult = captureFence(m_connection, accountId, "ContactCard");
+            if (const auto* serviceError =
+                    std::get_if<javelin::jmap::OperationError>(&addressBookFenceResult))
+                co_return *serviceError;
+            if (const auto* serviceError =
+                    std::get_if<javelin::jmap::OperationError>(&contactFenceResult))
+                co_return *serviceError;
+            const auto addressBookFence =
+                std::get<javelin::jmap::sync::RefreshFence>(addressBookFenceResult);
+            const auto contactFence =
+                std::get<javelin::jmap::sync::RefreshFence>(contactFenceResult);
             const auto getArguments =
                 javelin::jmap::api::serializeGetRequest({.accountId = accountId,
                                                          .ids = std::nullopt,
@@ -529,6 +616,16 @@ namespace javelin::jmap::contacts
                 }
                 contacts.push_back(std::move(*contact));
             }
+            const auto addressBooksCurrent = fenceIsCurrent(m_connection, addressBookFence);
+            const auto contactsCurrent = fenceIsCurrent(m_connection, contactFence);
+            if (const auto* serviceError =
+                    std::get_if<javelin::jmap::OperationError>(&addressBooksCurrent))
+                co_return *serviceError;
+            if (const auto* serviceError =
+                    std::get_if<javelin::jmap::OperationError>(&contactsCurrent))
+                co_return *serviceError;
+            if (!std::get<bool>(addressBooksCurrent) || !std::get<bool>(contactsCurrent))
+                continue;
             if (const auto cacheError = m_repository.replaceAll(
                     accountId, books.value->list, contacts, books.value->state, cards.value->state))
             {
@@ -549,7 +646,8 @@ namespace javelin::jmap::contacts
         const auto accountId = request.accountId;
         co_return co_await setObjects(m_methodTransport, m_connection, std::move(settings),
                                       std::move(ownerAccountId), accountId, "AddressBook/set",
-                                      javelin::jmap::api::serializeAddressBookSetRequest(request));
+                                      javelin::jmap::api::serializeAddressBookSetRequest(request),
+                                      {{.accountId = accountId, .dataType = "AddressBook"}});
     }
 
     QCoro::Task<ContactMutationResult>
@@ -560,7 +658,8 @@ namespace javelin::jmap::contacts
         const auto accountId = request.accountId;
         co_return co_await setObjects(m_methodTransport, m_connection, std::move(settings),
                                       std::move(ownerAccountId), accountId, "ContactCard/set",
-                                      javelin::jmap::api::serializeContactCardSetRequest(request));
+                                      javelin::jmap::api::serializeContactCardSetRequest(request),
+                                      {{.accountId = accountId, .dataType = "ContactCard"}});
     }
 
     QCoro::Task<ContactMutationResult>
@@ -569,9 +668,15 @@ namespace javelin::jmap::contacts
                                      javelin::jmap::api::ContactCardCopyRequest request)
     {
         const auto accountId = request.accountId;
+        std::vector<javelin::jmap::sync::ConsistencyDomain> affectedDomains{
+            {.accountId = accountId, .dataType = "ContactCard"}};
+        if (request.onSuccessDestroyOriginal && request.fromAccountId != accountId)
+            affectedDomains.push_back(
+                {.accountId = request.fromAccountId, .dataType = "ContactCard"});
         co_return co_await setObjects(m_methodTransport, m_connection, std::move(settings),
                                       std::move(ownerAccountId), accountId, "ContactCard/copy",
-                                      javelin::jmap::api::serializeContactCardCopyRequest(request));
+                                      javelin::jmap::api::serializeContactCardCopyRequest(request),
+                                      std::move(affectedDomains));
     }
 
     QCoro::Task<ContactUploadResult>

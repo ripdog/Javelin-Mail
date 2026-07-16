@@ -2,6 +2,7 @@
 
 #include "jmap/api/JmapMethodTransport.h"
 #include "jmap/cache/SessionRepository.h"
+#include "jmap/sync/ConsistencyDomain.h"
 
 #include <QCoroTask>
 
@@ -166,6 +167,11 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
     REQUIRE(transport.request->envelope.methodCalls.size() == 1);
     CHECK(transport.request->envelope.methodCalls.front().arguments.find(
               R"("ifInState":"event-state-7")") != std::string::npos);
+    javelin::jmap::sync::ConsistencyDomainRepository consistency{connection};
+    const auto mutationGeneration =
+        consistency.mutationGeneration({.accountId = "a1", .dataType = "CalendarEvent"});
+    REQUIRE(std::holds_alternative<std::uint64_t>(mutationGeneration));
+    CHECK(std::get<std::uint64_t>(mutationGeneration) == 1);
 
     transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
         .methodResponses =
