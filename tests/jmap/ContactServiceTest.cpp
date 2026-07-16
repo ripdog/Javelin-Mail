@@ -391,6 +391,7 @@ TEST_CASE("contact group membership uses exact optimistic member patches",
             std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(projected);
         REQUIRE(group.has_value());
         CHECK(groupContains(*group, "uid-card-1"));
+        CHECK(groupContains(*group, "uid-card-2"));
         javelin::jmap::contacts::ContactMutationJournal journal{connection, contacts};
         const auto mutations = journal.listForContact("a1", "group-1");
         REQUIRE(std::holds_alternative<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(
@@ -404,20 +405,26 @@ TEST_CASE("contact group membership uses exact optimistic member patches",
     javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
     javelin::jmap::contacts::ContactService service{connection, contacts, transport,
                                                     methodTransport};
-    const auto accepted = QCoro::waitFor(service.setGroupMembership(
-        {.sessionUrl = "https://example.test/.well-known/jmap",
-         .loginEmail = "alice@example.test",
-         .apiKey = "secret"},
-        "a1",
-        {.accountId = "a1", .groupId = "group-1", .memberUid = "uid-card-1", .included = true}));
+    const auto accepted = QCoro::waitFor(
+        service.setGroupMembership({.sessionUrl = "https://example.test/.well-known/jmap",
+                                    .loginEmail = "alice@example.test",
+                                    .apiKey = "secret"},
+                                   "a1",
+                                   {.accountId = "a1",
+                                    .groupId = "group-1",
+                                    .memberUids = {"uid-card-1", "uid-card-2"},
+                                    .included = true}));
     REQUIRE(std::holds_alternative<javelin::jmap::contacts::ContactMutationSummary>(accepted));
     REQUIRE_FALSE(transport.requests.empty());
     CHECK(transport.requests.back().body.contains("\"members/uid-card-1\":true"));
+    CHECK(transport.requests.back().body.contains("\"members/uid-card-2\":true"));
     auto cached = contacts.findContact("a1", "group-1");
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::contacts::ContactSummary>>(cached));
     REQUIRE(std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(cached).has_value());
     CHECK(groupContains(*std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(cached),
                         "uid-card-1"));
+    CHECK(groupContains(*std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(cached),
+                        "uid-card-2"));
 
     transport.results.push_back(javelin::jmap::api::HttpResponse{
         .statusCode = 200,
@@ -425,19 +432,25 @@ TEST_CASE("contact group membership uses exact optimistic member patches",
             QByteArray{
                 R"({"methodResponses":[["ContactCard/set",{"accountId":"a1","oldState":"c2","newState":"c2","created":{},"updated":{},"destroyed":[],"notCreated":{},"notUpdated":{"group-1":{"type":"forbidden"}},"notDestroyed":{}},"contacts-set"]],"sessionState":"s3"})"},
     });
-    const auto rejected = QCoro::waitFor(service.setGroupMembership(
-        {.sessionUrl = "https://example.test/.well-known/jmap",
-         .loginEmail = "alice@example.test",
-         .apiKey = "secret"},
-        "a1",
-        {.accountId = "a1", .groupId = "group-1", .memberUid = "uid-card-1", .included = false}));
+    const auto rejected = QCoro::waitFor(
+        service.setGroupMembership({.sessionUrl = "https://example.test/.well-known/jmap",
+                                    .loginEmail = "alice@example.test",
+                                    .apiKey = "secret"},
+                                   "a1",
+                                   {.accountId = "a1",
+                                    .groupId = "group-1",
+                                    .memberUids = {"uid-card-1", "uid-card-2"},
+                                    .included = false}));
     REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(rejected));
     CHECK(transport.requests.back().body.contains("\"members/uid-card-1\":null"));
+    CHECK(transport.requests.back().body.contains("\"members/uid-card-2\":null"));
     cached = contacts.findContact("a1", "group-1");
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::contacts::ContactSummary>>(cached));
     REQUIRE(std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(cached).has_value());
     CHECK(groupContains(*std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(cached),
                         "uid-card-1"));
+    CHECK(groupContains(*std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(cached),
+                        "uid-card-2"));
     javelin::jmap::contacts::ContactMutationJournal journal{connection, contacts};
     const auto mutations = journal.listForContact("a1", "group-1");
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(

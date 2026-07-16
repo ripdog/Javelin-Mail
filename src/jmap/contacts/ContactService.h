@@ -64,7 +64,7 @@ namespace javelin::jmap::contacts
     {
         std::string accountId;
         std::string groupId;
-        std::string memberUid;
+        std::vector<std::string> memberUids;
         bool included = true;
     };
 

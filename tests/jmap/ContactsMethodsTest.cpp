@@ -207,6 +207,13 @@ TEST_CASE("contact group documents and membership patches preserve RFC paths",
                                                               std::get<std::string>(remove));
     REQUIRE(std::holds_alternative<std::string>(removed));
     CHECK(std::get<std::string>(removed).find("member/with~path") == std::string::npos);
+
+    const std::vector<std::string> members{"one", "two/with~path"};
+    const auto addMany = javelin::jmap::contacts::contactGroupMembershipPatch(members, true);
+    REQUIRE(std::holds_alternative<std::string>(addMany));
+    CHECK(std::get<std::string>(addMany).find(R"("members/one":true)") != std::string::npos);
+    CHECK(std::get<std::string>(addMany).find(R"("members/two~1with~0path":true)") !=
+          std::string::npos);
 }
 
 TEST_CASE("contact action rights require every membership to be writable",

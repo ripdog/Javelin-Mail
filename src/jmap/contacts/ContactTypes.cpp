@@ -741,12 +741,24 @@ namespace javelin::jmap::contacts
     {
         if (memberUid.empty())
             return std::string_view{"A contact group member requires a uid."};
+        const std::array members{std::string{memberUid}};
+        return contactGroupMembershipPatch(std::span<const std::string>{members}, included);
+    }
+
+    std::variant<std::string, std::string_view>
+    contactGroupMembershipPatch(const std::span<const std::string> memberUids, const bool included)
+    {
+        if (memberUids.empty() || std::ranges::any_of(memberUids, &std::string::empty))
+            return std::string_view{"A contact group member requires a uid."};
         glz::generic patch;
-        const auto path = javelin::jmap::api::patchPath("members", memberUid);
-        if (included)
-            patch[path] = true;
-        else
-            patch[path] = nullptr;
+        for (const auto& memberUid : memberUids)
+        {
+            const auto path = javelin::jmap::api::patchPath("members", memberUid);
+            if (included)
+                patch[path] = true;
+            else
+                patch[path] = nullptr;
+        }
         std::string result;
         if (glz::write_json(patch, result))
             return std::string_view{"Unable to serialize the contact group membership change."};

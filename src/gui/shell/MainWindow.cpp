@@ -2360,10 +2360,12 @@ namespace javelin::gui::shell
                                             widget->canEditContact());
             m_contactDeleteAction->setEnabled(!busy && selected && widget != nullptr &&
                                               widget->canDeleteContact());
-            m_contactCopyAction->setEnabled(!busy && selected);
+            m_contactCopyAction->setEnabled(!busy && widget != nullptr &&
+                                            widget->hasSingleSelectedContact());
             m_contactImportAction->setEnabled(!busy && widget != nullptr &&
                                               widget->canCreateContact());
-            m_contactExportAction->setEnabled(!busy && selected);
+            m_contactExportAction->setEnabled(!busy && widget != nullptr &&
+                                              widget->hasSingleSelectedContact());
             m_contactDuplicatesAction->setEnabled(!busy);
             m_contactAddToGroupAction->setEnabled(
                 !busy && widget != nullptr &&
@@ -5856,6 +5858,9 @@ namespace javelin::gui::shell
             settings.value(QStringLiteral("title"), QStringLiteral("Contacts")).toString());
         if (widget == nullptr)
             return;
+        std::vector<std::string> selectedContactKeys;
+        for (const auto& key : settings.value(QStringLiteral("selectedContactKeys")).toStringList())
+            selectedContactKeys.push_back(key.toStdString());
         widget->restoreViewState({
             .accountId =
                 settings.value(QStringLiteral("contactAccountId")).toString().toStdString(),
@@ -5866,6 +5871,7 @@ namespace javelin::gui::shell
             .sortMode = settings.value(QStringLiteral("contactSortMode"), 0).toInt(),
             .groupFilterMode = settings.value(QStringLiteral("contactGroupFilterMode"), 0).toInt(),
             .groupId = settings.value(QStringLiteral("contactGroupId")).toString().toStdString(),
+            .selectedContactKeys = std::move(selectedContactKeys),
         });
     }
 
@@ -5957,6 +5963,11 @@ namespace javelin::gui::shell
                                           state.groupFilterMode);
                         settings.setValue(QStringLiteral("contactGroupId"),
                                           QString::fromStdString(state.groupId));
+                        QStringList selectedContactKeys;
+                        for (const auto& key : state.selectedContactKeys)
+                            selectedContactKeys.push_back(QString::fromStdString(key));
+                        settings.setValue(QStringLiteral("selectedContactKeys"),
+                                          selectedContactKeys);
                     }
                 }
             },

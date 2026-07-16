@@ -95,6 +95,8 @@ namespace javelin::jmap::contacts
     createContactGroupDocument(std::string name, std::string uid, std::string addressBookId);
     [[nodiscard]] std::variant<std::string, std::string_view>
     contactGroupMembershipPatch(std::string_view memberUid, bool included);
+    [[nodiscard]] std::variant<std::string, std::string_view>
+    contactGroupMembershipPatch(std::span<const std::string> memberUids, bool included);
     [[nodiscard]] ContactActionRights
     contactActionRights(bool accountReadOnly,
                         std::span<const javelin::jmap::api::AddressBook> addressBooks,

@@ -2217,6 +2217,11 @@ namespace javelin::jmap::contacts
                                        std::string ownerAccountId,
                                        SetContactGroupMembershipCommand command)
     {
+        if (command.memberUids.empty() ||
+            std::ranges::any_of(command.memberUids,
+                                [](const auto& memberUid) { return memberUid.empty(); }))
+            co_return error(QStringLiteral("A contact group member requires a uid."),
+                            javelin::jmap::OperationErrorCode::InvalidUserInput);
         const auto cached = m_repository.findContact(command.accountId, command.groupId);
         if (const auto* cacheError = std::get_if<javelin::jmap::cache::DatabaseError>(&cached))
             co_return error(cacheError->message,
@@ -2249,19 +2254,27 @@ namespace javelin::jmap::contacts
         if (data == nullptr)
             co_return error(QStringLiteral("The contact group document is invalid."),
                             javelin::jmap::OperationErrorCode::ProtocolViolation);
-        const bool alreadyIncluded =
-            std::ranges::find(data->members, command.memberUid) != data->members.end();
+        std::vector<std::string> changedMembers;
+        changedMembers.reserve(command.memberUids.size());
+        for (auto& memberUid : command.memberUids)
+        {
+            const bool alreadyIncluded =
+                std::ranges::find(data->members, memberUid) != data->members.end();
+            if (alreadyIncluded != command.included)
+                changedMembers.push_back(std::move(memberUid));
+        }
         const auto state = contactState(m_connection, command.accountId);
         if (const auto* operationError = std::get_if<javelin::jmap::OperationError>(&state))
             co_return *operationError;
         const auto stateToken = std::get<std::optional<std::string>>(state);
-        if (alreadyIncluded == command.included)
+        if (changedMembers.empty())
             co_return ContactMutationSummary{
                 .accountId = std::move(command.accountId),
                 .newState = stateToken.value_or(std::string{}),
                 .createdId = std::nullopt,
             };
-        const auto patch = contactGroupMembershipPatch(command.memberUid, command.included);
+        const auto patch = contactGroupMembershipPatch(std::span<const std::string>{changedMembers},
+                                                       command.included);
         if (const auto* message = std::get_if<std::string_view>(&patch))
             co_return error(
                 QString::fromUtf8(message->data(), static_cast<qsizetype>(message->size())),

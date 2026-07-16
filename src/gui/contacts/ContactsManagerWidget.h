@@ -36,6 +36,7 @@ namespace javelin::gui::contacts
         int sortMode = 0;
         int groupFilterMode = 0;
         std::string groupId;
+        std::vector<std::string> selectedContactKeys;
     };
 
     class ContactsManagerWidget final : public QWidget
@@ -49,10 +50,12 @@ namespace javelin::gui::contacts
 
         [[nodiscard]] bool operationInFlight() const;
         [[nodiscard]] bool hasSelectedContact() const;
+        [[nodiscard]] bool hasSingleSelectedContact() const;
         [[nodiscard]] bool canCreateContact() const;
         [[nodiscard]] bool canEditContact() const;
         [[nodiscard]] bool canDeleteContact() const;
         [[nodiscard]] bool canCreateGroup() const;
+        [[nodiscard]] bool canStarSelectedContacts() const;
         [[nodiscard]] bool canAddSelectedContactToGroup() const;
         [[nodiscard]] bool canRemoveSelectedContactFromGroup() const;
         [[nodiscard]] ContactsViewState viewState() const;
@@ -87,8 +90,11 @@ namespace javelin::gui::contacts
         void reloadAddressBooks();
         void reloadContacts();
         void showSelectedContact();
+        void rebuildMultipleSelectionSummary(
+            const std::vector<const javelin::jmap::contacts::ContactSummary*>& contacts);
         void showContactContextMenu(const QPoint& position);
-        void setContactGroupMembership(std::string groupId, std::string memberUid, bool included);
+        void setContactGroupMembership(std::string groupId, std::vector<std::string> memberUids,
+                                       bool included);
         void cancelEdit();
         void loadEditorDocument(const QString& document);
         void saveContact();
@@ -109,6 +115,8 @@ namespace javelin::gui::contacts
         [[nodiscard]] std::optional<std::string> currentAddressBookId() const;
         [[nodiscard]] const javelin::jmap::cache::ContactAccount* currentAccount() const;
         [[nodiscard]] const javelin::jmap::contacts::ContactSummary* currentContact() const;
+        [[nodiscard]] std::vector<const javelin::jmap::contacts::ContactSummary*>
+        selectedContacts() const;
         [[nodiscard]] const javelin::jmap::contacts::ContactSummary* currentGroup() const;
         [[nodiscard]] bool
         groupIsWritable(const javelin::jmap::contacts::ContactSummary& group) const;
@@ -130,6 +138,9 @@ namespace javelin::gui::contacts
         QListWidget* m_groupList = nullptr;
         QListWidget* m_contactList = nullptr;
         QStackedWidget* m_detailStack = nullptr;
+        QLabel* m_multipleSelectionTitle = nullptr;
+        QVBoxLayout* m_multipleSelectionLayout = nullptr;
+        QToolButton* m_multipleStarButton = nullptr;
         QLabel* m_viewTitle = nullptr;
         QLabel* m_photoLabel = nullptr;
         QLabel* m_editorPhotoLabel = nullptr;
