@@ -62,7 +62,9 @@ add_executable(javelin_jmap_tests
     gui/MonthCalendarWidgetTest.cpp
     gui/MailboxSortTest.cpp
     gui/MessageViewPresentationTest.cpp
+    gui/PlainTextLinkifierTest.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/calendar/MonthCalendarLayout.cpp
+    ${PROJECT_SOURCE_DIR}/src/gui/messageview/PlainTextLinkifier.cpp
 )
 
 target_include_directories(javelin_jmap_tests

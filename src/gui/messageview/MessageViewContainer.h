@@ -12,11 +12,11 @@
 
 class QLabel;
 class QGridLayout;
-class QPlainTextEdit;
 class QProgressBar;
 class QScrollArea;
 class QResizeEvent;
 class QStackedWidget;
+class QTextBrowser;
 class QToolButton;
 class QVBoxLayout;
 class QWidget;
@@ -137,7 +137,7 @@ namespace javelin::gui::messageview
         QScrollArea* m_multipleSelectionScrollArea = nullptr;
         QWidget* m_multipleSelectionWidget = nullptr;
         QVBoxLayout* m_multipleSelectionLayout = nullptr;
-        QPlainTextEdit* m_plainTextView = nullptr;
+        QTextBrowser* m_plainTextView = nullptr;
         HtmlMessageView* m_htmlView = nullptr;
         QWidget* m_attachmentListWidget = nullptr;
         QGridLayout* m_attachmentListLayout = nullptr;

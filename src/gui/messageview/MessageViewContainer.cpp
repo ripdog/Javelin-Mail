@@ -3,6 +3,7 @@
 #include "gui/messageview/GoogleHtmlTranslator.h"
 #include "gui/messageview/HtmlMessageView.h"
 #include "gui/messageview/MessageViewPresentation.h"
+#include "gui/messageview/PlainTextLinkifier.h"
 #include "gui/settings/PreferencesDialog.h"
 #include "jmap/cache/TranslationCacheRepository.h"
 #include "jmap/contacts/ContactIdentityLookup.h"
@@ -11,6 +12,7 @@
 #include <QAction>
 #include <QApplication>
 #include <QDateTime>
+#include <QDesktopServices>
 #include <QFileIconProvider>
 #include <QFileInfo>
 #include <QFrame>
@@ -22,7 +24,6 @@
 #include <QMenu>
 #include <QMimeDatabase>
 #include <QMouseEvent>
-#include <QPlainTextEdit>
 #include <QProgressBar>
 #include <QScrollArea>
 #include <QSettings>
@@ -31,6 +32,7 @@
 #include <QStackedWidget>
 #include <QStringList>
 #include <QStyle>
+#include <QTextBrowser>
 #include <QTextDocument>
 #include <QToolButton>
 #include <QVBoxLayout>
@@ -704,9 +706,15 @@ namespace javelin::gui::messageview
         placeholderOuterLayout->addWidget(placeholderCard, 0, Qt::AlignHCenter);
         placeholderOuterLayout->addStretch(1);
 
-        m_plainTextView = new QPlainTextEdit(this);
+        m_plainTextView = new QTextBrowser(this);
         m_plainTextView->setReadOnly(true);
+        m_plainTextView->setOpenLinks(false);
+        m_plainTextView->setOpenExternalLinks(false);
         m_plainTextView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+        connect(m_plainTextView, &QTextBrowser::anchorClicked, this,
+                [](const QUrl& url) { QDesktopServices::openUrl(url); });
+        connect(m_plainTextView, &QTextBrowser::highlighted, this,
+                [this](const QUrl& url) { Q_EMIT hoveredLinkChanged(url.toString()); });
 
         m_multipleSelectionScrollArea = new QScrollArea(this);
         m_multipleSelectionScrollArea->setWidgetResizable(true);
@@ -1193,7 +1201,7 @@ namespace javelin::gui::messageview
                     return false;
                 }
                 m_originalPlainText = m_plainTextView->toPlainText();
-                m_plainTextView->setPlainText(chunks.front().front());
+                m_plainTextView->setHtml(linkifyPlainText(chunks.front().front()));
                 return true;
             }
 
@@ -1351,7 +1359,7 @@ namespace javelin::gui::messageview
     {
         if (m_activeView == ActiveView::PlainText && !m_originalPlainText.isEmpty())
         {
-            m_plainTextView->setPlainText(m_originalPlainText);
+            m_plainTextView->setHtml(linkifyPlainText(m_originalPlainText));
         }
         else if (m_activeView == ActiveView::Html)
         {
@@ -1535,7 +1543,8 @@ namespace javelin::gui::messageview
 
         if (reloadBody && m_snapshot->plainTextBody.has_value())
         {
-            m_plainTextView->setPlainText(QString::fromStdString(m_snapshot->plainTextBody->value));
+            m_plainTextView->setHtml(
+                linkifyPlainText(QString::fromStdString(m_snapshot->plainTextBody->value)));
         }
 
         if (reloadBody && m_snapshot->htmlBody.has_value())

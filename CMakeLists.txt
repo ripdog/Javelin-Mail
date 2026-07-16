@@ -112,6 +112,8 @@ set(JAVELIN_FORMAT_FILES
     src/gui/messageview/MessageViewContainer.cpp
     src/gui/messageview/MessageViewContainer.h
     src/gui/messageview/MessageViewPresentation.h
+    src/gui/messageview/PlainTextLinkifier.cpp
+    src/gui/messageview/PlainTextLinkifier.h
     src/gui/search/AdvancedSearchDialog.cpp
     src/gui/search/AdvancedSearchDialog.h
     src/gui/search/SearchSession.cpp
@@ -290,6 +292,7 @@ set(JAVELIN_FORMAT_FILES
     tests/jmap/CalendarRepositoryTest.cpp
     tests/gui/MonthCalendarWidgetTest.cpp
     tests/gui/MessageViewPresentationTest.cpp
+    tests/gui/PlainTextLinkifierTest.cpp
     tests/jmap/ComposeServiceTest.cpp
     tests/jmap/ConsistencyDomainTest.cpp
     tests/jmap/DatabaseTest.cpp
@@ -558,6 +561,8 @@ add_library(javelin_gui STATIC
     src/gui/messageview/MessageViewContainer.cpp
     src/gui/messageview/MessageViewContainer.h
     src/gui/messageview/MessageViewPresentation.h
+    src/gui/messageview/PlainTextLinkifier.cpp
+    src/gui/messageview/PlainTextLinkifier.h
     src/gui/search/AdvancedSearchDialog.cpp
     src/gui/search/AdvancedSearchDialog.h
     src/gui/search/SearchSession.cpp
