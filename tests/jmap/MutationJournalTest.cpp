@@ -2,6 +2,7 @@
 #include "jmap/sync/EmailMutationJournal.h"
 
 #include "FixtureReader.h"
+#include "jmap/cache/EmailRepository.h"
 #include "jmap/domain/MailEntityParsers.h"
 
 #include <QCoreApplication>
@@ -270,4 +271,54 @@ TEST_CASE("generic mutation journal preserves ambiguous outcomes across recovery
     REQUIRE(std::get<std::optional<javelin::jmap::sync::MutationRecord>>(accepted).has_value());
     CHECK(std::get<std::optional<javelin::jmap::sync::MutationRecord>>(accepted)->acceptedState ==
           std::optional<std::string>{"state-3"});
+}
+
+TEST_CASE(
+    "Email mutation projection rolls back its journal record when cache materialization fails",
+    "[jmap][sync][consistency]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    QSqlQuery trigger{databaseContext.connection.database()};
+    REQUIRE(trigger.exec(
+        QStringLiteral("CREATE TRIGGER reject_email_projection BEFORE INSERT ON emails BEGIN "
+                       "SELECT RAISE(ABORT,'projection rejected'); END")));
+
+    auto projected = loadEmailFixture();
+    projected.id = "eml-atomic";
+    projected.mailboxIds = {"mbx-archive"};
+    const javelin::jmap::sync::EmailMutationRecord record{
+        .mutationId = "atomic-1",
+        .operationGroupId = std::nullopt,
+        .accountId = "account-1",
+        .status = javelin::jmap::sync::MutationStatus::Pending,
+        .patch =
+            {
+                .emailId = "eml-atomic",
+                .addMailboxIds = {"mbx-archive"},
+                .removeMailboxIds = {"mbx-inbox"},
+                .addKeywords = {},
+                .removeKeywords = {},
+                .destroy = false,
+            },
+        .baseState = std::nullopt,
+        .acceptedState = std::nullopt,
+        .errorJson = std::nullopt,
+    };
+
+    javelin::jmap::sync::EmailMutationJournal emailJournal{databaseContext.connection};
+    REQUIRE(emailJournal.queue(record, projected).has_value());
+
+    javelin::jmap::sync::MutationJournalRepository journal{databaseContext.connection};
+    const auto found = journal.find("atomic-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::sync::MutationRecord>>(found));
+    CHECK_FALSE(std::get<std::optional<javelin::jmap::sync::MutationRecord>>(found).has_value());
+
+    javelin::jmap::cache::EmailRepository emails{databaseContext.connection};
+    const auto cached = emails.find("account-1", "eml-atomic");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(cached));
+    CHECK_FALSE(std::get<std::optional<javelin::jmap::domain::Email>>(cached).has_value());
 }

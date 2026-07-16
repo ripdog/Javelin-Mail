@@ -172,6 +172,158 @@ namespace javelin::jmap::cache
             return std::nullopt;
         }
 
+        std::optional<DatabaseError>
+        writeEmails(QSqlDatabase& database, const std::string_view accountId,
+                    const std::vector<javelin::jmap::domain::Email>& emails)
+        {
+            QSqlQuery emailQuery{database};
+            emailQuery.prepare(QStringLiteral(
+                "INSERT INTO emails ("
+                "account_id, email_id, thread_id, blob_id, received_at, sent_at, message_id_json, "
+                "in_reply_to_json, references_json, subject, preview, mailbox_ids_json, "
+                "keywords_json, has_attachment, size, state"
+                ") VALUES ("
+                ":account_id, :email_id, :thread_id, :blob_id, :received_at, :sent_at, "
+                ":message_id_json, :in_reply_to_json, :references_json, :subject, :preview, "
+                ":mailbox_ids_json, :keywords_json, :has_attachment, :size, :state"
+                ") ON CONFLICT(account_id, email_id) DO UPDATE SET "
+                "thread_id = excluded.thread_id, blob_id = excluded.blob_id, "
+                "received_at = excluded.received_at, sent_at = excluded.sent_at, "
+                "message_id_json = excluded.message_id_json, "
+                "in_reply_to_json = excluded.in_reply_to_json, "
+                "references_json = excluded.references_json, subject = excluded.subject, "
+                "preview = excluded.preview, mailbox_ids_json = excluded.mailbox_ids_json, "
+                "keywords_json = excluded.keywords_json, "
+                "has_attachment = excluded.has_attachment, size = excluded.size, "
+                "state = excluded.state"));
+
+            QSqlQuery mailboxQuery{database};
+            mailboxQuery.prepare(
+                QStringLiteral("INSERT INTO email_mailboxes (account_id, email_id, mailbox_id) "
+                               "VALUES (:account_id, :email_id, :mailbox_id)"));
+
+            QSqlQuery keywordQuery{database};
+            keywordQuery.prepare(
+                QStringLiteral("INSERT INTO email_keywords (account_id, email_id, keyword) "
+                               "VALUES (:account_id, :email_id, :keyword)"));
+
+            for (const auto& email : emails)
+            {
+                if (const auto error = deleteEmailSummaryChildren(database, accountId, email.id))
+                {
+                    return error;
+                }
+
+                emailQuery.bindValue(QStringLiteral(":account_id"),
+                                     QString::fromStdString(std::string{accountId}));
+                emailQuery.bindValue(QStringLiteral(":email_id"), QString::fromStdString(email.id));
+                emailQuery.bindValue(QStringLiteral(":thread_id"),
+                                     QString::fromStdString(email.threadId));
+                emailQuery.bindValue(QStringLiteral(":blob_id"),
+                                     QString::fromStdString(email.blobId));
+                emailQuery.bindValue(QStringLiteral(":received_at"),
+                                     QString::fromStdString(email.receivedAt));
+                emailQuery.bindValue(QStringLiteral(":sent_at"),
+                                     email.sentAt.has_value()
+                                         ? QVariant{QString::fromStdString(*email.sentAt)}
+                                         : QVariant{});
+                emailQuery.bindValue(QStringLiteral(":message_id_json"),
+                                     serializeStringList(email.messageId));
+                emailQuery.bindValue(QStringLiteral(":in_reply_to_json"),
+                                     serializeStringList(email.inReplyTo));
+                emailQuery.bindValue(QStringLiteral(":references_json"),
+                                     serializeStringList(email.references));
+                emailQuery.bindValue(QStringLiteral(":subject"),
+                                     QString::fromStdString(email.subject.value_or(std::string{})));
+                emailQuery.bindValue(QStringLiteral(":preview"),
+                                     QString::fromStdString(email.preview.value_or(std::string{})));
+                emailQuery.bindValue(QStringLiteral(":mailbox_ids_json"), QStringLiteral("[]"));
+                emailQuery.bindValue(QStringLiteral(":keywords_json"), QStringLiteral("{}"));
+                emailQuery.bindValue(QStringLiteral(":has_attachment"),
+                                     email.hasAttachment ? 1 : 0);
+                emailQuery.bindValue(QStringLiteral(":size"), static_cast<qulonglong>(email.size));
+                emailQuery.bindValue(QStringLiteral(":state"), QVariant{});
+                if (!emailQuery.exec())
+                {
+                    return makeQueryError(QStringLiteral("Upsert email"), emailQuery);
+                }
+
+                for (const auto& mailboxId : email.mailboxIds)
+                {
+                    mailboxQuery.bindValue(QStringLiteral(":account_id"),
+                                           QString::fromStdString(std::string{accountId}));
+                    mailboxQuery.bindValue(QStringLiteral(":email_id"),
+                                           QString::fromStdString(email.id));
+                    mailboxQuery.bindValue(QStringLiteral(":mailbox_id"),
+                                           QString::fromStdString(mailboxId));
+                    if (!mailboxQuery.exec())
+                    {
+                        return makeQueryError(QStringLiteral("Insert email mailbox"), mailboxQuery);
+                    }
+                }
+
+                for (const auto& keyword : email.keywords)
+                {
+                    keywordQuery.bindValue(QStringLiteral(":account_id"),
+                                           QString::fromStdString(std::string{accountId}));
+                    keywordQuery.bindValue(QStringLiteral(":email_id"),
+                                           QString::fromStdString(email.id));
+                    keywordQuery.bindValue(QStringLiteral(":keyword"),
+                                           QString::fromStdString(keyword));
+                    if (!keywordQuery.exec())
+                    {
+                        return makeQueryError(QStringLiteral("Insert email keyword"), keywordQuery);
+                    }
+                }
+
+                const std::array addressFields{
+                    std::pair{"from", &email.from},       std::pair{"to", &email.to},
+                    std::pair{"cc", &email.cc},           std::pair{"bcc", &email.bcc},
+                    std::pair{"replyTo", &email.replyTo},
+                };
+                for (const auto& [fieldName, addresses] : addressFields)
+                {
+                    if (const auto error =
+                            insertAddresses(database, accountId, email.id, fieldName, *addresses))
+                    {
+                        return error;
+                    }
+                }
+            }
+
+            return std::nullopt;
+        }
+
+        std::optional<DatabaseError> deleteEmails(QSqlDatabase& database,
+                                                  const std::string_view accountId,
+                                                  const std::span<const std::string> emailIds)
+        {
+            QSqlQuery deleteEmailQuery{database};
+            deleteEmailQuery.prepare(QStringLiteral(
+                "DELETE FROM emails WHERE account_id = :account_id AND email_id = :email_id"));
+            for (const auto& emailId : emailIds)
+            {
+                if (const auto error = deleteEmailSummaryChildren(database, accountId, emailId))
+                {
+                    return error;
+                }
+                if (const auto error = deleteEmailContent(database, accountId, emailId))
+                {
+                    return error;
+                }
+
+                deleteEmailQuery.bindValue(QStringLiteral(":account_id"),
+                                           QString::fromStdString(std::string{accountId}));
+                deleteEmailQuery.bindValue(QStringLiteral(":email_id"),
+                                           QString::fromStdString(emailId));
+                if (!deleteEmailQuery.exec())
+                {
+                    return makeQueryError(QStringLiteral("Delete email"), deleteEmailQuery);
+                }
+            }
+            return std::nullopt;
+        }
+
     } // namespace
 
     EmailRepository::EmailRepository(DatabaseConnection& connection) : m_connection(connection)
@@ -331,224 +483,81 @@ namespace javelin::jmap::cache
     EmailRepository::upsertMany(const std::string_view accountId,
                                 const std::vector<javelin::jmap::domain::Email>& emails)
     {
-        if (const auto error = m_connection.validate())
-        {
-            return error;
-        }
-
         if (emails.empty())
         {
             return std::nullopt;
         }
 
-        QSqlDatabase& database = m_connection.database();
-        if (!database.transaction())
+        auto transactionResult = DatabaseTransaction::begin(
+            m_connection, QStringLiteral("Begin email upsert transaction"));
+        if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
+        {
+            return *error;
+        }
+        auto transaction = std::get<DatabaseTransaction>(std::move(transactionResult));
+        if (const auto error = upsertMany(transaction, accountId, emails))
+        {
+            return error;
+        }
+        return transaction.commit();
+    }
+
+    std::optional<DatabaseError>
+    EmailRepository::upsertMany(DatabaseTransaction& transaction, const std::string_view accountId,
+                                const std::vector<javelin::jmap::domain::Email>& emails)
+    {
+        if (const auto error = m_connection.validate())
+        {
+            return error;
+        }
+        if (!transaction.isActive() || &transaction.connection() != &m_connection)
         {
             return DatabaseError{
                 .code = DatabaseErrorCode::QueryFailed,
-                .message = QStringLiteral("Begin email upsert transaction: ") +
-                           database.lastError().text(),
+                .message = QStringLiteral("Email upsert requires an active matching transaction"),
             };
         }
-
-        QSqlQuery emailQuery{database};
-        emailQuery.prepare(QStringLiteral(
-            "INSERT INTO emails ("
-            "account_id, email_id, thread_id, blob_id, received_at, sent_at, message_id_json, "
-            "in_reply_to_json, references_json, subject, preview, mailbox_ids_json, "
-            "keywords_json, has_attachment, size, state"
-            ") VALUES ("
-            ":account_id, :email_id, :thread_id, :blob_id, :received_at, :sent_at, "
-            ":message_id_json, :in_reply_to_json, :references_json, :subject, :preview, "
-            ":mailbox_ids_json, :keywords_json, :has_attachment, :size, :state"
-            ") ON CONFLICT(account_id, email_id) DO UPDATE SET "
-            "thread_id = excluded.thread_id, "
-            "blob_id = excluded.blob_id, "
-            "received_at = excluded.received_at, "
-            "sent_at = excluded.sent_at, "
-            "message_id_json = excluded.message_id_json, "
-            "in_reply_to_json = excluded.in_reply_to_json, "
-            "references_json = excluded.references_json, "
-            "subject = excluded.subject, "
-            "preview = excluded.preview, "
-            "mailbox_ids_json = excluded.mailbox_ids_json, "
-            "keywords_json = excluded.keywords_json, "
-            "has_attachment = excluded.has_attachment, "
-            "size = excluded.size, "
-            "state = excluded.state"));
-
-        QSqlQuery mailboxQuery{database};
-        mailboxQuery.prepare(
-            QStringLiteral("INSERT INTO email_mailboxes (account_id, email_id, mailbox_id) "
-                           "VALUES (:account_id, :email_id, :mailbox_id)"));
-
-        QSqlQuery keywordQuery{database};
-        keywordQuery.prepare(
-            QStringLiteral("INSERT INTO email_keywords (account_id, email_id, keyword) "
-                           "VALUES (:account_id, :email_id, :keyword)"));
-
-        for (const auto& email : emails)
-        {
-            if (const auto error = deleteEmailSummaryChildren(database, accountId, email.id))
-            {
-                database.rollback();
-                return error;
-            }
-
-            emailQuery.bindValue(QStringLiteral(":account_id"),
-                                 QString::fromStdString(std::string{accountId}));
-            emailQuery.bindValue(QStringLiteral(":email_id"), QString::fromStdString(email.id));
-            emailQuery.bindValue(QStringLiteral(":thread_id"),
-                                 QString::fromStdString(email.threadId));
-            emailQuery.bindValue(QStringLiteral(":blob_id"), QString::fromStdString(email.blobId));
-            emailQuery.bindValue(QStringLiteral(":received_at"),
-                                 QString::fromStdString(email.receivedAt));
-            emailQuery.bindValue(QStringLiteral(":sent_at"),
-                                 email.sentAt.has_value()
-                                     ? QVariant{QString::fromStdString(*email.sentAt)}
-                                     : QVariant{});
-            emailQuery.bindValue(QStringLiteral(":message_id_json"),
-                                 serializeStringList(email.messageId));
-            emailQuery.bindValue(QStringLiteral(":in_reply_to_json"),
-                                 serializeStringList(email.inReplyTo));
-            emailQuery.bindValue(QStringLiteral(":references_json"),
-                                 serializeStringList(email.references));
-            emailQuery.bindValue(QStringLiteral(":subject"),
-                                 QString::fromStdString(email.subject.value_or(std::string{})));
-            emailQuery.bindValue(QStringLiteral(":preview"),
-                                 QString::fromStdString(email.preview.value_or(std::string{})));
-            emailQuery.bindValue(QStringLiteral(":mailbox_ids_json"), QStringLiteral("[]"));
-            emailQuery.bindValue(QStringLiteral(":keywords_json"), QStringLiteral("{}"));
-            emailQuery.bindValue(QStringLiteral(":has_attachment"), email.hasAttachment ? 1 : 0);
-            emailQuery.bindValue(QStringLiteral(":size"), static_cast<qulonglong>(email.size));
-            emailQuery.bindValue(QStringLiteral(":state"), QVariant{});
-            if (!emailQuery.exec())
-            {
-                database.rollback();
-                return makeQueryError(QStringLiteral("Upsert email"), emailQuery);
-            }
-
-            for (const auto& mailboxId : email.mailboxIds)
-            {
-                mailboxQuery.bindValue(QStringLiteral(":account_id"),
-                                       QString::fromStdString(std::string{accountId}));
-                mailboxQuery.bindValue(QStringLiteral(":email_id"),
-                                       QString::fromStdString(email.id));
-                mailboxQuery.bindValue(QStringLiteral(":mailbox_id"),
-                                       QString::fromStdString(mailboxId));
-                if (!mailboxQuery.exec())
-                {
-                    database.rollback();
-                    return makeQueryError(QStringLiteral("Insert email mailbox"), mailboxQuery);
-                }
-            }
-
-            for (const auto& keyword : email.keywords)
-            {
-                keywordQuery.bindValue(QStringLiteral(":account_id"),
-                                       QString::fromStdString(std::string{accountId}));
-                keywordQuery.bindValue(QStringLiteral(":email_id"),
-                                       QString::fromStdString(email.id));
-                keywordQuery.bindValue(QStringLiteral(":keyword"), QString::fromStdString(keyword));
-                if (!keywordQuery.exec())
-                {
-                    database.rollback();
-                    return makeQueryError(QStringLiteral("Insert email keyword"), keywordQuery);
-                }
-            }
-
-            const std::array addressFields{
-                std::pair{"from", &email.from},       std::pair{"to", &email.to},
-                std::pair{"cc", &email.cc},           std::pair{"bcc", &email.bcc},
-                std::pair{"replyTo", &email.replyTo},
-            };
-            for (const auto& [fieldName, addresses] : addressFields)
-            {
-                if (const auto error =
-                        insertAddresses(database, accountId, email.id, fieldName, *addresses))
-                {
-                    database.rollback();
-                    return error;
-                }
-            }
-        }
-
-        if (!database.commit())
-        {
-            database.rollback();
-            return DatabaseError{
-                .code = DatabaseErrorCode::QueryFailed,
-                .message = QStringLiteral("Commit email upsert transaction: ") +
-                           database.lastError().text(),
-            };
-        }
-
-        return std::nullopt;
+        return writeEmails(m_connection.database(), accountId, emails);
     }
 
     std::optional<DatabaseError>
     EmailRepository::removeMany(const std::string_view accountId,
                                 const std::span<const std::string> emailIds)
     {
-        if (const auto error = m_connection.validate())
-        {
-            return error;
-        }
-
         if (emailIds.empty())
         {
             return std::nullopt;
         }
+        auto transactionResult = DatabaseTransaction::begin(
+            m_connection, QStringLiteral("Begin email delete transaction"));
+        if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
+        {
+            return *error;
+        }
+        auto transaction = std::get<DatabaseTransaction>(std::move(transactionResult));
+        if (const auto error = removeMany(transaction, accountId, emailIds))
+        {
+            return error;
+        }
+        return transaction.commit();
+    }
 
-        QSqlDatabase& database = m_connection.database();
-        if (!database.transaction())
+    std::optional<DatabaseError>
+    EmailRepository::removeMany(DatabaseTransaction& transaction, const std::string_view accountId,
+                                const std::span<const std::string> emailIds)
+    {
+        if (const auto error = m_connection.validate())
+        {
+            return error;
+        }
+        if (!transaction.isActive() || &transaction.connection() != &m_connection)
         {
             return DatabaseError{
                 .code = DatabaseErrorCode::QueryFailed,
-                .message = QStringLiteral("Begin email delete transaction: ") +
-                           database.lastError().text(),
+                .message = QStringLiteral("Email removal requires an active matching transaction"),
             };
         }
-
-        QSqlQuery deleteEmailQuery{database};
-        deleteEmailQuery.prepare(QStringLiteral(
-            "DELETE FROM emails WHERE account_id = :account_id AND email_id = :email_id"));
-        for (const auto& emailId : emailIds)
-        {
-            if (const auto error = deleteEmailSummaryChildren(database, accountId, emailId))
-            {
-                database.rollback();
-                return error;
-            }
-
-            if (const auto error = deleteEmailContent(database, accountId, emailId))
-            {
-                database.rollback();
-                return error;
-            }
-
-            deleteEmailQuery.bindValue(QStringLiteral(":account_id"),
-                                       QString::fromStdString(std::string{accountId}));
-            deleteEmailQuery.bindValue(QStringLiteral(":email_id"),
-                                       QString::fromStdString(emailId));
-            if (!deleteEmailQuery.exec())
-            {
-                database.rollback();
-                return makeQueryError(QStringLiteral("Delete email"), deleteEmailQuery);
-            }
-        }
-
-        if (!database.commit())
-        {
-            database.rollback();
-            return DatabaseError{
-                .code = DatabaseErrorCode::QueryFailed,
-                .message = QStringLiteral("Commit email delete transaction: ") +
-                           database.lastError().text(),
-            };
-        }
-
-        return std::nullopt;
+        return deleteEmails(m_connection.database(), accountId, emailIds);
     }
 
     std::optional<DatabaseError>

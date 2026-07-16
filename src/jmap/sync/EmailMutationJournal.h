@@ -41,6 +41,9 @@ namespace javelin::jmap::sync
 
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
         put(const EmailMutationRecord& record);
+        [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
+        queue(const EmailMutationRecord& record,
+              const javelin::jmap::domain::Email& projectedEmail);
         [[nodiscard]]
         std::variant<std::vector<EmailMutationRecord>, javelin::jmap::cache::DatabaseError>
         listForEmail(std::string_view accountId, std::string_view emailId) const;
@@ -55,6 +58,7 @@ namespace javelin::jmap::sync
         remove(std::string_view mutationId);
 
       private:
+        javelin::jmap::cache::DatabaseConnection& m_connection;
         MutationJournalRepository m_repository;
     };
 

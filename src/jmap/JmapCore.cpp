@@ -373,14 +373,9 @@ namespace javelin::jmap
             };
 
             javelin::jmap::sync::EmailMutationJournal emailMutationJournal{connection};
-            if (const auto error = emailMutationJournal.put(pendingAction))
-            {
-                return javelin::jmap::operationError(*error);
-            }
-
             const auto reconciledEmail =
                 javelin::jmap::sync::projectEmailMutations(*email, {pendingAction});
-            if (const auto error = emailRepository.upsertMany(accountId, {reconciledEmail}))
+            if (const auto error = emailMutationJournal.queue(pendingAction, reconciledEmail))
             {
                 return javelin::jmap::operationError(*error);
             }
@@ -462,14 +457,9 @@ namespace javelin::jmap
             };
 
             javelin::jmap::sync::EmailMutationJournal emailMutationJournal{connection};
-            if (const auto error = emailMutationJournal.put(pendingAction))
-            {
-                return javelin::jmap::operationError(*error);
-            }
-
             const auto reconciledEmail =
                 javelin::jmap::sync::projectEmailMutations(*email, {pendingAction});
-            if (const auto error = emailRepository.upsertMany(accountId, {reconciledEmail}))
+            if (const auto error = emailMutationJournal.queue(pendingAction, reconciledEmail))
             {
                 return javelin::jmap::operationError(*error);
             }
@@ -530,14 +520,9 @@ namespace javelin::jmap
             };
 
             javelin::jmap::sync::EmailMutationJournal emailMutationJournal{connection};
-            if (const auto error = emailMutationJournal.put(pendingAction))
-            {
-                return javelin::jmap::operationError(*error);
-            }
-
             const auto reconciledEmail =
                 javelin::jmap::sync::projectEmailMutations(*email, {pendingAction});
-            if (const auto error = emailRepository.upsertMany(accountId, {reconciledEmail}))
+            if (const auto error = emailMutationJournal.queue(pendingAction, reconciledEmail))
             {
                 return javelin::jmap::operationError(*error);
             }
@@ -1721,6 +1706,16 @@ namespace javelin::jmap
                                  << static_cast<qulonglong>(parsed.notDestroyed.size());
         }
 
+        auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+            *m_impl->databaseConnection, QStringLiteral("Apply Email mutation response"));
+        if (const auto* error =
+                std::get_if<javelin::jmap::cache::DatabaseError>(&transactionResult))
+        {
+            co_return javelin::jmap::operationError(*error);
+        }
+        auto transaction =
+            std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
+
         if (!updatedEmailIds.empty() || !destroyedEmailIds.empty())
         {
             javelin::jmap::sync::ConsistencyDomainRepository consistencyRepository{
@@ -1758,12 +1753,14 @@ namespace javelin::jmap
                 if (destroyedEmailIds.contains(emailId))
                 {
                     const std::array destroyed{emailId};
-                    if (const auto error = emailRepository.removeMany(accountId, destroyed))
+                    if (const auto error =
+                            emailRepository.removeMany(transaction, accountId, destroyed))
                     {
                         co_return javelin::jmap::operationError(*error);
                     }
                 }
-                else if (const auto error = emailRepository.upsertMany(accountId, {email}))
+                else if (const auto error =
+                             emailRepository.upsertMany(transaction, accountId, {email}))
                 {
                     co_return javelin::jmap::operationError(*error);
                 }
@@ -1788,6 +1785,11 @@ namespace javelin::jmap
                     co_return javelin::jmap::operationError(*error);
                 }
             }
+        }
+
+        if (const auto error = transaction.commit())
+        {
+            co_return javelin::jmap::operationError(*error);
         }
 
         co_return SubmittedEmailMutations{

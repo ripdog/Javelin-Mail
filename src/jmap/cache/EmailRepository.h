@@ -24,7 +24,13 @@ namespace javelin::jmap::cache
         upsertMany(std::string_view accountId,
                    const std::vector<javelin::jmap::domain::Email>& emails);
         [[nodiscard]] std::optional<DatabaseError>
+        upsertMany(DatabaseTransaction& transaction, std::string_view accountId,
+                   const std::vector<javelin::jmap::domain::Email>& emails);
+        [[nodiscard]] std::optional<DatabaseError>
         removeMany(std::string_view accountId, std::span<const std::string> emailIds);
+        [[nodiscard]] std::optional<DatabaseError>
+        removeMany(DatabaseTransaction& transaction, std::string_view accountId,
+                   std::span<const std::string> emailIds);
         [[nodiscard]] std::optional<DatabaseError>
         removeFromMailbox(std::string_view accountId, std::string_view mailboxId,
                           std::span<const std::string> emailIds);

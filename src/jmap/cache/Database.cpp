@@ -257,6 +257,89 @@ namespace javelin::jmap::cache
         reset();
     }
 
+    DatabaseTransaction::DatabaseTransaction(DatabaseConnection& connection)
+        : m_connection(&connection), m_active(true)
+    {
+    }
+
+    DatabaseTransaction::DatabaseTransaction(DatabaseTransaction&& other) noexcept
+        : m_connection(std::exchange(other.m_connection, nullptr)),
+          m_active(std::exchange(other.m_active, false))
+    {
+    }
+
+    DatabaseTransaction& DatabaseTransaction::operator=(DatabaseTransaction&& other) noexcept
+    {
+        if (this != &other)
+        {
+            rollback();
+            m_connection = std::exchange(other.m_connection, nullptr);
+            m_active = std::exchange(other.m_active, false);
+        }
+        return *this;
+    }
+
+    DatabaseTransaction::~DatabaseTransaction()
+    {
+        rollback();
+    }
+
+    std::variant<DatabaseTransaction, DatabaseError>
+    DatabaseTransaction::begin(DatabaseConnection& connection, QString operation)
+    {
+        if (const auto error = connection.validate())
+        {
+            return *error;
+        }
+        if (!connection.database().transaction())
+        {
+            return makeError(DatabaseErrorCode::QueryFailed, std::move(operation),
+                             connection.database());
+        }
+        return DatabaseTransaction{connection};
+    }
+
+    std::optional<DatabaseError> DatabaseTransaction::commit()
+    {
+        if (!m_active || m_connection == nullptr)
+        {
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message = QStringLiteral("Commit inactive database transaction"),
+            };
+        }
+        if (!m_connection->database().commit())
+        {
+            const auto error =
+                makeError(DatabaseErrorCode::QueryFailed,
+                          QStringLiteral("Commit database transaction"), m_connection->database());
+            m_connection->database().rollback();
+            m_active = false;
+            return error;
+        }
+        m_active = false;
+        return std::nullopt;
+    }
+
+    void DatabaseTransaction::rollback()
+    {
+        if (m_active && m_connection != nullptr)
+        {
+            m_connection->database().rollback();
+            m_active = false;
+        }
+    }
+
+    bool DatabaseTransaction::isActive() const
+    {
+        return m_active;
+    }
+
+    DatabaseConnection& DatabaseTransaction::connection() const
+    {
+        return *m_connection;
+    }
+
     std::variant<DatabaseConnection, DatabaseError>
     DatabaseConnection::open(const DatabaseConnectionOptions& options)
     {

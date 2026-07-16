@@ -95,6 +95,30 @@ namespace javelin::jmap::cache
         QSqlDatabase m_database;
     };
 
+    class DatabaseTransaction
+    {
+      public:
+        DatabaseTransaction(const DatabaseTransaction&) = delete;
+        DatabaseTransaction& operator=(const DatabaseTransaction&) = delete;
+        DatabaseTransaction(DatabaseTransaction&& other) noexcept;
+        DatabaseTransaction& operator=(DatabaseTransaction&& other) noexcept;
+        ~DatabaseTransaction();
+
+        [[nodiscard]] static std::variant<DatabaseTransaction, DatabaseError>
+        begin(DatabaseConnection& connection, QString operation);
+
+        [[nodiscard]] std::optional<DatabaseError> commit();
+        void rollback();
+        [[nodiscard]] bool isActive() const;
+        [[nodiscard]] DatabaseConnection& connection() const;
+
+      private:
+        explicit DatabaseTransaction(DatabaseConnection& connection);
+
+        DatabaseConnection* m_connection = nullptr;
+        bool m_active = false;
+    };
+
     class ThreadConnectionFactory
     {
       public:

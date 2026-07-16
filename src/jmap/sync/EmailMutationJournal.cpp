@@ -1,5 +1,7 @@
 #include "jmap/sync/EmailMutationJournal.h"
 
+#include "jmap/cache/EmailRepository.h"
+
 #include <glaze/glaze.hpp>
 
 #include <algorithm>
@@ -124,7 +126,7 @@ namespace javelin::jmap::sync
     } // namespace
 
     EmailMutationJournal::EmailMutationJournal(javelin::jmap::cache::DatabaseConnection& connection)
-        : m_repository(connection)
+        : m_connection(connection), m_repository(connection)
     {
     }
 
@@ -151,6 +153,31 @@ namespace javelin::jmap::sync
             .acceptedState = record.acceptedState,
             .errorJson = record.errorJson,
         });
+    }
+
+    std::optional<javelin::jmap::cache::DatabaseError>
+    EmailMutationJournal::queue(const EmailMutationRecord& record,
+                                const javelin::jmap::domain::Email& projectedEmail)
+    {
+        auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+            m_connection, QStringLiteral("Begin Email mutation projection"));
+        if (const auto* error =
+                std::get_if<javelin::jmap::cache::DatabaseError>(&transactionResult))
+        {
+            return *error;
+        }
+        auto transaction =
+            std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
+        if (const auto error = put(record))
+        {
+            return error;
+        }
+        javelin::jmap::cache::EmailRepository emails{m_connection};
+        if (const auto error = emails.upsertMany(transaction, record.accountId, {projectedEmail}))
+        {
+            return error;
+        }
+        return transaction.commit();
     }
 
     std::variant<std::vector<EmailMutationRecord>, javelin::jmap::cache::DatabaseError>
