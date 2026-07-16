@@ -1,6 +1,7 @@
 #pragma once
 
 #include "jmap/JmapCore.h"
+#include "jmap/sieve/SieveTypes.h"
 
 #include <QCoroTask>
 
@@ -18,16 +19,13 @@ namespace javelin::jmap::api
     class JmapMethodTransport;
 } // namespace javelin::jmap::api
 
+namespace javelin::jmap::cache
+{
+    class DatabaseConnection;
+}
+
 namespace javelin::jmap::sieve
 {
-    struct SieveScript
-    {
-        std::string id;
-        std::string name;
-        std::string blobId;
-        bool isActive = false;
-    };
-
     struct SieveValidation
     {
         bool valid = false;
@@ -44,7 +42,8 @@ namespace javelin::jmap::sieve
     class SieveService
     {
       public:
-        SieveService(api::AbstractTransport& resourceTransport,
+        SieveService(cache::DatabaseConnection& connection,
+                     api::AbstractTransport& resourceTransport,
                      api::JmapMethodTransport& methodTransport);
 
         [[nodiscard]] QCoro::Task<SieveListResult> list(LiveConnectionSettings settings,
@@ -67,6 +66,7 @@ namespace javelin::jmap::sieve
                                                                    bool active) const;
 
       private:
+        cache::DatabaseConnection& m_connection;
         api::AbstractTransport& m_resourceTransport;
         api::JmapMethodTransport& m_methodTransport;
     };

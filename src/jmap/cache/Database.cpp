@@ -1138,6 +1138,23 @@ namespace javelin::jmap::cache
                                 "(operation_group_id) WHERE operation_group_id IS NOT NULL"),
                         },
                 },
+                MigrationStep{
+                    .version = 22,
+                    .name = QStringLiteral("sieve_script_cache"),
+                    .statements =
+                        {
+                            QStringLiteral(
+                                "CREATE TABLE sieve_scripts ("
+                                "account_id TEXT NOT NULL REFERENCES accounts(account_id) ON "
+                                "DELETE CASCADE,script_id TEXT NOT NULL,name TEXT NOT NULL,"
+                                "blob_id TEXT NOT NULL,is_active INTEGER NOT NULL DEFAULT 0 "
+                                "CHECK(is_active IN (0,1)),"
+                                "PRIMARY KEY(account_id,script_id)) STRICT"),
+                            QStringLiteral(
+                                "CREATE INDEX idx_sieve_scripts_name ON sieve_scripts "
+                                "(account_id,name COLLATE NOCASE)"),
+                        },
+                },
             },
         };
     }

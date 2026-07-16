@@ -190,6 +190,8 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/cache/SearchResultReconciler.h
     src/jmap/cache/SessionRepository.cpp
     src/jmap/cache/SessionRepository.h
+    src/jmap/cache/SieveRepository.cpp
+    src/jmap/cache/SieveRepository.h
     src/jmap/cache/JmapTransportPreferenceRepository.cpp
     src/jmap/cache/JmapTransportPreferenceRepository.h
     src/jmap/cache/SubmissionRepository.cpp
@@ -270,6 +272,9 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/submission/ComposeTypes.h
     src/jmap/sieve/SieveService.cpp
     src/jmap/sieve/SieveService.h
+    src/jmap/sieve/SieveMutationJournal.cpp
+    src/jmap/sieve/SieveMutationJournal.h
+    src/jmap/sieve/SieveTypes.h
     src/gui/sieve/SieveEditorDialog.cpp
     src/gui/sieve/SieveEditorDialog.h
     tests/FixtureReader.cpp
@@ -403,6 +408,8 @@ add_library(javelin_jmap STATIC
     src/jmap/cache/SearchResultReconciler.h
     src/jmap/cache/SessionRepository.cpp
     src/jmap/cache/SessionRepository.h
+    src/jmap/cache/SieveRepository.cpp
+    src/jmap/cache/SieveRepository.h
     src/jmap/cache/JmapTransportPreferenceRepository.cpp
     src/jmap/cache/JmapTransportPreferenceRepository.h
     src/jmap/cache/SubmissionRepository.cpp
@@ -474,6 +481,9 @@ add_library(javelin_jmap STATIC
     src/jmap/submission/ComposeTypes.h
     src/jmap/sieve/SieveService.cpp
     src/jmap/sieve/SieveService.h
+    src/jmap/sieve/SieveMutationJournal.cpp
+    src/jmap/sieve/SieveMutationJournal.h
+    src/jmap/sieve/SieveTypes.h
 )
 target_include_directories(javelin_jmap PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>

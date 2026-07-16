@@ -1,14 +1,20 @@
 #include "jmap/sieve/SieveService.h"
 
 #include "jmap/api/JmapMethodTransport.h"
+#include "jmap/api/SessionParser.h"
 #include "jmap/api/Transport.h"
+#include "jmap/cache/SessionRepository.h"
+#include "jmap/cache/SieveRepository.h"
+#include "jmap/sync/MutationJournal.h"
 
 #include <QCoroTask>
 
 #include <QCoreApplication>
+#include <QTemporaryDir>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <functional>
 #include <utility>
 #include <vector>
 
@@ -36,6 +42,7 @@ namespace
       public:
         std::vector<javelin::jmap::api::JmapMethodRequest> requests;
         std::vector<javelin::jmap::api::JmapMethodTransportResult> results;
+        std::function<void()> beforeReturn;
 
         QCoro::Task<javelin::jmap::api::JmapMethodTransportResult>
         call(javelin::jmap::api::JmapMethodRequest request) override
@@ -44,6 +51,8 @@ namespace
             REQUIRE_FALSE(results.empty());
             auto result = std::move(results.front());
             results.erase(results.begin());
+            if (beforeReturn)
+                beforeReturn();
             co_return result;
         }
     };
@@ -71,12 +80,34 @@ namespace
                 .loginEmail = "alice@example.test",
                 .apiKey = "secret"};
     }
+
+    [[nodiscard]] javelin::jmap::cache::DatabaseConnection
+    testDatabase(QTemporaryDir& directory, const QString& connectionName)
+    {
+        auto opened = javelin::jmap::cache::DatabaseConnection::open({
+            .connectionName = connectionName,
+            .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
+        });
+        REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+        auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+        const auto parsed = javelin::jmap::api::parseSession(sessionResponse().toStdString());
+        REQUIRE(parsed.ok());
+        javelin::jmap::cache::SessionRepository sessions{connection};
+        const auto stored = sessions.replace("sieve-account", *parsed.session);
+        const auto storedMessage =
+            stored.has_value() ? stored->message.toStdString() : std::string{};
+        INFO(storedMessage);
+        REQUIRE_FALSE(stored.has_value());
+        return connection;
+    }
 } // namespace
 
 TEST_CASE("sieve save never updates a script rejected by server validation",
           "[jmap][sieve][service]")
 {
     ensureApplication();
+    QTemporaryDir directory;
+    auto connection = testDatabase(directory, QStringLiteral("sieve-validation-test"));
     FakeResourceTransport resources;
     resources.results = {
         javelin::jmap::api::HttpResponse{.statusCode = 200, .body = sessionResponse()},
@@ -96,7 +127,7 @@ TEST_CASE("sieve save never updates a script rejected by server validation",
         .createdIds = std::nullopt,
         .sessionState = "s2"});
 
-    javelin::jmap::sieve::SieveService service{resources, methods};
+    javelin::jmap::sieve::SieveService service{connection, resources, methods};
     const auto result = QCoro::waitFor(
         service.save(settings(), "owner", {.id = "script-1", .name = "main", .blobId = "blob-old"},
                      QByteArrayLiteral("discard;")));
@@ -115,6 +146,15 @@ TEST_CASE("sieve save never updates a script rejected by server validation",
 TEST_CASE("sieve save updates with the exact blob accepted by validation", "[jmap][sieve][service]")
 {
     ensureApplication();
+    QTemporaryDir directory;
+    auto connection = testDatabase(directory, QStringLiteral("sieve-save-test"));
+    javelin::jmap::cache::SieveRepository repository{connection};
+    REQUIRE_FALSE(
+        repository
+            .replaceAll(
+                "sieve-account",
+                {{.id = "script-1", .name = "main", .blobId = "blob-old", .isActive = false}}, "a")
+            .has_value());
     FakeResourceTransport resources;
     resources.results = {
         javelin::jmap::api::HttpResponse{.statusCode = 200, .body = sessionResponse()},
@@ -141,8 +181,18 @@ TEST_CASE("sieve save updates with the exact blob accepted by validation", "[jma
             .createdIds = std::nullopt,
             .sessionState = "s3"},
     };
+    methods.beforeReturn = [&methods, &repository]
+    {
+        if (methods.requests.size() != 2)
+            return;
+        const auto projected = repository.list("sieve-account");
+        REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sieve::SieveScript>>(projected));
+        const auto& scripts = std::get<std::vector<javelin::jmap::sieve::SieveScript>>(projected);
+        REQUIRE(scripts.size() == 1);
+        CHECK(scripts.front().blobId == "blob-validated");
+    };
 
-    javelin::jmap::sieve::SieveService service{resources, methods};
+    javelin::jmap::sieve::SieveService service{connection, resources, methods};
     const auto result = QCoro::waitFor(
         service.save(settings(), "owner", {.id = "script-1", .name = "main", .blobId = "blob-old"},
                      QByteArrayLiteral("keep;")));
@@ -159,6 +209,8 @@ TEST_CASE("sieve save updates with the exact blob accepted by validation", "[jma
 TEST_CASE("new sieve scripts are validated before creation", "[jmap][sieve][service]")
 {
     ensureApplication();
+    QTemporaryDir directory;
+    auto connection = testDatabase(directory, QStringLiteral("sieve-create-test"));
     FakeResourceTransport resources;
     resources.results = {
         javelin::jmap::api::HttpResponse{.statusCode = 200, .body = sessionResponse()},
@@ -185,8 +237,7 @@ TEST_CASE("new sieve scripts are validated before creation", "[jmap][sieve][serv
             .createdIds = std::nullopt,
             .sessionState = "s3"},
     };
-
-    javelin::jmap::sieve::SieveService service{resources, methods};
+    javelin::jmap::sieve::SieveService service{connection, resources, methods};
     const auto result = QCoro::waitFor(service.save(settings(), "owner",
                                                     {.id = {}, .name = "vacation", .blobId = {}},
                                                     QByteArrayLiteral("keep;")));
@@ -208,6 +259,15 @@ TEST_CASE("deleting an active sieve script deactivates it in a separate call",
           "[jmap][sieve][service]")
 {
     ensureApplication();
+    QTemporaryDir directory;
+    auto connection = testDatabase(directory, QStringLiteral("sieve-delete-test"));
+    javelin::jmap::cache::SieveRepository repository{connection};
+    REQUIRE_FALSE(
+        repository
+            .replaceAll("sieve-account",
+                        {{.id = "script-1", .name = "main", .blobId = "blob-1", .isActive = true}},
+                        "a")
+            .has_value());
     FakeResourceTransport resources;
     resources.results = {
         javelin::jmap::api::HttpResponse{.statusCode = 200, .body = sessionResponse()},
@@ -231,8 +291,16 @@ TEST_CASE("deleting an active sieve script deactivates it in a separate call",
             .createdIds = std::nullopt,
             .sessionState = "s3"},
     };
+    methods.beforeReturn = [&methods, &repository]
+    {
+        if (methods.requests.size() != 1)
+            return;
+        const auto projected = repository.list("sieve-account");
+        REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sieve::SieveScript>>(projected));
+        CHECK(std::get<std::vector<javelin::jmap::sieve::SieveScript>>(projected).empty());
+    };
 
-    javelin::jmap::sieve::SieveService service{resources, methods};
+    javelin::jmap::sieve::SieveService service{connection, resources, methods};
     const auto result = QCoro::waitFor(
         service.remove(settings(), "owner",
                        {.id = "script-1", .name = "main", .blobId = "blob-1", .isActive = true}));
@@ -252,6 +320,17 @@ TEST_CASE("sieve scripts can be activated and deactivated", "[jmap][sieve][servi
     ensureApplication();
     for (const bool active : {true, false})
     {
+        QTemporaryDir directory;
+        auto connection = testDatabase(directory, active ? QStringLiteral("sieve-activate-test")
+                                                         : QStringLiteral("sieve-deactivate-test"));
+        javelin::jmap::cache::SieveRepository repository{connection};
+        REQUIRE_FALSE(
+            repository
+                .replaceAll(
+                    "sieve-account",
+                    {{.id = "script-1", .name = "main", .blobId = "blob-1", .isActive = !active}},
+                    "a")
+                .has_value());
         FakeResourceTransport resources;
         resources.results = {
             javelin::jmap::api::HttpResponse{.statusCode = 200, .body = sessionResponse()},
@@ -266,31 +345,87 @@ TEST_CASE("sieve scripts can be activated and deactivated", "[jmap][sieve][servi
                       .callId = "sieve-active"}},
                 .createdIds = std::nullopt,
                 .sessionState = "s2"},
-            javelin::jmap::api::ResponseEnvelope{
-                .methodResponses =
-                    {{.name = "SieveScript/get",
-                      .arguments =
-                          active
-                              ? R"({"accountId":"sieve-account","state":"b","list":[{"id":"script-1","name":"main","blobId":"blob-1","isActive":true}],"notFound":[]})"
-                              : R"({"accountId":"sieve-account","state":"b","list":[{"id":"script-1","name":"main","blobId":"blob-1","isActive":false}],"notFound":[]})",
-                      .callId = "sieve-active-check"}},
-                .createdIds = std::nullopt,
-                .sessionState = "s2"},
+        };
+        methods.beforeReturn = [&repository, active]
+        {
+            const auto projected = repository.list("sieve-account");
+            REQUIRE(
+                std::holds_alternative<std::vector<javelin::jmap::sieve::SieveScript>>(projected));
+            const auto& scripts =
+                std::get<std::vector<javelin::jmap::sieve::SieveScript>>(projected);
+            REQUIRE(scripts.size() == 1);
+            CHECK(scripts.front().isActive == active);
         };
 
-        javelin::jmap::sieve::SieveService service{resources, methods};
+        javelin::jmap::sieve::SieveService service{connection, resources, methods};
         const auto result = QCoro::waitFor(service.setActive(
             settings(), "owner",
             {.id = "script-1", .name = "main", .blobId = "blob-1", .isActive = !active}, active));
 
         REQUIRE(std::holds_alternative<std::monostate>(result));
-        REQUIRE(methods.requests.size() == 2);
+        REQUIRE(methods.requests.size() == 1);
         const auto& request = methods.requests.front().envelope.methodCalls.front();
         CHECK(request.callId == "sieve-active");
         CHECK(request.arguments.find(active ? "onSuccessActivateScript"
                                             : "onSuccessDeactivateScript") != std::string::npos);
-        const auto& check = methods.requests.back().envelope.methodCalls.front();
-        CHECK(check.name == "SieveScript/get");
-        CHECK(check.arguments.find("script-1") != std::string::npos);
     }
+}
+
+TEST_CASE("ambiguous Sieve activation preserves the projected active script",
+          "[jmap][sieve][service][consistency]")
+{
+    ensureApplication();
+    QTemporaryDir directory;
+    auto connection = testDatabase(directory, QStringLiteral("sieve-activation-unknown-test"));
+    javelin::jmap::cache::SieveRepository repository{connection};
+    REQUIRE_FALSE(
+        repository
+            .replaceAll("sieve-account",
+                        {{.id = "script-1", .name = "main", .blobId = "blob-1", .isActive = false}},
+                        "a")
+            .has_value());
+    FakeResourceTransport resources;
+    resources.results = {
+        javelin::jmap::api::HttpResponse{.statusCode = 200, .body = sessionResponse()},
+    };
+    FakeMethodTransport methods;
+    methods.results = {
+        javelin::jmap::api::TransportError{
+            .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
+            .message = "Connection closed after dispatch",
+        },
+    };
+    javelin::jmap::sieve::SieveService service{connection, resources, methods};
+    const auto result = QCoro::waitFor(service.setActive(
+        settings(), "owner",
+        {.id = "script-1", .name = "main", .blobId = "blob-1", .isActive = false}, true));
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
+
+    const auto projected = repository.list("sieve-account");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sieve::SieveScript>>(projected));
+    const auto& scripts = std::get<std::vector<javelin::jmap::sieve::SieveScript>>(projected);
+    REQUIRE(scripts.size() == 1);
+    CHECK(scripts.front().isActive);
+    javelin::jmap::sync::MutationJournalRepository journal{connection};
+    const auto mutations =
+        journal.listByStatus({.accountId = "sieve-account", .dataType = "SieveScript"},
+                             javelin::jmap::sync::MutationStatus::Unknown, 10);
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::MutationRecord>>(mutations));
+    CHECK(std::get<std::vector<javelin::jmap::sync::MutationRecord>>(mutations).size() == 1);
+
+    resources.results.push_back(
+        javelin::jmap::api::HttpResponse{.statusCode = 200, .body = sessionResponse()});
+    methods.results.push_back(javelin::jmap::api::ResponseEnvelope{
+        .methodResponses =
+            {{.name = "SieveScript/get",
+              .arguments =
+                  R"({"accountId":"sieve-account","state":"stale","list":[{"id":"script-1","name":"main","blobId":"blob-1","isActive":false}],"notFound":[]})",
+              .callId = "sieve-list"}},
+        .createdIds = std::nullopt,
+        .sessionState = "s3"});
+    const auto refreshed = QCoro::waitFor(service.list(settings(), "owner"));
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sieve::SieveScript>>(refreshed));
+    const auto& visible = std::get<std::vector<javelin::jmap::sieve::SieveScript>>(refreshed);
+    REQUIRE(visible.size() == 1);
+    CHECK(visible.front().isActive);
 }

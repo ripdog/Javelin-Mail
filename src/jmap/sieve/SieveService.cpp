@@ -4,10 +4,14 @@
 #include "jmap/api/RequestBuilder.h"
 #include "jmap/api/SessionClient.h"
 #include "jmap/api/Transport.h"
+#include "jmap/cache/SieveRepository.h"
+#include "jmap/sieve/SieveMutationJournal.h"
+#include "jmap/sync/ConsistencyDomain.h"
 
 #include <glaze/glaze.hpp>
 
 #include <QUrl>
+#include <QUuid>
 
 #include <algorithm>
 #include <optional>
@@ -70,6 +74,7 @@ namespace javelin::jmap::sieve::detail
     struct SetRequest
     {
         std::string accountId;
+        std::optional<std::string> ifInState;
         std::optional<std::unordered_map<std::string, ScriptCreate>> create;
         std::optional<std::unordered_map<std::string, ScriptUpdate>> update;
         std::optional<std::vector<std::string>> destroy;
@@ -84,6 +89,8 @@ namespace javelin::jmap::sieve::detail
         std::string newState;
         std::optional<std::unordered_map<std::string, SetError>> notUpdated;
         std::optional<std::unordered_map<std::string, SieveScript>> created;
+        std::optional<std::unordered_map<std::string, std::optional<SieveScript>>> updated;
+        std::optional<std::vector<std::string>> destroyed;
         std::optional<std::unordered_map<std::string, SetError>> notCreated;
         std::optional<std::unordered_map<std::string, SetError>> notDestroyed;
     };
@@ -159,19 +166,19 @@ template <> struct glz::meta<javelin::jmap::sieve::detail::ScriptCreate>
 template <> struct glz::meta<javelin::jmap::sieve::detail::SetRequest>
 {
     using T = javelin::jmap::sieve::detail::SetRequest;
-    static constexpr auto value =
-        glz::object("accountId", &T::accountId, "create", &T::create, "update", &T::update,
-                    "destroy", &T::destroy, "onSuccessActivateScript", &T::onSuccessActivateScript,
-                    "onSuccessDeactivateScript", &T::onSuccessDeactivateScript);
+    static constexpr auto value = glz::object(
+        "accountId", &T::accountId, "create", &T::create, "update", &T::update, "ifInState",
+        &T::ifInState, "destroy", &T::destroy, "onSuccessActivateScript",
+        &T::onSuccessActivateScript, "onSuccessDeactivateScript", &T::onSuccessDeactivateScript);
 };
 
 template <> struct glz::meta<javelin::jmap::sieve::detail::SetResponse>
 {
     using T = javelin::jmap::sieve::detail::SetResponse;
-    static constexpr auto value =
-        glz::object("accountId", &T::accountId, "oldState", &T::oldState, "newState", &T::newState,
-                    "notUpdated", &T::notUpdated, "created", &T::created, "notCreated",
-                    &T::notCreated, "notDestroyed", &T::notDestroyed);
+    static constexpr auto value = glz::object(
+        "accountId", &T::accountId, "oldState", &T::oldState, "newState", &T::newState,
+        "notUpdated", &T::notUpdated, "created", &T::created, "notCreated", &T::notCreated,
+        "updated", &T::updated, "destroyed", &T::destroyed, "notDestroyed", &T::notDestroyed);
 };
 
 namespace javelin::jmap::sieve
@@ -354,11 +361,76 @@ namespace javelin::jmap::sieve
                                ? QString::fromStdString(*response.error->description)
                                : QStringLiteral("The server rejected the Sieve script.")};
         }
+
+        [[nodiscard]] std::variant<std::vector<SieveScript>, OperationError>
+        cachedScripts(cache::SieveRepository& repository, const std::string& accountId)
+        {
+            const auto listed = repository.list(accountId);
+            if (const auto* cacheError = std::get_if<cache::DatabaseError>(&listed))
+                return operationError(*cacheError);
+            return std::get<std::vector<SieveScript>>(listed);
+        }
+
+        [[nodiscard]] SieveMutationRecord mutationRecord(const std::string& accountId,
+                                                         std::string objectId,
+                                                         const SieveMutationKind kind,
+                                                         std::vector<SieveScript> baseScripts,
+                                                         std::vector<SieveScript> projectedScripts,
+                                                         std::optional<std::string> baseState)
+        {
+            return {
+                .mutationId = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString(),
+                .operationGroupId = std::nullopt,
+                .accountId = accountId,
+                .objectId = std::move(objectId),
+                .kind = kind,
+                .status = sync::MutationStatus::Pending,
+                .baseScripts = std::move(baseScripts),
+                .projectedScripts = std::move(projectedScripts),
+                .baseState = std::move(baseState),
+                .acceptedState = std::nullopt,
+                .errorJson = std::nullopt,
+            };
+        }
+
+        [[nodiscard]] std::optional<OperationError>
+        acceptMutation(cache::DatabaseConnection& connection, cache::SieveRepository& repository,
+                       const SieveMutationRecord& record,
+                       const std::vector<SieveScript>& acceptedScripts,
+                       const std::string& acceptedState)
+        {
+            auto transactionResult = sync::MutationProjectionTransaction::begin(
+                connection, QStringLiteral("Accept Sieve mutation"));
+            if (const auto* cacheError = std::get_if<cache::DatabaseError>(&transactionResult))
+                return operationError(*cacheError);
+            auto transaction =
+                std::get<sync::MutationProjectionTransaction>(std::move(transactionResult));
+            if (const auto cacheError = transaction.transition(
+                    record.mutationId, sync::MutationStatus::Accepted, acceptedState))
+                return operationError(*cacheError);
+            const std::array domains{sync::ConsistencyDomain{
+                .accountId = record.accountId,
+                .dataType = "SieveScript",
+            }};
+            if (const auto cacheError = transaction.advance(domains))
+                return operationError(*cacheError);
+            if (const auto cacheError =
+                    repository.replaceAll(transaction.cacheTransaction(), record.accountId,
+                                          acceptedScripts, acceptedState))
+                return operationError(*cacheError);
+            if (const auto cacheError = transaction.remove(record.mutationId))
+                return operationError(*cacheError);
+            if (const auto cacheError = transaction.commit())
+                return operationError(*cacheError);
+            return std::nullopt;
+        }
     } // namespace
 
-    SieveService::SieveService(api::AbstractTransport& resourceTransport,
+    SieveService::SieveService(cache::DatabaseConnection& connection,
+                               api::AbstractTransport& resourceTransport,
                                api::JmapMethodTransport& methodTransport)
-        : m_resourceTransport(resourceTransport), m_methodTransport(methodTransport)
+        : m_connection(connection), m_resourceTransport(resourceTransport),
+          m_methodTransport(methodTransport)
     {
     }
 
@@ -370,6 +442,12 @@ namespace javelin::jmap::sieve
         if (const auto* contextError = std::get_if<OperationError>(&contextResult))
             co_return *contextError;
         const auto& context = std::get<detail::ResolvedContext>(contextResult);
+        sync::ConsistencyDomainRepository consistency{m_connection};
+        const auto fenceResult = consistency.captureRefresh(
+            {.accountId = context.sieveAccountId, .dataType = "SieveScript"});
+        if (const auto* cacheError = std::get_if<cache::DatabaseError>(&fenceResult))
+            co_return operationError(*cacheError);
+        const auto fence = std::get<sync::RefreshFence>(fenceResult);
         const auto arguments =
             serialize(detail::GetRequest{.accountId = context.sieveAccountId, .ids = std::nullopt});
         if (!arguments)
@@ -383,7 +461,22 @@ namespace javelin::jmap::sieve
             std::get<api::ResponseEnvelope>(called), "sieve-list", sieveGetMethod);
         if (const auto* parseError = std::get_if<OperationError>(&parsed))
             co_return *parseError;
-        co_return std::move(std::get<detail::GetResponse>(parsed).list);
+        const auto& responseValue = std::get<detail::GetResponse>(parsed);
+        const auto canCommit = consistency.canCommitRefresh(fence);
+        if (const auto* cacheError = std::get_if<cache::DatabaseError>(&canCommit))
+            co_return operationError(*cacheError);
+        cache::SieveRepository repository{m_connection};
+        if (std::get<bool>(canCommit))
+        {
+            if (const auto cacheError = repository.replaceAll(
+                    context.sieveAccountId, responseValue.list, responseValue.state))
+                co_return operationError(*cacheError);
+            co_return responseValue.list;
+        }
+        const auto cached = repository.list(context.sieveAccountId);
+        if (const auto* cacheError = std::get_if<cache::DatabaseError>(&cached))
+            co_return operationError(*cacheError);
+        co_return std::get<std::vector<SieveScript>>(cached);
     }
 
     QCoro::Task<SieveContentResult> SieveService::load(LiveConnectionSettings settings,
@@ -445,20 +538,59 @@ namespace javelin::jmap::sieve
         if (!validationValue.valid)
             co_return error(OperationErrorCode::InvalidUserInput, validationValue.message);
 
+        cache::SieveRepository repository{m_connection};
+        const auto baseResult = cachedScripts(repository, context.sieveAccountId);
+        if (const auto* cacheError = std::get_if<OperationError>(&baseResult))
+            co_return *cacheError;
+        auto baseScripts = std::get<std::vector<SieveScript>>(baseResult);
+        auto projectedScripts = baseScripts;
+        const bool creating = script.id.empty();
+        const auto serverScriptId = script.id;
+        const auto temporaryId =
+            creating ? std::string{"local-"} +
+                           QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString()
+                     : script.id;
+        if (creating)
+        {
+            script.id = temporaryId;
+            script.blobId = blobId;
+            projectedScripts.push_back(script);
+        }
+        else
+        {
+            const auto found = std::ranges::find(projectedScripts, script.id, &SieveScript::id);
+            if (found == projectedScripts.end())
+                co_return error(OperationErrorCode::LocalStorageFailure,
+                                QStringLiteral("The cached Sieve script is unavailable."));
+            found->blobId = blobId;
+        }
+        const auto stateResult = repository.state(context.sieveAccountId);
+        if (const auto* cacheError = std::get_if<cache::DatabaseError>(&stateResult))
+            co_return operationError(*cacheError);
+        auto mutation =
+            mutationRecord(context.sieveAccountId, temporaryId,
+                           creating ? SieveMutationKind::Create : SieveMutationKind::Update,
+                           std::move(baseScripts), projectedScripts,
+                           std::get<std::optional<std::string>>(stateResult));
+        SieveMutationJournal journal{m_connection, repository};
+        if (const auto cacheError = journal.queue(mutation))
+            co_return operationError(*cacheError);
+        if (const auto cacheError = journal.transition(mutation, sync::MutationStatus::InFlight))
+            co_return operationError(*cacheError);
+
         constexpr std::string_view creationId = "new-script";
         const auto arguments = serialize(detail::SetRequest{
             .accountId = context.sieveAccountId,
-            .create = script.id.empty()
-                          ? std::optional<std::unordered_map<
-                                std::string, detail::ScriptCreate>>{{{std::string{creationId},
-                                                                      {.name = script.name,
-                                                                       .blobId = blobId}}}}
-                          : std::nullopt,
-            .update =
-                script.id.empty()
-                    ? std::nullopt
-                    : std::optional<std::unordered_map<
-                          std::string, detail::ScriptUpdate>>{{{script.id, {.blobId = blobId}}}},
+            .ifInState = mutation.baseState,
+            .create = creating ? std::optional<std::unordered_map<
+                                     std::string, detail::ScriptCreate>>{{{std::string{creationId},
+                                                                           {.name = script.name,
+                                                                            .blobId = blobId}}}}
+                               : std::nullopt,
+            .update = creating ? std::nullopt
+                               : std::optional<std::unordered_map<
+                                     std::string, detail::ScriptUpdate>>{{{serverScriptId,
+                                                                           {.blobId = blobId}}}},
             .destroy = std::nullopt,
             .onSuccessActivateScript = std::nullopt,
             .onSuccessDeactivateScript = std::nullopt,
@@ -469,51 +601,130 @@ namespace javelin::jmap::sieve
         auto called = co_await call(m_methodTransport, context, std::string{sieveSetMethod},
                                     *arguments, "sieve-save");
         if (const auto* callError = std::get_if<OperationError>(&called))
+        {
+            if (const auto cacheError = journal.transition(mutation, sync::MutationStatus::Unknown))
+                co_return operationError(*cacheError);
             co_return *callError;
+        }
         auto parsed = parseMethodResponse<detail::SetResponse>(
             std::get<api::ResponseEnvelope>(called), "sieve-save", sieveSetMethod);
         if (const auto* parseError = std::get_if<OperationError>(&parsed))
+        {
+            if (parseError->protocolType.has_value())
+            {
+                if (const auto cacheError =
+                        journal.restoreRejected(mutation, std::nullopt, *parseError->protocolType))
+                    co_return operationError(*cacheError);
+            }
+            else if (const auto cacheError =
+                         journal.transition(mutation, sync::MutationStatus::Unknown))
+                co_return operationError(*cacheError);
             co_return *parseError;
+        }
         const auto& response = std::get<detail::SetResponse>(parsed);
-        if (script.id.empty())
+        if (creating)
         {
             if (response.notCreated)
             {
                 const auto rejected = response.notCreated->find(std::string{creationId});
                 if (rejected != response.notCreated->end())
+                {
+                    if (const auto cacheError =
+                            journal.restoreRejected(mutation, std::nullopt, rejected->second.type))
+                        co_return operationError(*cacheError);
                     co_return error(rejected->second.type == "invalidSieve"
                                         ? OperationErrorCode::InvalidUserInput
                                         : OperationErrorCode::ProtocolViolation,
                                     rejected->second.description
                                         ? QString::fromStdString(*rejected->second.description)
                                         : QStringLiteral("The server rejected the new script."));
+                }
             }
             if (!response.created)
+            {
+                if (const auto cacheError =
+                        journal.transition(mutation, sync::MutationStatus::Unknown))
+                    co_return operationError(*cacheError);
                 co_return error(OperationErrorCode::ProtocolViolation,
                                 QStringLiteral("The server did not return the new script."));
+            }
             const auto created = response.created->find(std::string{creationId});
             if (created == response.created->end())
+            {
+                if (const auto cacheError =
+                        journal.transition(mutation, sync::MutationStatus::Unknown))
+                    co_return operationError(*cacheError);
                 co_return error(OperationErrorCode::ProtocolViolation,
                                 QStringLiteral("The server did not return the new script."));
+            }
             auto createdScript = created->second;
+            if (createdScript.id.empty())
+            {
+                if (const auto cacheError =
+                        journal.transition(mutation, sync::MutationStatus::Unknown))
+                    co_return operationError(*cacheError);
+                co_return error(OperationErrorCode::ProtocolViolation,
+                                QStringLiteral("The server omitted the new script id."));
+            }
             if (createdScript.name.empty())
                 createdScript.name = script.name;
             if (createdScript.blobId.empty())
                 createdScript.blobId = blobId;
+            auto acceptedScripts = projectedScripts;
+            std::erase_if(acceptedScripts, [&temporaryId](const SieveScript& value)
+                          { return value.id == temporaryId; });
+            acceptedScripts.push_back(createdScript);
+            if (const auto acceptedError = acceptMutation(m_connection, repository, mutation,
+                                                          acceptedScripts, response.newState))
+                co_return *acceptedError;
             co_return createdScript;
         }
         if (response.notUpdated)
         {
-            const auto rejected = response.notUpdated->find(script.id);
+            const auto rejected = response.notUpdated->find(serverScriptId);
             if (rejected != response.notUpdated->end())
+            {
+                if (const auto cacheError =
+                        journal.restoreRejected(mutation, std::nullopt, rejected->second.type))
+                    co_return operationError(*cacheError);
                 co_return error(rejected->second.type == "invalidSieve"
                                     ? OperationErrorCode::InvalidUserInput
                                     : OperationErrorCode::ProtocolViolation,
                                 rejected->second.description
                                     ? QString::fromStdString(*rejected->second.description)
                                     : QStringLiteral("The server rejected the script update."));
+            }
+        }
+        if (!response.updated || !response.updated->contains(serverScriptId))
+        {
+            if (const auto cacheError = journal.transition(mutation, sync::MutationStatus::Unknown))
+                co_return operationError(*cacheError);
+            co_return error(OperationErrorCode::ProtocolViolation,
+                            QStringLiteral("The server did not confirm the script update."));
         }
         script.blobId = blobId;
+        auto acceptedScripts = projectedScripts;
+        if (response.updated)
+        {
+            const auto updated = response.updated->find(serverScriptId);
+            if (updated != response.updated->end() && updated->second.has_value())
+            {
+                const auto found =
+                    std::ranges::find(acceptedScripts, serverScriptId, &SieveScript::id);
+                if (found != acceptedScripts.end())
+                {
+                    if (!updated->second->name.empty())
+                        found->name = updated->second->name;
+                    if (!updated->second->blobId.empty())
+                        found->blobId = updated->second->blobId;
+                    found->isActive = updated->second->isActive;
+                    script = *found;
+                }
+            }
+        }
+        if (const auto acceptedError = acceptMutation(m_connection, repository, mutation,
+                                                      acceptedScripts, response.newState))
+            co_return *acceptedError;
         co_return script;
     }
 
@@ -528,11 +739,34 @@ namespace javelin::jmap::sieve
         if (const auto* contextError = std::get_if<OperationError>(&contextResult))
             co_return *contextError;
         const auto& context = std::get<detail::ResolvedContext>(contextResult);
+        cache::SieveRepository repository{m_connection};
+        const auto baseResult = cachedScripts(repository, context.sieveAccountId);
+        if (const auto* cacheError = std::get_if<OperationError>(&baseResult))
+            co_return *cacheError;
+        auto baseScripts = std::get<std::vector<SieveScript>>(baseResult);
+        if (std::ranges::find(baseScripts, script.id, &SieveScript::id) == baseScripts.end())
+            co_return error(OperationErrorCode::LocalStorageFailure,
+                            QStringLiteral("The cached Sieve script is unavailable."));
+        auto projectedScripts = baseScripts;
+        std::erase_if(projectedScripts,
+                      [&script](const SieveScript& value) { return value.id == script.id; });
+        const auto stateResult = repository.state(context.sieveAccountId);
+        if (const auto* cacheError = std::get_if<cache::DatabaseError>(&stateResult))
+            co_return operationError(*cacheError);
+        auto mutation = mutationRecord(context.sieveAccountId, script.id,
+                                       SieveMutationKind::Destroy, baseScripts, projectedScripts,
+                                       std::get<std::optional<std::string>>(stateResult));
+        SieveMutationJournal journal{m_connection, repository};
+        if (const auto cacheError = journal.queue(mutation))
+            co_return operationError(*cacheError);
+        if (const auto cacheError = journal.transition(mutation, sync::MutationStatus::InFlight))
+            co_return operationError(*cacheError);
 
         if (script.isActive)
         {
             const auto deactivateArguments = serialize(detail::SetRequest{
                 .accountId = context.sieveAccountId,
+                .ifInState = mutation.baseState,
                 .create = std::nullopt,
                 .update = std::nullopt,
                 .destroy = std::nullopt,
@@ -547,15 +781,37 @@ namespace javelin::jmap::sieve
                 co_await call(m_methodTransport, context, std::string{sieveSetMethod},
                               *deactivateArguments, "sieve-deactivate");
             if (const auto* callError = std::get_if<OperationError>(&deactivated))
+            {
+                if (const auto cacheError =
+                        journal.transition(mutation, sync::MutationStatus::Unknown))
+                    co_return operationError(*cacheError);
                 co_return *callError;
+            }
             auto parsed = parseMethodResponse<detail::SetResponse>(
                 std::get<api::ResponseEnvelope>(deactivated), "sieve-deactivate", sieveSetMethod);
             if (const auto* parseError = std::get_if<OperationError>(&parsed))
+            {
+                if (parseError->protocolType.has_value())
+                {
+                    if (const auto cacheError = journal.restoreRejected(mutation, std::nullopt,
+                                                                        *parseError->protocolType))
+                        co_return operationError(*cacheError);
+                }
+                else if (const auto cacheError =
+                             journal.transition(mutation, sync::MutationStatus::Unknown))
+                    co_return operationError(*cacheError);
                 co_return *parseError;
+            }
+            const auto& response = std::get<detail::SetResponse>(parsed);
+            mutation.baseState = response.newState;
+            const auto base = std::ranges::find(mutation.baseScripts, script.id, &SieveScript::id);
+            if (base != mutation.baseScripts.end())
+                base->isActive = false;
         }
 
         const auto destroyArguments = serialize(detail::SetRequest{
             .accountId = context.sieveAccountId,
+            .ifInState = mutation.baseState,
             .create = std::nullopt,
             .update = std::nullopt,
             .destroy = std::vector<std::string>{script.id},
@@ -568,21 +824,52 @@ namespace javelin::jmap::sieve
         auto destroyed = co_await call(m_methodTransport, context, std::string{sieveSetMethod},
                                        *destroyArguments, "sieve-delete");
         if (const auto* callError = std::get_if<OperationError>(&destroyed))
+        {
+            if (const auto cacheError = journal.transition(mutation, sync::MutationStatus::Unknown))
+                co_return operationError(*cacheError);
             co_return *callError;
+        }
         auto parsed = parseMethodResponse<detail::SetResponse>(
             std::get<api::ResponseEnvelope>(destroyed), "sieve-delete", sieveSetMethod);
         if (const auto* parseError = std::get_if<OperationError>(&parsed))
+        {
+            if (parseError->protocolType.has_value())
+            {
+                if (const auto cacheError = journal.restoreRejected(mutation, mutation.baseState,
+                                                                    *parseError->protocolType))
+                    co_return operationError(*cacheError);
+            }
+            else if (const auto cacheError =
+                         journal.transition(mutation, sync::MutationStatus::Unknown))
+                co_return operationError(*cacheError);
             co_return *parseError;
+        }
         const auto& response = std::get<detail::SetResponse>(parsed);
         if (response.notDestroyed)
         {
             const auto rejected = response.notDestroyed->find(script.id);
             if (rejected != response.notDestroyed->end())
+            {
+                if (const auto cacheError = journal.restoreRejected(mutation, mutation.baseState,
+                                                                    rejected->second.type))
+                    co_return operationError(*cacheError);
                 co_return error(OperationErrorCode::ProtocolViolation,
                                 rejected->second.description
                                     ? QString::fromStdString(*rejected->second.description)
                                     : QStringLiteral("The server rejected the script deletion."));
+            }
         }
+        if (!response.destroyed ||
+            std::ranges::find(*response.destroyed, script.id) == response.destroyed->end())
+        {
+            if (const auto cacheError = journal.transition(mutation, sync::MutationStatus::Unknown))
+                co_return operationError(*cacheError);
+            co_return error(OperationErrorCode::ProtocolViolation,
+                            QStringLiteral("The server did not confirm the script deletion."));
+        }
+        if (const auto acceptedError = acceptMutation(m_connection, repository, mutation,
+                                                      projectedScripts, response.newState))
+            co_return *acceptedError;
         co_return std::monostate{};
     }
 
@@ -599,8 +886,37 @@ namespace javelin::jmap::sieve
         if (const auto* contextError = std::get_if<OperationError>(&contextResult))
             co_return *contextError;
         const auto& context = std::get<detail::ResolvedContext>(contextResult);
+        cache::SieveRepository repository{m_connection};
+        const auto baseResult = cachedScripts(repository, context.sieveAccountId);
+        if (const auto* cacheError = std::get_if<OperationError>(&baseResult))
+            co_return *cacheError;
+        auto baseScripts = std::get<std::vector<SieveScript>>(baseResult);
+        auto projectedScripts = baseScripts;
+        const auto target = std::ranges::find(projectedScripts, script.id, &SieveScript::id);
+        if (target == projectedScripts.end())
+            co_return error(OperationErrorCode::LocalStorageFailure,
+                            QStringLiteral("The cached Sieve script is unavailable."));
+        if (active)
+        {
+            for (auto& value : projectedScripts)
+                value.isActive = value.id == script.id;
+        }
+        else
+            target->isActive = false;
+        const auto stateResult = repository.state(context.sieveAccountId);
+        if (const auto* cacheError = std::get_if<cache::DatabaseError>(&stateResult))
+            co_return operationError(*cacheError);
+        auto mutation = mutationRecord(
+            context.sieveAccountId, script.id, SieveMutationKind::Activate, std::move(baseScripts),
+            projectedScripts, std::get<std::optional<std::string>>(stateResult));
+        SieveMutationJournal journal{m_connection, repository};
+        if (const auto cacheError = journal.queue(mutation))
+            co_return operationError(*cacheError);
+        if (const auto cacheError = journal.transition(mutation, sync::MutationStatus::InFlight))
+            co_return operationError(*cacheError);
         const auto arguments = serialize(detail::SetRequest{
             .accountId = context.sieveAccountId,
+            .ifInState = mutation.baseState,
             .create = std::nullopt,
             .update = std::nullopt,
             .destroy = std::nullopt,
@@ -613,32 +929,56 @@ namespace javelin::jmap::sieve
         auto called = co_await call(m_methodTransport, context, std::string{sieveSetMethod},
                                     *arguments, "sieve-active");
         if (const auto* callError = std::get_if<OperationError>(&called))
+        {
+            if (const auto cacheError = journal.transition(mutation, sync::MutationStatus::Unknown))
+                co_return operationError(*cacheError);
             co_return *callError;
+        }
         auto parsed = parseMethodResponse<detail::SetResponse>(
             std::get<api::ResponseEnvelope>(called), "sieve-active", sieveSetMethod);
         if (const auto* parseError = std::get_if<OperationError>(&parsed))
+        {
+            if (parseError->protocolType.has_value())
+            {
+                if (const auto cacheError =
+                        journal.restoreRejected(mutation, std::nullopt, *parseError->protocolType))
+                    co_return operationError(*cacheError);
+            }
+            else if (const auto cacheError =
+                         journal.transition(mutation, sync::MutationStatus::Unknown))
+                co_return operationError(*cacheError);
             co_return *parseError;
-        const auto getArguments = serialize(detail::GetRequest{
-            .accountId = context.sieveAccountId,
-            .ids = std::vector<std::string>{script.id},
-        });
-        if (!getArguments)
+        }
+        const auto& response = std::get<detail::SetResponse>(parsed);
+        auto acceptedScripts = projectedScripts;
+        if (!response.updated || !response.updated->contains(script.id))
+        {
+            if (const auto cacheError = journal.transition(mutation, sync::MutationStatus::Unknown))
+                co_return operationError(*cacheError);
             co_return error(OperationErrorCode::ProtocolViolation,
-                            QStringLiteral("Failed to encode the script state request."));
-        auto checked = co_await call(m_methodTransport, context, std::string{sieveGetMethod},
-                                     *getArguments, "sieve-active-check");
-        if (const auto* callError = std::get_if<OperationError>(&checked))
-            co_return *callError;
-        auto getResponse = parseMethodResponse<detail::GetResponse>(
-            std::get<api::ResponseEnvelope>(checked), "sieve-active-check", sieveGetMethod);
-        if (const auto* parseError = std::get_if<OperationError>(&getResponse))
-            co_return *parseError;
-        const auto& scripts = std::get<detail::GetResponse>(getResponse).list;
-        const auto changed = std::ranges::find(scripts, script.id, &SieveScript::id);
-        if (changed == scripts.cend() || changed->isActive != active)
+                            QStringLiteral("The server did not confirm the script state change."));
+        }
+        if (response.updated)
+        {
+            for (const auto& [id, patch] : *response.updated)
+            {
+                const auto found = std::ranges::find(acceptedScripts, id, &SieveScript::id);
+                if (found != acceptedScripts.end() && patch.has_value())
+                    found->isActive = patch->isActive;
+            }
+        }
+        const auto changed = std::ranges::find(acceptedScripts, script.id, &SieveScript::id);
+        if (changed == acceptedScripts.cend() || changed->isActive != active)
+        {
+            if (const auto cacheError = journal.transition(mutation, sync::MutationStatus::Unknown))
+                co_return operationError(*cacheError);
             co_return error(OperationErrorCode::ProtocolViolation,
                             active ? QStringLiteral("The server did not activate the script.")
                                    : QStringLiteral("The server did not deactivate the script."));
+        }
+        if (const auto acceptedError = acceptMutation(m_connection, repository, mutation,
+                                                      acceptedScripts, response.newState))
+            co_return *acceptedError;
         co_return std::monostate{};
     }
 } // namespace javelin::jmap::sieve

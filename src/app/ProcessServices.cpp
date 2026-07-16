@@ -90,8 +90,8 @@ namespace javelin::app
             m_databaseConnection, *m_contactRepository, *m_transport, *m_methodTransport);
         m_calendarService = std::make_unique<javelin::jmap::calendar::CalendarService>(
             m_databaseConnection, *m_methodTransport);
-        m_sieveService =
-            std::make_unique<javelin::jmap::sieve::SieveService>(*m_transport, *m_methodTransport);
+        m_sieveService = std::make_unique<javelin::jmap::sieve::SieveService>(
+            m_databaseConnection, *m_transport, *m_methodTransport);
         m_contactIdentityLookup =
             std::make_unique<javelin::jmap::contacts::ContactIdentityLookup>(*m_contactRepository);
         m_identityRepository =
