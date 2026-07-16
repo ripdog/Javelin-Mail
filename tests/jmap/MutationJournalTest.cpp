@@ -116,6 +116,8 @@ TEST_CASE("mutation journal round-trips typed Email patch mutations", "[jmap][sy
                 .removeKeywords = {"$flagged"},
                 .destroy = true,
             },
+        .baseMailboxIds = std::vector<std::string>{"mbx-inbox"},
+        .baseKeywords = std::vector<std::string>{"$flagged"},
         .baseState = std::nullopt,
         .acceptedState = std::nullopt,
         .errorJson = std::nullopt,
@@ -132,6 +134,8 @@ TEST_CASE("mutation journal round-trips typed Email patch mutations", "[jmap][sy
     CHECK(records.front().patch.addMailboxIds == std::vector<std::string>{"mbx-archive"});
     CHECK(records.front().patch.removeKeywords == std::vector<std::string>{"$flagged"});
     CHECK(records.front().patch.destroy);
+    CHECK(records.front().baseMailboxIds == std::vector<std::string>{"mbx-inbox"});
+    CHECK(records.front().baseKeywords == std::vector<std::string>{"$flagged"});
 }
 
 TEST_CASE("pending email patch merge reapplies local mailbox and keyword deltas", "[jmap][sync]")
@@ -151,6 +155,8 @@ TEST_CASE("pending email patch merge reapplies local mailbox and keyword deltas"
                     .addKeywords = {"$draft"},
                     .removeKeywords = {"$flagged"},
                 },
+            .baseMailboxIds = std::nullopt,
+            .baseKeywords = std::nullopt,
             .baseState = std::nullopt,
             .acceptedState = std::nullopt,
             .errorJson = std::nullopt,
@@ -168,6 +174,8 @@ TEST_CASE("pending email patch merge reapplies local mailbox and keyword deltas"
                     .addKeywords = {"$seen"},
                     .removeKeywords = {},
                 },
+            .baseMailboxIds = std::nullopt,
+            .baseKeywords = std::nullopt,
             .baseState = std::nullopt,
             .acceptedState = std::nullopt,
             .errorJson = std::nullopt,
@@ -304,6 +312,8 @@ TEST_CASE(
                 .removeKeywords = {},
                 .destroy = false,
             },
+        .baseMailboxIds = std::vector<std::string>{"mbx-inbox"},
+        .baseKeywords = std::vector<std::string>{},
         .baseState = std::nullopt,
         .acceptedState = std::nullopt,
         .errorJson = std::nullopt,

@@ -532,6 +532,8 @@ TEST_CASE("mailbox refresh executor reapplies pending keyword mutations after a 
                                   .addKeywords = {},
                                   .removeKeywords = {"$seen"},
                               },
+                          .baseMailboxIds = std::nullopt,
+                          .baseKeywords = std::nullopt,
                           .baseState = std::nullopt,
                           .acceptedState = std::nullopt,
                           .errorJson = std::nullopt,

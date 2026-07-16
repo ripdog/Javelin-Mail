@@ -29,6 +29,8 @@ namespace javelin::jmap::sync
         std::string accountId;
         MutationStatus status = MutationStatus::Pending;
         EmailPatchMutation patch;
+        std::optional<std::vector<std::string>> baseMailboxIds;
+        std::optional<std::vector<std::string>> baseKeywords;
         std::optional<std::string> baseState;
         std::optional<std::string> acceptedState;
         std::optional<std::string> errorJson;

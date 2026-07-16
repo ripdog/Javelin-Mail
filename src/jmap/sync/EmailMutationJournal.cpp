@@ -17,6 +17,8 @@ namespace
         std::vector<std::string> addKeywords;
         std::vector<std::string> removeKeywords;
         bool destroy = false;
+        std::optional<std::vector<std::string>> baseMailboxIds;
+        std::optional<std::vector<std::string>> baseKeywords;
     };
 
 } // namespace
@@ -28,7 +30,8 @@ template <> struct glz::meta<RawEmailPatchMutation>
     static constexpr auto value =
         glz::object("emailId", &T::emailId, "addMailboxIds", &T::addMailboxIds, "removeMailboxIds",
                     &T::removeMailboxIds, "addKeywords", &T::addKeywords, "removeKeywords",
-                    &T::removeKeywords, "destroy", &T::destroy);
+                    &T::removeKeywords, "destroy", &T::destroy, "baseMailboxIds",
+                    &T::baseMailboxIds, "baseKeywords", &T::baseKeywords);
 };
 
 namespace javelin::jmap::sync
@@ -37,44 +40,32 @@ namespace javelin::jmap::sync
     namespace
     {
 
-        [[nodiscard]] std::optional<std::string> serializePayload(const EmailPatchMutation& patch)
-        {
-            std::string buffer;
-            const auto error = glz::write_json(
-                RawEmailPatchMutation{
-                    .emailId = patch.emailId,
-                    .addMailboxIds = patch.addMailboxIds,
-                    .removeMailboxIds = patch.removeMailboxIds,
-                    .addKeywords = patch.addKeywords,
-                    .removeKeywords = patch.removeKeywords,
-                    .destroy = patch.destroy,
-                },
-                buffer);
-            return error ? std::nullopt : std::optional<std::string>{std::move(buffer)};
-        }
-
-        [[nodiscard]] std::optional<EmailPatchMutation> parsePayload(const std::string_view json)
+        [[nodiscard]] std::optional<RawEmailPatchMutation> parsePayload(const std::string_view json)
         {
             RawEmailPatchMutation raw;
             if (glz::read<glz::opts{.error_on_unknown_keys = false}>(raw, json))
             {
                 return std::nullopt;
             }
-            return EmailPatchMutation{
-                .emailId = std::move(raw.emailId),
-                .addMailboxIds = std::move(raw.addMailboxIds),
-                .removeMailboxIds = std::move(raw.removeMailboxIds),
-                .addKeywords = std::move(raw.addKeywords),
-                .removeKeywords = std::move(raw.removeKeywords),
-                .destroy = raw.destroy,
-            };
+            return raw;
         }
 
         [[nodiscard]] std::variant<MutationRecord, javelin::jmap::cache::DatabaseError>
         genericRecord(const EmailMutationRecord& record)
         {
-            const auto payload = serializePayload(record.patch);
-            if (!payload.has_value())
+            std::string payload;
+            if (glz::write_json(
+                    RawEmailPatchMutation{
+                        .emailId = record.patch.emailId,
+                        .addMailboxIds = record.patch.addMailboxIds,
+                        .removeMailboxIds = record.patch.removeMailboxIds,
+                        .addKeywords = record.patch.addKeywords,
+                        .removeKeywords = record.patch.removeKeywords,
+                        .destroy = record.patch.destroy,
+                        .baseMailboxIds = record.baseMailboxIds,
+                        .baseKeywords = record.baseKeywords,
+                    },
+                    payload))
             {
                 return javelin::jmap::cache::DatabaseError{
                     .code = javelin::jmap::cache::DatabaseErrorCode::QueryFailed,
@@ -88,7 +79,7 @@ namespace javelin::jmap::sync
                 .objectId = record.patch.emailId,
                 .mutationKind = "email_patch",
                 .status = record.status,
-                .payloadJson = *payload,
+                .payloadJson = std::move(payload),
                 .baseState = record.baseState,
                 .acceptedState = record.acceptedState,
                 .errorJson = record.errorJson,
@@ -108,8 +99,8 @@ namespace javelin::jmap::sync
             std::vector<EmailMutationRecord> typed;
             for (auto& record : std::get<std::vector<MutationRecord>>(result))
             {
-                const auto patch = parsePayload(record.payloadJson);
-                if (!patch.has_value() || patch->emailId != record.objectId ||
+                auto raw = parsePayload(record.payloadJson);
+                if (!raw.has_value() || raw->emailId != record.objectId ||
                     record.mutationKind != "email_patch")
                 {
                     return javelin::jmap::cache::DatabaseError{
@@ -122,7 +113,17 @@ namespace javelin::jmap::sync
                     .operationGroupId = std::move(record.operationGroupId),
                     .accountId = std::move(record.domain.accountId),
                     .status = record.status,
-                    .patch = std::move(*patch),
+                    .patch =
+                        {
+                            .emailId = std::move(raw->emailId),
+                            .addMailboxIds = std::move(raw->addMailboxIds),
+                            .removeMailboxIds = std::move(raw->removeMailboxIds),
+                            .addKeywords = std::move(raw->addKeywords),
+                            .removeKeywords = std::move(raw->removeKeywords),
+                            .destroy = raw->destroy,
+                        },
+                    .baseMailboxIds = std::move(raw->baseMailboxIds),
+                    .baseKeywords = std::move(raw->baseKeywords),
                     .baseState = std::move(record.baseState),
                     .acceptedState = std::move(record.acceptedState),
                     .errorJson = std::move(record.errorJson),

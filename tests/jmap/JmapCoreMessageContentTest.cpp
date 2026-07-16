@@ -972,6 +972,71 @@ TEST_CASE("JmapCore atomically rolls back accepted Email mutation projection fai
     CHECK(cached->mailboxIds == std::vector<std::string>{"mbx-archive"});
 }
 
+TEST_CASE("JmapCore restores rejected Email mutations immediately",
+          "[jmap][core][mutation-journal][consistency]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    javelin::jmap::cache::SessionRepository sessionRepository{databaseContext.connection};
+    REQUIRE_FALSE(sessionRepository.replace("u1", loadSessionFixture()).has_value());
+
+    auto email = loadEmailFixture();
+    email.id = "eml-1";
+    email.threadId = "thr-1";
+    email.mailboxIds = {"mbx-inbox"};
+    email.keywords = {"$seen"};
+    javelin::jmap::cache::EmailRepository emailRepository{databaseContext.connection};
+    REQUIRE_FALSE(emailRepository.replaceAll("u1", {email}).has_value());
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body =
+            R"({"methodResponses":[["Email/set",{"accountId":"u1","oldState":"email-state-1","newState":"email-state-1","updated":{},"notUpdated":{"eml-1":{"type":"forbidden"}}},"queued-email-set"]],"createdIds":{},"sessionState":"session-state-2"})",
+    });
+
+    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
+    const auto queued = core.queueArchiveEmail("u1", "eml-1", "mbx-inbox", "mbx-archive");
+    REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(queued));
+    const auto mutationId = std::get<javelin::jmap::QueuedEmailMutation>(queued).mutationId;
+    const auto queuedUnread = core.queueMarkEmailUnread("u1", "eml-1");
+    REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(queuedUnread));
+
+    const auto optimistic = emailRepository.find("u1", "eml-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(optimistic));
+    REQUIRE(std::get<std::optional<javelin::jmap::domain::Email>>(optimistic).has_value());
+    CHECK(std::get<std::optional<javelin::jmap::domain::Email>>(optimistic)->mailboxIds ==
+          std::vector<std::string>{"mbx-archive"});
+    CHECK(std::get<std::optional<javelin::jmap::domain::Email>>(optimistic)->keywords.empty());
+
+    const auto submitted = QCoro::waitFor(core.submitPendingEmailMutations(
+        {
+            .sessionUrl = "https://mail.example.com/.well-known/jmap",
+            .loginEmail = "alice@example.com",
+            .apiKey = "access-token",
+        },
+        "u1"));
+    REQUIRE(std::holds_alternative<javelin::jmap::SubmittedEmailMutations>(submitted));
+    CHECK(std::get<javelin::jmap::SubmittedEmailMutations>(submitted).failedEmailCount == 1);
+
+    const auto restored = emailRepository.find("u1", "eml-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(restored));
+    REQUIRE(std::get<std::optional<javelin::jmap::domain::Email>>(restored).has_value());
+    CHECK(std::get<std::optional<javelin::jmap::domain::Email>>(restored)->mailboxIds ==
+          std::vector<std::string>{"mbx-inbox"});
+    CHECK(std::get<std::optional<javelin::jmap::domain::Email>>(restored)->keywords ==
+          std::vector<std::string>{"$seen"});
+
+    javelin::jmap::sync::MutationJournalRepository journal{databaseContext.connection};
+    const auto mutation = journal.find(mutationId);
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::sync::MutationRecord>>(mutation));
+    REQUIRE(std::get<std::optional<javelin::jmap::sync::MutationRecord>>(mutation).has_value());
+    CHECK(std::get<std::optional<javelin::jmap::sync::MutationRecord>>(mutation)->status ==
+          javelin::jmap::sync::MutationStatus::Rejected);
+}
+
 TEST_CASE("JmapCore submits queued read keyword mutations through Email/set",
           "[jmap][core][mutation-journal]")
 {
