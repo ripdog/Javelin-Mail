@@ -1334,20 +1334,14 @@ namespace javelin::jmap
     }
 
     QCoro::Task<MessageSourceDownloadResult>
-    JmapCore::downloadMessageSource(LiveConnectionSettings settings, std::string accountId,
-                                    std::string emailId)
+    JmapCore::loadCachedMessageSource(std::string accountId, std::string emailId)
     {
-        if (m_impl->databaseConnection == nullptr || m_impl->resourceTransport == nullptr)
+        if (m_impl->databaseConnection == nullptr)
         {
             co_return OperationError{
                 .message = QStringLiteral(
-                    "Message source download is unavailable in this process configuration."),
+                    "Cached message source is unavailable in this process configuration."),
             };
-        }
-
-        if (const auto validationError = validateLoginSettings(settings, true))
-        {
-            co_return *validationError;
         }
 
         const auto emailResult =
@@ -1358,35 +1352,22 @@ namespace javelin::jmap
         }
 
         const auto& email = std::get<javelin::jmap::domain::Email>(emailResult);
-
-        const auto downloadContextResult =
-            prepareDownloadContext(*m_impl->databaseConnection, settings, accountId);
-        if (const auto* error = std::get_if<OperationError>(&downloadContextResult))
+        javelin::jmap::cache::RawMessageSourceRepository sourceRepository{
+            *m_impl->databaseConnection};
+        const auto sourceResult = sourceRepository.find(accountId, emailId);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&sourceResult))
         {
-            co_return *error;
+            co_return operationError(*error);
         }
-        const auto& downloadContext = std::get<DownloadContext>(downloadContextResult);
-        const javelin::jmap::cache::EmailPart messageBlob{
-            .emailId = email.id,
-            .partId = email.id,
-            .parentPartId = std::nullopt,
-            .blobId = email.blobId,
-            .kind = "message",
-            .mediaType = "message/rfc822",
-            .name = std::nullopt,
-            .charset = std::nullopt,
-            .disposition = std::nullopt,
-            .cid = std::nullopt,
-            .size = email.size,
-            .isInlineRenderable = false,
-            .isBodySection = false,
-        };
-        const auto payloadResult = co_await downloadBlob(
-            *m_impl->resourceTransport, downloadContext.session.downloadUrl, accountId, messageBlob,
-            downloadContext.accessToken, QStringLiteral("Message source download"));
-        if (const auto* error = std::get_if<BlobDownloadError>(&payloadResult))
+
+        const auto& source =
+            std::get<std::optional<javelin::jmap::cache::RawMessageSource>>(sourceResult);
+        if (!source.has_value() || source->blobId != email.blobId)
         {
-            co_return error->error;
+            co_return OperationError{
+                .message = QStringLiteral(
+                    "The message source is not cached locally. Open the message first."),
+            };
         }
 
         co_return MessageSourceDownload{
@@ -1394,7 +1375,7 @@ namespace javelin::jmap
             .emailId = std::move(emailId),
             .blobId = email.blobId,
             .subject = email.subject,
-            .payload = std::get<QByteArray>(payloadResult),
+            .payload = source->payload,
         };
     }
 

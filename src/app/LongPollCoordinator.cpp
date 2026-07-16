@@ -594,16 +594,8 @@ namespace javelin::app
     QCoro::Task<javelin::jmap::MessageSourceDownloadResult>
     MailApplicationService::requestMessageSource(std::string accountId, std::string emailId)
     {
-        const auto configuration = m_configurations.find(accountId);
-        if (configuration == m_configurations.end())
-            co_return javelin::jmap::OperationError{
-                .message = QStringLiteral("Account synchronization is not configured."),
-            };
-        co_return observeResult(m_errorCoordinator, configuration->second.settings, accountId,
-                                QStringLiteral("Download message source"),
-                                co_await m_jmapCore.downloadMessageSource(
-                                    toLiveConnectionSettings(configuration->second.settings),
-                                    accountId, std::move(emailId)));
+        co_return co_await m_jmapCore.loadCachedMessageSource(std::move(accountId),
+                                                              std::move(emailId));
     }
 
     QCoro::Task<javelin::jmap::LiveRefreshResult>

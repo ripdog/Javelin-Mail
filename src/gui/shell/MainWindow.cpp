@@ -5511,7 +5511,7 @@ namespace javelin::gui::shell
             return;
         }
 
-        m_statusBar->showMessage(QStringLiteral("Downloading message source..."));
+        m_statusBar->showMessage(QStringLiteral("Preparing message source..."));
         auto task = m_mailService.requestMessageSource(*accountId, *emailId);
         QCoro::connect(
             std::move(task), this,
@@ -5526,7 +5526,6 @@ namespace javelin::gui::shell
                 const auto& download = std::get<javelin::jmap::MessageSourceDownload>(result);
                 const QString targetPath =
                     tempMessageSourcePath(m_openAttachmentDirectory, download);
-                m_statusBar->showMessage(QStringLiteral("Preparing message source..."));
 
                 auto* watcher = new QFutureWatcher<FileWriteResult>(this);
                 connect(watcher, &QFutureWatcher<FileWriteResult>::finished, this,

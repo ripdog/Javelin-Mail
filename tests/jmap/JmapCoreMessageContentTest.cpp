@@ -770,6 +770,72 @@ TEST_CASE("JmapCore downloadAttachment reads attachment payloads from cached raw
     CHECK(transport.requests.empty());
 }
 
+TEST_CASE("JmapCore loads message source from the cached raw payload",
+          "[jmap][core][message-content]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    javelin::jmap::cache::SessionRepository sessionRepository{databaseContext.connection};
+    REQUIRE_FALSE(sessionRepository.replace("u1", loadSessionFixture()).has_value());
+    seedEmail(databaseContext.connection);
+
+    const QByteArray payload = QByteArrayLiteral("Subject: Cached source\r\n\r\nBody\r\n");
+    javelin::jmap::cache::RawMessageSourceRepository sourceRepository{databaseContext.connection};
+    REQUIRE_FALSE(sourceRepository
+                      .upsert("u1",
+                              {
+                                  .emailId = "eml-1",
+                                  .blobId = "blob-root",
+                                  .payload = payload,
+                              })
+                      .has_value());
+
+    FakeTransport transport;
+    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
+    const auto result = QCoro::waitFor(core.loadCachedMessageSource("u1", "eml-1"));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::MessageSourceDownload>(result));
+    const auto& source = std::get<javelin::jmap::MessageSourceDownload>(result);
+    CHECK(source.accountId == "u1");
+    CHECK(source.emailId == "eml-1");
+    CHECK(source.blobId == "blob-root");
+    CHECK(source.payload == payload);
+    CHECK(transport.requests.empty());
+}
+
+TEST_CASE("JmapCore rejects a missing or stale cached message source",
+          "[jmap][core][message-content]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    javelin::jmap::cache::SessionRepository sessionRepository{databaseContext.connection};
+    REQUIRE_FALSE(sessionRepository.replace("u1", loadSessionFixture()).has_value());
+    seedEmail(databaseContext.connection);
+
+    javelin::jmap::cache::RawMessageSourceRepository sourceRepository{databaseContext.connection};
+    REQUIRE_FALSE(sourceRepository
+                      .upsert("u1",
+                              {
+                                  .emailId = "eml-1",
+                                  .blobId = "stale-blob",
+                                  .payload = QByteArrayLiteral("Stale source"),
+                              })
+                      .has_value());
+
+    FakeTransport transport;
+    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
+    const auto result = QCoro::waitFor(core.loadCachedMessageSource("u1", "eml-1"));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
+    CHECK(std::get<javelin::jmap::OperationError>(result).message.contains(
+        QStringLiteral("not cached locally")));
+    CHECK(transport.requests.empty());
+}
+
 TEST_CASE("JmapCore downloadAttachment reads inline payloads from cached raw source",
           "[jmap][core][message-content]")
 {

@@ -206,8 +206,7 @@ namespace javelin::jmap
         downloadAttachment(LiveConnectionSettings settings, std::string accountId,
                            std::string emailId, std::string partId);
         [[nodiscard]] QCoro::Task<MessageSourceDownloadResult>
-        downloadMessageSource(LiveConnectionSettings settings, std::string accountId,
-                              std::string emailId);
+        loadCachedMessageSource(std::string accountId, std::string emailId);
         [[nodiscard]] QueuedEmailMutationResult queueMoveEmail(std::string accountId,
                                                                std::string emailId,
                                                                std::string sourceMailboxId,
