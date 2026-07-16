@@ -178,6 +178,39 @@ namespace javelin::jmap::cache
             return javelin::jmap::contacts::summarizeContact(
                 query.value(0).toString().toStdString(), card);
         }
+
+        [[nodiscard]] std::optional<DatabaseError>
+        writeContacts(QSqlDatabase& database, const std::string_view accountId,
+                      const std::vector<javelin::jmap::contacts::ContactSummary>& contacts,
+                      const std::span<const std::string> destroyed)
+        {
+            for (const auto& contact : contacts)
+            {
+                if (const auto error = insertContact(database, contact))
+                {
+                    return error;
+                }
+            }
+            if (destroyed.empty())
+            {
+                return std::nullopt;
+            }
+
+            QSqlQuery remove{database};
+            remove.prepare(QStringLiteral(
+                "DELETE FROM contact_cards WHERE account_id=:account AND contact_id=:id"));
+            for (const auto& id : destroyed)
+            {
+                remove.bindValue(QStringLiteral(":account"),
+                                 QString::fromStdString(std::string{accountId}));
+                remove.bindValue(QStringLiteral(":id"), QString::fromStdString(id));
+                if (!remove.exec())
+                {
+                    return queryError(QStringLiteral("Delete contact"), remove);
+                }
+            }
+            return std::nullopt;
+        }
     } // namespace
 
     ContactRepository::ContactRepository(DatabaseConnection& connection) : m_connection(connection)
@@ -374,28 +407,9 @@ namespace javelin::jmap::cache
         }
 
         auto& database = m_connection.database();
-        for (const auto& contact : contacts)
+        if (const auto error = writeContacts(database, accountId, contacts, destroyed))
         {
-            if (const auto error = insertContact(database, contact))
-            {
-                return error;
-            }
-        }
-        if (!destroyed.empty())
-        {
-            QSqlQuery remove{database};
-            remove.prepare(QStringLiteral("DELETE FROM contact_cards WHERE account_id=:account AND "
-                                          "contact_id=:id"));
-            for (const auto& id : destroyed)
-            {
-                remove.bindValue(QStringLiteral(":account"),
-                                 QString::fromStdString(std::string{accountId}));
-                remove.bindValue(QStringLiteral(":id"), QString::fromStdString(id));
-                if (!remove.exec())
-                {
-                    return queryError(QStringLiteral("Delete contact"), remove);
-                }
-            }
+            return error;
         }
         QSqlQuery syncState{database};
         syncState.prepare(
@@ -411,6 +425,25 @@ namespace javelin::jmap::cache
             return queryError(QStringLiteral("Store contact state"), syncState);
         }
         return std::nullopt;
+    }
+
+    std::optional<DatabaseError> ContactRepository::projectContacts(
+        DatabaseTransaction& transaction, const std::string_view accountId,
+        const std::vector<javelin::jmap::contacts::ContactSummary>& contacts,
+        const std::span<const std::string> destroyed)
+    {
+        if (const auto error = m_connection.validate())
+        {
+            return error;
+        }
+        if (!transaction.isActive() || &transaction.connection() != &m_connection)
+        {
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message = QStringLiteral("Contact projection requires a matching transaction"),
+            };
+        }
+        return writeContacts(m_connection.database(), accountId, contacts, destroyed);
     }
 
     void ContactRepository::notifyChanged(const std::string_view accountId)
@@ -530,6 +563,27 @@ namespace javelin::jmap::cache
             }
         }
         return result;
+    }
+
+    std::variant<std::optional<javelin::jmap::contacts::ContactSummary>, DatabaseError>
+    ContactRepository::findContact(const std::string_view accountId,
+                                   const std::string_view contactId) const
+    {
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "SELECT account_id,contact_id,uid,kind,display_name,organization,document_json "
+            "FROM contact_cards WHERE account_id=:account AND contact_id=:id"));
+        query.bindValue(QStringLiteral(":account"), QString::fromStdString(std::string{accountId}));
+        query.bindValue(QStringLiteral(":id"), QString::fromStdString(std::string{contactId}));
+        if (!query.exec())
+        {
+            return queryError(QStringLiteral("Find contact"), query);
+        }
+        if (!query.next())
+        {
+            return std::optional<javelin::jmap::contacts::ContactSummary>{};
+        }
+        return readContact(query);
     }
 
     std::variant<std::optional<javelin::jmap::contacts::ContactSummary>, DatabaseError>

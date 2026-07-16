@@ -98,6 +98,14 @@ TEST_CASE("contact repository greedily caches, filters, and resolves email addre
     REQUIRE(std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(found).has_value());
     CHECK(std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(found)->displayName ==
           "Joe Bloggs");
+    const auto foundById = repository.findContact("a1", "c1");
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::contacts::ContactSummary>>(foundById));
+    REQUIRE(
+        std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(foundById).has_value());
+    CHECK(
+        std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(foundById)->displayName ==
+        "Joe Bloggs");
 
     javelin::jmap::contacts::ContactIdentityLookup identities{repository};
     QString changedAccount;
@@ -159,11 +167,18 @@ TEST_CASE("contact repository greedily caches, filters, and resolves email addre
     REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(commitResult));
     auto commit = std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(commitResult));
     REQUIRE_FALSE(
-        repository
-            .upsertContacts(commit, "a1", {contact("c3", "Committed", "c@example.test")}, {}, "c3")
+        repository.projectContacts(commit, "a1", {contact("c3", "Committed", "c@example.test")}, {})
             .has_value());
     REQUIRE_FALSE(commit.commit().has_value());
     CHECK(changedAccount.isEmpty());
     repository.notifyChanged("a1");
     CHECK(changedAccount == QStringLiteral("a1"));
+    const auto projected = repository.findContact("a1", "c3");
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::contacts::ContactSummary>>(projected));
+    REQUIRE(
+        std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(projected).has_value());
+    CHECK(
+        std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(projected)->displayName ==
+        "Committed");
 }

@@ -49,6 +49,10 @@ namespace javelin::jmap::cache
         upsertContacts(DatabaseTransaction& transaction, std::string_view accountId,
                        const std::vector<javelin::jmap::contacts::ContactSummary>& contacts,
                        std::span<const std::string> destroyed, std::string_view state);
+        [[nodiscard]] std::optional<DatabaseError>
+        projectContacts(DatabaseTransaction& transaction, std::string_view accountId,
+                        const std::vector<javelin::jmap::contacts::ContactSummary>& contacts,
+                        std::span<const std::string> destroyed);
         [[nodiscard]] std::variant<std::vector<javelin::jmap::api::AddressBook>, DatabaseError>
         listAddressBooks(std::string_view accountId, bool includeUnsubscribed = true) const;
         [[nodiscard]] std::variant<std::vector<ContactAccount>, DatabaseError>
@@ -58,6 +62,9 @@ namespace javelin::jmap::cache
         listContacts(std::string_view accountId,
                      std::optional<std::string_view> addressBookId = std::nullopt,
                      std::string_view filter = {}) const;
+        [[nodiscard]] std::variant<std::optional<javelin::jmap::contacts::ContactSummary>,
+                                   DatabaseError>
+        findContact(std::string_view accountId, std::string_view contactId) const;
         [[nodiscard]] std::variant<std::optional<javelin::jmap::contacts::ContactSummary>,
                                    DatabaseError>
         findByEmail(std::string_view normalizedEmail,
