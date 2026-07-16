@@ -391,6 +391,44 @@ TEST_CASE("patch paths escape JSON Pointer map keys", "[jmap][method][patch]")
           "mailboxIds/team~1ops~0urgent");
 }
 
+TEST_CASE("PatchObject projection applies escaped paths and null removals", "[jmap][method][patch]")
+{
+    const auto result = javelin::jmap::api::applyPatchObject(
+        R"({"name":"old","nested":{"a":1,"x":true},"items":[1,2],"team/ops":{"~key":"old"}})",
+        R"({"name":"new","nested/a":2,"nested/x":null,"team~1ops/~0key":"new"})");
+
+    REQUIRE(std::holds_alternative<std::string>(result));
+    CHECK(std::get<std::string>(result) ==
+          R"({"name":"new","nested":{"a":2},"items":[1,2],"team/ops":{"~key":"new"}})");
+}
+
+TEST_CASE("PatchObject projection rejects paths forbidden by RFC 8620", "[jmap][method][patch]")
+{
+    const auto missing =
+        javelin::jmap::api::applyPatchObject(R"({"nested":{}})", R"({"missing/value":1})");
+    REQUIRE(std::holds_alternative<javelin::jmap::api::PatchObjectError>(missing));
+    CHECK(std::get<javelin::jmap::api::PatchObjectError>(missing).code ==
+          javelin::jmap::api::PatchObjectErrorCode::MissingParent);
+
+    const auto array =
+        javelin::jmap::api::applyPatchObject(R"({"items":[1,2]})", R"({"items/0":3})");
+    REQUIRE(std::holds_alternative<javelin::jmap::api::PatchObjectError>(array));
+    CHECK(std::get<javelin::jmap::api::PatchObjectError>(array).code ==
+          javelin::jmap::api::PatchObjectErrorCode::ArrayTraversal);
+
+    const auto conflict = javelin::jmap::api::applyPatchObject(R"({"nested":{"a":1}})",
+                                                               R"({"nested":{},"nested/a":2})");
+    REQUIRE(std::holds_alternative<javelin::jmap::api::PatchObjectError>(conflict));
+    CHECK(std::get<javelin::jmap::api::PatchObjectError>(conflict).code ==
+          javelin::jmap::api::PatchObjectErrorCode::ConflictingPointers);
+
+    const auto invalid =
+        javelin::jmap::api::applyPatchObject(R"({"nested":{}})", R"({"nested/~2":1})");
+    REQUIRE(std::holds_alternative<javelin::jmap::api::PatchObjectError>(invalid));
+    CHECK(std::get<javelin::jmap::api::PatchObjectError>(invalid).code ==
+          javelin::jmap::api::PatchObjectErrorCode::InvalidPointer);
+}
+
 TEST_CASE("email set responses parse updated and failed ids", "[jmap][method][mail]")
 {
     const auto result = javelin::jmap::api::parseEmailSetResponse(
