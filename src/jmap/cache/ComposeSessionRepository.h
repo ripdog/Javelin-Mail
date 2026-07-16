@@ -18,6 +18,9 @@ namespace javelin::jmap::cache
 
         [[nodiscard]] std::optional<DatabaseError>
         upsert(const javelin::jmap::submission::DraftSnapshot& snapshot);
+        [[nodiscard]] std::optional<DatabaseError>
+        upsert(DatabaseTransaction& transaction,
+               const javelin::jmap::submission::DraftSnapshot& snapshot);
         [[nodiscard]]
         std::variant<std::optional<javelin::jmap::submission::DraftSnapshot>, DatabaseError>
         find(std::string_view composeSessionId) const;

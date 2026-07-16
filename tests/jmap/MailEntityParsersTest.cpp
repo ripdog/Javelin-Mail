@@ -60,6 +60,24 @@ TEST_CASE("email fixtures parse into typed email entities", "[jmap][domain]")
     CHECK(result.value->replyTo.front().email == "support@example.com");
 }
 
+TEST_CASE("email cache documents round-trip through the durable mutation format",
+          "[jmap][domain][consistency]")
+{
+    const auto parsed =
+        javelin::jmap::domain::parseEmail(javelin::tests::loadFixture("jmap/entities/email.json"));
+    REQUIRE(parsed.ok());
+    const auto serialized = javelin::jmap::domain::serializeEmail(*parsed.value);
+    REQUIRE(serialized.has_value());
+    const auto roundTrip = javelin::jmap::domain::parseEmail(*serialized);
+    REQUIRE(roundTrip.ok());
+    CHECK(roundTrip.value->id == parsed.value->id);
+    CHECK(roundTrip.value->mailboxIds == parsed.value->mailboxIds);
+    CHECK(roundTrip.value->keywords == parsed.value->keywords);
+    CHECK(roundTrip.value->subject == parsed.value->subject);
+    REQUIRE(roundTrip.value->from.size() == parsed.value->from.size());
+    CHECK(roundTrip.value->from.front().email == parsed.value->from.front().email);
+}
+
 TEST_CASE("email parser ignores unknown server fields and missing optional arrays",
           "[jmap][domain]")
 {

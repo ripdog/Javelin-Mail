@@ -130,13 +130,13 @@ template <> struct glz::meta<RawEmail>
 {
     using T = RawEmail;
 
-    static constexpr auto value = glz::object(
-        "id", &T::id, "blobId", &T::blobId, "threadId", &T::threadId, "mailboxIds", &T::mailboxIds,
-        "keywords", &T::keywords, "size", &T::size, "receivedAt", &T::receivedAt, "sentAt",
-        &T::sentAt, "messageId", &T::messageId, "inReplyTo", &T::inReplyTo, "references",
-        &T::references, "hasAttachment", &T::hasAttachment, "subject", &T::subject, "from",
-        &T::from, "to", &T::to, "cc", &T::cc, "bcc", &T::bcc, "replyTo", &T::replyTo, "preview",
-        &T::preview);
+    static constexpr auto value =
+        glz::object("id", &T::id, "blobId", &T::blobId, "threadId", &T::threadId, "mailboxIds",
+                    &T::mailboxIds, "keywords", &T::keywords, "size", &T::size, "receivedAt",
+                    &T::receivedAt, "sentAt", &T::sentAt, "messageId", &T::messageId, "inReplyTo",
+                    &T::inReplyTo, "references", &T::references, "hasAttachment", &T::hasAttachment,
+                    "subject", &T::subject, "from", &T::from, "to", &T::to, "cc", &T::cc, "bcc",
+                    &T::bcc, "replyTo", &T::replyTo, "preview", &T::preview);
 };
 
 template <> struct glz::meta<RawIdentity>
@@ -195,6 +195,43 @@ namespace javelin::jmap::domain
                     .preview = std::move(rawEmail.preview),
                 };
             });
+    }
+
+    std::optional<std::string> serializeEmail(const Email& email)
+    {
+        const auto enabledMap = [](const std::vector<std::string>& values)
+        {
+            std::unordered_map<std::string, bool> result;
+            for (const auto& value : values)
+                result.emplace(value, true);
+            return result;
+        };
+        std::string json;
+        if (glz::write_json(
+                RawEmail{
+                    .id = email.id,
+                    .blobId = email.blobId,
+                    .threadId = email.threadId,
+                    .mailboxIds = enabledMap(email.mailboxIds),
+                    .keywords = enabledMap(email.keywords),
+                    .size = email.size,
+                    .receivedAt = email.receivedAt,
+                    .sentAt = email.sentAt,
+                    .messageId = email.messageId,
+                    .inReplyTo = email.inReplyTo,
+                    .references = email.references,
+                    .hasAttachment = email.hasAttachment,
+                    .subject = email.subject,
+                    .from = email.from,
+                    .to = email.to,
+                    .cc = email.cc,
+                    .bcc = email.bcc,
+                    .replyTo = email.replyTo,
+                    .preview = email.preview,
+                },
+                json))
+            return std::nullopt;
+        return json;
     }
 
     ParsedObject<Identity> parseIdentity(std::string_view json)

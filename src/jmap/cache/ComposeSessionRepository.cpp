@@ -119,8 +119,8 @@ namespace javelin::jmap::cache
             return values;
         }
 
-        [[nodiscard]] QJsonArray
-        serializeAttachments(const std::vector<javelin::jmap::submission::DraftAttachment>& attachments)
+        [[nodiscard]] QJsonArray serializeAttachments(
+            const std::vector<javelin::jmap::submission::DraftAttachment>& attachments)
         {
             QJsonArray array;
             for (const auto& attachment : attachments)
@@ -132,8 +132,7 @@ namespace javelin::jmap::cache
                               QString::fromStdString(attachment.displayName));
                 object.insert(QStringLiteral("mediaType"),
                               QString::fromStdString(attachment.mediaType));
-                object.insert(QStringLiteral("size"),
-                              static_cast<qint64>(attachment.size));
+                object.insert(QStringLiteral("size"), static_cast<qint64>(attachment.size));
                 if (attachment.blobId.has_value())
                 {
                     object.insert(QStringLiteral("blobId"),
@@ -170,31 +169,27 @@ namespace javelin::jmap::cache
 
                 const auto object = item.toObject();
                 attachments.push_back(javelin::jmap::submission::DraftAttachment{
-                    .localFilePath = object.value(QStringLiteral("localFilePath"))
-                                         .toString()
-                                         .toStdString(),
-                    .displayName = object.value(QStringLiteral("displayName"))
-                                       .toString()
-                                       .toStdString(),
-                    .mediaType = object.value(QStringLiteral("mediaType"))
-                                     .toString()
-                                     .toStdString(),
+                    .localFilePath =
+                        object.value(QStringLiteral("localFilePath")).toString().toStdString(),
+                    .displayName =
+                        object.value(QStringLiteral("displayName")).toString().toStdString(),
+                    .mediaType = object.value(QStringLiteral("mediaType")).toString().toStdString(),
                     .size = static_cast<std::uint64_t>(
                         object.value(QStringLiteral("size")).toInteger(0)),
-                    .blobId = object.value(QStringLiteral("blobId")).isUndefined()
-                                  ? std::nullopt
-                                  : std::optional<std::string>{
-                                        object.value(QStringLiteral("blobId"))
-                                            .toString()
-                                            .toStdString()},
+                    .blobId =
+                        object.value(QStringLiteral("blobId")).isUndefined()
+                            ? std::nullopt
+                            : std::optional<std::string>{object.value(QStringLiteral("blobId"))
+                                                             .toString()
+                                                             .toStdString()},
                     .inlineDisposition =
                         object.value(QStringLiteral("inlineDisposition")).toBool(false),
-                    .contentId = object.value(QStringLiteral("contentId")).isUndefined()
-                                     ? std::nullopt
-                                     : std::optional<std::string>{
-                                           object.value(QStringLiteral("contentId"))
-                                               .toString()
-                                               .toStdString()},
+                    .contentId =
+                        object.value(QStringLiteral("contentId")).isUndefined()
+                            ? std::nullopt
+                            : std::optional<std::string>{object.value(QStringLiteral("contentId"))
+                                                             .toString()
+                                                             .toStdString()},
                 });
             }
 
@@ -216,10 +211,9 @@ namespace javelin::jmap::cache
             object.insert(QStringLiteral("mode"),
                           QString::fromStdString(
                               std::string{javelin::jmap::submission::toString(snapshot.mode)}));
-            object.insert(
-                QStringLiteral("editorMode"),
-                QString::fromStdString(
-                    std::string{javelin::jmap::submission::toString(snapshot.editorMode)}));
+            object.insert(QStringLiteral("editorMode"),
+                          QString::fromStdString(std::string{
+                              javelin::jmap::submission::toString(snapshot.editorMode)}));
             object.insert(QStringLiteral("identityId"),
                           QString::fromStdString(snapshot.identityId));
             object.insert(QStringLiteral("to"), serializeAddresses(snapshot.to));
@@ -227,8 +221,7 @@ namespace javelin::jmap::cache
             object.insert(QStringLiteral("bcc"), serializeAddresses(snapshot.bcc));
             if (snapshot.subject.has_value())
             {
-                object.insert(QStringLiteral("subject"),
-                              QString::fromStdString(*snapshot.subject));
+                object.insert(QStringLiteral("subject"), QString::fromStdString(*snapshot.subject));
             }
             object.insert(QStringLiteral("plainTextBody"),
                           QString::fromStdString(snapshot.plainTextBody));
@@ -256,7 +249,8 @@ namespace javelin::jmap::cache
             }
 
             const auto object = document.object();
-            const auto composeSessionId = object.value(QStringLiteral("composeSessionId")).toString();
+            const auto composeSessionId =
+                object.value(QStringLiteral("composeSessionId")).toString();
             const auto accountId = object.value(QStringLiteral("accountId")).toString();
             const auto identityId = object.value(QStringLiteral("identityId")).toString();
             const auto modeValue = object.value(QStringLiteral("mode")).toString();
@@ -275,12 +269,12 @@ namespace javelin::jmap::cache
             return javelin::jmap::submission::DraftSnapshot{
                 .composeSessionId = composeSessionId.toStdString(),
                 .accountId = accountId.toStdString(),
-                .draftEmailId = object.value(QStringLiteral("draftEmailId")).isUndefined()
-                                    ? std::nullopt
-                                    : std::optional<std::string>{
-                                          object.value(QStringLiteral("draftEmailId"))
-                                              .toString()
-                                              .toStdString()},
+                .draftEmailId =
+                    object.value(QStringLiteral("draftEmailId")).isUndefined()
+                        ? std::nullopt
+                        : std::optional<std::string>{object.value(QStringLiteral("draftEmailId"))
+                                                         .toString()
+                                                         .toStdString()},
                 .mode = *mode,
                 .editorMode = *editorMode,
                 .identityId = identityId.toStdString(),
@@ -289,10 +283,9 @@ namespace javelin::jmap::cache
                 .bcc = deserializeAddresses(object.value(QStringLiteral("bcc"))),
                 .subject = object.value(QStringLiteral("subject")).isUndefined()
                                ? std::nullopt
-                               : std::optional<std::string>{
-                                     object.value(QStringLiteral("subject"))
-                                         .toString()
-                                         .toStdString()},
+                               : std::optional<std::string>{object.value(QStringLiteral("subject"))
+                                                                .toString()
+                                                                .toStdString()},
                 .plainTextBody =
                     object.value(QStringLiteral("plainTextBody")).toString().toStdString(),
                 .htmlBody = object.value(QStringLiteral("htmlBody")).toString().toStdString(),
@@ -323,7 +316,27 @@ namespace javelin::jmap::cache
         {
             return error;
         }
+        auto transactionResult =
+            DatabaseTransaction::begin(m_connection, QStringLiteral("Store compose session"));
+        if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
+            return *error;
+        auto transaction = std::get<DatabaseTransaction>(std::move(transactionResult));
+        if (const auto error = upsert(transaction, snapshot))
+            return error;
+        return transaction.commit();
+    }
 
+    std::optional<DatabaseError>
+    ComposeSessionRepository::upsert(DatabaseTransaction& transaction,
+                                     const javelin::jmap::submission::DraftSnapshot& snapshot)
+    {
+        if (const auto error = m_connection.validate())
+            return error;
+        if (!transaction.isActive() || &transaction.connection() != &m_connection)
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message = QStringLiteral("Compose update requires a matching transaction"),
+            };
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
             "INSERT INTO compose_sessions ("
@@ -350,10 +363,9 @@ namespace javelin::jmap::cache
         query.bindValue(QStringLiteral(":mode"),
                         QString::fromStdString(
                             std::string{javelin::jmap::submission::toString(snapshot.mode)}));
-        query.bindValue(
-            QStringLiteral(":editor_mode"),
-            QString::fromStdString(
-                std::string{javelin::jmap::submission::toString(snapshot.editorMode)}));
+        query.bindValue(QStringLiteral(":editor_mode"),
+                        QString::fromStdString(
+                            std::string{javelin::jmap::submission::toString(snapshot.editorMode)}));
         query.bindValue(QStringLiteral(":snapshot_json"), serializeSnapshot(snapshot));
         if (!query.exec())
         {
@@ -372,9 +384,9 @@ namespace javelin::jmap::cache
         }
 
         QSqlQuery query{m_connection.database()};
-        query.prepare(QStringLiteral(
-            "SELECT snapshot_json FROM compose_sessions WHERE compose_session_id = "
-            ":compose_session_id"));
+        query.prepare(
+            QStringLiteral("SELECT snapshot_json FROM compose_sessions WHERE compose_session_id = "
+                           ":compose_session_id"));
         query.bindValue(QStringLiteral(":compose_session_id"),
                         QString::fromStdString(std::string{composeSessionId}));
         if (!query.exec())
@@ -420,7 +432,8 @@ namespace javelin::jmap::cache
         return snapshots;
     }
 
-    std::optional<DatabaseError> ComposeSessionRepository::remove(const std::string_view composeSessionId)
+    std::optional<DatabaseError>
+    ComposeSessionRepository::remove(const std::string_view composeSessionId)
     {
         if (const auto error = m_connection.validate())
         {

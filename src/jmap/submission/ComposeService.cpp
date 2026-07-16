@@ -15,6 +15,7 @@
 #include "jmap/cache/QueryService.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/cache/SubmissionRepository.h"
+#include "jmap/submission/DraftMutationJournal.h"
 #include "jmap/sync/ConsistencyDomain.h"
 #include "jmap/sync/EmailMutationJournal.h"
 #include "jmap/sync/MutationJournal.h"
@@ -1147,34 +1148,88 @@ namespace javelin::jmap::submission
                      }},
                 },
             .update = {},
-            .destroy = snapshot.draftEmailId.has_value()
-                           ? std::vector<std::string>{*snapshot.draftEmailId}
-                           : std::vector<std::string>{},
+            .destroy = {},
         };
+        const auto methodRequest = javelin::jmap::api::emailSet(request);
+        if (!methodRequest.has_value())
+            co_return javelin::jmap::OperationError{
+                .message = QStringLiteral("Failed to encode the Email/set draft request."),
+            };
+
+        javelin::jmap::cache::EmailRepository emailRepository{m_connection};
+        std::optional<javelin::jmap::domain::Email> baseEmail;
+        if (snapshot.draftEmailId.has_value())
+        {
+            const auto found = emailRepository.find(snapshot.accountId, *snapshot.draftEmailId);
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&found))
+                co_return javelin::jmap::operationError(*error);
+            baseEmail = std::get<std::optional<javelin::jmap::domain::Email>>(found);
+            if (!baseEmail.has_value())
+                co_return javelin::jmap::OperationError{
+                    .code = javelin::jmap::OperationErrorCode::LocalStorageFailure,
+                    .message = QStringLiteral("The draft being replaced is not cached."),
+                };
+        }
+        const auto operationGroupId =
+            QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
+        const auto temporaryEmailId = std::string{"local-"} + operationGroupId;
+        const auto temporaryThreadId = std::string{"local-thread-"} + operationGroupId;
+        const auto projectedEmail = emailFromDraft(
+            snapshot, *identityIt, draftsMailbox->id,
+            {
+                .id = temporaryEmailId,
+                .blobId = {},
+                .threadId = baseEmail.has_value() ? baseEmail->threadId : temporaryThreadId,
+                .size = 0,
+            });
+        const DraftMutationGroup draftMutation{
+            .operationGroupId = operationGroupId,
+            .createMutationId = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString(),
+            .destroyMutationId =
+                snapshot.draftEmailId.has_value()
+                    ? std::optional<std::string>{QUuid::createUuid()
+                                                     .toString(QUuid::WithoutBraces)
+                                                     .toStdString()}
+                    : std::nullopt,
+            .accountId = snapshot.accountId,
+            .temporaryEmailId = temporaryEmailId,
+            .replacedEmailId = snapshot.draftEmailId,
+            .baseEmail = baseEmail,
+            .projectedEmail = projectedEmail,
+            .baseSnapshot = snapshot,
+        };
+        DraftMutationJournal draftJournal{m_connection};
+        if (const auto error = draftJournal.queue(draftMutation))
+            co_return javelin::jmap::operationError(*error);
+        if (const auto error =
+                draftJournal.transition(draftMutation, sync::MutationStatus::InFlight))
+            co_return javelin::jmap::operationError(*error);
 
         javelin::jmap::api::MethodCaller methodCaller{m_methodTransport};
         javelin::jmap::api::RequestBuilder builder;
         builder.useCore().useMail();
-        const auto methodRequest = javelin::jmap::api::emailSet(request);
-        if (!methodRequest.has_value())
-        {
-            co_return javelin::jmap::OperationError{
-                .message = QStringLiteral("Failed to encode the Email/set draft request."),
-            };
-        }
         const auto handle = builder.call(*methodRequest, "draft-save");
         const auto result = co_await methodCaller.call(
             buildApiRequestContext(settings, snapshot.accountId, session), builder);
         if (const auto* error = std::get_if<javelin::jmap::api::TransportError>(&result))
         {
+            if (const auto transitionError =
+                    draftJournal.transition(draftMutation, sync::MutationStatus::Unknown))
+                co_return javelin::jmap::operationError(*transitionError);
             co_return javelin::jmap::operationError(*error);
         }
         if (const auto* error = std::get_if<javelin::jmap::api::AuthError>(&result))
         {
+            if (const auto transitionError =
+                    draftJournal.transition(draftMutation, sync::MutationStatus::Pending))
+                co_return javelin::jmap::operationError(*transitionError);
             co_return javelin::jmap::operationError(*error);
         }
         if (const auto* error = std::get_if<javelin::jmap::api::ProtocolError>(&result))
         {
+            if (const auto transitionError =
+                    draftJournal.transition(draftMutation, sync::MutationStatus::Unknown))
+                co_return javelin::jmap::operationError(*transitionError);
             co_return javelin::jmap::operationError(*error);
         }
 
@@ -1184,12 +1239,30 @@ namespace javelin::jmap::submission
         if (const auto* error =
                 std::get_if<javelin::jmap::api::ResponseReaderError>(&responseResult))
         {
+            if (error->code == javelin::jmap::api::ResponseReaderErrorCode::MethodError)
+            {
+                if (const auto rejectionError = draftJournal.rejectCreation(
+                        draftMutation,
+                        error->methodError.has_value()
+                            ? std::optional<std::string_view>{error->methodError->type}
+                            : std::nullopt))
+                    co_return javelin::jmap::operationError(*rejectionError);
+            }
+            else if (const auto transitionError =
+                         draftJournal.transition(draftMutation, sync::MutationStatus::Unknown))
+                co_return javelin::jmap::operationError(*transitionError);
             co_return javelin::jmap::operationError(*error);
         }
         const auto& response = std::get<javelin::jmap::api::EmailSetResponse>(responseResult);
         if (!response.notCreated.empty() || response.created.empty())
         {
+            if (const auto rejectionError = draftJournal.rejectCreation(
+                    draftMutation, response.notCreated.empty() ? std::optional<std::string_view>{}
+                                                               : std::optional<std::string_view>{
+                                                                     response.notCreated.front()}))
+                co_return javelin::jmap::operationError(*rejectionError);
             co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::Conflict,
                 .message = QStringLiteral("The server rejected the draft save request."),
             };
         }
@@ -1197,32 +1270,97 @@ namespace javelin::jmap::submission
         const auto createdIt = response.created.find("draft");
         if (createdIt == response.created.end())
         {
+            if (const auto transitionError =
+                    draftJournal.transition(draftMutation, sync::MutationStatus::Unknown))
+                co_return javelin::jmap::operationError(*transitionError);
             co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::ProtocolViolation,
                 .message = QStringLiteral("The draft save response did not include the new draft."),
             };
         }
 
-        javelin::jmap::cache::EmailRepository emailRepository{m_connection};
         const auto synthesizedEmail =
             emailFromDraft(snapshot, *identityIt, draftsMailbox->id, createdIt->second);
-        if (const auto error = emailRepository.upsertMany(snapshot.accountId, {synthesizedEmail}))
-        {
-            co_return javelin::jmap::operationError(*error);
-        }
-        if (snapshot.draftEmailId.has_value() && *snapshot.draftEmailId != createdIt->second.id)
-        {
-            const std::vector<std::string> staleDraftIds{*snapshot.draftEmailId};
-            if (const auto error = emailRepository.removeMany(snapshot.accountId, staleDraftIds))
-            {
-                co_return javelin::jmap::operationError(*error);
-            }
-        }
-
         snapshot.draftEmailId = createdIt->second.id;
-        javelin::jmap::cache::ComposeSessionRepository composeRepository{m_connection};
-        if (const auto error = composeRepository.upsert(snapshot))
-        {
+        if (const auto error = draftJournal.acceptCreation(draftMutation, synthesizedEmail,
+                                                           snapshot, response.newState))
             co_return javelin::jmap::operationError(*error);
+
+        if (draftMutation.replacedEmailId.has_value())
+        {
+            const auto destroyRequest = javelin::jmap::api::emailSet({
+                .accountId = snapshot.accountId,
+                .create = {},
+                .update = {},
+                .destroy = {*draftMutation.replacedEmailId},
+            });
+            if (!destroyRequest.has_value())
+            {
+                if (const auto transitionError = draftJournal.transitionDestruction(
+                        draftMutation, sync::MutationStatus::Unknown))
+                    co_return javelin::jmap::operationError(*transitionError);
+            }
+            else
+            {
+                javelin::jmap::api::RequestBuilder destroyBuilder;
+                destroyBuilder.useCore().useMail();
+                const auto destroyHandle =
+                    destroyBuilder.call(*destroyRequest, "draft-replace-destroy");
+                const auto destroyResult = co_await methodCaller.call(
+                    buildApiRequestContext(settings, snapshot.accountId, session), destroyBuilder);
+                if (std::holds_alternative<javelin::jmap::api::ResponseEnvelope>(destroyResult))
+                {
+                    const javelin::jmap::api::ResponseReader destroyReader{
+                        std::get<javelin::jmap::api::ResponseEnvelope>(destroyResult)};
+                    const auto parsedDestroy = destroyReader.require(destroyHandle);
+                    if (const auto* readerError =
+                            std::get_if<javelin::jmap::api::ResponseReaderError>(&parsedDestroy))
+                    {
+                        if (readerError->code ==
+                            javelin::jmap::api::ResponseReaderErrorCode::MethodError)
+                        {
+                            if (const auto rejectionError = draftJournal.rejectDestruction(
+                                    draftMutation, response.newState,
+                                    readerError->methodError.has_value()
+                                        ? std::optional<std::string_view>{readerError->methodError
+                                                                              ->type}
+                                        : std::nullopt))
+                                co_return javelin::jmap::operationError(*rejectionError);
+                        }
+                        else if (const auto transitionError = draftJournal.transitionDestruction(
+                                     draftMutation, sync::MutationStatus::Unknown))
+                            co_return javelin::jmap::operationError(*transitionError);
+                    }
+                    else
+                    {
+                        const auto& destroyResponse =
+                            std::get<javelin::jmap::api::EmailSetResponse>(parsedDestroy);
+                        if (std::ranges::find(destroyResponse.destroyed,
+                                              *draftMutation.replacedEmailId) !=
+                            destroyResponse.destroyed.end())
+                        {
+                            if (const auto acceptedError = draftJournal.acceptDestruction(
+                                    draftMutation, destroyResponse.newState))
+                                co_return javelin::jmap::operationError(*acceptedError);
+                        }
+                        else if (std::ranges::find(destroyResponse.notDestroyed,
+                                                   *draftMutation.replacedEmailId) !=
+                                 destroyResponse.notDestroyed.end())
+                        {
+                            if (const auto rejectionError =
+                                    draftJournal.rejectDestruction(draftMutation, response.newState,
+                                                                   *draftMutation.replacedEmailId))
+                                co_return javelin::jmap::operationError(*rejectionError);
+                        }
+                        else if (const auto transitionError = draftJournal.transitionDestruction(
+                                     draftMutation, sync::MutationStatus::Unknown))
+                            co_return javelin::jmap::operationError(*transitionError);
+                    }
+                }
+                else if (const auto transitionError = draftJournal.transitionDestruction(
+                             draftMutation, sync::MutationStatus::Unknown))
+                    co_return javelin::jmap::operationError(*transitionError);
+            }
         }
 
         co_return DraftSaveSummary{

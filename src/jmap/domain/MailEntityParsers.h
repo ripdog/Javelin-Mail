@@ -23,6 +23,7 @@ namespace javelin::jmap::domain
     [[nodiscard]] ParsedObject<Mailbox> parseMailbox(std::string_view json);
     [[nodiscard]] ParsedObject<Thread> parseThread(std::string_view json);
     [[nodiscard]] ParsedObject<Email> parseEmail(std::string_view json);
+    [[nodiscard]] std::optional<std::string> serializeEmail(const Email& email);
     [[nodiscard]] ParsedObject<Identity> parseIdentity(std::string_view json);
 
 } // namespace javelin::jmap::domain

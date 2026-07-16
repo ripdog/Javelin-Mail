@@ -270,6 +270,8 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/submission/ComposeService.cpp
     src/jmap/submission/ComposeService.h
     src/jmap/submission/ComposeTypes.h
+    src/jmap/submission/DraftMutationJournal.cpp
+    src/jmap/submission/DraftMutationJournal.h
     src/jmap/sieve/SieveService.cpp
     src/jmap/sieve/SieveService.h
     src/jmap/sieve/SieveMutationJournal.cpp
@@ -479,6 +481,8 @@ add_library(javelin_jmap STATIC
     src/jmap/submission/ComposeService.cpp
     src/jmap/submission/ComposeService.h
     src/jmap/submission/ComposeTypes.h
+    src/jmap/submission/DraftMutationJournal.cpp
+    src/jmap/submission/DraftMutationJournal.h
     src/jmap/sieve/SieveService.cpp
     src/jmap/sieve/SieveService.h
     src/jmap/sieve/SieveMutationJournal.cpp

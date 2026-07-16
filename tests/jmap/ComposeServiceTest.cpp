@@ -204,9 +204,18 @@ TEST_CASE("compose sending uses the account selected with the From identity",
     transport.results = {draftCreatedResponse(), submittedResponse()};
     transport.beforeReturn = [&transport, &connection]
     {
+        javelin::jmap::cache::EmailRepository emails{connection};
+        if (transport.requests.size() == 1)
+        {
+            const auto draftIds = emails.listMailboxEmailIds("account-2", "account-2-drafts");
+            REQUIRE(std::holds_alternative<std::vector<std::string>>(draftIds));
+            const auto& values = std::get<std::vector<std::string>>(draftIds);
+            REQUIRE(values.size() == 1);
+            CHECK(values.front().starts_with("local-"));
+            return;
+        }
         if (transport.requests.size() != 2)
             return;
-        javelin::jmap::cache::EmailRepository emails{connection};
         const auto found = emails.find("account-2", "draft-2");
         REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(found));
         const auto& email = std::get<std::optional<javelin::jmap::domain::Email>>(found);
@@ -340,4 +349,169 @@ TEST_CASE("an ambiguous submission keeps the optimistic Sent projection durable"
     CHECK(std::get<std::vector<javelin::jmap::sync::MutationRecord>>(emailMutations).size() == 1);
     CHECK(std::get<std::vector<javelin::jmap::sync::MutationRecord>>(submissionMutations).size() ==
           1);
+}
+
+TEST_CASE("draft replacement creates the new draft before destroying the old one",
+          "[jmap][submission][draft][consistency]")
+{
+    ensureApplication();
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("compose-draft-replacement-test"),
+        .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    seedAccount(connection, "account-2", "https://account-2.example.test/jmap", "identity-2",
+                "sender@example.test");
+    javelin::jmap::cache::EmailRepository emails{connection};
+    REQUIRE_FALSE(emails
+                      .upsertMany("account-2", {{
+                                                   .id = "draft-old",
+                                                   .blobId = "blob-old",
+                                                   .threadId = "thread-old",
+                                                   .mailboxIds = {"account-2-drafts"},
+                                                   .keywords = {"$seen", "$draft"},
+                                                   .size = 10,
+                                                   .receivedAt = "2026-07-17T00:00:00Z",
+                                                   .sentAt = std::nullopt,
+                                                   .messageId = {},
+                                                   .inReplyTo = {},
+                                                   .references = {},
+                                                   .hasAttachment = false,
+                                                   .subject = "Old",
+                                                   .from = {},
+                                                   .to = {},
+                                                   .cc = {},
+                                                   .bcc = {},
+                                                   .replyTo = {},
+                                                   .preview = std::nullopt,
+                                               }})
+                      .has_value());
+
+    FakeTransport transport;
+    transport.results = {
+        javelin::jmap::api::HttpResponse{
+            .statusCode = 200,
+            .body = QByteArrayLiteral(
+                R"({"methodResponses":[["Email/set",{"accountId":"account-2","oldState":"email-2","newState":"email-3","created":{"draft":{"id":"draft-3","blobId":"blob-3","threadId":"thread-old","size":43}},"updated":{},"destroyed":[],"notCreated":{},"notUpdated":{},"notDestroyed":{}},"draft-save"]],"sessionState":"session-3"})"),
+        },
+        javelin::jmap::api::HttpResponse{
+            .statusCode = 200,
+            .body = QByteArrayLiteral(
+                R"({"methodResponses":[["Email/set",{"accountId":"account-2","oldState":"email-3","newState":"email-4","created":{},"updated":{},"destroyed":["draft-old"],"notCreated":{},"notUpdated":{},"notDestroyed":{}},"draft-replace-destroy"]],"sessionState":"session-4"})"),
+        },
+    };
+    transport.beforeReturn = [&transport, &emails]
+    {
+        const auto oldDraft = emails.find("account-2", "draft-old");
+        REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(oldDraft));
+        CHECK_FALSE(std::get<std::optional<javelin::jmap::domain::Email>>(oldDraft).has_value());
+        if (transport.requests.size() == 1)
+        {
+            const auto ids = emails.listMailboxEmailIds("account-2", "account-2-drafts");
+            REQUIRE(std::holds_alternative<std::vector<std::string>>(ids));
+            const auto& values = std::get<std::vector<std::string>>(ids);
+            REQUIRE(values.size() == 1);
+            CHECK(values.front().starts_with("local-"));
+        }
+        else
+        {
+            const auto accepted = emails.find("account-2", "draft-3");
+            REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(accepted));
+            REQUIRE(std::get<std::optional<javelin::jmap::domain::Email>>(accepted).has_value());
+        }
+    };
+    javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
+    javelin::jmap::JmapCore core{connection, transport, methodTransport};
+    javelin::jmap::submission::ComposeService service{connection, transport, methodTransport, core};
+    const auto result = QCoro::waitFor(service.saveDraft(
+        {
+            .sessionUrl = "https://account-2.example.test/.well-known/jmap",
+            .loginEmail = "shared-login@example.test",
+            .apiKey = "account-2-secret",
+        },
+        {
+            .composeSessionId = "compose-2",
+            .accountId = "account-2",
+            .draftEmailId = "draft-old",
+            .mode = javelin::jmap::submission::ComposeMode::NewMessage,
+            .editorMode = javelin::jmap::submission::BodyEditorMode::RichText,
+            .identityId = "identity-2",
+            .to = {{.name = std::nullopt, .email = "recipient@example.test"}},
+            .cc = {},
+            .bcc = {},
+            .subject = "Replacement",
+            .plainTextBody = "Body",
+            .htmlBody = "<p>Body</p>",
+            .threading = {},
+            .attachments = {},
+        }));
+    REQUIRE(std::holds_alternative<javelin::jmap::submission::DraftSaveSummary>(result));
+    CHECK(std::get<javelin::jmap::submission::DraftSaveSummary>(result).draftEmailId == "draft-3");
+    REQUIRE(transport.requests.size() == 2);
+    CHECK(transport.requests.front().body.contains("\"create\""));
+    CHECK_FALSE(transport.requests.front().body.contains("\"destroy\":[\"draft-old\"]"));
+    CHECK(transport.requests.back().body.contains("\"destroy\":[\"draft-old\"]"));
+}
+
+TEST_CASE("an ambiguous draft creation keeps the local draft projection",
+          "[jmap][submission][draft][consistency]")
+{
+    ensureApplication();
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("compose-draft-unknown-test"),
+        .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    seedAccount(connection, "account-2", "https://account-2.example.test/jmap", "identity-2",
+                "sender@example.test");
+    FakeTransport transport;
+    transport.results = {
+        javelin::jmap::api::TransportError{
+            .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
+            .message = "Connection closed after dispatch",
+        },
+    };
+    javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
+    javelin::jmap::JmapCore core{connection, transport, methodTransport};
+    javelin::jmap::submission::ComposeService service{connection, transport, methodTransport, core};
+    const auto result = QCoro::waitFor(service.saveDraft(
+        {
+            .sessionUrl = "https://account-2.example.test/.well-known/jmap",
+            .loginEmail = "shared-login@example.test",
+            .apiKey = "account-2-secret",
+        },
+        {
+            .composeSessionId = "compose-2",
+            .accountId = "account-2",
+            .draftEmailId = std::nullopt,
+            .mode = javelin::jmap::submission::ComposeMode::NewMessage,
+            .editorMode = javelin::jmap::submission::BodyEditorMode::RichText,
+            .identityId = "identity-2",
+            .to = {{.name = std::nullopt, .email = "recipient@example.test"}},
+            .cc = {},
+            .bcc = {},
+            .subject = "Uncertain draft",
+            .plainTextBody = "Body",
+            .htmlBody = "<p>Body</p>",
+            .threading = {},
+            .attachments = {},
+        }));
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
+    javelin::jmap::cache::EmailRepository emails{connection};
+    const auto ids = emails.listMailboxEmailIds("account-2", "account-2-drafts");
+    REQUIRE(std::holds_alternative<std::vector<std::string>>(ids));
+    const auto& values = std::get<std::vector<std::string>>(ids);
+    REQUIRE(values.size() == 1);
+    CHECK(values.front().starts_with("local-"));
+    javelin::jmap::sync::MutationJournalRepository journal{connection};
+    const auto unknown = journal.listByStatus({.accountId = "account-2", .dataType = "Email"},
+                                              javelin::jmap::sync::MutationStatus::Unknown, 10);
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::MutationRecord>>(unknown));
+    CHECK(std::get<std::vector<javelin::jmap::sync::MutationRecord>>(unknown).size() == 1);
 }
