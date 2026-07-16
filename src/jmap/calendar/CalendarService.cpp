@@ -42,7 +42,7 @@ namespace javelin::jmap::calendar
                        const javelin::jmap::sync::RefreshFence& fence)
         {
             javelin::jmap::sync::ConsistencyDomainRepository repository{connection};
-            const auto result = repository.isCurrent(fence);
+            const auto result = repository.canCommitRefresh(fence);
             if (const auto* cacheError = std::get_if<cache::DatabaseError>(&result))
                 return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
             return std::get<bool>(result);

@@ -24,6 +24,7 @@ namespace javelin::jmap::contacts
         std::optional<std::string> operationGroupId;
         std::string accountId;
         std::string objectId;
+        std::optional<std::string> creationId;
         ContactMutationKind kind = ContactMutationKind::Update;
         sync::MutationStatus status = sync::MutationStatus::Pending;
         std::string requestedDocument;
@@ -46,6 +47,10 @@ namespace javelin::jmap::contacts
               std::span<const std::string> destroyedIds);
         [[nodiscard]] std::variant<std::vector<ContactMutationRecord>, cache::DatabaseError>
         listForContact(std::string_view accountId, std::string_view contactId) const;
+        [[nodiscard]] std::optional<cache::DatabaseError>
+        transition(const std::vector<ContactMutationRecord>& records, sync::MutationStatus status,
+                   std::optional<std::string_view> acceptedState = std::nullopt,
+                   std::optional<std::string_view> errorJson = std::nullopt);
         [[nodiscard]] std::optional<cache::DatabaseError>
         restoreRejected(const std::vector<ContactMutationRecord>& records,
                         std::optional<std::string_view> errorJson = std::nullopt);

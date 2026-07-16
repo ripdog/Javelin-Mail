@@ -3,6 +3,7 @@
 #include "jmap/api/Error.h"
 #include "jmap/api/JmapMethodTransport.h"
 #include "jmap/api/MethodCaller.h"
+#include "jmap/api/PatchObject.h"
 #include "jmap/api/RequestBuilder.h"
 #include "jmap/api/Session.h"
 #include "jmap/api/Transport.h"
@@ -10,6 +11,7 @@
 #include "jmap/cache/ContactRepository.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/cache/SyncStateRepository.h"
+#include "jmap/contacts/ContactMutationJournal.h"
 #include "jmap/contacts/ContactTypes.h"
 #include "jmap/sync/ConsistencyDomain.h"
 #include "jmap/sync/MutationJournal.h"
@@ -17,9 +19,12 @@
 #include <glaze/glaze.hpp>
 
 #include <QUrl>
+#include <QUuid>
 
 #include <algorithm>
+#include <array>
 #include <limits>
+#include <span>
 #include <unordered_set>
 #include <utility>
 
@@ -118,7 +123,7 @@ namespace javelin::jmap::contacts
                        const javelin::jmap::sync::RefreshFence& fence)
         {
             javelin::jmap::sync::ConsistencyDomainRepository repository{connection};
-            const auto result = repository.isCurrent(fence);
+            const auto result = repository.canCommitRefresh(fence);
             if (const auto* cacheError = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
                 return error(cacheError->message,
                              javelin::jmap::OperationErrorCode::LocalStorageFailure);
@@ -404,15 +409,10 @@ namespace javelin::jmap::contacts
         }
 
         [[nodiscard]] std::optional<std::string>
-        createdId(const javelin::jmap::api::SetResult& result)
+        createdObjectId(const javelin::jmap::api::ContactDocument& document)
         {
-            if (result.created.empty())
-            {
-                return std::nullopt;
-            }
-            auto json = result.created.begin()->second.json;
             detail::CreatedObject object;
-            if (glz::read<glz::opts{.error_on_unknown_keys = false}>(object, json) ||
+            if (glz::read<glz::opts{.error_on_unknown_keys = false}>(object, document.json) ||
                 object.id.empty())
             {
                 return std::nullopt;
@@ -420,13 +420,161 @@ namespace javelin::jmap::contacts
             return object.id;
         }
 
-        [[nodiscard]] QCoro::Task<ContactMutationResult>
+        [[nodiscard]] std::optional<std::string>
+        createdId(const javelin::jmap::api::SetResult& result)
+        {
+            if (result.created.empty())
+            {
+                return std::nullopt;
+            }
+            return createdObjectId(result.created.begin()->second);
+        }
+
+        struct PreparedContactMutations
+        {
+            std::vector<ContactMutationRecord> records;
+            std::vector<ContactSummary> projectedContacts;
+            std::vector<std::string> destroyedIds;
+        };
+
+        [[nodiscard]] std::string newMutationId()
+        {
+            return QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
+        }
+
+        [[nodiscard]] std::variant<PreparedContactMutations, javelin::jmap::OperationError>
+        prepareContactMutations(javelin::jmap::cache::ContactRepository& repository,
+                                const javelin::jmap::api::ContactCardSetRequest& request)
+        {
+            PreparedContactMutations prepared;
+            prepared.records.reserve(request.create.size() + request.update.size() +
+                                     request.destroy.size());
+
+            for (const auto& [creationId, document] : request.create)
+            {
+                const auto mutationId = newMutationId();
+                const auto temporaryId = std::string{"local-"} + mutationId;
+                std::optional<std::string> projectedDocument;
+                if (auto projected =
+                        summarizeContact(request.accountId, javelin::jmap::api::ContactCard{
+                                                                .id = temporaryId,
+                                                                .uid = {},
+                                                                .kind = {},
+                                                                .document = document.json,
+                                                            }))
+                {
+                    projectedDocument = document.json;
+                    prepared.projectedContacts.push_back(std::move(*projected));
+                }
+                prepared.records.push_back({
+                    .mutationId = mutationId,
+                    .operationGroupId = std::nullopt,
+                    .accountId = request.accountId,
+                    .objectId = temporaryId,
+                    .creationId = creationId,
+                    .kind = ContactMutationKind::Create,
+                    .status = javelin::jmap::sync::MutationStatus::Pending,
+                    .requestedDocument = document.json,
+                    .baseDocument = std::nullopt,
+                    .projectedDocument = std::move(projectedDocument),
+                    .baseState = request.ifInState,
+                    .acceptedState = std::nullopt,
+                    .errorJson = std::nullopt,
+                });
+            }
+
+            for (const auto& [contactId, patch] : request.update)
+            {
+                const auto cached = repository.findContact(request.accountId, contactId);
+                if (const auto* cacheError =
+                        std::get_if<javelin::jmap::cache::DatabaseError>(&cached))
+                {
+                    return error(cacheError->message,
+                                 javelin::jmap::OperationErrorCode::LocalStorageFailure);
+                }
+                const auto& base =
+                    std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(cached);
+                std::optional<std::string> projectedDocument;
+                if (base.has_value())
+                {
+                    auto applied = javelin::jmap::api::applyPatchObject(base->document, patch.json);
+                    if (auto* json = std::get_if<std::string>(&applied))
+                    {
+                        if (auto projected =
+                                summarizeContact(request.accountId, javelin::jmap::api::ContactCard{
+                                                                        .id = contactId,
+                                                                        .uid = {},
+                                                                        .kind = {},
+                                                                        .document = *json,
+                                                                    }))
+                        {
+                            projectedDocument = *json;
+                            prepared.projectedContacts.push_back(std::move(*projected));
+                        }
+                    }
+                }
+                prepared.records.push_back({
+                    .mutationId = newMutationId(),
+                    .operationGroupId = std::nullopt,
+                    .accountId = request.accountId,
+                    .objectId = contactId,
+                    .creationId = std::nullopt,
+                    .kind = ContactMutationKind::Update,
+                    .status = javelin::jmap::sync::MutationStatus::Pending,
+                    .requestedDocument = patch.json,
+                    .baseDocument = base.has_value() ? std::optional<std::string>{base->document}
+                                                     : std::nullopt,
+                    .projectedDocument = std::move(projectedDocument),
+                    .baseState = request.ifInState,
+                    .acceptedState = std::nullopt,
+                    .errorJson = std::nullopt,
+                });
+            }
+
+            for (const auto& contactId : request.destroy)
+            {
+                const auto cached = repository.findContact(request.accountId, contactId);
+                if (const auto* cacheError =
+                        std::get_if<javelin::jmap::cache::DatabaseError>(&cached))
+                {
+                    return error(cacheError->message,
+                                 javelin::jmap::OperationErrorCode::LocalStorageFailure);
+                }
+                const auto& base =
+                    std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(cached);
+                if (base.has_value())
+                {
+                    prepared.destroyedIds.push_back(contactId);
+                }
+                prepared.records.push_back({
+                    .mutationId = newMutationId(),
+                    .operationGroupId = std::nullopt,
+                    .accountId = request.accountId,
+                    .objectId = contactId,
+                    .creationId = std::nullopt,
+                    .kind = ContactMutationKind::Destroy,
+                    .status = javelin::jmap::sync::MutationStatus::Pending,
+                    .requestedDocument = "{}",
+                    .baseDocument = base.has_value() ? std::optional<std::string>{base->document}
+                                                     : std::nullopt,
+                    .projectedDocument = std::nullopt,
+                    .baseState = request.ifInState,
+                    .acceptedState = std::nullopt,
+                    .errorJson = std::nullopt,
+                });
+            }
+            return prepared;
+        }
+
+        using SetObjectsResult =
+            std::variant<javelin::jmap::api::SetResult, javelin::jmap::OperationError>;
+
+        [[nodiscard]] QCoro::Task<SetObjectsResult>
         setObjects(javelin::jmap::api::JmapMethodTransport& methodTransport,
                    javelin::jmap::cache::DatabaseConnection& connection,
                    javelin::jmap::LiveConnectionSettings settings, std::string ownerAccountId,
                    std::string accountId, std::string methodName,
-                   std::optional<std::string> serialized,
-                   std::vector<javelin::jmap::sync::ConsistencyDomain> affectedDomains)
+                   std::optional<std::string> serialized)
         {
             if (!serialized.has_value())
             {
@@ -479,31 +627,274 @@ namespace javelin::jmap::contacts
                 co_return error(QStringLiteral("Invalid Contacts set response: %1")
                                     .arg(QString::fromStdString(parsed.error.value_or("unknown"))));
             }
-            if (!parsed.value->notCreated.empty() || !parsed.value->notUpdated.empty() ||
-                !parsed.value->notDestroyed.empty())
-            {
-                co_return error(QStringLiteral("The server rejected one or more Contacts changes."),
-                                javelin::jmap::OperationErrorCode::Conflict);
-            }
+            co_return *parsed.value;
+        }
+
+        [[nodiscard]] bool hasSetFailures(const javelin::jmap::api::SetResult& result)
+        {
+            return !result.notCreated.empty() || !result.notUpdated.empty() ||
+                   !result.notDestroyed.empty();
+        }
+
+        [[nodiscard]] bool hasSetSuccesses(const javelin::jmap::api::SetResult& result)
+        {
+            return !result.created.empty() || !result.updated.empty() || !result.destroyed.empty();
+        }
+
+        [[nodiscard]] ContactMutationResult
+        commitSetResult(javelin::jmap::cache::DatabaseConnection& connection,
+                        const javelin::jmap::api::SetResult& result,
+                        const std::span<const javelin::jmap::sync::ConsistencyDomain> domains)
+        {
             auto transactionResult = javelin::jmap::sync::MutationProjectionTransaction::begin(
                 connection, QStringLiteral("Apply Contacts mutation response"));
             if (const auto* cacheError =
                     std::get_if<javelin::jmap::cache::DatabaseError>(&transactionResult))
             {
-                co_return error(cacheError->message,
-                                javelin::jmap::OperationErrorCode::LocalStorageFailure);
+                return error(cacheError->message,
+                             javelin::jmap::OperationErrorCode::LocalStorageFailure);
             }
             auto transaction = std::get<javelin::jmap::sync::MutationProjectionTransaction>(
                 std::move(transactionResult));
-            if (const auto cacheError = transaction.advance(affectedDomains))
-                co_return error(cacheError->message,
-                                javelin::jmap::OperationErrorCode::LocalStorageFailure);
+            if (hasSetSuccesses(result))
+            {
+                if (const auto cacheError = transaction.advance(domains))
+                    return error(cacheError->message,
+                                 javelin::jmap::OperationErrorCode::LocalStorageFailure);
+            }
             if (const auto cacheError = transaction.commit())
-                co_return error(cacheError->message,
-                                javelin::jmap::OperationErrorCode::LocalStorageFailure);
-            co_return ContactMutationSummary{.accountId = accountId,
-                                             .newState = parsed.value->newState,
-                                             .createdId = createdId(*parsed.value)};
+                return error(cacheError->message,
+                             javelin::jmap::OperationErrorCode::LocalStorageFailure);
+            if (hasSetFailures(result))
+            {
+                return error(QStringLiteral("The server rejected one or more Contacts changes."),
+                             javelin::jmap::OperationErrorCode::Conflict);
+            }
+            return ContactMutationSummary{.accountId = result.accountId,
+                                          .newState = result.newState,
+                                          .createdId = createdId(result)};
+        }
+
+        [[nodiscard]] ContactMutationResult
+        reconcileContactMutations(javelin::jmap::cache::DatabaseConnection& connection,
+                                  javelin::jmap::cache::ContactRepository& repository,
+                                  const std::vector<ContactMutationRecord>& records,
+                                  const javelin::jmap::api::SetResult& result)
+        {
+            struct RejectedMutation
+            {
+                const ContactMutationRecord* record;
+                std::string errorJson;
+            };
+            std::vector<const ContactMutationRecord*> acceptedRecords;
+            std::vector<RejectedMutation> rejectedRecords;
+            std::vector<ContactSummary> projectedContacts;
+            std::vector<std::string> removedIds;
+            for (const auto& record : records)
+            {
+                if (record.kind == ContactMutationKind::Create)
+                {
+                    if (!record.creationId.has_value())
+                    {
+                        return error(
+                            QStringLiteral("A ContactCard creation lost its creation id."));
+                    }
+                    const auto created = result.created.find(*record.creationId);
+                    if (created == result.created.end())
+                    {
+                        const auto rejected = result.notCreated.find(*record.creationId);
+                        if (rejected == result.notCreated.end())
+                            return error(QStringLiteral(
+                                "The ContactCard/set response omitted a created object."));
+                        rejectedRecords.push_back(
+                            {.record = &record, .errorJson = rejected->second.json});
+                        removedIds.push_back(record.objectId);
+                        continue;
+                    }
+                    const auto contactId = createdObjectId(created->second);
+                    if (!contactId.has_value())
+                    {
+                        return error(QStringLiteral(
+                            "The ContactCard/set response omitted the created object id."));
+                    }
+                    const auto& baseDocument =
+                        record.projectedDocument.value_or(record.requestedDocument);
+                    const auto transformed =
+                        javelin::jmap::api::applyPatchObject(baseDocument, created->second.json);
+                    const auto* document = std::get_if<std::string>(&transformed);
+                    if (document == nullptr)
+                    {
+                        return error(QStringLiteral(
+                            "The ContactCard/set response contained an invalid transformation."));
+                    }
+                    auto summary =
+                        summarizeContact(record.accountId, javelin::jmap::api::ContactCard{
+                                                               .id = *contactId,
+                                                               .uid = {},
+                                                               .kind = {},
+                                                               .document = *document,
+                                                           });
+                    if (!summary.has_value())
+                    {
+                        return error(QStringLiteral(
+                            "The created ContactCard could not be materialized locally."));
+                    }
+                    acceptedRecords.push_back(&record);
+                    projectedContacts.push_back(std::move(*summary));
+                    removedIds.push_back(record.objectId);
+                    continue;
+                }
+                if (record.kind == ContactMutationKind::Update)
+                {
+                    const auto updated = result.updated.find(record.objectId);
+                    if (updated == result.updated.end())
+                    {
+                        const auto rejected = result.notUpdated.find(record.objectId);
+                        if (rejected == result.notUpdated.end())
+                            return error(QStringLiteral(
+                                "The ContactCard/set response omitted an updated object."));
+                        rejectedRecords.push_back(
+                            {.record = &record, .errorJson = rejected->second.json});
+                        if (record.baseDocument.has_value())
+                        {
+                            auto restored = summarizeContact(record.accountId,
+                                                             javelin::jmap::api::ContactCard{
+                                                                 .id = record.objectId,
+                                                                 .uid = {},
+                                                                 .kind = {},
+                                                                 .document = *record.baseDocument,
+                                                             });
+                            if (!restored.has_value())
+                                return error(QStringLiteral(
+                                    "A rejected ContactCard could not be restored locally."));
+                            projectedContacts.push_back(std::move(*restored));
+                        }
+                        continue;
+                    }
+                    acceptedRecords.push_back(&record);
+                    if (!record.projectedDocument.has_value())
+                    {
+                        continue;
+                    }
+                    const auto transformed = javelin::jmap::api::applyPatchObject(
+                        *record.projectedDocument, updated->second.json);
+                    const auto* document = std::get_if<std::string>(&transformed);
+                    if (document == nullptr)
+                    {
+                        return error(QStringLiteral(
+                            "The ContactCard/set response contained an invalid transformation."));
+                    }
+                    auto summary =
+                        summarizeContact(record.accountId, javelin::jmap::api::ContactCard{
+                                                               .id = record.objectId,
+                                                               .uid = {},
+                                                               .kind = {},
+                                                               .document = *document,
+                                                           });
+                    if (!summary.has_value())
+                    {
+                        return error(QStringLiteral(
+                            "The updated ContactCard could not be materialized locally."));
+                    }
+                    projectedContacts.push_back(std::move(*summary));
+                    continue;
+                }
+                if (std::ranges::find(result.destroyed, record.objectId) == result.destroyed.end())
+                {
+                    const auto rejected = result.notDestroyed.find(record.objectId);
+                    if (rejected == result.notDestroyed.end())
+                        return error(QStringLiteral(
+                            "The ContactCard/set response omitted a destroyed object."));
+                    rejectedRecords.push_back(
+                        {.record = &record, .errorJson = rejected->second.json});
+                    if (record.baseDocument.has_value())
+                    {
+                        auto restored =
+                            summarizeContact(record.accountId, javelin::jmap::api::ContactCard{
+                                                                   .id = record.objectId,
+                                                                   .uid = {},
+                                                                   .kind = {},
+                                                                   .document = *record.baseDocument,
+                                                               });
+                        if (!restored.has_value())
+                            return error(QStringLiteral(
+                                "A rejected ContactCard could not be restored locally."));
+                        projectedContacts.push_back(std::move(*restored));
+                    }
+                    continue;
+                }
+                acceptedRecords.push_back(&record);
+            }
+
+            auto transactionResult = javelin::jmap::sync::MutationProjectionTransaction::begin(
+                connection, QStringLiteral("Reconcile ContactCard mutations"));
+            if (const auto* cacheError =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&transactionResult))
+            {
+                return error(cacheError->message,
+                             javelin::jmap::OperationErrorCode::LocalStorageFailure);
+            }
+            auto transaction = std::get<javelin::jmap::sync::MutationProjectionTransaction>(
+                std::move(transactionResult));
+            for (const auto* record : acceptedRecords)
+            {
+                if (const auto cacheError = transaction.transition(
+                        record->mutationId, javelin::jmap::sync::MutationStatus::Accepted,
+                        result.newState))
+                {
+                    return error(cacheError->message,
+                                 javelin::jmap::OperationErrorCode::LocalStorageFailure);
+                }
+            }
+            for (const auto& rejected : rejectedRecords)
+            {
+                if (const auto cacheError = transaction.transition(
+                        rejected.record->mutationId, javelin::jmap::sync::MutationStatus::Rejected,
+                        std::nullopt, rejected.errorJson))
+                {
+                    return error(cacheError->message,
+                                 javelin::jmap::OperationErrorCode::LocalStorageFailure);
+                }
+            }
+            if (!acceptedRecords.empty())
+            {
+                const std::array domains{javelin::jmap::sync::ConsistencyDomain{
+                    .accountId = result.accountId,
+                    .dataType = "ContactCard",
+                }};
+                if (const auto cacheError = transaction.advance(domains))
+                    return error(cacheError->message,
+                                 javelin::jmap::OperationErrorCode::LocalStorageFailure);
+            }
+            if (const auto cacheError =
+                    repository.projectContacts(transaction.cacheTransaction(), result.accountId,
+                                               projectedContacts, removedIds))
+            {
+                return error(cacheError->message,
+                             javelin::jmap::OperationErrorCode::LocalStorageFailure);
+            }
+            for (const auto* record : acceptedRecords)
+            {
+                if (const auto cacheError = transaction.remove(record->mutationId))
+                {
+                    return error(cacheError->message,
+                                 javelin::jmap::OperationErrorCode::LocalStorageFailure);
+                }
+            }
+            if (const auto cacheError = transaction.commit())
+                return error(cacheError->message,
+                             javelin::jmap::OperationErrorCode::LocalStorageFailure);
+            repository.notifyChanged(result.accountId);
+            if (!rejectedRecords.empty())
+            {
+                return error(QStringLiteral("The server rejected one or more Contacts changes."),
+                             javelin::jmap::OperationErrorCode::Conflict);
+            }
+            return ContactMutationSummary{
+                .accountId = result.accountId,
+                .newState = result.newState,
+                .createdId = createdId(result),
+            };
         }
     } // namespace
 
@@ -652,10 +1043,18 @@ namespace javelin::jmap::contacts
                                     javelin::jmap::api::AddressBookSetRequest request)
     {
         const auto accountId = request.accountId;
-        co_return co_await setObjects(m_methodTransport, m_connection, std::move(settings),
-                                      std::move(ownerAccountId), accountId, "AddressBook/set",
-                                      javelin::jmap::api::serializeAddressBookSetRequest(request),
-                                      {{.accountId = accountId, .dataType = "AddressBook"}});
+        const auto result =
+            co_await setObjects(m_methodTransport, m_connection, std::move(settings),
+                                std::move(ownerAccountId), accountId, "AddressBook/set",
+                                javelin::jmap::api::serializeAddressBookSetRequest(request));
+        if (const auto* operationError = std::get_if<javelin::jmap::OperationError>(&result))
+            co_return *operationError;
+        const std::array domains{javelin::jmap::sync::ConsistencyDomain{
+            .accountId = accountId,
+            .dataType = "AddressBook",
+        }};
+        co_return commitSetResult(m_connection, std::get<javelin::jmap::api::SetResult>(result),
+                                  domains);
     }
 
     QCoro::Task<ContactMutationResult>
@@ -664,10 +1063,94 @@ namespace javelin::jmap::contacts
                                     javelin::jmap::api::ContactCardSetRequest request)
     {
         const auto accountId = request.accountId;
-        co_return co_await setObjects(m_methodTransport, m_connection, std::move(settings),
-                                      std::move(ownerAccountId), accountId, "ContactCard/set",
-                                      javelin::jmap::api::serializeContactCardSetRequest(request),
-                                      {{.accountId = accountId, .dataType = "ContactCard"}});
+        const auto serialized = javelin::jmap::api::serializeContactCardSetRequest(request);
+        if (!serialized.has_value())
+        {
+            co_return error(QStringLiteral("Unable to serialize the Contacts change."));
+        }
+        const auto sessionResult = loadSession(m_connection, ownerAccountId);
+        if (const auto* loadError = std::get_if<javelin::jmap::OperationError>(&sessionResult))
+        {
+            co_return *loadError;
+        }
+        const auto& session = std::get<javelin::jmap::api::Session>(sessionResult);
+        const auto account = session.accounts.find(accountId);
+        if (account == session.accounts.end() ||
+            !account->second.accountCapabilities.contacts.has_value())
+        {
+            co_return error(QStringLiteral("This account does not support JMAP Contacts."),
+                            javelin::jmap::OperationErrorCode::UnsupportedCapability);
+        }
+
+        const auto preparedResult = prepareContactMutations(m_repository, request);
+        if (const auto* operationError =
+                std::get_if<javelin::jmap::OperationError>(&preparedResult))
+        {
+            co_return *operationError;
+        }
+        auto prepared = std::get<PreparedContactMutations>(preparedResult);
+        ContactMutationJournal journal{m_connection, m_repository};
+        if (!prepared.records.empty())
+        {
+            if (const auto cacheError = journal.queue(prepared.records, prepared.projectedContacts,
+                                                      prepared.destroyedIds))
+            {
+                co_return error(cacheError->message,
+                                javelin::jmap::OperationErrorCode::LocalStorageFailure);
+            }
+            if (const auto cacheError = journal.transition(
+                    prepared.records, javelin::jmap::sync::MutationStatus::InFlight))
+            {
+                co_return error(cacheError->message,
+                                javelin::jmap::OperationErrorCode::LocalStorageFailure);
+            }
+        }
+
+        const auto result = co_await setObjects(m_methodTransport, m_connection,
+                                                std::move(settings), std::move(ownerAccountId),
+                                                accountId, "ContactCard/set", serialized);
+        if (const auto* operationError = std::get_if<javelin::jmap::OperationError>(&result))
+        {
+            if (!prepared.records.empty())
+            {
+                if (operationError->code == javelin::jmap::OperationErrorCode::Conflict)
+                {
+                    const auto errorJson = operationError->message.toStdString();
+                    if (const auto cacheError =
+                            journal.restoreRejected(prepared.records, errorJson))
+                    {
+                        co_return error(cacheError->message,
+                                        javelin::jmap::OperationErrorCode::LocalStorageFailure);
+                    }
+                }
+                else if (const auto cacheError = journal.transition(
+                             prepared.records, javelin::jmap::sync::MutationStatus::Unknown))
+                {
+                    co_return error(cacheError->message,
+                                    javelin::jmap::OperationErrorCode::LocalStorageFailure);
+                }
+            }
+            co_return *operationError;
+        }
+        if (prepared.records.empty())
+        {
+            const std::array domains{javelin::jmap::sync::ConsistencyDomain{
+                .accountId = accountId,
+                .dataType = "ContactCard",
+            }};
+            co_return commitSetResult(m_connection, std::get<javelin::jmap::api::SetResult>(result),
+                                      domains);
+        }
+        auto accepted = reconcileContactMutations(m_connection, m_repository, prepared.records,
+                                                  std::get<javelin::jmap::api::SetResult>(result));
+        if (const auto* reconciliationError = std::get_if<javelin::jmap::OperationError>(&accepted);
+            reconciliationError != nullptr &&
+            reconciliationError->code != javelin::jmap::OperationErrorCode::Conflict)
+        {
+            static_cast<void>(
+                journal.transition(prepared.records, javelin::jmap::sync::MutationStatus::Unknown));
+        }
+        co_return accepted;
     }
 
     QCoro::Task<ContactMutationResult>
@@ -681,10 +1164,14 @@ namespace javelin::jmap::contacts
         if (request.onSuccessDestroyOriginal && request.fromAccountId != accountId)
             affectedDomains.push_back(
                 {.accountId = request.fromAccountId, .dataType = "ContactCard"});
-        co_return co_await setObjects(m_methodTransport, m_connection, std::move(settings),
-                                      std::move(ownerAccountId), accountId, "ContactCard/copy",
-                                      javelin::jmap::api::serializeContactCardCopyRequest(request),
-                                      std::move(affectedDomains));
+        const auto result =
+            co_await setObjects(m_methodTransport, m_connection, std::move(settings),
+                                std::move(ownerAccountId), accountId, "ContactCard/copy",
+                                javelin::jmap::api::serializeContactCardCopyRequest(request));
+        if (const auto* operationError = std::get_if<javelin::jmap::OperationError>(&result))
+            co_return *operationError;
+        co_return commitSetResult(m_connection, std::get<javelin::jmap::api::SetResult>(result),
+                                  affectedDomains);
     }
 
     QCoro::Task<ContactUploadResult>

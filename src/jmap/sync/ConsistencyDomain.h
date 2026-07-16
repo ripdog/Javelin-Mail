@@ -32,6 +32,8 @@ namespace javelin::jmap::sync
         captureRefresh(const ConsistencyDomain& domain) const;
         [[nodiscard]] std::variant<bool, javelin::jmap::cache::DatabaseError>
         isCurrent(const RefreshFence& fence) const;
+        [[nodiscard]] std::variant<bool, javelin::jmap::cache::DatabaseError>
+        canCommitRefresh(const RefreshFence& fence) const;
         [[nodiscard]] std::variant<std::uint64_t, javelin::jmap::cache::DatabaseError>
         advanceMutation(const ConsistencyDomain& domain);
         [[nodiscard]] std::variant<std::uint64_t, javelin::jmap::cache::DatabaseError>

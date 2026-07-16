@@ -272,9 +272,9 @@ namespace javelin::jmap::contacts
             return found != parsed.keywords.end() && found->second;
         };
         ContactSummary summary{.accountId = std::move(accountId),
-                               .id = card.id,
-                               .uid = card.uid,
-                               .kind = card.kind,
+                               .id = card.id.empty() ? parsed.id : card.id,
+                               .uid = card.uid.empty() ? parsed.uid : card.uid,
+                               .kind = card.kind.empty() ? parsed.kind : card.kind,
                                .displayName = {},
                                .organization = std::nullopt,
                                .emails = {},

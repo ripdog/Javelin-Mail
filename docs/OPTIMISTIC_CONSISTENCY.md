@@ -74,8 +74,10 @@ server did not apply them.
 A refresh captures the current domain generation before network I/O. Immediately before its cache
 transaction, it verifies that the generation is unchanged.
 
-If the generation changed, the complete response is obsolete. The refresh discards all fetched
-objects, query windows, and state tokens and schedules a coalesced replacement refresh. Partial
+If the generation changed, the complete response is obsolete. A refresh also cannot commit while
+the domain has an active `pending`, `in_flight`, `accepted`, or `unknown` projection unless its
+typed adapter rebases those mutations as part of the same cache transaction. The conservative
+default is to discard the complete response and schedule a coalesced replacement refresh. Partial
 application is forbidden.
 
 This fence is a causality check, not a timeout or an optimistic grace period. A refresh begun after

@@ -184,29 +184,27 @@ namespace javelin::jmap::cache
                       const std::vector<javelin::jmap::contacts::ContactSummary>& contacts,
                       const std::span<const std::string> destroyed)
         {
+            if (!destroyed.empty())
+            {
+                QSqlQuery remove{database};
+                remove.prepare(QStringLiteral(
+                    "DELETE FROM contact_cards WHERE account_id=:account AND contact_id=:id"));
+                for (const auto& id : destroyed)
+                {
+                    remove.bindValue(QStringLiteral(":account"),
+                                     QString::fromStdString(std::string{accountId}));
+                    remove.bindValue(QStringLiteral(":id"), QString::fromStdString(id));
+                    if (!remove.exec())
+                    {
+                        return queryError(QStringLiteral("Delete contact"), remove);
+                    }
+                }
+            }
             for (const auto& contact : contacts)
             {
                 if (const auto error = insertContact(database, contact))
                 {
                     return error;
-                }
-            }
-            if (destroyed.empty())
-            {
-                return std::nullopt;
-            }
-
-            QSqlQuery remove{database};
-            remove.prepare(QStringLiteral(
-                "DELETE FROM contact_cards WHERE account_id=:account AND contact_id=:id"));
-            for (const auto& id : destroyed)
-            {
-                remove.bindValue(QStringLiteral(":account"),
-                                 QString::fromStdString(std::string{accountId}));
-                remove.bindValue(QStringLiteral(":id"), QString::fromStdString(id));
-                if (!remove.exec())
-                {
-                    return queryError(QStringLiteral("Delete contact"), remove);
                 }
             }
             return std::nullopt;

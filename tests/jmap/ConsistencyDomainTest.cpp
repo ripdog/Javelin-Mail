@@ -1,4 +1,5 @@
 #include "jmap/sync/ConsistencyDomain.h"
+#include "jmap/sync/MutationJournal.h"
 
 #include <QCoreApplication>
 #include <QSqlQuery>
@@ -127,4 +128,54 @@ TEST_CASE("consistency-domain generations persist and advance monotonically",
     const auto generation = reopenedView.mutationGeneration(domain);
     REQUIRE(std::holds_alternative<std::uint64_t>(generation));
     CHECK(std::get<std::uint64_t>(generation) == 2);
+}
+
+TEST_CASE("active optimistic mutations prevent refresh commits without changing causality",
+          "[jmap][sync][consistency]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto connection = makeConnection(directory);
+    seedAccount(connection);
+
+    const javelin::jmap::sync::ConsistencyDomain domain{
+        .accountId = "account-1",
+        .dataType = "ContactCard",
+    };
+    javelin::jmap::sync::ConsistencyDomainRepository consistency{connection};
+    const auto fenceResult = consistency.captureRefresh(domain);
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::RefreshFence>(fenceResult));
+    const auto fence = std::get<javelin::jmap::sync::RefreshFence>(fenceResult);
+
+    javelin::jmap::sync::MutationJournalRepository journal{connection};
+    REQUIRE_FALSE(journal
+                      .put({
+                          .mutationId = "contact-1",
+                          .operationGroupId = std::nullopt,
+                          .domain = domain,
+                          .objectId = "card-1",
+                          .mutationKind = "contact_card_patch",
+                          .status = javelin::jmap::sync::MutationStatus::Pending,
+                          .payloadJson = "{}",
+                          .baseState = "c1",
+                          .acceptedState = std::nullopt,
+                          .errorJson = std::nullopt,
+                      })
+                      .has_value());
+
+    const auto current = consistency.isCurrent(fence);
+    REQUIRE(std::holds_alternative<bool>(current));
+    CHECK(std::get<bool>(current));
+    const auto blocked = consistency.canCommitRefresh(fence);
+    REQUIRE(std::holds_alternative<bool>(blocked));
+    CHECK_FALSE(std::get<bool>(blocked));
+
+    REQUIRE_FALSE(
+        journal.transition("contact-1", javelin::jmap::sync::MutationStatus::Rejected).has_value());
+    const auto unblocked = consistency.canCommitRefresh(fence);
+    REQUIRE(std::holds_alternative<bool>(unblocked));
+    CHECK(std::get<bool>(unblocked));
 }

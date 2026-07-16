@@ -11,6 +11,7 @@ namespace
     struct RawContactMutation
     {
         std::string kind;
+        std::optional<std::string> creationId;
         std::string requestedDocument;
         std::optional<std::string> baseDocument;
         std::optional<std::string> projectedDocument;
@@ -20,9 +21,9 @@ namespace
 template <> struct glz::meta<RawContactMutation>
 {
     using T = RawContactMutation;
-    static constexpr auto value =
-        glz::object("kind", &T::kind, "requestedDocument", &T::requestedDocument, "baseDocument",
-                    &T::baseDocument, "projectedDocument", &T::projectedDocument);
+    static constexpr auto value = glz::object(
+        "kind", &T::kind, "creationId", &T::creationId, "requestedDocument", &T::requestedDocument,
+        "baseDocument", &T::baseDocument, "projectedDocument", &T::projectedDocument);
 };
 
 namespace javelin::jmap::contacts
@@ -61,6 +62,7 @@ namespace javelin::jmap::contacts
             if (glz::write_json(
                     RawContactMutation{
                         .kind = std::string{kindName(record.kind)},
+                        .creationId = record.creationId,
                         .requestedDocument = record.requestedDocument,
                         .baseDocument = record.baseDocument,
                         .projectedDocument = record.projectedDocument,
@@ -111,6 +113,7 @@ namespace javelin::jmap::contacts
                 .operationGroupId = std::move(record.operationGroupId),
                 .accountId = std::move(record.domain.accountId),
                 .objectId = std::move(record.objectId),
+                .creationId = std::move(payload.creationId),
                 .kind = *kind,
                 .status = record.status,
                 .requestedDocument = std::move(payload.requestedDocument),
@@ -205,6 +208,35 @@ namespace javelin::jmap::contacts
             records.push_back(std::get<ContactMutationRecord>(std::move(typed)));
         }
         return records;
+    }
+
+    std::optional<cache::DatabaseError>
+    ContactMutationJournal::transition(const std::vector<ContactMutationRecord>& records,
+                                       const sync::MutationStatus status,
+                                       const std::optional<std::string_view> acceptedState,
+                                       const std::optional<std::string_view> errorJson)
+    {
+        if (records.empty())
+        {
+            return std::nullopt;
+        }
+        auto transactionResult = sync::MutationProjectionTransaction::begin(
+            m_connection, QStringLiteral("Transition ContactCard mutations"));
+        if (const auto* error = std::get_if<cache::DatabaseError>(&transactionResult))
+        {
+            return *error;
+        }
+        auto transaction =
+            std::get<sync::MutationProjectionTransaction>(std::move(transactionResult));
+        for (const auto& record : records)
+        {
+            if (const auto error =
+                    transaction.transition(record.mutationId, status, acceptedState, errorJson))
+            {
+                return error;
+            }
+        }
+        return transaction.commit();
     }
 
     std::optional<cache::DatabaseError>

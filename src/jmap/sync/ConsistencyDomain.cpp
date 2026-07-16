@@ -53,6 +53,35 @@ namespace javelin::jmap::sync
         return std::get<std::uint64_t>(generation) == fence.mutationGeneration;
     }
 
+    std::variant<bool, javelin::jmap::cache::DatabaseError>
+    ConsistencyDomainRepository::canCommitRefresh(const RefreshFence& fence) const
+    {
+        const auto current = isCurrent(fence);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&current))
+        {
+            return *error;
+        }
+        if (!std::get<bool>(current))
+        {
+            return false;
+        }
+
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "SELECT EXISTS(SELECT 1 FROM mutation_journal WHERE account_id=:account_id "
+            "AND data_type=:data_type AND status IN "
+            "('pending','in_flight','accepted','unknown'))"));
+        query.bindValue(QStringLiteral(":account_id"),
+                        QString::fromStdString(fence.domain.accountId));
+        query.bindValue(QStringLiteral(":data_type"),
+                        QString::fromStdString(fence.domain.dataType));
+        if (!query.exec() || !query.next())
+        {
+            return queryError(QStringLiteral("Check active consistency-domain mutations"), query);
+        }
+        return query.value(0).toInt() == 0;
+    }
+
     std::variant<std::uint64_t, javelin::jmap::cache::DatabaseError>
     ConsistencyDomainRepository::advanceMutation(const ConsistencyDomain& domain)
     {
