@@ -4,6 +4,7 @@
 #include "jmap/calendar/CalendarTypes.h"
 
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -49,6 +50,8 @@ namespace javelin::jmap::cache
         listAccounts() const;
         [[nodiscard]] std::variant<std::optional<std::string>, DatabaseError>
         stateToken(std::string_view accountId, std::string_view dataType) const;
+        [[nodiscard]] std::variant<std::optional<calendar::CalendarEvent>, DatabaseError>
+        findEvent(std::string_view accountId, std::string_view eventId) const;
         [[nodiscard]] std::optional<DatabaseError> storeStateTokens(std::string_view accountId,
                                                                     std::string_view calendarState,
                                                                     std::string_view eventState);
@@ -60,6 +63,12 @@ namespace javelin::jmap::cache
                         const std::vector<calendar::CalendarEvent>& events,
                         const std::vector<calendar::Occurrence>& occurrences,
                         const std::vector<std::string>& destroyedEventIds);
+        [[nodiscard]] std::optional<DatabaseError>
+        projectEvents(DatabaseTransaction& transaction, std::string_view accountId,
+                      std::string_view eventState,
+                      const std::vector<calendar::CalendarEvent>& events,
+                      const std::vector<calendar::Occurrence>& nonRecurringOccurrences,
+                      std::span<const std::string> destroyedEventIds);
 
         [[nodiscard]] std::variant<std::optional<CalendarWindow>, DatabaseError>
         loadWindow(std::string_view accountId, const calendar::LocalDateTime& start,

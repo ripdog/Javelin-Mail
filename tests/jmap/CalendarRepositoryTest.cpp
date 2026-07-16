@@ -6,6 +6,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <array>
 #include <memory>
 
 namespace
@@ -146,6 +148,58 @@ TEST_CASE("calendar windows retain occurrences referenced by overlapping windows
         .events = {event("e2", "2026-04-02T09:00:00")},
         .occurrences = {occurrence("e2", "2026-04-02T09:00:00")}};
     REQUIRE_FALSE(repository.reconcileWindow(second).has_value());
+
+    const auto foundEvent = repository.findEvent("a1", "e1");
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::calendar::CalendarEvent>>(foundEvent));
+    REQUIRE(
+        std::get<std::optional<javelin::jmap::calendar::CalendarEvent>>(foundEvent).has_value());
+    CHECK(std::get<std::optional<javelin::jmap::calendar::CalendarEvent>>(foundEvent)->title ==
+          "Event e1");
+
+    auto projectedEvent = event("e1", "2026-03-04T10:00:00");
+    projectedEvent.title = "Projected event";
+    auto projectedOccurrence = occurrence("e1", "2026-03-04T10:00:00");
+    projectedOccurrence.localEnd = {.value = "2026-03-04T11:00:00"};
+    auto projectResult = javelin::jmap::cache::DatabaseTransaction::begin(
+        connection, QStringLiteral("Project calendar event"));
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(projectResult));
+    auto projection = std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(projectResult));
+    REQUIRE_FALSE(repository
+                      .projectEvents(projection, "a1", "e1-state", {projectedEvent},
+                                     {projectedOccurrence}, {})
+                      .has_value());
+    REQUIRE_FALSE(projection.commit().has_value());
+    const auto projectedWindow =
+        repository.loadWindow("a1", first.start, first.end, first.displayTimeZone);
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::CalendarWindow>>(
+        projectedWindow));
+    const auto& projectedValue =
+        std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(projectedWindow);
+    REQUIRE(projectedValue.has_value());
+    REQUIRE(projectedValue->events.size() == 2);
+    const auto projectedItem = std::ranges::find(projectedValue->events, "e1",
+                                                 &javelin::jmap::calendar::CalendarEvent::id);
+    REQUIRE(projectedItem != projectedValue->events.end());
+    CHECK(projectedItem->title == "Projected event");
+    const auto projectedInstance = std::ranges::find(projectedValue->occurrences, "e1",
+                                                     &javelin::jmap::calendar::Occurrence::id);
+    REQUIRE(projectedInstance != projectedValue->occurrences.end());
+    CHECK(projectedInstance->localStart.value == "2026-03-04T10:00:00");
+
+    auto rollbackResult = javelin::jmap::cache::DatabaseTransaction::begin(
+        connection, QStringLiteral("Rollback calendar projection"));
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(rollbackResult));
+    auto rollback = std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(rollbackResult));
+    const std::array destroyed{std::string{"e2"}};
+    REQUIRE_FALSE(
+        repository.projectEvents(rollback, "a1", "e1-state", {}, {}, destroyed).has_value());
+    rollback.rollback();
+    const auto retainedEvent = repository.findEvent("a1", "e2");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::calendar::CalendarEvent>>(
+        retainedEvent));
+    CHECK(
+        std::get<std::optional<javelin::jmap::calendar::CalendarEvent>>(retainedEvent).has_value());
 
     auto refreshedFirst = first;
     refreshedFirst.queryState = "q3";
