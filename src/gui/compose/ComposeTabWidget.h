@@ -147,12 +147,9 @@ namespace javelin::gui::compose
         QPlainTextEdit* m_htmlSourceEdit = nullptr;
         javelin::gui::messageview::HtmlMessageView* m_previewView = nullptr;
         QTabWidget* m_editorTabs = nullptr;
-        QPushButton* m_addAttachmentButton = nullptr;
         QScrollArea* m_attachmentScrollArea = nullptr;
         QWidget* m_attachmentStrip = nullptr;
         QHBoxLayout* m_attachmentStripLayout = nullptr;
-        QPushButton* m_saveDraftButton = nullptr;
-        QPushButton* m_sendButton = nullptr;
         QPushButton* m_closeButton = nullptr;
         QAction* m_boldAction = nullptr;
         QAction* m_italicAction = nullptr;

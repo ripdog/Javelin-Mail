@@ -594,10 +594,6 @@ namespace javelin::gui::compose
                     scheduleWorkingCopySave();
                 });
 
-        connect(m_addAttachmentButton, &QPushButton::clicked, this,
-                &ComposeTabWidget::addAttachments);
-        connect(m_saveDraftButton, &QPushButton::clicked, this, [this] { startSaveDraft(false); });
-        connect(m_sendButton, &QPushButton::clicked, this, &ComposeTabWidget::startSend);
         connect(m_closeButton, &QPushButton::clicked, this, &ComposeTabWidget::requestClose);
 
         refreshPreview();
@@ -885,12 +881,6 @@ namespace javelin::gui::compose
         m_editorTabs->addTab(m_previewView, QStringLiteral("Preview"));
         rootLayout->addWidget(m_editorTabs, 1);
 
-        auto* attachmentRow = new QHBoxLayout();
-        attachmentRow->setSpacing(8);
-        m_addAttachmentButton = new QPushButton(QStringLiteral("Attach File"), this);
-        m_addAttachmentButton->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-        attachmentRow->addWidget(m_addAttachmentButton);
-
         m_attachmentScrollArea = new QScrollArea(this);
         m_attachmentScrollArea->setFrameShape(QFrame::NoFrame);
         m_attachmentScrollArea->setWidgetResizable(true);
@@ -903,17 +893,12 @@ namespace javelin::gui::compose
         m_attachmentStripLayout->setSpacing(6);
         m_attachmentStripLayout->addStretch(1);
         m_attachmentScrollArea->setWidget(m_attachmentStrip);
-        m_attachmentScrollArea->setFixedHeight(m_addAttachmentButton->sizeHint().height() + 4);
-        attachmentRow->addWidget(m_attachmentScrollArea, 1);
-        rootLayout->addLayout(attachmentRow);
+        m_attachmentScrollArea->setFixedHeight(fontMetrics().height() + 24);
+        rootLayout->addWidget(m_attachmentScrollArea);
 
         auto* footerRow = new QHBoxLayout();
-        m_saveDraftButton = new QPushButton(QStringLiteral("Save Draft"), this);
-        m_sendButton = new QPushButton(QStringLiteral("Send"), this);
         m_closeButton = new QPushButton(QStringLiteral("Close"), this);
         footerRow->addStretch(1);
-        footerRow->addWidget(m_saveDraftButton);
-        footerRow->addWidget(m_sendButton);
         footerRow->addWidget(m_closeButton);
         rootLayout->addLayout(footerRow);
     }
@@ -1137,6 +1122,7 @@ namespace javelin::gui::compose
 
     void ComposeTabWidget::populateAttachments()
     {
+        m_attachmentScrollArea->setVisible(!m_snapshot.attachments.empty());
         while (m_attachmentStripLayout->count() > 0)
         {
             auto* item = m_attachmentStripLayout->takeAt(0);
@@ -1256,10 +1242,7 @@ namespace javelin::gui::compose
         m_htmlSourceEdit->setEnabled(!busy);
         m_editorTabs->setEnabled(!busy);
         m_formatToolbar->setEnabled(!busy && m_editorTabs->currentIndex() == richEditorTabIndex);
-        m_addAttachmentButton->setEnabled(!busy);
         populateAttachments();
-        m_saveDraftButton->setEnabled(!busy);
-        m_sendButton->setEnabled(!busy);
         m_closeButton->setEnabled(!busy);
     }
 
