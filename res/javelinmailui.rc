@@ -64,6 +64,8 @@
     <Action name="contact_import"/>
     <Action name="contact_export"/>
     <Action name="contact_duplicates"/>
+    <Action name="contact_add_to_group"/>
+    <Action name="contact_remove_from_group"/>
     <Separator/>
     <Action name="contact_manage_address_books"/>
     <Action name="contact_refresh"/>

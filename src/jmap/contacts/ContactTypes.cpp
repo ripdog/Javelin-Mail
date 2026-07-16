@@ -1,5 +1,7 @@
 #include "jmap/contacts/ContactTypes.h"
 
+#include "jmap/api/PatchObject.h"
+
 #include <glaze/glaze.hpp>
 
 #include <algorithm>
@@ -714,6 +716,40 @@ namespace javelin::jmap::contacts
         std::string result;
         if (glz::write_json(value, result))
             return std::string_view{"Unable to serialize the contact."};
+        return result;
+    }
+
+    std::variant<std::string, std::string_view>
+    createContactGroupDocument(std::string name, std::string uid, std::string addressBookId)
+    {
+        if (name.empty() || uid.empty() || addressBookId.empty())
+            return std::string_view{"A contact group requires a name, uid, and address book."};
+        glz::generic document;
+        document["uid"] = std::move(uid);
+        document["kind"] = std::string{"group"};
+        document["name"]["full"] = std::move(name);
+        document["addressBookIds"][std::move(addressBookId)] = true;
+        document["members"].data = glz::generic::object_t{};
+        std::string result;
+        if (glz::write_json(document, result))
+            return std::string_view{"Unable to serialize the contact group."};
+        return result;
+    }
+
+    std::variant<std::string, std::string_view>
+    contactGroupMembershipPatch(const std::string_view memberUid, const bool included)
+    {
+        if (memberUid.empty())
+            return std::string_view{"A contact group member requires a uid."};
+        glz::generic patch;
+        const auto path = javelin::jmap::api::patchPath("members", memberUid);
+        if (included)
+            patch[path] = true;
+        else
+            patch[path] = nullptr;
+        std::string result;
+        if (glz::write_json(patch, result))
+            return std::string_view{"Unable to serialize the contact group membership change."};
         return result;
     }
 

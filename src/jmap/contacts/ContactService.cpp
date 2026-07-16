@@ -2164,6 +2164,123 @@ namespace javelin::jmap::contacts
     }
 
     QCoro::Task<ContactMutationResult>
+    ContactService::createGroup(javelin::jmap::LiveConnectionSettings settings,
+                                std::string ownerAccountId, CreateContactGroupCommand command)
+    {
+        const auto accounts = m_repository.listAccounts();
+        if (const auto* cacheError = std::get_if<javelin::jmap::cache::DatabaseError>(&accounts))
+            co_return error(cacheError->message,
+                            javelin::jmap::OperationErrorCode::LocalStorageFailure);
+        const auto& availableAccounts =
+            std::get<std::vector<javelin::jmap::cache::ContactAccount>>(accounts);
+        const auto account = std::ranges::find(availableAccounts, command.accountId,
+                                               &javelin::jmap::cache::ContactAccount::accountId);
+        if (account == availableAccounts.end())
+            co_return error(QStringLiteral("The Contacts account is unavailable."),
+                            javelin::jmap::OperationErrorCode::NotFound);
+        const auto books = m_repository.listAddressBooks(command.accountId);
+        if (const auto* cacheError = std::get_if<javelin::jmap::cache::DatabaseError>(&books))
+            co_return error(cacheError->message,
+                            javelin::jmap::OperationErrorCode::LocalStorageFailure);
+        const auto& addressBooks = std::get<std::vector<javelin::jmap::api::AddressBook>>(books);
+        const auto addressBook = std::ranges::find(addressBooks, command.addressBookId,
+                                                   &javelin::jmap::api::AddressBook::id);
+        if (account->isReadOnly || addressBook == addressBooks.end() ||
+            !addressBook->myRights.mayWrite)
+            co_return error(QStringLiteral("You do not have permission to create this group."),
+                            javelin::jmap::OperationErrorCode::PermissionDenied);
+        const auto uid = newMutationId();
+        const auto document = createContactGroupDocument(std::move(command.name), uid,
+                                                         std::move(command.addressBookId));
+        if (const auto* message = std::get_if<std::string_view>(&document))
+            co_return error(
+                QString::fromUtf8(message->data(), static_cast<qsizetype>(message->size())),
+                javelin::jmap::OperationErrorCode::InvalidUserInput);
+        const auto state = contactState(m_connection, command.accountId);
+        if (const auto* operationError = std::get_if<javelin::jmap::OperationError>(&state))
+            co_return *operationError;
+        javelin::jmap::api::ContactCardSetRequest request{
+            .accountId = std::move(command.accountId),
+            .ifInState = std::get<std::optional<std::string>>(state),
+            .create = {},
+            .update = {},
+            .destroy = {},
+        };
+        request.create.emplace("new-group-" + uid, javelin::jmap::api::ContactDocument{
+                                                       .json = std::get<std::string>(document)});
+        co_return co_await setContactCards(std::move(settings), std::move(ownerAccountId),
+                                           std::move(request));
+    }
+
+    QCoro::Task<ContactMutationResult>
+    ContactService::setGroupMembership(javelin::jmap::LiveConnectionSettings settings,
+                                       std::string ownerAccountId,
+                                       SetContactGroupMembershipCommand command)
+    {
+        const auto cached = m_repository.findContact(command.accountId, command.groupId);
+        if (const auto* cacheError = std::get_if<javelin::jmap::cache::DatabaseError>(&cached))
+            co_return error(cacheError->message,
+                            javelin::jmap::OperationErrorCode::LocalStorageFailure);
+        const auto& group =
+            std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(cached);
+        if (!group.has_value() || group->kind != "group")
+            co_return error(QStringLiteral("The selected contact group is unavailable."),
+                            javelin::jmap::OperationErrorCode::NotFound);
+        const auto accounts = m_repository.listAccounts();
+        if (const auto* cacheError = std::get_if<javelin::jmap::cache::DatabaseError>(&accounts))
+            co_return error(cacheError->message,
+                            javelin::jmap::OperationErrorCode::LocalStorageFailure);
+        const auto& availableAccounts =
+            std::get<std::vector<javelin::jmap::cache::ContactAccount>>(accounts);
+        const auto account = std::ranges::find(availableAccounts, command.accountId,
+                                               &javelin::jmap::cache::ContactAccount::accountId);
+        const auto books = m_repository.listAddressBooks(command.accountId);
+        if (const auto* cacheError = std::get_if<javelin::jmap::cache::DatabaseError>(&books))
+            co_return error(cacheError->message,
+                            javelin::jmap::OperationErrorCode::LocalStorageFailure);
+        const auto& addressBooks = std::get<std::vector<javelin::jmap::api::AddressBook>>(books);
+        if (account == availableAccounts.end() ||
+            !contactActionRights(account->isReadOnly, addressBooks, group->addressBookIds)
+                 .mayModify)
+            co_return error(QStringLiteral("You do not have permission to change this group."),
+                            javelin::jmap::OperationErrorCode::PermissionDenied);
+        const auto editor = contactEditorData(group->document);
+        const auto* data = std::get_if<ContactEditorData>(&editor);
+        if (data == nullptr)
+            co_return error(QStringLiteral("The contact group document is invalid."),
+                            javelin::jmap::OperationErrorCode::ProtocolViolation);
+        const bool alreadyIncluded =
+            std::ranges::find(data->members, command.memberUid) != data->members.end();
+        const auto state = contactState(m_connection, command.accountId);
+        if (const auto* operationError = std::get_if<javelin::jmap::OperationError>(&state))
+            co_return *operationError;
+        const auto stateToken = std::get<std::optional<std::string>>(state);
+        if (alreadyIncluded == command.included)
+            co_return ContactMutationSummary{
+                .accountId = std::move(command.accountId),
+                .newState = stateToken.value_or(std::string{}),
+                .createdId = std::nullopt,
+            };
+        const auto patch = contactGroupMembershipPatch(command.memberUid, command.included);
+        if (const auto* message = std::get_if<std::string_view>(&patch))
+            co_return error(
+                QString::fromUtf8(message->data(), static_cast<qsizetype>(message->size())),
+                javelin::jmap::OperationErrorCode::InvalidUserInput);
+        javelin::jmap::api::ContactCardSetRequest request{
+            .accountId = std::move(command.accountId),
+            .ifInState = stateToken,
+            .create = {},
+            .update = {},
+            .destroy = {},
+        };
+        request.update.emplace(
+            std::move(command.groupId),
+            javelin::jmap::api::ContactDocument{.json = std::get<std::string>(patch)});
+        co_return co_await setContactCards(std::move(settings), std::move(ownerAccountId),
+                                           std::move(request));
+    }
+
+    QCoro::Task<ContactMutationResult>
     ContactService::copyContactCards(javelin::jmap::LiveConnectionSettings settings,
                                      std::string ownerAccountId,
                                      javelin::jmap::api::ContactCardCopyRequest request)

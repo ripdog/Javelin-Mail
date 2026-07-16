@@ -15,6 +15,7 @@ class QComboBox;
 class QLabel;
 class QLineEdit;
 class QListWidget;
+class QMenu;
 class QPoint;
 class QPlainTextEdit;
 class QVBoxLayout;
@@ -33,6 +34,8 @@ namespace javelin::gui::contacts
         std::string contactId;
         QString filter;
         int sortMode = 0;
+        int groupFilterMode = 0;
+        std::string groupId;
     };
 
     class ContactsManagerWidget final : public QWidget
@@ -49,12 +52,18 @@ namespace javelin::gui::contacts
         [[nodiscard]] bool canCreateContact() const;
         [[nodiscard]] bool canEditContact() const;
         [[nodiscard]] bool canDeleteContact() const;
+        [[nodiscard]] bool canCreateGroup() const;
+        [[nodiscard]] bool canAddSelectedContactToGroup() const;
+        [[nodiscard]] bool canRemoveSelectedContactFromGroup() const;
         [[nodiscard]] ContactsViewState viewState() const;
         void restoreViewState(const ContactsViewState& state);
+        void populateAddToGroupMenu(QMenu& menu);
+        void populateRemoveFromGroupMenu(QMenu& menu);
 
       public Q_SLOTS:
         void requestRefresh();
         void beginCreateContact();
+        void beginCreateGroup();
         void beginEditContact();
         void deleteContact();
         void copyContact();
@@ -79,6 +88,7 @@ namespace javelin::gui::contacts
         void reloadContacts();
         void showSelectedContact();
         void showContactContextMenu(const QPoint& position);
+        void setContactGroupMembership(std::string groupId, std::string memberUid, bool included);
         void cancelEdit();
         void loadEditorDocument(const QString& document);
         void saveContact();
@@ -99,6 +109,9 @@ namespace javelin::gui::contacts
         [[nodiscard]] std::optional<std::string> currentAddressBookId() const;
         [[nodiscard]] const javelin::jmap::cache::ContactAccount* currentAccount() const;
         [[nodiscard]] const javelin::jmap::contacts::ContactSummary* currentContact() const;
+        [[nodiscard]] const javelin::jmap::contacts::ContactSummary* currentGroup() const;
+        [[nodiscard]] bool
+        groupIsWritable(const javelin::jmap::contacts::ContactSummary& group) const;
         void populateContactCards(const javelin::jmap::contacts::ContactSummary& contact);
 
         javelin::jmap::cache::ContactRepository& m_repository;
@@ -107,12 +120,14 @@ namespace javelin::gui::contacts
         std::vector<javelin::jmap::cache::ContactAccount> m_accounts;
         std::vector<javelin::jmap::api::AddressBook> m_addressBooks;
         std::vector<javelin::jmap::contacts::ContactSummary> m_contacts;
+        std::vector<javelin::jmap::contacts::ContactSummary> m_groups;
         bool m_busy = false;
         bool m_creating = false;
         QComboBox* m_accountCombo = nullptr;
         QComboBox* m_addressBookCombo = nullptr;
         QComboBox* m_sortCombo = nullptr;
         QLineEdit* m_filterEdit = nullptr;
+        QListWidget* m_groupList = nullptr;
         QListWidget* m_contactList = nullptr;
         QStackedWidget* m_detailStack = nullptr;
         QLabel* m_viewTitle = nullptr;

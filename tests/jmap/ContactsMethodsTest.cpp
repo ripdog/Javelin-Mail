@@ -1,4 +1,5 @@
 #include "jmap/api/ContactsMethods.h"
+#include "jmap/api/PatchObject.h"
 #include "jmap/contacts/ContactInterchange.h"
 #include "jmap/contacts/ContactTypes.h"
 
@@ -179,6 +180,33 @@ TEST_CASE("structured contact fields and unresolved group members survive editin
     CHECK(json.find("x-card") != std::string::npos);
     CHECK(json.find("temporarily-unavailable-uid") != std::string::npos);
     CHECK(json.find("known-uid") == std::string::npos);
+}
+
+TEST_CASE("contact group documents and membership patches preserve RFC paths",
+          "[jmap][contacts][groups]")
+{
+    const auto document =
+        javelin::jmap::contacts::createContactGroupDocument("Project Team", "group-uid", "book-1");
+    REQUIRE(std::holds_alternative<std::string>(document));
+    const auto& json = std::get<std::string>(document);
+    CHECK(json.find(R"("kind":"group")") != std::string::npos);
+    CHECK(json.find(R"("members":{})") != std::string::npos);
+
+    const auto add = javelin::jmap::contacts::contactGroupMembershipPatch("member/with~path", true);
+    REQUIRE(std::holds_alternative<std::string>(add));
+    CHECK(std::get<std::string>(add).find(R"("members/member~1with~0path":true)") !=
+          std::string::npos);
+    const auto projected = javelin::jmap::api::applyPatchObject(json, std::get<std::string>(add));
+    REQUIRE(std::holds_alternative<std::string>(projected));
+    CHECK(std::get<std::string>(projected).find(R"("member/with~path":true)") != std::string::npos);
+
+    const auto remove =
+        javelin::jmap::contacts::contactGroupMembershipPatch("member/with~path", false);
+    REQUIRE(std::holds_alternative<std::string>(remove));
+    const auto removed = javelin::jmap::api::applyPatchObject(std::get<std::string>(projected),
+                                                              std::get<std::string>(remove));
+    REQUIRE(std::holds_alternative<std::string>(removed));
+    CHECK(std::get<std::string>(removed).find("member/with~path") == std::string::npos);
 }
 
 TEST_CASE("contact action rights require every membership to be writable",

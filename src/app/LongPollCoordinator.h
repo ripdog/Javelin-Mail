@@ -194,6 +194,13 @@ namespace javelin::app
         [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
         setContactCards(std::string accountId, javelin::jmap::api::ContactCardSetRequest request);
         [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
+        createContactGroup(std::string ownerAccountId,
+                           javelin::jmap::contacts::CreateContactGroupCommand command);
+        [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
+        setContactGroupMembership(
+            std::string ownerAccountId,
+            javelin::jmap::contacts::SetContactGroupMembershipCommand command);
+        [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
         copyContactCards(std::string accountId, javelin::jmap::api::ContactCardCopyRequest request);
         [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactUploadResult>
         uploadContactMedia(std::string ownerAccountId, std::string accountId, QByteArray payload,

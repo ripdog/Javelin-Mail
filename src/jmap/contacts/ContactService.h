@@ -53,6 +53,21 @@ namespace javelin::jmap::contacts
         std::string mediaType;
     };
 
+    struct CreateContactGroupCommand
+    {
+        std::string accountId;
+        std::string addressBookId;
+        std::string name;
+    };
+
+    struct SetContactGroupMembershipCommand
+    {
+        std::string accountId;
+        std::string groupId;
+        std::string memberUid;
+        bool included = true;
+    };
+
     using ContactRefreshResult = std::variant<ContactRefreshSummary, javelin::jmap::OperationError>;
     using ContactMutationResult =
         std::variant<ContactMutationSummary, javelin::jmap::OperationError>;
@@ -76,6 +91,12 @@ namespace javelin::jmap::contacts
         [[nodiscard]] QCoro::Task<ContactMutationResult>
         setContactCards(javelin::jmap::LiveConnectionSettings settings, std::string ownerAccountId,
                         javelin::jmap::api::ContactCardSetRequest request);
+        [[nodiscard]] QCoro::Task<ContactMutationResult>
+        createGroup(javelin::jmap::LiveConnectionSettings settings, std::string ownerAccountId,
+                    CreateContactGroupCommand command);
+        [[nodiscard]] QCoro::Task<ContactMutationResult>
+        setGroupMembership(javelin::jmap::LiveConnectionSettings settings,
+                           std::string ownerAccountId, SetContactGroupMembershipCommand command);
         [[nodiscard]] QCoro::Task<ContactMutationResult>
         copyContactCards(javelin::jmap::LiveConnectionSettings settings, std::string ownerAccountId,
                          javelin::jmap::api::ContactCardCopyRequest request);

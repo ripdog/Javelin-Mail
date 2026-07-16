@@ -816,10 +816,22 @@ namespace javelin::gui::shell
                     (contacts->widget->*operation)();
         };
         m_contactNewAction = new QAction(QIcon::fromTheme(QStringLiteral("contact-new")),
-                                         QStringLiteral("New Contact"), this);
+                                         QStringLiteral("Add"), this);
         connect(
             m_contactNewAction, &QAction::triggered, this, [invokeContact]
             { invokeContact(&javelin::gui::contacts::ContactsManagerWidget::beginCreateContact); });
+        auto* contactAddMenu = new QMenu(this);
+        auto* newContact = contactAddMenu->addAction(
+            QIcon::fromTheme(QStringLiteral("contact-new")), QStringLiteral("New Contact"));
+        connect(
+            newContact, &QAction::triggered, this, [invokeContact]
+            { invokeContact(&javelin::gui::contacts::ContactsManagerWidget::beginCreateContact); });
+        auto* newGroup = contactAddMenu->addAction(QIcon::fromTheme(QStringLiteral("system-users")),
+                                                   QStringLiteral("New Group"));
+        connect(
+            newGroup, &QAction::triggered, this, [invokeContact]
+            { invokeContact(&javelin::gui::contacts::ContactsManagerWidget::beginCreateGroup); });
+        m_contactNewAction->setMenu(contactAddMenu);
         actionCollection()->addAction(QStringLiteral("contact_new"), m_contactNewAction);
         m_contactEditAction = new QAction(QIcon::fromTheme(QStringLiteral("document-edit")),
                                           QStringLiteral("Edit Contact"), this);
@@ -857,6 +869,41 @@ namespace javelin::gui::shell
                 });
         actionCollection()->addAction(QStringLiteral("contact_duplicates"),
                                       m_contactDuplicatesAction);
+        m_contactAddToGroupAction = new QAction(QIcon::fromTheme(QStringLiteral("list-add")),
+                                                QStringLiteral("Add to Group"), this);
+        auto* addToGroupMenu = new QMenu(this);
+        connect(addToGroupMenu, &QMenu::aboutToShow, this,
+                [this, addToGroupMenu]
+                {
+                    const auto* tab = activeTab();
+                    const auto* contacts =
+                        tab == nullptr ? nullptr : std::get_if<ContactsTabState>(&tab->content);
+                    if (contacts != nullptr && contacts->widget != nullptr)
+                        contacts->widget->populateAddToGroupMenu(*addToGroupMenu);
+                    else
+                        addToGroupMenu->clear();
+                });
+        m_contactAddToGroupAction->setMenu(addToGroupMenu);
+        actionCollection()->addAction(QStringLiteral("contact_add_to_group"),
+                                      m_contactAddToGroupAction);
+        m_contactRemoveFromGroupAction =
+            new QAction(QIcon::fromTheme(QStringLiteral("list-remove")),
+                        QStringLiteral("Remove from Group"), this);
+        auto* removeFromGroupMenu = new QMenu(this);
+        connect(removeFromGroupMenu, &QMenu::aboutToShow, this,
+                [this, removeFromGroupMenu]
+                {
+                    const auto* tab = activeTab();
+                    const auto* contacts =
+                        tab == nullptr ? nullptr : std::get_if<ContactsTabState>(&tab->content);
+                    if (contacts != nullptr && contacts->widget != nullptr)
+                        contacts->widget->populateRemoveFromGroupMenu(*removeFromGroupMenu);
+                    else
+                        removeFromGroupMenu->clear();
+                });
+        m_contactRemoveFromGroupAction->setMenu(removeFromGroupMenu);
+        actionCollection()->addAction(QStringLiteral("contact_remove_from_group"),
+                                      m_contactRemoveFromGroupAction);
         m_contactManageAddressBooksAction =
             new QAction(QIcon::fromTheme(QStringLiteral("view-list-details")),
                         QStringLiteral("Manage Address Books…"), this);
@@ -2318,6 +2365,11 @@ namespace javelin::gui::shell
                                               widget->canCreateContact());
             m_contactExportAction->setEnabled(!busy && selected);
             m_contactDuplicatesAction->setEnabled(!busy);
+            m_contactAddToGroupAction->setEnabled(
+                !busy && widget != nullptr &&
+                (widget->canCreateGroup() || widget->canAddSelectedContactToGroup()));
+            m_contactRemoveFromGroupAction->setEnabled(!busy && widget != nullptr &&
+                                                       widget->canRemoveSelectedContactFromGroup());
             m_contactManageAddressBooksAction->setEnabled(!busy);
             m_contactRefreshAction->setEnabled(!busy);
         }
@@ -5812,6 +5864,8 @@ namespace javelin::gui::shell
             .contactId = settings.value(QStringLiteral("contactId")).toString().toStdString(),
             .filter = settings.value(QStringLiteral("contactFilter")).toString(),
             .sortMode = settings.value(QStringLiteral("contactSortMode"), 0).toInt(),
+            .groupFilterMode = settings.value(QStringLiteral("contactGroupFilterMode"), 0).toInt(),
+            .groupId = settings.value(QStringLiteral("contactGroupId")).toString().toStdString(),
         });
     }
 
@@ -5899,6 +5953,10 @@ namespace javelin::gui::shell
                                           QString::fromStdString(state.contactId));
                         settings.setValue(QStringLiteral("contactFilter"), state.filter);
                         settings.setValue(QStringLiteral("contactSortMode"), state.sortMode);
+                        settings.setValue(QStringLiteral("contactGroupFilterMode"),
+                                          state.groupFilterMode);
+                        settings.setValue(QStringLiteral("contactGroupId"),
+                                          QString::fromStdString(state.groupId));
                     }
                 }
             },

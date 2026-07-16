@@ -911,6 +911,41 @@ namespace javelin::app
     }
 
     QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
+    MailApplicationService::createContactGroup(
+        std::string ownerAccountId, javelin::jmap::contacts::CreateContactGroupCommand command)
+    {
+        const auto configuration = m_configurations.find(ownerAccountId);
+        if (configuration == m_configurations.end())
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::PreconditionFailed,
+                .message = QStringLiteral("Account synchronization is not configured."),
+            };
+        co_return observeResult(m_errorCoordinator, configuration->second.settings, ownerAccountId,
+                                QStringLiteral("Create contact group"),
+                                co_await m_contactService.createGroup(
+                                    toLiveConnectionSettings(configuration->second.settings),
+                                    ownerAccountId, std::move(command)));
+    }
+
+    QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
+    MailApplicationService::setContactGroupMembership(
+        std::string ownerAccountId,
+        javelin::jmap::contacts::SetContactGroupMembershipCommand command)
+    {
+        const auto configuration = m_configurations.find(ownerAccountId);
+        if (configuration == m_configurations.end())
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::PreconditionFailed,
+                .message = QStringLiteral("Account synchronization is not configured."),
+            };
+        co_return observeResult(m_errorCoordinator, configuration->second.settings, ownerAccountId,
+                                QStringLiteral("Change contact group membership"),
+                                co_await m_contactService.setGroupMembership(
+                                    toLiveConnectionSettings(configuration->second.settings),
+                                    ownerAccountId, std::move(command)));
+    }
+
+    QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
     MailApplicationService::copyContactCards(std::string accountId,
                                              javelin::jmap::api::ContactCardCopyRequest request)
     {

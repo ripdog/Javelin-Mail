@@ -1,6 +1,7 @@
 #include "jmap/contacts/ContactService.h"
 
 #include "jmap/api/JmapMethodTransport.h"
+#include "jmap/api/PatchObject.h"
 #include "jmap/api/Transport.h"
 #include "jmap/cache/ContactRepository.h"
 #include "jmap/cache/SessionRepository.h"
@@ -126,6 +127,38 @@ namespace
                     R"({"id":")" + id + R"(","uid":"uid-)" + id +
                     R"(","kind":"individual","addressBookIds":{"book-1":true},"name":{"full":")" +
                     name + R"("},"emails":{"email-1":{"address":")" + email + R"("}}})"};
+    }
+
+    [[nodiscard]] javelin::jmap::contacts::ContactSummary
+    cachedGroup(std::string id, std::string name, std::vector<std::string> members = {})
+    {
+        auto documentResult =
+            javelin::jmap::contacts::createContactGroupDocument(name, "uid-" + id, "book-1");
+        REQUIRE(std::holds_alternative<std::string>(documentResult));
+        auto document = std::get<std::string>(std::move(documentResult));
+        for (const auto& member : members)
+        {
+            const auto patchResult =
+                javelin::jmap::contacts::contactGroupMembershipPatch(member, true);
+            REQUIRE(std::holds_alternative<std::string>(patchResult));
+            const auto patched =
+                javelin::jmap::api::applyPatchObject(document, std::get<std::string>(patchResult));
+            REQUIRE(std::holds_alternative<std::string>(patched));
+            document = std::get<std::string>(patched);
+        }
+        const auto summary = javelin::jmap::contacts::summarizeContact(
+            "a1", {.id = id, .uid = "uid-" + id, .kind = "group", .document = document});
+        REQUIRE(summary.has_value());
+        return *summary;
+    }
+
+    [[nodiscard]] bool groupContains(const javelin::jmap::contacts::ContactSummary& group,
+                                     std::string_view memberUid)
+    {
+        const auto parsed = javelin::jmap::contacts::contactEditorData(group.document);
+        const auto* data = std::get_if<javelin::jmap::contacts::ContactEditorData>(&parsed);
+        return data != nullptr &&
+               std::ranges::find(data->members, memberUid) != data->members.end();
     }
 
     [[nodiscard]] javelin::jmap::api::Session sessionWithContactDestination()
@@ -322,6 +355,99 @@ TEST_CASE("successful ContactCard sets advance only the ContactCard consistency 
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(
         mutations));
     CHECK(std::get<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(mutations).empty());
+}
+
+TEST_CASE("contact group membership uses exact optimistic member patches",
+          "[jmap][contacts][groups][consistency]")
+{
+    ensureApplication();
+    QTemporaryDir directory;
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("contact-group-membership-test"),
+        .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    javelin::jmap::cache::SessionRepository sessions{connection};
+    REQUIRE_FALSE(sessions.replace("a1", session()).has_value());
+    javelin::jmap::cache::ContactRepository contacts{connection};
+    REQUIRE_FALSE(
+        contacts.replaceAll("a1", {addressBook()}, {cachedGroup("group-1", "Friends")}, "b1", "c1")
+            .has_value());
+
+    FakeTransport transport;
+    transport.results.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body =
+            QByteArray{
+                R"({"methodResponses":[["ContactCard/set",{"accountId":"a1","oldState":"c1","newState":"c2","created":{},"updated":{"group-1":{}},"destroyed":[],"notCreated":{},"notUpdated":{},"notDestroyed":{}},"contacts-set"]],"sessionState":"s2"})"},
+    });
+    transport.beforeReturn = [&connection, &contacts]
+    {
+        const auto projected = contacts.findContact("a1", "group-1");
+        REQUIRE(std::holds_alternative<std::optional<javelin::jmap::contacts::ContactSummary>>(
+            projected));
+        const auto& group =
+            std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(projected);
+        REQUIRE(group.has_value());
+        CHECK(groupContains(*group, "uid-card-1"));
+        javelin::jmap::contacts::ContactMutationJournal journal{connection, contacts};
+        const auto mutations = journal.listForContact("a1", "group-1");
+        REQUIRE(std::holds_alternative<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(
+            mutations));
+        REQUIRE(std::get<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(mutations)
+                    .size() == 1);
+        CHECK(std::get<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(mutations)
+                  .front()
+                  .status == javelin::jmap::sync::MutationStatus::InFlight);
+    };
+    javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
+    javelin::jmap::contacts::ContactService service{connection, contacts, transport,
+                                                    methodTransport};
+    const auto accepted = QCoro::waitFor(service.setGroupMembership(
+        {.sessionUrl = "https://example.test/.well-known/jmap",
+         .loginEmail = "alice@example.test",
+         .apiKey = "secret"},
+        "a1",
+        {.accountId = "a1", .groupId = "group-1", .memberUid = "uid-card-1", .included = true}));
+    REQUIRE(std::holds_alternative<javelin::jmap::contacts::ContactMutationSummary>(accepted));
+    REQUIRE_FALSE(transport.requests.empty());
+    CHECK(transport.requests.back().body.contains("\"members/uid-card-1\":true"));
+    auto cached = contacts.findContact("a1", "group-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::contacts::ContactSummary>>(cached));
+    REQUIRE(std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(cached).has_value());
+    CHECK(groupContains(*std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(cached),
+                        "uid-card-1"));
+
+    transport.results.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body =
+            QByteArray{
+                R"({"methodResponses":[["ContactCard/set",{"accountId":"a1","oldState":"c2","newState":"c2","created":{},"updated":{},"destroyed":[],"notCreated":{},"notUpdated":{"group-1":{"type":"forbidden"}},"notDestroyed":{}},"contacts-set"]],"sessionState":"s3"})"},
+    });
+    const auto rejected = QCoro::waitFor(service.setGroupMembership(
+        {.sessionUrl = "https://example.test/.well-known/jmap",
+         .loginEmail = "alice@example.test",
+         .apiKey = "secret"},
+        "a1",
+        {.accountId = "a1", .groupId = "group-1", .memberUid = "uid-card-1", .included = false}));
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(rejected));
+    CHECK(transport.requests.back().body.contains("\"members/uid-card-1\":null"));
+    cached = contacts.findContact("a1", "group-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::contacts::ContactSummary>>(cached));
+    REQUIRE(std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(cached).has_value());
+    CHECK(groupContains(*std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(cached),
+                        "uid-card-1"));
+    javelin::jmap::contacts::ContactMutationJournal journal{connection, contacts};
+    const auto mutations = journal.listForContact("a1", "group-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(
+        mutations));
+    REQUIRE(
+        std::get<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(mutations).size() ==
+        1);
+    CHECK(std::get<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(mutations)
+              .front()
+              .status == javelin::jmap::sync::MutationStatus::Rejected);
 }
 
 TEST_CASE("AddressBook mutations project, reconcile rejection, and preserve uncertainty",
