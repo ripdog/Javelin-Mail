@@ -87,6 +87,41 @@ KDE cmake settings enable `QT_NO_CAST_FROM_ASCII` and `QT_NO_KEYWORDS`. All code
   the JMAP library, application semantics and orchestration in the coordination layer, and visual
   interaction only in the GUI.
 
+### Optimistic Consistency Foundation
+
+All stateful JMAP actions must build on the architecture in
+[`docs/OPTIMISTIC_CONSISTENCY.md`](/home/ripdog/CLionProjects/Javelin-Mail/docs/OPTIMISTIC_CONSISTENCY.md).
+Do not add a direct `/set` or `/copy` path that writes the cache outside this subsystem.
+
+- SQLite renders the effective state: confirmed server state plus active mutation projections.
+  The GUI must not keep a second optimistic object store.
+- Persist every mutation before dispatch with a typed service adapter and the generic lifecycle:
+  `pending`, `in_flight`, `accepted`, `rejected`, or `unknown`.
+- Append a mutation and materialize its projection atomically with
+  `MutationProjectionTransaction`. Accept/reject reconciliation, cache changes, state tokens, and
+  consistency-generation changes must likewise be one transaction.
+- Treat transport ambiguity as `unknown`, never success or rejection. Startup recovery converts
+  leftover `in_flight` records to `unknown`.
+- A refresh must capture a per-account, per-data-type generation fence. It may commit only if still
+  causally current, unless its typed adapter rebases every active projection into the same cache
+  transaction.
+- Stale server snapshots must never make an optimistic object flash back to its old state. Rebase
+  `pending`, `in_flight`, and `unknown` projections over refreshed confirmed state.
+- Retire an unknown mutation only when a server snapshot proves the requested outcome. If a lost
+  create response cannot be correlated safely, preserve uncertainty and block duplicate submission
+  of the same logical command.
+- Definitive per-object JMAP failures restore the confirmed state immediately. Partial successes
+  and failures reconcile independently.
+- Use exact RFC 8620 PatchObject paths for changed map entries. Do not replace whole collection
+  properties when the user changed only one membership or keyword.
+- Cross-account or cross-type workflows are application-owned operation groups with explicit
+  dependencies and partial-failure policy; typed JMAP adapters remain policy-neutral.
+- Procedural operations such as uploads, downloads, validation, and reads do not need optimistic
+  records unless they mutate persistent JMAP object state.
+
+Every new mutation requires deterministic tests for projection, success, rejection, ambiguous
+transport outcome, stale refresh rebasing, and crash/retry safety.
+
 ## Static Analysis And Quality Gates
 
 - Keep the codebase `clang-format` clean. Do NOT run clang-format on non-code, such as CMakeLists.txt
