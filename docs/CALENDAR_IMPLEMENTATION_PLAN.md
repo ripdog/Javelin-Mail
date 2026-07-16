@@ -123,7 +123,7 @@ returned as typed errors without changing the cached window or its event state.
 
 ## Milestone 5: calendar product and month-view completeness
 
-- Persist per-account calendar visibility and writable default destination.
+- Persist per-account calendar visibility and honor the server-set writable default destination.
 - Represent multi-calendar membership without pretending it is a single-calendar
   property; make rights and read-only state explicit in the editor.
 - Calculate chip capacity from actual cell geometry and fonts.
@@ -139,9 +139,16 @@ Calendar visibility overrides are stored separately from the server-owned Calend
 document and survive subsequent `Calendar/get` reconciliation. The calendar menu writes
 the per-account override immediately and reports cache failures through the normal typed
 error/logging path.
-The same preference record stores one writable default destination per account. The
-calendar menu exposes writable choices, the service rejects read-only selections, and
-new-event creation consumes the effective default without modifying the server Calendar.
+The calendar menu exposes writable default choices and sends
+`Calendar/set.onSuccessSetIsDefault`; `isDefault` remains server-owned and changes locally only
+when the response proves the result. An inconclusive successful response is verified immediately
+with `Calendar/get`, accommodating servers that apply the change without returning the requested
+update. The mutation is journaled in the Calendar consistency domain, ambiguous dispatch blocks
+duplicates, and new-event creation consumes the confirmed server default.
+The event editor keeps the Calendar field available for creation and whole-series editing.
+Creation aggregates destinations from every calendar-capable account, while editing offers all
+calendars in the event account; read-only calendars remain visible for context but cannot be
+selected as a destination.
 Calendar discovery, refresh, and preference failures now retain a concise status message
 while opening a non-blocking expandable details view whose complete text is selectable
 and copyable; the same full detail is always written to the diagnostic log.
@@ -152,6 +159,9 @@ Multi-day chips now render as connected visual segments: continuation days omit 
 misleading repeated start time, arrows mark continuation across cell boundaries, and
 only the true start/end edges are rounded. Multi-day items sort ahead of ordinary timed
 items after all-day events.
+Chip labels explicitly use right-side elision, preserving the beginning of event names.
+Resize handling rebuilds immediately and once more after layout settles; even a temporarily
+short cell retains one event rather than replacing the complete event list with overflow.
 
 ## Milestone 6: interoperability and quality gates
 

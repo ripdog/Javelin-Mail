@@ -94,6 +94,27 @@ namespace javelin::jmap::api
         std::vector<std::string> properties;
     };
 
+    struct CalendarSetRequest
+    {
+        std::string accountId;
+        std::optional<std::string> ifInState;
+        std::optional<std::string> onSuccessSetIsDefault;
+    };
+
+    struct CalendarSetResponse
+    {
+        struct SetResult
+        {
+            std::optional<bool> isDefault;
+        };
+
+        std::string accountId;
+        std::string oldState;
+        std::string newState;
+        std::unordered_map<std::string, SetResult> updated;
+        std::unordered_map<std::string, CalendarSetError> notUpdated;
+    };
+
     struct CalendarEventSetRequest
     {
         std::string accountId;
@@ -126,6 +147,8 @@ namespace javelin::jmap::api
     calendarGet(const GetRequest& request);
     [[nodiscard]] std::optional<MethodRequest<CalendarChangesResponse>>
     calendarChanges(const ChangesRequest& request);
+    [[nodiscard]] std::optional<MethodRequest<CalendarSetResponse>>
+    calendarSet(const CalendarSetRequest& request);
     [[nodiscard]] std::optional<MethodRequest<CalendarEventQueryResponse>>
     calendarEventQuery(const CalendarEventQueryRequest& request);
     [[nodiscard]] std::optional<MethodRequest<CalendarEventGetResponse>>
@@ -139,6 +162,8 @@ namespace javelin::jmap::api
     parseCalendarGetResponse(std::string_view json);
     [[nodiscard]] ParsedEnvelope<CalendarChangesResponse>
     parseCalendarChangesResponse(std::string_view json);
+    [[nodiscard]] ParsedEnvelope<CalendarSetResponse>
+    parseCalendarSetResponse(std::string_view json);
     [[nodiscard]] ParsedEnvelope<CalendarEventQueryResponse>
     parseCalendarEventQueryResponse(std::string_view json);
     [[nodiscard]] ParsedEnvelope<CalendarEventGetResponse>
@@ -166,6 +191,14 @@ namespace javelin::jmap::api
         static ParsedEnvelope<CalendarChangesResponse> parse(std::string_view json)
         {
             return parseCalendarChangesResponse(json);
+        }
+    };
+    template <> struct MethodResponseTraits<CalendarSetResponse>
+    {
+        static constexpr std::string_view methodName = "Calendar/set";
+        static ParsedEnvelope<CalendarSetResponse> parse(std::string_view json)
+        {
+            return parseCalendarSetResponse(json);
         }
     };
     template <> struct MethodResponseTraits<CalendarEventQueryResponse>

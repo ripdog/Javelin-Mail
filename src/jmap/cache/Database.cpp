@@ -1150,9 +1150,18 @@ namespace javelin::jmap::cache
                                 "blob_id TEXT NOT NULL,is_active INTEGER NOT NULL DEFAULT 0 "
                                 "CHECK(is_active IN (0,1)),"
                                 "PRIMARY KEY(account_id,script_id)) STRICT"),
-                            QStringLiteral(
-                                "CREATE INDEX idx_sieve_scripts_name ON sieve_scripts "
-                                "(account_id,name COLLATE NOCASE)"),
+                            QStringLiteral("CREATE INDEX idx_sieve_scripts_name ON sieve_scripts "
+                                           "(account_id,name COLLATE NOCASE)"),
+                        },
+                },
+                MigrationStep{
+                    .version = 23,
+                    .name = QStringLiteral("server_calendar_default"),
+                    .statements =
+                        {
+                            QStringLiteral("DROP INDEX idx_calendar_default_destination"),
+                            QStringLiteral("ALTER TABLE calendar_preferences DROP COLUMN "
+                                           "is_default_destination"),
                         },
                 },
             },

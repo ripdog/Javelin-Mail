@@ -63,8 +63,10 @@ namespace javelin::gui::calendar
             {
                 const auto segment =
                     monthEventSegment(event.title, event.start, event.end, event.allDay, cellDate);
-                setText(segment.label + (event.recurring ? QStringLiteral(" ↻") : QString{}));
+                m_fullText = segment.label + (event.recurring ? QStringLiteral(" ↻") : QString{});
+                setText(m_fullText);
                 setToolTip(event.title);
+                setMinimumWidth(0);
                 setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
                 setAutoRaise(true);
                 const auto color =
@@ -85,6 +87,17 @@ namespace javelin::gui::calendar
                         .arg(color.name(QColor::HexArgb), foreground.name(QColor::HexArgb),
                              leftRadius, rightRadius));
             }
+
+          protected:
+            void resizeEvent(QResizeEvent* event) override
+            {
+                QToolButton::resizeEvent(event);
+                setText(
+                    fontMetrics().elidedText(m_fullText, Qt::ElideRight, std::max(0, width() - 8)));
+            }
+
+          private:
+            QString m_fullText;
         };
 
         QDate eventLastDate(const MonthEvent& event)
@@ -508,6 +521,7 @@ namespace javelin::gui::calendar
     void MonthCalendarWidget::resizeEvent(QResizeEvent* event)
     {
         QWidget::resizeEvent(event);
+        rebuildEvents();
         scheduleEventRebuild();
     }
 

@@ -172,6 +172,9 @@ namespace javelin::app
         [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
         deleteCalendarEvent(std::string ownerAccountId,
                             javelin::jmap::calendar::DeleteEventCommand command);
+        [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
+        setDefaultCalendar(std::string ownerAccountId, std::string accountId,
+                           std::string calendarId);
         [[nodiscard]] QCoro::Task<javelin::jmap::sieve::SieveListResult>
         requestSieveScripts(std::string ownerAccountId);
         [[nodiscard]] QCoro::Task<javelin::jmap::sieve::SieveContentResult>

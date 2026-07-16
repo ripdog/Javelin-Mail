@@ -115,7 +115,6 @@ TEST_CASE("calendar windows retain occurrences referenced by overlapping windows
     CHECK_FALSE(std::get<std::vector<javelin::jmap::calendar::Calendar>>(hiddenCalendars)
                     .front()
                     .isVisible);
-    REQUIRE_FALSE(repository.setDefaultCalendar("a1", "work").has_value());
     auto serverChangedCalendar = calendar;
     serverChangedCalendar.isDefault = false;
     REQUIRE_FALSE(
@@ -124,6 +123,20 @@ TEST_CASE("calendar windows retain occurrences referenced by overlapping windows
     CHECK_FALSE(std::get<std::vector<javelin::jmap::calendar::Calendar>>(hiddenCalendars)
                     .front()
                     .isVisible);
+    CHECK_FALSE(std::get<std::vector<javelin::jmap::calendar::Calendar>>(hiddenCalendars)
+                    .front()
+                    .isDefault);
+    auto defaultTransactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+        connection, QStringLiteral("Test server calendar default"));
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(
+        defaultTransactionResult));
+    auto defaultTransaction =
+        std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(defaultTransactionResult));
+    REQUIRE_FALSE(
+        repository.applyCalendarDefaults(defaultTransaction, "a1", "c1-default", {{"work", true}})
+            .has_value());
+    REQUIRE_FALSE(defaultTransaction.commit().has_value());
+    hiddenCalendars = repository.listCalendars("a1");
     CHECK(std::get<std::vector<javelin::jmap::calendar::Calendar>>(hiddenCalendars)
               .front()
               .isDefault);
@@ -265,7 +278,7 @@ TEST_CASE("calendar windows retain occurrences referenced by overlapping windows
     const auto calendarState = repository.stateToken("a1", "Calendar");
     REQUIRE(std::holds_alternative<std::optional<std::string>>(calendarState));
     CHECK(std::get<std::optional<std::string>>(calendarState) ==
-          std::optional<std::string>{"c1-refreshed"});
+          std::optional<std::string>{"c1-default"});
     const auto eventState = repository.stateToken("a1", "CalendarEvent");
     REQUIRE(std::holds_alternative<std::optional<std::string>>(eventState));
     CHECK(std::get<std::optional<std::string>>(eventState) ==

@@ -26,7 +26,7 @@ TEST_CASE("month calendar event capacity follows cell and font geometry", "[gui]
     CHECK(monthCellVisibleEventCount(120, 18, 20, 8, 2, 3) == 3);
     CHECK(monthCellVisibleEventCount(120, 18, 20, 8, 2, 6) == 3);
     CHECK(monthCellVisibleEventCount(76, 18, 20, 8, 2, 5) == 1);
-    CHECK(monthCellVisibleEventCount(40, 18, 20, 8, 2, 5) == 0);
+    CHECK(monthCellVisibleEventCount(40, 18, 20, 8, 2, 5) == 1);
     CHECK(monthCellVisibleEventCount(120, 18, 28, 8, 2, 6) == 2);
     CHECK(monthCellVisibleEventCount(120, 18, 20, 8, 2, 0) == 0);
 }

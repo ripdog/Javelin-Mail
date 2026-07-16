@@ -86,8 +86,9 @@ namespace javelin::jmap::calendar
         [[nodiscard]] CalendarListResult calendars(std::string_view accountId) const;
         [[nodiscard]] CalendarPreferenceResult
         setCalendarVisible(std::string_view accountId, std::string_view calendarId, bool visible);
-        [[nodiscard]] CalendarPreferenceResult setDefaultCalendar(std::string_view accountId,
-                                                                  std::string_view calendarId);
+        [[nodiscard]] QCoro::Task<CalendarMutationResult>
+        setDefaultCalendar(LiveConnectionSettings settings, std::string ownerAccountId,
+                           std::string accountId, std::string calendarId);
         [[nodiscard]] QCoro::Task<CalendarRefreshResult> refresh(LiveConnectionSettings settings,
                                                                  std::string ownerAccountId,
                                                                  VisibleInterval interval,

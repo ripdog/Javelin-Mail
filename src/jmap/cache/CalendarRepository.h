@@ -7,6 +7,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <variant>
 #include <vector>
 
@@ -44,8 +45,10 @@ namespace javelin::jmap::cache
         listCalendars(std::string_view accountId) const;
         [[nodiscard]] std::optional<DatabaseError>
         setCalendarVisible(std::string_view accountId, std::string_view calendarId, bool visible);
-        [[nodiscard]] std::optional<DatabaseError> setDefaultCalendar(std::string_view accountId,
-                                                                      std::string_view calendarId);
+        [[nodiscard]] std::optional<DatabaseError>
+        applyCalendarDefaults(DatabaseTransaction& transaction, std::string_view accountId,
+                              std::string_view state,
+                              const std::unordered_map<std::string, bool>& defaults);
         [[nodiscard]] std::variant<std::vector<CalendarAccount>, DatabaseError>
         listAccounts() const;
         [[nodiscard]] std::variant<std::optional<std::string>, DatabaseError>

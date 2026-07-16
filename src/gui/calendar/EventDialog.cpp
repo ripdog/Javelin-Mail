@@ -13,6 +13,7 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QRegularExpression>
+#include <QStandardItemModel>
 #include <QTimeZone>
 
 #include <optional>
@@ -72,6 +73,12 @@ namespace
                              number(3) * 60 * 60 + number(4) * 60 + number(5);
         return seconds > 0 ? std::optional{seconds} : std::nullopt;
     }
+
+    QString calendarKey(const std::string& accountId, const std::string& calendarId)
+    {
+        return QString::fromStdString(accountId) + QLatin1Char('\n') +
+               QString::fromStdString(calendarId);
+    }
 } // namespace
 
 namespace javelin::gui::calendar
@@ -86,9 +93,19 @@ namespace javelin::gui::calendar
         m_title = new QLineEdit(this);
         m_calendar = new QComboBox(this);
         for (const auto& calendar : m_calendars)
-            if (calendar.myRights.mayWriteAll || calendar.myRights.mayWriteOwn)
-                m_calendar->addItem(QString::fromStdString(calendar.name),
-                                    QString::fromStdString(calendar.id));
+        {
+            const auto writable = calendar.myRights.mayWriteAll || calendar.myRights.mayWriteOwn;
+            m_calendar->addItem(
+                writable
+                    ? QString::fromStdString(calendar.name)
+                    : QStringLiteral("%1 (read-only)").arg(QString::fromStdString(calendar.name)),
+                calendarKey(calendar.accountId, calendar.id));
+            if (!writable)
+            {
+                if (auto* model = qobject_cast<QStandardItemModel*>(m_calendar->model()))
+                    model->item(m_calendar->count() - 1)->setEnabled(false);
+            }
+        }
         m_allDay = new QCheckBox(QStringLiteral("All day"), this);
         auto* startRow = new QWidget(this);
         auto* startLayout = new QHBoxLayout(startRow);
@@ -170,8 +187,14 @@ namespace javelin::gui::calendar
         m_title->setText(QString::fromStdString(event.title));
         for (const auto& [calendarId, present] : event.calendarIds)
             if (present)
-                m_calendar->setCurrentIndex(
-                    m_calendar->findData(QString::fromStdString(calendarId)));
+            {
+                const auto index = m_calendar->findData(calendarKey(event.accountId, calendarId));
+                if (index >= 0)
+                {
+                    m_calendar->setCurrentIndex(index);
+                    break;
+                }
+            }
         m_allDay->setChecked(event.showWithoutTime);
         const auto start =
             QDateTime::fromString(QString::fromStdString(event.start.value), Qt::ISODate);
@@ -256,8 +279,14 @@ namespace javelin::gui::calendar
         result.title = m_title->text().trimmed().toStdString();
         if (m_calendarEdited || result.calendarIds.empty())
         {
-            result.calendarIds.clear();
-            result.calendarIds.emplace(m_calendar->currentData().toString().toStdString(), true);
+            const auto key = m_calendar->currentData().toString();
+            const auto separator = key.indexOf(QLatin1Char('\n'));
+            if (separator > 0 && separator < key.size() - 1)
+            {
+                result.accountId = key.first(separator).toStdString();
+                result.calendarIds.clear();
+                result.calendarIds.emplace(key.sliced(separator + 1).toStdString(), true);
+            }
         }
         result.showWithoutTime = m_allDay->isChecked();
         const auto start = enteredDateTime(m_startDate, m_startTime).value();
@@ -318,6 +347,13 @@ namespace javelin::gui::calendar
             return;
         }
         if (m_calendar->currentIndex() < 0)
+        {
+            showMutationError(QStringLiteral("Choose a writable calendar."));
+            return;
+        }
+        if (!(m_calendar->model()->flags(
+                  m_calendar->model()->index(m_calendar->currentIndex(), 0)) &
+              Qt::ItemIsEnabled))
         {
             showMutationError(QStringLiteral("Choose a writable calendar."));
             return;

@@ -38,6 +38,22 @@ TEST_CASE("calendar get parses draft-26 rights", "[jmap][calendar]")
     CHECK_FALSE(parsed.value->list.front().myRights.mayDelete);
 }
 
+TEST_CASE("calendar set changes the server default through the draft argument", "[jmap][calendar]")
+{
+    const auto method = javelin::jmap::api::calendarSet(
+        {.accountId = "a1", .ifInState = "calendar-state-1", .onSuccessSetIsDefault = "personal"});
+    REQUIRE(method.has_value());
+    CHECK(method->name == "Calendar/set");
+    CHECK(method->arguments.find(R"("onSuccessSetIsDefault":"personal")") != std::string::npos);
+    CHECK(method->arguments.find(R"("isDefault")") == std::string::npos);
+
+    const auto response = javelin::jmap::api::parseCalendarSetResponse(
+        R"({"accountId":"a1","oldState":"calendar-state-1","newState":"calendar-state-2","updated":{"work":{"isDefault":false},"personal":{"isDefault":true}},"notUpdated":{}})");
+    REQUIRE(response.ok());
+    CHECK(response.value->updated.at("work").isDefault == std::optional<bool>{false});
+    CHECK(response.value->updated.at("personal").isDefault == std::optional<bool>{true});
+}
+
 TEST_CASE("calendar event documents preserve recurrence and attendees", "[jmap][calendar]")
 {
     const auto parsed = javelin::jmap::api::parseCalendarEventGetResponse(

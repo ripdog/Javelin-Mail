@@ -1542,22 +1542,33 @@ namespace javelin::gui::shell
                         loadVisible(widget->visibleStart(), widget->visibleEnd());
                     }
                 });
-        connect(widget, &javelin::gui::calendar::MonthCalendarWidget::defaultCalendarChanged,
-                widget,
-                [this, loadVisible, widget](const QString& displayId)
-                {
-                    const auto separator = displayId.indexOf(QLatin1Char('\n'));
-                    if (separator <= 0 || separator == displayId.size() - 1)
-                        return;
-                    const auto result = m_calendarService.setDefaultCalendar(
-                        displayId.first(separator).toStdString(),
-                        displayId.sliced(separator + 1).toStdString());
-                    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
-                    {
-                        presentError(*error);
-                        loadVisible(widget->visibleStart(), widget->visibleEnd());
-                    }
-                });
+        connect(
+            widget, &javelin::gui::calendar::MonthCalendarWidget::defaultCalendarChanged, widget,
+            [this, accounts = *accounts, loadVisible, widget](const QString& displayId)
+            {
+                const auto separator = displayId.indexOf(QLatin1Char('\n'));
+                if (separator <= 0 || separator == displayId.size() - 1)
+                    return;
+                const auto accountId = displayId.first(separator).toStdString();
+                const auto account = std::ranges::find(
+                    accounts, accountId, &javelin::jmap::cache::CalendarAccount::accountId);
+                if (account == accounts.end())
+                    return;
+                auto task =
+                    m_mailService.setDefaultCalendar(account->ownerAccountId, accountId,
+                                                     displayId.sliced(separator + 1).toStdString());
+                QCoro::connect(std::move(task), widget,
+                               [this, loadVisible,
+                                widget](javelin::jmap::calendar::CalendarMutationResult result)
+                               {
+                                   if (const auto* error =
+                                           std::get_if<javelin::jmap::OperationError>(&result))
+                                   {
+                                       presentError(*error);
+                                       loadVisible(widget->visibleStart(), widget->visibleEnd());
+                                   }
+                               });
+            });
         connect(&m_mailService, &javelin::app::MailApplicationService::calendarCacheCommitted,
                 widget,
                 [widget, accounts = *accounts,
@@ -1603,6 +1614,8 @@ namespace javelin::gui::shell
             widget, &javelin::gui::calendar::MonthCalendarWidget::emptyTimeActivated, widget,
             [this, widget, accounts = *accounts, refreshVisible](const QDate& date)
             {
+                std::vector<javelin::jmap::calendar::Calendar> choices;
+                std::optional<std::size_t> destinationIndex;
                 for (const auto& account : accounts)
                 {
                     const auto calendarsResult = m_calendarService.calendars(account.accountId);
@@ -1611,77 +1624,88 @@ namespace javelin::gui::shell
                             &calendarsResult);
                     if (calendars == nullptr)
                         continue;
-                    auto destination = std::ranges::find_if(*calendars,
-                                                            [](const auto& item)
-                                                            {
-                                                                return item.isDefault &&
-                                                                       (item.myRights.mayWriteAll ||
-                                                                        item.myRights.mayWriteOwn);
-                                                            });
-                    if (destination == calendars->end())
-                        destination = std::ranges::find_if(
-                            *calendars, [](const auto& item)
-                            { return item.myRights.mayWriteAll || item.myRights.mayWriteOwn; });
-                    if (destination == calendars->end())
-                        continue;
-
-                    auto* dialog = new javelin::gui::calendar::EventDialog(*calendars, widget);
-                    dialog->setAttribute(Qt::WA_DeleteOnClose, false);
-                    dialog->setEvent(javelin::jmap::calendar::CalendarEvent{
-                        .accountId = account.accountId,
-                        .id = {},
-                        .baseEventId = std::nullopt,
-                        .recurrenceId = std::nullopt,
-                        .uid = {},
-                        .calendarIds = {{destination->id, true}},
-                        .title = {},
-                        .description = std::nullopt,
-                        .location = std::nullopt,
-                        .start =
-                            {.value =
-                                 QDateTime{date, QTime{9, 0}}.toString(Qt::ISODate).toStdString()},
-                        .duration = {.value = "PT1H"},
-                        .timeZone =
-                            javelin::jmap::calendar::TimeZoneId{
-                                .value = QTimeZone::systemTimeZoneId().toStdString()},
-                        .showWithoutTime = false,
-                        .isDraft = false,
-                        .isOrigin = true,
-                        .utcStart = std::nullopt,
-                        .utcEnd = std::nullopt,
-                        .recurrenceRule = std::nullopt,
-                        .recurrenceOverrides = {},
-                        .attendees = {}});
-                    if (dialog->exec() != QDialog::Accepted)
+                    for (const auto& calendar : *calendars)
                     {
-                        dialog->deleteLater();
-                        return;
+                        auto choice = calendar;
+                        if (accounts.size() > 1)
+                            choice.name += QStringLiteral(" — %1")
+                                               .arg(QString::fromStdString(account.name))
+                                               .toStdString();
+                        const auto writable =
+                            choice.myRights.mayWriteAll || choice.myRights.mayWriteOwn;
+                        if (writable && (!destinationIndex.has_value() || choice.isDefault))
+                            destinationIndex = choices.size();
+                        choices.push_back(std::move(choice));
                     }
-                    auto task = m_mailService.createCalendarEvent(account.ownerAccountId,
-                                                                  {.accountId = account.accountId,
-                                                                   .event = dialog->eventDocument(),
-                                                                   .ifInState = std::nullopt});
-                    QCoro::connect(std::move(task), dialog,
-                                   [dialog, widget, refreshVisible](
-                                       javelin::jmap::calendar::CalendarMutationResult result)
-                                   {
-                                       if (const auto* error =
-                                               std::get_if<javelin::jmap::OperationError>(&result))
-                                       {
-                                           qCWarning(logUserOperations).noquote()
-                                               << "calendar event creation failed"
-                                               << error->message;
-                                           dialog->showMutationError(error->message);
-                                           dialog->show();
-                                           return;
-                                       }
-                                       dialog->deleteLater();
-                                       refreshVisible(widget->visibleStart(), widget->visibleEnd());
-                                   });
+                }
+                if (!destinationIndex.has_value())
+                {
+                    m_statusBar->showMessage(QStringLiteral("No writable calendar is available."),
+                                             5000);
                     return;
                 }
-                m_statusBar->showMessage(QStringLiteral("No writable calendar is available."),
-                                         5000);
+                const auto& destination = choices[*destinationIndex];
+                auto* dialog = new javelin::gui::calendar::EventDialog(choices, widget);
+                dialog->setAttribute(Qt::WA_DeleteOnClose, false);
+                dialog->setEvent(javelin::jmap::calendar::CalendarEvent{
+                    .accountId = destination.accountId,
+                    .id = {},
+                    .baseEventId = std::nullopt,
+                    .recurrenceId = std::nullopt,
+                    .uid = {},
+                    .calendarIds = {{destination.id, true}},
+                    .title = {},
+                    .description = std::nullopt,
+                    .location = std::nullopt,
+                    .start = {.value =
+                                  QDateTime{date, QTime{9, 0}}.toString(Qt::ISODate).toStdString()},
+                    .duration = {.value = "PT1H"},
+                    .timeZone =
+                        javelin::jmap::calendar::TimeZoneId{
+                            .value = QTimeZone::systemTimeZoneId().toStdString()},
+                    .showWithoutTime = false,
+                    .isDraft = false,
+                    .isOrigin = true,
+                    .utcStart = std::nullopt,
+                    .utcEnd = std::nullopt,
+                    .recurrenceRule = std::nullopt,
+                    .recurrenceOverrides = {},
+                    .attendees = {}});
+                if (dialog->exec() != QDialog::Accepted)
+                {
+                    dialog->deleteLater();
+                    return;
+                }
+                auto event = dialog->eventDocument();
+                const auto selectedAccount = std::ranges::find(
+                    accounts, event.accountId, &javelin::jmap::cache::CalendarAccount::accountId);
+                if (selectedAccount == accounts.end())
+                {
+                    dialog->showMutationError(
+                        QStringLiteral("The selected calendar account is no longer available."));
+                    dialog->show();
+                    return;
+                }
+                auto task = m_mailService.createCalendarEvent(selectedAccount->ownerAccountId,
+                                                              {.accountId = event.accountId,
+                                                               .event = std::move(event),
+                                                               .ifInState = std::nullopt});
+                QCoro::connect(
+                    std::move(task), dialog,
+                    [dialog, widget,
+                     refreshVisible](javelin::jmap::calendar::CalendarMutationResult result)
+                    {
+                        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                        {
+                            qCWarning(logUserOperations).noquote()
+                                << "calendar event creation failed" << error->message;
+                            dialog->showMutationError(error->message);
+                            dialog->show();
+                            return;
+                        }
+                        dialog->deleteLater();
+                        refreshVisible(widget->visibleStart(), widget->visibleEnd());
+                    });
             });
         connect(
             widget, &javelin::gui::calendar::MonthCalendarWidget::eventActivated, widget,

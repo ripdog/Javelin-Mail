@@ -32,7 +32,7 @@ namespace javelin::gui::calendar
         const auto slots = static_cast<std::size_t>(rowCount);
         if (eventCount <= slots)
             return eventCount;
-        return slots > 1 ? slots - 1 : 0;
+        return slots > 1 ? slots - 1 : 1;
     }
 
     QDate monthEventLastDate(const QDateTime& start, const QDateTime& end)

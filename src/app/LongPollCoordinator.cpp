@@ -702,6 +702,33 @@ namespace javelin::app
     }
 
     QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
+    MailApplicationService::setDefaultCalendar(std::string ownerAccountId, std::string accountId,
+                                               std::string calendarId)
+    {
+        const auto configuration = m_configurations.find(ownerAccountId);
+        if (configuration == m_configurations.end())
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
+                .message = QStringLiteral("Account synchronization is not configured.")};
+        auto result = co_await m_calendarService.setDefaultCalendar(
+            toLiveConnectionSettings(configuration->second.settings), ownerAccountId,
+            std::move(accountId), std::move(calendarId));
+        if (std::holds_alternative<javelin::jmap::calendar::CommittedMutation>(result))
+        {
+            const auto range = m_visibleCalendarRanges.find(ownerAccountId);
+            if (range != m_visibleCalendarRanges.end())
+                Q_EMIT calendarCacheCommitted(
+                    {.ownerAccountId = QString::fromStdString(ownerAccountId),
+                     .interval = range->second.interval,
+                     .displayTimeZone = range->second.displayTimeZone,
+                     .accountCount = 1,
+                     .eventCount = 0});
+        }
+        co_return observeResult(m_errorCoordinator, configuration->second.settings, ownerAccountId,
+                                QStringLiteral("Change default calendar"), std::move(result));
+    }
+
+    QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
     MailApplicationService::updateCalendarEvent(std::string ownerAccountId,
                                                 javelin::jmap::calendar::UpdateEventCommand command)
     {

@@ -174,6 +174,27 @@ namespace javelin::jmap::api::detail
         std::vector<std::string> properties;
     };
 
+    struct RawCalendarSetRequest
+    {
+        std::string accountId;
+        std::optional<std::string> ifInState;
+        std::optional<std::string> onSuccessSetIsDefault;
+    };
+
+    struct RawCalendarSetResult
+    {
+        std::optional<bool> isDefault;
+    };
+
+    struct RawCalendarSetResponse
+    {
+        std::string accountId;
+        std::string oldState;
+        std::string newState;
+        std::unordered_map<std::string, RawCalendarSetResult> updated;
+        std::unordered_map<std::string, RawSetError> notUpdated;
+    };
+
     struct RawCalendarEventSetResult
     {
         std::optional<std::string> id;
@@ -259,6 +280,11 @@ JAVELIN_GLZ_META(RawEventGetResponse, "accountId", &T::accountId, "state", &T::s
                  &T::list, "notFound", &T::notFound);
 JAVELIN_GLZ_META(RawSetError, "type", &T::type, "description", &T::description, "properties",
                  &T::properties);
+JAVELIN_GLZ_META(RawCalendarSetRequest, "accountId", &T::accountId, "ifInState", &T::ifInState,
+                 "onSuccessSetIsDefault", &T::onSuccessSetIsDefault);
+JAVELIN_GLZ_META(RawCalendarSetResult, "isDefault", &T::isDefault);
+JAVELIN_GLZ_META(RawCalendarSetResponse, "accountId", &T::accountId, "oldState", &T::oldState,
+                 "newState", &T::newState, "updated", &T::updated, "notUpdated", &T::notUpdated);
 JAVELIN_GLZ_META(RawCalendarEventSetResult, "id", &T::id);
 JAVELIN_GLZ_META(RawSetRequest, "accountId", &T::accountId, "ifInState", &T::ifInState, "create",
                  &T::create, "update", &T::update, "destroy", &T::destroy, "sendSchedulingMessages",
@@ -577,6 +603,17 @@ namespace javelin::jmap::api
                          : std::nullopt;
     }
 
+    std::optional<MethodRequest<CalendarSetResponse>> calendarSet(const CalendarSetRequest& request)
+    {
+        const auto arguments = serialize(
+            detail::RawCalendarSetRequest{.accountId = request.accountId,
+                                          .ifInState = request.ifInState,
+                                          .onSuccessSetIsDefault = request.onSuccessSetIsDefault});
+        return arguments ? std::optional{MethodRequest<CalendarSetResponse>{
+                               .name = "Calendar/set", .arguments = *arguments}}
+                         : std::nullopt;
+    }
+
     std::optional<MethodRequest<CalendarEventQueryResponse>>
     calendarEventQuery(const CalendarEventQueryRequest& request)
     {
@@ -681,6 +718,24 @@ namespace javelin::jmap::api
             return {.value = std::nullopt, .error = parsed.error};
         CalendarChangesResponse result;
         static_cast<ChangesResponse&>(result) = *parsed.value;
+        return {.value = std::move(result), .error = std::nullopt};
+    }
+
+    ParsedEnvelope<CalendarSetResponse> parseCalendarSetResponse(std::string_view json)
+    {
+        auto raw = parseRaw<detail::RawCalendarSetResponse>(json);
+        if (!raw.ok())
+            return {.value = std::nullopt, .error = raw.error};
+        CalendarSetResponse result{.accountId = std::move(raw.value->accountId),
+                                   .oldState = std::move(raw.value->oldState),
+                                   .newState = std::move(raw.value->newState),
+                                   .updated = {},
+                                   .notUpdated = {}};
+        for (auto& [id, value] : raw.value->updated)
+            result.updated.emplace(std::move(id),
+                                   CalendarSetResponse::SetResult{.isDefault = value.isDefault});
+        for (auto& [id, value] : raw.value->notUpdated)
+            result.notUpdated.emplace(std::move(id), setError(value));
         return {.value = std::move(result), .error = std::nullopt};
     }
 

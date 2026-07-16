@@ -536,12 +536,137 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
     readOnly.myRights.mayWriteAll = false;
     readOnly.myRights.mayWriteOwn = false;
     calendarDocuments.push_back(readOnly);
+    auto personal = calendarDocuments.front();
+    personal.id = "personal";
+    personal.name = "Personal";
+    personal.isDefault = false;
+    calendarDocuments.push_back(personal);
     REQUIRE_FALSE(
         calendars.replaceCalendars("a1", "calendar-with-read-only", calendarDocuments).has_value());
 
-    const auto readOnlyDefault = service.setDefaultCalendar("a1", "read-only");
+    const auto readOnlyDefault =
+        QCoro::waitFor(service.setDefaultCalendar(settings, "a1", "a1", "read-only"));
 
     REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(readOnlyDefault));
     CHECK(std::get<javelin::jmap::OperationError>(readOnlyDefault).code ==
           javelin::jmap::OperationErrorCode::PermissionDenied);
+
+    transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+        .methodResponses =
+            {{.name = "Calendar/set",
+              .arguments =
+                  R"({"accountId":"a1","oldState":"calendar-with-read-only","newState":"calendar-default-2","updated":{},"notUpdated":{}})",
+              .callId = "calendar-set-default"}},
+        .createdIds = std::nullopt,
+        .sessionState = "session-calendar-default"});
+    transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+        .methodResponses =
+            {{.name = "Calendar/get",
+              .arguments =
+                  R"({"accountId":"a1","state":"calendar-default-verified","list":[{"id":"personal","name":"Personal","isSubscribed":true,"isVisible":true,"isDefault":true,"myRights":{"mayReadFreeBusy":true,"mayReadItems":true,"mayWriteAll":true,"mayWriteOwn":true,"mayUpdatePrivate":true,"mayRSVP":true,"mayShare":false,"mayDelete":false}}],"notFound":[]})",
+              .callId = "calendar-get-default-verification"}},
+        .createdIds = std::nullopt,
+        .sessionState = "session-calendar-default-verified"});
+    const auto changedDefault =
+        QCoro::waitFor(service.setDefaultCalendar(settings, "a1", "a1", "personal"));
+    REQUIRE(std::holds_alternative<javelin::jmap::calendar::CommittedMutation>(changedDefault));
+    REQUIRE(transport.requests.size() >= 2);
+    const auto& setDefaultRequest = transport.requests[transport.requests.size() - 2];
+    REQUIRE(setDefaultRequest.envelope.methodCalls.size() == 1);
+    CHECK(setDefaultRequest.envelope.methodCalls.front().name == "Calendar/set");
+    CHECK(setDefaultRequest.envelope.methodCalls.front().arguments.find(
+              R"("onSuccessSetIsDefault":"personal")") != std::string::npos);
+    REQUIRE(transport.request.has_value());
+    REQUIRE(transport.request->envelope.methodCalls.size() == 1);
+    CHECK(transport.request->envelope.methodCalls.front().name == "Calendar/get");
+    const auto defaultState = calendars.stateToken("a1", "Calendar");
+    REQUIRE(std::holds_alternative<std::optional<std::string>>(defaultState));
+    CHECK(std::get<std::optional<std::string>>(defaultState) ==
+          std::optional<std::string>{"calendar-default-verified"});
+    const auto calendarsAfterDefault = calendars.listCalendars("a1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::calendar::Calendar>>(
+        calendarsAfterDefault));
+    const auto& defaultDocuments =
+        std::get<std::vector<javelin::jmap::calendar::Calendar>>(calendarsAfterDefault);
+    CHECK(std::ranges::count_if(defaultDocuments,
+                                [](const auto& item) { return item.isDefault; }) == 1);
+    const auto personalDefault =
+        std::ranges::find(defaultDocuments, "personal", &javelin::jmap::calendar::Calendar::id);
+    REQUIRE(personalDefault != defaultDocuments.end());
+    CHECK(personalDefault->isDefault);
+
+    transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+        .methodResponses =
+            {{.name = "Calendar/set",
+              .arguments =
+                  R"({"accountId":"a1","oldState":"calendar-default-verified","newState":"calendar-default-verified","updated":{},"notUpdated":{}})",
+              .callId = "calendar-set-default"}},
+        .createdIds = std::nullopt,
+        .sessionState = "session-calendar-default-ignored"});
+    transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+        .methodResponses =
+            {{.name = "Calendar/get",
+              .arguments =
+                  R"({"accountId":"a1","state":"calendar-default-verified","list":[{"id":"work","name":"Work","isSubscribed":true,"isVisible":true,"isDefault":false,"myRights":{"mayReadFreeBusy":true,"mayReadItems":true,"mayWriteAll":true,"mayWriteOwn":true,"mayUpdatePrivate":true,"mayRSVP":true,"mayShare":false,"mayDelete":false}}],"notFound":[]})",
+              .callId = "calendar-get-default-verification"}},
+        .createdIds = std::nullopt,
+        .sessionState = "session-calendar-default-ignored-verification"});
+    const auto ignoredDefault =
+        QCoro::waitFor(service.setDefaultCalendar(settings, "a1", "a1", "work"));
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(ignoredDefault));
+    CHECK(std::get<javelin::jmap::OperationError>(ignoredDefault).code ==
+          javelin::jmap::OperationErrorCode::PermissionDenied);
+
+    transport.results.push_back(javelin::jmap::api::TransportError{
+        .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
+        .message = "Connection closed after Calendar/set dispatch",
+    });
+    const auto uncertainDefault =
+        QCoro::waitFor(service.setDefaultCalendar(settings, "a1", "a1", "work"));
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(uncertainDefault));
+    javelin::jmap::sync::MutationJournalRepository genericJournal{connection};
+    const auto activeDefaults =
+        genericJournal.listActive({.accountId = "a1", .dataType = "Calendar"});
+    REQUIRE(
+        std::holds_alternative<std::vector<javelin::jmap::sync::MutationRecord>>(activeDefaults));
+    REQUIRE(std::get<std::vector<javelin::jmap::sync::MutationRecord>>(activeDefaults).size() == 1);
+    CHECK(
+        std::get<std::vector<javelin::jmap::sync::MutationRecord>>(activeDefaults).front().status ==
+        javelin::jmap::sync::MutationStatus::Unknown);
+    const auto duplicateDefault =
+        QCoro::waitFor(service.setDefaultCalendar(settings, "a1", "a1", "work"));
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(duplicateDefault));
+    CHECK(std::get<javelin::jmap::OperationError>(duplicateDefault).code ==
+          javelin::jmap::OperationErrorCode::Conflict);
+
+    transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+        .methodResponses =
+            {{.name = "Calendar/get",
+              .arguments =
+                  R"({"accountId":"a1","state":"calendar-default-resolved","list":[{"id":"work","name":"Work","isSubscribed":true,"isVisible":true,"isDefault":true,"myRights":{"mayReadFreeBusy":true,"mayReadItems":true,"mayWriteAll":true,"mayWriteOwn":true,"mayUpdatePrivate":true,"mayRSVP":true,"mayShare":false,"mayDelete":false}},{"id":"read-only","name":"Read only","isSubscribed":true,"isVisible":true,"isDefault":false,"myRights":{"mayReadFreeBusy":true,"mayReadItems":true,"mayWriteAll":false,"mayWriteOwn":false,"mayUpdatePrivate":false,"mayRSVP":false,"mayShare":false,"mayDelete":false}},{"id":"personal","name":"Personal","isSubscribed":true,"isVisible":true,"isDefault":false,"myRights":{"mayReadFreeBusy":true,"mayReadItems":true,"mayWriteAll":true,"mayWriteOwn":true,"mayUpdatePrivate":true,"mayRSVP":true,"mayShare":false,"mayDelete":false}}],"notFound":[]})",
+              .callId = "calendar-get"},
+             {.name = "CalendarEvent/query",
+              .arguments =
+                  R"({"accountId":"a1","queryState":"resolved-expanded","canCalculateChanges":false,"position":0,"ids":[],"total":0,"limit":1})",
+              .callId = "calendar-event-query"},
+             {.name = "CalendarEvent/query",
+              .arguments =
+                  R"({"accountId":"a1","queryState":"resolved-base","canCalculateChanges":false,"position":0,"ids":[],"total":0,"limit":1})",
+              .callId = "calendar-base-event-query"}},
+        .createdIds = std::nullopt,
+        .sessionState = "session-calendar-default-resolved"});
+
+    const auto resolvedDefault = QCoro::waitFor(service.refresh(settings, "a1", interval, zone));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::calendar::RefreshedRange>(resolvedDefault));
+    const auto activeAfterResolution =
+        genericJournal.listActive({.accountId = "a1", .dataType = "Calendar"});
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::MutationRecord>>(
+        activeAfterResolution));
+    CHECK(
+        std::get<std::vector<javelin::jmap::sync::MutationRecord>>(activeAfterResolution).empty());
+    const auto resolvedState = calendars.stateToken("a1", "Calendar");
+    REQUIRE(std::holds_alternative<std::optional<std::string>>(resolvedState));
+    CHECK(std::get<std::optional<std::string>>(resolvedState) ==
+          std::optional<std::string>{"calendar-default-resolved"});
 }

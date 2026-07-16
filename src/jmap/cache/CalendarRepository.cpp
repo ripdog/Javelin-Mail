@@ -5,6 +5,7 @@
 #include <QSqlError>
 #include <QSqlQuery>
 
+#include <algorithm>
 #include <unordered_set>
 
 namespace javelin::jmap::cache
@@ -168,10 +169,7 @@ namespace javelin::jmap::cache
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
             "SELECT c.calendar_id,c.name,c.description,c.color,c.sort_order,c.is_subscribed,"
-            "COALESCE(p.is_visible,c.is_visible),CASE WHEN EXISTS (SELECT 1 FROM "
-            "calendar_preferences d WHERE d.account_id=c.account_id AND "
-            "d.is_default_destination=1) THEN COALESCE(p.is_default_destination,0) ELSE "
-            "c.is_default END,c.time_zone,c.rights_json FROM "
+            "COALESCE(p.is_visible,c.is_visible),c.is_default,c.time_zone,c.rights_json FROM "
             "calendars c LEFT JOIN calendar_preferences p ON p.account_id=c.account_id AND "
             "p.calendar_id=c.calendar_id WHERE c.account_id=:account ORDER BY c.sort_order,"
             "c.name COLLATE NOCASE,c.calendar_id"));
@@ -226,52 +224,50 @@ namespace javelin::jmap::cache
         return std::nullopt;
     }
 
-    std::optional<DatabaseError>
-    CalendarRepository::setDefaultCalendar(const std::string_view accountId,
-                                           const std::string_view calendarId)
+    std::optional<DatabaseError> CalendarRepository::applyCalendarDefaults(
+        DatabaseTransaction& transaction, const std::string_view accountId,
+        const std::string_view state, const std::unordered_map<std::string, bool>& defaults)
     {
-        if (const auto error = m_connection.validate())
-            return error;
-        auto& database = m_connection.database();
-        if (!database.transaction())
+        if (!transaction.isActive())
             return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
-                                 .message = QStringLiteral("Begin default calendar update: ") +
-                                            database.lastError().text()};
-        QSqlQuery clear{database};
-        clear.prepare(
-            QStringLiteral("UPDATE calendar_preferences SET is_default_destination=0 WHERE "
-                           "account_id=:account"));
-        clear.bindValue(QStringLiteral(":account"), QString::fromStdString(std::string{accountId}));
-        if (!clear.exec())
+                                 .message = QStringLiteral("Apply defaults without transaction")};
+        auto& database = transaction.connection().database();
+        if (std::ranges::any_of(defaults, [](const auto& item) { return item.second; }))
         {
-            database.rollback();
-            return queryError(QStringLiteral("Clear default calendar"), clear);
+            QSqlQuery clear{database};
+            clear.prepare(QStringLiteral(
+                "UPDATE calendars SET is_default=0,state=:state WHERE account_id=:account"));
+            clear.bindValue(QStringLiteral(":state"), QString::fromStdString(std::string{state}));
+            clear.bindValue(QStringLiteral(":account"),
+                            QString::fromStdString(std::string{accountId}));
+            if (!clear.exec())
+                return queryError(QStringLiteral("Clear previous server calendar default"), clear);
         }
-        QSqlQuery select{database};
-        select.prepare(QStringLiteral(
-            "INSERT INTO calendar_preferences (account_id,calendar_id,is_visible,"
-            "is_default_destination) SELECT account_id,calendar_id,is_visible,1 FROM calendars "
-            "WHERE account_id=:account AND calendar_id=:calendar ON CONFLICT(account_id,"
-            "calendar_id) DO UPDATE SET is_default_destination=1"));
-        select.bindValue(QStringLiteral(":account"),
-                         QString::fromStdString(std::string{accountId}));
-        select.bindValue(QStringLiteral(":calendar"),
-                         QString::fromStdString(std::string{calendarId}));
-        if (!select.exec())
+        QSqlQuery update{database};
+        update.prepare(QStringLiteral(
+            "UPDATE calendars SET is_default=:default,state=:state WHERE account_id=:account AND "
+            "calendar_id=:calendar"));
+        for (const auto& [calendarId, isDefault] : defaults)
         {
-            database.rollback();
-            return queryError(QStringLiteral("Store default calendar"), select);
+            update.bindValue(QStringLiteral(":default"), isDefault ? 1 : 0);
+            update.bindValue(QStringLiteral(":state"), QString::fromStdString(std::string{state}));
+            update.bindValue(QStringLiteral(":account"),
+                             QString::fromStdString(std::string{accountId}));
+            update.bindValue(QStringLiteral(":calendar"), QString::fromStdString(calendarId));
+            if (!update.exec())
+                return queryError(QStringLiteral("Apply server calendar default"), update);
         }
-        if (select.numRowsAffected() != 1)
-        {
-            database.rollback();
-            return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
-                                 .message = QStringLiteral("The default calendar is missing.")};
-        }
-        if (!database.commit())
-            return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
-                                 .message = QStringLiteral("Commit default calendar update: ") +
-                                            database.lastError().text()};
+        QSqlQuery stateToken{database};
+        stateToken.prepare(QStringLiteral(
+            "INSERT INTO calendar_state_tokens (account_id,data_type,state) VALUES "
+            "(:account,'Calendar',:state) ON CONFLICT(account_id,data_type) DO UPDATE SET "
+            "state=excluded.state"));
+        stateToken.bindValue(QStringLiteral(":account"),
+                             QString::fromStdString(std::string{accountId}));
+        stateToken.bindValue(QStringLiteral(":state"), QString::fromStdString(std::string{state}));
+        if (!stateToken.exec())
+            return queryError(QStringLiteral("Store Calendar state after default change"),
+                              stateToken);
         return std::nullopt;
     }
 
