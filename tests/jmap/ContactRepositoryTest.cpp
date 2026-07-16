@@ -136,4 +136,34 @@ TEST_CASE("contact repository greedily caches, filters, and resolves email addre
     CHECK(
         std::get<std::vector<javelin::jmap::contacts::ContactSummary>>(retainedMembership).size() ==
         2);
+
+    changedAccount.clear();
+    auto rollbackResult = javelin::jmap::cache::DatabaseTransaction::begin(
+        connection, QStringLiteral("Test Contact rollback"));
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(rollbackResult));
+    auto rollback = std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(rollbackResult));
+    REQUIRE_FALSE(
+        repository
+            .upsertContacts(rollback, "a1", {contact("c3", "Rollback", "r@example.test")}, {}, "c3")
+            .has_value());
+    rollback.rollback();
+    CHECK(changedAccount.isEmpty());
+    const auto afterRollback = repository.listContacts("a1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::contacts::ContactSummary>>(
+        afterRollback));
+    CHECK(std::get<std::vector<javelin::jmap::contacts::ContactSummary>>(afterRollback).size() ==
+          2);
+
+    auto commitResult = javelin::jmap::cache::DatabaseTransaction::begin(
+        connection, QStringLiteral("Test Contact commit"));
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(commitResult));
+    auto commit = std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(commitResult));
+    REQUIRE_FALSE(
+        repository
+            .upsertContacts(commit, "a1", {contact("c3", "Committed", "c@example.test")}, {}, "c3")
+            .has_value());
+    REQUIRE_FALSE(commit.commit().has_value());
+    CHECK(changedAccount.isEmpty());
+    repository.notifyChanged("a1");
+    CHECK(changedAccount == QStringLiteral("a1"));
 }

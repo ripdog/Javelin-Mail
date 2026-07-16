@@ -250,13 +250,43 @@ namespace javelin::jmap::cache
         const std::string_view accountId, const std::vector<javelin::jmap::api::AddressBook>& books,
         const std::string_view state)
     {
-        auto& database = m_connection.database();
-        if (!database.transaction())
+        auto transactionResult = DatabaseTransaction::begin(
+            m_connection, QStringLiteral("Begin address book replacement"));
+        if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
         {
-            return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
-                                 .message = QStringLiteral("Begin address book replacement")};
+            return *error;
+        }
+        auto transaction = std::get<DatabaseTransaction>(std::move(transactionResult));
+        if (const auto error = replaceAddressBooks(transaction, accountId, books, state))
+        {
+            return error;
+        }
+        if (const auto error = transaction.commit())
+        {
+            return error;
+        }
+        notifyChanged(accountId);
+        return std::nullopt;
+    }
+
+    std::optional<DatabaseError> ContactRepository::replaceAddressBooks(
+        DatabaseTransaction& transaction, const std::string_view accountId,
+        const std::vector<javelin::jmap::api::AddressBook>& books, const std::string_view state)
+    {
+        if (const auto error = m_connection.validate())
+        {
+            return error;
+        }
+        if (!transaction.isActive() || &transaction.connection() != &m_connection)
+        {
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message =
+                    QStringLiteral("Address book replacement requires a matching transaction"),
+            };
         }
 
+        auto& database = m_connection.database();
         std::unordered_set<std::string> retainedIds;
         retainedIds.reserve(books.size());
         for (const auto& book : books)
@@ -264,7 +294,6 @@ namespace javelin::jmap::cache
             retainedIds.insert(book.id);
             if (const auto error = insertAddressBook(database, accountId, book, state))
             {
-                database.rollback();
                 return error;
             }
         }
@@ -276,7 +305,6 @@ namespace javelin::jmap::cache
                            QString::fromStdString(std::string{accountId}));
         if (!existing.exec())
         {
-            database.rollback();
             return queryError(QStringLiteral("List cached address books"), existing);
         }
         std::vector<std::string> removedIds;
@@ -297,18 +325,10 @@ namespace javelin::jmap::cache
             remove.bindValue(QStringLiteral(":id"), QString::fromStdString(id));
             if (!remove.exec())
             {
-                database.rollback();
                 return queryError(QStringLiteral("Remove stale address book"), remove);
             }
         }
 
-        if (!database.commit())
-        {
-            database.rollback();
-            return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
-                                 .message = QStringLiteral("Commit address book replacement")};
-        }
-        Q_EMIT contactsChanged(QString::fromStdString(std::string{accountId}));
         return std::nullopt;
     }
 
@@ -317,17 +337,47 @@ namespace javelin::jmap::cache
         const std::vector<javelin::jmap::contacts::ContactSummary>& contacts,
         const std::span<const std::string> destroyed, const std::string_view state)
     {
-        auto& database = m_connection.database();
-        if (!database.transaction())
+        auto transactionResult =
+            DatabaseTransaction::begin(m_connection, QStringLiteral("Begin contact update"));
+        if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
         {
-            return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
-                                 .message = QStringLiteral("Begin contact update")};
+            return *error;
         }
+        auto transaction = std::get<DatabaseTransaction>(std::move(transactionResult));
+        if (const auto error = upsertContacts(transaction, accountId, contacts, destroyed, state))
+        {
+            return error;
+        }
+        if (const auto error = transaction.commit())
+        {
+            return error;
+        }
+        notifyChanged(accountId);
+        return std::nullopt;
+    }
+
+    std::optional<DatabaseError> ContactRepository::upsertContacts(
+        DatabaseTransaction& transaction, const std::string_view accountId,
+        const std::vector<javelin::jmap::contacts::ContactSummary>& contacts,
+        const std::span<const std::string> destroyed, const std::string_view state)
+    {
+        if (const auto error = m_connection.validate())
+        {
+            return error;
+        }
+        if (!transaction.isActive() || &transaction.connection() != &m_connection)
+        {
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message = QStringLiteral("Contact update requires a matching transaction"),
+            };
+        }
+
+        auto& database = m_connection.database();
         for (const auto& contact : contacts)
         {
             if (const auto error = insertContact(database, contact))
             {
-                database.rollback();
                 return error;
             }
         }
@@ -343,7 +393,6 @@ namespace javelin::jmap::cache
                 remove.bindValue(QStringLiteral(":id"), QString::fromStdString(id));
                 if (!remove.exec())
                 {
-                    database.rollback();
                     return queryError(QStringLiteral("Delete contact"), remove);
                 }
             }
@@ -359,17 +408,14 @@ namespace javelin::jmap::cache
         syncState.bindValue(QStringLiteral(":state"), QString::fromStdString(std::string{state}));
         if (!syncState.exec())
         {
-            database.rollback();
             return queryError(QStringLiteral("Store contact state"), syncState);
         }
-        if (!database.commit())
-        {
-            database.rollback();
-            return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
-                                 .message = QStringLiteral("Commit contact update")};
-        }
-        Q_EMIT contactsChanged(QString::fromStdString(std::string{accountId}));
         return std::nullopt;
+    }
+
+    void ContactRepository::notifyChanged(const std::string_view accountId)
+    {
+        Q_EMIT contactsChanged(QString::fromStdString(std::string{accountId}));
     }
 
     std::variant<std::vector<javelin::jmap::api::AddressBook>, DatabaseError>

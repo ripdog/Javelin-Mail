@@ -12,6 +12,7 @@
 #include "jmap/cache/SyncStateRepository.h"
 #include "jmap/contacts/ContactTypes.h"
 #include "jmap/sync/ConsistencyDomain.h"
+#include "jmap/sync/MutationJournal.h"
 
 #include <glaze/glaze.hpp>
 
@@ -484,15 +485,22 @@ namespace javelin::jmap::contacts
                 co_return error(QStringLiteral("The server rejected one or more Contacts changes."),
                                 javelin::jmap::OperationErrorCode::Conflict);
             }
-            javelin::jmap::sync::ConsistencyDomainRepository consistencyRepository{connection};
-            for (const auto& domain : affectedDomains)
+            auto transactionResult = javelin::jmap::sync::MutationProjectionTransaction::begin(
+                connection, QStringLiteral("Apply Contacts mutation response"));
+            if (const auto* cacheError =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&transactionResult))
             {
-                const auto generation = consistencyRepository.advanceMutation(domain);
-                if (const auto* cacheError =
-                        std::get_if<javelin::jmap::cache::DatabaseError>(&generation))
-                    co_return error(cacheError->message,
-                                    javelin::jmap::OperationErrorCode::LocalStorageFailure);
+                co_return error(cacheError->message,
+                                javelin::jmap::OperationErrorCode::LocalStorageFailure);
             }
+            auto transaction = std::get<javelin::jmap::sync::MutationProjectionTransaction>(
+                std::move(transactionResult));
+            if (const auto cacheError = transaction.advance(affectedDomains))
+                co_return error(cacheError->message,
+                                javelin::jmap::OperationErrorCode::LocalStorageFailure);
+            if (const auto cacheError = transaction.commit())
+                co_return error(cacheError->message,
+                                javelin::jmap::OperationErrorCode::LocalStorageFailure);
             co_return ContactMutationSummary{.accountId = accountId,
                                              .newState = parsed.value->newState,
                                              .createdId = createdId(*parsed.value)};

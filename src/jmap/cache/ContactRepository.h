@@ -38,7 +38,15 @@ namespace javelin::jmap::cache
                             const std::vector<javelin::jmap::api::AddressBook>& books,
                             std::string_view state);
         [[nodiscard]] std::optional<DatabaseError>
+        replaceAddressBooks(DatabaseTransaction& transaction, std::string_view accountId,
+                            const std::vector<javelin::jmap::api::AddressBook>& books,
+                            std::string_view state);
+        [[nodiscard]] std::optional<DatabaseError>
         upsertContacts(std::string_view accountId,
+                       const std::vector<javelin::jmap::contacts::ContactSummary>& contacts,
+                       std::span<const std::string> destroyed, std::string_view state);
+        [[nodiscard]] std::optional<DatabaseError>
+        upsertContacts(DatabaseTransaction& transaction, std::string_view accountId,
                        const std::vector<javelin::jmap::contacts::ContactSummary>& contacts,
                        std::span<const std::string> destroyed, std::string_view state);
         [[nodiscard]] std::variant<std::vector<javelin::jmap::api::AddressBook>, DatabaseError>
@@ -54,6 +62,7 @@ namespace javelin::jmap::cache
                                    DatabaseError>
         findByEmail(std::string_view normalizedEmail,
                     std::optional<std::string_view> accountId = std::nullopt) const;
+        void notifyChanged(std::string_view accountId);
 
       Q_SIGNALS:
         void contactsChanged(const QString& accountId);
