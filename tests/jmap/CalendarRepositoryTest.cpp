@@ -1,4 +1,6 @@
 #include "jmap/cache/CalendarRepository.h"
+#include "jmap/api/CalendarMethods.h"
+#include "jmap/calendar/CalendarMutationJournal.h"
 
 #include <QCoreApplication>
 #include <QSqlQuery>
@@ -186,6 +188,49 @@ TEST_CASE("calendar windows retain occurrences referenced by overlapping windows
                                                      &javelin::jmap::calendar::Occurrence::id);
     REQUIRE(projectedInstance != projectedValue->occurrences.end());
     CHECK(projectedInstance->localStart.value == "2026-03-04T10:00:00");
+
+    auto journalEvent = projectedEvent;
+    journalEvent.title = "Journal event";
+    const auto baseDocument = javelin::jmap::api::serializeCalendarEventDocument(projectedEvent);
+    const auto projectedDocument = javelin::jmap::api::serializeCalendarEventDocument(journalEvent);
+    REQUIRE(baseDocument.has_value());
+    REQUIRE(projectedDocument.has_value());
+    const javelin::jmap::calendar::CalendarMutationRecord mutation{
+        .mutationId = "calendar-update-1",
+        .operationGroupId = std::nullopt,
+        .accountId = "a1",
+        .objectId = "e1",
+        .creationId = std::nullopt,
+        .kind = javelin::jmap::calendar::CalendarMutationKind::Update,
+        .status = javelin::jmap::sync::MutationStatus::Pending,
+        .requestedDocument = *projectedDocument,
+        .baseDocument = *baseDocument,
+        .projectedDocument = *projectedDocument,
+        .baseState = "e1-state",
+        .acceptedState = std::nullopt,
+        .errorJson = std::nullopt,
+    };
+    javelin::jmap::calendar::CalendarMutationJournal journal{connection, repository};
+    REQUIRE_FALSE(journal.queue({mutation}, "e1-state", {journalEvent}, {projectedOccurrence}, {})
+                      .has_value());
+    const auto journalRecords = journal.listForEvent("a1", "e1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::calendar::CalendarMutationRecord>>(
+        journalRecords));
+    REQUIRE(std::get<std::vector<javelin::jmap::calendar::CalendarMutationRecord>>(journalRecords)
+                .size() == 1);
+    CHECK(std::get<std::vector<javelin::jmap::calendar::CalendarMutationRecord>>(journalRecords)
+              .front()
+              .status == javelin::jmap::sync::MutationStatus::Pending);
+    REQUIRE_FALSE(
+        journal.transition({mutation}, javelin::jmap::sync::MutationStatus::InFlight).has_value());
+    const auto journalProjected = repository.findEvent("a1", "e1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::calendar::CalendarEvent>>(
+        journalProjected));
+    REQUIRE(std::get<std::optional<javelin::jmap::calendar::CalendarEvent>>(journalProjected)
+                .has_value());
+    CHECK(
+        std::get<std::optional<javelin::jmap::calendar::CalendarEvent>>(journalProjected)->title ==
+        "Journal event");
 
     auto rollbackResult = javelin::jmap::cache::DatabaseTransaction::begin(
         connection, QStringLiteral("Rollback calendar projection"));

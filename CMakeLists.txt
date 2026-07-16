@@ -242,6 +242,8 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/sync/EmailMutationJournal.h
     src/jmap/contacts/ContactMutationJournal.cpp
     src/jmap/contacts/ContactMutationJournal.h
+    src/jmap/calendar/CalendarMutationJournal.cpp
+    src/jmap/calendar/CalendarMutationJournal.h
     src/jmap/sync/RefreshNotificationPlanner.cpp
     src/jmap/sync/RefreshNotificationPlanner.h
     src/jmap/sync/SyncPlanner.cpp
@@ -443,6 +445,8 @@ add_library(javelin_jmap STATIC
     src/jmap/sync/EmailMutationJournal.h
     src/jmap/contacts/ContactMutationJournal.cpp
     src/jmap/contacts/ContactMutationJournal.h
+    src/jmap/calendar/CalendarMutationJournal.cpp
+    src/jmap/calendar/CalendarMutationJournal.h
     src/jmap/sync/RefreshNotificationPlanner.cpp
     src/jmap/sync/RefreshNotificationPlanner.h
     src/jmap/sync/SyncPlanner.cpp
