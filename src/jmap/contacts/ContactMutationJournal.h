@@ -35,6 +35,13 @@ namespace javelin::jmap::contacts
         std::optional<std::string> errorJson;
     };
 
+    struct ContactProjection
+    {
+        std::string accountId;
+        std::vector<ContactSummary> contacts;
+        std::vector<std::string> destroyedIds;
+    };
+
     class ContactMutationJournal
     {
       public:
@@ -45,6 +52,9 @@ namespace javelin::jmap::contacts
         queue(const std::vector<ContactMutationRecord>& records,
               const std::vector<ContactSummary>& projectedContacts,
               std::span<const std::string> destroyedIds);
+        [[nodiscard]] std::optional<cache::DatabaseError>
+        queueGroup(const std::vector<ContactMutationRecord>& records,
+                   std::span<const ContactProjection> projections);
         [[nodiscard]] std::variant<std::vector<ContactMutationRecord>, cache::DatabaseError>
         listForContact(std::string_view accountId, std::string_view contactId) const;
         [[nodiscard]] std::optional<cache::DatabaseError>

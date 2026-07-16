@@ -107,9 +107,9 @@ namespace
     }
 
     [[nodiscard]] javelin::jmap::contacts::ContactSummary
-    cachedContact(std::string id, std::string name, std::string email)
+    cachedContact(std::string id, std::string name, std::string email, std::string accountId = "a1")
     {
-        return {.accountId = "a1",
+        return {.accountId = std::move(accountId),
                 .id = id,
                 .uid = "uid-" + id,
                 .kind = "individual",
@@ -126,6 +126,26 @@ namespace
                     R"({"id":")" + id + R"(","uid":"uid-)" + id +
                     R"(","kind":"individual","addressBookIds":{"book-1":true},"name":{"full":")" +
                     name + R"("},"emails":{"email-1":{"address":")" + email + R"("}}})"};
+    }
+
+    [[nodiscard]] javelin::jmap::api::Session sessionWithContactDestination()
+    {
+        auto value = session();
+        value.accounts.emplace(
+            "a2", javelin::jmap::api::Account{
+                      .id = "a2",
+                      .name = "Shared",
+                      .isPersonal = false,
+                      .isReadOnly = false,
+                      .accountCapabilities = {.mail = false,
+                                              .submission = false,
+                                              .contacts =
+                                                  javelin::jmap::api::ContactsCapability{
+                                                      .maxAddressBooksPerCard = std::nullopt,
+                                                      .mayCreateAddressBook = true},
+                                              .calendars = std::nullopt},
+                  });
+        return value;
     }
 } // namespace
 
@@ -729,6 +749,210 @@ TEST_CASE("accepted ContactCard creation replaces its temporary projection",
     REQUIRE(values.size() == 1);
     CHECK(values.front().id == "card-2");
     CHECK(values.front().displayName == "New Contact");
+}
+
+TEST_CASE("ContactCard move-by-copy projects and reconciles both accounts atomically",
+          "[jmap][contacts][service][consistency][copy]")
+{
+    ensureApplication();
+    QTemporaryDir directory;
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("contact-service-copy-group-test"),
+        .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    javelin::jmap::cache::SessionRepository sessions{connection};
+    REQUIRE_FALSE(sessions.replace("a1", sessionWithContactDestination()).has_value());
+    javelin::jmap::cache::ContactRepository contacts{connection};
+    REQUIRE_FALSE(contacts
+                      .replaceAll("a1", {addressBook()},
+                                  {cachedContact("card-1", "Original", "original@example.test")},
+                                  "b1", "source-1")
+                      .has_value());
+    REQUIRE_FALSE(
+        contacts.replaceAll("a2", {addressBook()}, {}, "b2", "destination-1").has_value());
+
+    FakeTransport transport;
+    transport.results.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body =
+            QByteArray{
+                R"({"methodResponses":[["ContactCard/copy",{"fromAccountId":"a1","accountId":"a2","oldState":"destination-1","newState":"destination-2","created":{"copy-1":{"id":"card-2"}},"notCreated":{}},"contacts-copy"],["ContactCard/set",{"accountId":"a1","oldState":"source-1","newState":"source-2","created":{},"updated":{},"destroyed":["card-1"],"notCreated":{},"notUpdated":{},"notDestroyed":{}},"contacts-copy"]],"sessionState":"s2"})"},
+    });
+    transport.beforeReturn = [&contacts]
+    {
+        const auto source = contacts.findContact("a1", "card-1");
+        const auto destination = contacts.listContacts("a2");
+        REQUIRE(
+            std::holds_alternative<std::optional<javelin::jmap::contacts::ContactSummary>>(source));
+        REQUIRE(std::holds_alternative<std::vector<javelin::jmap::contacts::ContactSummary>>(
+            destination));
+        CHECK_FALSE(
+            std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(source).has_value());
+        const auto& projected =
+            std::get<std::vector<javelin::jmap::contacts::ContactSummary>>(destination);
+        REQUIRE(projected.size() == 1);
+        CHECK(projected.front().id.starts_with("local-"));
+        CHECK(projected.front().displayName == "Original");
+    };
+    javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
+    javelin::jmap::contacts::ContactService service{connection, contacts, transport,
+                                                    methodTransport};
+    const auto result = QCoro::waitFor(
+        service.copyContactCards({.sessionUrl = "https://example.test/.well-known/jmap",
+                                  .loginEmail = "alice@example.test",
+                                  .apiKey = "secret"},
+                                 "a1",
+                                 {.fromAccountId = "a1",
+                                  .accountId = "a2",
+                                  .ifFromInState = std::nullopt,
+                                  .ifInState = std::nullopt,
+                                  .create = {{"copy-1", {.json = R"({"id":"card-1"})"}}},
+                                  .onSuccessDestroyOriginal = true,
+                                  .destroyFromIfInState = std::nullopt}));
+    REQUIRE(std::holds_alternative<javelin::jmap::contacts::ContactMutationSummary>(result));
+    CHECK(transport.lastRequest.body.contains(R"("ifFromInState":"source-1")"));
+    CHECK(transport.lastRequest.body.contains(R"("ifInState":"destination-1")"));
+    CHECK(transport.lastRequest.body.contains(R"("destroyFromIfInState":"source-1")"));
+
+    const auto source = contacts.findContact("a1", "card-1");
+    const auto destination = contacts.findContact("a2", "card-2");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::contacts::ContactSummary>>(source));
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::contacts::ContactSummary>>(
+        destination));
+    CHECK_FALSE(
+        std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(source).has_value());
+    REQUIRE(
+        std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(destination).has_value());
+    CHECK(std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(destination)
+              ->displayName == "Original");
+}
+
+TEST_CASE("a failed source deletion restores only the source side of ContactCard copy",
+          "[jmap][contacts][service][consistency][copy]")
+{
+    ensureApplication();
+    QTemporaryDir directory;
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("contact-service-copy-delete-rejected-test"),
+        .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    javelin::jmap::cache::SessionRepository sessions{connection};
+    REQUIRE_FALSE(sessions.replace("a1", sessionWithContactDestination()).has_value());
+    javelin::jmap::cache::ContactRepository contacts{connection};
+    REQUIRE_FALSE(contacts
+                      .replaceAll("a1", {addressBook()},
+                                  {cachedContact("card-1", "Original", "original@example.test")},
+                                  "b1", "source-1")
+                      .has_value());
+    REQUIRE_FALSE(
+        contacts.replaceAll("a2", {addressBook()}, {}, "b2", "destination-1").has_value());
+
+    FakeTransport transport;
+    transport.results.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body =
+            QByteArray{
+                R"({"methodResponses":[["ContactCard/copy",{"fromAccountId":"a1","accountId":"a2","oldState":"destination-1","newState":"destination-2","created":{"copy-1":{"id":"card-2"}},"notCreated":{}},"contacts-copy"],["ContactCard/set",{"accountId":"a1","oldState":"source-1","newState":"source-1","created":{},"updated":{},"destroyed":[],"notCreated":{},"notUpdated":{},"notDestroyed":{"card-1":{"type":"forbidden"}}},"contacts-copy"]],"sessionState":"s2"})"},
+    });
+    javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
+    javelin::jmap::contacts::ContactService service{connection, contacts, transport,
+                                                    methodTransport};
+    const auto result = QCoro::waitFor(
+        service.copyContactCards({.sessionUrl = "https://example.test/.well-known/jmap",
+                                  .loginEmail = "alice@example.test",
+                                  .apiKey = "secret"},
+                                 "a1",
+                                 {.fromAccountId = "a1",
+                                  .accountId = "a2",
+                                  .ifFromInState = std::nullopt,
+                                  .ifInState = std::nullopt,
+                                  .create = {{"copy-1", {.json = R"({"id":"card-1"})"}}},
+                                  .onSuccessDestroyOriginal = true,
+                                  .destroyFromIfInState = std::nullopt}));
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
+    CHECK(std::get<javelin::jmap::OperationError>(result).code ==
+          javelin::jmap::OperationErrorCode::Conflict);
+
+    const auto source = contacts.findContact("a1", "card-1");
+    const auto destination = contacts.findContact("a2", "card-2");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::contacts::ContactSummary>>(source));
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::contacts::ContactSummary>>(
+        destination));
+    REQUIRE(std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(source).has_value());
+    REQUIRE(
+        std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(destination).has_value());
+}
+
+TEST_CASE("an unconfirmed source deletion remains optimistically hidden after ContactCard copy",
+          "[jmap][contacts][service][consistency][copy]")
+{
+    ensureApplication();
+    QTemporaryDir directory;
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("contact-service-copy-delete-unknown-test"),
+        .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    javelin::jmap::cache::SessionRepository sessions{connection};
+    REQUIRE_FALSE(sessions.replace("a1", sessionWithContactDestination()).has_value());
+    javelin::jmap::cache::ContactRepository contacts{connection};
+    REQUIRE_FALSE(contacts
+                      .replaceAll("a1", {addressBook()},
+                                  {cachedContact("card-1", "Original", "original@example.test")},
+                                  "b1", "source-1")
+                      .has_value());
+    REQUIRE_FALSE(
+        contacts.replaceAll("a2", {addressBook()}, {}, "b2", "destination-1").has_value());
+
+    FakeTransport transport;
+    transport.results.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body =
+            QByteArray{
+                R"({"methodResponses":[["ContactCard/copy",{"fromAccountId":"a1","accountId":"a2","oldState":"destination-1","newState":"destination-2","created":{"copy-1":{"id":"card-2"}},"notCreated":{}},"contacts-copy"]],"sessionState":"s2"})"},
+    });
+    javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
+    javelin::jmap::contacts::ContactService service{connection, contacts, transport,
+                                                    methodTransport};
+    const auto result = QCoro::waitFor(
+        service.copyContactCards({.sessionUrl = "https://example.test/.well-known/jmap",
+                                  .loginEmail = "alice@example.test",
+                                  .apiKey = "secret"},
+                                 "a1",
+                                 {.fromAccountId = "a1",
+                                  .accountId = "a2",
+                                  .ifFromInState = std::nullopt,
+                                  .ifInState = std::nullopt,
+                                  .create = {{"copy-1", {.json = R"({"id":"card-1"})"}}},
+                                  .onSuccessDestroyOriginal = true,
+                                  .destroyFromIfInState = std::nullopt}));
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
+    CHECK(std::get<javelin::jmap::OperationError>(result).code ==
+          javelin::jmap::OperationErrorCode::ProtocolViolation);
+
+    const auto source = contacts.findContact("a1", "card-1");
+    const auto destination = contacts.findContact("a2", "card-2");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::contacts::ContactSummary>>(source));
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::contacts::ContactSummary>>(
+        destination));
+    CHECK_FALSE(
+        std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(source).has_value());
+    REQUIRE(
+        std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(destination).has_value());
+    javelin::jmap::contacts::ContactMutationJournal journal{connection, contacts};
+    const auto sourceMutations = journal.listForContact("a1", "card-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(
+        sourceMutations));
+    REQUIRE(std::get<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(sourceMutations)
+                .size() == 1);
+    CHECK(std::get<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(sourceMutations)
+              .front()
+              .status == javelin::jmap::sync::MutationStatus::Unknown);
 }
 
 TEST_CASE("contact service incrementally applies paged changes with bounded gets",

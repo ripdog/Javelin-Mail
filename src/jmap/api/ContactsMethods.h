@@ -169,6 +169,7 @@ namespace javelin::jmap::api
         std::optional<std::string> ifInState;
         std::unordered_map<std::string, ContactDocument> create;
         bool onSuccessDestroyOriginal = false;
+        std::optional<std::string> destroyFromIfInState;
     };
 
     using ContactCardCopyResponse = SetResult;

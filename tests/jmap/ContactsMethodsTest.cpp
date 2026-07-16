@@ -70,9 +70,11 @@ TEST_CASE("contacts set and copy embed JSContact documents", "[jmap][contacts][p
     copyRequest.create.emplace("copy-1",
                                javelin::jmap::api::ContactDocument{.json = R"({"id":"card-1"})"});
     copyRequest.onSuccessDestroyOriginal = true;
+    copyRequest.destroyFromIfInState = "source-state";
     const auto copyJson = javelin::jmap::api::serializeContactCardCopyRequest(copyRequest);
     REQUIRE(copyJson.has_value());
     CHECK(copyJson->find(R"("onSuccessDestroyOriginal":true)") != std::string::npos);
+    CHECK(copyJson->find(R"("destroyFromIfInState":"source-state")") != std::string::npos);
 }
 
 TEST_CASE("contacts set responses preserve patches and errors", "[jmap][contacts][protocol]")

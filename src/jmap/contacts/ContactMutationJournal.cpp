@@ -5,6 +5,7 @@
 #include <glaze/glaze.hpp>
 
 #include <algorithm>
+#include <array>
 
 namespace
 {
@@ -144,14 +145,34 @@ namespace javelin::jmap::contacts
                 .message = QStringLiteral("A ContactCard projection requires mutation records."),
             };
         }
-        const auto& accountId = records.front().accountId;
-        if (accountId.empty() ||
-            std::ranges::any_of(records, [&accountId](const ContactMutationRecord& record)
-                                { return record.accountId != accountId; }))
+        const std::array projections{ContactProjection{
+            .accountId = records.front().accountId,
+            .contacts = projectedContacts,
+            .destroyedIds = {destroyedIds.begin(), destroyedIds.end()},
+        }};
+        return queueGroup(records, projections);
+    }
+
+    std::optional<cache::DatabaseError>
+    ContactMutationJournal::queueGroup(const std::vector<ContactMutationRecord>& records,
+                                       const std::span<const ContactProjection> projections)
+    {
+        if (records.empty())
         {
             return cache::DatabaseError{
                 .code = cache::DatabaseErrorCode::QueryFailed,
-                .message = QStringLiteral("ContactCard projections must belong to one account."),
+                .message = QStringLiteral("A ContactCard projection requires mutation records."),
+            };
+        }
+        if (projections.empty() ||
+            std::ranges::any_of(records, [](const ContactMutationRecord& record)
+                                { return record.accountId.empty(); }) ||
+            std::ranges::any_of(projections, [](const ContactProjection& projection)
+                                { return projection.accountId.empty(); }))
+        {
+            return cache::DatabaseError{
+                .code = cache::DatabaseErrorCode::QueryFailed,
+                .message = QStringLiteral("ContactCard projections require account ids."),
             };
         }
         auto transactionResult = sync::MutationProjectionTransaction::begin(
@@ -174,16 +195,23 @@ namespace javelin::jmap::contacts
                 return error;
             }
         }
-        if (const auto error = m_contacts.projectContacts(transaction.cacheTransaction(), accountId,
-                                                          projectedContacts, destroyedIds))
+        for (const auto& projection : projections)
         {
-            return error;
+            if (const auto error =
+                    m_contacts.projectContacts(transaction.cacheTransaction(), projection.accountId,
+                                               projection.contacts, projection.destroyedIds))
+            {
+                return error;
+            }
         }
         if (const auto error = transaction.commit())
         {
             return error;
         }
-        m_contacts.notifyChanged(accountId);
+        for (const auto& projection : projections)
+        {
+            m_contacts.notifyChanged(projection.accountId);
+        }
         return std::nullopt;
     }
 
@@ -255,8 +283,20 @@ namespace javelin::jmap::contacts
         }
         auto transaction =
             std::get<sync::MutationProjectionTransaction>(std::move(transactionResult));
-        std::vector<ContactSummary> restored;
-        std::vector<std::string> removed;
+        std::vector<ContactProjection> projections;
+        const auto projectionFor =
+            [&projections](const std::string& accountId) -> ContactProjection&
+        {
+            const auto found =
+                std::ranges::find(projections, accountId, &ContactProjection::accountId);
+            if (found != projections.end())
+                return *found;
+            return projections.emplace_back(ContactProjection{
+                .accountId = accountId,
+                .contacts = {},
+                .destroyedIds = {},
+            });
+        };
         for (const auto& record : records)
         {
             if (const auto error = transaction.transition(
@@ -281,25 +321,29 @@ namespace javelin::jmap::contacts
                             QStringLiteral("Unable to restore a rejected ContactCard mutation."),
                     };
                 }
-                restored.push_back(*summary);
+                projectionFor(record.accountId).contacts.push_back(*summary);
             }
             else if (record.kind == ContactMutationKind::Create)
             {
-                removed.push_back(record.objectId);
+                projectionFor(record.accountId).destroyedIds.push_back(record.objectId);
             }
         }
-        if (const auto error = m_contacts.projectContacts(
-                transaction.cacheTransaction(), records.front().accountId, restored, removed))
+        for (const auto& projection : projections)
         {
-            return error;
+            if (const auto error =
+                    m_contacts.projectContacts(transaction.cacheTransaction(), projection.accountId,
+                                               projection.contacts, projection.destroyedIds))
+            {
+                return error;
+            }
         }
         if (const auto error = transaction.commit())
         {
             return error;
         }
-        if (!records.empty())
+        for (const auto& projection : projections)
         {
-            m_contacts.notifyChanged(records.front().accountId);
+            m_contacts.notifyChanged(projection.accountId);
         }
         return std::nullopt;
     }

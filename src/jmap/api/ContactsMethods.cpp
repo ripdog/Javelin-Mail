@@ -44,6 +44,7 @@ namespace javelin::jmap::api::detail
         std::optional<std::string> ifInState;
         std::unordered_map<std::string, glz::raw_json> create;
         bool onSuccessDestroyOriginal = false;
+        std::optional<std::string> destroyFromIfInState;
     };
 
     struct RawAddressBookCreate
@@ -58,7 +59,7 @@ namespace javelin::jmap::api::detail
     struct RawSetResult
     {
         std::string accountId;
-        std::string oldState;
+        std::optional<std::string> oldState;
         std::string newState;
         std::unordered_map<std::string, glz::generic> created;
         std::unordered_map<std::string, glz::generic> updated;
@@ -176,7 +177,8 @@ template <> struct glz::meta<javelin::jmap::api::detail::RawContactCardCopyReque
     static constexpr auto value =
         glz::object("fromAccountId", &T::fromAccountId, "accountId", &T::accountId, "ifFromInState",
                     &T::ifFromInState, "ifInState", &T::ifInState, "create", &T::create,
-                    "onSuccessDestroyOriginal", &T::onSuccessDestroyOriginal);
+                    "onSuccessDestroyOriginal", &T::onSuccessDestroyOriginal,
+                    "destroyFromIfInState", &T::destroyFromIfInState);
 };
 
 template <> struct glz::meta<javelin::jmap::api::detail::RawAddressBookCreate>
@@ -297,6 +299,7 @@ namespace javelin::jmap::api
             .ifInState = request.ifInState,
             .create = rawDocuments(request.create),
             .onSuccessDestroyOriginal = request.onSuccessDestroyOriginal,
+            .destroyFromIfInState = request.destroyFromIfInState,
         });
     }
 
@@ -387,7 +390,7 @@ namespace javelin::jmap::api
             return {.value = std::nullopt, .error = raw.error};
         }
         return {.value = SetResult{.accountId = raw.value->accountId,
-                                   .oldState = raw.value->oldState,
+                                   .oldState = raw.value->oldState.value_or(std::string{}),
                                    .newState = raw.value->newState,
                                    .created = documents(raw.value->created),
                                    .updated = documents(raw.value->updated),

@@ -567,6 +567,135 @@ namespace javelin::jmap::contacts
             return QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
         }
 
+        struct PreparedContactCopy
+        {
+            std::vector<ContactMutationRecord> records;
+            std::vector<ContactProjection> projections;
+        };
+
+        [[nodiscard]] std::variant<std::optional<std::string>, javelin::jmap::OperationError>
+        contactState(javelin::jmap::cache::DatabaseConnection& connection,
+                     const std::string& accountId)
+        {
+            javelin::jmap::cache::SyncStateRepository states{connection};
+            const auto result =
+                states.find({.accountId = accountId, .objectType = "ContactCard", .queryKey = {}});
+            if (const auto* cacheError = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
+                return error(cacheError->message,
+                             javelin::jmap::OperationErrorCode::LocalStorageFailure);
+            const auto& state =
+                std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(result);
+            return state.has_value() ? std::optional<std::string>{state->stateToken} : std::nullopt;
+        }
+
+        [[nodiscard]] std::variant<PreparedContactCopy, javelin::jmap::OperationError>
+        prepareContactCopy(javelin::jmap::cache::ContactRepository& repository,
+                           const javelin::jmap::api::ContactCardCopyRequest& request)
+        {
+            if (request.fromAccountId == request.accountId)
+                return error(QStringLiteral("ContactCard/copy requires two different accounts."),
+                             javelin::jmap::OperationErrorCode::InvalidRequest);
+
+            PreparedContactCopy prepared;
+            const auto operationGroupId = newMutationId();
+            ContactProjection destination{
+                .accountId = request.accountId,
+                .contacts = {},
+                .destroyedIds = {},
+            };
+            ContactProjection source{
+                .accountId = request.fromAccountId,
+                .contacts = {},
+                .destroyedIds = {},
+            };
+            for (const auto& [creationId, copyDocument] : request.create)
+            {
+                std::string copyBuffer = copyDocument.json;
+                glz::generic overrides;
+                if (glz::read_json(overrides, copyBuffer) || !overrides.is_object() ||
+                    !overrides.contains("id") || !overrides.at("id").is_string())
+                    return error(
+                        QStringLiteral("Each ContactCard copy requires a source object id."),
+                        javelin::jmap::OperationErrorCode::InvalidRequest);
+                const auto sourceId = overrides.at("id").get_string();
+                const auto found = repository.findContact(request.fromAccountId, sourceId);
+                if (const auto* cacheError =
+                        std::get_if<javelin::jmap::cache::DatabaseError>(&found))
+                    return error(cacheError->message,
+                                 javelin::jmap::OperationErrorCode::LocalStorageFailure);
+                const auto& sourceContact = std::get<std::optional<ContactSummary>>(found);
+                if (!sourceContact.has_value())
+                    return error(QStringLiteral("The source contact is not cached."),
+                                 javelin::jmap::OperationErrorCode::NotFound);
+
+                std::string projectedBuffer = sourceContact->document;
+                glz::generic projected;
+                if (glz::read_json(projected, projectedBuffer) || !projected.is_object())
+                    return error(QStringLiteral("The cached source contact is invalid."),
+                                 javelin::jmap::OperationErrorCode::LocalStorageFailure);
+                overrides.get_object().erase("id");
+                projected.get_object().erase("id");
+                for (auto& [key, value] : overrides.get_object())
+                    projected[key] = std::move(value);
+                std::string projectedDocument;
+                if (glz::write_json(projected, projectedDocument))
+                    return error(QStringLiteral("Unable to materialize the copied contact."),
+                                 javelin::jmap::OperationErrorCode::LocalStorageFailure);
+
+                const auto mutationId = newMutationId();
+                const auto temporaryId = std::string{"local-"} + mutationId;
+                auto projectedContact =
+                    summarizeContact(request.accountId, javelin::jmap::api::ContactCard{
+                                                            .id = temporaryId,
+                                                            .uid = {},
+                                                            .kind = {},
+                                                            .document = projectedDocument,
+                                                        });
+                if (!projectedContact.has_value())
+                    return error(QStringLiteral("Unable to summarize the copied contact."),
+                                 javelin::jmap::OperationErrorCode::LocalStorageFailure);
+                destination.contacts.push_back(std::move(*projectedContact));
+                prepared.records.push_back({
+                    .mutationId = mutationId,
+                    .operationGroupId = operationGroupId,
+                    .accountId = request.accountId,
+                    .objectId = temporaryId,
+                    .creationId = creationId,
+                    .kind = ContactMutationKind::Create,
+                    .status = javelin::jmap::sync::MutationStatus::Pending,
+                    .requestedDocument = copyDocument.json,
+                    .baseDocument = std::nullopt,
+                    .projectedDocument = std::move(projectedDocument),
+                    .baseState = request.ifInState,
+                    .acceptedState = std::nullopt,
+                    .errorJson = std::nullopt,
+                });
+                if (request.onSuccessDestroyOriginal)
+                {
+                    source.destroyedIds.push_back(sourceId);
+                    prepared.records.push_back({
+                        .mutationId = newMutationId(),
+                        .operationGroupId = operationGroupId,
+                        .accountId = request.fromAccountId,
+                        .objectId = sourceId,
+                        .creationId = creationId,
+                        .kind = ContactMutationKind::Destroy,
+                        .status = javelin::jmap::sync::MutationStatus::Pending,
+                        .requestedDocument = "{}",
+                        .baseDocument = sourceContact->document,
+                        .projectedDocument = std::nullopt,
+                        .baseState = request.destroyFromIfInState,
+                        .acceptedState = std::nullopt,
+                        .errorJson = std::nullopt,
+                    });
+                }
+            }
+            prepared.projections.push_back(std::move(destination));
+            if (request.onSuccessDestroyOriginal)
+                prepared.projections.push_back(std::move(source));
+            return prepared;
+        }
+
         [[nodiscard]] std::variant<PreparedContactMutations, javelin::jmap::OperationError>
         prepareContactMutations(javelin::jmap::cache::ContactRepository& repository,
                                 const javelin::jmap::api::ContactCardSetRequest& request)
@@ -694,6 +823,14 @@ namespace javelin::jmap::contacts
         using SetObjectsResult =
             std::variant<javelin::jmap::api::SetResult, javelin::jmap::OperationError>;
 
+        struct CopyObjectsResponse
+        {
+            javelin::jmap::api::SetResult copied;
+            std::optional<javelin::jmap::api::SetResult> destroyedOriginals;
+        };
+
+        using CopyObjectsResult = std::variant<CopyObjectsResponse, javelin::jmap::OperationError>;
+
         [[nodiscard]] QCoro::Task<SetObjectsResult>
         setObjects(javelin::jmap::api::JmapMethodTransport& methodTransport,
                    javelin::jmap::cache::DatabaseConnection& connection,
@@ -753,6 +890,77 @@ namespace javelin::jmap::contacts
                                     .arg(QString::fromStdString(parsed.error.value_or("unknown"))));
             }
             co_return *parsed.value;
+        }
+
+        [[nodiscard]] QCoro::Task<CopyObjectsResult>
+        copyObjects(javelin::jmap::api::JmapMethodTransport& methodTransport,
+                    javelin::jmap::cache::DatabaseConnection& connection,
+                    javelin::jmap::LiveConnectionSettings settings, std::string ownerAccountId,
+                    const javelin::jmap::api::ContactCardCopyRequest& request,
+                    const std::string& serialized)
+        {
+            const auto sessionResult = loadSession(connection, ownerAccountId);
+            if (const auto* loadError = std::get_if<javelin::jmap::OperationError>(&sessionResult))
+                co_return *loadError;
+            const auto& session = std::get<javelin::jmap::api::Session>(sessionResult);
+            for (const auto& accountId : {request.fromAccountId, request.accountId})
+            {
+                const auto account = session.accounts.find(accountId);
+                if (account == session.accounts.end() ||
+                    !account->second.accountCapabilities.contacts.has_value())
+                    co_return error(
+                        QStringLiteral("A copy account does not support JMAP Contacts."),
+                        javelin::jmap::OperationErrorCode::UnsupportedCapability);
+            }
+
+            javelin::jmap::api::RequestBuilder builder;
+            builder.useCore().useCapability(std::string{javelin::jmap::api::contactsCapabilityUri});
+            static_cast<void>(builder.call(
+                javelin::jmap::api::MethodRequest<javelin::jmap::api::SetResult>{
+                    .name = "ContactCard/copy", .arguments = serialized},
+                "contacts-copy"));
+            javelin::jmap::api::MethodCaller caller{methodTransport};
+            const auto callResult =
+                co_await caller.call(context(settings, session, request.accountId), builder);
+            const auto* envelope = std::get_if<javelin::jmap::api::ResponseEnvelope>(&callResult);
+            if (envelope == nullptr)
+                co_return callError(callResult);
+
+            CopyObjectsResponse responseValue;
+            bool foundCopy = false;
+            for (const auto& invocation : envelope->methodResponses)
+            {
+                if (invocation.callId != "contacts-copy")
+                    continue;
+                if (invocation.name == "error")
+                {
+                    const auto parsed = javelin::jmap::api::parseMethodError(invocation.arguments);
+                    if (!parsed.ok())
+                        co_return error(QStringLiteral("Invalid ContactCard/copy error response."),
+                                        javelin::jmap::OperationErrorCode::ProtocolViolation);
+                    co_return javelin::jmap::operationError(*parsed.value);
+                }
+                if (invocation.name != "ContactCard/copy" && invocation.name != "ContactCard/set")
+                    continue;
+                const auto parsed =
+                    javelin::jmap::api::parseContactsSetResponse(invocation.arguments);
+                if (!parsed.ok())
+                    co_return error(
+                        QStringLiteral("Invalid Contacts copy response: %1")
+                            .arg(QString::fromStdString(parsed.error.value_or("unknown"))),
+                        javelin::jmap::OperationErrorCode::ProtocolViolation);
+                if (invocation.name == "ContactCard/copy")
+                {
+                    responseValue.copied = std::move(*parsed.value);
+                    foundCopy = true;
+                }
+                else
+                    responseValue.destroyedOriginals = std::move(*parsed.value);
+            }
+            if (!foundCopy)
+                co_return error(QStringLiteral("The server omitted the ContactCard/copy response."),
+                                javelin::jmap::OperationErrorCode::ProtocolViolation);
+            co_return responseValue;
         }
 
         [[nodiscard]] bool hasSetFailures(const javelin::jmap::api::SetResult& result)
@@ -1211,6 +1419,230 @@ namespace javelin::jmap::contacts
                 .createdId = createdId(result),
             };
         }
+
+        [[nodiscard]] ContactMutationResult
+        reconcileContactCopy(javelin::jmap::cache::DatabaseConnection& connection,
+                             javelin::jmap::cache::ContactRepository& repository,
+                             const std::vector<ContactMutationRecord>& records,
+                             const CopyObjectsResponse& responseValue)
+        {
+            struct Transition
+            {
+                const ContactMutationRecord* record;
+                javelin::jmap::sync::MutationStatus status;
+                std::optional<std::string> state;
+                std::optional<std::string> errorJson;
+            };
+            std::vector<Transition> transitions;
+            std::vector<ContactSummary> destinationContacts;
+            std::vector<std::string> destinationRemoved;
+            std::vector<ContactSummary> sourceContacts;
+            bool hasRejected = false;
+            bool hasUnknown = false;
+
+            const auto sourceRecordFor = [&records](const std::optional<std::string>& creationId)
+                -> const ContactMutationRecord*
+            {
+                if (!creationId.has_value())
+                    return nullptr;
+                const auto found =
+                    std::ranges::find_if(records,
+                                         [&creationId](const ContactMutationRecord& record)
+                                         {
+                                             return record.kind == ContactMutationKind::Destroy &&
+                                                    record.creationId == creationId;
+                                         });
+                return found == records.end() ? nullptr : &*found;
+            };
+            const auto restoreSource = [&sourceContacts](const ContactMutationRecord& record)
+                -> std::optional<javelin::jmap::OperationError>
+            {
+                if (!record.baseDocument.has_value())
+                    return std::nullopt;
+                auto restored =
+                    summarizeContact(record.accountId, javelin::jmap::api::ContactCard{
+                                                           .id = record.objectId,
+                                                           .uid = {},
+                                                           .kind = {},
+                                                           .document = *record.baseDocument,
+                                                       });
+                if (!restored.has_value())
+                    return error(QStringLiteral("A copied contact could not be restored locally."),
+                                 javelin::jmap::OperationErrorCode::LocalStorageFailure);
+                sourceContacts.push_back(std::move(*restored));
+                return std::nullopt;
+            };
+
+            for (const auto& record : records)
+            {
+                if (record.kind != ContactMutationKind::Create)
+                    continue;
+                if (!record.creationId.has_value())
+                    return error(QStringLiteral("A ContactCard copy lost its creation id."));
+                const auto* sourceRecord = sourceRecordFor(record.creationId);
+                const auto created = responseValue.copied.created.find(*record.creationId);
+                if (created == responseValue.copied.created.end())
+                {
+                    const auto rejected = responseValue.copied.notCreated.find(*record.creationId);
+                    if (rejected == responseValue.copied.notCreated.end())
+                        return error(QStringLiteral(
+                                         "The ContactCard/copy response omitted a copied object."),
+                                     javelin::jmap::OperationErrorCode::ProtocolViolation);
+                    hasRejected = true;
+                    destinationRemoved.push_back(record.objectId);
+                    transitions.push_back({.record = &record,
+                                           .status = javelin::jmap::sync::MutationStatus::Rejected,
+                                           .state = std::nullopt,
+                                           .errorJson = rejected->second.json});
+                    if (sourceRecord != nullptr)
+                    {
+                        if (const auto restoreError = restoreSource(*sourceRecord))
+                            return *restoreError;
+                        transitions.push_back(
+                            {.record = sourceRecord,
+                             .status = javelin::jmap::sync::MutationStatus::Rejected,
+                             .state = std::nullopt,
+                             .errorJson = rejected->second.json});
+                    }
+                    continue;
+                }
+
+                const auto contactId = createdObjectId(created->second);
+                if (!contactId.has_value() || !record.projectedDocument.has_value())
+                    return error(
+                        QStringLiteral("The ContactCard/copy response omitted the copied id."),
+                        javelin::jmap::OperationErrorCode::ProtocolViolation);
+                const auto transformed = javelin::jmap::api::applyPatchObject(
+                    *record.projectedDocument, created->second.json);
+                const auto* document = std::get_if<std::string>(&transformed);
+                if (document == nullptr)
+                    return error(QStringLiteral("The ContactCard/copy transformation is invalid."),
+                                 javelin::jmap::OperationErrorCode::ProtocolViolation);
+                auto copied = summarizeContact(record.accountId, javelin::jmap::api::ContactCard{
+                                                                     .id = *contactId,
+                                                                     .uid = {},
+                                                                     .kind = {},
+                                                                     .document = *document,
+                                                                 });
+                if (!copied.has_value())
+                    return error(QStringLiteral("The copied ContactCard is invalid."),
+                                 javelin::jmap::OperationErrorCode::ProtocolViolation);
+                destinationContacts.push_back(std::move(*copied));
+                destinationRemoved.push_back(record.objectId);
+                transitions.push_back({.record = &record,
+                                       .status = javelin::jmap::sync::MutationStatus::Accepted,
+                                       .state = responseValue.copied.newState,
+                                       .errorJson = std::nullopt});
+
+                if (sourceRecord == nullptr)
+                    continue;
+                if (!responseValue.destroyedOriginals.has_value())
+                {
+                    hasUnknown = true;
+                    transitions.push_back({.record = sourceRecord,
+                                           .status = javelin::jmap::sync::MutationStatus::Unknown,
+                                           .state = std::nullopt,
+                                           .errorJson = std::nullopt});
+                    continue;
+                }
+                const auto& destroyed = *responseValue.destroyedOriginals;
+                if (std::ranges::find(destroyed.destroyed, sourceRecord->objectId) !=
+                    destroyed.destroyed.end())
+                {
+                    transitions.push_back({.record = sourceRecord,
+                                           .status = javelin::jmap::sync::MutationStatus::Accepted,
+                                           .state = destroyed.newState,
+                                           .errorJson = std::nullopt});
+                    continue;
+                }
+                const auto rejected = destroyed.notDestroyed.find(sourceRecord->objectId);
+                if (rejected == destroyed.notDestroyed.end())
+                {
+                    hasUnknown = true;
+                    transitions.push_back({.record = sourceRecord,
+                                           .status = javelin::jmap::sync::MutationStatus::Unknown,
+                                           .state = std::nullopt,
+                                           .errorJson = std::nullopt});
+                    continue;
+                }
+                hasRejected = true;
+                if (const auto restoreError = restoreSource(*sourceRecord))
+                    return *restoreError;
+                transitions.push_back({.record = sourceRecord,
+                                       .status = javelin::jmap::sync::MutationStatus::Rejected,
+                                       .state = std::nullopt,
+                                       .errorJson = rejected->second.json});
+            }
+
+            auto transactionResult = javelin::jmap::sync::MutationProjectionTransaction::begin(
+                connection, QStringLiteral("Reconcile ContactCard copy"));
+            if (const auto* cacheError =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&transactionResult))
+                return error(cacheError->message,
+                             javelin::jmap::OperationErrorCode::LocalStorageFailure);
+            auto transaction = std::get<javelin::jmap::sync::MutationProjectionTransaction>(
+                std::move(transactionResult));
+            std::vector<javelin::jmap::sync::ConsistencyDomain> acceptedDomains;
+            for (const auto& transition : transitions)
+            {
+                if (const auto cacheError =
+                        transaction.transition(transition.record->mutationId, transition.status,
+                                               transition.state, transition.errorJson))
+                    return error(cacheError->message,
+                                 javelin::jmap::OperationErrorCode::LocalStorageFailure);
+                if (transition.status == javelin::jmap::sync::MutationStatus::Accepted)
+                {
+                    const javelin::jmap::sync::ConsistencyDomain domain{
+                        .accountId = transition.record->accountId,
+                        .dataType = "ContactCard",
+                    };
+                    if (std::ranges::find(acceptedDomains, domain) == acceptedDomains.end())
+                        acceptedDomains.push_back(domain);
+                }
+            }
+            if (const auto cacheError = transaction.advance(acceptedDomains))
+                return error(cacheError->message,
+                             javelin::jmap::OperationErrorCode::LocalStorageFailure);
+            if (const auto cacheError = repository.projectContacts(
+                    transaction.cacheTransaction(), responseValue.copied.accountId,
+                    destinationContacts, destinationRemoved))
+                return error(cacheError->message,
+                             javelin::jmap::OperationErrorCode::LocalStorageFailure);
+            if (!sourceContacts.empty())
+            {
+                const auto& sourceAccountId = sourceContacts.front().accountId;
+                if (const auto cacheError = repository.projectContacts(
+                        transaction.cacheTransaction(), sourceAccountId, sourceContacts, {}))
+                    return error(cacheError->message,
+                                 javelin::jmap::OperationErrorCode::LocalStorageFailure);
+            }
+            for (const auto& transition : transitions)
+            {
+                if (transition.status == javelin::jmap::sync::MutationStatus::Accepted)
+                {
+                    if (const auto cacheError = transaction.remove(transition.record->mutationId))
+                        return error(cacheError->message,
+                                     javelin::jmap::OperationErrorCode::LocalStorageFailure);
+                }
+            }
+            if (const auto cacheError = transaction.commit())
+                return error(cacheError->message,
+                             javelin::jmap::OperationErrorCode::LocalStorageFailure);
+            for (const auto& accountId : {records.front().accountId, records.back().accountId})
+                repository.notifyChanged(accountId);
+            if (hasUnknown)
+                return error(
+                    QStringLiteral("The contact was copied, but source removal is unconfirmed."),
+                    javelin::jmap::OperationErrorCode::ProtocolViolation);
+            if (hasRejected)
+                return error(QStringLiteral("The server rejected part of the contact copy."),
+                             javelin::jmap::OperationErrorCode::Conflict);
+            return ContactMutationSummary{
+                .accountId = responseValue.copied.accountId,
+                .newState = responseValue.copied.newState,
+                .createdId = createdId(responseValue.copied),
+            };
+        }
     } // namespace
 
     ContactService::ContactService(javelin::jmap::cache::DatabaseConnection& connection,
@@ -1530,20 +1962,72 @@ namespace javelin::jmap::contacts
                                      std::string ownerAccountId,
                                      javelin::jmap::api::ContactCardCopyRequest request)
     {
-        const auto accountId = request.accountId;
-        std::vector<javelin::jmap::sync::ConsistencyDomain> affectedDomains{
-            {.accountId = accountId, .dataType = "ContactCard"}};
-        if (request.onSuccessDestroyOriginal && request.fromAccountId != accountId)
-            affectedDomains.push_back(
-                {.accountId = request.fromAccountId, .dataType = "ContactCard"});
-        const auto result =
-            co_await setObjects(m_methodTransport, m_connection, std::move(settings),
-                                std::move(ownerAccountId), accountId, "ContactCard/copy",
-                                javelin::jmap::api::serializeContactCardCopyRequest(request));
-        if (const auto* operationError = std::get_if<javelin::jmap::OperationError>(&result))
+        if (!request.ifFromInState.has_value())
+        {
+            const auto state = contactState(m_connection, request.fromAccountId);
+            if (const auto* operationError = std::get_if<javelin::jmap::OperationError>(&state))
+                co_return *operationError;
+            request.ifFromInState = std::get<std::optional<std::string>>(state);
+        }
+        if (!request.ifInState.has_value())
+        {
+            const auto state = contactState(m_connection, request.accountId);
+            if (const auto* operationError = std::get_if<javelin::jmap::OperationError>(&state))
+                co_return *operationError;
+            request.ifInState = std::get<std::optional<std::string>>(state);
+        }
+        if (request.onSuccessDestroyOriginal && !request.destroyFromIfInState.has_value())
+            request.destroyFromIfInState = request.ifFromInState;
+        const auto serialized = javelin::jmap::api::serializeContactCardCopyRequest(request);
+        if (!serialized.has_value())
+            co_return error(QStringLiteral("Unable to serialize the Contacts copy."));
+
+        const auto preparedResult = prepareContactCopy(m_repository, request);
+        if (const auto* operationError =
+                std::get_if<javelin::jmap::OperationError>(&preparedResult))
             co_return *operationError;
-        co_return commitSetResult(m_connection, std::get<javelin::jmap::api::SetResult>(result),
-                                  affectedDomains);
+        auto prepared = std::get<PreparedContactCopy>(preparedResult);
+        ContactMutationJournal journal{m_connection, m_repository};
+        if (!prepared.records.empty())
+        {
+            if (const auto cacheError = journal.queueGroup(prepared.records, prepared.projections))
+                co_return error(cacheError->message,
+                                javelin::jmap::OperationErrorCode::LocalStorageFailure);
+            if (const auto cacheError = journal.transition(
+                    prepared.records, javelin::jmap::sync::MutationStatus::InFlight))
+                co_return error(cacheError->message,
+                                javelin::jmap::OperationErrorCode::LocalStorageFailure);
+        }
+
+        const auto result =
+            co_await copyObjects(m_methodTransport, m_connection, std::move(settings),
+                                 std::move(ownerAccountId), request, *serialized);
+        if (const auto* operationError = std::get_if<javelin::jmap::OperationError>(&result))
+        {
+            if (operationError->protocolType.has_value())
+            {
+                if (const auto cacheError =
+                        journal.restoreRejected(prepared.records, *operationError->protocolType))
+                    co_return error(cacheError->message,
+                                    javelin::jmap::OperationErrorCode::LocalStorageFailure);
+            }
+            else if (const auto cacheError = journal.transition(
+                         prepared.records, javelin::jmap::sync::MutationStatus::Unknown))
+                co_return error(cacheError->message,
+                                javelin::jmap::OperationErrorCode::LocalStorageFailure);
+            co_return *operationError;
+        }
+        if (prepared.records.empty())
+        {
+            const auto& copied = std::get<CopyObjectsResponse>(result).copied;
+            const std::array domains{javelin::jmap::sync::ConsistencyDomain{
+                .accountId = copied.accountId,
+                .dataType = "ContactCard",
+            }};
+            co_return commitSetResult(m_connection, copied, domains);
+        }
+        co_return reconcileContactCopy(m_connection, m_repository, prepared.records,
+                                       std::get<CopyObjectsResponse>(result));
     }
 
     QCoro::Task<ContactUploadResult>
