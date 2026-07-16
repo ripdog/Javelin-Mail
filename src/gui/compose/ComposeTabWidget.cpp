@@ -30,7 +30,6 @@
 #include <QMimeData>
 #include <QMimeDatabase>
 #include <QPlainTextEdit>
-#include <QPushButton>
 #include <QRadioButton>
 #include <QRegularExpression>
 #include <QScrollArea>
@@ -594,8 +593,6 @@ namespace javelin::gui::compose
                     scheduleWorkingCopySave();
                 });
 
-        connect(m_closeButton, &QPushButton::clicked, this, &ComposeTabWidget::requestClose);
-
         refreshPreview();
         updateEditorModeUi();
         updateTabTitle();
@@ -785,10 +782,6 @@ namespace javelin::gui::compose
             "QLineEdit, QComboBox { padding: 6px 8px; }"
             "QToolBar { background: #202632; border: 1px solid #394354; border-radius: 10px; "
             "spacing: 4px; }"
-            "QPushButton { background: #2b3341; color: #eef2f7; border: 1px solid #43506a; "
-            "border-radius: 9px; padding: 7px 12px; }"
-            "QPushButton:hover { background: #334055; }"
-            "QPushButton:disabled { color: #8a93a5; background: #232833; }"
             "QTabWidget::pane { border: 1px solid #333c4b; border-radius: 12px; background: "
             "#20242d; }"
             "QTabBar::tab { background: #262c38; color: #ced7e4; padding: 8px 14px; "
@@ -895,12 +888,6 @@ namespace javelin::gui::compose
         m_attachmentScrollArea->setWidget(m_attachmentStrip);
         m_attachmentScrollArea->setFixedHeight(fontMetrics().height() + 24);
         rootLayout->addWidget(m_attachmentScrollArea);
-
-        auto* footerRow = new QHBoxLayout();
-        m_closeButton = new QPushButton(QStringLiteral("Close"), this);
-        footerRow->addStretch(1);
-        footerRow->addWidget(m_closeButton);
-        rootLayout->addLayout(footerRow);
     }
 
     void ComposeTabWidget::createToolbarActions()
@@ -1243,7 +1230,6 @@ namespace javelin::gui::compose
         m_editorTabs->setEnabled(!busy);
         m_formatToolbar->setEnabled(!busy && m_editorTabs->currentIndex() == richEditorTabIndex);
         populateAttachments();
-        m_closeButton->setEnabled(!busy);
     }
 
     void ComposeTabWidget::updateEditorModeUi()
@@ -1425,11 +1411,6 @@ namespace javelin::gui::compose
         auto html = m_richTextEdit->document()->toHtml();
         html.remove(imageTagPattern);
         m_richTextEdit->setHtml(html);
-    }
-
-    void ComposeTabWidget::requestClose()
-    {
-        Q_EMIT closeRequested();
     }
 
     void ComposeTabWidget::startSaveDraft(const bool closeAfterSave)

@@ -18,7 +18,6 @@ class QHBoxLayout;
 class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
-class QPushButton;
 class QScrollArea;
 class QStringListModel;
 class QTabWidget;
@@ -111,7 +110,6 @@ namespace javelin::gui::compose
         void setAttachmentEmbedded(std::size_t index, bool embedded);
         void insertEmbeddedImage(std::size_t index);
         void removeEmbeddedImageReference(const std::string& contentId);
-        void requestClose();
         void startSaveDraft(bool closeAfterSave);
         void startSend();
         void toggleBold();
@@ -150,7 +148,6 @@ namespace javelin::gui::compose
         QScrollArea* m_attachmentScrollArea = nullptr;
         QWidget* m_attachmentStrip = nullptr;
         QHBoxLayout* m_attachmentStripLayout = nullptr;
-        QPushButton* m_closeButton = nullptr;
         QAction* m_boldAction = nullptr;
         QAction* m_italicAction = nullptr;
         QAction* m_underlineAction = nullptr;
