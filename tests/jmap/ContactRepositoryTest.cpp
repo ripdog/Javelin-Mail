@@ -1,5 +1,6 @@
 #include "jmap/cache/ContactRepository.h"
 #include "jmap/contacts/ContactIdentityLookup.h"
+#include "jmap/contacts/ContactMutationJournal.h"
 
 #include <QCoreApplication>
 #include <QSqlQuery>
@@ -181,4 +182,99 @@ TEST_CASE("contact repository greedily caches, filters, and resolves email addre
     CHECK(
         std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(projected)->displayName ==
         "Committed");
+
+    const auto baseResult = repository.findContact("a1", "c1");
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::contacts::ContactSummary>>(baseResult));
+    const auto& base = std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(baseResult);
+    REQUIRE(base.has_value());
+    const auto optimistic = contact("c1", "Optimistic", "optimistic@example.test");
+    const javelin::jmap::contacts::ContactMutationRecord updateMutation{
+        .mutationId = "contact-update-1",
+        .operationGroupId = std::nullopt,
+        .accountId = "a1",
+        .objectId = "c1",
+        .kind = javelin::jmap::contacts::ContactMutationKind::Update,
+        .status = javelin::jmap::sync::MutationStatus::Pending,
+        .requestedDocument = R"({"name/full":"Optimistic"})",
+        .baseDocument = base->document,
+        .projectedDocument = optimistic.document,
+        .baseState = "c2",
+        .acceptedState = std::nullopt,
+        .errorJson = std::nullopt,
+    };
+    javelin::jmap::contacts::ContactMutationJournal contactJournal{connection, repository};
+    REQUIRE_FALSE(contactJournal.queue({updateMutation}, {optimistic}, {}).has_value());
+    const auto pendingMutations = contactJournal.listForContact("a1", "c1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(
+        pendingMutations));
+    REQUIRE(std::get<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(pendingMutations)
+                .size() == 1);
+    CHECK(std::get<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(pendingMutations)
+              .front()
+              .status == javelin::jmap::sync::MutationStatus::Pending);
+    const auto projectedUpdate = repository.findContact("a1", "c1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::contacts::ContactSummary>>(
+        projectedUpdate));
+    REQUIRE(std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(projectedUpdate)
+                .has_value());
+    CHECK(std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(projectedUpdate)
+              ->displayName == "Optimistic");
+    REQUIRE_FALSE(
+        contactJournal.restoreRejected({updateMutation}, R"({"type":"forbidden"})").has_value());
+    const auto rejectedMutations = contactJournal.listForContact("a1", "c1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(
+        rejectedMutations));
+    REQUIRE(std::get<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(rejectedMutations)
+                .size() == 1);
+    CHECK(std::get<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(rejectedMutations)
+              .front()
+              .status == javelin::jmap::sync::MutationStatus::Rejected);
+    const auto restoredUpdate = repository.findContact("a1", "c1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::contacts::ContactSummary>>(
+        restoredUpdate));
+    REQUIRE(std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(restoredUpdate)
+                .has_value());
+    CHECK(std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(restoredUpdate)
+              ->displayName == "Joseph Bloggs");
+
+    const auto created = contact("create-1", "New Contact", "new@example.test");
+    const javelin::jmap::contacts::ContactMutationRecord createMutation{
+        .mutationId = "contact-create-1",
+        .operationGroupId = std::nullopt,
+        .accountId = "a1",
+        .objectId = "create-1",
+        .kind = javelin::jmap::contacts::ContactMutationKind::Create,
+        .status = javelin::jmap::sync::MutationStatus::Pending,
+        .requestedDocument = created.document,
+        .baseDocument = std::nullopt,
+        .projectedDocument = created.document,
+        .baseState = "c2",
+        .acceptedState = std::nullopt,
+        .errorJson = std::nullopt,
+    };
+    REQUIRE_FALSE(contactJournal.queue({createMutation}, {created}, {}).has_value());
+    REQUIRE_FALSE(contactJournal.restoreRejected({createMutation}).has_value());
+    const auto removedCreate = repository.findContact("a1", "create-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::contacts::ContactSummary>>(
+        removedCreate));
+    CHECK_FALSE(std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(removedCreate)
+                    .has_value());
+
+    QSqlQuery rejectProjection{connection.database()};
+    REQUIRE(rejectProjection.exec(QStringLiteral(
+        "CREATE TRIGGER reject_contact_projection BEFORE INSERT ON contact_cards "
+        "WHEN NEW.contact_id='fail-1' BEGIN SELECT RAISE(ABORT,'projection rejected'); END")));
+    const auto failedContact = contact("fail-1", "Failed", "failed@example.test");
+    auto failedMutation = createMutation;
+    failedMutation.mutationId = "contact-create-failed";
+    failedMutation.objectId = "fail-1";
+    failedMutation.requestedDocument = failedContact.document;
+    failedMutation.projectedDocument = failedContact.document;
+    REQUIRE(contactJournal.queue({failedMutation}, {failedContact}, {}).has_value());
+    const auto rolledBack = contactJournal.listForContact("a1", "fail-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(
+        rolledBack));
+    CHECK(
+        std::get<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(rolledBack).empty());
 }
