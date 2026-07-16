@@ -23,6 +23,7 @@ namespace javelin::jmap::sync
     {
         std::size_t representativeCount = 0;
         bool usedIncrementalRefresh = false;
+        bool superseded = false;
         std::vector<std::string> changedEmailIds;
         std::vector<std::string> insertedEmailIds;
         std::vector<std::string> removedEmailIds;

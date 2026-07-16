@@ -226,6 +226,8 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/sync/EventSourceLongPoll.h
     src/jmap/sync/WebSocketPushChannel.cpp
     src/jmap/sync/WebSocketPushChannel.h
+    src/jmap/sync/ConsistencyDomain.cpp
+    src/jmap/sync/ConsistencyDomain.h
     src/jmap/sync/MailboxRefreshExecutor.cpp
     src/jmap/sync/MailboxRefreshExecutor.h
     src/jmap/sync/MailboxStateRefreshExecutor.cpp
@@ -272,6 +274,7 @@ set(JAVELIN_FORMAT_FILES
     tests/gui/MonthCalendarWidgetTest.cpp
     tests/gui/MessageViewPresentationTest.cpp
     tests/jmap/ComposeServiceTest.cpp
+    tests/jmap/ConsistencyDomainTest.cpp
     tests/jmap/DatabaseTest.cpp
     tests/jmap/EmailRepositoryTest.cpp
     tests/jmap/HtmlMessageDocumentBuilderTest.cpp
@@ -418,6 +421,8 @@ add_library(javelin_jmap STATIC
     src/jmap/sync/EventSourceLongPoll.h
     src/jmap/sync/WebSocketPushChannel.cpp
     src/jmap/sync/WebSocketPushChannel.h
+    src/jmap/sync/ConsistencyDomain.cpp
+    src/jmap/sync/ConsistencyDomain.h
     src/jmap/sync/MailboxRefreshExecutor.cpp
     src/jmap/sync/MailboxRefreshExecutor.h
     src/jmap/sync/MailboxStateRefreshExecutor.cpp

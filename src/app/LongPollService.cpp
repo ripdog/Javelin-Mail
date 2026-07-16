@@ -363,6 +363,11 @@ namespace javelin::app
             if (const auto* summary =
                     std::get_if<javelin::jmap::sync::MailboxRefreshSummary>(&refreshResult))
             {
+                if (summary->superseded)
+                {
+                    m_shouldCatchUpRefreshOnReconnect = true;
+                    continue;
+                }
                 m_shouldCatchUpRefreshOnReconnect = false;
                 watchedMailboxRefreshed = true;
                 refreshedMailboxIds.push_back(QString::fromStdString(mailboxId));

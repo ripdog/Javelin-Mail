@@ -1004,6 +1004,21 @@ namespace javelin::jmap::cache
                                 "email_id=old.email_id; END"),
                         },
                 },
+                MigrationStep{
+                    .version = 20,
+                    .name = QStringLiteral("consistency_domains"),
+                    .statements =
+                        {
+                            QStringLiteral(
+                                "CREATE TABLE consistency_domains ("
+                                "account_id TEXT NOT NULL REFERENCES accounts(account_id) ON "
+                                "DELETE CASCADE,data_type TEXT NOT NULL,"
+                                "mutation_generation INTEGER NOT NULL DEFAULT 0 "
+                                "CHECK(mutation_generation>=0),"
+                                "updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+                                "PRIMARY KEY(account_id,data_type)) STRICT"),
+                        },
+                },
             },
         };
     }

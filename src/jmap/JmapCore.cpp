@@ -20,6 +20,7 @@
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/cache/SyncStateRepository.h"
 #include "jmap/cache/ThreadRepository.h"
+#include "jmap/sync/ConsistencyDomain.h"
 #include "jmap/sync/MailboxRefreshExecutor.h"
 #include "jmap/sync/PendingActions.h"
 
@@ -1658,6 +1659,20 @@ namespace javelin::jmap
             qWarning().noquote() << "Email/set permanent deletion rejected for ids"
                                  << QString::fromStdString(parsed.notDestroyed.front()) << "count"
                                  << static_cast<qulonglong>(parsed.notDestroyed.size());
+        }
+
+        if (!updatedEmailIds.empty() || !destroyedEmailIds.empty())
+        {
+            javelin::jmap::sync::ConsistencyDomainRepository consistencyRepository{
+                *m_impl->databaseConnection};
+            const auto generation = consistencyRepository.advanceMutation({
+                .accountId = accountId,
+                .dataType = "Email",
+            });
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&generation))
+            {
+                co_return javelin::jmap::operationError(*error);
+            }
         }
 
         for (const auto& [emailId, email] : mergedEmails)

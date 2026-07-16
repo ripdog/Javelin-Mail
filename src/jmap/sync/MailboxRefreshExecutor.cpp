@@ -6,6 +6,7 @@
 #include "jmap/cache/QueryService.h"
 #include "jmap/cache/SyncStateRepository.h"
 #include "jmap/cache/ThreadRepository.h"
+#include "jmap/sync/ConsistencyDomain.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
 #include "jmap/sync/PendingActions.h"
 #include "jmap/sync/RefreshNotificationPlanner.h"
@@ -740,6 +741,28 @@ namespace javelin::jmap::sync
 
         javelin::jmap::cache::SyncStateRepository syncStateRepository{m_databaseConnection};
         javelin::jmap::cache::EmailRepository emailRepository{m_databaseConnection};
+        javelin::jmap::sync::ConsistencyDomainRepository consistencyRepository{
+            m_databaseConnection};
+        const auto refreshFenceResult = consistencyRepository.captureRefresh({
+            .accountId = accountId,
+            .dataType = "Email",
+        });
+        if (const auto* error =
+                std::get_if<javelin::jmap::cache::DatabaseError>(&refreshFenceResult))
+        {
+            co_return javelin::jmap::operationError(*error);
+        }
+        const auto refreshFence = std::get<javelin::jmap::sync::RefreshFence>(refreshFenceResult);
+        const auto refreshIsCurrent = [&consistencyRepository,
+                                       &refreshFence]() -> std::variant<bool, OperationError>
+        {
+            const auto current = consistencyRepository.isCurrent(refreshFence);
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&current))
+            {
+                return javelin::jmap::operationError(*error);
+            }
+            return std::get<bool>(current);
+        };
         const javelin::jmap::sync::SyncPlanner syncPlanner{syncStateRepository};
         const auto queryKey = mailboxQuerySyncKey(accountId, mailboxId);
         const auto emailKey = emailSyncKey(accountId);
@@ -800,6 +823,24 @@ namespace javelin::jmap::sync
 
             const auto& incremental =
                 std::get<IncrementalCollapsedMailboxRefresh>(incrementalResult);
+            const auto current = refreshIsCurrent();
+            if (const auto* error = std::get_if<OperationError>(&current))
+            {
+                co_return *error;
+            }
+            if (!std::get<bool>(current))
+            {
+                co_return MailboxRefreshSummary{
+                    .representativeCount = 0,
+                    .usedIncrementalRefresh = false,
+                    .superseded = true,
+                    .changedEmailIds = {},
+                    .insertedEmailIds = {},
+                    .removedEmailIds = {},
+                    .requiresNotificationScan = false,
+                    .notificationCandidates = {},
+                };
+            }
             changedEmailIds = incremental.changedEmailIds;
             insertedEmailIds = incremental.insertedEmailIds;
             removedEmailIds = incremental.removedEmailIds;
@@ -855,6 +896,24 @@ namespace javelin::jmap::sync
             }
 
             auto fetch = std::get<CollapsedMailboxFetch>(std::move(fetchResult));
+            const auto current = refreshIsCurrent();
+            if (const auto* error = std::get_if<OperationError>(&current))
+            {
+                co_return *error;
+            }
+            if (!std::get<bool>(current))
+            {
+                co_return MailboxRefreshSummary{
+                    .representativeCount = 0,
+                    .usedIncrementalRefresh = false,
+                    .superseded = true,
+                    .changedEmailIds = {},
+                    .insertedEmailIds = {},
+                    .removedEmailIds = {},
+                    .requiresNotificationScan = false,
+                    .notificationCandidates = {},
+                };
+            }
             const auto currentFetchedMailboxEmailIds =
                 fetchedMailboxEmailIds(fetch.emails, mailboxId);
 
