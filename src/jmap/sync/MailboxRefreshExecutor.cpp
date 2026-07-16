@@ -7,8 +7,8 @@
 #include "jmap/cache/SyncStateRepository.h"
 #include "jmap/cache/ThreadRepository.h"
 #include "jmap/sync/ConsistencyDomain.h"
+#include "jmap/sync/EmailMutationJournal.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
-#include "jmap/sync/PendingActions.h"
 #include "jmap/sync/RefreshNotificationPlanner.h"
 #include "jmap/sync/SyncPlanner.h"
 
@@ -164,14 +164,14 @@ namespace javelin::jmap::sync
             return std::get<std::vector<javelin::jmap::cache::MessageListItem>>(result).size();
         }
 
-        [[nodiscard]] std::vector<javelin::jmap::sync::PendingActionRecord>
-        activePendingActions(const std::vector<javelin::jmap::sync::PendingActionRecord>& actions)
+        [[nodiscard]] std::vector<javelin::jmap::sync::EmailMutationRecord>
+        activeEmailMutations(const std::vector<javelin::jmap::sync::EmailMutationRecord>& actions)
         {
-            std::vector<javelin::jmap::sync::PendingActionRecord> filtered;
+            std::vector<javelin::jmap::sync::EmailMutationRecord> filtered;
             filtered.reserve(actions.size());
             for (const auto& action : actions)
             {
-                if (action.status != javelin::jmap::sync::PendingActionStatus::Failed)
+                if (javelin::jmap::sync::projectsOptimistically(action.status))
                 {
                     filtered.push_back(action);
                 }
@@ -192,8 +192,7 @@ namespace javelin::jmap::sync
             }
 
             javelin::jmap::cache::EmailRepository emailRepository{databaseConnection};
-            javelin::jmap::sync::PendingActionRepository pendingActionRepository{
-                databaseConnection};
+            javelin::jmap::sync::EmailMutationJournal emailMutationJournal{databaseConnection};
             std::vector<javelin::jmap::domain::Email> reconciledEmails;
             reconciledEmails.reserve(ids.size());
 
@@ -213,22 +212,22 @@ namespace javelin::jmap::sync
                     continue;
                 }
 
-                const auto pendingResult = pendingActionRepository.listForEmail(accountId, emailId);
+                const auto pendingResult = emailMutationJournal.listForEmail(accountId, emailId);
                 if (const auto* error =
                         std::get_if<javelin::jmap::cache::DatabaseError>(&pendingResult))
                 {
                     return javelin::jmap::operationError(*error);
                 }
 
-                const auto pendingActions = activePendingActions(
-                    std::get<std::vector<javelin::jmap::sync::PendingActionRecord>>(pendingResult));
+                const auto pendingActions = activeEmailMutations(
+                    std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(pendingResult));
                 if (pendingActions.empty())
                 {
                     continue;
                 }
 
                 reconciledEmails.push_back(
-                    javelin::jmap::sync::mergePendingEmailPatch(*email, pendingActions));
+                    javelin::jmap::sync::projectEmailMutations(*email, pendingActions));
             }
 
             if (!reconciledEmails.empty())

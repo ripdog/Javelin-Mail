@@ -1019,6 +1019,42 @@ namespace javelin::jmap::cache
                                 "PRIMARY KEY(account_id,data_type)) STRICT"),
                         },
                 },
+                MigrationStep{
+                    .version = 21,
+                    .name = QStringLiteral("generic_mutation_journal"),
+                    .statements =
+                        {
+                            QStringLiteral(
+                                "CREATE TABLE mutation_journal ("
+                                "mutation_id TEXT PRIMARY KEY,operation_group_id TEXT,"
+                                "account_id TEXT NOT NULL REFERENCES accounts(account_id) ON "
+                                "DELETE CASCADE,data_type TEXT NOT NULL,object_id TEXT NOT NULL,"
+                                "mutation_kind TEXT NOT NULL,status TEXT NOT NULL "
+                                "CHECK(status IN ('pending','in_flight','accepted','rejected',"
+                                "'unknown')),payload_json TEXT NOT NULL,base_state TEXT,"
+                                "accepted_state TEXT,error_json TEXT,"
+                                "created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+                                "updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP) STRICT"),
+                            QStringLiteral(
+                                "INSERT INTO mutation_journal (mutation_id,account_id,data_type,"
+                                "object_id,mutation_kind,status,payload_json,created_at,updated_at)"
+                                " "
+                                "SELECT pending_action_id,account_id,'Email',"
+                                "json_extract(payload_json,'$.emailId'),'email_patch',"
+                                "CASE status WHEN 'failed' THEN 'rejected' ELSE status END,"
+                                "payload_json,created_at,updated_at FROM pending_actions"),
+                            QStringLiteral("DROP TABLE pending_actions"),
+                            QStringLiteral(
+                                "CREATE INDEX idx_mutation_journal_status ON mutation_journal "
+                                "(account_id,data_type,status,created_at)"),
+                            QStringLiteral(
+                                "CREATE INDEX idx_mutation_journal_object ON mutation_journal "
+                                "(account_id,data_type,object_id,created_at)"),
+                            QStringLiteral(
+                                "CREATE INDEX idx_mutation_journal_group ON mutation_journal "
+                                "(operation_group_id) WHERE operation_group_id IS NOT NULL"),
+                        },
+                },
             },
         };
     }

@@ -10,8 +10,8 @@
 #include "jmap/cache/ThreadRepository.h"
 #include "jmap/domain/MailEntityParsers.h"
 #include "jmap/sync/ConsistencyDomain.h"
+#include "jmap/sync/EmailMutationJournal.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
-#include "jmap/sync/PendingActions.h"
 
 #include <QCoroTask>
 
@@ -350,86 +350,126 @@ TEST_CASE("mailbox refresh executor discards a response superseded by an accepte
     REQUIRE_FALSE(emailRepository.upsertMany("account-1", {archivedEmail}).has_value());
 
     FakeTransport transport;
-    transport
-        .queuedResults.push_back(javelin::
-                                     jmap::api::HttpResponse{.statusCode = 200,
-                                                             .body =
-                                                                 QByteArray::fromStdString(
-                                                                     serializeResponseEnvelope(
-                                                                         {
-                                                                             .methodResponses =
-                                                                                 {
-                                                                                     javelin::jmap::api::MethodInvocation{
-                                                                                         .name = "E"
-                                                                                                 "m"
-                                                                                                 "a"
-                                                                                                 "i"
-                                                                                                 "l"
-                                                                                                 "/"
-                                                                                                 "q"
-                                                                                                 "u"
-                                                                                                 "e"
-                                                                                                 "r"
-                                                                                                 "y",
-                                                                                         .arguments = R"({"accountId":"account-1","queryState":"stale-query-state","canCalculateChanges":true,"position":0,"ids":["eml-1"],"total":1})",
-                                                                                         .callId = "mailbox-query",
-                                                                                     },
-                                                                                     javelin::jmap::
-                                                                                         api::
-                                                                                             MethodInvocation{
-                                                                                                 .name = "Email/get",
-                                                                                                 .arguments =
-                                                                                                     emailGetArguments(
-                                                                                                         "stale-email-state",
-                                                                                                         javelin::tests::loadFixture(
-                                                                                                             "jmap/entities/email.json")),
-                                                                                                 .callId =
-                                                                                                     "thread-ids-get",
-                                                                                             },
-                                                                                     javelin::jmap::
-                                                                                         api::MethodInvocation{
-                                                                                             .name =
-                                                                                                 "T"
-                                                                                                 "h"
-                                                                                                 "r"
-                                                                                                 "e"
-                                                                                                 "a"
-                                                                                                 "d"
-                                                                                                 "/"
-                                                                                                 "g"
-                                                                                                 "e"
-                                                                                                 "t",
-                                                                                             .arguments = R"({"accountId":"account-1","state":"thread-state","list":[{"id":"thr-123","emailIds":["eml-1"]}],"notFound":[]})",
-                                                                                             .callId =
-                                                                                                 "t"
-                                                                                                 "h"
-                                                                                                 "r"
-                                                                                                 "e"
-                                                                                                 "a"
-                                                                                                 "d"
-                                                                                                 "s"
-                                                                                                 "-"
-                                                                                                 "g"
-                                                                                                 "e"
-                                                                                                 "t",
-                                                                                         },
-                                                                                     javelin::jmap::
-                                                                                         api::
-                                                                                             MethodInvocation{
-                                                                                                 .name = "Email/get",
-                                                                                                 .arguments =
-                                                                                                     emailGetArguments(
-                                                                                                         "stale-email-state",
-                                                                                                         javelin::tests::loadFixture("jmap/entities/email.json")),
-                                                                                                 .callId =
-                                                                                                     "mailbox-emails-get",
-                                                                                             },
-                                                                                 },
-                                                                             .createdIds =
-                                                                                 std::nullopt,
-                                                                             .sessionState =
-                                                                                 "session-state",
-                                                                         }))});
+    transport.queuedResults
+        .push_back(
+            javelin::jmap::api::HttpResponse{.statusCode = 200,
+                                             .body =
+                                                 QByteArray::fromStdString(
+                                                     serializeResponseEnvelope(
+                                                         {
+                                                             .methodResponses =
+                                                                 {
+                                                                     javelin::jmap::api::
+                                                                         MethodInvocation{
+                                                                             .name = "E"
+                                                                                     "m"
+                                                                                     "a"
+                                                                                     "i"
+                                                                                     "l"
+                                                                                     "/"
+                                                                                     "q"
+                                                                                     "u"
+                                                                                     "e"
+                                                                                     "r"
+                                                                                     "y",
+                                                                             .arguments =
+                                                                                 R"({"accountId":"account-1","queryState":"stale-query-state","canCalculateChanges":true,"position":0,"ids":["eml-1"],"total":1})",
+                                                                             .callId = "m"
+                                                                                       "a"
+                                                                                       "i"
+                                                                                       "l"
+                                                                                       "b"
+                                                                                       "o"
+                                                                                       "x"
+                                                                                       "-"
+                                                                                       "q"
+                                                                                       "u"
+                                                                                       "e"
+                                                                                       "r"
+                                                                                       "y",
+                                                                         },
+                                                                     javelin::
+                                                                         jmap::api::MethodInvocation{
+                                                                             .name = "Ema"
+                                                                                     "il/"
+                                                                                     "ge"
+                                                                                     "t",
+                                                                             .arguments = emailGetArguments("stale-email-state",
+                                                                                                            javelin::
+                                                                                                                tests::loadFixture(
+                                                                                                                    "jmap/entities/email.json")),
+                                                                             .callId = "t"
+                                                                                       "h"
+                                                                                       "r"
+                                                                                       "e"
+                                                                                       "a"
+                                                                                       "d"
+                                                                                       "-"
+                                                                                       "i"
+                                                                                       "d"
+                                                                                       "s"
+                                                                                       "-"
+                                                                                       "g"
+                                                                                       "e"
+                                                                                       "t",
+                                                                         },
+                                                                     javelin::jmap::api::
+                                                                         MethodInvocation{
+                                                                             .name = "T"
+                                                                                     "h"
+                                                                                     "r"
+                                                                                     "e"
+                                                                                     "a"
+                                                                                     "d"
+                                                                                     "/"
+                                                                                     "g"
+                                                                                     "e"
+                                                                                     "t",
+                                                                             .arguments = R"({"accountId":"account-1","state":"thread-state","list":[{"id":"thr-123","emailIds":["eml-1"]}],"notFound":[]})",
+                                                                             .callId = "t"
+                                                                                       "h"
+                                                                                       "r"
+                                                                                       "e"
+                                                                                       "a"
+                                                                                       "d"
+                                                                                       "s"
+                                                                                       "-"
+                                                                                       "g"
+                                                                                       "e"
+                                                                                       "t",
+                                                                         },
+                                                                     javelin::jmap::api::
+                                                                         MethodInvocation{
+                                                                             .name = "Ema"
+                                                                                     "il/"
+                                                                                     "ge"
+                                                                                     "t",
+                                                                             .arguments = emailGetArguments("stale-email-state", javelin::
+                                                                                                                                     tests::loadFixture(
+                                                                                                                                         "jmap/entities/email.json")),
+                                                                             .callId = "m"
+                                                                                       "a"
+                                                                                       "i"
+                                                                                       "l"
+                                                                                       "b"
+                                                                                       "o"
+                                                                                       "x"
+                                                                                       "-"
+                                                                                       "e"
+                                                                                       "m"
+                                                                                       "a"
+                                                                                       "i"
+                                                                                       "l"
+                                                                                       "s"
+                                                                                       "-"
+                                                                                       "g"
+                                                                                       "e"
+                                                                                       "t",
+                                                                         },
+                                                                 },
+                                                             .createdIds = std::nullopt,
+                                                             .sessionState = "session-state",
+                                                         }))});
     transport.onSend = [&databaseContext]
     {
         javelin::jmap::sync::ConsistencyDomainRepository consistencyRepository{
@@ -477,14 +517,14 @@ TEST_CASE("mailbox refresh executor reapplies pending keyword mutations after a 
     auto databaseContext = makeDatabaseContext();
     seedAccount(databaseContext.connection);
 
-    javelin::jmap::sync::PendingActionRepository pendingActionRepository{
-        databaseContext.connection};
-    REQUIRE_FALSE(pendingActionRepository
+    javelin::jmap::sync::EmailMutationJournal emailMutationJournal{databaseContext.connection};
+    REQUIRE_FALSE(emailMutationJournal
                       .put({
-                          .pendingActionId = "action-unread",
+                          .mutationId = "action-unread",
+                          .operationGroupId = std::nullopt,
                           .accountId = "account-1",
-                          .status = javelin::jmap::sync::PendingActionStatus::Pending,
-                          .emailPatch =
+                          .status = javelin::jmap::sync::MutationStatus::Pending,
+                          .patch =
                               {
                                   .emailId = "eml-1",
                                   .addMailboxIds = {},
@@ -492,6 +532,9 @@ TEST_CASE("mailbox refresh executor reapplies pending keyword mutations after a 
                                   .addKeywords = {},
                                   .removeKeywords = {"$seen"},
                               },
+                          .baseState = std::nullopt,
+                          .acceptedState = std::nullopt,
+                          .errorJson = std::nullopt,
                       })
                       .has_value());
 

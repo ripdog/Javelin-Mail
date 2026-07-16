@@ -1,5 +1,6 @@
 #include "jmap/api/MailMethods.h"
 #include "FixtureReader.h"
+#include "jmap/api/PatchObject.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -342,17 +343,17 @@ TEST_CASE("email set requests serialize typed mailbox and keyword updates", "[jm
             {
                 {"eml-1",
                  javelin::jmap::api::EmailSetUpdate{
-                     .mailboxIds = {{"mbx-archive", true}},
-                     .keywords = {{"$seen", true}},
+                     .patch = {{"mailboxIds/mbx-archive", true}, {"keywords/$seen", true}},
                  }},
             },
         .destroy = {},
     });
 
     REQUIRE(json.has_value());
-    CHECK(
-        *json ==
-        R"({"accountId":"u1","update":{"eml-1":{"mailboxIds":{"mbx-archive":true},"keywords":{"$seen":true}}}})");
+    CHECK(json->find(R"("mailboxIds/mbx-archive":true)") != std::string::npos);
+    CHECK(json->find(R"("keywords/$seen":true)") != std::string::npos);
+    CHECK(json->find(R"("mailboxIds":{)") == std::string::npos);
+    CHECK(json->find(R"("keywords":{)") == std::string::npos);
 }
 
 TEST_CASE("email set requests serialize nullable mailbox and keyword patch removals",
@@ -365,18 +366,29 @@ TEST_CASE("email set requests serialize nullable mailbox and keyword patch remov
             {
                 {"eml-1",
                  javelin::jmap::api::EmailSetUpdate{
-                     .mailboxIds = {{"mbx-drafts", nullptr}, {"mbx-sent", true}},
-                     .keywords = {{"$draft", nullptr}, {"$seen", true}},
+                     .patch =
+                         {
+                             {"mailboxIds/mbx-drafts", nullptr},
+                             {"mailboxIds/mbx-sent", true},
+                             {"keywords/$draft", nullptr},
+                             {"keywords/$seen", true},
+                         },
                  }},
             },
         .destroy = {},
     });
 
     REQUIRE(json.has_value());
-    CHECK(json->find(R"("mbx-drafts":null)") != std::string::npos);
-    CHECK(json->find(R"("mbx-sent":true)") != std::string::npos);
-    CHECK(json->find(R"("$draft":null)") != std::string::npos);
-    CHECK(json->find(R"("$seen":true)") != std::string::npos);
+    CHECK(json->find(R"("mailboxIds/mbx-drafts":null)") != std::string::npos);
+    CHECK(json->find(R"("mailboxIds/mbx-sent":true)") != std::string::npos);
+    CHECK(json->find(R"("keywords/$draft":null)") != std::string::npos);
+    CHECK(json->find(R"("keywords/$seen":true)") != std::string::npos);
+}
+
+TEST_CASE("patch paths escape JSON Pointer map keys", "[jmap][method][patch]")
+{
+    CHECK(javelin::jmap::api::patchPath("mailboxIds", "team/ops~urgent") ==
+          "mailboxIds/team~1ops~0urgent");
 }
 
 TEST_CASE("email set responses parse updated and failed ids", "[jmap][method][mail]")

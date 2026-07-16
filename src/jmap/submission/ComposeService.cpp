@@ -3,6 +3,7 @@
 #include "jmap/api/JmapMethodTransport.h"
 #include "jmap/api/MailMethods.h"
 #include "jmap/api/MethodCaller.h"
+#include "jmap/api/PatchObject.h"
 #include "jmap/api/ResponseReader.h"
 #include "jmap/api/Session.h"
 #include "jmap/api/Transport.h"
@@ -1400,19 +1401,33 @@ namespace javelin::jmap::submission
                           << joinStrings(implicitEmailResponse.notUpdated) << "notDestroyed"
                           << joinStrings(implicitEmailResponse.notDestroyed);
 
-        const auto cleanupRequest = javelin::jmap::api::emailSet({
-            .accountId = draftSummary.accountId,
-            .create = {},
-            .update =
-                {
-                    {draftSummary.draftEmailId,
-                     javelin::jmap::api::EmailSetUpdate{
-                         .mailboxIds = {{draftsMailbox->id, nullptr}, {sentMailbox->id, true}},
-                         .keywords = {{"$draft", nullptr}, {"$seen", true}},
-                     }},
-                },
-            .destroy = {},
-        });
+        const auto
+            cleanupRequest =
+                javelin::jmap::api::emailSet(
+                    {
+                        .accountId = draftSummary.accountId,
+                        .create = {},
+                        .update =
+                            {
+                                {draftSummary.draftEmailId,
+                                 javelin::jmap::api::EmailSetUpdate{
+                                     .patch =
+                                         {
+                                             {javelin::jmap::api::patchPath("mailboxIds",
+                                                                            draftsMailbox->id),
+                                              nullptr},
+                                             {javelin::jmap::api::patchPath("mailboxIds",
+                                                                            sentMailbox->id),
+                                              true},
+                                             {javelin::jmap::api::patchPath("keywords", "$draft"),
+                                              nullptr},
+                                             {javelin::jmap::api::patchPath("keywords", "$seen"),
+                                              true},
+                                         },
+                                 }},
+                            },
+                        .destroy = {},
+                    });
         if (!cleanupRequest.has_value())
         {
             qWarning().noquote() << "Compose send failed to encode explicit draft cleanup"

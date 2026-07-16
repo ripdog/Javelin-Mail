@@ -147,6 +147,8 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/api/JmapMethodTransport.h
     src/jmap/api/MethodEnvelope.cpp
     src/jmap/api/MethodEnvelope.h
+    src/jmap/api/PatchObject.cpp
+    src/jmap/api/PatchObject.h
     src/jmap/api/RequestBuilder.h
     src/jmap/api/ResponseReader.h
     src/jmap/api/Session.cpp
@@ -234,8 +236,10 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/sync/MailboxStateRefreshExecutor.h
     src/jmap/sync/MailboxQueryDescriptor.cpp
     src/jmap/sync/MailboxQueryDescriptor.h
-    src/jmap/sync/PendingActions.cpp
-    src/jmap/sync/PendingActions.h
+    src/jmap/sync/MutationJournal.cpp
+    src/jmap/sync/MutationJournal.h
+    src/jmap/sync/EmailMutationJournal.cpp
+    src/jmap/sync/EmailMutationJournal.h
     src/jmap/sync/RefreshNotificationPlanner.cpp
     src/jmap/sync/RefreshNotificationPlanner.h
     src/jmap/sync/SyncPlanner.cpp
@@ -291,7 +295,7 @@ set(JAVELIN_FORMAT_FILES
     tests/jmap/MessageViewServiceTest.cpp
     tests/jmap/MethodCallerTest.cpp
     tests/jmap/MethodEnvelopeTest.cpp
-    tests/jmap/PendingActionsTest.cpp
+    tests/jmap/MutationJournalTest.cpp
     tests/jmap/PreferredJmapMethodTransportTest.cpp
     tests/jmap/QueryDiffTest.cpp
     tests/jmap/QueryServiceTest.cpp
@@ -346,6 +350,8 @@ add_library(javelin_jmap STATIC
     src/jmap/api/JmapMethodTransport.h
     src/jmap/api/MethodEnvelope.cpp
     src/jmap/api/MethodEnvelope.h
+    src/jmap/api/PatchObject.cpp
+    src/jmap/api/PatchObject.h
     src/jmap/api/RequestBuilder.h
     src/jmap/api/ResponseReader.h
     src/jmap/api/Session.cpp
@@ -429,8 +435,10 @@ add_library(javelin_jmap STATIC
     src/jmap/sync/MailboxStateRefreshExecutor.h
     src/jmap/sync/MailboxQueryDescriptor.cpp
     src/jmap/sync/MailboxQueryDescriptor.h
-    src/jmap/sync/PendingActions.cpp
-    src/jmap/sync/PendingActions.h
+    src/jmap/sync/MutationJournal.cpp
+    src/jmap/sync/MutationJournal.h
+    src/jmap/sync/EmailMutationJournal.cpp
+    src/jmap/sync/EmailMutationJournal.h
     src/jmap/sync/RefreshNotificationPlanner.cpp
     src/jmap/sync/RefreshNotificationPlanner.h
     src/jmap/sync/SyncPlanner.cpp

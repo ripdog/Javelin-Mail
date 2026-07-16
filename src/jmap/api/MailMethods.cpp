@@ -144,12 +144,6 @@ namespace
         std::vector<std::string> notFound;
     };
 
-    struct RawEmailSetUpdate
-    {
-        std::unordered_map<std::string, javelin::jmap::api::EmailPatchValue> mailboxIds;
-        std::unordered_map<std::string, javelin::jmap::api::EmailPatchValue> keywords;
-    };
-
     struct RawEmailBodyValueCreate
     {
         std::string value;
@@ -198,7 +192,9 @@ namespace
     {
         std::string accountId;
         std::optional<std::unordered_map<std::string, RawEmailSetCreate>> create;
-        std::unordered_map<std::string, RawEmailSetUpdate> update;
+        std::unordered_map<std::string,
+                           std::unordered_map<std::string, javelin::jmap::api::EmailPatchValue>>
+            update;
         std::optional<std::vector<std::string>> destroy;
     };
 
@@ -242,10 +238,9 @@ namespace
     {
         std::string accountId;
         std::unordered_map<std::string, RawEmailSubmissionCreate> create;
-        std::optional<
-            std::unordered_map<
-                std::string,
-                std::unordered_map<std::string, javelin::jmap::api::EmailSubmissionPatchValue>>>
+        std::optional<std::unordered_map<
+            std::string,
+            std::unordered_map<std::string, javelin::jmap::api::EmailSubmissionPatchValue>>>
             onSuccessUpdateEmail;
     };
 
@@ -435,14 +430,6 @@ template <> struct glz::meta<RawEmailContentGetResponse>
 
     static constexpr auto value = glz::object("accountId", &T::accountId, "state", &T::state,
                                               "list", &T::list, "notFound", &T::notFound);
-};
-
-template <> struct glz::meta<RawEmailSetUpdate>
-{
-    using T = RawEmailSetUpdate;
-
-    static constexpr auto value =
-        glz::object("mailboxIds", &T::mailboxIds, "keywords", &T::keywords);
 };
 
 template <> struct glz::meta<RawEmailBodyValueCreate>
@@ -895,14 +882,13 @@ namespace javelin::jmap::api
             rawCreate = std::move(converted);
         }
 
-        std::unordered_map<std::string, RawEmailSetUpdate> rawUpdates;
+        std::unordered_map<std::string,
+                           std::unordered_map<std::string, javelin::jmap::api::EmailPatchValue>>
+            rawUpdates;
         rawUpdates.reserve(request.update.size());
         for (const auto& [emailId, update] : request.update)
         {
-            rawUpdates.emplace(emailId, RawEmailSetUpdate{
-                                            .mailboxIds = update.mailboxIds,
-                                            .keywords = update.keywords,
-                                        });
+            rawUpdates.emplace(emailId, update.patch);
         }
 
         return serializeMethod(RawEmailSetRequest{
@@ -962,8 +948,9 @@ namespace javelin::jmap::api
                     ? std::nullopt
                     : std::optional<std::unordered_map<
                           std::string,
-                          std::unordered_map<std::string, EmailSubmissionPatchValue>>>{
-                          request.onSuccessUpdateEmail},
+                          std::unordered_map<
+                              std::string, EmailSubmissionPatchValue>>>{request
+                                                                            .onSuccessUpdateEmail},
         });
     }
 

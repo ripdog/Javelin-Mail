@@ -170,7 +170,7 @@ The local database should be authoritative for the client working set. Target ta
 - `identities`
 - `submissions`
 - `sync_state`
-- `pending_actions`
+- `mutation_journal`
 - `notifications`
 - `settings`
 - `schema_migrations`

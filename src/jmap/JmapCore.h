@@ -117,7 +117,7 @@ namespace javelin::jmap
 
     struct QueuedEmailMutation
     {
-        std::string pendingActionId;
+        std::string mutationId;
         std::string accountId;
         std::string emailId;
     };

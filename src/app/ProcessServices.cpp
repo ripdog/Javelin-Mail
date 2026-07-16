@@ -21,6 +21,7 @@
 #include "jmap/render/InlineMessageUrl.h"
 #include "jmap/sieve/SieveService.h"
 #include "jmap/submission/ComposeService.h"
+#include "jmap/sync/MutationJournal.h"
 
 #include <QDir>
 #include <QStandardPaths>
@@ -59,6 +60,13 @@ namespace javelin::app
 
         m_databaseConnection =
             std::get<javelin::jmap::cache::DatabaseConnection>(std::move(databaseResult));
+        javelin::jmap::sync::MutationJournalRepository mutationJournal{m_databaseConnection};
+        const auto recoveredMutations = mutationJournal.recoverInFlight();
+        if (const auto* error =
+                std::get_if<javelin::jmap::cache::DatabaseError>(&recoveredMutations))
+        {
+            throw std::runtime_error(error->message.toStdString());
+        }
         m_networkAccessManager = std::make_unique<QNetworkAccessManager>();
         m_stateChangeNetworkAccessManager = std::make_unique<QNetworkAccessManager>();
         m_transport =

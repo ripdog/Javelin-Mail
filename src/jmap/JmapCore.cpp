@@ -5,6 +5,7 @@
 #include "jmap/api/MailMethods.h"
 #include "jmap/api/MethodCaller.h"
 #include "jmap/api/MethodEnvelope.h"
+#include "jmap/api/PatchObject.h"
 #include "jmap/api/RequestBuilder.h"
 #include "jmap/api/ResponseReader.h"
 #include "jmap/api/SessionClient.h"
@@ -21,8 +22,8 @@
 #include "jmap/cache/SyncStateRepository.h"
 #include "jmap/cache/ThreadRepository.h"
 #include "jmap/sync/ConsistencyDomain.h"
+#include "jmap/sync/EmailMutationJournal.h"
 #include "jmap/sync/MailboxRefreshExecutor.h"
-#include "jmap/sync/PendingActions.h"
 
 #include <QDebug>
 #include <QSqlError>
@@ -352,12 +353,13 @@ namespace javelin::jmap
                 };
             }
 
-            const auto pendingActionId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-            const javelin::jmap::sync::PendingActionRecord pendingAction{
-                .pendingActionId = pendingActionId.toStdString(),
+            const auto mutationId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+            const javelin::jmap::sync::EmailMutationRecord pendingAction{
+                .mutationId = mutationId.toStdString(),
+                .operationGroupId = std::nullopt,
                 .accountId = accountId,
-                .status = javelin::jmap::sync::PendingActionStatus::Pending,
-                .emailPatch =
+                .status = javelin::jmap::sync::MutationStatus::Pending,
+                .patch =
                     {
                         .emailId = mutation.emailId,
                         .addMailboxIds = mutation.addMailboxIds,
@@ -365,23 +367,26 @@ namespace javelin::jmap
                         .addKeywords = {},
                         .removeKeywords = {},
                     },
+                .baseState = std::nullopt,
+                .acceptedState = std::nullopt,
+                .errorJson = std::nullopt,
             };
 
-            javelin::jmap::sync::PendingActionRepository pendingActionRepository{connection};
-            if (const auto error = pendingActionRepository.put(pendingAction))
+            javelin::jmap::sync::EmailMutationJournal emailMutationJournal{connection};
+            if (const auto error = emailMutationJournal.put(pendingAction))
             {
                 return javelin::jmap::operationError(*error);
             }
 
             const auto reconciledEmail =
-                javelin::jmap::sync::mergePendingEmailPatch(*email, {pendingAction});
+                javelin::jmap::sync::projectEmailMutations(*email, {pendingAction});
             if (const auto error = emailRepository.upsertMany(accountId, {reconciledEmail}))
             {
                 return javelin::jmap::operationError(*error);
             }
 
             return QueuedEmailMutation{
-                .pendingActionId = pendingActionId.toStdString(),
+                .mutationId = mutationId.toStdString(),
                 .accountId = std::move(accountId),
                 .emailId = std::move(mutation.emailId),
             };
@@ -436,12 +441,13 @@ namespace javelin::jmap
                 };
             }
 
-            const auto pendingActionId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-            const javelin::jmap::sync::PendingActionRecord pendingAction{
-                .pendingActionId = pendingActionId.toStdString(),
+            const auto mutationId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+            const javelin::jmap::sync::EmailMutationRecord pendingAction{
+                .mutationId = mutationId.toStdString(),
+                .operationGroupId = std::nullopt,
                 .accountId = accountId,
-                .status = javelin::jmap::sync::PendingActionStatus::Pending,
-                .emailPatch =
+                .status = javelin::jmap::sync::MutationStatus::Pending,
+                .patch =
                     {
                         .emailId = emailId,
                         .addMailboxIds = {},
@@ -450,23 +456,26 @@ namespace javelin::jmap
                         .removeKeywords = {},
                         .destroy = true,
                     },
+                .baseState = std::nullopt,
+                .acceptedState = std::nullopt,
+                .errorJson = std::nullopt,
             };
 
-            javelin::jmap::sync::PendingActionRepository pendingActionRepository{connection};
-            if (const auto error = pendingActionRepository.put(pendingAction))
+            javelin::jmap::sync::EmailMutationJournal emailMutationJournal{connection};
+            if (const auto error = emailMutationJournal.put(pendingAction))
             {
                 return javelin::jmap::operationError(*error);
             }
 
             const auto reconciledEmail =
-                javelin::jmap::sync::mergePendingEmailPatch(*email, {pendingAction});
+                javelin::jmap::sync::projectEmailMutations(*email, {pendingAction});
             if (const auto error = emailRepository.upsertMany(accountId, {reconciledEmail}))
             {
                 return javelin::jmap::operationError(*error);
             }
 
             return QueuedEmailMutation{
-                .pendingActionId = pendingActionId.toStdString(),
+                .mutationId = mutationId.toStdString(),
                 .accountId = std::move(accountId),
                 .emailId = std::move(emailId),
             };
@@ -499,12 +508,13 @@ namespace javelin::jmap
                 };
             }
 
-            const auto pendingActionId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-            const javelin::jmap::sync::PendingActionRecord pendingAction{
-                .pendingActionId = pendingActionId.toStdString(),
+            const auto mutationId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+            const javelin::jmap::sync::EmailMutationRecord pendingAction{
+                .mutationId = mutationId.toStdString(),
+                .operationGroupId = std::nullopt,
                 .accountId = accountId,
-                .status = javelin::jmap::sync::PendingActionStatus::Pending,
-                .emailPatch =
+                .status = javelin::jmap::sync::MutationStatus::Pending,
+                .patch =
                     {
                         .emailId = emailId,
                         .addMailboxIds = {},
@@ -514,48 +524,39 @@ namespace javelin::jmap
                         .removeKeywords = enabled ? std::vector<std::string>{}
                                                   : std::vector<std::string>{keyword},
                     },
+                .baseState = std::nullopt,
+                .acceptedState = std::nullopt,
+                .errorJson = std::nullopt,
             };
 
-            javelin::jmap::sync::PendingActionRepository pendingActionRepository{connection};
-            if (const auto error = pendingActionRepository.put(pendingAction))
+            javelin::jmap::sync::EmailMutationJournal emailMutationJournal{connection};
+            if (const auto error = emailMutationJournal.put(pendingAction))
             {
                 return javelin::jmap::operationError(*error);
             }
 
             const auto reconciledEmail =
-                javelin::jmap::sync::mergePendingEmailPatch(*email, {pendingAction});
+                javelin::jmap::sync::projectEmailMutations(*email, {pendingAction});
             if (const auto error = emailRepository.upsertMany(accountId, {reconciledEmail}))
             {
                 return javelin::jmap::operationError(*error);
             }
 
             return QueuedEmailMutation{
-                .pendingActionId = pendingActionId.toStdString(),
+                .mutationId = mutationId.toStdString(),
                 .accountId = std::move(accountId),
                 .emailId = std::move(emailId),
             };
         }
 
-        [[nodiscard]] std::unordered_map<std::string, javelin::jmap::api::EmailPatchValue>
-        enabledMap(const std::vector<std::string>& values)
+        [[nodiscard]] std::vector<javelin::jmap::sync::EmailMutationRecord>
+        activeEmailMutations(const std::vector<javelin::jmap::sync::EmailMutationRecord>& actions)
         {
-            std::unordered_map<std::string, javelin::jmap::api::EmailPatchValue> enabled;
-            enabled.reserve(values.size());
-            for (const auto& value : values)
-            {
-                enabled.emplace(value, true);
-            }
-            return enabled;
-        }
-
-        [[nodiscard]] std::vector<javelin::jmap::sync::PendingActionRecord>
-        activePendingActions(const std::vector<javelin::jmap::sync::PendingActionRecord>& actions)
-        {
-            std::vector<javelin::jmap::sync::PendingActionRecord> filtered;
+            std::vector<javelin::jmap::sync::EmailMutationRecord> filtered;
             filtered.reserve(actions.size());
             for (const auto& action : actions)
             {
-                if (action.status != javelin::jmap::sync::PendingActionStatus::Failed)
+                if (javelin::jmap::sync::projectsOptimistically(action.status))
                 {
                     filtered.push_back(action);
                 }
@@ -1495,17 +1496,16 @@ namespace javelin::jmap
         }
         const auto& session = std::get<javelin::jmap::api::Session>(sessionResult);
 
-        javelin::jmap::sync::PendingActionRepository pendingActionRepository{
-            *m_impl->databaseConnection};
-        const auto pendingResult = pendingActionRepository.listByStatus(
-            accountId, javelin::jmap::sync::PendingActionStatus::Pending, limit);
+        javelin::jmap::sync::EmailMutationJournal emailMutationJournal{*m_impl->databaseConnection};
+        const auto pendingResult = emailMutationJournal.listByStatus(
+            accountId, javelin::jmap::sync::MutationStatus::Pending, limit);
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&pendingResult))
         {
             co_return javelin::jmap::operationError(*error);
         }
 
         const auto& pendingActions =
-            std::get<std::vector<javelin::jmap::sync::PendingActionRecord>>(pendingResult);
+            std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(pendingResult);
         if (pendingActions.empty())
         {
             co_return SubmittedEmailMutations{
@@ -1520,15 +1520,15 @@ namespace javelin::jmap
         std::unordered_set<std::string> seenEmailIds;
         for (const auto& action : pendingActions)
         {
-            if (seenEmailIds.insert(action.emailPatch.emailId).second)
+            if (seenEmailIds.insert(action.patch.emailId).second)
             {
-                emailIds.push_back(action.emailPatch.emailId);
+                emailIds.push_back(action.patch.emailId);
             }
         }
 
         javelin::jmap::cache::EmailRepository emailRepository{*m_impl->databaseConnection};
         std::unordered_map<std::string, javelin::jmap::domain::Email> mergedEmails;
-        std::unordered_map<std::string, std::vector<std::string>> pendingActionIdsByEmailId;
+        std::unordered_map<std::string, std::vector<std::string>> mutationIdsByEmailId;
         for (const auto& emailId : emailIds)
         {
             const auto emailResult = emailRepository.find(accountId, emailId);
@@ -1546,15 +1546,15 @@ namespace javelin::jmap
             }
 
             const auto allEmailActionsResult =
-                pendingActionRepository.listForEmail(accountId, emailId);
+                emailMutationJournal.listForEmail(accountId, emailId);
             if (const auto* error =
                     std::get_if<javelin::jmap::cache::DatabaseError>(&allEmailActionsResult))
             {
                 co_return javelin::jmap::operationError(*error);
             }
 
-            const auto allEmailActions = activePendingActions(
-                std::get<std::vector<javelin::jmap::sync::PendingActionRecord>>(
+            const auto allEmailActions = activeEmailMutations(
+                std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(
                     allEmailActionsResult));
             if (allEmailActions.empty())
             {
@@ -1562,15 +1562,15 @@ namespace javelin::jmap
             }
 
             mergedEmails.emplace(
-                emailId, javelin::jmap::sync::mergePendingEmailPatch(*email, allEmailActions));
+                emailId, javelin::jmap::sync::projectEmailMutations(*email, allEmailActions));
 
-            auto& pendingIds = pendingActionIdsByEmailId[emailId];
+            auto& pendingIds = mutationIdsByEmailId[emailId];
             pendingIds.reserve(allEmailActions.size());
             for (const auto& action : allEmailActions)
             {
-                pendingIds.push_back(action.pendingActionId);
-                if (const auto error = pendingActionRepository.updateStatus(
-                        action.pendingActionId, javelin::jmap::sync::PendingActionStatus::InFlight))
+                pendingIds.push_back(action.mutationId);
+                if (const auto error = emailMutationJournal.transition(
+                        action.mutationId, javelin::jmap::sync::MutationStatus::InFlight))
                 {
                     co_return javelin::jmap::operationError(*error);
                 }
@@ -1583,26 +1583,48 @@ namespace javelin::jmap
         destroys.reserve(mergedEmails.size());
         for (const auto& [emailId, email] : mergedEmails)
         {
-            const auto actionsResult = pendingActionRepository.listForEmail(accountId, emailId);
+            static_cast<void>(email);
+            const auto actionsResult = emailMutationJournal.listForEmail(accountId, emailId);
             if (const auto* error =
                     std::get_if<javelin::jmap::cache::DatabaseError>(&actionsResult))
             {
                 co_return javelin::jmap::operationError(*error);
             }
-            const auto actions = activePendingActions(
-                std::get<std::vector<javelin::jmap::sync::PendingActionRecord>>(actionsResult));
+            const auto actions = activeEmailMutations(
+                std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(actionsResult));
             const bool destroy = std::ranges::any_of(actions, [](const auto& action)
-                                                     { return action.emailPatch.destroy; });
+                                                     { return action.patch.destroy; });
             if (destroy)
             {
                 destroys.push_back(emailId);
                 continue;
             }
 
-            updates.emplace(emailId, javelin::jmap::api::EmailSetUpdate{
-                                         .mailboxIds = enabledMap(email.mailboxIds),
-                                         .keywords = enabledMap(email.keywords),
-                                     });
+            javelin::jmap::api::EmailSetUpdate update;
+            for (const auto& action : actions)
+            {
+                for (const auto& mailboxId : action.patch.addMailboxIds)
+                {
+                    update.patch.insert_or_assign(
+                        javelin::jmap::api::patchPath("mailboxIds", mailboxId), true);
+                }
+                for (const auto& mailboxId : action.patch.removeMailboxIds)
+                {
+                    update.patch.insert_or_assign(
+                        javelin::jmap::api::patchPath("mailboxIds", mailboxId), nullptr);
+                }
+                for (const auto& keyword : action.patch.addKeywords)
+                {
+                    update.patch.insert_or_assign(
+                        javelin::jmap::api::patchPath("keywords", keyword), true);
+                }
+                for (const auto& keyword : action.patch.removeKeywords)
+                {
+                    update.patch.insert_or_assign(
+                        javelin::jmap::api::patchPath("keywords", keyword), nullptr);
+                }
+            }
+            updates.emplace(emailId, std::move(update));
         }
 
         const auto requestMethod = javelin::jmap::api::emailSet({
@@ -1624,17 +1646,50 @@ namespace javelin::jmap
         requestBuilder.useCore().useMail();
         const auto setHandle = requestBuilder.call(*requestMethod, "queued-email-set");
 
+        const auto transitionSubmittedMutations =
+            [&emailMutationJournal, &mutationIdsByEmailId](
+                const javelin::jmap::sync::MutationStatus status) -> std::optional<OperationError>
+        {
+            for (const auto& [emailId, mutationIds] : mutationIdsByEmailId)
+            {
+                static_cast<void>(emailId);
+                for (const auto& mutationId : mutationIds)
+                {
+                    if (const auto error = emailMutationJournal.transition(mutationId, status))
+                    {
+                        return javelin::jmap::operationError(*error);
+                    }
+                }
+            }
+            return std::nullopt;
+        };
+
         const auto envelopeResult = co_await methodCaller.call(apiRequestContext, requestBuilder);
         if (const auto* error = std::get_if<javelin::jmap::api::TransportError>(&envelopeResult))
         {
+            if (const auto transitionError =
+                    transitionSubmittedMutations(javelin::jmap::sync::MutationStatus::Unknown))
+            {
+                co_return *transitionError;
+            }
             co_return operationError(*error);
         }
         if (const auto* error = std::get_if<javelin::jmap::api::AuthError>(&envelopeResult))
         {
+            if (const auto transitionError =
+                    transitionSubmittedMutations(javelin::jmap::sync::MutationStatus::Pending))
+            {
+                co_return *transitionError;
+            }
             co_return operationError(*error);
         }
         if (const auto* error = std::get_if<javelin::jmap::api::ProtocolError>(&envelopeResult))
         {
+            if (const auto transitionError =
+                    transitionSubmittedMutations(javelin::jmap::sync::MutationStatus::Unknown))
+            {
+                co_return *transitionError;
+            }
             co_return operationError(*error);
         }
 
@@ -1643,6 +1698,11 @@ namespace javelin::jmap
         const auto parsedResult = reader.require(setHandle);
         if (const auto* error = std::get_if<javelin::jmap::api::ResponseReaderError>(&parsedResult))
         {
+            if (const auto transitionError =
+                    transitionSubmittedMutations(javelin::jmap::sync::MutationStatus::Unknown))
+            {
+                co_return *transitionError;
+            }
             co_return operationError(*error);
         }
         const auto& parsed = std::get<javelin::jmap::api::EmailSetResponse>(parsedResult);
@@ -1677,14 +1737,24 @@ namespace javelin::jmap
 
         for (const auto& [emailId, email] : mergedEmails)
         {
-            const auto idsIt = pendingActionIdsByEmailId.find(emailId);
-            if (idsIt == pendingActionIdsByEmailId.end())
+            const auto idsIt = mutationIdsByEmailId.find(emailId);
+            if (idsIt == mutationIdsByEmailId.end())
             {
                 continue;
             }
 
             if (updatedEmailIds.contains(emailId) || destroyedEmailIds.contains(emailId))
             {
+                for (const auto& mutationId : idsIt->second)
+                {
+                    if (const auto error = emailMutationJournal.transition(
+                            mutationId, javelin::jmap::sync::MutationStatus::Accepted,
+                            parsed.newState))
+                    {
+                        co_return javelin::jmap::operationError(*error);
+                    }
+                }
+
                 if (destroyedEmailIds.contains(emailId))
                 {
                     const std::array destroyed{emailId};
@@ -1698,9 +1768,9 @@ namespace javelin::jmap
                     co_return javelin::jmap::operationError(*error);
                 }
 
-                for (const auto& pendingActionId : idsIt->second)
+                for (const auto& mutationId : idsIt->second)
                 {
-                    if (const auto error = pendingActionRepository.remove(pendingActionId))
+                    if (const auto error = emailMutationJournal.remove(mutationId))
                     {
                         co_return javelin::jmap::operationError(*error);
                     }
@@ -1708,13 +1778,12 @@ namespace javelin::jmap
                 continue;
             }
 
-            for (const auto& pendingActionId : idsIt->second)
+            for (const auto& mutationId : idsIt->second)
             {
                 const auto status = failedEmailIds.contains(emailId)
-                                        ? javelin::jmap::sync::PendingActionStatus::Failed
-                                        : javelin::jmap::sync::PendingActionStatus::Pending;
-                if (const auto error =
-                        pendingActionRepository.updateStatus(pendingActionId, status))
+                                        ? javelin::jmap::sync::MutationStatus::Rejected
+                                        : javelin::jmap::sync::MutationStatus::Pending;
+                if (const auto error = emailMutationJournal.transition(mutationId, status))
                 {
                     co_return javelin::jmap::operationError(*error);
                 }

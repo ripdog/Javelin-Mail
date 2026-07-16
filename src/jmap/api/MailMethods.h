@@ -190,8 +190,7 @@ namespace javelin::jmap::api
 
     struct EmailSetUpdate
     {
-        std::unordered_map<std::string, EmailPatchValue> mailboxIds;
-        std::unordered_map<std::string, EmailPatchValue> keywords;
+        std::unordered_map<std::string, EmailPatchValue> patch;
     };
 
     struct EmailBodyValueCreate

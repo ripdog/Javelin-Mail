@@ -11,7 +11,7 @@
 #include "jmap/cache/ThreadRepository.h"
 #include "jmap/domain/MailEntityParsers.h"
 #include "jmap/search/EmailSearch.h"
-#include "jmap/sync/PendingActions.h"
+#include "jmap/sync/EmailMutationJournal.h"
 
 #include <QCoroTask>
 
@@ -460,8 +460,8 @@ TEST_CASE("JmapCore searchMessages uses Email/query text filters and caches thre
     CHECK(cachedThread->emailIds == std::vector<std::string>{"eml-1", "eml-2"});
 }
 
-TEST_CASE("JmapCore queues archive and delete mailbox moves as pending actions",
-          "[jmap][core][pending-actions]")
+TEST_CASE("JmapCore queues archive and delete mailbox moves as mutations",
+          "[jmap][core][mutation-journal]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
@@ -504,34 +504,33 @@ TEST_CASE("JmapCore queues archive and delete mailbox moves as pending actions",
     REQUIRE(deletedEmail.has_value());
     CHECK(deletedEmail->mailboxIds == std::vector<std::string>{"mbx-trash"});
 
-    javelin::jmap::sync::PendingActionRepository pendingActionRepository{
-        databaseContext.connection};
-    const auto pendingResult = pendingActionRepository.listForEmail("account-1", "eml-1");
-    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::PendingActionRecord>>(
+    javelin::jmap::sync::EmailMutationJournal emailMutationJournal{databaseContext.connection};
+    const auto pendingResult = emailMutationJournal.listForEmail("account-1", "eml-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::EmailMutationRecord>>(
         pendingResult));
     const auto& records =
-        std::get<std::vector<javelin::jmap::sync::PendingActionRecord>>(pendingResult);
+        std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(pendingResult);
     REQUIRE(records.size() == 2);
     CHECK(std::any_of(records.cbegin(), records.cend(),
                       [](const auto& record)
                       {
-                          return record.emailPatch.addMailboxIds ==
+                          return record.patch.addMailboxIds ==
                                      std::vector<std::string>{"mbx-archive"} &&
-                                 record.emailPatch.removeMailboxIds ==
+                                 record.patch.removeMailboxIds ==
                                      std::vector<std::string>{"mbx-inbox"};
                       }));
     CHECK(std::any_of(records.cbegin(), records.cend(),
                       [](const auto& record)
                       {
-                          return record.emailPatch.addMailboxIds ==
+                          return record.patch.addMailboxIds ==
                                      std::vector<std::string>{"mbx-trash"} &&
-                                 record.emailPatch.removeMailboxIds ==
+                                 record.patch.removeMailboxIds ==
                                      std::vector<std::string>{"mbx-archive"};
                       }));
 }
 
 TEST_CASE("JmapCore permanently destroys queued emails through Email/set",
-          "[jmap][core][pending-actions]")
+          "[jmap][core][mutation-journal]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
@@ -596,7 +595,7 @@ TEST_CASE("JmapCore permanently destroys queued emails through Email/set",
         std::get<std::optional<javelin::jmap::domain::Email>>(deletedEmailResult).has_value());
 }
 
-TEST_CASE("JmapCore queues mailbox copies as pending actions", "[jmap][core][pending-actions]")
+TEST_CASE("JmapCore queues mailbox copies as mutations", "[jmap][core][mutation-journal]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
@@ -625,20 +624,18 @@ TEST_CASE("JmapCore queues mailbox copies as pending actions", "[jmap][core][pen
     REQUIRE(copiedEmail.has_value());
     CHECK(copiedEmail->mailboxIds == std::vector<std::string>{"mbx-inbox", "mbx-projects"});
 
-    javelin::jmap::sync::PendingActionRepository pendingActionRepository{
-        databaseContext.connection};
-    const auto pendingResult = pendingActionRepository.listForEmail("account-1", "eml-1");
-    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::PendingActionRecord>>(
+    javelin::jmap::sync::EmailMutationJournal emailMutationJournal{databaseContext.connection};
+    const auto pendingResult = emailMutationJournal.listForEmail("account-1", "eml-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::EmailMutationRecord>>(
         pendingResult));
     const auto& records =
-        std::get<std::vector<javelin::jmap::sync::PendingActionRecord>>(pendingResult);
+        std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(pendingResult);
     REQUIRE(records.size() == 1);
-    CHECK(records.front().emailPatch.addMailboxIds == std::vector<std::string>{"mbx-projects"});
-    CHECK(records.front().emailPatch.removeMailboxIds.empty());
+    CHECK(records.front().patch.addMailboxIds == std::vector<std::string>{"mbx-projects"});
+    CHECK(records.front().patch.removeMailboxIds.empty());
 }
 
-TEST_CASE("JmapCore queues exact mailbox patches as pending actions",
-          "[jmap][core][pending-actions]")
+TEST_CASE("JmapCore queues exact mailbox patches as mutations", "[jmap][core][mutation-journal]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
@@ -673,8 +670,7 @@ TEST_CASE("JmapCore queues exact mailbox patches as pending actions",
     CHECK(movedEmail->mailboxIds == std::vector<std::string>{"mbx-archive"});
 }
 
-TEST_CASE("JmapCore queues read keyword mutations as pending actions",
-          "[jmap][core][pending-actions]")
+TEST_CASE("JmapCore queues read keyword mutations as mutations", "[jmap][core][mutation-journal]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
@@ -835,7 +831,7 @@ TEST_CASE("JmapCore downloadAttachment reads inline payloads from cached raw sou
 }
 
 TEST_CASE("JmapCore submits queued mailbox mutations through Email/set",
-          "[jmap][core][pending-actions]")
+          "[jmap][core][mutation-journal]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
@@ -887,7 +883,9 @@ TEST_CASE("JmapCore submits queued mailbox mutations through Email/set",
     REQUIRE(transport.requests.size() == 1);
     CHECK(transport.requests.front().method == javelin::jmap::api::HttpMethod::Post);
     CHECK(transport.requests.front().body.contains("\"Email/set\""));
-    CHECK(transport.requests.front().body.contains("\"mbx-archive\":true"));
+    CHECK(transport.requests.front().body.contains("\"mailboxIds/mbx-archive\":true"));
+    CHECK(transport.requests.front().body.contains("\"mailboxIds/mbx-inbox\":null"));
+    CHECK_FALSE(transport.requests.front().body.contains("\"mailboxIds\":{"));
     CHECK_FALSE(transport.requests.front().body.contains("\"mbx-inbox\":true"));
 
     const auto refreshedEmailResult = emailRepository.find("u1", "eml-1");
@@ -899,16 +897,15 @@ TEST_CASE("JmapCore submits queued mailbox mutations through Email/set",
     CHECK(refreshedEmail->mailboxIds == std::vector<std::string>{"mbx-archive"});
     CHECK(refreshedEmail->keywords == std::vector<std::string>{"$seen"});
 
-    javelin::jmap::sync::PendingActionRepository pendingActionRepository{
-        databaseContext.connection};
-    const auto pendingResult = pendingActionRepository.listForEmail("u1", "eml-1");
-    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::PendingActionRecord>>(
+    javelin::jmap::sync::EmailMutationJournal emailMutationJournal{databaseContext.connection};
+    const auto pendingResult = emailMutationJournal.listForEmail("u1", "eml-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::EmailMutationRecord>>(
         pendingResult));
-    CHECK(std::get<std::vector<javelin::jmap::sync::PendingActionRecord>>(pendingResult).empty());
+    CHECK(std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(pendingResult).empty());
 }
 
 TEST_CASE("JmapCore submits queued read keyword mutations through Email/set",
-          "[jmap][core][pending-actions]")
+          "[jmap][core][mutation-journal]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
@@ -959,7 +956,8 @@ TEST_CASE("JmapCore submits queued read keyword mutations through Email/set",
 
     REQUIRE(transport.requests.size() == 1);
     CHECK(transport.requests.front().body.contains("\"Email/set\""));
-    CHECK(transport.requests.front().body.contains("\"$seen\":true"));
+    CHECK(transport.requests.front().body.contains("\"keywords/$seen\":true"));
+    CHECK_FALSE(transport.requests.front().body.contains("\"keywords\":{"));
 
     const auto refreshedEmailResult = emailRepository.find("u1", "eml-1");
     REQUIRE(
@@ -968,4 +966,56 @@ TEST_CASE("JmapCore submits queued read keyword mutations through Email/set",
         std::get<std::optional<javelin::jmap::domain::Email>>(refreshedEmailResult);
     REQUIRE(refreshedEmail.has_value());
     CHECK(refreshedEmail->keywords == std::vector<std::string>{"$seen"});
+}
+
+TEST_CASE("JmapCore preserves ambiguous Email mutation outcomes for reconciliation",
+          "[jmap][core][mutation-journal]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    javelin::jmap::cache::SessionRepository sessionRepository{databaseContext.connection};
+    REQUIRE_FALSE(sessionRepository.replace("u1", loadSessionFixture()).has_value());
+
+    auto email = loadEmailFixture();
+    email.id = "eml-1";
+    email.threadId = "thr-1";
+    email.mailboxIds = {"mbx-inbox"};
+    javelin::jmap::cache::EmailRepository emailRepository{databaseContext.connection};
+    REQUIRE_FALSE(emailRepository.replaceAll("u1", {email}).has_value());
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(javelin::jmap::api::TransportError{
+        .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
+        .message = "Connection closed after request dispatch",
+    });
+
+    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
+    const auto queued = core.queueArchiveEmail("u1", "eml-1", "mbx-inbox", "mbx-archive");
+    REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(queued));
+
+    const auto submitted = QCoro::waitFor(core.submitPendingEmailMutations(
+        {
+            .sessionUrl = "https://mail.example.com/.well-known/jmap",
+            .loginEmail = "alice@example.com",
+            .apiKey = "access-token",
+        },
+        "u1"));
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(submitted));
+
+    javelin::jmap::sync::EmailMutationJournal journal{databaseContext.connection};
+    const auto mutations = journal.listForEmail("u1", "eml-1");
+    REQUIRE(
+        std::holds_alternative<std::vector<javelin::jmap::sync::EmailMutationRecord>>(mutations));
+    const auto& records =
+        std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(mutations);
+    REQUIRE(records.size() == 1);
+    CHECK(records.front().status == javelin::jmap::sync::MutationStatus::Unknown);
+
+    const auto effectiveEmail = emailRepository.find("u1", "eml-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(effectiveEmail));
+    REQUIRE(std::get<std::optional<javelin::jmap::domain::Email>>(effectiveEmail).has_value());
+    CHECK(std::get<std::optional<javelin::jmap::domain::Email>>(effectiveEmail)->mailboxIds ==
+          std::vector<std::string>{"mbx-archive"});
 }
