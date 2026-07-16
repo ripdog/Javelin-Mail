@@ -62,6 +62,27 @@ namespace javelin::jmap::sieve
                     .isActive = script.isActive};
         }
 
+        [[nodiscard]] std::optional<SieveMutationKind> parseKind(const std::string_view kind)
+        {
+            if (kind == "create")
+                return SieveMutationKind::Create;
+            if (kind == "update")
+                return SieveMutationKind::Update;
+            if (kind == "destroy")
+                return SieveMutationKind::Destroy;
+            if (kind == "activate")
+                return SieveMutationKind::Activate;
+            return std::nullopt;
+        }
+
+        [[nodiscard]] SieveScript typed(const RawSieveScript& script)
+        {
+            return {.id = script.id,
+                    .name = script.name,
+                    .blobId = script.blobId,
+                    .isActive = script.isActive};
+        }
+
         [[nodiscard]] std::variant<sync::MutationRecord, cache::DatabaseError>
         genericRecord(const SieveMutationRecord& record)
         {
@@ -156,5 +177,51 @@ namespace javelin::jmap::sieve
                                                          record.accountId, record.baseScripts))
             return error;
         return transaction.commit();
+    }
+
+    std::variant<std::vector<SieveMutationRecord>, cache::DatabaseError>
+    SieveMutationJournal::listActive(const std::string_view accountId) const
+    {
+        sync::MutationJournalRepository journal{m_connection};
+        auto result =
+            journal.listActive({.accountId = std::string{accountId}, .dataType = "SieveScript"});
+        if (const auto* error = std::get_if<cache::DatabaseError>(&result))
+            return *error;
+        std::vector<SieveMutationRecord> records;
+        for (auto& generic : std::get<std::vector<sync::MutationRecord>>(result))
+        {
+            RawSieveMutation payload;
+            if (generic.mutationKind != "sieve_script_set" ||
+                glz::read<glz::opts{.error_on_unknown_keys = false}>(payload, generic.payloadJson))
+                return cache::DatabaseError{
+                    .code = cache::DatabaseErrorCode::QueryFailed,
+                    .message = QStringLiteral("Invalid Sieve mutation journal payload."),
+                };
+            const auto kind = parseKind(payload.kind);
+            if (!kind.has_value())
+                return cache::DatabaseError{
+                    .code = cache::DatabaseErrorCode::QueryFailed,
+                    .message = QStringLiteral("Invalid Sieve mutation kind."),
+                };
+            SieveMutationRecord record{
+                .mutationId = std::move(generic.mutationId),
+                .operationGroupId = std::move(generic.operationGroupId),
+                .accountId = std::move(generic.domain.accountId),
+                .objectId = std::move(generic.objectId),
+                .kind = *kind,
+                .status = generic.status,
+                .baseScripts = {},
+                .projectedScripts = {},
+                .baseState = std::move(generic.baseState),
+                .acceptedState = std::move(generic.acceptedState),
+                .errorJson = std::move(generic.errorJson),
+            };
+            for (const auto& script : payload.baseScripts)
+                record.baseScripts.push_back(typed(script));
+            for (const auto& script : payload.projectedScripts)
+                record.projectedScripts.push_back(typed(script));
+            records.push_back(std::move(record));
+        }
+        return records;
     }
 } // namespace javelin::jmap::sieve

@@ -65,6 +65,8 @@ Every durable mutation has one of these states:
 confirmed state atomically and advances the domain generation. A rejected result removes its
 projection and restores the current confirmed state. Unknown results are reconciled with a
 targeted `/get` or `/changes` request before retry or rollback.
+When a protocol cannot safely correlate a server-created object after a lost create response, the
+record remains unknown and the same logical command is blocked from being submitted again.
 
 On startup, persisted `in_flight` records become `unknown`; a process restart cannot prove that the
 server did not apply them.
@@ -121,6 +123,37 @@ The generic engine stores lifecycle and causality. A typed adapter provides:
 Cross-type actions, such as sending a draft through `Email/set` and `EmailSubmission/set`, are
 application-owned operation groups containing typed mutations with explicit dependencies.
 
+The concrete library boundary is:
+
+- `MutationJournalRepository`: durable, policy-neutral lifecycle queries and transitions;
+- `ConsistencyDomainRepository`: monotonic generations and refresh-fence checks;
+- `MutationProjectionTransaction`: one transaction for journal, cache, and generation changes;
+- a service-specific mutation journal: typed payload, projection, restoration, and rebase;
+- a service: capability checks, protocol dispatch, response classification, and reconciliation.
+
+Application code invokes typed service commands. It does not read or write generic journal records
+to decide product behavior.
+
+## Implemented Service Policy
+
+| JMAP action | Optimistic projection | Ambiguous-result reconciliation |
+| --- | --- | --- |
+| `Email/set` mailbox, keyword, and destroy changes | Exact Email patch projected into SQLite | Refreshed server Email is compared with the requested patch; satisfied unknown patches retire atomically |
+| `ContactCard/set` and `AddressBook/set` | Full typed document projection | Full snapshots are rebased; exact updates, absent destroys, and correlatable creates retire unknown records |
+| `ContactCard/copy` move/copy workflows | Destination and optional source projections are one operation group | Destination and source outcomes reconcile independently, preserving RFC 8620 non-atomic copy semantics |
+| `CalendarEvent/set` | Event and visible occurrence projection | Full ranges are rebased; stale recurrence expansions are suppressed until the base event is confirmed |
+| `SieveScript/set` | Complete effective script-list projection | Full script snapshots are correlated and rebased |
+| Draft `Email/set` replacement | New local draft is projected before dispatch; old draft remains hidden | Lost creates remain unknown and duplicate saves for that compose session are blocked |
+| `EmailSubmission/set` send | Draft moves to the Sent projection before dispatch | Submission and implicit Email changes are tracked as dependent mutations; ambiguity preserves the Sent projection |
+
+Uploads, downloads, Sieve validation, identity reads, and other procedural calls do not own
+persistent JMAP object state and therefore do not create optimistic records.
+
+Calendar recurrence expansion remains server-owned. While a recurring CalendarEvent mutation is
+active, the cache uses one local anchor occurrence for the projected series and suppresses stale
+expanded server occurrences. A confirming refresh replaces that anchor with authoritative expanded
+instances.
+
 ## Required Invariants
 
 1. A refresh response cannot overwrite a mutation accepted after that refresh began.
@@ -131,12 +164,15 @@ application-owned operation groups containing typed mutations with explicit depe
 6. Recovery after a crash preserves uncertainty and cannot silently duplicate a mutation.
 7. The GUI observes only committed effective states, never intermediate reconciliation writes.
 
-## Migration Order
+## Extension Checklist
 
-1. Add persisted consistency domains and refresh fences.
-2. Replace the mail-only pending action schema with the generic mutation journal.
-3. Migrate Email mailbox and keyword mutations to exact patches and atomic projection.
-4. Fence Email, ContactCard, AddressBook, CalendarEvent, and SieveScript refresh commits.
-5. Migrate direct Contacts, Calendar, Sieve, and compose mutations to typed adapters.
-6. Add operation groups, crash recovery, targeted unknown-result reconciliation, and coalescing.
-7. Remove all direct mutation/cache paths that bypass the consistency subsystem.
+Every new stateful JMAP mutation must:
+
+1. define a consistency domain and typed durable payload;
+2. validate capability and rights before projection;
+3. atomically append the mutation and materialize its effective cache state;
+4. classify per-object success, definitive rejection, and transport ambiguity separately;
+5. atomically accept or restore the projection;
+6. make every refresh either fence the domain or rebase its active mutations;
+7. define correlation and safe-retry behavior for unknown outcomes;
+8. add deterministic tests for success, rejection, ambiguity, stale refresh, and recovery.

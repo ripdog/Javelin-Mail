@@ -424,6 +424,38 @@ namespace javelin::jmap::sieve
                 return operationError(*cacheError);
             return std::nullopt;
         }
+
+        [[nodiscard]] bool sameScripts(std::vector<SieveScript> left,
+                                       std::vector<SieveScript> right)
+        {
+            const auto byId = [](const SieveScript& first, const SieveScript& second)
+            { return first.id < second.id; };
+            std::ranges::sort(left, byId);
+            std::ranges::sort(right, byId);
+            return std::ranges::equal(left, right,
+                                      [](const SieveScript& first, const SieveScript& second)
+                                      {
+                                          return first.id == second.id &&
+                                                 first.name == second.name &&
+                                                 first.blobId == second.blobId &&
+                                                 first.isActive == second.isActive;
+                                      });
+        }
+
+        void correlateCreatedScripts(std::vector<SieveScript>& projected,
+                                     const std::vector<SieveScript>& serverScripts)
+        {
+            for (auto& script : projected)
+            {
+                if (!script.id.starts_with("local-"))
+                    continue;
+                const auto found = std::ranges::find_if(
+                    serverScripts, [&script](const SieveScript& server)
+                    { return server.name == script.name && server.blobId == script.blobId; });
+                if (found != serverScripts.end())
+                    script = *found;
+            }
+        }
     } // namespace
 
     SieveService::SieveService(cache::DatabaseConnection& connection,
@@ -462,21 +494,63 @@ namespace javelin::jmap::sieve
         if (const auto* parseError = std::get_if<OperationError>(&parsed))
             co_return *parseError;
         const auto& responseValue = std::get<detail::GetResponse>(parsed);
-        const auto canCommit = consistency.canCommitRefresh(fence);
-        if (const auto* cacheError = std::get_if<cache::DatabaseError>(&canCommit))
+        const auto isCurrent = consistency.isCurrent(fence);
+        if (const auto* cacheError = std::get_if<cache::DatabaseError>(&isCurrent))
             co_return operationError(*cacheError);
         cache::SieveRepository repository{m_connection};
-        if (std::get<bool>(canCommit))
+        if (!std::get<bool>(isCurrent))
         {
-            if (const auto cacheError = repository.replaceAll(
-                    context.sieveAccountId, responseValue.list, responseValue.state))
+            const auto cached = repository.list(context.sieveAccountId);
+            if (const auto* cacheError = std::get_if<cache::DatabaseError>(&cached))
                 co_return operationError(*cacheError);
-            co_return responseValue.list;
+            co_return std::get<std::vector<SieveScript>>(cached);
         }
-        const auto cached = repository.list(context.sieveAccountId);
-        if (const auto* cacheError = std::get_if<cache::DatabaseError>(&cached))
+        SieveMutationJournal mutationJournal{m_connection, repository};
+        const auto activeResult = mutationJournal.listActive(context.sieveAccountId);
+        if (const auto* cacheError = std::get_if<cache::DatabaseError>(&activeResult))
             co_return operationError(*cacheError);
-        co_return std::get<std::vector<SieveScript>>(cached);
+        const auto& active = std::get<std::vector<SieveMutationRecord>>(activeResult);
+        auto visibleScripts = responseValue.list;
+        std::vector<const SieveMutationRecord*> acceptedUnknown;
+        for (const auto& mutation : active)
+        {
+            auto projected = mutation.projectedScripts;
+            correlateCreatedScripts(projected, responseValue.list);
+            if (mutation.status == sync::MutationStatus::Unknown &&
+                sameScripts(projected, responseValue.list))
+                acceptedUnknown.push_back(&mutation);
+            visibleScripts = std::move(projected);
+        }
+        auto transactionResult = sync::MutationProjectionTransaction::begin(
+            m_connection, QStringLiteral("Rebase Sieve refresh"));
+        if (const auto* cacheError = std::get_if<cache::DatabaseError>(&transactionResult))
+            co_return operationError(*cacheError);
+        auto transaction =
+            std::get<sync::MutationProjectionTransaction>(std::move(transactionResult));
+        if (!acceptedUnknown.empty())
+        {
+            const std::array domains{sync::ConsistencyDomain{
+                .accountId = context.sieveAccountId,
+                .dataType = "SieveScript",
+            }};
+            if (const auto cacheError = transaction.advance(domains))
+                co_return operationError(*cacheError);
+            for (const auto* mutation : acceptedUnknown)
+            {
+                if (const auto cacheError = transaction.transition(
+                        mutation->mutationId, sync::MutationStatus::Accepted, responseValue.state))
+                    co_return operationError(*cacheError);
+                if (const auto cacheError = transaction.remove(mutation->mutationId))
+                    co_return operationError(*cacheError);
+            }
+        }
+        if (const auto cacheError =
+                repository.replaceAll(transaction.cacheTransaction(), context.sieveAccountId,
+                                      visibleScripts, responseValue.state))
+            co_return operationError(*cacheError);
+        if (const auto cacheError = transaction.commit())
+            co_return operationError(*cacheError);
+        co_return visibleScripts;
     }
 
     QCoro::Task<SieveContentResult> SieveService::load(LiveConnectionSettings settings,

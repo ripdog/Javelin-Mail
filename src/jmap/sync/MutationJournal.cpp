@@ -242,6 +242,36 @@ namespace javelin::jmap::sync
         return records;
     }
 
+    std::variant<std::vector<MutationRecord>, javelin::jmap::cache::DatabaseError>
+    MutationJournalRepository::listActive(const ConsistencyDomain& domain) const
+    {
+        if (const auto error = m_connection.validate())
+            return *error;
+        QSqlQuery query{m_connection.database()};
+        query.prepare(
+            QStringLiteral(
+                "SELECT %1 FROM mutation_journal WHERE account_id=:account_id "
+                "AND data_type=:data_type AND status IN ('pending','in_flight','unknown') "
+                "ORDER BY created_at,mutation_id")
+                .arg(selectColumns()));
+        query.bindValue(QStringLiteral(":account_id"), QString::fromStdString(domain.accountId));
+        query.bindValue(QStringLiteral(":data_type"), QString::fromStdString(domain.dataType));
+        if (!query.exec())
+            return queryError(QStringLiteral("Read active mutation journal"), query);
+        std::vector<MutationRecord> records;
+        while (query.next())
+        {
+            const auto record = recordFromQuery(query);
+            if (!record.has_value())
+                return javelin::jmap::cache::DatabaseError{
+                    .code = javelin::jmap::cache::DatabaseErrorCode::QueryFailed,
+                    .message = QStringLiteral("Mutation journal record has an invalid status."),
+                };
+            records.push_back(*record);
+        }
+        return records;
+    }
+
     std::optional<javelin::jmap::cache::DatabaseError>
     MutationJournalRepository::transition(const std::string_view mutationId,
                                           const MutationStatus status,

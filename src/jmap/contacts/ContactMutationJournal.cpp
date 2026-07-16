@@ -238,6 +238,24 @@ namespace javelin::jmap::contacts
         return records;
     }
 
+    std::variant<std::vector<ContactMutationRecord>, cache::DatabaseError>
+    ContactMutationJournal::listActive(const std::string_view accountId) const
+    {
+        auto result =
+            m_journal.listActive({.accountId = std::string{accountId}, .dataType = "ContactCard"});
+        if (const auto* error = std::get_if<cache::DatabaseError>(&result))
+            return *error;
+        std::vector<ContactMutationRecord> records;
+        for (auto& generic : std::get<std::vector<sync::MutationRecord>>(result))
+        {
+            auto typed = typedRecord(std::move(generic));
+            if (const auto* error = std::get_if<cache::DatabaseError>(&typed))
+                return *error;
+            records.push_back(std::get<ContactMutationRecord>(std::move(typed)));
+        }
+        return records;
+    }
+
     std::optional<cache::DatabaseError>
     ContactMutationJournal::transition(const std::vector<ContactMutationRecord>& records,
                                        const sync::MutationStatus status,

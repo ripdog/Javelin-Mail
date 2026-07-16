@@ -48,6 +48,8 @@ namespace javelin::jmap::calendar
               std::span<const std::string> destroyedIds);
         [[nodiscard]] std::variant<std::vector<CalendarMutationRecord>, cache::DatabaseError>
         listForEvent(std::string_view accountId, std::string_view eventId) const;
+        [[nodiscard]] std::variant<std::vector<CalendarMutationRecord>, cache::DatabaseError>
+        listActive(std::string_view accountId) const;
         [[nodiscard]] std::optional<cache::DatabaseError>
         transition(const std::vector<CalendarMutationRecord>& records, sync::MutationStatus status,
                    std::optional<std::string_view> acceptedState = std::nullopt,

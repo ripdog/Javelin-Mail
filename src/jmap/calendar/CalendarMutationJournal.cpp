@@ -195,6 +195,24 @@ namespace javelin::jmap::calendar
         return records;
     }
 
+    std::variant<std::vector<CalendarMutationRecord>, cache::DatabaseError>
+    CalendarMutationJournal::listActive(const std::string_view accountId) const
+    {
+        auto result = m_journal.listActive(
+            {.accountId = std::string{accountId}, .dataType = "CalendarEvent"});
+        if (const auto* error = std::get_if<cache::DatabaseError>(&result))
+            return *error;
+        std::vector<CalendarMutationRecord> records;
+        for (auto& generic : std::get<std::vector<sync::MutationRecord>>(result))
+        {
+            auto typed = typedRecord(std::move(generic));
+            if (const auto* error = std::get_if<cache::DatabaseError>(&typed))
+                return *error;
+            records.push_back(std::get<CalendarMutationRecord>(std::move(typed)));
+        }
+        return records;
+    }
+
     std::optional<cache::DatabaseError>
     CalendarMutationJournal::transition(const std::vector<CalendarMutationRecord>& records,
                                         const sync::MutationStatus status,

@@ -49,6 +49,8 @@ namespace javelin::jmap::sieve
         restoreRejected(const SieveMutationRecord& record,
                         std::optional<std::string_view> acceptedState = std::nullopt,
                         std::optional<std::string_view> errorJson = std::nullopt);
+        [[nodiscard]] std::variant<std::vector<SieveMutationRecord>, cache::DatabaseError>
+        listActive(std::string_view accountId) const;
 
       private:
         cache::DatabaseConnection& m_connection;

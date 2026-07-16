@@ -17,6 +17,7 @@
 #include <QString>
 #include <QStringList>
 #include <algorithm>
+#include <array>
 #include <unordered_set>
 
 namespace javelin::jmap::sync
@@ -183,7 +184,8 @@ namespace javelin::jmap::sync
         [[nodiscard]] std::optional<OperationError>
         reapplyPendingEmailPatches(javelin::jmap::cache::DatabaseConnection& databaseConnection,
                                    const std::string_view accountId,
-                                   std::vector<std::string> emailIds)
+                                   std::vector<std::string> emailIds,
+                                   const std::string_view serverState)
         {
             const auto ids = deduplicatedIds(std::move(emailIds));
             if (ids.empty())
@@ -195,6 +197,26 @@ namespace javelin::jmap::sync
             javelin::jmap::sync::EmailMutationJournal emailMutationJournal{databaseConnection};
             std::vector<javelin::jmap::domain::Email> reconciledEmails;
             reconciledEmails.reserve(ids.size());
+            std::vector<std::string> acceptedMutationIds;
+
+            const auto patchSatisfied = [](const javelin::jmap::domain::Email& email,
+                                           const javelin::jmap::sync::EmailPatchMutation& patch)
+            {
+                const auto contains =
+                    [](const std::vector<std::string>& values, const std::string& value)
+                { return std::ranges::find(values, value) != values.end(); };
+                return std::ranges::all_of(patch.addMailboxIds, [&email, &contains](const auto& id)
+                                           { return contains(email.mailboxIds, id); }) &&
+                       std::ranges::none_of(patch.removeMailboxIds,
+                                            [&email, &contains](const auto& id)
+                                            { return contains(email.mailboxIds, id); }) &&
+                       std::ranges::all_of(patch.addKeywords,
+                                           [&email, &contains](const auto& keyword)
+                                           { return contains(email.keywords, keyword); }) &&
+                       std::ranges::none_of(patch.removeKeywords,
+                                            [&email, &contains](const auto& keyword)
+                                            { return contains(email.keywords, keyword); });
+            };
 
             for (const auto& emailId : ids)
             {
@@ -219,23 +241,59 @@ namespace javelin::jmap::sync
                     return javelin::jmap::operationError(*error);
                 }
 
-                const auto pendingActions = activeEmailMutations(
+                auto pendingActions = activeEmailMutations(
                     std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(pendingResult));
                 if (pendingActions.empty())
                 {
                     continue;
                 }
+                std::erase_if(pendingActions,
+                              [&email, &acceptedMutationIds, &patchSatisfied](const auto& action)
+                              {
+                                  if (action.status !=
+                                          javelin::jmap::sync::MutationStatus::Unknown ||
+                                      action.patch.destroy || !patchSatisfied(*email, action.patch))
+                                      return false;
+                                  acceptedMutationIds.push_back(action.mutationId);
+                                  return true;
+                              });
 
                 reconciledEmails.push_back(
                     javelin::jmap::sync::projectEmailMutations(*email, pendingActions));
             }
 
-            if (!reconciledEmails.empty())
+            if (!reconciledEmails.empty() || !acceptedMutationIds.empty())
             {
-                if (const auto error = emailRepository.upsertMany(accountId, reconciledEmails))
-                {
+                auto transactionResult = javelin::jmap::sync::MutationProjectionTransaction::begin(
+                    databaseConnection, QStringLiteral("Rebase Email mutations"));
+                if (const auto* error =
+                        std::get_if<javelin::jmap::cache::DatabaseError>(&transactionResult))
                     return javelin::jmap::operationError(*error);
+                auto transaction = std::get<javelin::jmap::sync::MutationProjectionTransaction>(
+                    std::move(transactionResult));
+                if (!acceptedMutationIds.empty())
+                {
+                    const std::array domains{javelin::jmap::sync::ConsistencyDomain{
+                        .accountId = std::string{accountId},
+                        .dataType = "Email",
+                    }};
+                    if (const auto error = transaction.advance(domains))
+                        return javelin::jmap::operationError(*error);
+                    for (const auto& mutationId : acceptedMutationIds)
+                    {
+                        if (const auto error = transaction.transition(
+                                mutationId, javelin::jmap::sync::MutationStatus::Accepted,
+                                serverState))
+                            return javelin::jmap::operationError(*error);
+                        if (const auto error = transaction.remove(mutationId))
+                            return javelin::jmap::operationError(*error);
+                    }
                 }
+                if (const auto error = emailRepository.upsertMany(transaction.cacheTransaction(),
+                                                                  accountId, reconciledEmails))
+                    return javelin::jmap::operationError(*error);
+                if (const auto error = transaction.commit())
+                    return javelin::jmap::operationError(*error);
             }
 
             return std::nullopt;
@@ -862,7 +920,8 @@ namespace javelin::jmap::sync
                     }
 
                     if (const auto error = reapplyPendingEmailPatches(
-                            m_databaseConnection, accountId, std::move(updatedEmailIds)))
+                            m_databaseConnection, accountId, std::move(updatedEmailIds),
+                            incremental.emailState))
                     {
                         co_return *error;
                     }
@@ -933,8 +992,8 @@ namespace javelin::jmap::sync
             {
                 fetchedEmailIds.push_back(email.id);
             }
-            if (const auto error = reapplyPendingEmailPatches(m_databaseConnection, accountId,
-                                                              std::move(fetchedEmailIds)))
+            if (const auto error = reapplyPendingEmailPatches(
+                    m_databaseConnection, accountId, std::move(fetchedEmailIds), fetch.emailState))
             {
                 co_return *error;
             }

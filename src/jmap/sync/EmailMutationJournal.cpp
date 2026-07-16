@@ -99,9 +99,10 @@ namespace javelin::jmap::sync
             std::vector<EmailMutationRecord> typed;
             for (auto& record : std::get<std::vector<MutationRecord>>(result))
             {
+                if (record.mutationKind != "email_patch")
+                    continue;
                 auto raw = parsePayload(record.payloadJson);
-                if (!raw.has_value() || raw->emailId != record.objectId ||
-                    record.mutationKind != "email_patch")
+                if (!raw.has_value() || raw->emailId != record.objectId)
                 {
                     return javelin::jmap::cache::DatabaseError{
                         .code = javelin::jmap::cache::DatabaseErrorCode::QueryFailed,

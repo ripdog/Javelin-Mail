@@ -428,4 +428,21 @@ TEST_CASE("ambiguous Sieve activation preserves the projected active script",
     const auto& visible = std::get<std::vector<javelin::jmap::sieve::SieveScript>>(refreshed);
     REQUIRE(visible.size() == 1);
     CHECK(visible.front().isActive);
+
+    resources.results.push_back(
+        javelin::jmap::api::HttpResponse{.statusCode = 200, .body = sessionResponse()});
+    methods.results.push_back(javelin::jmap::api::ResponseEnvelope{
+        .methodResponses =
+            {{.name = "SieveScript/get",
+              .arguments =
+                  R"({"accountId":"sieve-account","state":"confirmed","list":[{"id":"script-1","name":"main","blobId":"blob-1","isActive":true}],"notFound":[]})",
+              .callId = "sieve-list"}},
+        .createdIds = std::nullopt,
+        .sessionState = "s4"});
+    const auto confirmed = QCoro::waitFor(service.list(settings(), "owner"));
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sieve::SieveScript>>(confirmed));
+    const auto remaining =
+        journal.listActive({.accountId = "sieve-account", .dataType = "SieveScript"});
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::MutationRecord>>(remaining));
+    CHECK(std::get<std::vector<javelin::jmap::sync::MutationRecord>>(remaining).empty());
 }

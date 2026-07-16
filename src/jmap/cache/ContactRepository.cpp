@@ -220,44 +220,52 @@ namespace javelin::jmap::cache
         const std::vector<javelin::jmap::contacts::ContactSummary>& contacts,
         const std::string_view addressBookState, const std::string_view contactState)
     {
+        auto transactionResult =
+            DatabaseTransaction::begin(m_connection, QStringLiteral("Replace contacts"));
+        if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
+            return *error;
+        auto transaction = std::get<DatabaseTransaction>(std::move(transactionResult));
+        if (const auto error =
+                replaceAll(transaction, accountId, books, contacts, addressBookState, contactState))
+            return error;
+        if (const auto error = transaction.commit())
+            return error;
+        notifyChanged(accountId);
+        return std::nullopt;
+    }
+
+    std::optional<DatabaseError> ContactRepository::replaceAll(
+        DatabaseTransaction& transaction, const std::string_view accountId,
+        const std::vector<javelin::jmap::api::AddressBook>& books,
+        const std::vector<javelin::jmap::contacts::ContactSummary>& contacts,
+        const std::string_view addressBookState, const std::string_view contactState)
+    {
+        if (!transaction.isActive() || &transaction.connection() != &m_connection)
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message = QStringLiteral("Contacts replacement requires a matching transaction"),
+            };
         auto& database = m_connection.database();
-        if (!database.transaction())
-        {
-            return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
-                                 .message = QStringLiteral("Begin contacts replacement")};
-        }
         QSqlQuery clearCards{database};
         clearCards.prepare(QStringLiteral("DELETE FROM contact_cards WHERE account_id=:account"));
         clearCards.bindValue(QStringLiteral(":account"),
                              QString::fromStdString(std::string{accountId}));
         if (!clearCards.exec())
-        {
-            database.rollback();
             return queryError(QStringLiteral("Clear contact cards"), clearCards);
-        }
         QSqlQuery clear{database};
         clear.prepare(QStringLiteral("DELETE FROM address_books WHERE account_id=:account"));
         clear.bindValue(QStringLiteral(":account"), QString::fromStdString(std::string{accountId}));
         if (!clear.exec())
-        {
-            database.rollback();
             return queryError(QStringLiteral("Clear address books"), clear);
-        }
         for (const auto& item : books)
         {
             if (const auto error = insertAddressBook(database, accountId, item, addressBookState))
-            {
-                database.rollback();
                 return error;
-            }
         }
         for (const auto& contact : contacts)
         {
             if (const auto error = insertContact(database, contact))
-            {
-                database.rollback();
                 return error;
-            }
         }
         QSqlQuery state{database};
         state.prepare(
@@ -268,12 +276,8 @@ namespace javelin::jmap::cache
         state.bindValue(QStringLiteral(":account"), QString::fromStdString(std::string{accountId}));
         state.bindValue(QStringLiteral(":state"),
                         QString::fromStdString(std::string{contactState}));
-        if (!state.exec() || !database.commit())
-        {
-            database.rollback();
+        if (!state.exec())
             return queryError(QStringLiteral("Store contacts state"), state);
-        }
-        Q_EMIT contactsChanged(QString::fromStdString(std::string{accountId}));
         return std::nullopt;
     }
 

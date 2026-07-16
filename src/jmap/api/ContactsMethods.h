@@ -16,6 +16,8 @@ namespace javelin::jmap::api
         bool mayWrite = false;
         bool mayShare = false;
         bool mayDelete = false;
+
+        bool operator==(const AddressBookRights&) const = default;
     };
 
     struct AddressBook
@@ -28,6 +30,8 @@ namespace javelin::jmap::api
         bool isSubscribed = false;
         std::optional<std::unordered_map<std::string, AddressBookRights>> shareWith;
         AddressBookRights myRights;
+
+        bool operator==(const AddressBook&) const = default;
     };
 
     struct ContactCard

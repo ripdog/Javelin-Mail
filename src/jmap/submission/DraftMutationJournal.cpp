@@ -288,4 +288,30 @@ namespace javelin::jmap::submission
         }
         return transaction.commit();
     }
+
+    std::variant<bool, cache::DatabaseError>
+    DraftMutationJournal::hasActiveForCompose(const std::string_view accountId,
+                                              const std::string_view composeSessionId) const
+    {
+        sync::MutationJournalRepository journal{m_connection};
+        const auto active =
+            journal.listActive({.accountId = std::string{accountId}, .dataType = "Email"});
+        if (const auto* error = std::get_if<cache::DatabaseError>(&active))
+            return *error;
+        for (const auto& mutation : std::get<std::vector<sync::MutationRecord>>(active))
+        {
+            if (mutation.mutationKind != "email_draft_create" &&
+                mutation.mutationKind != "email_draft_destroy")
+                continue;
+            RawDraftMutation payload;
+            if (glz::read_json(payload, mutation.payloadJson))
+                return cache::DatabaseError{
+                    .code = cache::DatabaseErrorCode::QueryFailed,
+                    .message = QStringLiteral("Unable to parse an active draft mutation."),
+                };
+            if (payload.composeSessionId == composeSessionId)
+                return true;
+        }
+        return false;
+    }
 } // namespace javelin::jmap::submission

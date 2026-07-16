@@ -683,6 +683,44 @@ TEST_CASE("ambiguous ContactCard outcomes preserve the optimistic contact",
     CHECK(std::get<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(mutations)
               .front()
               .status == javelin::jmap::sync::MutationStatus::Unknown);
+
+    transport.results.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body =
+            QByteArray{
+                R"({"methodResponses":[["AddressBook/get",{"accountId":"a1","state":"b2","list":[{"id":"book-1","name":"Personal","description":null,"sortOrder":0,"isDefault":true,"isSubscribed":true,"shareWith":null,"myRights":{"mayRead":true,"mayWrite":true,"mayShare":false,"mayDelete":true}}],"notFound":[]},"address-books"],["ContactCard/get",{"accountId":"a1","state":"c2","list":[{"id":"card-1","uid":"uid-card-1","kind":"individual","addressBookIds":{"book-1":true},"name":{"full":"Original"},"emails":{"email-1":{"address":"original@example.test"}}}],"notFound":[]},"contact-cards"]],"sessionState":"s3"})"},
+    });
+    const auto staleRefresh =
+        QCoro::waitFor(service.refreshAll({.sessionUrl = "https://example.test/.well-known/jmap",
+                                           .loginEmail = "alice@example.test",
+                                           .apiKey = "secret"},
+                                          "a1"));
+    REQUIRE(std::holds_alternative<javelin::jmap::contacts::ContactRefreshSummary>(staleRefresh));
+    const auto stillProjected = contacts.findContact("a1", "card-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::contacts::ContactSummary>>(
+        stillProjected));
+    REQUIRE(std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(stillProjected)
+                .has_value());
+    CHECK(std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(stillProjected)
+              ->displayName == "Uncertain");
+
+    transport.results.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body =
+            QByteArray{
+                R"({"methodResponses":[["AddressBook/get",{"accountId":"a1","state":"b3","list":[{"id":"book-1","name":"Personal","description":null,"sortOrder":0,"isDefault":true,"isSubscribed":true,"shareWith":null,"myRights":{"mayRead":true,"mayWrite":true,"mayShare":false,"mayDelete":true}}],"notFound":[]},"address-books"],["ContactCard/get",{"accountId":"a1","state":"c3","list":[{"id":"card-1","uid":"uid-card-1","kind":"individual","addressBookIds":{"book-1":true},"name":{"full":"Uncertain"},"emails":{"email-1":{"address":"original@example.test"}}}],"notFound":[]},"contact-cards"]],"sessionState":"s4"})"},
+    });
+    const auto confirmedRefresh =
+        QCoro::waitFor(service.refreshAll({.sessionUrl = "https://example.test/.well-known/jmap",
+                                           .loginEmail = "alice@example.test",
+                                           .apiKey = "secret"},
+                                          "a1"));
+    REQUIRE(
+        std::holds_alternative<javelin::jmap::contacts::ContactRefreshSummary>(confirmedRefresh));
+    const auto remaining = journal.listActive("a1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(
+        remaining));
+    CHECK(std::get<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(remaining).empty());
 }
 
 TEST_CASE("accepted ContactCard creation replaces its temporary projection",

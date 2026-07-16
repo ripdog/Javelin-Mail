@@ -52,6 +52,8 @@ namespace javelin::jmap::sync
         [[nodiscard]] std::variant<std::vector<MutationRecord>, javelin::jmap::cache::DatabaseError>
         listByStatus(const ConsistencyDomain& domain, MutationStatus status,
                      std::size_t limit) const;
+        [[nodiscard]] std::variant<std::vector<MutationRecord>, javelin::jmap::cache::DatabaseError>
+        listActive(const ConsistencyDomain& domain) const;
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
         transition(std::string_view mutationId, MutationStatus status,
                    std::optional<std::string_view> acceptedState = std::nullopt,

@@ -194,6 +194,24 @@ namespace javelin::jmap::contacts
         return records;
     }
 
+    std::variant<std::vector<AddressBookMutationRecord>, cache::DatabaseError>
+    AddressBookMutationJournal::listActive(const std::string_view accountId) const
+    {
+        auto result =
+            m_journal.listActive({.accountId = std::string{accountId}, .dataType = "AddressBook"});
+        if (const auto* error = std::get_if<cache::DatabaseError>(&result))
+            return *error;
+        std::vector<AddressBookMutationRecord> records;
+        for (auto& generic : std::get<std::vector<sync::MutationRecord>>(result))
+        {
+            auto typed = typedRecord(std::move(generic));
+            if (const auto* error = std::get_if<cache::DatabaseError>(&typed))
+                return *error;
+            records.push_back(std::get<AddressBookMutationRecord>(std::move(typed)));
+        }
+        return records;
+    }
+
     std::optional<cache::DatabaseError>
     AddressBookMutationJournal::transition(const std::vector<AddressBookMutationRecord>& records,
                                            const sync::MutationStatus status,

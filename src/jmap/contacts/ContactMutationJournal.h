@@ -57,6 +57,8 @@ namespace javelin::jmap::contacts
                    std::span<const ContactProjection> projections);
         [[nodiscard]] std::variant<std::vector<ContactMutationRecord>, cache::DatabaseError>
         listForContact(std::string_view accountId, std::string_view contactId) const;
+        [[nodiscard]] std::variant<std::vector<ContactMutationRecord>, cache::DatabaseError>
+        listActive(std::string_view accountId) const;
         [[nodiscard]] std::optional<cache::DatabaseError>
         transition(const std::vector<ContactMutationRecord>& records, sync::MutationStatus status,
                    std::optional<std::string_view> acceptedState = std::nullopt,

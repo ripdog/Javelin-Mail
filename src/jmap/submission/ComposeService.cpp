@@ -1009,6 +1009,19 @@ namespace javelin::jmap::submission
             co_return *validationError;
         }
 
+        DraftMutationJournal draftJournal{m_connection};
+        const auto activeDraft =
+            draftJournal.hasActiveForCompose(snapshot.accountId, snapshot.composeSessionId);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&activeDraft))
+            co_return javelin::jmap::operationError(*error);
+        if (std::get<bool>(activeDraft))
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::Conflict,
+                .message =
+                    QStringLiteral("The previous draft save is still being reconciled with the "
+                                   "server."),
+            };
+
         const auto sessionResult = loadCachedSession(m_connection, snapshot.accountId);
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&sessionResult))
         {
@@ -1198,7 +1211,6 @@ namespace javelin::jmap::submission
             .projectedEmail = projectedEmail,
             .baseSnapshot = snapshot,
         };
-        DraftMutationJournal draftJournal{m_connection};
         if (const auto error = draftJournal.queue(draftMutation))
             co_return javelin::jmap::operationError(*error);
         if (const auto error =

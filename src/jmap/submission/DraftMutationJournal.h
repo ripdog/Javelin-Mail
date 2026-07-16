@@ -46,6 +46,8 @@ namespace javelin::jmap::submission
         rejectDestruction(const DraftMutationGroup& group,
                           std::optional<std::string_view> acceptedState,
                           std::optional<std::string_view> errorJson = std::nullopt);
+        [[nodiscard]] std::variant<bool, cache::DatabaseError>
+        hasActiveForCompose(std::string_view accountId, std::string_view composeSessionId) const;
 
       private:
         cache::DatabaseConnection& m_connection;

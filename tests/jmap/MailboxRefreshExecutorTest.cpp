@@ -539,6 +539,27 @@ TEST_CASE("mailbox refresh executor reapplies pending keyword mutations after a 
                           .errorJson = std::nullopt,
                       })
                       .has_value());
+    REQUIRE_FALSE(emailMutationJournal
+                      .put({
+                          .mutationId = "action-confirmed-flagged",
+                          .operationGroupId = std::nullopt,
+                          .accountId = "account-1",
+                          .status = javelin::jmap::sync::MutationStatus::Unknown,
+                          .patch =
+                              {
+                                  .emailId = "eml-1",
+                                  .addMailboxIds = {},
+                                  .removeMailboxIds = {},
+                                  .addKeywords = {"$flagged"},
+                                  .removeKeywords = {},
+                              },
+                          .baseMailboxIds = std::nullopt,
+                          .baseKeywords = std::nullopt,
+                          .baseState = std::nullopt,
+                          .acceptedState = std::nullopt,
+                          .errorJson = std::nullopt,
+                      })
+                      .has_value());
 
     FakeTransport transport;
     transport
@@ -608,6 +629,13 @@ TEST_CASE("mailbox refresh executor reapplies pending keyword mutations after a 
     REQUIRE(email.has_value());
     CHECK(std::find(email->keywords.cbegin(), email->keywords.cend(), std::string{"$seen"}) ==
           email->keywords.cend());
+    const auto remaining = emailMutationJournal.listForEmail("account-1", "eml-1");
+    REQUIRE(
+        std::holds_alternative<std::vector<javelin::jmap::sync::EmailMutationRecord>>(remaining));
+    const auto& remainingRecords =
+        std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(remaining);
+    REQUIRE(remainingRecords.size() == 1);
+    CHECK(remainingRecords.front().mutationId == "action-unread");
 }
 
 TEST_CASE("mailbox refresh executor applies updated-only deltas without full rebuild",

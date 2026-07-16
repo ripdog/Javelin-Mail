@@ -131,6 +131,18 @@ namespace javelin::jmap::contacts
             return std::get<bool>(result);
         }
 
+        [[nodiscard]] std::variant<bool, javelin::jmap::OperationError>
+        fenceGenerationIsCurrent(javelin::jmap::cache::DatabaseConnection& connection,
+                                 const javelin::jmap::sync::RefreshFence& fence)
+        {
+            javelin::jmap::sync::ConsistencyDomainRepository repository{connection};
+            const auto result = repository.isCurrent(fence);
+            if (const auto* cacheError = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
+                return error(cacheError->message,
+                             javelin::jmap::OperationErrorCode::LocalStorageFailure);
+            return std::get<bool>(result);
+        }
+
         [[nodiscard]] SessionResult
         loadSession(javelin::jmap::cache::DatabaseConnection& connection,
                     const std::string_view ownerAccountId)
@@ -1643,6 +1655,144 @@ namespace javelin::jmap::contacts
                 .createdId = createdId(responseValue.copied),
             };
         }
+
+        [[nodiscard]] std::optional<std::string>
+        canonicalContactDocument(const std::string_view document, const bool removeId)
+        {
+            std::string buffer{document};
+            glz::generic value;
+            if (glz::read_json(value, buffer) || !value.is_object())
+                return std::nullopt;
+            if (removeId)
+                value.get_object().erase("id");
+            std::string canonical;
+            if (glz::write_json(value, canonical))
+                return std::nullopt;
+            return canonical;
+        }
+
+        struct RebasedContacts
+        {
+            std::vector<javelin::jmap::api::AddressBook> books;
+            std::vector<ContactSummary> contacts;
+            std::vector<const AddressBookMutationRecord*> acceptedBooks;
+            std::vector<const ContactMutationRecord*> acceptedContacts;
+        };
+
+        [[nodiscard]] std::variant<RebasedContacts, javelin::jmap::OperationError>
+        rebaseContacts(const std::string& accountId,
+                       std::vector<javelin::jmap::api::AddressBook> serverBooks,
+                       std::vector<ContactSummary> serverContacts,
+                       const std::vector<AddressBookMutationRecord>& bookMutations,
+                       const std::vector<ContactMutationRecord>& contactMutations)
+        {
+            RebasedContacts result{
+                .books = std::move(serverBooks),
+                .contacts = std::move(serverContacts),
+                .acceptedBooks = {},
+                .acceptedContacts = {},
+            };
+            const auto serverBooksSnapshot = result.books;
+            const auto serverContactsSnapshot = result.contacts;
+            for (const auto& mutation : bookMutations)
+            {
+                const auto server = std::ranges::find(serverBooksSnapshot, mutation.objectId,
+                                                      &javelin::jmap::api::AddressBook::id);
+                if (mutation.kind == AddressBookMutationKind::Destroy)
+                {
+                    if (mutation.status == javelin::jmap::sync::MutationStatus::Unknown &&
+                        server == serverBooksSnapshot.end())
+                        result.acceptedBooks.push_back(&mutation);
+                    std::erase_if(result.books, [&mutation](const auto& book)
+                                  { return book.id == mutation.objectId; });
+                    continue;
+                }
+                if (!mutation.projectedDocument.has_value())
+                    continue;
+                const auto projected = javelin::jmap::api::parseAddressBookDocument(
+                    mutation.objectId, *mutation.projectedDocument);
+                if (!projected.ok() || !projected.value.has_value())
+                    return error(QStringLiteral("A projected AddressBook is invalid."),
+                                 javelin::jmap::OperationErrorCode::LocalStorageFailure);
+                auto visible = *projected.value;
+                bool confirmed = false;
+                if (mutation.kind == AddressBookMutationKind::Create)
+                {
+                    const auto matched = std::ranges::find_if(serverBooksSnapshot,
+                                                              [&visible](auto candidate)
+                                                              {
+                                                                  candidate.id = visible.id;
+                                                                  return candidate == visible;
+                                                              });
+                    if (matched != serverBooksSnapshot.end())
+                    {
+                        visible = *matched;
+                        confirmed = true;
+                    }
+                }
+                else if (server != serverBooksSnapshot.end())
+                    confirmed = *server == visible;
+                if (mutation.status == javelin::jmap::sync::MutationStatus::Unknown && confirmed)
+                    result.acceptedBooks.push_back(&mutation);
+                std::erase_if(result.books, [&mutation](const auto& book)
+                              { return book.id == mutation.objectId; });
+                result.books.push_back(std::move(visible));
+            }
+            for (const auto& mutation : contactMutations)
+            {
+                const auto server = std::ranges::find(serverContactsSnapshot, mutation.objectId,
+                                                      &ContactSummary::id);
+                if (mutation.kind == ContactMutationKind::Destroy)
+                {
+                    if (mutation.status == javelin::jmap::sync::MutationStatus::Unknown &&
+                        server == serverContactsSnapshot.end())
+                        result.acceptedContacts.push_back(&mutation);
+                    std::erase_if(result.contacts, [&mutation](const ContactSummary& contact)
+                                  { return contact.id == mutation.objectId; });
+                    continue;
+                }
+                if (!mutation.projectedDocument.has_value())
+                    continue;
+                auto projected =
+                    summarizeContact(accountId, javelin::jmap::api::ContactCard{
+                                                    .id = mutation.objectId,
+                                                    .uid = {},
+                                                    .kind = {},
+                                                    .document = *mutation.projectedDocument,
+                                                });
+                if (!projected.has_value())
+                    return error(QStringLiteral("A projected ContactCard is invalid."),
+                                 javelin::jmap::OperationErrorCode::LocalStorageFailure);
+                bool confirmed = false;
+                if (mutation.kind == ContactMutationKind::Create)
+                {
+                    const auto matched = std::ranges::find(serverContactsSnapshot, projected->uid,
+                                                           &ContactSummary::uid);
+                    if (matched != serverContactsSnapshot.end())
+                    {
+                        const auto expected = canonicalContactDocument(projected->document, true);
+                        const auto actual = canonicalContactDocument(matched->document, true);
+                        if (expected.has_value() && expected == actual)
+                        {
+                            projected = *matched;
+                            confirmed = true;
+                        }
+                    }
+                }
+                else if (server != serverContactsSnapshot.end())
+                {
+                    const auto expected = canonicalContactDocument(projected->document, false);
+                    const auto actual = canonicalContactDocument(server->document, false);
+                    confirmed = expected.has_value() && expected == actual;
+                }
+                if (mutation.status == javelin::jmap::sync::MutationStatus::Unknown && confirmed)
+                    result.acceptedContacts.push_back(&mutation);
+                std::erase_if(result.contacts, [&mutation](const ContactSummary& contact)
+                              { return contact.id == mutation.objectId; });
+                result.contacts.push_back(std::move(*projected));
+            }
+            return result;
+        }
     } // namespace
 
     ContactService::ContactService(javelin::jmap::cache::DatabaseConnection& connection,
@@ -1671,6 +1821,20 @@ namespace javelin::jmap::contacts
             {
                 continue;
             }
+            AddressBookMutationJournal addressBookJournal{m_connection, m_repository};
+            ContactMutationJournal contactJournal{m_connection, m_repository};
+            const auto activeBooksResult = addressBookJournal.listActive(accountId);
+            const auto activeContactsResult = contactJournal.listActive(accountId);
+            if (const auto* cacheError =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&activeBooksResult))
+                co_return error(cacheError->message);
+            if (const auto* cacheError =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&activeContactsResult))
+                co_return error(cacheError->message);
+            const auto& activeBooks =
+                std::get<std::vector<AddressBookMutationRecord>>(activeBooksResult);
+            const auto& activeContacts =
+                std::get<std::vector<ContactMutationRecord>>(activeContactsResult);
             javelin::jmap::cache::SyncStateRepository states{m_connection};
             const auto cachedState =
                 states.find({.accountId = accountId, .objectType = "ContactCard", .queryKey = {}});
@@ -1679,7 +1843,8 @@ namespace javelin::jmap::contacts
                 co_return error(stateError->message);
             const auto& stateRecord =
                 std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(cachedState);
-            if (stateRecord.has_value() && !stateRecord->stateToken.empty())
+            if (activeBooks.empty() && activeContacts.empty() && stateRecord.has_value() &&
+                !stateRecord->stateToken.empty())
             {
                 auto incremental = co_await refreshAccountIncrementally(
                     m_repository, m_connection, m_methodTransport, settings, session, accountId,
@@ -1762,8 +1927,9 @@ namespace javelin::jmap::contacts
                 }
                 contacts.push_back(std::move(*contact));
             }
-            const auto addressBooksCurrent = fenceIsCurrent(m_connection, addressBookFence);
-            const auto contactsCurrent = fenceIsCurrent(m_connection, contactFence);
+            const auto addressBooksCurrent =
+                fenceGenerationIsCurrent(m_connection, addressBookFence);
+            const auto contactsCurrent = fenceGenerationIsCurrent(m_connection, contactFence);
             if (const auto* serviceError =
                     std::get_if<javelin::jmap::OperationError>(&addressBooksCurrent))
                 co_return *serviceError;
@@ -1772,14 +1938,54 @@ namespace javelin::jmap::contacts
                 co_return *serviceError;
             if (!std::get<bool>(addressBooksCurrent) || !std::get<bool>(contactsCurrent))
                 continue;
-            if (const auto cacheError = m_repository.replaceAll(
-                    accountId, books.value->list, contacts, books.value->state, cards.value->state))
-            {
+            const auto rebasedResult = rebaseContacts(
+                accountId, books.value->list, std::move(contacts), activeBooks, activeContacts);
+            if (const auto* operationError =
+                    std::get_if<javelin::jmap::OperationError>(&rebasedResult))
+                co_return *operationError;
+            auto rebased = std::get<RebasedContacts>(rebasedResult);
+            auto transactionResult = javelin::jmap::sync::MutationProjectionTransaction::begin(
+                m_connection, QStringLiteral("Rebase Contacts refresh"));
+            if (const auto* cacheError =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&transactionResult))
                 co_return error(cacheError->message);
+            auto transaction = std::get<javelin::jmap::sync::MutationProjectionTransaction>(
+                std::move(transactionResult));
+            std::vector<javelin::jmap::sync::ConsistencyDomain> acceptedDomains;
+            if (!rebased.acceptedBooks.empty())
+                acceptedDomains.push_back({.accountId = accountId, .dataType = "AddressBook"});
+            if (!rebased.acceptedContacts.empty())
+                acceptedDomains.push_back({.accountId = accountId, .dataType = "ContactCard"});
+            if (const auto cacheError = transaction.advance(acceptedDomains))
+                co_return error(cacheError->message);
+            for (const auto* mutation : rebased.acceptedBooks)
+            {
+                if (const auto cacheError = transaction.transition(
+                        mutation->mutationId, javelin::jmap::sync::MutationStatus::Accepted,
+                        books.value->state))
+                    co_return error(cacheError->message);
+                if (const auto cacheError = transaction.remove(mutation->mutationId))
+                    co_return error(cacheError->message);
             }
+            for (const auto* mutation : rebased.acceptedContacts)
+            {
+                if (const auto cacheError = transaction.transition(
+                        mutation->mutationId, javelin::jmap::sync::MutationStatus::Accepted,
+                        cards.value->state))
+                    co_return error(cacheError->message);
+                if (const auto cacheError = transaction.remove(mutation->mutationId))
+                    co_return error(cacheError->message);
+            }
+            if (const auto cacheError = m_repository.replaceAll(
+                    transaction.cacheTransaction(), accountId, rebased.books, rebased.contacts,
+                    books.value->state, cards.value->state))
+                co_return error(cacheError->message);
+            if (const auto cacheError = transaction.commit())
+                co_return error(cacheError->message);
+            m_repository.notifyChanged(accountId);
             ++summary.accountCount;
-            summary.addressBookCount += books.value->list.size();
-            summary.contactCount += contacts.size();
+            summary.addressBookCount += rebased.books.size();
+            summary.contactCount += rebased.contacts.size();
         }
         co_return summary;
     }

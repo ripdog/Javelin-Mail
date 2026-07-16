@@ -449,6 +449,12 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
     });
     auto uncertainEvent = event();
     uncertainEvent.title = "Uncertain";
+    uncertainEvent.recurrenceRule = javelin::jmap::calendar::RecurrenceRule{
+        .frequency = javelin::jmap::calendar::RecurrenceFrequency::Daily,
+        .interval = 1,
+        .count = 3,
+        .until = std::nullopt,
+    };
     const auto uncertain = QCoro::waitFor(service.update(
         settings, "a1", {.accountId = "a1", .event = uncertainEvent, .ifInState = std::nullopt}));
     REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(uncertain));
@@ -468,6 +474,54 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
         std::get<std::vector<javelin::jmap::calendar::CalendarMutationRecord>>(uncertainRecords),
         [](const auto& record)
         { return record.status == javelin::jmap::sync::MutationStatus::Unknown; }));
+
+    transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+        .methodResponses =
+            {{.name = "Calendar/get",
+              .arguments =
+                  R"({"accountId":"a1","state":"calendar-stale","list":[{"id":"work","name":"Work","isSubscribed":true,"isVisible":true,"isDefault":true,"myRights":{"mayReadFreeBusy":true,"mayReadItems":true,"mayWriteAll":true,"mayWriteOwn":true,"mayUpdatePrivate":true,"mayRSVP":true,"mayShare":false,"mayDelete":false}}],"notFound":[]})",
+              .callId = "calendar-get"},
+             {.name = "CalendarEvent/query",
+              .arguments =
+                  R"({"accountId":"a1","queryState":"expanded-stale","canCalculateChanges":false,"position":0,"ids":["occurrence-stale"],"total":1,"limit":1})",
+              .callId = "calendar-event-query"},
+             {.name = "CalendarEvent/query",
+              .arguments =
+                  R"({"accountId":"a1","queryState":"base-stale","canCalculateChanges":false,"position":0,"ids":["event-1"],"total":1,"limit":1})",
+              .callId = "calendar-base-event-query"}},
+        .createdIds = std::nullopt,
+        .sessionState = "session-stale-query"});
+    transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+        .methodResponses =
+            {{.name = "CalendarEvent/get",
+              .arguments =
+                  R"({"accountId":"a1","state":"event-stale","list":[{"@type":"Event","id":"occurrence-stale","baseEventId":"event-1","recurrenceId":"2026-07-13T09:00:00","uid":"uid-1","calendarIds":{"work":true},"title":"Stale","start":"2026-07-13T09:00:00","duration":"PT1H","timeZone":"Pacific/Auckland","showWithoutTime":false,"isDraft":false,"isOrigin":true}],"notFound":[]})",
+              .callId = "calendar-event-get"}},
+        .createdIds = std::nullopt,
+        .sessionState = "session-stale-expanded"});
+    transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+        .methodResponses =
+            {{.name = "CalendarEvent/get",
+              .arguments =
+                  R"({"accountId":"a1","state":"event-stale","list":[{"@type":"Event","id":"event-1","uid":"uid-1","calendarIds":{"work":true},"title":"Stale","start":"2026-07-13T09:00:00","duration":"PT1H","timeZone":"Pacific/Auckland","showWithoutTime":false,"isDraft":false,"isOrigin":true,"recurrenceRule":{"@type":"RecurrenceRule","frequency":"daily","interval":1,"count":3}}],"notFound":[]})",
+              .callId = "calendar-base-event-get"}},
+        .createdIds = std::nullopt,
+        .sessionState = "session-stale-base"});
+
+    const auto staleRefresh = QCoro::waitFor(service.refresh(settings, "a1", interval, zone));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::calendar::RefreshedRange>(staleRefresh));
+    const auto rebasedWindow = calendars.loadWindow("a1", interval.start, interval.end, zone);
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::cache::CalendarWindow>>(rebasedWindow));
+    const auto& rebased =
+        std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(rebasedWindow);
+    REQUIRE(rebased.has_value());
+    REQUIRE(rebased->events.size() == 1);
+    CHECK(rebased->events.front().title == "Uncertain");
+    REQUIRE(rebased->occurrences.size() == 1);
+    CHECK(rebased->occurrences.front().id == "event-1");
+    CHECK(rebased->occurrences.front().eventId == "event-1");
 
     auto listedCalendars = calendars.listCalendars("a1");
     REQUIRE(

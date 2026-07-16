@@ -514,4 +514,31 @@ TEST_CASE("an ambiguous draft creation keeps the local draft projection",
                                               javelin::jmap::sync::MutationStatus::Unknown, 10);
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::MutationRecord>>(unknown));
     CHECK(std::get<std::vector<javelin::jmap::sync::MutationRecord>>(unknown).size() == 1);
+
+    const auto retry = QCoro::waitFor(service.saveDraft(
+        {
+            .sessionUrl = "https://account-2.example.test/.well-known/jmap",
+            .loginEmail = "shared-login@example.test",
+            .apiKey = "account-2-secret",
+        },
+        {
+            .composeSessionId = "compose-2",
+            .accountId = "account-2",
+            .draftEmailId = values.front(),
+            .mode = javelin::jmap::submission::ComposeMode::NewMessage,
+            .editorMode = javelin::jmap::submission::BodyEditorMode::RichText,
+            .identityId = "identity-2",
+            .to = {{.name = std::nullopt, .email = "recipient@example.test"}},
+            .cc = {},
+            .bcc = {},
+            .subject = "Uncertain draft",
+            .plainTextBody = "Body",
+            .htmlBody = "<p>Body</p>",
+            .threading = {},
+            .attachments = {},
+        }));
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(retry));
+    CHECK(std::get<javelin::jmap::OperationError>(retry).code ==
+          javelin::jmap::OperationErrorCode::Conflict);
+    CHECK(transport.requests.size() == 1);
 }

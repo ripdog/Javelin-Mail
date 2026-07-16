@@ -46,6 +46,8 @@ namespace javelin::jmap::contacts
               const std::vector<api::AddressBook>& projectedBooks, std::string_view state);
         [[nodiscard]] std::variant<std::vector<AddressBookMutationRecord>, cache::DatabaseError>
         listForAddressBook(std::string_view accountId, std::string_view addressBookId) const;
+        [[nodiscard]] std::variant<std::vector<AddressBookMutationRecord>, cache::DatabaseError>
+        listActive(std::string_view accountId) const;
         [[nodiscard]] std::optional<cache::DatabaseError>
         transition(const std::vector<AddressBookMutationRecord>& records,
                    sync::MutationStatus status,
