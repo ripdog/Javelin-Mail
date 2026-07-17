@@ -1201,6 +1201,37 @@ namespace javelin::jmap::cache
                                 "DEFAULT ''"),
                         },
                 },
+                MigrationStep{
+                    .version = 25,
+                    .name = QStringLiteral("calendar_notification_state"),
+                    .statements =
+                        {
+                            QStringLiteral(
+                                "CREATE TABLE calendar_notification_state (notification_key TEXT "
+                                "PRIMARY KEY,status TEXT NOT NULL CHECK(status IN "
+                                "('notified','dismissed','snoozed')),notified_at TEXT NOT NULL,"
+                                "snoozed_until TEXT) STRICT"),
+                            QStringLiteral("CREATE INDEX idx_calendar_notification_snooze ON "
+                                           "calendar_notification_state(status,snoozed_until)"),
+                        },
+                },
+                MigrationStep{
+                    .version = 26,
+                    .name = QStringLiteral("calendar_default_alerts"),
+                    .statements =
+                        {
+                            QStringLiteral(
+                                "CREATE TABLE calendar_default_alerts (account_id TEXT NOT NULL,"
+                                "calendar_id TEXT NOT NULL,alert_id TEXT NOT NULL,without_time "
+                                "INTEGER NOT NULL CHECK(without_time IN (0,1)),action TEXT NOT "
+                                "NULL,trigger_kind TEXT NOT NULL CHECK(trigger_kind IN "
+                                "('offset','absolute')),relative_to TEXT NOT NULL,offset TEXT,"
+                                "trigger_at TEXT,acknowledged TEXT,PRIMARY KEY(account_id,"
+                                "calendar_id,alert_id,without_time),FOREIGN KEY(account_id,"
+                                "calendar_id) REFERENCES calendars(account_id,calendar_id) ON "
+                                "DELETE CASCADE) STRICT"),
+                        },
+                },
             },
         };
     }

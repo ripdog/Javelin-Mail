@@ -1,4 +1,5 @@
 #include "gui/search/AdvancedSearchDialog.h"
+#include "gui/widgets/EmailAddressLineEdit.h"
 
 #include <QDialogButtonBox>
 #include <QFormLayout>
@@ -28,11 +29,11 @@ namespace javelin::gui::search
         setWindowTitle(QStringLiteral("Advanced Search"));
 
         m_textEdit = new QLineEdit(this);
-        m_withEdit = new QLineEdit(this);
-        m_fromEdit = new QLineEdit(this);
-        m_toEdit = new QLineEdit(this);
-        m_ccEdit = new QLineEdit(this);
-        m_bccEdit = new QLineEdit(this);
+        m_withEdit = new widgets::EmailAddressLineEdit(true, this);
+        m_fromEdit = new widgets::EmailAddressLineEdit(false, this);
+        m_toEdit = new widgets::EmailAddressLineEdit(true, this);
+        m_ccEdit = new widgets::EmailAddressLineEdit(true, this);
+        m_bccEdit = new widgets::EmailAddressLineEdit(true, this);
         m_subjectEdit = new QLineEdit(this);
         m_bodyEdit = new QLineEdit(this);
 

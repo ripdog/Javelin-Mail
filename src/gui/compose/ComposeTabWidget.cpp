@@ -3,16 +3,15 @@
 #include "app/ComposeService.h"
 #include "gui/messageview/HtmlMessageView.h"
 #include "gui/settings/PreferencesDialog.h"
+#include "gui/widgets/EmailAddressLineEdit.h"
 #include "jmap/cache/IdentityRepository.h"
 #include "jmap/contacts/ContactIdentityLookup.h"
 
 #include <QCoroTask>
 
-#include <QAbstractItemView>
 #include <QAction>
 #include <QApplication>
 #include <QComboBox>
-#include <QCompleter>
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>
 #include <QDropEvent>
@@ -35,7 +34,6 @@
 #include <QScrollArea>
 #include <QSignalBlocker>
 #include <QSizePolicy>
-#include <QStringListModel>
 #include <QStyle>
 #include <QTabWidget>
 #include <QTextBlockFormat>
@@ -500,10 +498,6 @@ namespace javelin::gui::compose
     {
         setAcceptDrops(true);
         setupUi();
-        connect(&m_contactIdentityLookup,
-                &javelin::jmap::contacts::ContactIdentityLookup::contactDataChanged, this,
-                &ComposeTabWidget::setupContactCompletion);
-        setupContactCompletion();
         createToolbarActions();
         loadIdentities();
         applySnapshotToUi();
@@ -704,71 +698,6 @@ namespace javelin::gui::compose
         event->acceptProposedAction();
     }
 
-    void ComposeTabWidget::setupContactCompletion()
-    {
-        const auto result = m_contactIdentityLookup.suggestions();
-        const auto* contacts =
-            std::get_if<std::vector<javelin::jmap::contacts::ContactIdentity>>(&result);
-        if (contacts == nullptr)
-        {
-            return;
-        }
-        QStringList values;
-        values.reserve(static_cast<qsizetype>(contacts->size()));
-        for (const auto& contact : *contacts)
-        {
-            QString name = QString::fromStdString(contact.displayName);
-            if (contact.organization.has_value() && *contact.organization != contact.displayName)
-            {
-                name += QStringLiteral(" — %1").arg(QString::fromStdString(*contact.organization));
-            }
-            values.push_back(
-                QStringLiteral("%1 <%2>").arg(name, QString::fromStdString(contact.email)));
-        }
-
-        if (m_contactCompletionModel != nullptr)
-        {
-            m_contactCompletionModel->setStringList(values);
-            return;
-        }
-
-        m_contactCompletionModel = new QStringListModel(values, this);
-        for (auto* edit : {m_toEdit, m_ccEdit, m_bccEdit})
-        {
-            auto* completer = new QCompleter(m_contactCompletionModel, edit);
-            completer->setWidget(edit);
-            completer->setCaseSensitivity(Qt::CaseInsensitive);
-            completer->setCompletionMode(QCompleter::PopupCompletion);
-            completer->setFilterMode(Qt::MatchContains);
-            connect(edit, &QLineEdit::textEdited, completer,
-                    [edit, completer](const QString& text)
-                    {
-                        const qsizetype separator = std::max(text.lastIndexOf(QLatin1Char(',')),
-                                                             text.lastIndexOf(QLatin1Char(';')));
-                        const QString token = text.sliced(separator + 1).trimmed();
-                        if (token.isEmpty())
-                        {
-                            completer->popup()->hide();
-                            return;
-                        }
-                        completer->setCompletionPrefix(token);
-                        completer->complete();
-                    });
-            connect(completer, qOverload<const QString&>(&QCompleter::activated), edit,
-                    [edit](const QString& completion)
-                    {
-                        const QString text = edit->text();
-                        const qsizetype separator = std::max(text.lastIndexOf(QLatin1Char(',')),
-                                                             text.lastIndexOf(QLatin1Char(';')));
-                        const QString prefix = separator >= 0
-                                                   ? text.left(separator + 1) + QStringLiteral(" ")
-                                                   : QString{};
-                        edit->setText(prefix + completion);
-                        edit->setCursorPosition(static_cast<int>(edit->text().size()));
-                    });
-        }
-    }
-
     void ComposeTabWidget::setupUi()
     {
         setObjectName(QStringLiteral("composeTab"));
@@ -819,7 +748,7 @@ namespace javelin::gui::compose
         auto* toRow = new QHBoxLayout();
         auto* toLabel = new QLabel(QStringLiteral("To"), headerFrame);
         toLabel->setMinimumWidth(52);
-        m_toEdit = new QLineEdit(headerFrame);
+        m_toEdit = new widgets::EmailAddressLineEdit(true, headerFrame);
         m_toEdit->setPlaceholderText(QStringLiteral("alice@example.com, Bob <bob@example.com>"));
         toRow->addWidget(toLabel);
         toRow->addWidget(m_toEdit, 1);
@@ -828,7 +757,7 @@ namespace javelin::gui::compose
         auto* ccRow = new QHBoxLayout();
         auto* ccLabel = new QLabel(QStringLiteral("Cc"), headerFrame);
         ccLabel->setMinimumWidth(52);
-        m_ccEdit = new QLineEdit(headerFrame);
+        m_ccEdit = new widgets::EmailAddressLineEdit(true, headerFrame);
         m_ccEdit->setPlaceholderText(QStringLiteral("Optional"));
         ccRow->addWidget(ccLabel);
         ccRow->addWidget(m_ccEdit, 1);
@@ -837,7 +766,7 @@ namespace javelin::gui::compose
         auto* bccRow = new QHBoxLayout();
         auto* bccLabel = new QLabel(QStringLiteral("Bcc"), headerFrame);
         bccLabel->setMinimumWidth(52);
-        m_bccEdit = new QLineEdit(headerFrame);
+        m_bccEdit = new widgets::EmailAddressLineEdit(true, headerFrame);
         m_bccEdit->setPlaceholderText(QStringLiteral("Optional"));
         bccRow->addWidget(bccLabel);
         bccRow->addWidget(m_bccEdit, 1);

@@ -1,6 +1,8 @@
 #include "app/ProcessServices.h"
 
+#include "app/AddressSuggestionStore.h"
 #include "app/ApplicationErrorCoordinator.h"
+#include "app/CalendarNotificationService.h"
 #include "app/ComposeService.h"
 #include "app/InlineMessageSchemeHandler.h"
 #include "app/LongPollCoordinator.h"
@@ -86,6 +88,10 @@ namespace javelin::app
             std::make_unique<javelin::jmap::cache::AccountRepository>(m_databaseConnection);
         m_contactRepository =
             std::make_unique<javelin::jmap::cache::ContactRepository>(m_databaseConnection);
+        AddressSuggestionStore::instance().initialize(m_databaseConnection);
+        QObject::connect(m_contactRepository.get(),
+                         &javelin::jmap::cache::ContactRepository::contactsChanged,
+                         &AddressSuggestionStore::instance(), &AddressSuggestionStore::refresh);
         m_contactService = std::make_unique<javelin::jmap::contacts::ContactService>(
             m_databaseConnection, *m_contactRepository, *m_transport, *m_methodTransport);
         m_calendarService = std::make_unique<javelin::jmap::calendar::CalendarService>(
@@ -113,6 +119,8 @@ namespace javelin::app
             m_databaseConnection, *m_jmapCore, *m_methodTransport,
             *m_stateChangeNetworkAccessManager, *m_accountRepository, *m_queryService,
             *m_contactService, *m_calendarService, *m_sieveService, *m_errorCoordinator);
+        m_calendarNotificationService =
+            std::make_unique<CalendarNotificationService>(m_databaseConnection);
     }
 
     ProcessServices::~ProcessServices() = default;
@@ -190,6 +198,11 @@ namespace javelin::app
     ApplicationErrorCoordinator& ProcessServices::errorCoordinator()
     {
         return *m_errorCoordinator;
+    }
+
+    CalendarNotificationService& ProcessServices::calendarNotificationService()
+    {
+        return *m_calendarNotificationService;
     }
 
 } // namespace javelin::app

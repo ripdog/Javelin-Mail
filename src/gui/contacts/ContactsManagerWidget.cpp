@@ -1,4 +1,5 @@
 #include "gui/contacts/ContactsManagerWidget.h"
+#include "gui/widgets/EmailAddressLineEdit.h"
 
 #include "gui/IconUtils.h"
 #include "gui/settings/PreferencesDialog.h"
@@ -140,13 +141,16 @@ namespace javelin::gui::contacts
     {
       public:
         ContactFieldRow(javelin::jmap::contacts::ContactEditorField field,
-                        const QString& placeholder, QWidget* parent)
+                        const QString& placeholder, const bool emailAddress, QWidget* parent)
             : QWidget(parent), m_original(std::move(field))
         {
             auto* layout = new QHBoxLayout(this);
             layout->setContentsMargins(0, 0, 0, 0);
             layout->setSpacing(6);
-            m_value = new QLineEdit(QString::fromStdString(m_original.value), this);
+            m_value = emailAddress
+                          ? static_cast<QLineEdit*>(new javelin::gui::widgets::EmailAddressLineEdit(
+                                QString::fromStdString(m_original.value), false, this))
+                          : new QLineEdit(QString::fromStdString(m_original.value), this);
             m_value->setPlaceholderText(placeholder);
             m_context = new QComboBox(this);
             m_context->addItem(QStringLiteral("Other"), QStringLiteral(""));
@@ -232,8 +236,9 @@ namespace javelin::gui::contacts
     class ContactFieldEditor final : public QWidget
     {
       public:
-        ContactFieldEditor(QString placeholder, QWidget* parent)
-            : QWidget(parent), m_placeholder(std::move(placeholder))
+        ContactFieldEditor(QString placeholder, const bool emailAddresses, QWidget* parent)
+            : QWidget(parent), m_placeholder(std::move(placeholder)),
+              m_emailAddresses(emailAddresses)
         {
             auto* layout = new QVBoxLayout(this);
             layout->setContentsMargins(0, 0, 0, 0);
@@ -287,7 +292,8 @@ namespace javelin::gui::contacts
       private:
         void addRow(javelin::jmap::contacts::ContactEditorField field)
         {
-            auto* row = new ContactFieldRow(std::move(field), m_placeholder, this);
+            auto* row =
+                new ContactFieldRow(std::move(field), m_placeholder, m_emailAddresses, this);
             connect(row->removeButton(), &QToolButton::clicked, this,
                     [this, row]
                     {
@@ -299,6 +305,7 @@ namespace javelin::gui::contacts
         }
 
         QString m_placeholder;
+        bool m_emailAddresses = false;
         QVBoxLayout* m_rows = nullptr;
     };
 
@@ -883,9 +890,10 @@ namespace javelin::gui::contacts
         contactForm->addRow(QStringLiteral("Organization"), m_organizationEdit);
         contactForm->addRow(QStringLiteral("Title"), m_titleEdit);
 
-        m_emailsEdit = new ContactFieldEditor(QStringLiteral("Email address"), formWidget);
-        m_phonesEdit = new ContactFieldEditor(QStringLiteral("Phone number"), formWidget);
-        m_addressesEdit = new ContactFieldEditor(QStringLiteral("Postal address"), formWidget);
+        m_emailsEdit = new ContactFieldEditor(QStringLiteral("Email address"), true, formWidget);
+        m_phonesEdit = new ContactFieldEditor(QStringLiteral("Phone number"), false, formWidget);
+        m_addressesEdit =
+            new ContactFieldEditor(QStringLiteral("Postal address"), false, formWidget);
         contactForm->addRow(QStringLiteral("Emails"), m_emailsEdit);
         contactForm->addRow(QStringLiteral("Phones"), m_phonesEdit);
         contactForm->addRow(QStringLiteral("Addresses"), m_addressesEdit);

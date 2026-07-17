@@ -21,6 +21,7 @@ namespace javelin::app
 {
     class ApplicationErrorCoordinator;
     class ComposeService;
+    class CalendarNotificationService;
     class InlineMessageSchemeHandler;
     class MailApplicationService;
 } // namespace javelin::app
@@ -86,6 +87,7 @@ namespace javelin::app
         [[nodiscard]] ComposeService& composeService();
         [[nodiscard]] MailApplicationService& mailService();
         [[nodiscard]] ApplicationErrorCoordinator& errorCoordinator();
+        [[nodiscard]] CalendarNotificationService& calendarNotificationService();
 
       private:
         std::unique_ptr<javelin::jmap::JmapCore> m_jmapCore;
@@ -112,6 +114,7 @@ namespace javelin::app
         std::unique_ptr<ComposeService> m_composeService;
         std::unique_ptr<ApplicationErrorCoordinator> m_errorCoordinator;
         std::unique_ptr<MailApplicationService> m_mailService;
+        std::unique_ptr<CalendarNotificationService> m_calendarNotificationService;
     };
 
 } // namespace javelin::app

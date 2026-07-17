@@ -39,6 +39,23 @@ namespace javelin::jmap::calendar
         auto operator<=>(const TimeZoneId&) const = default;
     };
 
+    enum class AlertTriggerKind
+    {
+        Offset,
+        Absolute,
+    };
+
+    struct Alert
+    {
+        std::string id;
+        std::string action;
+        AlertTriggerKind triggerKind = AlertTriggerKind::Offset;
+        std::string relativeTo = "start";
+        std::optional<Duration> offset;
+        std::optional<UtcInstant> when;
+        std::optional<UtcInstant> acknowledged;
+    };
+
     struct CalendarRights
     {
         bool mayReadFreeBusy = false;
@@ -63,6 +80,8 @@ namespace javelin::jmap::calendar
         bool isVisible = true;
         bool isDefault = false;
         std::optional<TimeZoneId> timeZone;
+        std::unordered_map<std::string, Alert> defaultAlertsWithTime;
+        std::unordered_map<std::string, Alert> defaultAlertsWithoutTime;
         CalendarRights myRights;
     };
 
@@ -123,6 +142,8 @@ namespace javelin::jmap::calendar
         bool showWithoutTime = false;
         bool isDraft = false;
         bool isOrigin = false;
+        bool useDefaultAlerts = false;
+        std::unordered_map<std::string, Alert> alerts;
         std::optional<UtcInstant> utcStart;
         std::optional<UtcInstant> utcEnd;
         std::optional<RecurrenceRule> recurrenceRule;

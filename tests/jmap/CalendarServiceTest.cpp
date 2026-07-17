@@ -128,6 +128,8 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
                                                              .isVisible = true,
                                                              .isDefault = true,
                                                              .timeZone = std::nullopt,
+                                                             .defaultAlertsWithTime = {},
+                                                             .defaultAlertsWithoutTime = {},
                                                              .myRights = {.mayReadFreeBusy = true,
                                                                           .mayReadItems = true,
                                                                           .mayWriteAll = true,

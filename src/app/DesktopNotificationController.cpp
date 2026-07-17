@@ -72,6 +72,7 @@ namespace javelin::app
                                                                     .emailId = emailId,
                                                                     .activationToken = {},
                                                                     .connectionId = {},
+                                                                    .calendarNotificationKey = {},
                                                                     .opensSettings = false,
                                                                 });
     }
@@ -113,22 +114,64 @@ namespace javelin::app
                                                            .emailId = {},
                                                            .activationToken = {},
                                                            .connectionId = connectionId,
+                                                           .calendarNotificationKey = {},
                                                            .opensSettings = opensSettings});
+    }
+
+    void DesktopNotificationController::notifyCalendarEvent(const QString& key,
+                                                            const QString& title,
+                                                            const QString& message)
+    {
+        QDBusInterface notifications{
+            QString::fromLatin1(notificationsService), QString::fromLatin1(notificationsPath),
+            QString::fromLatin1(notificationsInterface), QDBusConnection::sessionBus()};
+        if (!notifications.isValid())
+        {
+            qWarning() << "Desktop notifications are unavailable on the session bus";
+            return;
+        }
+        const QStringList actions = {QStringLiteral("dismiss"), QStringLiteral("Dismiss"),
+                                     QStringLiteral("snooze"), QStringLiteral("Snooze 5 min")};
+        const QDBusReply<uint> reply{
+            notifications.call(QStringLiteral("Notify"), QStringLiteral("Javelin Mail"),
+                               static_cast<uint>(0), QStringLiteral("appointment-soon"), title,
+                               message, actions, notificationHints(urgencyNormal), 0)};
+        if (!reply.isValid())
+        {
+            qWarning().noquote() << "Failed to send calendar notification"
+                                 << reply.error().message();
+            return;
+        }
+        m_trackedNotifications.insert_or_assign(reply.value(),
+                                                TrackedNotification{.accountId = {},
+                                                                    .mailboxId = {},
+                                                                    .threadId = {},
+                                                                    .emailId = {},
+                                                                    .activationToken = {},
+                                                                    .connectionId = {},
+                                                                    .calendarNotificationKey = key,
+                                                                    .opensSettings = false});
     }
 
     void DesktopNotificationController::onActionInvoked(const uint notificationId,
                                                         const QString& actionKey)
     {
-        if (actionKey != QString::fromLatin1(defaultActionKey))
-        {
-            return;
-        }
-
         const auto it = m_trackedNotifications.find(notificationId);
         if (it == m_trackedNotifications.end())
         {
             return;
         }
+
+        if (!it->second.calendarNotificationKey.isEmpty())
+        {
+            if (actionKey == QStringLiteral("dismiss") || actionKey == QStringLiteral("snooze"))
+                Q_EMIT calendarNotificationAction(it->second.calendarNotificationKey,
+                                                  actionKey == QStringLiteral("snooze"));
+            untrackNotification(notificationId);
+            return;
+        }
+        if (actionKey != QString::fromLatin1(defaultActionKey))
+            return;
 
         if (it->second.opensSettings)
         {

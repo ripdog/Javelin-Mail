@@ -24,6 +24,7 @@ namespace javelin::app
                            const QString& message);
         void notifyError(const QString& connectionId, const QString& title, const QString& message,
                          bool persistent, bool opensSettings);
+        void notifyCalendarEvent(const QString& key, const QString& title, const QString& message);
 
       Q_SIGNALS:
         void notificationActivated(const QString& accountId, const QString& mailboxId,
@@ -31,6 +32,7 @@ namespace javelin::app
                                    const QString& activationToken);
         void errorNotificationActivated(const QString& connectionId,
                                         const QString& activationToken);
+        void calendarNotificationAction(const QString& key, bool snooze);
 
       private Q_SLOTS:
         void onActionInvoked(uint notificationId, const QString& actionKey);
@@ -46,6 +48,7 @@ namespace javelin::app
             QString emailId;
             QString activationToken;
             QString connectionId;
+            QString calendarNotificationKey;
             bool opensSettings = false;
         };
 

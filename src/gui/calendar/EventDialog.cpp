@@ -1,4 +1,5 @@
 #include "gui/calendar/EventDialog.h"
+#include "gui/widgets/EmailAddressLineEdit.h"
 
 #include "jmap/calendar/CalendarEventEditing.h"
 
@@ -139,7 +140,7 @@ namespace javelin::gui::calendar
         m_recurrence->addItem(QStringLiteral("Weekly"), QStringLiteral("weekly"));
         m_recurrence->addItem(QStringLiteral("Monthly"), QStringLiteral("monthly"));
         m_recurrence->addItem(QStringLiteral("Yearly"), QStringLiteral("yearly"));
-        m_attendees = new QPlainTextEdit(this);
+        m_attendees = new javelin::gui::widgets::EmailAddressPlainTextEdit(this);
         m_attendees->setPlaceholderText(QStringLiteral("One email address per line"));
         m_error = new QLabel(this);
         m_error->setStyleSheet(QStringLiteral("color: palette(link-visited);"));

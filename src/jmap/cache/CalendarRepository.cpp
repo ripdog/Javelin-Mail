@@ -84,6 +84,16 @@ namespace javelin::jmap::cache
             "sort_order=excluded.sort_order,is_subscribed=excluded.is_subscribed,"
             "is_visible=excluded.is_visible,is_default=excluded.is_default,"
             "time_zone=excluded.time_zone,rights_json=excluded.rights_json,state=excluded.state"));
+        QSqlQuery removeAlerts{database};
+        removeAlerts.prepare(
+            QStringLiteral("DELETE FROM calendar_default_alerts WHERE account_id=:account AND "
+                           "calendar_id=:calendar"));
+        QSqlQuery insertAlert{database};
+        insertAlert.prepare(QStringLiteral(
+            "INSERT INTO calendar_default_alerts(account_id,calendar_id,alert_id,without_time,"
+            "action,trigger_kind,relative_to,offset,trigger_at,acknowledged) VALUES "
+            "(:account,:calendar,:alert,:without_time,:action,:kind,:relative,:offset,:when,"
+            ":acknowledged)"));
         std::unordered_set<std::string> retained;
         for (const auto& item : calendars)
         {
@@ -104,6 +114,50 @@ namespace javelin::jmap::cache
             upsert.bindValue(QStringLiteral(":rights"), rightsMask(item.myRights));
             upsert.bindValue(QStringLiteral(":state"), QString::fromStdString(std::string{state}));
             if (!exec(upsert, failure, QStringLiteral("Upsert calendar")))
+                break;
+            removeAlerts.bindValue(QStringLiteral(":account"),
+                                   QString::fromStdString(std::string{accountId}));
+            removeAlerts.bindValue(QStringLiteral(":calendar"), QString::fromStdString(item.id));
+            if (!exec(removeAlerts, failure, QStringLiteral("Replace calendar default alerts")))
+                break;
+            const auto writeAlerts = [&](const auto& alerts, const bool withoutTime)
+            {
+                for (const auto& [alertId, alert] : alerts)
+                {
+                    insertAlert.bindValue(QStringLiteral(":account"),
+                                          QString::fromStdString(std::string{accountId}));
+                    insertAlert.bindValue(QStringLiteral(":calendar"),
+                                          QString::fromStdString(item.id));
+                    insertAlert.bindValue(QStringLiteral(":alert"),
+                                          QString::fromStdString(alertId));
+                    insertAlert.bindValue(QStringLiteral(":without_time"), withoutTime ? 1 : 0);
+                    insertAlert.bindValue(QStringLiteral(":action"),
+                                          QString::fromStdString(alert.action));
+                    insertAlert.bindValue(QStringLiteral(":kind"),
+                                          alert.triggerKind == calendar::AlertTriggerKind::Absolute
+                                              ? QStringLiteral("absolute")
+                                              : QStringLiteral("offset"));
+                    insertAlert.bindValue(QStringLiteral(":relative"),
+                                          QString::fromStdString(alert.relativeTo));
+                    insertAlert.bindValue(
+                        QStringLiteral(":offset"),
+                        alert.offset ? QVariant{QString::fromStdString(alert.offset->value)}
+                                     : QVariant{});
+                    insertAlert.bindValue(QStringLiteral(":when"),
+                                          alert.when
+                                              ? QVariant{QString::fromStdString(alert.when->value)}
+                                              : QVariant{});
+                    insertAlert.bindValue(QStringLiteral(":acknowledged"),
+                                          alert.acknowledged ? QVariant{QString::fromStdString(
+                                                                   alert.acknowledged->value)}
+                                                             : QVariant{});
+                    if (!exec(insertAlert, failure, QStringLiteral("Store calendar default alert")))
+                        return false;
+                }
+                return true;
+            };
+            if (!writeAlerts(item.defaultAlertsWithTime, false) ||
+                !writeAlerts(item.defaultAlertsWithoutTime, true))
                 break;
         }
         if (!failure)
@@ -179,7 +233,7 @@ namespace javelin::jmap::cache
         std::vector<calendar::Calendar> result;
         while (query.next())
         {
-            result.push_back(calendar::Calendar{
+            calendar::Calendar item{
                 .accountId = std::string{accountId},
                 .id = query.value(0).toString().toStdString(),
                 .name = query.value(1).toString().toStdString(),
@@ -199,7 +253,49 @@ namespace javelin::jmap::cache
                         : std::optional<calendar::TimeZoneId>{{.value = query.value(8)
                                                                             .toString()
                                                                             .toStdString()}},
-                .myRights = rights(query.value(9).toUInt())});
+                .defaultAlertsWithTime = {},
+                .defaultAlertsWithoutTime = {},
+                .myRights = rights(query.value(9).toUInt())};
+            QSqlQuery alerts{m_connection.database()};
+            alerts.prepare(QStringLiteral(
+                "SELECT alert_id,without_time,action,trigger_kind,relative_to,offset,trigger_at,"
+                "acknowledged FROM calendar_default_alerts WHERE account_id=:account AND "
+                "calendar_id=:calendar"));
+            alerts.bindValue(QStringLiteral(":account"),
+                             QString::fromStdString(std::string{accountId}));
+            alerts.bindValue(QStringLiteral(":calendar"), QString::fromStdString(item.id));
+            if (!alerts.exec())
+                return queryError(QStringLiteral("List calendar default alerts"), alerts);
+            while (alerts.next())
+            {
+                calendar::Alert alert{
+                    .id = alerts.value(0).toString().toStdString(),
+                    .action = alerts.value(2).toString().toStdString(),
+                    .triggerKind = alerts.value(3).toString() == QStringLiteral("absolute")
+                                       ? calendar::AlertTriggerKind::Absolute
+                                       : calendar::AlertTriggerKind::Offset,
+                    .relativeTo = alerts.value(4).toString().toStdString(),
+                    .offset =
+                        alerts.value(5).isNull()
+                            ? std::nullopt
+                            : std::optional<calendar::Duration>{{.value = alerts.value(5)
+                                                                              .toString()
+                                                                              .toStdString()}},
+                    .when =
+                        alerts.value(6).isNull()
+                            ? std::nullopt
+                            : std::optional<calendar::UtcInstant>{{.value = alerts.value(6)
+                                                                                .toString()
+                                                                                .toStdString()}},
+                    .acknowledged = alerts.value(7).isNull()
+                                        ? std::nullopt
+                                        : std::optional<calendar::UtcInstant>{
+                                              {.value = alerts.value(7).toString().toStdString()}}};
+                auto& destination = alerts.value(1).toBool() ? item.defaultAlertsWithoutTime
+                                                             : item.defaultAlertsWithTime;
+                destination.emplace(alert.id, std::move(alert));
+            }
+            result.push_back(std::move(item));
         }
         return result;
     }

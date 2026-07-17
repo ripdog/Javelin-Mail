@@ -1,6 +1,8 @@
 #include "app/ApplicationBootstrap.h"
 
+#include "app/AddressSuggestionStore.h"
 #include "app/ApplicationErrorCoordinator.h"
+#include "app/CalendarNotificationService.h"
 #include "app/DesktopNotificationController.h"
 #include "app/LongPollCoordinator.h"
 #include "app/ProcessServices.h"
@@ -249,6 +251,8 @@ namespace javelin::app
                 m_notificationController->notifyNewMail(accountId, mailboxId, threadId, emailId,
                                                         mailboxName, title, message);
             });
+        QObject::connect(&m_processServices->mailService(), &MailApplicationService::cacheCommitted,
+                         &AddressSuggestionStore::instance(), &AddressSuggestionStore::refresh);
         QObject::connect(
             &m_processServices->errorCoordinator(), &ApplicationErrorCoordinator::incidentRaised,
             m_notificationController.get(),
@@ -271,6 +275,19 @@ namespace javelin::app
                                                                            threadId, emailId);
                              }
                          });
+        QObject::connect(&m_processServices->calendarNotificationService(),
+                         &CalendarNotificationService::reminderDue, m_notificationController.get(),
+                         &DesktopNotificationController::notifyCalendarEvent);
+        QObject::connect(m_notificationController.get(),
+                         &DesktopNotificationController::calendarNotificationAction, &m_application,
+                         [this](const QString& key, const bool snooze)
+                         {
+                             if (snooze)
+                                 m_processServices->calendarNotificationService().snooze(key);
+                             else
+                                 m_processServices->calendarNotificationService().dismiss(key);
+                         });
+        m_processServices->calendarNotificationService().start();
         QObject::connect(m_notificationController.get(),
                          &DesktopNotificationController::errorNotificationActivated, &m_application,
                          [this](const QString& connectionId, const QString& activationToken)

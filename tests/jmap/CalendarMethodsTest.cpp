@@ -156,6 +156,8 @@ TEST_CASE("calendar set omits server-set event properties", "[jmap][calendar]")
         .showWithoutTime = false,
         .isDraft = false,
         .isOrigin = true,
+        .useDefaultAlerts = false,
+        .alerts = {},
         .utcStart = javelin::jmap::calendar::UtcInstant{.value = "2026-03-02T20:00:00Z"},
         .utcEnd = javelin::jmap::calendar::UtcInstant{.value = "2026-03-02T21:00:00Z"},
         .recurrenceRule = std::nullopt,

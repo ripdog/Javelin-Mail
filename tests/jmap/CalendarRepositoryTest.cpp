@@ -1,5 +1,6 @@
 #include "jmap/cache/CalendarRepository.h"
 #include "jmap/api/CalendarMethods.h"
+#include "jmap/cache/CalendarNotificationRepository.h"
 #include "jmap/calendar/CalendarMutationJournal.h"
 
 #include <QCoreApplication>
@@ -48,6 +49,8 @@ namespace
                 .showWithoutTime = false,
                 .isDraft = false,
                 .isOrigin = true,
+                .useDefaultAlerts = false,
+                .alerts = {},
                 .utcStart = std::nullopt,
                 .utcEnd = std::nullopt,
                 .recurrenceRule = std::nullopt,
@@ -87,7 +90,7 @@ TEST_CASE("calendar windows retain occurrences referenced by overlapping windows
         "('a1','alice@example.test','https://example.test/jmap',1)")));
 
     javelin::jmap::cache::CalendarRepository repository{connection};
-    const javelin::jmap::calendar::Calendar calendar{
+    javelin::jmap::calendar::Calendar calendar{
         .accountId = "a1",
         .id = "work",
         .name = "Work",
@@ -98,6 +101,8 @@ TEST_CASE("calendar windows retain occurrences referenced by overlapping windows
         .isVisible = true,
         .isDefault = true,
         .timeZone = javelin::jmap::calendar::TimeZoneId{.value = "Pacific/Auckland"},
+        .defaultAlertsWithTime = {},
+        .defaultAlertsWithoutTime = {},
         .myRights = {.mayReadFreeBusy = true,
                      .mayReadItems = true,
                      .mayWriteAll = true,
@@ -363,4 +368,125 @@ TEST_CASE("calendar windows retain occurrences referenced by overlapping windows
     REQUIRE(count.exec(QStringLiteral("SELECT COUNT(*) FROM calendar_query_windows")));
     REQUIRE(count.next());
     CHECK(count.value(0).toInt() == 12);
+}
+
+TEST_CASE("calendar reminders are claimed once and can be snoozed or dismissed",
+          "[jmap][calendar][notification]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open(
+        {.connectionName = QStringLiteral("calendar-notification-state"),
+         .databasePath = directory.filePath(QStringLiteral("cache.sqlite3"))});
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    REQUIRE(QSqlQuery{connection.database()}.exec(QStringLiteral(
+        "INSERT INTO accounts (account_id,email_address,session_url,is_primary) VALUES "
+        "('a1','alice@example.test','https://example.test/jmap',1)")));
+
+    javelin::jmap::cache::CalendarRepository calendars{connection};
+    javelin::jmap::calendar::Calendar calendar{
+        .accountId = "a1",
+        .id = "work",
+        .name = "Work",
+        .description = std::nullopt,
+        .color = std::nullopt,
+        .sortOrder = 0,
+        .isSubscribed = true,
+        .isVisible = true,
+        .isDefault = true,
+        .timeZone = javelin::jmap::calendar::TimeZoneId{.value = "Etc/UTC"},
+        .defaultAlertsWithTime = {},
+        .defaultAlertsWithoutTime = {},
+        .myRights = {.mayReadFreeBusy = true, .mayReadItems = true}};
+    calendar.defaultAlertsWithTime.emplace(
+        "default-alert", javelin::jmap::calendar::Alert{
+                             .id = "default-alert",
+                             .action = "display",
+                             .triggerKind = javelin::jmap::calendar::AlertTriggerKind::Offset,
+                             .relativeTo = "start",
+                             .offset = javelin::jmap::calendar::Duration{.value = "-PT10M"},
+                             .when = std::nullopt,
+                             .acknowledged = std::nullopt});
+    REQUIRE_FALSE(calendars.replaceCalendars("a1", "c1", {calendar}).has_value());
+
+    auto remindedEvent = event("event-1", "2026-07-18T10:00:00");
+    remindedEvent.timeZone = javelin::jmap::calendar::TimeZoneId{.value = "Etc/UTC"};
+    remindedEvent.utcStart = javelin::jmap::calendar::UtcInstant{.value = "2026-07-18T10:00:00Z"};
+    remindedEvent.utcEnd = javelin::jmap::calendar::UtcInstant{.value = "2026-07-18T11:00:00Z"};
+    remindedEvent.alerts.emplace(
+        "alert-1", javelin::jmap::calendar::Alert{
+                       .id = "alert-1",
+                       .action = "display",
+                       .triggerKind = javelin::jmap::calendar::AlertTriggerKind::Offset,
+                       .relativeTo = "start",
+                       .offset = javelin::jmap::calendar::Duration{.value = "-PT10M"},
+                       .when = std::nullopt,
+                       .acknowledged = std::nullopt});
+    auto remindedOccurrence = occurrence("event-1", "2026-07-18T10:00:00");
+    remindedOccurrence.localEnd = {.value = "2026-07-18T11:00:00"};
+    remindedOccurrence.utcStart =
+        javelin::jmap::calendar::UtcInstant{.value = "2026-07-18T10:00:00Z"};
+    remindedOccurrence.utcEnd =
+        javelin::jmap::calendar::UtcInstant{.value = "2026-07-18T11:00:00Z"};
+    REQUIRE_FALSE(calendars
+                      .reconcileWindow({.accountId = "a1",
+                                        .start = {.value = "2026-07-01T00:00:00"},
+                                        .end = {.value = "2026-08-01T00:00:00"},
+                                        .displayTimeZone = {.value = "Etc/UTC"},
+                                        .queryState = "q1",
+                                        .eventState = "e1",
+                                        .events = {remindedEvent},
+                                        .occurrences = {remindedOccurrence}})
+                      .has_value());
+
+    javelin::jmap::cache::CalendarNotificationRepository notifications{connection};
+    const QDateTime now =
+        QDateTime::fromString(QStringLiteral("2026-07-18T10:05:00Z"), Qt::ISODate);
+    auto first = notifications.claimDue(now);
+    REQUIRE(
+        std::holds_alternative<std::vector<javelin::jmap::cache::CalendarNotificationCandidate>>(
+            first));
+    auto candidates =
+        std::get<std::vector<javelin::jmap::cache::CalendarNotificationCandidate>>(first);
+    REQUIRE(candidates.size() == 1);
+    CHECK(candidates.front().title == "Event event-1");
+    CHECK(std::get<std::vector<javelin::jmap::cache::CalendarNotificationCandidate>>(
+              notifications.claimDue(now))
+              .empty());
+
+    REQUIRE_FALSE(notifications.snooze(candidates.front().key, now.addSecs(300)).has_value());
+    CHECK(std::get<std::vector<javelin::jmap::cache::CalendarNotificationCandidate>>(
+              notifications.claimDue(now.addSecs(299)))
+              .empty());
+    auto snoozed = notifications.claimDue(now.addSecs(300));
+    REQUIRE(std::get<std::vector<javelin::jmap::cache::CalendarNotificationCandidate>>(snoozed)
+                .size() == 1);
+    REQUIRE_FALSE(notifications.dismiss(candidates.front().key).has_value());
+    CHECK(std::get<std::vector<javelin::jmap::cache::CalendarNotificationCandidate>>(
+              notifications.claimDue(now.addSecs(600)))
+              .empty());
+
+    remindedEvent.useDefaultAlerts = true;
+    remindedEvent.alerts.clear();
+    REQUIRE_FALSE(calendars
+                      .reconcileWindow({.accountId = "a1",
+                                        .start = {.value = "2026-07-01T00:00:00"},
+                                        .end = {.value = "2026-08-01T00:00:00"},
+                                        .displayTimeZone = {.value = "Etc/UTC"},
+                                        .queryState = "q2",
+                                        .eventState = "e2",
+                                        .events = {remindedEvent},
+                                        .occurrences = {remindedOccurrence}})
+                      .has_value());
+    const auto defaultReminder = notifications.claimDue(now.addSecs(600));
+    REQUIRE(
+        std::get<std::vector<javelin::jmap::cache::CalendarNotificationCandidate>>(defaultReminder)
+            .size() == 1);
+    CHECK(
+        std::get<std::vector<javelin::jmap::cache::CalendarNotificationCandidate>>(defaultReminder)
+            .front()
+            .alertId == "default-alert");
 }

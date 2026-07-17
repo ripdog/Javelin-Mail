@@ -1717,6 +1717,8 @@ namespace javelin::gui::shell
                     .showWithoutTime = false,
                     .isDraft = false,
                     .isOrigin = true,
+                    .useDefaultAlerts = false,
+                    .alerts = {},
                     .utcStart = std::nullopt,
                     .utcEnd = std::nullopt,
                     .recurrenceRule = std::nullopt,

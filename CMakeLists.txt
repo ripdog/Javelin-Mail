@@ -48,12 +48,18 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/cache/MailboxWindowRepository.h
     src/jmap/cache/NotificationRepository.cpp
     src/jmap/cache/NotificationRepository.h
+    src/jmap/cache/CalendarNotificationRepository.cpp
+    src/jmap/cache/CalendarNotificationRepository.h
     src/jmap/sync/StateChangeSource.h
     src/jmap/sync/MailboxInterestRegistry.cpp
     src/jmap/sync/MailboxInterestRegistry.h
     src/app/AccountConnectionSettings.h
     src/app/ApplicationErrorCoordinator.cpp
     src/app/ApplicationErrorCoordinator.h
+    src/app/CalendarNotificationService.cpp
+    src/app/CalendarNotificationService.h
+    src/app/AddressSuggestionStore.cpp
+    src/app/AddressSuggestionStore.h
     src/app/ComposeService.cpp
     src/app/ComposeService.h
     src/app/ApplicationBootstrap.cpp
@@ -93,6 +99,8 @@ set(JAVELIN_FORMAT_FILES
     src/gui/compose/ComposeTabWidget.h
     src/gui/contacts/ContactsManagerWidget.cpp
     src/gui/contacts/ContactsManagerWidget.h
+    src/gui/widgets/EmailAddressLineEdit.cpp
+    src/gui/widgets/EmailAddressLineEdit.h
     src/gui/calendar/MonthCalendarWidget.cpp
     src/gui/calendar/MonthCalendarWidget.h
     src/gui/calendar/MonthCalendarLayout.cpp
@@ -348,6 +356,8 @@ add_library(javelin_jmap STATIC
     src/jmap/cache/MailboxWindowRepository.h
     src/jmap/cache/NotificationRepository.cpp
     src/jmap/cache/NotificationRepository.h
+    src/jmap/cache/CalendarNotificationRepository.cpp
+    src/jmap/cache/CalendarNotificationRepository.h
     src/jmap/sync/StateChangeSource.h
     src/jmap/sync/MailboxInterestRegistry.cpp
     src/jmap/sync/MailboxInterestRegistry.h
@@ -520,6 +530,8 @@ javelin_enable_static_analysis(javelin_jmap)
 javelin_enable_sanitizers(javelin_jmap)
 
 add_library(javelin_gui STATIC
+    src/app/AddressSuggestionStore.cpp
+    src/app/AddressSuggestionStore.h
     src/app/LogStore.cpp
     src/app/LogStore.h
     src/gui/IconUtils.cpp
@@ -535,6 +547,8 @@ add_library(javelin_gui STATIC
     src/gui/compose/ComposeTabWidget.h
     src/gui/contacts/ContactsManagerWidget.cpp
     src/gui/contacts/ContactsManagerWidget.h
+    src/gui/widgets/EmailAddressLineEdit.cpp
+    src/gui/widgets/EmailAddressLineEdit.h
     src/gui/calendar/MonthCalendarWidget.cpp
     src/gui/calendar/MonthCalendarWidget.h
     src/gui/calendar/MonthCalendarLayout.cpp
@@ -642,6 +656,8 @@ add_library(javelin_app STATIC
     src/app/AccountConnectionSettings.h
     src/app/ApplicationErrorCoordinator.cpp
     src/app/ApplicationErrorCoordinator.h
+    src/app/CalendarNotificationService.cpp
+    src/app/CalendarNotificationService.h
     src/app/ComposeService.cpp
     src/app/ComposeService.h
     src/app/ApplicationBootstrap.cpp

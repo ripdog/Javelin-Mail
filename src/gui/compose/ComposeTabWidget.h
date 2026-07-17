@@ -19,7 +19,6 @@ class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
 class QScrollArea;
-class QStringListModel;
 class QTabWidget;
 class QTextEdit;
 class QTimer;
@@ -92,7 +91,6 @@ namespace javelin::gui::compose
         void setupUi();
         void createToolbarActions();
         void loadIdentities();
-        void setupContactCompletion();
         void applySnapshotToUi();
         void populateAttachments();
         void refreshPreview();
@@ -138,7 +136,6 @@ namespace javelin::gui::compose
         QLineEdit* m_toEdit = nullptr;
         QLineEdit* m_ccEdit = nullptr;
         QLineEdit* m_bccEdit = nullptr;
-        QStringListModel* m_contactCompletionModel = nullptr;
         QLineEdit* m_subjectEdit = nullptr;
         QToolBar* m_formatToolbar = nullptr;
         QTextEdit* m_richTextEdit = nullptr;
