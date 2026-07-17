@@ -1164,6 +1164,43 @@ namespace javelin::jmap::cache
                                            "is_default_destination"),
                         },
                 },
+                MigrationStep{
+                    .version = 24,
+                    .name = QStringLiteral("mailbox_query_windows"),
+                    .statements =
+                        {
+                            QStringLiteral(
+                                "CREATE TABLE mailbox_query_windows ("
+                                "account_id TEXT NOT NULL REFERENCES accounts(account_id) ON "
+                                "DELETE CASCADE,mailbox_id TEXT NOT NULL,query_key TEXT NOT NULL,"
+                                "requested_offset INTEGER NOT NULL,requested_limit INTEGER NOT "
+                                "NULL,position INTEGER NOT NULL,returned_limit INTEGER NOT NULL,"
+                                "total INTEGER,query_state TEXT NOT NULL,updated_at TEXT NOT NULL "
+                                "DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(account_id,query_key,"
+                                "requested_offset,requested_limit)) STRICT"),
+                            QStringLiteral(
+                                "CREATE TABLE mailbox_query_window_items (account_id TEXT NOT "
+                                "NULL,query_key TEXT NOT NULL,requested_offset INTEGER NOT NULL,"
+                                "requested_limit INTEGER NOT NULL,position INTEGER NOT NULL,"
+                                "email_id TEXT NOT NULL,PRIMARY KEY(account_id,query_key,"
+                                "requested_offset,requested_limit,position),FOREIGN KEY(account_id,"
+                                "query_key,requested_offset,requested_limit) REFERENCES "
+                                "mailbox_query_windows(account_id,query_key,requested_offset,"
+                                "requested_limit) ON DELETE CASCADE) STRICT"),
+                            QStringLiteral(
+                                "CREATE INDEX idx_mailbox_query_windows_mailbox ON "
+                                "mailbox_query_windows(account_id,mailbox_id,updated_at)"),
+                            QStringLiteral(
+                                "ALTER TABLE search_windows ADD COLUMN position INTEGER NOT NULL "
+                                "DEFAULT 0"),
+                            QStringLiteral(
+                                "ALTER TABLE search_windows ADD COLUMN returned_limit INTEGER NOT "
+                                "NULL DEFAULT 0"),
+                            QStringLiteral(
+                                "ALTER TABLE search_windows ADD COLUMN query_state TEXT NOT NULL "
+                                "DEFAULT ''"),
+                        },
+                },
             },
         };
     }

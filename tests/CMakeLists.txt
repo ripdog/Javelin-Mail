@@ -27,7 +27,6 @@ add_executable(javelin_jmap_tests
     jmap/LanguageDetectionTest.cpp
     jmap/LongPollMailboxObserverTest.cpp
     jmap/LongPollWorkerTest.cpp
-    jmap/MailboxWindowPolicyTest.cpp
     app/ApplicationErrorCoordinatorTest.cpp
     app/MailboxSelectionMutationTest.cpp
     jmap/MailMethodsTest.cpp
@@ -50,7 +49,6 @@ add_executable(javelin_jmap_tests
     jmap/MailEntityParsersTest.cpp
     jmap/SessionClientTest.cpp
     jmap/SessionRepositoryTest.cpp
-    jmap/SearchResultReconcilerTest.cpp
     jmap/SearchWindowRepositoryTest.cpp
     jmap/SessionTest.cpp
     jmap/SieveServiceTest.cpp
@@ -62,6 +60,7 @@ add_executable(javelin_jmap_tests
     gui/MonthCalendarWidgetTest.cpp
     gui/MailboxSortTest.cpp
     gui/MessageViewPresentationTest.cpp
+    gui/PaginationTest.cpp
     gui/PlainTextLinkifierTest.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/calendar/MonthCalendarLayout.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/messageview/PlainTextLinkifier.cpp

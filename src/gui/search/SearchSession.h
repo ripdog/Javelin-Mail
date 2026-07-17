@@ -12,7 +12,6 @@
 #include <cstdint>
 #include <optional>
 #include <string>
-#include <unordered_set>
 #include <vector>
 
 namespace javelin::gui::search
@@ -21,7 +20,11 @@ namespace javelin::gui::search
     struct SearchPageState
     {
         std::size_t offset = 0;
+        std::size_t position = 0;
+        std::size_t returnedLimit = 0;
         std::optional<std::size_t> total;
+        std::string queryState;
+        std::optional<std::string> anchor;
         std::vector<javelin::jmap::cache::MessageListItem> items;
         bool cacheLoaded = false;
         bool refreshInFlight = false;
@@ -59,7 +62,6 @@ namespace javelin::gui::search
         void setSort(javelin::jmap::query::EmailListSort sort);
         [[nodiscard]] bool goToPreviousPage();
         [[nodiscard]] bool goToNextPage();
-        void setSelectedEmailId(std::optional<std::string> emailId);
 
       Q_SIGNALS:
         void pageChanged();
@@ -78,9 +80,6 @@ namespace javelin::gui::search
         javelin::app::MailApplicationService& m_mailService;
         std::size_t m_pageSize;
         SearchPageState m_page;
-        std::vector<javelin::jmap::cache::MessageListItem> m_authoritativeServerItems;
-        std::optional<std::string> m_selectedEmailId;
-        std::unordered_set<std::string> m_retainedLocalEmailIds;
         bool m_localSearchInFlight = false;
         bool m_authoritativeResultsApplied = false;
         std::uint64_t m_generation = 0;

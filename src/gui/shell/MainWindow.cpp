@@ -15,6 +15,7 @@
 #include "gui/mailboxes/MailboxTreeView.h"
 #include "gui/messages/MessageListDelegate.h"
 #include "gui/messages/MessageListModel.h"
+#include "gui/messages/Pagination.h"
 #include "gui/messageview/MessageViewContainer.h"
 #include "gui/search/AdvancedSearchDialog.h"
 #include "gui/search/SearchSession.h"
@@ -34,6 +35,7 @@
 #include "jmap/contacts/ContactIdentityLookup.h"
 #include "jmap/contacts/ContactService.h"
 #include "jmap/query/QueryDiff.h"
+#include "jmap/sync/MailboxQueryDescriptor.h"
 
 #include <QCoroTask>
 
@@ -2461,7 +2463,11 @@ namespace javelin::gui::shell
                         .page =
                             PageState{
                                 .offset = 0,
+                                .position = 0,
+                                .returnedLimit = pageSize,
                                 .total = total,
+                                .queryState = {},
+                                .anchor = std::nullopt,
                                 .items = {},
                                 .cacheLoaded = false,
                                 .refreshInFlight = false,
@@ -2485,7 +2491,11 @@ namespace javelin::gui::shell
                 .page =
                     PageState{
                         .offset = 0,
+                        .position = 0,
+                        .returnedLimit = pageSize,
                         .total = total,
+                        .queryState = {},
+                        .anchor = std::nullopt,
                         .items = {},
                         .cacheLoaded = false,
                         .refreshInFlight = false,
@@ -2778,32 +2788,29 @@ namespace javelin::gui::shell
             return;
         }
 
-        const auto pageResult = m_queryService.listMailboxMessages(
-            tab.accountId, tab.mailboxId, pageSize, tab.page.offset, m_emailListSort);
-        if (const auto* items =
-                std::get_if<std::vector<javelin::jmap::cache::MessageListItem>>(&pageResult))
+        const auto queryKey = javelin::jmap::sync::mailboxQueryKey({
+            .mailboxId = tab.mailboxId,
+            .sortProperty = javelin::jmap::query::propertyName(m_emailListSort.property),
+            .isAscending = javelin::jmap::query::isAscending(m_emailListSort),
+            .collapseThreads = true,
+        });
+        const auto pageResult =
+            m_queryService.loadMailboxWindow(tab.accountId, queryKey, tab.page.offset, pageSize);
+        if (const auto* page =
+                std::get_if<std::optional<javelin::jmap::cache::MailboxWindowPage>>(&pageResult);
+            page != nullptr && page->has_value())
         {
-            tab.page.items = *items;
+            tab.page.items = (*page)->items;
+            tab.page.position = (*page)->position;
+            tab.page.returnedLimit = (*page)->returnedLimit;
+            tab.page.total = (*page)->total;
+            tab.page.queryState = (*page)->queryState;
             tab.page.cacheLoaded = true;
         }
         else
         {
             tab.page.items.clear();
             tab.page.cacheLoaded = false;
-        }
-
-        if (!tab.page.total.has_value() || forceReload)
-        {
-            const auto totalResult =
-                m_queryService.countMailboxMessages(tab.accountId, tab.mailboxId);
-            if (const auto* total = std::get_if<std::size_t>(&totalResult))
-            {
-                tab.page.total = *total;
-            }
-            else
-            {
-                tab.page.total.reset();
-            }
         }
 
         qCDebug(logGuiMailbox).noquote()
@@ -3012,6 +3019,7 @@ namespace javelin::gui::shell
             .limit = pageSize,
             .sort = m_emailListSort,
             .forceRefresh = tab.page.stale,
+            .anchor = tab.page.anchor,
         });
         QCoro::connect(
             std::move(task), this,
@@ -3048,7 +3056,29 @@ namespace javelin::gui::shell
 
                     const auto& summary = std::get<javelin::app::MailboxWindowSummary>(result);
                     mailboxTab->page.total = summary.total;
+                    mailboxTab->page.position = summary.position;
+                    mailboxTab->page.returnedLimit = summary.returnedLimit;
+                    mailboxTab->page.queryState = summary.queryState;
                     mailboxTab->page.refreshInFlight = false;
+                    if (mailboxTab->page.total.has_value() && mailboxTab->page.offset > 0 &&
+                        (*mailboxTab->page.total == 0 ||
+                         mailboxTab->page.position >= *mailboxTab->page.total))
+                    {
+                        const auto step = mailboxTab->page.returnedLimit == 0
+                                              ? pageSize
+                                              : mailboxTab->page.returnedLimit;
+                        mailboxTab->page.offset = javelin::gui::messages::normalizedPageOffset(
+                            mailboxTab->page.offset, *mailboxTab->page.total, step);
+                        mailboxTab->page.position = mailboxTab->page.offset;
+                        mailboxTab->page.anchor.reset();
+                        mailboxTab->page.items.clear();
+                        mailboxTab->page.cacheLoaded = false;
+                        mailboxTab->page.stale = true;
+                        if (activeTab() == &tabState)
+                            applyActiveTabPageToModel();
+                        refreshMailboxTabFromServer(*mailboxTab);
+                        return;
+                    }
                     mailboxTab->page.stale = false;
                     mailboxTab->page.refreshError.clear();
                     updateEmptyStates();
@@ -3599,9 +3629,13 @@ namespace javelin::gui::shell
             {
                 return false;
             }
-            else if (content.page.offset >= MainWindow::pageSize)
+            else if (content.page.offset > 0)
             {
-                content.page.offset -= MainWindow::pageSize;
+                const auto step = content.page.returnedLimit == 0 ? MainWindow::pageSize
+                                                                  : content.page.returnedLimit;
+                content.page.offset -= std::min(content.page.offset, step);
+                content.page.position = content.page.offset;
+                content.page.anchor.reset();
                 content.page.items.clear();
                 content.page.cacheLoaded = false;
                 content.selection = {};
@@ -3641,13 +3675,19 @@ namespace javelin::gui::shell
                 return false;
             }
             else if (content.page.total.has_value() &&
-                     content.page.offset + MainWindow::pageSize >= *content.page.total)
+                     content.page.position + content.page.items.size() >= *content.page.total)
+            {
+                return false;
+            }
+            else if (content.page.items.empty())
             {
                 return false;
             }
             else
             {
-                content.page.offset += MainWindow::pageSize;
+                content.page.anchor = content.page.items.back().emailId;
+                content.page.offset = content.page.position + content.page.items.size();
+                content.page.position = content.page.offset;
                 content.page.items.clear();
                 content.page.cacheLoaded = false;
                 content.selection = {};
@@ -3674,10 +3714,6 @@ namespace javelin::gui::shell
             };
             std::visit([&selection](auto& content) { content.selection = selection; },
                        tab->content);
-            if (auto* searchTab = std::get_if<SearchTabState>(&tab->content))
-            {
-                searchTab->session->setSelectedEmailId(selection.emailId);
-            }
         }
     }
 
@@ -3991,30 +4027,32 @@ namespace javelin::gui::shell
                 m_messageListMetaLabel->setText(
                     activeTabIsSearch()
                         ? QStringLiteral("%1 Matches").arg(static_cast<qulonglong>(*page.total))
-                        : QStringLiteral("%1 Messages").arg(static_cast<qulonglong>(*page.total)));
+                        : QStringLiteral("%1 Conversations")
+                              .arg(static_cast<qulonglong>(*page.total)));
                 if (*page.total == 0)
                 {
                     m_messagePageLabel->setText(QStringLiteral("0-0"));
                 }
                 else
                 {
-                    const auto start = page.offset + 1;
-                    const auto end =
-                        std::min(page.offset + static_cast<std::size_t>(m_messageModel->rowCount()),
-                                 *page.total);
+                    const auto metrics = javelin::gui::messages::pageMetrics(
+                        page.position, page.items.size(), *page.total);
                     m_messagePageLabel->setText(QStringLiteral("%1-%2")
-                                                    .arg(static_cast<qulonglong>(start))
-                                                    .arg(static_cast<qulonglong>(end)));
+                                                    .arg(static_cast<qulonglong>(metrics.start))
+                                                    .arg(static_cast<qulonglong>(metrics.end)));
                 }
-                m_previousPageButton->setEnabled(page.offset > 0);
-                m_nextPageButton->setEnabled(page.offset + pageSize < *page.total);
+                m_previousPageButton->setEnabled(page.position > 0);
+                m_nextPageButton->setEnabled(javelin::gui::messages::pageMetrics(
+                                                 page.position, page.items.size(), *page.total)
+                                                 .hasNext);
             }
             else
             {
                 m_messageListMetaLabel->setText(
-                    activeTabIsSearch()
-                        ? QStringLiteral("%1 Matches").arg(m_messageModel->rowCount())
-                        : QStringLiteral("%1 Messages").arg(m_messageModel->rowCount()));
+                    activeTabIsSearch() ? QStringLiteral("%1 Loaded Matches")
+                                              .arg(static_cast<qulonglong>(page.items.size()))
+                                        : QStringLiteral("%1 Loaded Conversations")
+                                              .arg(static_cast<qulonglong>(page.items.size())));
                 m_messagePageLabel->clear();
                 m_previousPageButton->setEnabled(page.offset > 0);
                 m_nextPageButton->setEnabled(false);
@@ -5798,7 +5836,12 @@ namespace javelin::gui::shell
                         PageState{
                             .offset = static_cast<std::size_t>(
                                 settings.value(QStringLiteral("offset"), 0).toULongLong()),
+                            .position = static_cast<std::size_t>(
+                                settings.value(QStringLiteral("offset"), 0).toULongLong()),
+                            .returnedLimit = pageSize,
                             .total = std::nullopt,
+                            .queryState = {},
+                            .anchor = std::nullopt,
                             .items = {},
                             .cacheLoaded = false,
                             .refreshInFlight = false,

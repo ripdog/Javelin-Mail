@@ -155,8 +155,6 @@ namespace
             .sortProperty = "receivedAt",
             .isAscending = false,
             .collapseThreads = true,
-            .limit = 100,
-            .offset = 0,
         });
     }
 
@@ -869,8 +867,12 @@ TEST_CASE("mailbox refresh executor preserves change hints when delta falls back
     auto originalEmail = loadEmailFixture();
     originalEmail.id = "eml-1";
     originalEmail.mailboxIds = {"mbx-inbox"};
+    auto removedEmail = originalEmail;
+    removedEmail.id = "eml-removed";
+    removedEmail.threadId = "thr-removed";
     javelin::jmap::cache::EmailRepository emailRepository{databaseContext.connection};
-    REQUIRE_FALSE(emailRepository.replaceAll("account-1", {originalEmail}).has_value());
+    REQUIRE_FALSE(
+        emailRepository.replaceAll("account-1", {originalEmail, removedEmail}).has_value());
 
     javelin::jmap::cache::SyncStateRepository syncStateRepository{databaseContext.connection};
     REQUIRE_FALSE(syncStateRepository
@@ -928,7 +930,7 @@ TEST_CASE("mailbox refresh executor preserves change hints when delta falls back
                                                                          MethodInvocation{
                                                                              .name = "Email/query",
                                                                              .arguments =
-                                                                                 R"({"accountId":"account-1","queryState":"query-state-2","canCalculateChanges":true,"position":0,"ids":["eml-1"],"total":1})",
+                                                                                 R"({"accountId":"account-1","queryState":"query-state-2","canCalculateChanges":true,"position":0,"ids":["eml-1"],"total":500})",
                                                                              .callId =
                                                                                  "mailbox-query",
                                                                          },
@@ -981,6 +983,9 @@ TEST_CASE("mailbox refresh executor preserves change hints when delta falls back
     CHECK(summary.requiresNotificationScan);
     CHECK(summary.notificationCandidates.empty());
     REQUIRE(transport.requests.size() == 2);
+    const auto removedResult = emailRepository.find("account-1", "eml-removed");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(removedResult));
+    CHECK_FALSE(std::get<std::optional<javelin::jmap::domain::Email>>(removedResult).has_value());
 }
 
 TEST_CASE("mailbox refresh executor derives inserted email ids from full fetch fallback",

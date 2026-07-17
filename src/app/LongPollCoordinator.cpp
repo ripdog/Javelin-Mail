@@ -3,7 +3,7 @@
 
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/SessionRepository.h"
-#include "jmap/sync/MailboxWindowPolicy.h"
+#include "jmap/sync/MailboxQueryDescriptor.h"
 
 #include <QCoroTask>
 
@@ -320,45 +320,38 @@ namespace javelin::app
             };
         }
 
-        const auto cachedCountResult =
-            m_queryService.countMailboxMessages(intent.accountId, intent.mailboxId);
-        const auto mailboxTreeResult = m_queryService.listMailboxTree(intent.accountId);
-        const auto* cachedCount = std::get_if<std::size_t>(&cachedCountResult);
-        const auto* mailboxes =
-            std::get_if<std::vector<javelin::jmap::cache::MailboxTreeItem>>(&mailboxTreeResult);
-        if (cachedCount != nullptr && mailboxes != nullptr)
+        const auto queryKey = javelin::jmap::sync::mailboxQueryKey({
+            .mailboxId = intent.mailboxId,
+            .sortProperty = javelin::jmap::query::propertyName(intent.sort.property),
+            .isAscending = javelin::jmap::query::isAscending(intent.sort),
+            .collapseThreads = true,
+        });
+        if (!intent.forceRefresh && !intent.anchor.has_value())
         {
-            const auto mailbox =
-                std::ranges::find(mailboxes->cbegin(), mailboxes->cend(), intent.mailboxId,
-                                  &javelin::jmap::cache::MailboxTreeItem::id);
-            if (mailbox != mailboxes->cend())
+            const auto cachedResult = m_queryService.loadMailboxWindow(intent.accountId, queryKey,
+                                                                       intent.offset, intent.limit);
+            if (const auto* cached =
+                    std::get_if<std::optional<javelin::jmap::cache::MailboxWindowPage>>(
+                        &cachedResult);
+                cached != nullptr && cached->has_value())
             {
-                const javelin::jmap::sync::MailboxWindowAvailability availability{
-                    .cachedRepresentativeCount = *cachedCount,
-                    .serverRepresentativeCount = static_cast<std::size_t>(mailbox->totalThreads),
+                co_return MailboxWindowSummary{
+                    .accountId = std::move(intent.accountId),
+                    .mailboxId = std::move(intent.mailboxId),
                     .offset = intent.offset,
                     .limit = intent.limit,
-                    .sort = intent.sort,
-                    .forceRefresh = intent.forceRefresh,
+                    .position = (*cached)->position,
+                    .returnedLimit = (*cached)->returnedLimit,
+                    .representativeCount = (*cached)->items.size(),
+                    .total = (*cached)->total,
+                    .queryState = (*cached)->queryState,
                 };
-                if (javelin::jmap::sync::cacheSatisfiesMailboxWindow(availability))
-                {
-                    co_return MailboxWindowSummary{
-                        .accountId = std::move(intent.accountId),
-                        .mailboxId = std::move(intent.mailboxId),
-                        .offset = intent.offset,
-                        .limit = intent.limit,
-                        .representativeCount =
-                            javelin::jmap::sync::cachedMailboxWindowSize(availability),
-                        .total = availability.serverRepresentativeCount,
-                    };
-                }
             }
         }
 
         auto result = co_await m_jmapCore.queryMailboxPage(
             toLiveConnectionSettings(configuration->second.settings), intent.accountId,
-            intent.mailboxId, intent.offset, intent.limit, intent.sort);
+            intent.mailboxId, intent.offset, intent.limit, intent.sort, std::move(intent.anchor));
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
         {
             m_errorCoordinator.reportFailure(configuration->second.settings, intent.accountId,
@@ -373,8 +366,11 @@ namespace javelin::app
             .mailboxId = page.mailboxId,
             .offset = page.offset,
             .limit = page.limit,
+            .position = page.position,
+            .returnedLimit = page.returnedLimit,
             .representativeCount = page.representativeCount,
             .total = page.total,
+            .queryState = page.queryState,
         };
         Q_EMIT cacheCommitted(MailCacheChange{
             .accountId = QString::fromStdString(page.accountId),
@@ -405,7 +401,7 @@ namespace javelin::app
         const auto queryKey = javelin::jmap::search::cacheKey(intent.criteria, intent.sort);
         auto result = co_await m_jmapCore.searchMessages(
             toLiveConnectionSettings(configuration->second.settings), intent.accountId,
-            intent.criteria, intent.offset, intent.limit, intent.sort);
+            intent.criteria, intent.offset, intent.limit, intent.sort, std::move(intent.anchor));
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
         {
             m_errorCoordinator.reportFailure(configuration->second.settings, intent.accountId,
@@ -420,8 +416,11 @@ namespace javelin::app
             .queryKey = queryKey,
             .offset = page.offset,
             .limit = page.limit,
+            .position = page.position,
+            .returnedLimit = page.returnedLimit,
             .representativeCount = page.representativeCount,
             .total = page.total,
+            .queryState = page.queryState,
         };
         Q_EMIT cacheCommitted(MailCacheChange{
             .accountId = QString::fromStdString(page.accountId),

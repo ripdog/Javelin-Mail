@@ -81,7 +81,7 @@ TEST_CASE("database connection creates the initial cache schema", "[jmap][cache]
         migrationsResult));
     const auto& migrations =
         std::get<std::vector<javelin::jmap::cache::AppliedMigration>>(migrationsResult);
-    REQUIRE(migrations.size() == 21);
+    REQUIRE(migrations.size() == 22);
     CHECK(migrations.front().version == 1);
     CHECK(migrations.front().name == QStringLiteral("initial_cache_schema"));
     CHECK(migrations.at(1).version == 2);
@@ -104,8 +104,8 @@ TEST_CASE("database connection creates the initial cache schema", "[jmap][cache]
     CHECK(migrations.at(10).name == QStringLiteral("websocket_push_capability"));
     CHECK(migrations.at(11).version == 14);
     CHECK(migrations.at(11).name == QStringLiteral("search_windows"));
-    CHECK(migrations.back().version == 23);
-    CHECK(migrations.back().name == QStringLiteral("server_calendar_default"));
+    CHECK(migrations.back().version == 24);
+    CHECK(migrations.back().name == QStringLiteral("mailbox_query_windows"));
 
     QSqlQuery tableQuery{connection.database()};
     REQUIRE(tableQuery.exec(
@@ -114,7 +114,8 @@ TEST_CASE("database connection creates the initial cache schema", "[jmap][cache]
                        "'emails', 'jmap_transport_preferences', 'observed_notification_emails', "
                        "'raw_message_sources', 'email_search_fts', "
                        "'schema_migrations', 'translation_cache', 'search_windows', "
-                       "'search_window_items', 'sync_state', 'consistency_domains', "
+                       "'search_window_items', 'mailbox_query_windows', "
+                       "'mailbox_query_window_items', 'sync_state', 'consistency_domains', "
                        "'mutation_journal') "
                        "ORDER BY name")));
 
@@ -128,7 +129,9 @@ TEST_CASE("database connection creates the initial cache schema", "[jmap][cache]
           QStringList{QStringLiteral("accounts"), QStringLiteral("compose_sessions"),
                       QStringLiteral("consistency_domains"), QStringLiteral("email_search_fts"),
                       QStringLiteral("emails"), QStringLiteral("jmap_transport_preferences"),
-                      QStringLiteral("mailboxes"), QStringLiteral("mutation_journal"),
+                      QStringLiteral("mailbox_query_window_items"),
+                      QStringLiteral("mailbox_query_windows"), QStringLiteral("mailboxes"),
+                      QStringLiteral("mutation_journal"),
                       QStringLiteral("observed_notification_emails"),
                       QStringLiteral("raw_message_sources"), QStringLiteral("schema_migrations"),
                       QStringLiteral("search_window_items"), QStringLiteral("search_windows"),
@@ -175,13 +178,13 @@ TEST_CASE("database migrations are repeatable when reopening an existing cache",
         migrationsResult));
     const auto& migrations =
         std::get<std::vector<javelin::jmap::cache::AppliedMigration>>(migrationsResult);
-    REQUIRE(migrations.size() == 21);
+    REQUIRE(migrations.size() == 22);
     CHECK(migrations.front().version == 1);
     CHECK(migrations.at(1).version == 2);
     CHECK(migrations.at(2).version == 3);
     CHECK(migrations.at(6).version == 9);
-    CHECK(migrations.back().version == 23);
-    CHECK(connection.schemaVersion() == 23);
+    CHECK(migrations.back().version == 24);
+    CHECK(connection.schemaVersion() == 24);
 }
 
 TEST_CASE("thread connection factory encodes owner tag and current thread in connection names",

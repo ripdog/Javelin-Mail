@@ -95,6 +95,8 @@ namespace javelin::jmap::api
         std::optional<EmailQueryFilter> filter;
         std::vector<EmailQuerySort> sort;
         std::optional<std::uint64_t> position;
+        std::optional<std::string> anchor;
+        std::int64_t anchorOffset = 0;
         std::optional<std::uint64_t> limit;
         bool collapseThreads = false;
         bool calculateTotal = false;
@@ -108,6 +110,7 @@ namespace javelin::jmap::api
         std::uint64_t position = 0;
         std::vector<std::string> ids;
         std::optional<std::uint64_t> total;
+        std::optional<std::uint64_t> limit;
     };
 
     struct EmailQueryChangesRequest

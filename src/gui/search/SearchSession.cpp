@@ -1,6 +1,6 @@
 #include "gui/search/SearchSession.h"
 
-#include "jmap/cache/SearchResultReconciler.h"
+#include "gui/messages/Pagination.h"
 
 #include <QCoroTask>
 
@@ -121,7 +121,10 @@ namespace javelin::gui::search
         }
 
         m_page.items = (*page)->items;
+        m_page.position = (*page)->position;
+        m_page.returnedLimit = (*page)->returnedLimit;
         m_page.total = (*page)->total;
+        m_page.queryState = (*page)->queryState;
         m_page.cacheLoaded = true;
         m_authoritativeResultsApplied = true;
     }
@@ -145,6 +148,7 @@ namespace javelin::gui::search
             .offset = requestedOffset,
             .limit = m_pageSize,
             .sort = m_sort,
+            .anchor = m_page.anchor,
         });
         QCoro::connect(
             std::move(task), this,
@@ -165,7 +169,22 @@ namespace javelin::gui::search
 
                 const auto& summary = std::get<javelin::app::SearchWindowSummary>(result);
                 m_page.total = summary.total;
+                m_page.position = summary.position;
+                m_page.returnedLimit = summary.returnedLimit;
+                m_page.queryState = summary.queryState;
                 m_page.refreshInFlight = false;
+                if (m_page.total.has_value() && m_page.offset > 0 &&
+                    (*m_page.total == 0 || m_page.position >= *m_page.total))
+                {
+                    const auto step = m_page.returnedLimit == 0 ? m_pageSize : m_page.returnedLimit;
+                    m_page.offset = javelin::gui::messages::normalizedPageOffset(
+                        m_page.offset, *m_page.total, step);
+                    m_page.anchor.reset();
+                    resetForPageChange();
+                    m_page.stale = true;
+                    refreshFromServer();
+                    return;
+                }
                 m_page.stale = false;
                 m_page.refreshError.clear();
                 Q_EMIT pageChanged();
@@ -185,6 +204,7 @@ namespace javelin::gui::search
         }
         m_sort = sort;
         m_page.offset = 0;
+        m_page.anchor.reset();
         m_page.total.reset();
         m_page.stale = true;
         resetForPageChange();
@@ -192,42 +212,29 @@ namespace javelin::gui::search
 
     bool SearchSession::goToPreviousPage()
     {
-        if (m_page.offset < m_pageSize)
+        if (m_page.offset == 0)
         {
             return false;
         }
-        m_page.offset -= m_pageSize;
+        const auto step = m_page.returnedLimit == 0 ? m_pageSize : m_page.returnedLimit;
+        m_page.offset -= std::min(m_page.offset, step);
+        m_page.anchor.reset();
         resetForPageChange();
         return true;
     }
 
     bool SearchSession::goToNextPage()
     {
-        if (m_page.total.has_value() && m_page.offset + m_pageSize >= *m_page.total)
+        if (m_page.total.has_value() && m_page.position + m_page.items.size() >= *m_page.total)
         {
             return false;
         }
-        m_page.offset += m_pageSize;
+        if (m_page.items.empty())
+            return false;
+        m_page.anchor = m_page.items.back().emailId;
+        m_page.offset = m_page.position + m_page.items.size();
         resetForPageChange();
         return true;
-    }
-
-    void SearchSession::setSelectedEmailId(std::optional<std::string> emailId)
-    {
-        m_selectedEmailId = std::move(emailId);
-        if (m_retainedLocalEmailIds.empty())
-        {
-            return;
-        }
-
-        const bool retainedSelectionStillActive =
-            m_selectedEmailId.has_value() && m_retainedLocalEmailIds.contains(*m_selectedEmailId);
-        if (!retainedSelectionStillActive)
-        {
-            m_page.items = m_authoritativeServerItems;
-            m_retainedLocalEmailIds.clear();
-            Q_EMIT pageChanged();
-        }
     }
 
     void SearchSession::startLocalSearch()
@@ -269,19 +276,7 @@ namespace javelin::gui::search
 
     void SearchSession::applyCommittedServerPage()
     {
-        const auto priorItems = m_page.items;
         loadCachedPage(true);
-        m_authoritativeServerItems = m_page.items;
-        if (m_authoritativeResultsApplied && javelin::jmap::search::isBasicTextSearch(m_criteria))
-        {
-            const auto protectedId = m_selectedEmailId.has_value()
-                                         ? std::optional<std::string_view>{*m_selectedEmailId}
-                                         : std::nullopt;
-            auto reconciled = javelin::jmap::cache::reconcileServerSearchResults(
-                priorItems, m_page.items, protectedId);
-            m_page.items = std::move(reconciled.items);
-            m_retainedLocalEmailIds = std::move(reconciled.retainedLocalEmailIds);
-        }
         m_page.stale = false;
         Q_EMIT pageChanged();
     }
@@ -289,13 +284,11 @@ namespace javelin::gui::search
     void SearchSession::resetForPageChange()
     {
         ++m_generation;
+        m_page.position = m_page.offset;
         m_page.items.clear();
-        m_authoritativeServerItems.clear();
         m_page.cacheLoaded = false;
         m_page.refreshInFlight = false;
         m_page.refreshError.clear();
-        m_selectedEmailId.reset();
-        m_retainedLocalEmailIds.clear();
         m_localSearchInFlight = false;
         m_authoritativeResultsApplied = false;
     }

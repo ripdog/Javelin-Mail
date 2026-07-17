@@ -5,8 +5,10 @@
 #include "jmap/api/SessionParser.h"
 #include "jmap/api/Transport.h"
 #include "jmap/cache/EmailRepository.h"
+#include "jmap/cache/MailboxWindowRepository.h"
 #include "jmap/cache/QueryService.h"
 #include "jmap/cache/RawMessageSourceRepository.h"
+#include "jmap/cache/SearchWindowRepository.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/cache/ThreadRepository.h"
 #include "jmap/domain/MailEntityParsers.h"
@@ -652,6 +654,40 @@ TEST_CASE("JmapCore queues exact mailbox patches as mutations", "[jmap][core][mu
     javelin::jmap::cache::EmailRepository emailRepository{databaseContext.connection};
     REQUIRE_FALSE(emailRepository.replaceAll("account-1", {email}).has_value());
 
+    javelin::jmap::cache::MailboxWindowRepository mailboxWindows{databaseContext.connection};
+    for (const auto& mailboxId : email.mailboxIds)
+    {
+        const auto key = "mailbox:" + mailboxId + "|sort:receivedAt:desc|collapseThreads:true";
+        REQUIRE_FALSE(mailboxWindows
+                          .replace({
+                              .accountId = "account-1",
+                              .mailboxId = mailboxId,
+                              .queryKey = key,
+                              .requestedOffset = 0,
+                              .requestedLimit = 100,
+                              .position = 0,
+                              .returnedLimit = 100,
+                              .total = 1,
+                              .queryState = "state-1",
+                              .emailIds = {"eml-1"},
+                          })
+                          .has_value());
+    }
+    javelin::jmap::cache::SearchWindowRepository searchWindows{databaseContext.connection};
+    REQUIRE_FALSE(searchWindows
+                      .replace({
+                          .accountId = "account-1",
+                          .queryKey = "search-key",
+                          .offset = 0,
+                          .limit = 100,
+                          .position = 0,
+                          .returnedLimit = 100,
+                          .total = 1,
+                          .queryState = "state-1",
+                          .emailIds = {"eml-1"},
+                      })
+                      .has_value());
+
     FakeTransport transport;
     javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
 
@@ -669,6 +705,20 @@ TEST_CASE("JmapCore queues exact mailbox patches as mutations", "[jmap][core][mu
         std::get<std::optional<javelin::jmap::domain::Email>>(movedEmailResult);
     REQUIRE(movedEmail.has_value());
     CHECK(movedEmail->mailboxIds == std::vector<std::string>{"mbx-archive"});
+    for (const auto& mailboxId : std::vector<std::string>{"mbx-inbox", "mbx-projects"})
+    {
+        const auto key = "mailbox:" + mailboxId + "|sort:receivedAt:desc|collapseThreads:true";
+        const auto window = mailboxWindows.find("account-1", key, 0, 100);
+        const auto* cached =
+            std::get_if<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(&window);
+        REQUIRE(cached != nullptr);
+        CHECK_FALSE(cached->has_value());
+    }
+    const auto searchWindow = searchWindows.find("account-1", "search-key", 0, 100);
+    const auto* cachedSearch =
+        std::get_if<std::optional<javelin::jmap::cache::SearchWindowRecord>>(&searchWindow);
+    REQUIRE(cachedSearch != nullptr);
+    CHECK_FALSE(cachedSearch->has_value());
 }
 
 TEST_CASE("JmapCore queues read keyword mutations as mutations", "[jmap][core][mutation-journal]")

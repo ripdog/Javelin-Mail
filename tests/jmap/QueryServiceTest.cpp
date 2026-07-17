@@ -2,6 +2,7 @@
 #include "FixtureReader.h"
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/MailboxRepository.h"
+#include "jmap/cache/MailboxWindowRepository.h"
 #include "jmap/cache/RawMessageSourceRepository.h"
 #include "jmap/cache/ThreadRepository.h"
 #include "jmap/domain/MailEntityParsers.h"
@@ -456,6 +457,55 @@ TEST_CASE("query service rehydrates cached representative rows by email id order
     const auto archiveUnread = queryService.countUnreadMailboxEmails("account-1", "mbx-archive");
     REQUIRE(std::holds_alternative<std::size_t>(archiveUnread));
     CHECK(std::get<std::size_t>(archiveUnread) == 1);
+}
+
+TEST_CASE("query service loads sparse mailbox pages from authoritative window order",
+          "[jmap][cache][query][pagination]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    auto newer = loadEmailFixture();
+    newer.id = "newer";
+    newer.threadId = "thread-newer";
+    newer.receivedAt = "2026-07-17T10:00:00Z";
+    auto older = newer;
+    older.id = "older";
+    older.threadId = "thread-older";
+    older.receivedAt = "2025-01-01T10:00:00Z";
+    javelin::jmap::cache::EmailRepository emails{databaseContext.connection};
+    REQUIRE_FALSE(emails.replaceAll("account-1", {newer, older}).has_value());
+
+    const std::string queryKey = "mailbox:mbx-inbox|sort:receivedAt:desc|collapseThreads:true";
+    javelin::jmap::cache::MailboxWindowRepository windows{databaseContext.connection};
+    REQUIRE_FALSE(windows
+                      .replace({
+                          .accountId = "account-1",
+                          .mailboxId = "mbx-inbox",
+                          .queryKey = queryKey,
+                          .requestedOffset = 200,
+                          .requestedLimit = 100,
+                          .position = 200,
+                          .returnedLimit = 50,
+                          .total = 1000,
+                          .queryState = "state-1",
+                          .emailIds = {"older", "newer"},
+                      })
+                      .has_value());
+
+    javelin::jmap::cache::QueryService queryService{databaseContext.connection};
+    const auto result = queryService.loadMailboxWindow("account-1", queryKey, 200, 100);
+    const auto* page = std::get_if<std::optional<javelin::jmap::cache::MailboxWindowPage>>(&result);
+    REQUIRE(page != nullptr);
+    REQUIRE(page->has_value());
+    REQUIRE((*page)->items.size() == 2);
+    CHECK((*page)->items[0].emailId == "older");
+    CHECK((*page)->items[1].emailId == "newer");
+    CHECK((*page)->position == 200);
+    CHECK((*page)->returnedLimit == 50);
+    CHECK((*page)->total == std::optional<std::size_t>{1000});
 }
 
 TEST_CASE("query service SQL plans use the intended cache indexes", "[jmap][cache][query]")

@@ -1,4 +1,5 @@
 #include "jmap/cache/SearchWindowRepository.h"
+#include "jmap/cache/MailboxWindowRepository.h"
 
 #include <QCoreApplication>
 #include <QSqlQuery>
@@ -77,7 +78,10 @@ TEST_CASE("search window repository replaces ordered query results", "[jmap][cac
                           .queryKey = "query-1",
                           .offset = 0,
                           .limit = 100,
+                          .position = 0,
+                          .returnedLimit = 100,
                           .total = 3,
+                          .queryState = "state-1",
                           .emailIds = {"email-2", "email-1", "email-3"},
                       })
                       .has_value());
@@ -87,8 +91,25 @@ TEST_CASE("search window repository replaces ordered query results", "[jmap][cac
         std::get_if<std::optional<javelin::jmap::cache::SearchWindowRecord>>(&firstResult);
     REQUIRE(first != nullptr);
     REQUIRE(first->has_value());
+    CHECK((*first)->position == 0);
+    CHECK((*first)->returnedLimit == 100);
     CHECK((*first)->total == std::optional<std::size_t>{3});
+    CHECK((*first)->queryState == "state-1");
     CHECK((*first)->emailIds == std::vector<std::string>{"email-2", "email-1", "email-3"});
+
+    REQUIRE_FALSE(repository
+                      .replace({
+                          .accountId = "account-1",
+                          .queryKey = "query-1",
+                          .offset = 100,
+                          .limit = 100,
+                          .position = 100,
+                          .returnedLimit = 100,
+                          .total = 3,
+                          .queryState = "state-1",
+                          .emailIds = {"email-101"},
+                      })
+                      .has_value());
 
     REQUIRE_FALSE(repository
                       .replace({
@@ -96,7 +117,10 @@ TEST_CASE("search window repository replaces ordered query results", "[jmap][cac
                           .queryKey = "query-1",
                           .offset = 0,
                           .limit = 100,
+                          .position = 0,
+                          .returnedLimit = 50,
                           .total = 1,
+                          .queryState = "state-2",
                           .emailIds = {"email-4"},
                       })
                       .has_value());
@@ -106,8 +130,15 @@ TEST_CASE("search window repository replaces ordered query results", "[jmap][cac
         std::get_if<std::optional<javelin::jmap::cache::SearchWindowRecord>>(&replacedResult);
     REQUIRE(replaced != nullptr);
     REQUIRE(replaced->has_value());
+    CHECK((*replaced)->returnedLimit == 50);
     CHECK((*replaced)->total == std::optional<std::size_t>{1});
+    CHECK((*replaced)->queryState == "state-2");
     CHECK((*replaced)->emailIds == std::vector<std::string>{"email-4"});
+    const auto staleSiblingResult = repository.find("account-1", "query-1", 100, 100);
+    const auto* staleSibling =
+        std::get_if<std::optional<javelin::jmap::cache::SearchWindowRecord>>(&staleSiblingResult);
+    REQUIRE(staleSibling != nullptr);
+    CHECK_FALSE(staleSibling->has_value());
 }
 
 TEST_CASE("search window repository distinguishes pages and missing windows",
@@ -124,7 +155,10 @@ TEST_CASE("search window repository distinguishes pages and missing windows",
                           .queryKey = "query-1",
                           .offset = 100,
                           .limit = 100,
+                          .position = 100,
+                          .returnedLimit = 100,
                           .total = std::nullopt,
+                          .queryState = "state-1",
                           .emailIds = {"email-101"},
                       })
                       .has_value());
@@ -141,4 +175,55 @@ TEST_CASE("search window repository distinguishes pages and missing windows",
         std::get_if<std::optional<javelin::jmap::cache::SearchWindowRecord>>(&missingResult);
     REQUIRE(missing != nullptr);
     CHECK_FALSE(missing->has_value());
+}
+
+TEST_CASE("mailbox windows preserve exact sparse server positions and invalidate by mailbox",
+          "[jmap][cache][mailbox-window]")
+{
+    ApplicationGuard application;
+    auto database = makeDatabaseContext();
+    seedAccount(database.connection);
+    javelin::jmap::cache::MailboxWindowRepository repository{database.connection};
+
+    REQUIRE_FALSE(repository
+                      .replace({
+                          .accountId = "account-1",
+                          .mailboxId = "mbx-inbox",
+                          .queryKey = "mailbox:mbx-inbox|sort:receivedAt:desc|collapseThreads:true",
+                          .requestedOffset = 200,
+                          .requestedLimit = 100,
+                          .position = 200,
+                          .returnedLimit = 50,
+                          .total = 1200,
+                          .queryState = "query-state-7",
+                          .emailIds = {"email-201", "email-202"},
+                      })
+                      .has_value());
+
+    const auto result = repository.find(
+        "account-1", "mailbox:mbx-inbox|sort:receivedAt:desc|collapseThreads:true", 200, 100);
+    const auto* found =
+        std::get_if<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(&result);
+    REQUIRE(found != nullptr);
+    REQUIRE(found->has_value());
+    CHECK((*found)->position == 200);
+    CHECK((*found)->returnedLimit == 50);
+    CHECK((*found)->total == std::optional<std::size_t>{1200});
+    CHECK((*found)->queryState == "query-state-7");
+    CHECK((*found)->emailIds == std::vector<std::string>{"email-201", "email-202"});
+
+    const auto adjacent = repository.find(
+        "account-1", "mailbox:mbx-inbox|sort:receivedAt:desc|collapseThreads:true", 100, 100);
+    const auto* missing =
+        std::get_if<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(&adjacent);
+    REQUIRE(missing != nullptr);
+    CHECK_FALSE(missing->has_value());
+
+    REQUIRE_FALSE(repository.invalidateMailbox("account-1", "mbx-inbox").has_value());
+    const auto invalidated = repository.find(
+        "account-1", "mailbox:mbx-inbox|sort:receivedAt:desc|collapseThreads:true", 200, 100);
+    const auto* absent =
+        std::get_if<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(&invalidated);
+    REQUIRE(absent != nullptr);
+    CHECK_FALSE(absent->has_value());
 }

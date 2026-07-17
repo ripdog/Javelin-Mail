@@ -1,5 +1,7 @@
 #include "jmap/cache/QueryService.h"
 
+#include "jmap/cache/MailboxWindowRepository.h"
+
 #include "jmap/cache/MailboxRepository.h"
 #include "jmap/cache/MimeMessageParser.h"
 #include "jmap/cache/SearchWindowRepository.h"
@@ -511,7 +513,39 @@ namespace javelin::jmap::cache
         return std::optional<SearchWindowPage>{SearchWindowPage{
             .offset = (*window)->offset,
             .limit = (*window)->limit,
+            .position = (*window)->position,
+            .returnedLimit = (*window)->returnedLimit,
             .total = (*window)->total,
+            .queryState = (*window)->queryState,
+            .items = *messages,
+        }};
+    }
+
+    std::variant<std::optional<MailboxWindowPage>, DatabaseError> QueryService::loadMailboxWindow(
+        const std::string_view accountId, const std::string_view queryKey,
+        const std::size_t requestedOffset, const std::size_t requestedLimit) const
+    {
+        MailboxWindowRepository repository{m_connection};
+        const auto windowResult =
+            repository.find(accountId, queryKey, requestedOffset, requestedLimit);
+        const auto* window = std::get_if<std::optional<MailboxWindowRecord>>(&windowResult);
+        if (window == nullptr)
+            return std::get<DatabaseError>(windowResult);
+        if (!window->has_value())
+            return std::optional<MailboxWindowPage>{std::nullopt};
+
+        const auto messagesResult = listMessagesByEmailIds(accountId, (*window)->emailIds);
+        const auto* messages = std::get_if<std::vector<MessageListItem>>(&messagesResult);
+        if (messages == nullptr)
+            return std::get<DatabaseError>(messagesResult);
+
+        return std::optional<MailboxWindowPage>{MailboxWindowPage{
+            .requestedOffset = (*window)->requestedOffset,
+            .requestedLimit = (*window)->requestedLimit,
+            .position = (*window)->position,
+            .returnedLimit = (*window)->returnedLimit,
+            .total = (*window)->total,
+            .queryState = (*window)->queryState,
             .items = *messages,
         }};
     }

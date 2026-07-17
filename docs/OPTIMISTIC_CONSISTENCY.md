@@ -164,6 +164,11 @@ instances.
 6. Recovery after a crash preserves uncertainty and cannot silently duplicate a mutation.
 7. The GUI observes only committed effective states, never intermediate reconciliation writes.
 
+Ordered Email query membership follows the additional invariants in
+[`QUERY_WINDOWS.md`](QUERY_WINDOWS.md). A mailbox or search mutation invalidates affected query
+windows inside the same projection transaction; cached object counts are never treated as proof of
+ordered query coverage.
+
 ## Extension Checklist
 
 Every new stateful JMAP mutation must:

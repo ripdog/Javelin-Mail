@@ -1,6 +1,8 @@
 #include "jmap/sync/EmailMutationJournal.h"
 
 #include "jmap/cache/EmailRepository.h"
+#include "jmap/cache/MailboxWindowRepository.h"
+#include "jmap/cache/SearchWindowRepository.h"
 
 #include <glaze/glaze.hpp>
 
@@ -210,6 +212,28 @@ namespace javelin::jmap::sync
         {
             return error;
         }
+        std::vector<std::string> affectedMailboxIds = record.patch.addMailboxIds;
+        affectedMailboxIds.insert(affectedMailboxIds.end(), record.patch.removeMailboxIds.begin(),
+                                  record.patch.removeMailboxIds.end());
+        if (record.patch.destroy && record.baseMailboxIds.has_value())
+        {
+            affectedMailboxIds.insert(affectedMailboxIds.end(), record.baseMailboxIds->begin(),
+                                      record.baseMailboxIds->end());
+        }
+        std::ranges::sort(affectedMailboxIds);
+        const auto uniqueEnd = std::ranges::unique(affectedMailboxIds).begin();
+        affectedMailboxIds.erase(uniqueEnd, affectedMailboxIds.end());
+        javelin::jmap::cache::MailboxWindowRepository windows{m_connection};
+        for (const auto& mailboxId : affectedMailboxIds)
+        {
+            if (const auto error = windows.invalidateMailbox(transaction.cacheTransaction(),
+                                                             record.accountId, mailboxId))
+                return error;
+        }
+        javelin::jmap::cache::SearchWindowRepository searchWindows{m_connection};
+        if (const auto error =
+                searchWindows.invalidateAccount(transaction.cacheTransaction(), record.accountId))
+            return error;
         return transaction.commit();
     }
 

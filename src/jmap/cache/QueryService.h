@@ -50,7 +50,21 @@ namespace javelin::jmap::cache
     {
         std::size_t offset = 0;
         std::size_t limit = 0;
+        std::size_t position = 0;
+        std::size_t returnedLimit = 0;
         std::optional<std::size_t> total;
+        std::string queryState;
+        std::vector<MessageListItem> items;
+    };
+
+    struct MailboxWindowPage
+    {
+        std::size_t requestedOffset = 0;
+        std::size_t requestedLimit = 0;
+        std::size_t position = 0;
+        std::size_t returnedLimit = 0;
+        std::optional<std::size_t> total;
+        std::string queryState;
         std::vector<MessageListItem> items;
     };
 
@@ -79,6 +93,9 @@ namespace javelin::jmap::cache
         [[nodiscard]] std::variant<std::optional<SearchWindowPage>, DatabaseError>
         loadSearchWindow(std::string_view accountId, std::string_view queryKey, std::size_t offset,
                          std::size_t limit) const;
+        [[nodiscard]] std::variant<std::optional<MailboxWindowPage>, DatabaseError>
+        loadMailboxWindow(std::string_view accountId, std::string_view queryKey,
+                          std::size_t requestedOffset, std::size_t requestedLimit) const;
         [[nodiscard]] std::variant<std::vector<MessageListItem>, DatabaseError>
         listThreadMessages(std::string_view accountId, std::string_view threadId) const;
         [[nodiscard]] std::variant<std::vector<MessageListItem>, DatabaseError>

@@ -9,9 +9,7 @@ TEST_CASE("mailbox query key is canonical and explicit", "[jmap][sync][query-key
         .sortProperty = "receivedAt",
         .isAscending = false,
         .collapseThreads = true,
-        .limit = 100,
-        .offset = 0,
     });
 
-    CHECK(key == "mailbox:mbx-inbox|sort:receivedAt:desc|collapseThreads:true|limit:100|offset:0");
+    CHECK(key == "mailbox:mbx-inbox|sort:receivedAt:desc|collapseThreads:true");
 }

@@ -44,13 +44,13 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/api/Cancellation.h
     src/jmap/cache/SearchWindowRepository.cpp
     src/jmap/cache/SearchWindowRepository.h
+    src/jmap/cache/MailboxWindowRepository.cpp
+    src/jmap/cache/MailboxWindowRepository.h
     src/jmap/cache/NotificationRepository.cpp
     src/jmap/cache/NotificationRepository.h
     src/jmap/sync/StateChangeSource.h
     src/jmap/sync/MailboxInterestRegistry.cpp
     src/jmap/sync/MailboxInterestRegistry.h
-    src/jmap/sync/MailboxWindowPolicy.cpp
-    src/jmap/sync/MailboxWindowPolicy.h
     src/app/AccountConnectionSettings.h
     src/app/ApplicationErrorCoordinator.cpp
     src/app/ApplicationErrorCoordinator.h
@@ -100,6 +100,7 @@ set(JAVELIN_FORMAT_FILES
     src/gui/calendar/EventDialog.cpp
     src/gui/calendar/EventDialog.h
     src/gui/messages/MessageListModel.cpp
+    src/gui/messages/Pagination.h
     src/gui/messages/MessageListModel.h
     src/gui/messages/MessageListDelegate.cpp
     src/gui/messages/MessageListDelegate.h
@@ -188,8 +189,6 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/cache/QueryService.h
     src/jmap/cache/RawMessageSourceRepository.cpp
     src/jmap/cache/RawMessageSourceRepository.h
-    src/jmap/cache/SearchResultReconciler.cpp
-    src/jmap/cache/SearchResultReconciler.h
     src/jmap/cache/SessionRepository.cpp
     src/jmap/cache/SessionRepository.h
     src/jmap/cache/SieveRepository.cpp
@@ -292,6 +291,7 @@ set(JAVELIN_FORMAT_FILES
     tests/jmap/CalendarRepositoryTest.cpp
     tests/gui/MonthCalendarWidgetTest.cpp
     tests/gui/MessageViewPresentationTest.cpp
+    tests/gui/PaginationTest.cpp
     tests/gui/PlainTextLinkifierTest.cpp
     tests/jmap/ComposeServiceTest.cpp
     tests/jmap/ConsistencyDomainTest.cpp
@@ -315,7 +315,6 @@ set(JAVELIN_FORMAT_FILES
     tests/jmap/PreferredJmapMethodTransportTest.cpp
     tests/jmap/QueryDiffTest.cpp
     tests/jmap/QueryServiceTest.cpp
-    tests/jmap/SearchResultReconcilerTest.cpp
     tests/jmap/RefreshNotificationPlannerTest.cpp
     tests/jmap/MailEntityParsersTest.cpp
     tests/jmap/SessionClientTest.cpp
@@ -345,13 +344,13 @@ add_library(javelin_jmap STATIC
     src/jmap/api/Cancellation.h
     src/jmap/cache/SearchWindowRepository.cpp
     src/jmap/cache/SearchWindowRepository.h
+    src/jmap/cache/MailboxWindowRepository.cpp
+    src/jmap/cache/MailboxWindowRepository.h
     src/jmap/cache/NotificationRepository.cpp
     src/jmap/cache/NotificationRepository.h
     src/jmap/sync/StateChangeSource.h
     src/jmap/sync/MailboxInterestRegistry.cpp
     src/jmap/sync/MailboxInterestRegistry.h
-    src/jmap/sync/MailboxWindowPolicy.cpp
-    src/jmap/sync/MailboxWindowPolicy.h
     src/jmap/api/SessionDiscovery.cpp
     src/jmap/api/SessionDiscovery.h
     src/jmap/api/ContactsMethods.cpp
@@ -409,8 +408,6 @@ add_library(javelin_jmap STATIC
     src/jmap/cache/QueryService.h
     src/jmap/cache/RawMessageSourceRepository.cpp
     src/jmap/cache/RawMessageSourceRepository.h
-    src/jmap/cache/SearchResultReconciler.cpp
-    src/jmap/cache/SearchResultReconciler.h
     src/jmap/cache/SessionRepository.cpp
     src/jmap/cache/SessionRepository.h
     src/jmap/cache/SieveRepository.cpp
@@ -551,6 +548,7 @@ add_library(javelin_gui STATIC
     src/gui/mailboxes/MailboxTreeView.cpp
     src/gui/mailboxes/MailboxTreeView.h
     src/gui/messages/MessageListModel.cpp
+    src/gui/messages/Pagination.h
     src/gui/messages/MessageListModel.h
     src/gui/messages/MessageListDelegate.cpp
     src/gui/messages/MessageListDelegate.h

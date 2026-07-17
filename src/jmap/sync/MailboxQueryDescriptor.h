@@ -12,8 +12,6 @@ namespace javelin::jmap::sync
         std::string sortProperty = "receivedAt";
         bool isAscending = false;
         bool collapseThreads = true;
-        std::size_t limit = 100;
-        std::size_t offset = 0;
     };
 
     [[nodiscard]] std::string mailboxQueryKey(const MailboxQueryDescriptor& descriptor);

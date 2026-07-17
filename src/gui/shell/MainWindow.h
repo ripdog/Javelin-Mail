@@ -149,7 +149,11 @@ namespace javelin::gui::shell
         struct PageState
         {
             std::size_t offset = 0;
+            std::size_t position = 0;
+            std::size_t returnedLimit = pageSize;
             std::optional<std::size_t> total;
+            std::string queryState;
+            std::optional<std::string> anchor;
             std::vector<javelin::jmap::cache::MessageListItem> items;
             bool cacheLoaded = false;
             bool refreshInFlight = false;

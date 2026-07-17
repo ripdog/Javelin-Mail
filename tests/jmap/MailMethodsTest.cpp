@@ -66,6 +66,8 @@ TEST_CASE("email query requests serialize mailbox-scoped sort windows", "[jmap][
                 },
             },
         .position = 0,
+        .anchor = std::nullopt,
+        .anchorOffset = 0,
         .limit = 100,
         .collapseThreads = false,
         .calculateTotal = false,
@@ -94,6 +96,8 @@ TEST_CASE("email query requests serialize text search filters", "[jmap][method][
                 },
             },
         .position = 0,
+        .anchor = std::nullopt,
+        .anchorOffset = 0,
         .limit = 25,
         .collapseThreads = true,
         .calculateTotal = true,
@@ -103,6 +107,26 @@ TEST_CASE("email query requests serialize text search filters", "[jmap][method][
     CHECK(
         *json ==
         R"({"accountId":"u1","filter":{"text":"quarterly report"},"sort":[{"property":"receivedAt","isAscending":false}],"position":0,"limit":25,"collapseThreads":true,"calculateTotal":true})");
+}
+
+TEST_CASE("email query requests serialize anchored windows", "[jmap][method][mail]")
+{
+    const auto json = javelin::jmap::api::serializeEmailQueryRequest({
+        .accountId = "u1",
+        .filter = javelin::jmap::api::EmailQueryFilter{.inMailbox = "mbx-inbox"},
+        .sort = {javelin::jmap::api::EmailQuerySort{.property = "receivedAt"}},
+        .position = std::nullopt,
+        .anchor = "email-50",
+        .anchorOffset = 1,
+        .limit = 50,
+        .collapseThreads = true,
+        .calculateTotal = true,
+    });
+
+    REQUIRE(json.has_value());
+    CHECK(
+        *json ==
+        R"({"accountId":"u1","filter":{"inMailbox":"mbx-inbox"},"sort":[{"property":"receivedAt","isAscending":false}],"anchor":"email-50","anchorOffset":1,"limit":50,"collapseThreads":true,"calculateTotal":true})");
 }
 
 TEST_CASE("email query requests serialize nested address search filters", "[jmap][method][mail]")
@@ -128,6 +152,8 @@ TEST_CASE("email query requests serialize nested address search filters", "[jmap
                 },
             },
         .position = 0,
+        .anchor = std::nullopt,
+        .anchorOffset = 0,
         .limit = 25,
         .collapseThreads = true,
         .calculateTotal = true,
@@ -246,7 +272,7 @@ TEST_CASE("email changes responses parse typed incremental ids", "[jmap][method]
 TEST_CASE("email query responses parse ids and query metadata", "[jmap][method][mail]")
 {
     const auto result = javelin::jmap::api::parseEmailQueryResponse(
-        R"({"accountId":"u1","queryState":"query-state-1","canCalculateChanges":true,"position":0,"ids":["eml-1","eml-2"],"total":2})");
+        R"({"accountId":"u1","queryState":"query-state-1","canCalculateChanges":true,"position":0,"ids":["eml-1","eml-2"],"total":2,"limit":50})");
 
     REQUIRE(result.ok());
     REQUIRE(result.value.has_value());
@@ -255,6 +281,7 @@ TEST_CASE("email query responses parse ids and query metadata", "[jmap][method][
     CHECK(result.value->canCalculateChanges);
     CHECK(result.value->ids == std::vector<std::string>{"eml-1", "eml-2"});
     CHECK(result.value->total == std::optional<std::uint64_t>{2});
+    CHECK(result.value->limit == std::optional<std::uint64_t>{50});
 }
 
 TEST_CASE("email query responses ignore unknown server fields", "[jmap][method][mail]")

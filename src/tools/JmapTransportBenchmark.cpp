@@ -148,6 +148,8 @@ namespace
                                               .filter = std::move(inboxFilter),
                                               .sort = {},
                                               .position = std::nullopt,
+                                              .anchor = std::nullopt,
+                                              .anchorOffset = 0,
                                               .limit = 1,
                                               .collapseThreads = false,
                                               .calculateTotal = false});

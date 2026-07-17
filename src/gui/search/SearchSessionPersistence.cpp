@@ -188,15 +188,23 @@ namespace javelin::gui::search
                         SearchPageState{
                             .offset = static_cast<std::size_t>(
                                 settings.value(QStringLiteral("offset"), 0).toULongLong()),
+                            .position = static_cast<std::size_t>(
+                                settings.value(QStringLiteral("position"), 0).toULongLong()),
+                            .returnedLimit = static_cast<std::size_t>(
+                                settings.value(QStringLiteral("returnedLimit"), 0).toULongLong()),
                             .total =
                                 settings.value(QStringLiteral("total")).isValid()
                                     ? std::optional<std::size_t>{static_cast<std::size_t>(
                                           settings.value(QStringLiteral("total")).toULongLong())}
                                     : std::nullopt,
+                            .queryState = settings.value(QStringLiteral("queryState"))
+                                              .toString()
+                                              .toStdString(),
+                            .anchor = std::nullopt,
                             .items = std::move(items),
                             .cacheLoaded = true,
                             .refreshInFlight = false,
-                            .stale = false,
+                            .stale = true,
                             .refreshError = {},
                         },
                     .authoritativeResults = true,
@@ -219,6 +227,11 @@ namespace javelin::gui::search
         writeOptionalField(settings, QStringLiteral("searchBody"), criteria.body);
 
         const auto& page = session.page();
+        settings.setValue(QStringLiteral("offset"), static_cast<qulonglong>(page.offset));
+        settings.setValue(QStringLiteral("position"), static_cast<qulonglong>(page.position));
+        settings.setValue(QStringLiteral("returnedLimit"),
+                          static_cast<qulonglong>(page.returnedLimit));
+        settings.setValue(QStringLiteral("queryState"), QString::fromStdString(page.queryState));
         if (page.total.has_value())
         {
             settings.setValue(QStringLiteral("total"), static_cast<qulonglong>(*page.total));

@@ -36,6 +36,7 @@ namespace javelin::app
         std::size_t limit = 0;
         javelin::jmap::query::EmailListSort sort;
         bool forceRefresh = false;
+        std::optional<std::string> anchor;
     };
 
     struct SearchWindowIntent
@@ -45,6 +46,7 @@ namespace javelin::app
         std::size_t offset = 0;
         std::size_t limit = 0;
         javelin::jmap::query::EmailListSort sort;
+        std::optional<std::string> anchor;
     };
 
     struct MailboxWindowSummary
@@ -53,8 +55,11 @@ namespace javelin::app
         std::string mailboxId;
         std::size_t offset = 0;
         std::size_t limit = 0;
+        std::size_t position = 0;
+        std::size_t returnedLimit = 0;
         std::size_t representativeCount = 0;
         std::optional<std::size_t> total;
+        std::string queryState;
     };
 
     using MailboxWindowResult = std::variant<MailboxWindowSummary, javelin::jmap::OperationError>;
@@ -65,8 +70,11 @@ namespace javelin::app
         std::string queryKey;
         std::size_t offset = 0;
         std::size_t limit = 0;
+        std::size_t position = 0;
+        std::size_t returnedLimit = 0;
         std::size_t representativeCount = 0;
         std::optional<std::size_t> total;
+        std::string queryState;
     };
 
     using SearchWindowResult = std::variant<SearchWindowSummary, javelin::jmap::OperationError>;

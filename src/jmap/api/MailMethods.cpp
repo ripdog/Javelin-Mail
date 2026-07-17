@@ -80,6 +80,8 @@ namespace
         std::optional<RawEmailQueryFilter> filter;
         std::vector<RawEmailQuerySort> sort;
         std::optional<std::uint64_t> position;
+        std::optional<std::string> anchor;
+        std::optional<std::int64_t> anchorOffset;
         std::optional<std::uint64_t> limit;
         bool collapseThreads = false;
         bool calculateTotal = false;
@@ -272,6 +274,7 @@ namespace
         std::uint64_t position = 0;
         std::vector<std::string> ids;
         std::optional<std::uint64_t> total;
+        std::optional<std::uint64_t> limit;
     };
 
     struct RawAddedItem
@@ -371,10 +374,10 @@ template <> struct glz::meta<RawEmailQueryRequest>
 {
     using T = RawEmailQueryRequest;
 
-    static constexpr auto value =
-        glz::object("accountId", &T::accountId, "filter", &T::filter, "sort", &T::sort, "position",
-                    &T::position, "limit", &T::limit, "collapseThreads", &T::collapseThreads,
-                    "calculateTotal", &T::calculateTotal);
+    static constexpr auto value = glz::object(
+        "accountId", &T::accountId, "filter", &T::filter, "sort", &T::sort, "position",
+        &T::position, "anchor", &T::anchor, "anchorOffset", &T::anchorOffset, "limit", &T::limit,
+        "collapseThreads", &T::collapseThreads, "calculateTotal", &T::calculateTotal);
 };
 
 template <> struct glz::meta<RawEmailQueryChangesRequest>
@@ -546,9 +549,10 @@ template <> struct glz::meta<RawEmailQueryResponse>
 {
     using T = RawEmailQueryResponse;
 
-    static constexpr auto value = glz::object(
-        "accountId", &T::accountId, "queryState", &T::queryState, "canCalculateChanges",
-        &T::canCalculateChanges, "position", &T::position, "ids", &T::ids, "total", &T::total);
+    static constexpr auto value =
+        glz::object("accountId", &T::accountId, "queryState", &T::queryState, "canCalculateChanges",
+                    &T::canCalculateChanges, "position", &T::position, "ids", &T::ids, "total",
+                    &T::total, "limit", &T::limit);
 };
 
 template <> struct glz::meta<RawAddedItem>
@@ -788,6 +792,10 @@ namespace javelin::jmap::api
                     : std::nullopt,
             .sort = std::move(sort),
             .position = request.position,
+            .anchor = request.anchor,
+            .anchorOffset = request.anchor.has_value()
+                                ? std::optional<std::int64_t>{request.anchorOffset}
+                                : std::nullopt,
             .limit = request.limit,
             .collapseThreads = request.collapseThreads,
             .calculateTotal = request.calculateTotal,
@@ -1110,6 +1118,7 @@ namespace javelin::jmap::api
                     .position = parsed.value->position,
                     .ids = std::move(parsed.value->ids),
                     .total = parsed.value->total,
+                    .limit = parsed.value->limit,
                 },
             .error = std::nullopt,
         };
