@@ -1337,9 +1337,7 @@ namespace javelin::gui::shell
         {
             if (!m_messageViewContainer->hasReadableBody())
             {
-                m_messageViewContainer->setLoadingState(
-                    true, QStringLiteral("Checking your saved copy, then downloading the message "
-                                         "if needed."));
+                m_messageViewContainer->setLoadingState(true);
             }
             refreshSelectedMessageContent(*accountId, emailId.toStdString());
             if (isUnread)
@@ -3967,9 +3965,7 @@ namespace javelin::gui::shell
         if (accountId.has_value() && emailId.has_value() &&
             !m_messageViewContainer->hasReadableBody())
         {
-            m_messageViewContainer->setLoadingState(
-                true, QStringLiteral("Checking your saved copy, then downloading the message if "
-                                     "needed."));
+            m_messageViewContainer->setLoadingState(true);
             refreshSelectedMessageContent(*accountId, *emailId);
         }
     }

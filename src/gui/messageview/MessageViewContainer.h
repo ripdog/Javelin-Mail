@@ -53,7 +53,7 @@ namespace javelin::gui::messageview
                                   std::optional<std::string> mailboxId,
                                   std::vector<javelin::jmap::cache::MessageListItem> messages);
         void refresh(javelin::jmap::cache::MessageViewService& messageViewService);
-        void setLoadingState(bool loading, const QString& detailText = QString{});
+        void setLoadingState(bool loading);
         void setErrorState(const QString& errorMessage);
         [[nodiscard]] bool hasContentSnapshot() const;
         [[nodiscard]] bool hasReadableBody() const;

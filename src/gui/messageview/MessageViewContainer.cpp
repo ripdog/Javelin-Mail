@@ -935,16 +935,12 @@ namespace javelin::gui::messageview
         }
     }
 
-    void MessageViewContainer::setLoadingState(const bool loading, const QString& detailText)
+    void MessageViewContainer::setLoadingState(const bool loading)
     {
         m_loading = loading;
         if (loading)
         {
             m_errorMessage.clear();
-        }
-        if (!detailText.isEmpty())
-        {
-            m_placeholderDetailLabel->setText(detailText);
         }
         updatePresentation();
     }
@@ -1434,6 +1430,7 @@ namespace javelin::gui::messageview
         updateRemoteContentButton();
         updateLanguageBanner();
         m_loadingIndicator->setVisible(false);
+        m_placeholderDetailLabel->setVisible(true);
 
         const auto presentation =
             messageViewPresentation(m_accountId.has_value(), m_mailboxId.has_value(),
@@ -1506,13 +1503,11 @@ namespace javelin::gui::messageview
             else if (m_loading)
             {
                 m_titleLabel->setText(QStringLiteral("Loading message"));
-                m_detailLabel->setText(QStringLiteral("Downloading the selected message now."));
+                m_detailLabel->clear();
+                m_detailLabel->setVisible(false);
                 m_placeholderTitleLabel->setText(QStringLiteral("Loading message"));
-                if (m_placeholderDetailLabel->text().isEmpty())
-                {
-                    m_placeholderDetailLabel->setText(
-                        QStringLiteral("Downloading the selected message now."));
-                }
+                m_placeholderDetailLabel->clear();
+                m_placeholderDetailLabel->setVisible(false);
                 m_loadingIndicator->setVisible(true);
             }
             else
@@ -1575,8 +1570,8 @@ namespace javelin::gui::messageview
             else
             {
                 m_placeholderTitleLabel->setText(QStringLiteral("Loading message"));
-                m_placeholderDetailLabel->setText(
-                    QStringLiteral("Preparing the selected message for display."));
+                m_placeholderDetailLabel->clear();
+                m_placeholderDetailLabel->setVisible(false);
                 m_loadingIndicator->setVisible(true);
                 setActiveView(ActiveView::Placeholder);
             }
@@ -1592,10 +1587,11 @@ namespace javelin::gui::messageview
             if (m_loading)
             {
                 m_titleLabel->setText(QStringLiteral("Loading message"));
-                m_detailLabel->setText(QStringLiteral("Downloading the selected message now."));
+                m_detailLabel->clear();
+                m_detailLabel->setVisible(false);
                 m_placeholderTitleLabel->setText(QStringLiteral("Loading message"));
-                m_placeholderDetailLabel->setText(
-                    QStringLiteral("Downloading the selected message now."));
+                m_placeholderDetailLabel->clear();
+                m_placeholderDetailLabel->setVisible(false);
                 m_loadingIndicator->setVisible(true);
             }
             else
