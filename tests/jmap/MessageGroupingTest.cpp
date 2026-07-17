@@ -21,6 +21,7 @@ namespace
             .isUnread = true,
             .isFlagged = false,
             .from = std::nullopt,
+            .mailboxNames = {},
         };
     }
 

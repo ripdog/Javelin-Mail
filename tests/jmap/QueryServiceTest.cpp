@@ -399,6 +399,15 @@ TEST_CASE("query service rehydrates cached representative rows by email id order
     auto databaseContext = makeDatabaseContext();
     seedAccount(databaseContext.connection);
 
+    auto inbox = loadMailboxFixture();
+    auto archive = inbox;
+    archive.id = "mbx-archive";
+    archive.name = "Archive";
+    archive.role = "archive";
+    archive.sortOrder = 20;
+    javelin::jmap::cache::MailboxRepository mailboxRepository{databaseContext.connection};
+    REQUIRE_FALSE(mailboxRepository.replaceAll("account-1", {inbox, archive}).has_value());
+
     auto first = loadEmailFixture();
     first.id = "eml-1";
     first.threadId = "thr-1";
@@ -418,6 +427,7 @@ TEST_CASE("query service rehydrates cached representative rows by email id order
     third.receivedAt = "2026-04-04T11:22:33Z";
     third.subject = "Other thread";
     third.keywords.clear();
+    third.mailboxIds = {"mbx-inbox", "mbx-archive"};
 
     javelin::jmap::cache::EmailRepository emailRepository{databaseContext.connection};
     REQUIRE_FALSE(emailRepository.replaceAll("account-1", {first, second, third}).has_value());
@@ -433,11 +443,19 @@ TEST_CASE("query service rehydrates cached representative rows by email id order
     CHECK(items[0].threadMessageCount == 1);
     CHECK(items[0].isUnread);
     CHECK_FALSE(items[0].isFlagged);
+    CHECK(items[0].mailboxNames == std::vector<std::string>{"Inbox", "Archive"});
     CHECK(items[1].emailId == "eml-2");
     CHECK(items[1].threadId == "thr-1");
     CHECK(items[1].threadMessageCount == 2);
     CHECK(items[1].isUnread);
     CHECK(items[1].isFlagged);
+
+    const auto inboxUnread = queryService.countUnreadMailboxEmails("account-1", "mbx-inbox");
+    REQUIRE(std::holds_alternative<std::size_t>(inboxUnread));
+    CHECK(std::get<std::size_t>(inboxUnread) == 2);
+    const auto archiveUnread = queryService.countUnreadMailboxEmails("account-1", "mbx-archive");
+    REQUIRE(std::holds_alternative<std::size_t>(archiveUnread));
+    CHECK(std::get<std::size_t>(archiveUnread) == 1);
 }
 
 TEST_CASE("query service SQL plans use the intended cache indexes", "[jmap][cache][query]")

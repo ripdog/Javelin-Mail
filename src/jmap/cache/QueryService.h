@@ -43,6 +43,7 @@ namespace javelin::jmap::cache
         bool isUnread = false;
         bool isFlagged = false;
         std::optional<javelin::jmap::domain::EmailAddress> from;
+        std::vector<std::string> mailboxNames;
     };
 
     struct SearchWindowPage
@@ -66,6 +67,8 @@ namespace javelin::jmap::cache
                             javelin::jmap::query::EmailListSort sort = {}) const;
         [[nodiscard]] std::variant<std::size_t, DatabaseError>
         countMailboxMessages(std::string_view accountId, std::string_view mailboxId) const;
+        [[nodiscard]] std::variant<std::size_t, DatabaseError>
+        countUnreadMailboxEmails(std::string_view accountId, std::string_view mailboxId) const;
         [[nodiscard]] std::variant<std::vector<MessageListItem>, DatabaseError>
         listMessagesByEmailIds(std::string_view accountId,
                                const std::vector<std::string>& emailIds) const;

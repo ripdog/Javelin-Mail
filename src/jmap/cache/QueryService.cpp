@@ -207,6 +207,7 @@ namespace javelin::jmap::cache
                 .isUnread = query.value(8).toInt() != 0,
                 .isFlagged = query.value(9).toInt() != 0,
                 .from = std::nullopt,
+                .mailboxNames = {},
             };
 
             if (!query.value(11).isNull())
@@ -275,7 +276,17 @@ namespace javelin::jmap::cache
             "         WHERE a.account_id = :account_id AND a.email_id = e.email_id "
             "           AND a.field_name = 'from' "
             "         ORDER BY a.position LIMIT 1"
-            "       ) AS from_email "
+            "       ) AS from_email, "
+            "       ("
+            "         SELECT json_group_array(mailbox_name) FROM ("
+            "           SELECT m.name AS mailbox_name "
+            "           FROM email_mailboxes em "
+            "           INNER JOIN mailboxes m ON m.account_id = em.account_id "
+            "                AND m.mailbox_id = em.mailbox_id "
+            "           WHERE em.account_id = :account_id AND em.email_id = e.email_id "
+            "           ORDER BY m.sort_order, m.name, m.mailbox_id"
+            "         )"
+            "       ) AS mailbox_names_json "
             "FROM requested r "
             "INNER JOIN emails e ON e.account_id = :account_id AND e.email_id = r.email_id "
             "LEFT JOIN ("
@@ -333,6 +344,7 @@ namespace javelin::jmap::cache
                 .isUnread = query.value(8).toInt() != 0,
                 .isFlagged = query.value(9).toInt() != 0,
                 .from = std::nullopt,
+                .mailboxNames = {},
             };
 
             if (!query.value(11).isNull())
@@ -343,6 +355,12 @@ namespace javelin::jmap::cache
                                 : std::optional{query.value(10).toString().toStdString()},
                     .email = query.value(11).toString().toStdString(),
                 };
+            }
+
+            if (const auto mailboxNamesJson = query.value(12).toString().toStdString();
+                !mailboxNamesJson.empty())
+            {
+                static_cast<void>(glz::read_json(item.mailboxNames, mailboxNamesJson));
             }
 
             items.push_back(std::move(item));
@@ -565,6 +583,7 @@ namespace javelin::jmap::cache
                 .isUnread = query.value(8).toInt() != 0,
                 .isFlagged = query.value(9).toInt() != 0,
                 .from = std::nullopt,
+                .mailboxNames = {},
             };
 
             if (!query.value(11).isNull())
@@ -655,6 +674,7 @@ namespace javelin::jmap::cache
                 .isUnread = query.value(8).toInt() != 0,
                 .isFlagged = query.value(9).toInt() != 0,
                 .from = std::nullopt,
+                .mailboxNames = {},
             };
 
             if (!query.value(11).isNull())
@@ -707,6 +727,41 @@ namespace javelin::jmap::cache
             return static_cast<std::size_t>(0);
         }
 
+        return static_cast<std::size_t>(query.value(0).toULongLong());
+    }
+
+    std::variant<std::size_t, DatabaseError>
+    QueryService::countUnreadMailboxEmails(const std::string_view accountId,
+                                           const std::string_view mailboxId) const
+    {
+        if (const auto error = m_connection.validate())
+        {
+            return *error;
+        }
+
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "SELECT COUNT(*) "
+            "FROM email_mailboxes em "
+            "WHERE em.account_id = :account_id AND em.mailbox_id = :mailbox_id "
+            "  AND NOT EXISTS ("
+            "    SELECT 1 FROM email_keywords seen "
+            "    WHERE seen.account_id = em.account_id AND seen.email_id = em.email_id "
+            "      AND seen.keyword = '$seen'"
+            "  )"));
+        query.bindValue(QStringLiteral(":account_id"),
+                        QString::fromStdString(std::string{accountId}));
+        query.bindValue(QStringLiteral(":mailbox_id"),
+                        QString::fromStdString(std::string{mailboxId}));
+        if (!query.exec())
+        {
+            return makeQueryError(QStringLiteral("Count unread mailbox emails"), query);
+        }
+
+        if (!query.next())
+        {
+            return static_cast<std::size_t>(0);
+        }
         return static_cast<std::size_t>(query.value(0).toULongLong());
     }
 

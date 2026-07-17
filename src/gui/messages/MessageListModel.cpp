@@ -44,7 +44,8 @@ namespace javelin::gui::messages
                    left.receivedAt == right.receivedAt && left.sentAt == right.sentAt &&
                    left.threadMessageCount == right.threadMessageCount &&
                    left.hasAttachment == right.hasAttachment && left.isUnread == right.isUnread &&
-                   left.isFlagged == right.isFlagged && sameAddress(left.from, right.from);
+                   left.isFlagged == right.isFlagged && sameAddress(left.from, right.from) &&
+                   left.mailboxNames == right.mailboxNames;
         }
 
     } // namespace
@@ -170,6 +171,22 @@ namespace javelin::gui::messages
         if (role == CanExpandRole)
         {
             return row.kind == RowKind::ThreadSummary && item.threadMessageCount > 1;
+        }
+
+        if (role == MailboxNamesRole)
+        {
+            QStringList names;
+            names.reserve(static_cast<qsizetype>(item.mailboxNames.size()));
+            for (const auto& name : item.mailboxNames)
+            {
+                names.push_back(QString::fromStdString(name));
+            }
+            return names;
+        }
+
+        if (role == IsSearchResultRole)
+        {
+            return !m_mailboxId.has_value();
         }
 
         return {};

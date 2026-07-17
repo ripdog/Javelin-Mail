@@ -36,6 +36,7 @@ namespace javelin::gui::mailboxes
             TotalThreadsRole = Qt::UserRole + 3,
             MailboxRoleRole = Qt::UserRole + 4,
             ConnectionStatusRole = Qt::UserRole + 5,
+            MailboxNameRole = Qt::UserRole + 6,
         };
 
         enum class ConnectionStatus

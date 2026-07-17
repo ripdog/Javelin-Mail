@@ -217,6 +217,11 @@ namespace javelin::gui::mailboxes
             return node->role.has_value() ? QString::fromStdString(*node->role) : QVariant{};
         }
 
+        if (role == MailboxNameRole)
+        {
+            return QString::fromStdString(node->displayName);
+        }
+
         if (role == ConnectionStatusRole && node->kind == Node::Kind::Account)
         {
             const auto status = m_connectionStatuses.find(node->accountId);

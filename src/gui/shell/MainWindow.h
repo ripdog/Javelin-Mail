@@ -279,6 +279,7 @@ namespace javelin::gui::shell
         void refreshMailboxTabFromServer(MailboxTabState& tab);
         void connectSearchSession(javelin::gui::search::SearchSession& session);
         [[nodiscard]] QString titleForTab(const TabState& tab) const;
+        [[nodiscard]] QString mailboxTitle(const MailboxTabState& tab) const;
         [[nodiscard]] QIcon iconForTab(const TabState& tab) const;
         [[nodiscard]] bool activeTabIsMailbox() const;
         [[nodiscard]] bool activeTabIsSearch() const;

@@ -59,7 +59,8 @@ namespace javelin::jmap::query
                    left.subject == right.subject && left.preview == right.preview &&
                    left.receivedAt == right.receivedAt && left.sentAt == right.sentAt &&
                    left.hasAttachment == right.hasAttachment && left.isUnread == right.isUnread &&
-                   left.isFlagged == right.isFlagged && equalFrom;
+                   left.isFlagged == right.isFlagged && left.mailboxNames == right.mailboxNames &&
+                   equalFrom;
         }
 
         [[nodiscard]] MailboxSelectionKey makeSelectionKey(const std::string& id,

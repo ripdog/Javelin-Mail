@@ -17,7 +17,8 @@ namespace
                 .hasAttachment = false,
                 .isUnread = false,
                 .isFlagged = false,
-                .from = std::nullopt};
+                .from = std::nullopt,
+                .mailboxNames = {}};
     }
 } // namespace
 

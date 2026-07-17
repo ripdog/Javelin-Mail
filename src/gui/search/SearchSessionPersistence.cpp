@@ -77,6 +77,12 @@ namespace javelin::gui::search
             {
                 object.insert(QStringLiteral("from"), serializeEmailAddress(*item.from));
             }
+            QJsonArray mailboxNames;
+            for (const auto& name : item.mailboxNames)
+            {
+                mailboxNames.push_back(QString::fromStdString(name));
+            }
+            object.insert(QStringLiteral("mailboxNames"), mailboxNames);
             return object;
         }
 
@@ -94,6 +100,11 @@ namespace javelin::gui::search
             if (emailId.isEmpty() || threadId.isEmpty() || receivedAt.isEmpty())
             {
                 return std::nullopt;
+            }
+            std::vector<std::string> mailboxNames;
+            for (const auto& name : object.value(QStringLiteral("mailboxNames")).toArray())
+            {
+                mailboxNames.push_back(name.toString().toStdString());
             }
             return javelin::jmap::cache::MessageListItem{
                 .emailId = emailId.toStdString(),
@@ -120,6 +131,7 @@ namespace javelin::gui::search
                 .isUnread = object.value(QStringLiteral("isUnread")).toBool(false),
                 .isFlagged = object.value(QStringLiteral("isFlagged")).toBool(false),
                 .from = deserializeEmailAddress(object.value(QStringLiteral("from"))),
+                .mailboxNames = std::move(mailboxNames),
             };
         }
 

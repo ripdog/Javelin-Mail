@@ -40,6 +40,8 @@ namespace javelin::gui::messages
             RowKindRole,
             IsExpandedRole,
             CanExpandRole,
+            MailboxNamesRole,
+            IsSearchResultRole,
         };
 
         explicit MessageListModel(javelin::jmap::cache::QueryService& queryService,

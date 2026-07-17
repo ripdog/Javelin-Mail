@@ -584,7 +584,9 @@ namespace javelin::gui::shell
                                                                std::optional<QString>{mailboxId});
         if (mailboxIndex.isValid())
         {
-            mailboxTitle = mailboxIndex.data(Qt::DisplayRole).toString();
+            mailboxTitle =
+                mailboxIndex.data(javelin::gui::mailboxes::MailboxTreeModel::MailboxNameRole)
+                    .toString();
             const auto role =
                 mailboxIndex.data(javelin::gui::mailboxes::MailboxTreeModel::MailboxRoleRole)
                     .toString();
@@ -2146,7 +2148,7 @@ namespace javelin::gui::shell
         std::string accountId;
         if (const auto* mailboxTab = std::get_if<MailboxTabState>(&tab.content))
         {
-            title = mailboxTab->title;
+            title = mailboxTitle(*mailboxTab);
             accountId = mailboxTab->accountId;
         }
         else if (const auto* searchTab = std::get_if<SearchTabState>(&tab.content))
@@ -2189,6 +2191,18 @@ namespace javelin::gui::shell
         if (accountName.isEmpty())
             accountName = settings.loginEmail;
         return accountName.isEmpty() ? title : QStringLiteral("%1 - %2").arg(title, accountName);
+    }
+
+    QString MainWindow::mailboxTitle(const MailboxTabState& tab) const
+    {
+        const auto unreadResult =
+            m_queryService.countUnreadMailboxEmails(tab.accountId, tab.mailboxId);
+        const auto* unread = std::get_if<std::size_t>(&unreadResult);
+        if (unread == nullptr || *unread == 0)
+        {
+            return tab.title;
+        }
+        return QStringLiteral("%1 (%2)").arg(tab.title).arg(static_cast<qulonglong>(*unread));
     }
 
     QIcon MainWindow::iconForTab(const TabState& tab) const
@@ -3065,9 +3079,11 @@ namespace javelin::gui::shell
                                       ? std::optional<std::size_t>{static_cast<std::size_t>(
                                             totalThreadsValue.toULongLong())}
                                       : std::nullopt;
-        activateMailboxInHomeTab(*accountId, *mailboxId,
-                                 currentIndex.data(Qt::DisplayRole).toString(),
-                                 currentMailboxRole(*m_mailboxView), totalThreads, refreshRemote);
+        activateMailboxInHomeTab(
+            *accountId, *mailboxId,
+            currentIndex.data(javelin::gui::mailboxes::MailboxTreeModel::MailboxNameRole)
+                .toString(),
+            currentMailboxRole(*m_mailboxView), totalThreads, refreshRemote);
         qInfo().noquote() << "GUI activate mailbox selection" << QString::fromStdString(*accountId)
                           << QString::fromStdString(*mailboxId) << "refreshRemote" << refreshRemote
                           << "ms" << timer.elapsed();
@@ -3121,7 +3137,9 @@ namespace javelin::gui::shell
         }
 
         const auto currentIndex = m_mailboxView->currentIndex();
-        const auto title = currentIndex.data(Qt::DisplayRole).toString();
+        const auto title =
+            currentIndex.data(javelin::gui::mailboxes::MailboxTreeModel::MailboxNameRole)
+                .toString();
         const auto role = currentMailboxRole(*m_mailboxView);
         for (std::size_t index = 1; index < m_tabs.size(); ++index)
         {
@@ -4003,7 +4021,7 @@ namespace javelin::gui::shell
             }
         };
         std::visit(
-            [&updateForPage](const auto& content)
+            [this, &updateForPage](const auto& content)
             {
                 if constexpr (std::is_same_v<std::decay_t<decltype(content)>, SearchTabState>)
                 {
@@ -4011,7 +4029,14 @@ namespace javelin::gui::shell
                 }
                 else
                 {
-                    updateForPage(content.title, content.page);
+                    if constexpr (std::is_same_v<std::decay_t<decltype(content)>, MailboxTabState>)
+                    {
+                        updateForPage(mailboxTitle(content), content.page);
+                    }
+                    else
+                    {
+                        updateForPage(content.title, content.page);
+                    }
                 }
             },
             tab->content);
@@ -4770,6 +4795,7 @@ namespace javelin::gui::shell
                 .isFlagged =
                     index.data(javelin::gui::messages::MessageListModel::IsFlaggedRole).toBool(),
                 .from = std::nullopt,
+                .mailboxNames = {},
             });
         }
 

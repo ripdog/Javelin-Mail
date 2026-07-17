@@ -83,12 +83,13 @@ namespace javelin::gui::messages
         {
             const auto outerRect = insetRect(option.rect, cardMargin);
             return isMemberRow ? insetRect(outerRect.adjusted(memberIndent, 0, 0, 0), cardMargin)
-                                : insetRect(outerRect, cardMargin);
+                               : insetRect(outerRect, cardMargin);
         }
 
         [[nodiscard]] QRect contentRectForCard(const QRect& cardRect)
         {
-            return cardRect.adjusted(contentHInset, contentTopInset, -contentHInset, -contentBottomInset);
+            return cardRect.adjusted(contentHInset, contentTopInset, -contentHInset,
+                                     -contentBottomInset);
         }
 
         [[nodiscard]] QString repliesLabelForIndex(const QModelIndex& index)
@@ -143,9 +144,9 @@ namespace javelin::gui::messages
             {
                 return {};
             }
-            const int width =
-                buttonNaturalWidth(option.fontMetrics, true, label, hasTrailingIcon);
-            return QRect{contentRect.left(), contentRect.bottom() - buttonMargin, width, buttonSize};
+            const int width = buttonNaturalWidth(option.fontMetrics, true, label, hasTrailingIcon);
+            return QRect{contentRect.left(), contentRect.bottom() - buttonMargin, width,
+                         buttonSize};
         }
 
         [[nodiscard]] QRect starButtonRect(const QRect& contentRect)
@@ -164,9 +165,9 @@ namespace javelin::gui::messages
                          contentRect.bottom() - buttonMargin, buttonSize, buttonSize};
         }
 
-void drawButton(QPainter* painter, const QStyleOptionViewItem& option, const QRect& rect,
-                       const QIcon& icon, const QString& text, const bool hovered,
-                       const bool pressed, const QIcon& trailingIcon = {})
+        void drawButton(QPainter* painter, const QStyleOptionViewItem& option, const QRect& rect,
+                        const QIcon& icon, const QString& text, const bool hovered,
+                        const bool pressed, const QIcon& trailingIcon = {})
         {
             if (rect.isEmpty())
             {
@@ -228,7 +229,8 @@ void drawButton(QPainter* painter, const QStyleOptionViewItem& option, const QRe
                 // the trailing label.
                 const int iconX = text.isEmpty() ? contentRect.center().x() - buttonIconSize / 2
                                                  : contentRect.left();
-                icon.paint(painter, QRect{QPoint{iconX, iconY}, QSize{buttonIconSize, buttonIconSize}});
+                icon.paint(painter,
+                           QRect{QPoint{iconX, iconY}, QSize{buttonIconSize, buttonIconSize}});
                 if (!text.isEmpty())
                 {
                     textRect.setLeft(iconX + buttonIconSize + buttonIconTextGap);
@@ -245,9 +247,8 @@ void drawButton(QPainter* painter, const QStyleOptionViewItem& option, const QRe
             if (hasTrailing)
             {
                 const int chevronY = contentRect.center().y() - buttonChevronSize / 2;
-                trailingIcon.paint(
-                    painter,
-                    QRect{QPoint{chevronX, chevronY}, QSize{buttonChevronSize, buttonChevronSize}});
+                trailingIcon.paint(painter, QRect{QPoint{chevronX, chevronY},
+                                                  QSize{buttonChevronSize, buttonChevronSize}});
             }
 
             painter->restore();
@@ -309,14 +310,16 @@ void drawButton(QPainter* painter, const QStyleOptionViewItem& option, const QRe
             formattedTimestamp(index.data(MessageListModel::ReceivedAtRole).toString());
 
         auto senderFont = option.font;
-        senderFont.setPointSize(senderFont.pointSize() + (isMemberRow ? 0 : senderFontSizeIncreaseParent));
+        senderFont.setPointSize(senderFont.pointSize() +
+                                (isMemberRow ? 0 : senderFontSizeIncreaseParent));
         senderFont.setBold(true);
         painter->setFont(senderFont);
         painter->setPen(senderColor);
 
         const auto senderMetrics = QFontMetrics{senderFont};
         const auto timestampMetrics = QFontMetrics{option.font};
-        const int timestampWidth = timestampMetrics.boundingRect(timestamp).width() + timestampPadding;
+        const int timestampWidth =
+            timestampMetrics.boundingRect(timestamp).width() + timestampPadding;
         const int unreadDotReserve = isUnread ? unreadDotDiameter + unreadDotGap : 0;
         const QRect rightHeaderRect{
             contentRect.left() + contentRect.width() - timestampWidth,
@@ -326,7 +329,8 @@ void drawButton(QPainter* painter, const QStyleOptionViewItem& option, const QRe
         };
         const QRect leftHeaderRect{
             contentRect.left() + unreadDotReserve, contentRect.top(),
-            std::max(0, contentRect.width() - timestampWidth - headerGap - unreadDotReserve), headerHeight};
+            std::max(0, contentRect.width() - timestampWidth - headerGap - unreadDotReserve),
+            headerHeight};
 
         if (isUnread)
         {
@@ -348,13 +352,14 @@ void drawButton(QPainter* painter, const QStyleOptionViewItem& option, const QRe
         painter->drawText(rightHeaderRect, Qt::AlignRight | Qt::AlignVCenter, timestamp);
 
         auto subjectFont = option.font;
-        subjectFont.setPointSize(subjectFont.pointSize() + (isMemberRow ? subjectFontSizeIncreaseMember
-                                                                        : subjectFontSizeIncreaseParent));
+        subjectFont.setPointSize(subjectFont.pointSize() + (isMemberRow
+                                                                ? subjectFontSizeIncreaseMember
+                                                                : subjectFontSizeIncreaseParent));
         painter->setFont(subjectFont);
         painter->setPen(textColor);
         const auto subjectMetrics = QFontMetrics{subjectFont};
-        const QRect subjectRect{contentRect.left(), contentRect.top() + subjectOffset, contentRect.width(),
-                                subjectHeight};
+        const QRect subjectRect{contentRect.left(), contentRect.top() + subjectOffset,
+                                contentRect.width(), subjectHeight};
         painter->drawText(subjectRect, Qt::AlignLeft | Qt::AlignVCenter,
                           subjectMetrics.elidedText(subject, Qt::ElideRight, subjectRect.width()));
 
@@ -370,12 +375,12 @@ void drawButton(QPainter* painter, const QStyleOptionViewItem& option, const QRe
         // Trailing chevron communicates the open/close state of the thread.
         const auto isExpanded = index.data(MessageListModel::IsExpandedRole).toBool();
         const auto chevronIcon =
-            canExpand ? javelin::gui::themedSvgIcon(
-                           isExpanded
-                               ? QStringLiteral(":/icons/thunderbird-icons/arrow-down-12.svg")
-                               : QStringLiteral(":/icons/thunderbird-icons/arrow-right-12.svg"),
-                           buttonColor)
-                     : QIcon{};
+            canExpand
+                ? javelin::gui::themedSvgIcon(
+                      isExpanded ? QStringLiteral(":/icons/thunderbird-icons/arrow-down-12.svg")
+                                 : QStringLiteral(":/icons/thunderbird-icons/arrow-right-12.svg"),
+                      buttonColor)
+                : QIcon{};
         const bool repliesHovered =
             m_hoveredIndex == index && m_hoveredButton == ButtonKind::Replies;
         const bool attachmentHovered =
@@ -388,9 +393,32 @@ void drawButton(QPainter* painter, const QStyleOptionViewItem& option, const QRe
         const bool starPressed = m_pressedIndex == index && m_pressedButton == ButtonKind::Star;
 
         const auto repliesLabel = repliesLabelForIndex(index);
-        drawButton(painter, option,
-                   repliesButtonRect(contentRect, option, repliesLabel, !chevronIcon.isNull()),
-                   repliesIcon, repliesLabel, repliesHovered, repliesPressed, chevronIcon);
+        const auto repliesRect =
+            repliesButtonRect(contentRect, option, repliesLabel, !chevronIcon.isNull());
+        drawButton(painter, option, repliesRect, repliesIcon, repliesLabel, repliesHovered,
+                   repliesPressed, chevronIcon);
+
+        if (index.data(MessageListModel::IsSearchResultRole).toBool())
+        {
+            const auto mailboxNames = index.data(MessageListModel::MailboxNamesRole)
+                                          .toStringList()
+                                          .join(QStringLiteral(", "));
+            if (!mailboxNames.isEmpty())
+            {
+                const int left =
+                    repliesRect.isEmpty() ? contentRect.left() : repliesRect.right() + buttonGap;
+                const auto attachmentRect = attachmentButtonRect(contentRect, hasAttachment);
+                const int right = attachmentRect.isEmpty() ? starButtonRect(contentRect).left()
+                                                           : attachmentRect.left();
+                const QRect mailboxRect{left, contentRect.bottom() - buttonMargin,
+                                        std::max(0, right - buttonGap - left), buttonSize};
+                painter->setFont(option.font);
+                painter->setPen(textColor);
+                painter->drawText(mailboxRect, Qt::AlignLeft | Qt::AlignVCenter,
+                                  option.fontMetrics.elidedText(mailboxNames, Qt::ElideRight,
+                                                                mailboxRect.width()));
+            }
+        }
         drawButton(painter, option, attachmentButtonRect(contentRect, hasAttachment),
                    attachmentIcon, QString{}, attachmentHovered, attachmentPressed);
         drawButton(painter, option, starButtonRect(contentRect), starIcon, QString{}, starHovered,

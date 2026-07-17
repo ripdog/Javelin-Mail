@@ -629,6 +629,7 @@ namespace javelin::jmap
                     email.from.empty()
                         ? std::nullopt
                         : std::optional<javelin::jmap::domain::EmailAddress>{email.from.front()},
+                .mailboxNames = {},
             };
         }
 
@@ -1998,11 +1999,19 @@ namespace javelin::jmap
                 .offset = offset,
                 .limit = limit,
                 .total = page.total,
-                .emailIds = std::move(emailIds),
+                .emailIds = emailIds,
             }))
         {
             co_return javelin::jmap::operationError(*error);
         }
+
+        javelin::jmap::cache::QueryService queryService{*m_impl->databaseConnection};
+        const auto cachedResults = queryService.listMessagesByEmailIds(accountId, emailIds);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&cachedResults))
+        {
+            co_return javelin::jmap::operationError(*error);
+        }
+        page.results = std::get<std::vector<javelin::jmap::cache::MessageListItem>>(cachedResults);
 
         co_return MessageSearchSummary{
             .accountId = std::move(accountId),
