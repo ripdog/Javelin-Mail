@@ -527,6 +527,7 @@ namespace javelin::gui::shell
         connect(&m_mailService, &javelin::app::MailApplicationService::cacheCommitted, this,
                 [this](const javelin::app::MailCacheChange& change)
                 {
+                    const auto changedAccountId = change.accountId.toStdString();
                     {
                         QSignalBlocker mailboxSelectionBlocker{m_mailboxView->selectionModel()};
                         m_mailboxModel->refresh();
@@ -538,8 +539,7 @@ namespace javelin::gui::shell
                     {
                         const auto mailboxId = window.mailboxId.toStdString();
                         queryWindowMailboxIds.insert(mailboxId);
-                        loadMailboxTabFromCache(change.accountId.toStdString(), mailboxId, true,
-                                                window.offset);
+                        loadMailboxTabFromCache(changedAccountId, mailboxId, true, window.offset);
                     }
 
                     for (const auto& mailboxId : change.mailboxIds)
@@ -547,7 +547,21 @@ namespace javelin::gui::shell
                         const auto mailbox = mailboxId.toStdString();
                         if (!queryWindowMailboxIds.contains(mailbox))
                         {
-                            loadMailboxTabFromCache(change.accountId.toStdString(), mailbox, true);
+                            loadMailboxTabFromCache(changedAccountId, mailbox, true);
+                            for (auto& tabState : m_tabs)
+                            {
+                                auto* mailboxTab = std::get_if<MailboxTabState>(&tabState.content);
+                                if (mailboxTab == nullptr ||
+                                    mailboxTab->accountId != changedAccountId ||
+                                    mailboxTab->mailboxId != mailbox ||
+                                    mailboxTab->page.cacheLoaded)
+                                {
+                                    continue;
+                                }
+
+                                mailboxTab->page.stale = true;
+                                refreshMailboxTabFromServer(*mailboxTab);
+                            }
                         }
                         if (change.hasNewMail && activeTabIsMailbox() &&
                             activeAccountId() ==
@@ -2778,7 +2792,7 @@ namespace javelin::gui::shell
         m_syncingNavigation = false;
     }
 
-    void MainWindow::loadMailboxTabPageFromCache(MailboxTabState& tab, const bool forceReload)
+    bool MainWindow::loadMailboxTabPageFromCache(MailboxTabState& tab, const bool forceReload)
     {
         QElapsedTimer timer;
         timer.start();
@@ -2787,7 +2801,7 @@ namespace javelin::gui::shell
             qCDebug(logGuiMailbox).noquote()
                 << "cache load skipped" << QString::fromStdString(tab.accountId)
                 << QString::fromStdString(tab.mailboxId);
-            return;
+            return true;
         }
 
         const auto queryKey = javelin::jmap::sync::mailboxQueryKey({
@@ -2808,18 +2822,31 @@ namespace javelin::gui::shell
             tab.page.total = (*page)->total;
             tab.page.queryState = (*page)->queryState;
             tab.page.cacheLoaded = true;
-        }
-        else
-        {
-            tab.page.items.clear();
-            tab.page.cacheLoaded = false;
+            qCDebug(logGuiMailbox).noquote()
+                << "cache load" << QString::fromStdString(tab.accountId)
+                << QString::fromStdString(tab.mailboxId) << "offset"
+                << static_cast<qulonglong>(tab.page.offset) << "rows"
+                << static_cast<qulonglong>(tab.page.items.size()) << "ms" << timer.elapsed();
+            return true;
         }
 
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&pageResult))
+        {
+            qCWarning(logGuiMailbox).noquote()
+                << "cache load failed" << QString::fromStdString(tab.accountId)
+                << QString::fromStdString(tab.mailboxId) << error->message;
+        }
+        // A missing window was invalidated because its ordering is stale. It is not an
+        // authoritative empty result, so retain the rendered rows until the replacement query
+        // commits.
+        tab.page.cacheLoaded = false;
+        tab.page.stale = true;
         qCDebug(logGuiMailbox).noquote()
-            << "cache load" << QString::fromStdString(tab.accountId)
-            << QString::fromStdString(tab.mailboxId) << "offset"
-            << static_cast<qulonglong>(tab.page.offset) << "rows"
+            << "cache window unavailable; retaining displayed page"
+            << QString::fromStdString(tab.accountId) << QString::fromStdString(tab.mailboxId)
+            << "offset" << static_cast<qulonglong>(tab.page.offset) << "rows"
             << static_cast<qulonglong>(tab.page.items.size()) << "ms" << timer.elapsed();
+        return false;
     }
 
     void MainWindow::applyActiveTabPageToModel()
@@ -2864,7 +2891,7 @@ namespace javelin::gui::shell
                 continue;
             }
 
-            loadMailboxTabPageFromCache(*mailboxTab, true);
+            static_cast<void>(loadMailboxTabPageFromCache(*mailboxTab, true));
             activeTabReloaded = activeTabReloaded || &tabState == active;
         }
 
@@ -2913,7 +2940,7 @@ namespace javelin::gui::shell
 
         if (auto* mailboxTab = std::get_if<MailboxTabState>(&tab->content))
         {
-            loadMailboxTabPageFromCache(*mailboxTab, forceReload);
+            static_cast<void>(loadMailboxTabPageFromCache(*mailboxTab, forceReload));
             if (refreshRemote)
             {
                 refreshMailboxTabFromServer(*mailboxTab);

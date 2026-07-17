@@ -508,6 +508,63 @@ TEST_CASE("query service loads sparse mailbox pages from authoritative window or
     CHECK((*page)->total == std::optional<std::size_t>{1000});
 }
 
+TEST_CASE("query service distinguishes an invalidated mailbox window from an empty page",
+          "[jmap][cache][query][pagination]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    const std::string queryKey = "mailbox:mbx-inbox|sort:receivedAt:desc|collapseThreads:true";
+    javelin::jmap::cache::MailboxWindowRepository windows{databaseContext.connection};
+    REQUIRE_FALSE(windows
+                      .replace({
+                          .accountId = "account-1",
+                          .mailboxId = "mbx-inbox",
+                          .queryKey = queryKey,
+                          .requestedOffset = 0,
+                          .requestedLimit = 100,
+                          .position = 0,
+                          .returnedLimit = 100,
+                          .total = 1,
+                          .queryState = "state-1",
+                          .emailIds = {},
+                      })
+                      .has_value());
+    REQUIRE_FALSE(windows.invalidateMailbox("account-1", "mbx-inbox").has_value());
+
+    javelin::jmap::cache::QueryService queryService{databaseContext.connection};
+    const auto missingResult = queryService.loadMailboxWindow("account-1", queryKey, 0, 100);
+    const auto* missing =
+        std::get_if<std::optional<javelin::jmap::cache::MailboxWindowPage>>(&missingResult);
+    REQUIRE(missing != nullptr);
+    CHECK_FALSE(missing->has_value());
+
+    REQUIRE_FALSE(windows
+                      .replace({
+                          .accountId = "account-1",
+                          .mailboxId = "mbx-inbox",
+                          .queryKey = queryKey,
+                          .requestedOffset = 0,
+                          .requestedLimit = 100,
+                          .position = 0,
+                          .returnedLimit = 100,
+                          .total = 0,
+                          .queryState = "state-2",
+                          .emailIds = {},
+                      })
+                      .has_value());
+
+    const auto emptyResult = queryService.loadMailboxWindow("account-1", queryKey, 0, 100);
+    const auto* empty =
+        std::get_if<std::optional<javelin::jmap::cache::MailboxWindowPage>>(&emptyResult);
+    REQUIRE(empty != nullptr);
+    REQUIRE(empty->has_value());
+    CHECK((*empty)->items.empty());
+    CHECK((*empty)->total == std::optional<std::size_t>{0});
+}
+
 TEST_CASE("query service SQL plans use the intended cache indexes", "[jmap][cache][query]")
 {
     ApplicationGuard application;
