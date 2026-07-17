@@ -412,11 +412,19 @@ namespace javelin::gui::messages
                                                            : attachmentRect.left();
                 const QRect mailboxRect{left, contentRect.bottom() - buttonMargin,
                                         std::max(0, right - buttonGap - left), buttonSize};
+                const auto folderIcon = javelin::gui::themedSvgIcon(
+                    QStringLiteral(":/icons/thunderbird-icons/folder.svg"), textColor);
+                const QRect folderIconRect{mailboxRect.left(),
+                                           mailboxRect.center().y() - buttonIconSize / 2,
+                                           buttonIconSize, buttonIconSize};
+                folderIcon.paint(painter, folderIconRect);
+                const QRect mailboxTextRect =
+                    mailboxRect.adjusted(buttonIconSize + buttonIconTextGap, 0, 0, 0);
                 painter->setFont(option.font);
                 painter->setPen(textColor);
-                painter->drawText(mailboxRect, Qt::AlignLeft | Qt::AlignVCenter,
+                painter->drawText(mailboxTextRect, Qt::AlignLeft | Qt::AlignVCenter,
                                   option.fontMetrics.elidedText(mailboxNames, Qt::ElideRight,
-                                                                mailboxRect.width()));
+                                                                mailboxTextRect.width()));
             }
         }
         drawButton(painter, option, attachmentButtonRect(contentRect, hasAttachment),
