@@ -25,10 +25,11 @@ namespace javelin::jmap::api
 
     struct CalendarEventQueryFilter
     {
-        std::optional<std::string> inCalendar;
-        calendar::LocalDateTime after;
-        calendar::LocalDateTime before;
-        std::optional<std::string> text;
+        std::optional<std::string> inCalendar = std::nullopt;
+        std::optional<calendar::LocalDateTime> after = std::nullopt;
+        std::optional<calendar::LocalDateTime> before = std::nullopt;
+        std::optional<std::string> text = std::nullopt;
+        std::optional<std::string> uid = std::nullopt;
     };
 
     struct CalendarEventQueryRequest

@@ -62,9 +62,10 @@ namespace javelin::jmap::api::detail
     struct RawQueryFilter
     {
         std::optional<std::string> inCalendar;
-        std::string after;
-        std::string before;
+        std::optional<std::string> after;
+        std::optional<std::string> before;
         std::optional<std::string> text;
+        std::optional<std::string> uid;
     };
 
     struct RawQueryRequest
@@ -265,7 +266,7 @@ JAVELIN_GLZ_META(RawCalendar, "id", &T::id, "name", &T::name, "description", &T:
 JAVELIN_GLZ_META(RawCalendarGetResponse, "accountId", &T::accountId, "state", &T::state, "list",
                  &T::list, "notFound", &T::notFound);
 JAVELIN_GLZ_META(RawQueryFilter, "inCalendar", &T::inCalendar, "after", &T::after, "before",
-                 &T::before, "text", &T::text);
+                 &T::before, "text", &T::text, "uid", &T::uid);
 JAVELIN_GLZ_META(RawQueryRequest, "accountId", &T::accountId, "filter", &T::filter,
                  "expandRecurrences", &T::expandRecurrences, "timeZone", &T::timeZone, "position",
                  &T::position, "limit", &T::limit, "calculateTotal", &T::calculateTotal);
@@ -695,17 +696,20 @@ namespace javelin::jmap::api
     std::optional<MethodRequest<CalendarEventQueryResponse>>
     calendarEventQuery(const CalendarEventQueryRequest& request)
     {
-        const auto arguments =
-            serialize(detail::RawQueryRequest{.accountId = request.accountId,
-                                              .filter = {.inCalendar = request.filter.inCalendar,
-                                                         .after = request.filter.after.value,
-                                                         .before = request.filter.before.value,
-                                                         .text = request.filter.text},
-                                              .expandRecurrences = request.expandRecurrences,
-                                              .timeZone = request.timeZone.value,
-                                              .position = request.position,
-                                              .limit = request.limit,
-                                              .calculateTotal = request.calculateTotal});
+        const auto arguments = serialize(detail::RawQueryRequest{
+            .accountId = request.accountId,
+            .filter = {.inCalendar = request.filter.inCalendar,
+                       .after = request.filter.after ? std::optional{request.filter.after->value}
+                                                     : std::nullopt,
+                       .before = request.filter.before ? std::optional{request.filter.before->value}
+                                                       : std::nullopt,
+                       .text = request.filter.text,
+                       .uid = request.filter.uid},
+            .expandRecurrences = request.expandRecurrences,
+            .timeZone = request.timeZone.value,
+            .position = request.position,
+            .limit = request.limit,
+            .calculateTotal = request.calculateTotal});
         return arguments ? std::optional{MethodRequest<CalendarEventQueryResponse>{
                                .name = "CalendarEvent/query", .arguments = *arguments}}
                          : std::nullopt;

@@ -672,3 +672,98 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
     CHECK(std::get<std::optional<std::string>>(resolvedState) ==
           std::optional<std::string>{"calendar-default-resolved"});
 }
+
+TEST_CASE("calendar refresh recovers a recurring base omitted by the bounded base query",
+          "[jmap][calendar][service][recurrence]")
+{
+    ensureApplication();
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open(
+        {.connectionName = QStringLiteral("calendar-service-recover-base"),
+         .databasePath = directory.filePath(QStringLiteral("cache.sqlite3"))});
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    javelin::jmap::cache::SessionRepository sessions{connection};
+    if (const auto error = sessions.replace("a1", session()))
+        FAIL(error->message.toStdString());
+
+    FakeMethodTransport transport;
+    transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+        .methodResponses =
+            {{.name = "Calendar/get",
+              .arguments =
+                  R"({"accountId":"a1","state":"calendar-water","list":[{"id":"work","name":"Work","isSubscribed":true,"isVisible":true,"isDefault":true,"myRights":{"mayReadFreeBusy":true,"mayReadItems":true,"mayWriteAll":true,"mayWriteOwn":true,"mayUpdatePrivate":true,"mayRSVP":true,"mayShare":false,"mayDelete":false}}],"notFound":[]})",
+              .callId = "calendar-get"},
+             {.name = "CalendarEvent/query",
+              .arguments =
+                  R"({"accountId":"a1","queryState":"expanded-water","canCalculateChanges":false,"position":0,"ids":["synthetic-water"],"total":1})",
+              .callId = "calendar-event-query"},
+             {.name = "CalendarEvent/query",
+              .arguments =
+                  R"({"accountId":"a1","queryState":"base-water-missing","canCalculateChanges":false,"position":0,"ids":[],"total":0})",
+              .callId = "calendar-base-event-query"}},
+        .createdIds = std::nullopt,
+        .sessionState = "session-water-query"});
+    transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+        .methodResponses =
+            {{.name = "CalendarEvent/get",
+              .arguments =
+                  R"({"accountId":"a1","state":"event-water","list":[{"@type":"Event","id":"synthetic-water","recurrenceId":"2026-07-01T02:20:00","uid":"water-series-uid","calendarIds":{"work":true},"title":"Water Softener Running","start":"2026-07-01T02:20:00","duration":"PT2H10M","timeZone":"Pacific/Auckland","showWithoutTime":false,"isDraft":false,"isOrigin":true}],"notFound":[]})",
+              .callId = "calendar-event-get"}},
+        .createdIds = std::nullopt,
+        .sessionState = "session-water-expanded-get"});
+    transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+        .methodResponses =
+            {{.name = "CalendarEvent/get",
+              .arguments = R"({"accountId":"a1","state":"event-water","list":[],"notFound":[]})",
+              .callId = "calendar-base-event-get"}},
+        .createdIds = std::nullopt,
+        .sessionState = "session-water-empty-base-get"});
+    transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+        .methodResponses =
+            {{.name = "CalendarEvent/query",
+              .arguments =
+                  R"({"accountId":"a1","queryState":"base-water-recovered","canCalculateChanges":false,"position":0,"ids":["base-water"],"total":1})",
+              .callId = "calendar-base-event-recovery-query"}},
+        .createdIds = std::nullopt,
+        .sessionState = "session-water-recovery-query"});
+    transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+        .methodResponses =
+            {{.name = "CalendarEvent/get",
+              .arguments =
+                  R"({"accountId":"a1","state":"event-water","list":[{"@type":"Event","id":"base-water","uid":"water-series-uid","calendarIds":{"work":true},"title":"Water Softener Running","start":"2026-01-08T02:20:00","duration":"PT2H10M","timeZone":"Pacific/Auckland","showWithoutTime":false,"isDraft":false,"isOrigin":true,"recurrenceRule":{"@type":"RecurrenceRule","frequency":"daily","interval":3}}],"notFound":[]})",
+              .callId = "calendar-base-event-recovery-get"}},
+        .createdIds = std::nullopt,
+        .sessionState = "session-water-recovery-get"});
+
+    javelin::jmap::calendar::CalendarService service{connection, transport};
+    const javelin::jmap::calendar::VisibleInterval interval{
+        .start = {.value = "2026-06-29T00:00:00"}, .end = {.value = "2026-08-10T00:00:00"}};
+    const javelin::jmap::calendar::TimeZoneId zone{.value = "Pacific/Auckland"};
+    const auto refreshed =
+        QCoro::waitFor(service.refresh({.sessionUrl = "https://example.test/.well-known/jmap",
+                                        .loginEmail = "alice@example.test",
+                                        .apiKey = "secret"},
+                                       "a1", interval, zone));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::calendar::RefreshedRange>(refreshed));
+    javelin::jmap::cache::CalendarRepository calendars{connection};
+    const auto loaded = calendars.loadWindow("a1", interval.start, interval.end, zone);
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::CalendarWindow>>(loaded));
+    const auto& window = std::get<std::optional<javelin::jmap::cache::CalendarWindow>>(loaded);
+    REQUIRE(window.has_value());
+    REQUIRE(window->events.size() == 1);
+    CHECK(window->events.front().id == "base-water");
+    CHECK(window->events.front().title == "Water Softener Running");
+    REQUIRE(window->occurrences.size() == 1);
+    CHECK(window->occurrences.front().eventId == "base-water");
+    CHECK(window->occurrences.front().localStart.value == "2026-07-01T02:20:00");
+    REQUIRE(transport.requests.size() == 5);
+    CHECK(transport.requests[3].envelope.methodCalls.front().arguments.find(
+              R"("uid":"water-series-uid")") != std::string::npos);
+    CHECK(transport.requests[3].envelope.methodCalls.front().arguments.find(R"("after")") ==
+          std::string::npos);
+    CHECK(transport.requests[3].envelope.methodCalls.front().arguments.find(R"("before")") ==
+          std::string::npos);
+}

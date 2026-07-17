@@ -7,8 +7,9 @@ TEST_CASE("calendar query serializes the bounded draft-26 recurrence shape", "[j
     const auto request = javelin::jmap::api::calendarEventQuery(
         {.accountId = "a1",
          .filter = {.inCalendar = std::nullopt,
-                    .after = {.value = "2026-03-01T00:00:00"},
-                    .before = {.value = "2026-04-12T00:00:00"},
+                    .after = javelin::jmap::calendar::LocalDateTime{.value = "2026-03-01T00:00:00"},
+                    .before =
+                        javelin::jmap::calendar::LocalDateTime{.value = "2026-04-12T00:00:00"},
                     .text = std::nullopt},
          .expandRecurrences = true,
          .timeZone = {.value = "Pacific/Auckland"},
@@ -22,6 +23,24 @@ TEST_CASE("calendar query serializes the bounded draft-26 recurrence shape", "[j
     CHECK(request->arguments.find(R"("after":"2026-03-01T00:00:00")") != std::string::npos);
     CHECK(request->arguments.find(R"("before":"2026-04-12T00:00:00")") != std::string::npos);
     CHECK(request->arguments.find(R"("timeZone":"Pacific/Auckland")") != std::string::npos);
+}
+
+TEST_CASE("calendar query serializes an unbounded UID lookup", "[jmap][calendar]")
+{
+    const auto request =
+        javelin::jmap::api::calendarEventQuery({.accountId = "a1",
+                                                .filter = {.uid = "series-uid"},
+                                                .expandRecurrences = false,
+                                                .timeZone = {.value = "Pacific/Auckland"},
+                                                .position = 0,
+                                                .limit = std::nullopt,
+                                                .calculateTotal = true});
+
+    REQUIRE(request.has_value());
+    CHECK(request->arguments.find(R"("uid":"series-uid")") != std::string::npos);
+    CHECK(request->arguments.find(R"("expandRecurrences":false)") != std::string::npos);
+    CHECK(request->arguments.find(R"("after")") == std::string::npos);
+    CHECK(request->arguments.find(R"("before")") == std::string::npos);
 }
 
 TEST_CASE("calendar get parses draft-26 rights", "[jmap][calendar]")

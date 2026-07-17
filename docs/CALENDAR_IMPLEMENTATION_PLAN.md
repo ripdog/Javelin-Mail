@@ -118,6 +118,10 @@ obsolete window or rewind an opaque JMAP state token.
 Full refreshes split expanded occurrence and stable base-event `CalendarEvent/get`
 requests at the Core capability's `maxObjectsInGet` limit. Each batch uses one method
 call and all batches must report the same event state before reconciliation.
+If a bounded unexpanded query omits the stable base document for an expanded occurrence,
+the service recovers that series with a narrow unexpanded UID query. Occurrences that still
+cannot be correlated are logged with their account, synthetic id, UID, recurrence id, and title
+instead of disappearing without diagnostics.
 Scripted service coverage verifies that server permission and scheduling failures are
 returned as typed errors without changing the cached window or its event state.
 

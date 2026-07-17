@@ -1143,6 +1143,11 @@ namespace javelin::jmap::calendar
             const auto& calendars = std::get<api::CalendarGetResponse>(calendarsRead);
             const auto& query = std::get<api::CalendarEventQueryResponse>(queryRead);
             const auto& baseQuery = std::get<api::CalendarEventQueryResponse>(baseQueryRead);
+            qCDebug(logCalendarService).noquote()
+                << "calendar range query" << QString::fromStdString(accountId)
+                << QString::fromStdString(interval.start.value)
+                << QString::fromStdString(interval.end.value) << "expanded" << query.ids.size()
+                << "base" << baseQuery.ids.size();
             sync::MutationJournalRepository genericJournal{m_connection};
             const auto activeCalendarMutations =
                 genericJournal.listActive({.accountId = accountId, .dataType = "Calendar"});
@@ -1301,6 +1306,98 @@ namespace javelin::jmap::calendar
             if (const auto* serviceError = std::get_if<OperationError>(&baseGetResult))
                 co_return *serviceError;
             auto baseResponse = std::get<api::CalendarEventGetResponse>(std::move(baseGetResult));
+
+            std::unordered_set<std::string> baseUids;
+            for (const auto& event : baseResponse.list)
+                if (!event.uid.empty())
+                    baseUids.insert(event.uid);
+            std::unordered_set<std::string> missingBaseUids;
+            for (const auto& occurrence : events.list)
+                if (occurrence.recurrenceId && !occurrence.uid.empty() &&
+                    !baseUids.contains(occurrence.uid))
+                    missingBaseUids.insert(occurrence.uid);
+            std::vector<std::string> recoveredBaseIds;
+            for (const auto& uid : missingBaseUids)
+            {
+                qCDebug(logCalendarService).noquote()
+                    << "recover recurring calendar base by uid" << QString::fromStdString(accountId)
+                    << QString::fromStdString(uid);
+                std::uint64_t position = 0;
+                std::optional<std::uint64_t> recoveryTotal;
+                do
+                {
+                    const auto recoveryRequest =
+                        api::calendarEventQuery({.accountId = accountId,
+                                                 .filter = {.uid = uid},
+                                                 .expandRecurrences = false,
+                                                 .timeZone = displayTimeZone,
+                                                 .position = position,
+                                                 .limit = std::nullopt,
+                                                 .calculateTotal = !recoveryTotal.has_value()});
+                    if (!recoveryRequest)
+                        co_return error(OperationErrorCode::InvalidRequest,
+                                        QStringLiteral("Unable to serialize a recurring event "
+                                                       "recovery query."));
+                    api::RequestBuilder recoveryBuilder;
+                    recoveryBuilder.useCore().useCapability(
+                        std::string{api::calendarsCapabilityUri});
+                    const auto recoveryHandle = recoveryBuilder.call(
+                        *recoveryRequest, "calendar-base-event-recovery-query");
+                    const auto recoveryResult = co_await caller.call(
+                        context(settings, session, accountId), recoveryBuilder);
+                    if (!isCurrentRefresh(ownerAccountId, generation))
+                        co_return summary;
+                    const auto* recoveryEnvelope =
+                        std::get_if<api::ResponseEnvelope>(&recoveryResult);
+                    if (!recoveryEnvelope)
+                        co_return callError(recoveryResult);
+                    const auto recoveryRead =
+                        api::ResponseReader{*recoveryEnvelope}.require(recoveryHandle);
+                    if (const auto* readError =
+                            std::get_if<api::ResponseReaderError>(&recoveryRead))
+                        co_return responseError(*readError);
+                    auto recovery = std::get<api::CalendarEventQueryResponse>(recoveryRead);
+                    if (!recoveryTotal.has_value())
+                        recoveryTotal = recovery.total.value_or(recovery.ids.size());
+                    if (recovery.ids.empty() && position < *recoveryTotal)
+                        co_return error(OperationErrorCode::ProtocolViolation,
+                                        QStringLiteral("Recurring event recovery pagination "
+                                                       "stopped early."));
+                    position += recovery.ids.size();
+                    recoveredBaseIds.insert(recoveredBaseIds.end(),
+                                            std::make_move_iterator(recovery.ids.begin()),
+                                            std::make_move_iterator(recovery.ids.end()));
+                } while (position < *recoveryTotal);
+            }
+            std::ranges::sort(recoveredBaseIds);
+            recoveredBaseIds.erase(std::unique(recoveredBaseIds.begin(), recoveredBaseIds.end()),
+                                   recoveredBaseIds.end());
+            if (!recoveredBaseIds.empty())
+            {
+                auto recoveredGetResult = co_await getCalendarEventsBatched(
+                    caller, settings, session, accountId, recoveredBaseIds, displayTimeZone,
+                    batchLimit, "calendar-base-event-recovery-get",
+                    [this, &ownerAccountId, generation]
+                    { return isCurrentRefresh(ownerAccountId, generation); });
+                if (std::holds_alternative<SupersededRefresh>(recoveredGetResult))
+                    co_return summary;
+                if (const auto* serviceError = std::get_if<OperationError>(&recoveredGetResult))
+                    co_return *serviceError;
+                auto recovered =
+                    std::get<api::CalendarEventGetResponse>(std::move(recoveredGetResult));
+                if (recovered.state != events.state)
+                    co_return error(
+                        OperationErrorCode::ProtocolViolation,
+                        QStringLiteral("Recovered recurring events returned an inconsistent "
+                                       "state."));
+                if (!recovered.notFound.empty())
+                    co_return error(OperationErrorCode::ProtocolViolation,
+                                    QStringLiteral("The server did not return a recovered "
+                                                   "recurring event."));
+                baseResponse.list.insert(baseResponse.list.end(),
+                                         std::make_move_iterator(recovered.list.begin()),
+                                         std::make_move_iterator(recovered.list.end()));
+            }
             if (events.state != baseResponse.state)
                 co_return error(
                     OperationErrorCode::ProtocolViolation,
@@ -1364,7 +1461,16 @@ namespace javelin::jmap::calendar
                         eventId = base->second;
                 }
                 if (!eventId)
+                {
+                    if (event.recurrenceId)
+                        qCWarning(logCalendarService).noquote()
+                            << "discard unmatched expanded calendar occurrence"
+                            << QString::fromStdString(accountId) << QString::fromStdString(event.id)
+                            << QString::fromStdString(event.uid)
+                            << QString::fromStdString(event.recurrenceId->value)
+                            << QString::fromStdString(event.title);
                     continue;
+                }
                 occurrences.push_back({.accountId = accountId,
                                        .id = event.id,
                                        .eventId = *eventId,
