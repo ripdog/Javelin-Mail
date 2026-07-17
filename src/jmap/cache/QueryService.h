@@ -65,6 +65,7 @@ namespace javelin::jmap::cache
         std::size_t returnedLimit = 0;
         std::optional<std::size_t> total;
         std::string queryState;
+        bool isAuthoritative = true;
         std::vector<MessageListItem> items;
     };
 
@@ -86,7 +87,6 @@ namespace javelin::jmap::cache
         [[nodiscard]] std::variant<std::vector<MessageListItem>, DatabaseError>
         listMessagesByEmailIds(std::string_view accountId,
                                const std::vector<std::string>& emailIds) const;
-        [[nodiscard]] std::variant<std::vector<MessageListItem>, DatabaseError>
         searchCachedMessageText(std::string_view accountId, std::string_view text,
                                 std::size_t limit, std::size_t offset = 0) const;
         [[nodiscard]] QString databasePath() const;
@@ -95,7 +95,8 @@ namespace javelin::jmap::cache
                          std::size_t limit) const;
         [[nodiscard]] std::variant<std::optional<MailboxWindowPage>, DatabaseError>
         loadMailboxWindow(std::string_view accountId, std::string_view queryKey,
-                          std::size_t requestedOffset, std::size_t requestedLimit) const;
+                          std::size_t requestedOffset, std::size_t requestedLimit,
+                          javelin::jmap::query::EmailListSort sort = {}) const;
         [[nodiscard]] std::variant<std::vector<MessageListItem>, DatabaseError>
         listThreadMessages(std::string_view accountId, std::string_view threadId) const;
         [[nodiscard]] std::variant<std::vector<MessageListItem>, DatabaseError>
@@ -103,6 +104,10 @@ namespace javelin::jmap::cache
                                   std::string_view threadId) const;
 
       private:
+        [[nodiscard]] std::variant<std::vector<MessageListItem>, DatabaseError>
+        listMailboxWindowMessagesByEmailIds(std::string_view accountId, std::string_view mailboxId,
+                                            const std::vector<std::string>& emailIds,
+                                            javelin::jmap::query::EmailListSort sort) const;
         DatabaseConnection& m_connection;
     };
 

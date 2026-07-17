@@ -328,12 +328,12 @@ namespace javelin::app
         });
         if (!intent.forceRefresh && !intent.anchor.has_value())
         {
-            const auto cachedResult = m_queryService.loadMailboxWindow(intent.accountId, queryKey,
-                                                                       intent.offset, intent.limit);
+            const auto cachedResult = m_queryService.loadMailboxWindow(
+                intent.accountId, queryKey, intent.offset, intent.limit, intent.sort);
             if (const auto* cached =
                     std::get_if<std::optional<javelin::jmap::cache::MailboxWindowPage>>(
                         &cachedResult);
-                cached != nullptr && cached->has_value())
+                cached != nullptr && cached->has_value() && (*cached)->isAuthoritative)
             {
                 co_return MailboxWindowSummary{
                     .accountId = std::move(intent.accountId),

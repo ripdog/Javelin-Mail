@@ -479,6 +479,22 @@ TEST_CASE("JmapCore queues archive and delete mailbox moves as mutations",
 
     javelin::jmap::cache::EmailRepository emailRepository{databaseContext.connection};
     REQUIRE_FALSE(emailRepository.replaceAll("account-1", {email}).has_value());
+    const std::string inboxQueryKey = "mailbox:mbx-inbox|sort:receivedAt:desc|collapseThreads:true";
+    javelin::jmap::cache::MailboxWindowRepository mailboxWindows{databaseContext.connection};
+    REQUIRE_FALSE(mailboxWindows
+                      .replace({
+                          .accountId = "account-1",
+                          .mailboxId = "mbx-inbox",
+                          .queryKey = inboxQueryKey,
+                          .requestedOffset = 0,
+                          .requestedLimit = 100,
+                          .position = 0,
+                          .returnedLimit = 100,
+                          .total = 1,
+                          .queryState = "query-state-1",
+                          .emailIds = {"eml-1"},
+                      })
+                      .has_value());
 
     FakeTransport transport;
     javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
@@ -494,6 +510,23 @@ TEST_CASE("JmapCore queues archive and delete mailbox moves as mutations",
         std::get<std::optional<javelin::jmap::domain::Email>>(archivedEmailResult);
     REQUIRE(archivedEmail.has_value());
     CHECK(archivedEmail->mailboxIds == std::vector<std::string>{"mbx-archive"});
+
+    javelin::jmap::cache::QueryService queryService{databaseContext.connection};
+    const auto optimisticInbox = queryService.loadMailboxWindow("account-1", inboxQueryKey, 0, 100);
+    const auto* inboxPage =
+        std::get_if<std::optional<javelin::jmap::cache::MailboxWindowPage>>(&optimisticInbox);
+    REQUIRE(inboxPage != nullptr);
+    REQUIRE(inboxPage->has_value());
+    CHECK_FALSE((*inboxPage)->isAuthoritative);
+    CHECK((*inboxPage)->items.empty());
+    const auto optimisticArchive =
+        queryService.listMailboxMessages("account-1", "mbx-archive", 100);
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MessageListItem>>(
+        optimisticArchive));
+    const auto& archiveItems =
+        std::get<std::vector<javelin::jmap::cache::MessageListItem>>(optimisticArchive);
+    REQUIRE(archiveItems.size() == 1);
+    CHECK(archiveItems.front().emailId == "eml-1");
 
     const auto deleteResult =
         core.queueDeleteEmail("account-1", "eml-1", "mbx-archive", "mbx-trash");
@@ -712,7 +745,8 @@ TEST_CASE("JmapCore queues exact mailbox patches as mutations", "[jmap][core][mu
         const auto* cached =
             std::get_if<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(&window);
         REQUIRE(cached != nullptr);
-        CHECK_FALSE(cached->has_value());
+        REQUIRE(cached->has_value());
+        CHECK_FALSE((*cached)->isAuthoritative);
     }
     const auto searchWindow = searchWindows.find("account-1", "search-key", 0, 100);
     const auto* cachedSearch =
@@ -736,6 +770,22 @@ TEST_CASE("JmapCore queues read keyword mutations as mutations", "[jmap][core][m
 
     javelin::jmap::cache::EmailRepository emailRepository{databaseContext.connection};
     REQUIRE_FALSE(emailRepository.replaceAll("account-1", {email}).has_value());
+    const std::string queryKey = "mailbox:mbx-inbox|sort:receivedAt:desc|collapseThreads:true";
+    javelin::jmap::cache::MailboxWindowRepository mailboxWindows{databaseContext.connection};
+    REQUIRE_FALSE(mailboxWindows
+                      .replace({
+                          .accountId = "account-1",
+                          .mailboxId = "mbx-inbox",
+                          .queryKey = queryKey,
+                          .requestedOffset = 0,
+                          .requestedLimit = 100,
+                          .position = 0,
+                          .returnedLimit = 100,
+                          .total = 1,
+                          .queryState = "query-state-1",
+                          .emailIds = {"eml-1"},
+                      })
+                      .has_value());
 
     FakeTransport transport;
     javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
@@ -748,6 +798,15 @@ TEST_CASE("JmapCore queues read keyword mutations as mutations", "[jmap][core][m
     const auto& readEmail = std::get<std::optional<javelin::jmap::domain::Email>>(readEmailResult);
     REQUIRE(readEmail.has_value());
     CHECK(readEmail->keywords == std::vector<std::string>{"$seen"});
+
+    javelin::jmap::cache::QueryService queryService{databaseContext.connection};
+    const auto readPageResult = queryService.loadMailboxWindow("account-1", queryKey, 0, 100);
+    const auto* readPage =
+        std::get_if<std::optional<javelin::jmap::cache::MailboxWindowPage>>(&readPageResult);
+    REQUIRE(readPage != nullptr);
+    REQUIRE(readPage->has_value());
+    REQUIRE((*readPage)->items.size() == 1);
+    CHECK_FALSE((*readPage)->items.front().isUnread);
 
     const auto markUnreadResult = core.queueMarkEmailUnread("account-1", "eml-1");
     REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(markUnreadResult));

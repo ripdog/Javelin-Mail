@@ -372,6 +372,65 @@ namespace javelin::jmap::cache
     }
 
     std::variant<std::vector<MessageListItem>, DatabaseError>
+    QueryService::listMailboxWindowMessagesByEmailIds(
+        const std::string_view accountId, const std::string_view mailboxId,
+        const std::vector<std::string>& emailIds, javelin::jmap::query::EmailListSort sort) const
+    {
+        if (const auto error = m_connection.validate())
+            return *error;
+        if (emailIds.empty())
+            return std::vector<MessageListItem>{};
+
+        std::string emailIdsJson;
+        if (const auto writeError = glz::write_json(emailIds, emailIdsJson))
+        {
+            Q_UNUSED(writeError);
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message = QStringLiteral("Serialize mailbox-window ids failed."),
+            };
+        }
+
+        const auto orderDirection = javelin::jmap::query::isAscending(sort)
+                                        ? QStringLiteral("ASC")
+                                        : QStringLiteral("DESC");
+        const auto sortKey = sortKeyExpression(sort.property);
+        QSqlQuery query{m_connection.database()};
+        query.prepare(
+            QStringLiteral(
+                "WITH requested AS ("
+                "  SELECT value AS email_id,CAST(key AS INTEGER) AS window_position "
+                "  FROM json_each(:email_ids_json)"
+                "),requested_threads AS ("
+                "  SELECT r.window_position,e.thread_id FROM requested r "
+                "  INNER JOIN emails e ON e.account_id=:account_id AND e.email_id=r.email_id"
+                "),ranked_members AS ("
+                "  SELECT rt.window_position,e.email_id,"
+                "         ROW_NUMBER() OVER (PARTITION BY rt.window_position "
+                "           ORDER BY %2 %1,e.email_id %1) AS thread_rank "
+                "  FROM requested_threads rt "
+                "  INNER JOIN emails e ON e.account_id=:account_id AND e.thread_id=rt.thread_id "
+                "  INNER JOIN email_mailboxes em ON em.account_id=e.account_id "
+                "    AND em.email_id=e.email_id AND em.mailbox_id=:mailbox_id"
+                ") SELECT email_id FROM ranked_members WHERE thread_rank=1 "
+                "ORDER BY window_position")
+                .arg(orderDirection, sortKey));
+        query.bindValue(QStringLiteral(":account_id"),
+                        QString::fromStdString(std::string{accountId}));
+        query.bindValue(QStringLiteral(":mailbox_id"),
+                        QString::fromStdString(std::string{mailboxId}));
+        query.bindValue(QStringLiteral(":email_ids_json"), QString::fromStdString(emailIdsJson));
+        if (!query.exec())
+            return makeQueryError(QStringLiteral("Project mailbox-window membership"), query);
+
+        std::vector<std::string> projectedIds;
+        projectedIds.reserve(emailIds.size());
+        while (query.next())
+            projectedIds.push_back(query.value(0).toString().toStdString());
+        return listMessagesByEmailIds(accountId, projectedIds);
+    }
+
+    std::variant<std::vector<MessageListItem>, DatabaseError>
     QueryService::searchCachedMessageText(const std::string_view accountId,
                                           const std::string_view text, const std::size_t limit,
                                           const std::size_t offset) const
@@ -523,7 +582,8 @@ namespace javelin::jmap::cache
 
     std::variant<std::optional<MailboxWindowPage>, DatabaseError> QueryService::loadMailboxWindow(
         const std::string_view accountId, const std::string_view queryKey,
-        const std::size_t requestedOffset, const std::size_t requestedLimit) const
+        const std::size_t requestedOffset, const std::size_t requestedLimit,
+        javelin::jmap::query::EmailListSort sort) const
     {
         MailboxWindowRepository repository{m_connection};
         const auto windowResult =
@@ -534,7 +594,8 @@ namespace javelin::jmap::cache
         if (!window->has_value())
             return std::optional<MailboxWindowPage>{std::nullopt};
 
-        const auto messagesResult = listMessagesByEmailIds(accountId, (*window)->emailIds);
+        const auto messagesResult = listMailboxWindowMessagesByEmailIds(
+            accountId, (*window)->mailboxId, (*window)->emailIds, sort);
         const auto* messages = std::get_if<std::vector<MessageListItem>>(&messagesResult);
         if (messages == nullptr)
             return std::get<DatabaseError>(messagesResult);
@@ -546,6 +607,7 @@ namespace javelin::jmap::cache
             .returnedLimit = (*window)->returnedLimit,
             .total = (*window)->total,
             .queryState = (*window)->queryState,
+            .isAuthoritative = (*window)->isAuthoritative,
             .items = *messages,
         }};
     }

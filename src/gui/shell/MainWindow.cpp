@@ -2808,8 +2808,8 @@ namespace javelin::gui::shell
             .isAscending = javelin::jmap::query::isAscending(m_emailListSort),
             .collapseThreads = true,
         });
-        const auto pageResult =
-            m_queryService.loadMailboxWindow(tab.accountId, queryKey, tab.page.offset, pageSize);
+        const auto pageResult = m_queryService.loadMailboxWindow(
+            tab.accountId, queryKey, tab.page.offset, pageSize, m_emailListSort);
         if (const auto* page =
                 std::get_if<std::optional<javelin::jmap::cache::MailboxWindowPage>>(&pageResult);
             page != nullptr && page->has_value())
@@ -2819,13 +2819,14 @@ namespace javelin::gui::shell
             tab.page.returnedLimit = (*page)->returnedLimit;
             tab.page.total = (*page)->total;
             tab.page.queryState = (*page)->queryState;
-            tab.page.cacheLoaded = true;
+            tab.page.cacheLoaded = (*page)->isAuthoritative;
+            tab.page.stale = !(*page)->isAuthoritative;
             qCDebug(logGuiMailbox).noquote()
                 << "cache load" << QString::fromStdString(tab.accountId)
                 << QString::fromStdString(tab.mailboxId) << "offset"
                 << static_cast<qulonglong>(tab.page.offset) << "rows"
                 << static_cast<qulonglong>(tab.page.items.size()) << "ms" << timer.elapsed();
-            return true;
+            return (*page)->isAuthoritative;
         }
 
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&pageResult))
@@ -2834,9 +2835,8 @@ namespace javelin::gui::shell
                 << "cache load failed" << QString::fromStdString(tab.accountId)
                 << QString::fromStdString(tab.mailboxId) << error->message;
         }
-        // A missing window was invalidated because its ordering is stale. It is not an
-        // authoritative empty result, so retain the rendered rows until the replacement query
-        // commits.
+        // A missing window is a cache miss, not an authoritative empty result. Retain the
+        // rendered rows until the replacement query commits.
         tab.page.cacheLoaded = false;
         tab.page.stale = true;
         qCDebug(logGuiMailbox).noquote()

@@ -1232,6 +1232,16 @@ namespace javelin::jmap::cache
                                 "DELETE CASCADE) STRICT"),
                         },
                 },
+                MigrationStep{
+                    .version = 27,
+                    .name = QStringLiteral("mailbox_query_window_validity"),
+                    .statements =
+                        {
+                            QStringLiteral(
+                                "ALTER TABLE mailbox_query_windows ADD COLUMN is_valid INTEGER "
+                                "NOT NULL DEFAULT 1 CHECK(is_valid IN (0,1))"),
+                        },
+                },
             },
         };
     }

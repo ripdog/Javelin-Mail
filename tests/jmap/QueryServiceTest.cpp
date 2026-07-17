@@ -508,7 +508,7 @@ TEST_CASE("query service loads sparse mailbox pages from authoritative window or
     CHECK((*page)->total == std::optional<std::size_t>{1000});
 }
 
-TEST_CASE("query service distinguishes an invalidated mailbox window from an empty page",
+TEST_CASE("query service distinguishes a stale mailbox window from an empty page",
           "[jmap][cache][query][pagination]")
 {
     ApplicationGuard application;
@@ -535,11 +535,12 @@ TEST_CASE("query service distinguishes an invalidated mailbox window from an emp
     REQUIRE_FALSE(windows.invalidateMailbox("account-1", "mbx-inbox").has_value());
 
     javelin::jmap::cache::QueryService queryService{databaseContext.connection};
-    const auto missingResult = queryService.loadMailboxWindow("account-1", queryKey, 0, 100);
-    const auto* missing =
-        std::get_if<std::optional<javelin::jmap::cache::MailboxWindowPage>>(&missingResult);
-    REQUIRE(missing != nullptr);
-    CHECK_FALSE(missing->has_value());
+    const auto staleResult = queryService.loadMailboxWindow("account-1", queryKey, 0, 100);
+    const auto* stale =
+        std::get_if<std::optional<javelin::jmap::cache::MailboxWindowPage>>(&staleResult);
+    REQUIRE(stale != nullptr);
+    REQUIRE(stale->has_value());
+    CHECK_FALSE((*stale)->isAuthoritative);
 
     REQUIRE_FALSE(windows
                       .replace({
@@ -561,6 +562,7 @@ TEST_CASE("query service distinguishes an invalidated mailbox window from an emp
         std::get_if<std::optional<javelin::jmap::cache::MailboxWindowPage>>(&emptyResult);
     REQUIRE(empty != nullptr);
     REQUIRE(empty->has_value());
+    CHECK((*empty)->isAuthoritative);
     CHECK((*empty)->items.empty());
     CHECK((*empty)->total == std::optional<std::size_t>{0});
 }

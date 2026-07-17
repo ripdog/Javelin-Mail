@@ -222,8 +222,10 @@ TEST_CASE("mailbox windows preserve exact sparse server positions and invalidate
     REQUIRE_FALSE(repository.invalidateMailbox("account-1", "mbx-inbox").has_value());
     const auto invalidated = repository.find(
         "account-1", "mailbox:mbx-inbox|sort:receivedAt:desc|collapseThreads:true", 200, 100);
-    const auto* absent =
+    const auto* stale =
         std::get_if<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(&invalidated);
-    REQUIRE(absent != nullptr);
-    CHECK_FALSE(absent->has_value());
+    REQUIRE(stale != nullptr);
+    REQUIRE(stale->has_value());
+    CHECK_FALSE((*stale)->isAuthoritative);
+    CHECK((*stale)->emailIds == std::vector<std::string>{"email-201", "email-202"});
 }
