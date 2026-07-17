@@ -108,6 +108,18 @@ namespace javelin::jmap::api::detail
         std::uint32_t interval = 1;
         std::optional<std::uint32_t> count;
         std::optional<std::string> until;
+        std::optional<std::string> rscale = std::nullopt;
+        std::optional<std::string> skip = std::nullopt;
+        std::optional<std::string> firstDayOfWeek = std::nullopt;
+        std::optional<std::vector<glz::generic>> byDay = std::nullopt;
+        std::optional<std::vector<int>> byMonthDay = std::nullopt;
+        std::optional<std::vector<std::string>> byMonth = std::nullopt;
+        std::optional<std::vector<int>> byYearDay = std::nullopt;
+        std::optional<std::vector<int>> byWeekNo = std::nullopt;
+        std::optional<std::vector<std::uint32_t>> byHour = std::nullopt;
+        std::optional<std::vector<std::uint32_t>> byMinute = std::nullopt;
+        std::optional<std::vector<std::uint32_t>> bySecond = std::nullopt;
+        std::optional<std::vector<int>> bySetPosition = std::nullopt;
     };
 
     struct RawOverride
@@ -278,7 +290,11 @@ JAVELIN_GLZ_META(RawEventGetRequest, "accountId", &T::accountId, "ids", &T::ids,
                  "recurrenceOverridesAfter", &T::recurrenceOverridesAfter, "reduceParticipants",
                  &T::reduceParticipants, "timeZone", &T::timeZone);
 JAVELIN_GLZ_META(RawRecurrenceRule, "@type", &T::type, "frequency", &T::frequency, "interval",
-                 &T::interval, "count", &T::count, "until", &T::until);
+                 &T::interval, "count", &T::count, "until", &T::until, "rscale", &T::rscale, "skip",
+                 &T::skip, "firstDayOfWeek", &T::firstDayOfWeek, "byDay", &T::byDay, "byMonthDay",
+                 &T::byMonthDay, "byMonth", &T::byMonth, "byYearDay", &T::byYearDay, "byWeekNo",
+                 &T::byWeekNo, "byHour", &T::byHour, "byMinute", &T::byMinute, "bySecond",
+                 &T::bySecond, "bySetPosition", &T::bySetPosition);
 JAVELIN_GLZ_META(RawOverride, "excluded", &T::excluded, "start", &T::start, "duration",
                  &T::duration, "title", &T::title);
 JAVELIN_GLZ_META(RawParticipant, "@type", &T::type, "name", &T::name, "email", &T::email,
@@ -597,15 +613,23 @@ namespace javelin::jmap::api
             }
             if (raw.recurrenceRule)
             {
+                const auto& recurrence = *raw.recurrenceRule;
                 value.recurrenceRule = calendar::RecurrenceRule{
-                    .frequency = frequency(raw.recurrenceRule->frequency),
-                    .interval = raw.recurrenceRule->interval,
-                    .count = raw.recurrenceRule->count,
+                    .frequency = frequency(recurrence.frequency),
+                    .interval = recurrence.interval,
+                    .count = recurrence.count,
                     .until =
-                        raw.recurrenceRule->until
-                            ? std::optional<calendar::LocalDateTime>{{.value = *raw.recurrenceRule
-                                                                                    ->until}}
-                            : std::nullopt};
+                        recurrence.until
+                            ? std::optional<calendar::LocalDateTime>{{.value = *recurrence.until}}
+                            : std::nullopt,
+                    .hasUnsupportedExpansionProperties =
+                        (recurrence.rscale && *recurrence.rscale != "gregorian") ||
+                        (recurrence.skip && *recurrence.skip != "omit") ||
+                        recurrence.byDay.has_value() || recurrence.byMonthDay.has_value() ||
+                        recurrence.byMonth.has_value() || recurrence.byYearDay.has_value() ||
+                        recurrence.byWeekNo.has_value() || recurrence.byHour.has_value() ||
+                        recurrence.byMinute.has_value() || recurrence.bySecond.has_value() ||
+                        recurrence.bySetPosition.has_value()};
             }
             for (const auto& [id, rawOverride] : raw.recurrenceOverrides)
             {

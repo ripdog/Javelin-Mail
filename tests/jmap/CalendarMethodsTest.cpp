@@ -89,6 +89,24 @@ TEST_CASE("calendar event documents preserve recurrence and attendees", "[jmap][
     CHECK(event.attendees.front().isOwner);
 }
 
+TEST_CASE("calendar recurrence parsing marks selector rules unsafe for simple expansion",
+          "[jmap][calendar][recurrence]")
+{
+    const auto parsed = javelin::jmap::api::parseCalendarEventGetResponse(
+        R"({"accountId":"a1","state":"e5","list":[{"@type":"Event","id":"e1","uid":"uid-1","calendarIds":{"work":true},"title":"Weekdays","start":"2026-03-03T09:00:00","duration":"PT1H","timeZone":"Pacific/Auckland","showWithoutTime":false,"isDraft":false,"isOrigin":true,"recurrenceRule":{"@type":"RecurrenceRule","frequency":"weekly","byDay":[{"@type":"NDay","day":"mo"},{"@type":"NDay","day":"we"}]}}],"notFound":[]})");
+
+    REQUIRE(parsed.ok());
+    REQUIRE(parsed.value->list.size() == 1);
+    REQUIRE(parsed.value->list.front().recurrenceRule.has_value());
+    CHECK(parsed.value->list.front().recurrenceRule->hasUnsupportedExpansionProperties);
+
+    const auto simple = javelin::jmap::api::parseCalendarEventGetResponse(
+        R"({"accountId":"a1","state":"e6","list":[{"@type":"Event","id":"e2","uid":"uid-2","calendarIds":{"work":true},"title":"Every three days","start":"2026-01-08T02:20:00","duration":"PT2H10M","timeZone":"Pacific/Auckland","showWithoutTime":false,"isDraft":false,"isOrigin":true,"recurrenceRule":{"@type":"RecurrenceRule","frequency":"daily","interval":3,"firstDayOfWeek":"su"}}],"notFound":[]})");
+    REQUIRE(simple.ok());
+    REQUIRE(simple.value->list.front().recurrenceRule.has_value());
+    CHECK_FALSE(simple.value->list.front().recurrenceRule->hasUnsupportedExpansionProperties);
+}
+
 TEST_CASE("calendar event parsing preserves expanded instance identity", "[jmap][calendar]")
 {
     const auto parsed = javelin::jmap::api::parseCalendarEventGetResponse(

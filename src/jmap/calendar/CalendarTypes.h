@@ -102,6 +102,7 @@ namespace javelin::jmap::calendar
         std::uint32_t interval = 1;
         std::optional<std::uint32_t> count;
         std::optional<LocalDateTime> until;
+        bool hasUnsupportedExpansionProperties = false;
     };
 
     struct Attendee

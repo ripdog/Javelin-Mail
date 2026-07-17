@@ -122,6 +122,10 @@ If a bounded unexpanded query omits the stable base document for an expanded occ
 the service recovers that series with a narrow unexpanded UID query. Occurrences that still
 cannot be correlated are logged with their account, synthetic id, UID, recurrence id, and title
 instead of disappearing without diagnostics.
+For simple daily, weekly, monthly, and yearly rules, the service also calculates the bounded
+visible instances locally and supplements recurrence ids omitted by the server expansion. Rules
+with selectors or non-Gregorian/skip behavior are detected during typed parsing and are not
+locally expanded, preventing a speculative fallback from inventing incorrect dates.
 Scripted service coverage verifies that server permission and scheduling failures are
 returned as typed errors without changing the cached window or its event state.
 
