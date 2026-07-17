@@ -744,6 +744,14 @@ target_compile_options(jmap-transport-benchmark PRIVATE -fexceptions)
 javelin_set_project_warnings(jmap-transport-benchmark)
 javelin_enable_sanitizers(jmap-transport-benchmark)
 
+qt_add_executable(jmap-query
+    src/tools/JmapQuery.cpp
+)
+target_link_libraries(jmap-query PRIVATE javelin_jmap Qt::Core Qt::Network)
+target_compile_options(jmap-query PRIVATE -fexceptions)
+javelin_set_project_warnings(jmap-query)
+javelin_enable_sanitizers(jmap-query)
+
 # KDEInstallDirs can leave KDE_INSTALL_KXMLGUIDIR empty in some local/dev
 # configurations; default to the documented DATAROOTDIR/kxmlgui5 location.
 if(NOT KDE_INSTALL_KXMLGUIDIR)
