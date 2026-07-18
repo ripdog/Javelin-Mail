@@ -297,7 +297,7 @@ namespace javelin::jmap::calendar
             }
             for (const auto& [eventId, requested] : request.update)
             {
-                auto projected = requested;
+                auto projected = requested.event;
                 projected.accountId = request.accountId;
                 projected.id = eventId;
                 const auto cached = repository.findEvent(request.accountId, eventId);
@@ -1579,12 +1579,25 @@ namespace javelin::jmap::calendar
             if (present)
                 calendarIds.push_back(calendarId);
         const auto eventId = command.event.id;
-        api::CalendarEventSetRequest request{.accountId = command.accountId,
-                                             .ifInState = command.ifInState,
-                                             .create = {},
-                                             .update = {{eventId, std::move(command.event)}},
-                                             .destroy = {},
-                                             .sendSchedulingMessages = true};
+        cache::CalendarRepository repository{m_connection};
+        const auto cached = repository.findEvent(command.accountId, eventId);
+        if (const auto* cacheError = std::get_if<cache::DatabaseError>(&cached))
+            co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+        const auto& previous = std::get<std::optional<CalendarEvent>>(cached);
+        if (!previous)
+            co_return error(OperationErrorCode::InvalidRequest,
+                            QStringLiteral("The calendar event is no longer in the cache."));
+        if (*previous == command.event)
+            co_return CommittedMutation{.accountId = std::move(command.accountId),
+                                        .newState = *command.ifInState,
+                                        .createdId = std::nullopt};
+        api::CalendarEventSetRequest request{
+            .accountId = command.accountId,
+            .ifInState = command.ifInState,
+            .create = {},
+            .update = {{eventId, {.previous = *previous, .event = std::move(command.event)}}},
+            .destroy = {},
+            .sendSchedulingMessages = true};
         co_return co_await mutate(std::move(settings), std::move(ownerAccountId),
                                   std::move(request), std::move(calendarIds),
                                   std::move(projectionCommitted));

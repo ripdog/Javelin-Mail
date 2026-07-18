@@ -118,10 +118,16 @@ namespace javelin::jmap::api
 
     struct CalendarEventSetRequest
     {
+        struct Update
+        {
+            calendar::CalendarEvent previous;
+            calendar::CalendarEvent event;
+        };
+
         std::string accountId;
         std::optional<std::string> ifInState;
         std::unordered_map<std::string, calendar::CalendarEvent> create;
-        std::unordered_map<std::string, calendar::CalendarEvent> update;
+        std::unordered_map<std::string, Update> update;
         std::vector<std::string> destroy;
         bool sendSchedulingMessages = true;
     };

@@ -121,12 +121,15 @@ TEST_CASE("calendar event documents round-trip complete custom recurrence rules"
     CHECK(rule.bySetPosition == std::vector<std::int32_t>{1, -1});
     CHECK(rule.count == std::optional<std::uint32_t>{9});
 
-    const auto method = javelin::jmap::api::calendarEventSet({.accountId = "a1",
-                                                              .ifInState = "e5",
-                                                              .create = {},
-                                                              .update = {{"e1", event}},
-                                                              .destroy = {},
-                                                              .sendSchedulingMessages = true});
+    auto previous = event;
+    previous.recurrenceRule = std::nullopt;
+    const auto method = javelin::jmap::api::calendarEventSet(
+        {.accountId = "a1",
+         .ifInState = "e5",
+         .create = {},
+         .update = {{"e1", {.previous = previous, .event = event}}},
+         .destroy = {},
+         .sendSchedulingMessages = true});
     REQUIRE(method.has_value());
     CHECK(method->arguments.find(R"("rscale":"gregorian")") != std::string::npos);
     CHECK(method->arguments.find(R"("skip":"backward")") != std::string::npos);
@@ -230,16 +233,18 @@ TEST_CASE("calendar set omits server-set event properties", "[jmap][calendar]")
         .recurrenceRule = std::nullopt,
         .recurrenceOverrides = {},
         .attendees = {}};
-    const auto method = javelin::jmap::api::calendarEventSet({.accountId = "a1",
-                                                              .ifInState = std::nullopt,
-                                                              .create = {},
-                                                              .update = {{"e1", event}},
-                                                              .destroy = {},
-                                                              .sendSchedulingMessages = true});
+    const auto method = javelin::jmap::api::calendarEventSet(
+        {.accountId = "a1",
+         .ifInState = std::nullopt,
+         .create = {},
+         .update = {{"e1", {.previous = event, .event = event}}},
+         .destroy = {},
+         .sendSchedulingMessages = true});
 
     REQUIRE(method.has_value());
+    CHECK(method->arguments.find(R"("update":{"e1":{}})") != std::string::npos);
     CHECK(method->arguments.find(R"("id":"e1")") == std::string::npos);
-    CHECK(method->arguments.find(R"("uid":"uid-1")") == std::string::npos);
+    CHECK(method->arguments.find(R"("uid")") == std::string::npos);
     CHECK(method->arguments.find(R"("isOrigin")") == std::string::npos);
     CHECK(method->arguments.find(R"("utcStart")") == std::string::npos);
     CHECK(method->arguments.find(R"("utcEnd")") == std::string::npos);
@@ -272,12 +277,15 @@ TEST_CASE("calendar set serializes occurrence edits as base-series overrides",
                                                                            .duration = std::nullopt,
                                                                            .title = std::nullopt});
 
-    const auto method = javelin::jmap::api::calendarEventSet({.accountId = "a1",
-                                                              .ifInState = "event-state-4",
-                                                              .create = {},
-                                                              .update = {{"base-series", series}},
-                                                              .destroy = {},
-                                                              .sendSchedulingMessages = true});
+    auto previous = series;
+    previous.recurrenceOverrides.clear();
+    const auto method = javelin::jmap::api::calendarEventSet(
+        {.accountId = "a1",
+         .ifInState = "event-state-4",
+         .create = {},
+         .update = {{"base-series", {.previous = previous, .event = series}}},
+         .destroy = {},
+         .sendSchedulingMessages = true});
 
     REQUIRE(method.has_value());
     CHECK(method->arguments.find(R"("update":{"base-series":)") != std::string::npos);

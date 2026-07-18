@@ -139,16 +139,27 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
                                                                           .mayShare = false,
                                                                           .mayDelete = false}}})
                       .has_value());
-    REQUIRE_FALSE(calendars
-                      .reconcileWindow({.accountId = "a1",
-                                        .start = {.value = "2026-06-29T00:00:00"},
-                                        .end = {.value = "2026-08-10T00:00:00"},
-                                        .displayTimeZone = {.value = "Pacific/Auckland"},
-                                        .queryState = "query-state-1",
-                                        .eventState = "event-state-7",
-                                        .events = {},
-                                        .occurrences = {}})
-                      .has_value());
+    auto cachedEvent = event();
+    cachedEvent.title = "Original";
+    REQUIRE_FALSE(
+        calendars
+            .reconcileWindow({.accountId = "a1",
+                              .start = {.value = "2026-06-29T00:00:00"},
+                              .end = {.value = "2026-08-10T00:00:00"},
+                              .displayTimeZone = {.value = "Pacific/Auckland"},
+                              .queryState = "query-state-1",
+                              .eventState = "event-state-7",
+                              .events = {cachedEvent},
+                              .occurrences = {{.accountId = "a1",
+                                               .id = "event-1",
+                                               .eventId = "event-1",
+                                               .recurrenceId = std::nullopt,
+                                               .localStart = {.value = "2026-07-13T09:00:00"},
+                                               .localEnd = {.value = "2026-07-13T10:00:00"},
+                                               .utcStart = std::nullopt,
+                                               .utcEnd = std::nullopt,
+                                               .allDay = false}}})
+            .has_value());
 
     FakeMethodTransport transport;
     transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
@@ -204,6 +215,17 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::calendar::CalendarMutationRecord>>(
         records));
     CHECK(std::get<std::vector<javelin::jmap::calendar::CalendarMutationRecord>>(records).empty());
+
+    transport.request.reset();
+    const auto noOpUpdate = QCoro::waitFor(
+        service.update({.sessionUrl = "https://example.test/.well-known/jmap",
+                        .loginEmail = "alice@example.test",
+                        .apiKey = "secret"},
+                       "a1", {.accountId = "a1", .event = event(), .ifInState = std::nullopt},
+                       [&projectionNotifications] { ++projectionNotifications; }));
+    REQUIRE(std::holds_alternative<javelin::jmap::calendar::CommittedMutation>(noOpUpdate));
+    CHECK_FALSE(transport.request.has_value());
+    CHECK(projectionNotifications == 2);
 
     transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
         .methodResponses =
@@ -387,6 +409,21 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
         CHECK_FALSE(arguments.find(R"("base-1","base-2")") != std::string::npos);
     }
 
+    const auto editable = event();
+    REQUIRE_FALSE(calendars
+                      .applyEventDelta("a1", "calendar-batched", "event-batched", zone, {editable},
+                                       {{.accountId = "a1",
+                                         .id = "event-1",
+                                         .eventId = "event-1",
+                                         .recurrenceId = std::nullopt,
+                                         .localStart = {.value = "2026-07-13T09:00:00"},
+                                         .localEnd = {.value = "2026-07-13T10:00:00"},
+                                         .utcStart = std::nullopt,
+                                         .utcEnd = std::nullopt,
+                                         .allDay = false}},
+                                       {})
+                      .has_value());
+
     const auto cachedBeforeFailure = calendars.loadWindow("a1", interval.start, interval.end, zone);
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::CalendarWindow>>(
         cachedBeforeFailure));
@@ -401,8 +438,11 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
         .createdIds = std::nullopt,
         .sessionState = "session-forbidden"});
 
+    auto forbiddenEvent = event();
+    forbiddenEvent.title = "Forbidden update";
     const auto forbidden = QCoro::waitFor(service.update(
-        settings, "a1", {.accountId = "a1", .event = event(), .ifInState = std::nullopt}));
+        settings, "a1",
+        {.accountId = "a1", .event = std::move(forbiddenEvent), .ifInState = std::nullopt}));
 
     REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(forbidden));
     CHECK(std::get<javelin::jmap::OperationError>(forbidden).code ==

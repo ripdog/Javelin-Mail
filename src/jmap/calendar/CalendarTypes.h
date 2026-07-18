@@ -54,6 +54,8 @@ namespace javelin::jmap::calendar
         std::optional<Duration> offset;
         std::optional<UtcInstant> when;
         std::optional<UtcInstant> acknowledged;
+
+        bool operator==(const Alert&) const = default;
     };
 
     struct CalendarRights
@@ -155,6 +157,8 @@ namespace javelin::jmap::calendar
         bool isAttendee = true;
         std::uint32_t scheduleSequence = 0;
         std::optional<UtcInstant> scheduleUpdated;
+
+        bool operator==(const Attendee&) const = default;
     };
 
     struct RecurrenceOverride
@@ -163,6 +167,8 @@ namespace javelin::jmap::calendar
         std::optional<LocalDateTime> start;
         std::optional<Duration> duration;
         std::optional<std::string> title;
+
+        bool operator==(const RecurrenceOverride&) const = default;
     };
 
     struct CalendarEvent
@@ -189,6 +195,8 @@ namespace javelin::jmap::calendar
         std::optional<RecurrenceRule> recurrenceRule;
         std::unordered_map<std::string, RecurrenceOverride> recurrenceOverrides;
         std::vector<Attendee> attendees;
+
+        bool operator==(const CalendarEvent&) const = default;
     };
 
     struct Occurrence
