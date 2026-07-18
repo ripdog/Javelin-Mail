@@ -445,6 +445,9 @@ namespace javelin::gui::calendar
                                     : javelin::jmap::calendar::RecurrenceFrequency::Yearly;
         }
         RecurrenceDialog dialog{this};
+        const auto storedStart =
+            QDateTime::fromString(QString::fromStdString(m_event.start.value), Qt::ISODate);
+        dialog.setEventStart(enteredDateTime(m_startDate, m_startTime).value_or(storedStart));
         dialog.setRule(initial);
         if (dialog.exec() != QDialog::Accepted)
         {

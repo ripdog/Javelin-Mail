@@ -1,18 +1,18 @@
 #pragma once
 
-#include "jmap/calendar/CalendarTypes.h"
+#include "gui/calendar/RecurrencePattern.h"
 
 #include <QDialog>
 
+#include <utility>
 #include <vector>
 
 class QComboBox;
-class QDateTimeEdit;
+class QDateEdit;
 class QLabel;
-class QLineEdit;
-class QPushButton;
+class QRadioButton;
 class QSpinBox;
-class QVBoxLayout;
+class QToolButton;
 
 namespace javelin::gui::calendar
 {
@@ -23,49 +23,33 @@ namespace javelin::gui::calendar
       public:
         explicit RecurrenceDialog(QWidget* parent = nullptr);
 
+        void setEventStart(const QDateTime& start);
         void setRule(const javelin::jmap::calendar::RecurrenceRule& rule);
         [[nodiscard]] javelin::jmap::calendar::RecurrenceRule rule() const;
 
       private Q_SLOTS:
         void validateAndAccept();
-        void updateEndMode();
+        void updateFrequencyControls();
+        void updateEndControls();
 
       private:
-        struct DayRow
-        {
-            QWidget* container = nullptr;
-            QComboBox* day = nullptr;
-            QSpinBox* ordinal = nullptr;
-            QPushButton* remove = nullptr;
-        };
+        void updateMonthlyChoices();
+        [[nodiscard]] FriendlyRecurrencePattern pattern() const;
 
-        void
-        addDayRow(const std::optional<javelin::jmap::calendar::RecurrenceDay>& day = std::nullopt);
-        void removeDayRow(QWidget* row);
-        void clearDayRows();
-        [[nodiscard]] std::optional<javelin::jmap::calendar::RecurrenceRule>
-        validatedRule(QString& error) const;
-
-        QComboBox* m_frequency = nullptr;
-        QSpinBox* m_interval = nullptr;
-        QLineEdit* m_rscale = nullptr;
-        QComboBox* m_skip = nullptr;
-        QComboBox* m_firstDay = nullptr;
-        QWidget* m_dayRowsWidget = nullptr;
-        QVBoxLayout* m_dayRowsLayout = nullptr;
-        std::vector<DayRow> m_dayRows;
-        QLineEdit* m_byMonthDay = nullptr;
-        QLineEdit* m_byMonth = nullptr;
-        QLineEdit* m_byYearDay = nullptr;
-        QLineEdit* m_byWeekNo = nullptr;
-        QLineEdit* m_byHour = nullptr;
-        QLineEdit* m_byMinute = nullptr;
-        QLineEdit* m_bySecond = nullptr;
-        QLineEdit* m_bySetPosition = nullptr;
-        QComboBox* m_endMode = nullptr;
-        QSpinBox* m_count = nullptr;
-        QDateTimeEdit* m_until = nullptr;
-        QLabel* m_error = nullptr;
+        QDateTime m_eventStart;
         javelin::jmap::calendar::RecurrenceRule m_rule;
+        std::optional<javelin::jmap::calendar::Weekday> m_firstDayOfWeek;
+        QLabel* m_unsupported = nullptr;
+        QSpinBox* m_interval = nullptr;
+        QComboBox* m_frequency = nullptr;
+        QWidget* m_weeklyControls = nullptr;
+        std::vector<std::pair<javelin::jmap::calendar::Weekday, QToolButton*>> m_weekdays;
+        QComboBox* m_monthlyMode = nullptr;
+        QRadioButton* m_never = nullptr;
+        QRadioButton* m_onDate = nullptr;
+        QDateEdit* m_untilDate = nullptr;
+        QRadioButton* m_afterCount = nullptr;
+        QSpinBox* m_count = nullptr;
+        QLabel* m_error = nullptr;
     };
 } // namespace javelin::gui::calendar

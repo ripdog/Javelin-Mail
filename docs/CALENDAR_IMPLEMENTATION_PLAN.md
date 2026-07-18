@@ -155,10 +155,11 @@ The event editor keeps the Calendar field available for creation and whole-serie
 Creation aggregates destinations from every calendar-capable account, while editing offers all
 calendars in the event account; read-only calendars remain visible for context but cannot be
 selected as a destination.
-The recurrence editor preserves and edits the complete RFC 8984 `RecurrenceRule` surface used by
-draft-26, including calendar scale and skip behavior, ordinal weekdays, all `by*` selectors, and
-mutually exclusive count/until bounds. Simple daily, weekly, monthly, and yearly presets remain
-available without opening the advanced editor.
+The recurrence editor presents the familiar daily, weekly, monthly, and yearly patterns: an
+interval, contextual weekday or monthly choices, and mutually exclusive never/date/count endings.
+Uncommon RFC 8984 selectors remain preserved in the event document but are not exposed as product
+controls. Opening such a rule explains that Done replaces it with the displayed common pattern,
+while Cancel leaves the original rule untouched.
 Attendees are edited as dynamic single-address rows backed by the shared address-suggestion model.
 Adding or removing rows preserves existing scheduling participant records, while selected
 `Display Name <address>` suggestions are split into their typed name and email fields.

@@ -58,11 +58,13 @@ add_executable(javelin_jmap_tests
     jmap/ThreadRepositoryTest.cpp
     jmap/TranslationCacheRepositoryTest.cpp
     gui/MonthCalendarWidgetTest.cpp
+    gui/RecurrencePatternTest.cpp
     gui/MailboxSortTest.cpp
     gui/MessageViewPresentationTest.cpp
     gui/PaginationTest.cpp
     gui/PlainTextLinkifierTest.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/calendar/MonthCalendarLayout.cpp
+    ${PROJECT_SOURCE_DIR}/src/gui/calendar/RecurrencePattern.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/messageview/PlainTextLinkifier.cpp
 )
 

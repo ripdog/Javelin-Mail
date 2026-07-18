@@ -109,6 +109,8 @@ set(JAVELIN_FORMAT_FILES
     src/gui/calendar/EventDialog.h
     src/gui/calendar/RecurrenceDialog.cpp
     src/gui/calendar/RecurrenceDialog.h
+    src/gui/calendar/RecurrencePattern.cpp
+    src/gui/calendar/RecurrencePattern.h
     src/gui/messages/MessageListModel.cpp
     src/gui/messages/Pagination.h
     src/gui/messages/MessageListModel.h
@@ -300,6 +302,7 @@ set(JAVELIN_FORMAT_FILES
     tests/jmap/CalendarMethodsTest.cpp
     tests/jmap/CalendarRepositoryTest.cpp
     tests/gui/MonthCalendarWidgetTest.cpp
+    tests/gui/RecurrencePatternTest.cpp
     tests/gui/MessageViewPresentationTest.cpp
     tests/gui/PaginationTest.cpp
     tests/gui/PlainTextLinkifierTest.cpp
@@ -559,6 +562,8 @@ add_library(javelin_gui STATIC
     src/gui/calendar/EventDialog.h
     src/gui/calendar/RecurrenceDialog.cpp
     src/gui/calendar/RecurrenceDialog.h
+    src/gui/calendar/RecurrencePattern.cpp
+    src/gui/calendar/RecurrencePattern.h
     src/gui/mailboxes/MailboxTreeDelegate.cpp
     src/gui/mailboxes/MailboxTreeDelegate.h
     src/gui/mailboxes/MailboxTreeModel.cpp
@@ -648,6 +653,8 @@ add_library(javelin_calendar_gui STATIC
     src/gui/calendar/EventDialog.h
     src/gui/calendar/RecurrenceDialog.cpp
     src/gui/calendar/RecurrenceDialog.h
+    src/gui/calendar/RecurrencePattern.cpp
+    src/gui/calendar/RecurrencePattern.h
 )
 target_include_directories(javelin_calendar_gui PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
