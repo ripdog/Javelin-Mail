@@ -89,6 +89,54 @@ TEST_CASE("calendar event documents preserve recurrence and attendees", "[jmap][
     CHECK(event.attendees.front().isOwner);
 }
 
+TEST_CASE("calendar event documents round-trip complete custom recurrence rules",
+          "[jmap][calendar][recurrence]")
+{
+    const auto parsed = javelin::jmap::api::parseCalendarEventGetResponse(
+        R"({"accountId":"a1","state":"e5","list":[{"@type":"Event","id":"e1","uid":"uid-1","calendarIds":{"work":true},"title":"Complex","start":"2026-03-03T09:00:00","duration":"PT1H","timeZone":"Pacific/Auckland","showWithoutTime":false,"isDraft":false,"isOrigin":true,"recurrenceRule":{"@type":"RecurrenceRule","frequency":"yearly","interval":2,"rscale":"gregorian","skip":"backward","firstDayOfWeek":"su","byDay":[{"@type":"NDay","day":"mo"},{"@type":"NDay","day":"fr","nthOfPeriod":-1}],"byMonthDay":[1,-1],"byMonth":["3","6L"],"byYearDay":[100,-1],"byWeekNo":[1,-1],"byHour":[8,17],"byMinute":[0,30],"bySecond":[0,60],"bySetPosition":[1,-1],"count":9}}],"notFound":[]})");
+
+    REQUIRE(parsed.ok());
+    REQUIRE(parsed.value->list.size() == 1);
+    const auto& event = parsed.value->list.front();
+    REQUIRE(event.recurrenceRule.has_value());
+    const auto& rule = *event.recurrenceRule;
+    CHECK(rule.frequency == javelin::jmap::calendar::RecurrenceFrequency::Yearly);
+    CHECK(rule.interval == 2);
+    CHECK(rule.rscale == std::optional<std::string>{"gregorian"});
+    CHECK(rule.skip == std::optional{javelin::jmap::calendar::RecurrenceSkip::Backward});
+    CHECK(rule.firstDayOfWeek == std::optional{javelin::jmap::calendar::Weekday::Sunday});
+    CHECK(rule.byDay ==
+          std::vector{
+              javelin::jmap::calendar::RecurrenceDay{
+                  .day = javelin::jmap::calendar::Weekday::Monday, .nthOfPeriod = std::nullopt},
+              javelin::jmap::calendar::RecurrenceDay{
+                  .day = javelin::jmap::calendar::Weekday::Friday, .nthOfPeriod = -1}});
+    CHECK(rule.byMonthDay == std::vector<std::int32_t>{1, -1});
+    CHECK(rule.byMonth == std::vector<std::string>{"3", "6L"});
+    CHECK(rule.byYearDay == std::vector<std::int32_t>{100, -1});
+    CHECK(rule.byWeekNo == std::vector<std::int32_t>{1, -1});
+    CHECK(rule.byHour == std::vector<std::uint32_t>{8, 17});
+    CHECK(rule.byMinute == std::vector<std::uint32_t>{0, 30});
+    CHECK(rule.bySecond == std::vector<std::uint32_t>{0, 60});
+    CHECK(rule.bySetPosition == std::vector<std::int32_t>{1, -1});
+    CHECK(rule.count == std::optional<std::uint32_t>{9});
+
+    const auto method = javelin::jmap::api::calendarEventSet({.accountId = "a1",
+                                                              .ifInState = "e5",
+                                                              .create = {},
+                                                              .update = {{"e1", event}},
+                                                              .destroy = {},
+                                                              .sendSchedulingMessages = true});
+    REQUIRE(method.has_value());
+    CHECK(method->arguments.find(R"("rscale":"gregorian")") != std::string::npos);
+    CHECK(method->arguments.find(R"("skip":"backward")") != std::string::npos);
+    CHECK(method->arguments.find(R"("firstDayOfWeek":"su")") != std::string::npos);
+    CHECK(method->arguments.find(R"("nthOfPeriod":-1)") != std::string::npos);
+    CHECK(method->arguments.find(R"("byMonthDay":[1,-1])") != std::string::npos);
+    CHECK(method->arguments.find(R"("byMonth":["3","6L"])") != std::string::npos);
+    CHECK(method->arguments.find(R"("bySetPosition":[1,-1])") != std::string::npos);
+}
+
 TEST_CASE("calendar event parsing preserves expanded instance identity", "[jmap][calendar]")
 {
     const auto parsed = javelin::jmap::api::parseCalendarEventGetResponse(
@@ -209,11 +257,8 @@ TEST_CASE("calendar set serializes occurrence edits as base-series overrides",
     series.start = {.value = "2026-07-13T09:00:00"};
     series.duration = {.value = "PT1H"};
     series.timeZone = javelin::jmap::calendar::TimeZoneId{.value = "Pacific/Auckland"};
-    series.recurrenceRule = javelin::jmap::calendar::RecurrenceRule{
-        .frequency = javelin::jmap::calendar::RecurrenceFrequency::Weekly,
-        .interval = 1,
-        .count = std::nullopt,
-        .until = std::nullopt};
+    series.recurrenceRule = javelin::jmap::calendar::RecurrenceRule{};
+    series.recurrenceRule->frequency = javelin::jmap::calendar::RecurrenceFrequency::Weekly;
     series.recurrenceOverrides.emplace(
         "2026-07-20T09:00:00",
         javelin::jmap::calendar::RecurrenceOverride{

@@ -451,12 +451,8 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
     });
     auto uncertainEvent = event();
     uncertainEvent.title = "Uncertain";
-    uncertainEvent.recurrenceRule = javelin::jmap::calendar::RecurrenceRule{
-        .frequency = javelin::jmap::calendar::RecurrenceFrequency::Daily,
-        .interval = 1,
-        .count = 3,
-        .until = std::nullopt,
-    };
+    uncertainEvent.recurrenceRule = javelin::jmap::calendar::RecurrenceRule{};
+    uncertainEvent.recurrenceRule->count = 3;
     const auto uncertain = QCoro::waitFor(service.update(
         settings, "a1", {.accountId = "a1", .event = uncertainEvent, .ifInState = std::nullopt}));
     REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(uncertain));

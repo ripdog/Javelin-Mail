@@ -52,6 +52,19 @@ TEST_CASE("attendee edits preserve matching scheduling records and owners")
     CHECK(result[2].participationStatus == "needs-action");
 }
 
+TEST_CASE("attendee suggestions split display names from email addresses")
+{
+    const std::vector<javelin::jmap::calendar::Attendee> existing;
+    const std::vector<std::string> requested{"Carol Person <carol@example.test>"};
+
+    const auto result = javelin::jmap::calendar::reconcileEditableAttendees(existing, requested);
+
+    REQUIRE(result.size() == 1);
+    CHECK(result.front().name == "Carol Person");
+    CHECK(result.front().email == std::optional<std::string>{"carol@example.test"});
+    CHECK(result.front().calendarAddress == "mailto:carol@example.test");
+}
+
 TEST_CASE("removed editable attendees do not remove hidden participant records")
 {
     auto hidden = attendee("resource", "room@example.test");

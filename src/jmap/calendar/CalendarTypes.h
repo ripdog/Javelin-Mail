@@ -96,12 +96,52 @@ namespace javelin::jmap::calendar
         Secondly,
     };
 
+    enum class RecurrenceSkip
+    {
+        Omit,
+        Backward,
+        Forward,
+    };
+
+    enum class Weekday
+    {
+        Monday,
+        Tuesday,
+        Wednesday,
+        Thursday,
+        Friday,
+        Saturday,
+        Sunday,
+    };
+
+    struct RecurrenceDay
+    {
+        Weekday day = Weekday::Monday;
+        std::optional<std::int32_t> nthOfPeriod;
+
+        auto operator<=>(const RecurrenceDay&) const = default;
+    };
+
     struct RecurrenceRule
     {
         RecurrenceFrequency frequency = RecurrenceFrequency::Daily;
         std::uint32_t interval = 1;
+        std::optional<std::string> rscale;
+        std::optional<RecurrenceSkip> skip;
+        std::optional<Weekday> firstDayOfWeek;
+        std::vector<RecurrenceDay> byDay;
+        std::vector<std::int32_t> byMonthDay;
+        std::vector<std::string> byMonth;
+        std::vector<std::int32_t> byYearDay;
+        std::vector<std::int32_t> byWeekNo;
+        std::vector<std::uint32_t> byHour;
+        std::vector<std::uint32_t> byMinute;
+        std::vector<std::uint32_t> bySecond;
+        std::vector<std::int32_t> bySetPosition;
         std::optional<std::uint32_t> count;
         std::optional<LocalDateTime> until;
+
+        auto operator<=>(const RecurrenceRule&) const = default;
     };
 
     struct Attendee

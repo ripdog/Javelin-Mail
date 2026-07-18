@@ -13,6 +13,12 @@ class QDateEdit;
 class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
+class QVBoxLayout;
+
+namespace javelin::gui::widgets
+{
+    class EmailAddressLineEdit;
+}
 
 namespace javelin::gui::calendar
 {
@@ -36,8 +42,21 @@ namespace javelin::gui::calendar
         void updateAllDayMode(bool allDay);
         void updateAutomaticEnd();
         void markEndEdited();
+        void editCustomRecurrence();
 
       private:
+        struct AttendeeRow
+        {
+            QWidget* container = nullptr;
+            javelin::gui::widgets::EmailAddressLineEdit* editor = nullptr;
+            QPushButton* remove = nullptr;
+        };
+
+        void addAttendeeRow(const QString& address = {});
+        void removeAttendeeRow(QWidget* row);
+        void clearAttendeeRows();
+        void updateRecurrenceControls();
+
         std::vector<javelin::jmap::calendar::Calendar> m_calendars;
         javelin::jmap::calendar::CalendarEvent m_event;
         QLineEdit* m_title = nullptr;
@@ -51,7 +70,12 @@ namespace javelin::gui::calendar
         QPlainTextEdit* m_description = nullptr;
         QLineEdit* m_location = nullptr;
         QComboBox* m_recurrence = nullptr;
-        QPlainTextEdit* m_attendees = nullptr;
+        QPushButton* m_customizeRecurrence = nullptr;
+        std::optional<javelin::jmap::calendar::RecurrenceRule> m_customRecurrence;
+        QString m_committedRecurrenceKey = QStringLiteral("none");
+        QWidget* m_attendees = nullptr;
+        QVBoxLayout* m_attendeeRowsLayout = nullptr;
+        std::vector<AttendeeRow> m_attendeeRows;
         QLabel* m_error = nullptr;
         QPushButton* m_delete = nullptr;
         bool m_endEdited = false;

@@ -101,11 +101,30 @@ namespace javelin::jmap::api::detail
         std::string timeZone;
     };
 
+    struct RawRecurrenceDay
+    {
+        std::string type;
+        std::string day;
+        std::optional<std::int32_t> nthOfPeriod;
+    };
+
     struct RawRecurrenceRule
     {
         std::string type;
         std::string frequency;
         std::uint32_t interval = 1;
+        std::optional<std::string> rscale;
+        std::optional<std::string> skip;
+        std::optional<std::string> firstDayOfWeek;
+        std::optional<std::vector<RawRecurrenceDay>> byDay;
+        std::optional<std::vector<std::int32_t>> byMonthDay;
+        std::optional<std::vector<std::string>> byMonth;
+        std::optional<std::vector<std::int32_t>> byYearDay;
+        std::optional<std::vector<std::int32_t>> byWeekNo;
+        std::optional<std::vector<std::uint32_t>> byHour;
+        std::optional<std::vector<std::uint32_t>> byMinute;
+        std::optional<std::vector<std::uint32_t>> bySecond;
+        std::optional<std::vector<std::int32_t>> bySetPosition;
         std::optional<std::uint32_t> count;
         std::optional<std::string> until;
     };
@@ -277,8 +296,14 @@ JAVELIN_GLZ_META(RawEventGetRequest, "accountId", &T::accountId, "ids", &T::ids,
                  &T::properties, "recurrenceOverridesBefore", &T::recurrenceOverridesBefore,
                  "recurrenceOverridesAfter", &T::recurrenceOverridesAfter, "reduceParticipants",
                  &T::reduceParticipants, "timeZone", &T::timeZone);
+JAVELIN_GLZ_META(RawRecurrenceDay, "@type", &T::type, "day", &T::day, "nthOfPeriod",
+                 &T::nthOfPeriod);
 JAVELIN_GLZ_META(RawRecurrenceRule, "@type", &T::type, "frequency", &T::frequency, "interval",
-                 &T::interval, "count", &T::count, "until", &T::until);
+                 &T::interval, "rscale", &T::rscale, "skip", &T::skip, "firstDayOfWeek",
+                 &T::firstDayOfWeek, "byDay", &T::byDay, "byMonthDay", &T::byMonthDay, "byMonth",
+                 &T::byMonth, "byYearDay", &T::byYearDay, "byWeekNo", &T::byWeekNo, "byHour",
+                 &T::byHour, "byMinute", &T::byMinute, "bySecond", &T::bySecond, "bySetPosition",
+                 &T::bySetPosition, "count", &T::count, "until", &T::until);
 JAVELIN_GLZ_META(RawOverride, "excluded", &T::excluded, "start", &T::start, "duration",
                  &T::duration, "title", &T::title);
 JAVELIN_GLZ_META(RawParticipant, "@type", &T::type, "name", &T::name, "email", &T::email,
@@ -401,6 +426,74 @@ namespace javelin::jmap::api
             return calendar::RecurrenceFrequency::Daily;
         }
 
+        std::string skip(const calendar::RecurrenceSkip value)
+        {
+            switch (value)
+            {
+            case calendar::RecurrenceSkip::Omit:
+                return "omit";
+            case calendar::RecurrenceSkip::Backward:
+                return "backward";
+            case calendar::RecurrenceSkip::Forward:
+                return "forward";
+            }
+            return "omit";
+        }
+
+        calendar::RecurrenceSkip recurrenceSkip(const std::string_view value)
+        {
+            if (value == "backward")
+                return calendar::RecurrenceSkip::Backward;
+            if (value == "forward")
+                return calendar::RecurrenceSkip::Forward;
+            return calendar::RecurrenceSkip::Omit;
+        }
+
+        std::string weekday(const calendar::Weekday value)
+        {
+            switch (value)
+            {
+            case calendar::Weekday::Monday:
+                return "mo";
+            case calendar::Weekday::Tuesday:
+                return "tu";
+            case calendar::Weekday::Wednesday:
+                return "we";
+            case calendar::Weekday::Thursday:
+                return "th";
+            case calendar::Weekday::Friday:
+                return "fr";
+            case calendar::Weekday::Saturday:
+                return "sa";
+            case calendar::Weekday::Sunday:
+                return "su";
+            }
+            return "mo";
+        }
+
+        calendar::Weekday weekday(const std::string_view value)
+        {
+            if (value == "tu")
+                return calendar::Weekday::Tuesday;
+            if (value == "we")
+                return calendar::Weekday::Wednesday;
+            if (value == "th")
+                return calendar::Weekday::Thursday;
+            if (value == "fr")
+                return calendar::Weekday::Friday;
+            if (value == "sa")
+                return calendar::Weekday::Saturday;
+            if (value == "su")
+                return calendar::Weekday::Sunday;
+            return calendar::Weekday::Monday;
+        }
+
+        template <typename T>
+        std::optional<std::vector<T>> optionalValues(const std::vector<T>& values)
+        {
+            return values.empty() ? std::nullopt : std::optional{values};
+        }
+
         bool isImportedAllDayEvent(const detail::RawEvent& value)
         {
             if (value.showWithoutTime)
@@ -472,10 +565,32 @@ namespace javelin::jmap::api
             }
             if (value.recurrenceRule)
             {
+                std::vector<detail::RawRecurrenceDay> byDay;
+                byDay.reserve(value.recurrenceRule->byDay.size());
+                for (const auto& day : value.recurrenceRule->byDay)
+                    byDay.push_back(
+                        {.type = "NDay", .day = weekday(day.day), .nthOfPeriod = day.nthOfPeriod});
                 raw.recurrenceRule = detail::RawRecurrenceRule{
                     .type = "RecurrenceRule",
                     .frequency = frequency(value.recurrenceRule->frequency),
                     .interval = value.recurrenceRule->interval,
+                    .rscale = value.recurrenceRule->rscale,
+                    .skip = value.recurrenceRule->skip
+                                ? std::optional{skip(*value.recurrenceRule->skip)}
+                                : std::nullopt,
+                    .firstDayOfWeek =
+                        value.recurrenceRule->firstDayOfWeek
+                            ? std::optional{weekday(*value.recurrenceRule->firstDayOfWeek)}
+                            : std::nullopt,
+                    .byDay = optionalValues(byDay),
+                    .byMonthDay = optionalValues(value.recurrenceRule->byMonthDay),
+                    .byMonth = optionalValues(value.recurrenceRule->byMonth),
+                    .byYearDay = optionalValues(value.recurrenceRule->byYearDay),
+                    .byWeekNo = optionalValues(value.recurrenceRule->byWeekNo),
+                    .byHour = optionalValues(value.recurrenceRule->byHour),
+                    .byMinute = optionalValues(value.recurrenceRule->byMinute),
+                    .bySecond = optionalValues(value.recurrenceRule->bySecond),
+                    .bySetPosition = optionalValues(value.recurrenceRule->bySetPosition),
                     .count = value.recurrenceRule->count,
                     .until = value.recurrenceRule->until
                                  ? std::optional{value.recurrenceRule->until->value}
@@ -597,9 +712,36 @@ namespace javelin::jmap::api
             }
             if (raw.recurrenceRule)
             {
+                std::vector<calendar::RecurrenceDay> byDay;
+                if (raw.recurrenceRule->byDay)
+                {
+                    byDay.reserve(raw.recurrenceRule->byDay->size());
+                    for (const auto& day : *raw.recurrenceRule->byDay)
+                        byDay.push_back({.day = weekday(day.day), .nthOfPeriod = day.nthOfPeriod});
+                }
                 value.recurrenceRule = calendar::RecurrenceRule{
                     .frequency = frequency(raw.recurrenceRule->frequency),
                     .interval = raw.recurrenceRule->interval,
+                    .rscale = raw.recurrenceRule->rscale,
+                    .skip = raw.recurrenceRule->skip
+                                ? std::optional{recurrenceSkip(*raw.recurrenceRule->skip)}
+                                : std::nullopt,
+                    .firstDayOfWeek =
+                        raw.recurrenceRule->firstDayOfWeek
+                            ? std::optional{weekday(*raw.recurrenceRule->firstDayOfWeek)}
+                            : std::nullopt,
+                    .byDay = std::move(byDay),
+                    .byMonthDay =
+                        raw.recurrenceRule->byMonthDay.value_or(std::vector<std::int32_t>{}),
+                    .byMonth = raw.recurrenceRule->byMonth.value_or(std::vector<std::string>{}),
+                    .byYearDay =
+                        raw.recurrenceRule->byYearDay.value_or(std::vector<std::int32_t>{}),
+                    .byWeekNo = raw.recurrenceRule->byWeekNo.value_or(std::vector<std::int32_t>{}),
+                    .byHour = raw.recurrenceRule->byHour.value_or(std::vector<std::uint32_t>{}),
+                    .byMinute = raw.recurrenceRule->byMinute.value_or(std::vector<std::uint32_t>{}),
+                    .bySecond = raw.recurrenceRule->bySecond.value_or(std::vector<std::uint32_t>{}),
+                    .bySetPosition =
+                        raw.recurrenceRule->bySetPosition.value_or(std::vector<std::int32_t>{}),
                     .count = raw.recurrenceRule->count,
                     .until =
                         raw.recurrenceRule->until

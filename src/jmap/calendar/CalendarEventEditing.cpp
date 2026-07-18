@@ -42,6 +42,29 @@ namespace
         return address;
     }
 
+    struct ParsedAddress
+    {
+        std::string name;
+        std::string address;
+    };
+
+    ParsedAddress parsedAddress(std::string value)
+    {
+        value = trim(std::move(value));
+        const auto opening = value.rfind('<');
+        if (opening != std::string::npos && value.ends_with('>') && opening + 1 < value.size() - 1)
+        {
+            auto name = trim(value.substr(0, opening));
+            if (name.size() >= 2 && name.front() == '"' && name.back() == '"')
+                name = name.substr(1, name.size() - 2);
+            return {.name = std::move(name),
+                    .address = trim(value.substr(opening + 1, value.size() - opening - 2))};
+        }
+        if (startsWithMailto(value))
+            value.erase(0, std::string_view{"mailto:"}.size());
+        return {.name = {}, .address = std::move(value)};
+    }
+
     std::optional<std::string> attendeeAddress(const javelin::jmap::calendar::Attendee& attendee)
     {
         auto address = attendee.email.value_or(attendee.calendarAddress);
@@ -94,8 +117,8 @@ namespace javelin::jmap::calendar
         std::size_t nextId = 1;
         for (const auto& requested : requestedAddresses)
         {
-            const auto address = trim(requested);
-            const auto normalized = normalizedAddress(address);
+            const auto parsed = parsedAddress(requested);
+            const auto normalized = normalizedAddress(parsed.address);
             if (normalized.empty() || !addedAddresses.emplace(normalized).second)
                 continue;
 
@@ -110,10 +133,11 @@ namespace javelin::jmap::calendar
                 id = "attendee-" + std::to_string(nextId++);
             while (usedIds.contains(id));
             usedIds.emplace(id);
+            const auto name = parsed.name.empty() ? parsed.address : parsed.name;
             result.push_back({.id = std::move(id),
-                              .name = address,
-                              .email = address,
-                              .calendarAddress = "mailto:" + address,
+                              .name = name,
+                              .email = parsed.address,
+                              .calendarAddress = "mailto:" + parsed.address,
                               .participationStatus = "needs-action",
                               .isOwner = false,
                               .isAttendee = true,
