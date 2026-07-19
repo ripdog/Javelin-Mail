@@ -41,7 +41,9 @@ namespace javelin::jmap
 namespace javelin::app
 {
     class ComposeService;
-}
+    class MessageNavigationCoordinator;
+    struct OpenEmailRoute;
+} // namespace javelin::app
 namespace javelin::gui::search
 {
     class SearchSession;
@@ -124,10 +126,10 @@ namespace javelin::gui::shell
             javelin::jmap::cache::QueryService& queryService,
             javelin::jmap::cache::TranslationCacheRepository& translationCacheRepository,
             javelin::app::ComposeService& composeService,
-            javelin::app::MailApplicationService& mailService, QWidget* parent = nullptr);
+            javelin::app::MailApplicationService& mailService,
+            javelin::app::MessageNavigationCoordinator& messageNavigationCoordinator,
+            QWidget* parent = nullptr);
         ~MainWindow() override = default;
-        void openMessageFromNotification(const QString& accountId, const QString& mailboxId,
-                                         const QString& threadId, const QString& emailId);
         void openPreferencesForConnection(const QString& connectionId);
 
       Q_SIGNALS:
@@ -154,6 +156,7 @@ namespace javelin::gui::shell
             std::optional<std::size_t> total;
             std::string queryState;
             std::optional<std::string> anchor;
+            std::int64_t anchorOffset = 1;
             std::vector<javelin::jmap::cache::MessageListItem> items;
             bool cacheLoaded = false;
             bool refreshInFlight = false;
@@ -306,6 +309,9 @@ namespace javelin::gui::shell
         [[nodiscard]] ToolbarContext toolbarContextForActiveTab() const;
         void updateToolbarForActiveTab();
         void refreshSelectedMessageContent(std::string accountId, std::string emailId);
+        void openEmailRoute(const javelin::app::OpenEmailRoute& route);
+        void resolveOpenEmailRoute();
+        [[nodiscard]] const javelin::app::OpenEmailRoute* activeOpenEmailRoute() const;
         [[nodiscard]] std::vector<std::string> selectedEmailIds() const;
         [[nodiscard]] std::variant<std::vector<std::string>, QString>
         selectedEmailIdsForMailboxAction(std::string_view accountId) const;
@@ -386,6 +392,7 @@ namespace javelin::gui::shell
         javelin::jmap::cache::TranslationCacheRepository& m_translationCacheRepository;
         javelin::app::ComposeService& m_composeService;
         javelin::app::MailApplicationService& m_mailService;
+        javelin::app::MessageNavigationCoordinator& m_messageNavigationCoordinator;
         QSplitter* m_mainSplitter = nullptr;
         QStackedWidget* m_contentStack = nullptr;
         QWidget* m_mailboxPane = nullptr;
@@ -448,6 +455,7 @@ namespace javelin::gui::shell
         bool m_refreshInFlight = false;
         std::uint64_t m_nextMessageContentRequestToken = 1;
         std::optional<MessageContentRequestState> m_messageContentRequestInFlight;
+        std::optional<std::uint64_t> m_navigationContextRequested;
         bool m_syncingNavigation = false;
         std::optional<int> m_activeTabIndex;
         std::vector<TabState> m_tabs;

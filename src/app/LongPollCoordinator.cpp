@@ -351,7 +351,8 @@ namespace javelin::app
 
         auto result = co_await m_jmapCore.queryMailboxPage(
             toLiveConnectionSettings(configuration->second.settings), intent.accountId,
-            intent.mailboxId, intent.offset, intent.limit, intent.sort, std::move(intent.anchor));
+            intent.mailboxId, intent.offset, intent.limit, intent.sort, std::move(intent.anchor),
+            intent.anchorOffset);
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
         {
             m_errorCoordinator.reportFailure(configuration->second.settings, intent.accountId,

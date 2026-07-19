@@ -11,6 +11,7 @@
 
 #include <cstddef>
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -23,6 +24,7 @@ namespace javelin::jmap::sync
     {
         std::size_t representativeCount = 0;
         bool usedIncrementalRefresh = false;
+        bool canonicalWindowMaterialized = false;
         bool superseded = false;
         std::vector<std::string> changedEmailIds;
         std::vector<std::string> insertedEmailIds;
@@ -32,6 +34,11 @@ namespace javelin::jmap::sync
     };
 
     using MailboxRefreshResult = std::variant<MailboxRefreshSummary, OperationError>;
+
+    [[nodiscard]] std::optional<OperationError>
+    rebaseActiveEmailProjections(javelin::jmap::cache::DatabaseConnection& databaseConnection,
+                                 std::string_view accountId, std::vector<std::string> emailIds,
+                                 std::string_view serverState);
 
     class MailboxRefreshExecutor
     {

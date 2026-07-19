@@ -37,6 +37,7 @@ namespace javelin::app
         javelin::jmap::query::EmailListSort sort;
         bool forceRefresh = false;
         std::optional<std::string> anchor;
+        std::int64_t anchorOffset = 1;
     };
 
     struct SearchWindowIntent

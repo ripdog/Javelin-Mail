@@ -354,6 +354,7 @@ namespace javelin::app
             m_databaseConnection, methodCaller, apiRequestContext};
         bool watchedMailboxRefreshed = false;
         QStringList refreshedMailboxIds;
+        std::vector<MailboxQueryWindowChange> materializedWindows;
         bool hasNewMail = false;
         const auto watchedMailboxes = runContext->configuration.mailboxes;
         for (const auto& [mailboxId, mailboxName] : watchedMailboxes)
@@ -371,12 +372,21 @@ namespace javelin::app
                 m_shouldCatchUpRefreshOnReconnect = false;
                 watchedMailboxRefreshed = true;
                 refreshedMailboxIds.push_back(QString::fromStdString(mailboxId));
+                if (summary->canonicalWindowMaterialized)
+                {
+                    materializedWindows.push_back(MailboxQueryWindowChange{
+                        .mailboxId = QString::fromStdString(mailboxId),
+                        .offset = 0,
+                        .limit = 100,
+                        .total = std::nullopt,
+                    });
+                }
                 hasNewMail = hasNewMail || !summary->insertedEmailIds.empty();
                 if (runContext->configuration.notificationMailboxIds.contains(mailboxId))
                 {
                     javelin::jmap::cache::NotificationRepository notifications{
                         m_databaseConnection};
-                    const auto candidates = notifications.claimUnreadMailboxEmails(
+                    const auto candidates = notifications.enqueueUnreadMailboxEmails(
                         runContext->configuration.accountId, mailboxId);
                     if (const auto* error =
                             std::get_if<javelin::jmap::cache::DatabaseError>(&candidates))
@@ -385,11 +395,20 @@ namespace javelin::app
                     }
                     else
                     {
-                        publishNotifications(
-                            *runContext, mailboxId, mailboxName,
-                            std::get<
-                                std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(
-                                candidates));
+                        const auto& pending = std::get<
+                            std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(
+                            candidates);
+                        publishNotifications(*runContext, mailboxId, mailboxName, pending);
+                        std::vector<std::string> deliveredIds;
+                        deliveredIds.reserve(pending.size());
+                        for (const auto& candidate : pending)
+                            deliveredIds.push_back(candidate.emailId);
+                        if (const auto deliveryError = notifications.markDelivered(
+                                runContext->configuration.accountId, mailboxId, deliveredIds))
+                        {
+                            qWarning().noquote() << "Notification delivery recording failed"
+                                                 << deliveryError->message;
+                        }
                     }
                 }
             }
@@ -412,7 +431,7 @@ namespace javelin::app
             Q_EMIT cacheCommitted(MailCacheChange{
                 .accountId = QString::fromStdString(runContext->configuration.accountId),
                 .mailboxIds = std::move(refreshedMailboxIds),
-                .queryWindows = {},
+                .queryWindows = std::move(materializedWindows),
                 .searchWindows = {},
                 .hasNewMail = hasNewMail,
             });

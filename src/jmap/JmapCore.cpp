@@ -663,6 +663,7 @@ namespace javelin::jmap
                                   const std::size_t offset, const std::size_t limit,
                                   javelin::jmap::query::EmailListSort sort,
                                   std::optional<std::string> anchor,
+                                  const std::int64_t anchorOffset,
                                   std::function<void(const QString&)> reportProgress)
         {
             if (const auto validationError = validateLoginSettings(settings, true))
@@ -691,7 +692,7 @@ namespace javelin::jmap
                                 ? std::nullopt
                                 : std::optional<std::uint64_t>{static_cast<std::uint64_t>(offset)},
                 .anchor = std::move(anchor),
-                .anchorOffset = 1,
+                .anchorOffset = anchorOffset,
                 .limit = static_cast<std::uint64_t>(limit),
                 .collapseThreads = true,
                 .calculateTotal = true,
@@ -813,6 +814,17 @@ namespace javelin::jmap
             if (const auto error = emailRepository.upsertMany(accountId, parsedEmails.list))
             {
                 co_return javelin::jmap::operationError(*error);
+            }
+
+            std::vector<std::string> materializedEmailIds;
+            materializedEmailIds.reserve(parsedEmails.list.size());
+            for (const auto& email : parsedEmails.list)
+                materializedEmailIds.push_back(email.id);
+            if (const auto error = javelin::jmap::sync::rebaseActiveEmailProjections(
+                    databaseConnection, accountId, std::move(materializedEmailIds),
+                    parsedEmails.state))
+            {
+                co_return *error;
             }
 
             javelin::jmap::cache::ThreadRepository threadRepository{databaseConnection};
@@ -2001,7 +2013,7 @@ namespace javelin::jmap
         const auto pageResult = co_await performCollapsedQueryPage(
             *m_impl->databaseConnection, *m_impl->methodTransport, settings, accountId,
             javelin::jmap::search::toEmailQueryFilter(criteria), offset, limit, std::move(sort),
-            std::move(anchor), reportProgress);
+            std::move(anchor), 1, reportProgress);
         if (const auto* error = std::get_if<OperationError>(&pageResult))
         {
             co_return *error;
@@ -2053,10 +2065,12 @@ namespace javelin::jmap
         };
     }
 
-    QCoro::Task<MailboxPageResult> JmapCore::queryMailboxPage(
-        LiveConnectionSettings settings, std::string accountId, std::string mailboxId,
-        const std::size_t offset, const std::size_t limit, javelin::jmap::query::EmailListSort sort,
-        std::optional<std::string> anchor, std::function<void(const QString&)> progressCallback)
+    QCoro::Task<MailboxPageResult>
+    JmapCore::queryMailboxPage(LiveConnectionSettings settings, std::string accountId,
+                               std::string mailboxId, const std::size_t offset,
+                               const std::size_t limit, javelin::jmap::query::EmailListSort sort,
+                               std::optional<std::string> anchor, const std::int64_t anchorOffset,
+                               std::function<void(const QString&)> progressCallback)
     {
         const auto reportProgress = [&progressCallback](const QString& message)
         {
@@ -2098,19 +2112,22 @@ namespace javelin::jmap
             co_return javelin::jmap::operationError(*error);
         }
 
+        const bool anchoredRequest = anchor.has_value();
         const auto pageResult = co_await performCollapsedQueryPage(
             *m_impl->databaseConnection, *m_impl->methodTransport, settings, accountId,
             javelin::jmap::api::EmailQueryFilter{
                 .inMailbox = mailboxId,
                 .text = std::nullopt,
             },
-            offset, limit, std::move(sort), std::move(anchor), reportProgress);
+            offset, limit, std::move(sort), std::move(anchor), anchorOffset, reportProgress);
         if (const auto* error = std::get_if<OperationError>(&pageResult))
         {
             co_return *error;
         }
 
         auto page = std::get<CollapsedQueryPage>(std::move(pageResult));
+        const auto materializedOffset = javelin::jmap::sync::materializedMailboxWindowOffset(
+            offset, anchoredRequest, page.position);
         std::vector<std::string> representativeIds;
         representativeIds.reserve(page.results.size());
         for (const auto& item : page.results)
@@ -2126,7 +2143,7 @@ namespace javelin::jmap
                 .accountId = accountId,
                 .mailboxId = mailboxId,
                 .queryKey = queryKey,
-                .requestedOffset = offset,
+                .requestedOffset = materializedOffset,
                 .requestedLimit = limit,
                 .position = page.position,
                 .returnedLimit = page.returnedLimit,
@@ -2140,7 +2157,7 @@ namespace javelin::jmap
         co_return MailboxPageSummary{
             .accountId = std::move(accountId),
             .mailboxId = std::move(mailboxId),
-            .offset = offset,
+            .offset = materializedOffset,
             .limit = limit,
             .position = page.position,
             .returnedLimit = page.returnedLimit,

@@ -176,7 +176,8 @@ TEST_CASE("refresh notification planner returns empty candidates when nothing wa
     CHECK(std::get<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(result).empty());
 }
 
-TEST_CASE("notification repository claims each mailbox email once", "[jmap][cache][notification]")
+TEST_CASE("notification outbox persists pending mail until delivery",
+          "[jmap][cache][notification]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
@@ -199,7 +200,7 @@ TEST_CASE("notification repository claims each mailbox email once", "[jmap][cach
     REQUIRE_FALSE(emails.replaceAll("account-1", {unread, seen}).has_value());
 
     javelin::jmap::cache::NotificationRepository notifications{databaseContext.connection};
-    const auto first = notifications.claimUnreadMailboxEmails("account-1", "mbx-inbox");
+    const auto first = notifications.enqueueUnreadMailboxEmails("account-1", "mbx-inbox");
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(
         first));
     const auto& candidates =
@@ -207,9 +208,17 @@ TEST_CASE("notification repository claims each mailbox email once", "[jmap][cach
     REQUIRE(candidates.size() == 1);
     CHECK(candidates.front().emailId == "eml-unread");
 
+    const auto pendingAgain = notifications.enqueueUnreadMailboxEmails("account-1", "mbx-inbox");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(
+        pendingAgain));
+    CHECK(std::get<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(pendingAgain)
+              .size() == 1);
+    REQUIRE_FALSE(
+        notifications.markDelivered("account-1", "mbx-inbox", {"eml-unread"}).has_value());
+
     seen.keywords = {};
     REQUIRE_FALSE(emails.upsertMany("account-1", {seen}).has_value());
-    const auto second = notifications.claimUnreadMailboxEmails("account-1", "mbx-inbox");
+    const auto second = notifications.enqueueUnreadMailboxEmails("account-1", "mbx-inbox");
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(
         second));
     CHECK(std::get<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(second).empty());

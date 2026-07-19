@@ -17,6 +17,37 @@ refresh, mailbox interest, state tokens, cache reconciliation, retries, and post
 Consumers receive one `MailCacheChange` after a synchronization pass commits and reload affected
 views from SQLite.
 
+## Cache materialization and navigation
+
+A synchronization result is not UI state until its typed cache materializer has committed it.
+Each JMAP data type owns its own adapter, schema, consistency domain, window semantics, and
+optimistic rebase rules. The shared contract is deliberately narrow: capture the domain fence,
+materialize confirmed objects and authoritative query membership, rebase active projections, then
+publish one typed post-commit cache change. There is no generic cross-type object table and no
+untyped JMAP value bag.
+
+For Email, an authoritative mailbox materialization includes both the fetched Email/Thread objects
+and the exact ordered `Email/query` window. Background watched-mailbox refresh uses the canonical
+received-at-descending collapsed window, so a synchronized mailbox is immediately loadable from
+SQLite. Any page fetch that writes server Email objects reapplies active Email projections before
+the cache can be rendered. Contacts continue to materialize AddressBook and ContactCard snapshots
+through their repositories; calendars continue to materialize CalendarEvent objects and bounded
+occurrence windows through `CalendarService`. Their state tokens, eviction rules, and optimistic
+adapters remain independent.
+
+External navigation is an application intent, not a transient widget selection. A notification
+activation creates a typed Email route containing stable account, mailbox, thread, and Email ids.
+The process-owned coordinator keeps that route alive while the GUI restores, renders any cached
+message immediately, and—only when necessary—materializes an anchored authoritative mailbox page.
+The route completes after the target has been selected/rendered, or is cancelled by superseding
+user navigation. Contact and calendar routes may use the same lifecycle with their own typed route
+values; they do not acquire Email pagination semantics.
+
+Mail notification discovery writes a persistent pending outbox before publication. Entries become
+delivered only after the desktop-notification signal is emitted, making a process failure in that
+gap retryable instead of silently losing the notification. Calendar reminder acknowledgement and
+snooze state remains in its separate calendar notification repository.
+
 `JmapMethodTransport` is the request/response boundary for typed JMAP envelopes.
 `PreferredJmapMethodTransport` uses the RFC 8887 capability advertised by the cached Session to
 keep an authenticated `jmap` WebSocket per owning account, correlate concurrent requests, and send

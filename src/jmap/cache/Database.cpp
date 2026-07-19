@@ -1242,6 +1242,24 @@ namespace javelin::jmap::cache
                                 "NOT NULL DEFAULT 1 CHECK(is_valid IN (0,1))"),
                         },
                 },
+                MigrationStep{
+                    .version = 28,
+                    .name = QStringLiteral("mail_notification_outbox"),
+                    .statements =
+                        {
+                            QStringLiteral(
+                                "CREATE TABLE mail_notification_outbox ("
+                                "account_id TEXT NOT NULL REFERENCES accounts(account_id) ON "
+                                "DELETE CASCADE,mailbox_id TEXT NOT NULL,email_id TEXT NOT NULL,"
+                                "thread_id TEXT NOT NULL,subject TEXT,received_at TEXT NOT NULL,"
+                                "status TEXT NOT NULL CHECK(status IN ('pending','delivered')),"
+                                "created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,delivered_at "
+                                "TEXT,PRIMARY KEY(account_id,email_id)) STRICT"),
+                            QStringLiteral("CREATE INDEX idx_mail_notification_outbox_pending ON "
+                                           "mail_notification_outbox(account_id,mailbox_id,status,"
+                                           "received_at)"),
+                        },
+                },
             },
         };
     }

@@ -5,6 +5,7 @@
 #include "jmap/api/MethodEnvelope.h"
 #include "jmap/api/Transport.h"
 #include "jmap/cache/EmailRepository.h"
+#include "jmap/cache/MailboxWindowRepository.h"
 #include "jmap/cache/QueryService.h"
 #include "jmap/cache/SyncStateRepository.h"
 #include "jmap/cache/ThreadRepository.h"
@@ -146,6 +147,29 @@ namespace
                 },
             .apiUrl = "https://mail.example.com/jmap/api",
         };
+    }
+
+    [[nodiscard]] std::string mailboxQueryKey();
+
+    void seedCanonicalWindow(javelin::jmap::cache::DatabaseConnection& connection,
+                             std::vector<std::string> emailIds = {"eml-1"})
+    {
+        javelin::jmap::cache::MailboxWindowRepository windows{connection};
+        REQUIRE_FALSE(windows
+                          .replace({
+                              .accountId = "account-1",
+                              .mailboxId = "mbx-inbox",
+                              .queryKey = mailboxQueryKey(),
+                              .requestedOffset = 0,
+                              .requestedLimit = 100,
+                              .position = 0,
+                              .returnedLimit = 100,
+                              .total = emailIds.size(),
+                              .queryState = "query-state-1",
+                              .isAuthoritative = true,
+                              .emailIds = std::move(emailIds),
+                          })
+                          .has_value());
     }
 
     [[nodiscard]] std::string mailboxQueryKey()
@@ -305,6 +329,7 @@ TEST_CASE("mailbox refresh executor bootstraps a collapsed mailbox into the cach
     const auto& summary = std::get<javelin::jmap::sync::MailboxRefreshSummary>(result);
     CHECK(summary.representativeCount == 1);
     CHECK_FALSE(summary.usedIncrementalRefresh);
+    CHECK(summary.canonicalWindowMaterialized);
     CHECK(summary.changedEmailIds.empty());
     CHECK(summary.insertedEmailIds.empty());
     CHECK(summary.removedEmailIds.empty());
@@ -331,6 +356,17 @@ TEST_CASE("mailbox refresh executor bootstraps a collapsed mailbox into the cach
     REQUIRE(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(queryState).has_value());
     CHECK(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(queryState)->stateToken ==
           "query-state-1");
+
+    javelin::jmap::cache::MailboxWindowRepository windows{databaseContext.connection};
+    const auto windowResult = windows.find("account-1", mailboxQueryKey(), 0, 100);
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(
+        windowResult));
+    const auto& window =
+        std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(windowResult);
+    REQUIRE(window.has_value());
+    CHECK(window->isAuthoritative);
+    CHECK(window->queryState == "query-state-1");
+    CHECK(window->emailIds == std::vector<std::string>{"eml-1"});
 }
 
 TEST_CASE("mailbox refresh executor discards a response superseded by an accepted mutation",
@@ -663,6 +699,7 @@ TEST_CASE("mailbox refresh executor applies updated-only deltas without full reb
                       .upsert({.accountId = "account-1", .objectType = "Email", .queryKey = {}},
                               "email-state-1")
                       .has_value());
+    seedCanonicalWindow(databaseContext.connection);
 
     FakeTransport transport;
     transport.queuedResults
@@ -754,6 +791,7 @@ TEST_CASE("mailbox refresh executor rebuilds window when updated delta is missin
                       .upsert({.accountId = "account-1", .objectType = "Email", .queryKey = {}},
                               "email-state-1")
                       .has_value());
+    seedCanonicalWindow(databaseContext.connection);
 
     FakeTransport transport;
     transport.queuedResults
@@ -885,6 +923,7 @@ TEST_CASE("mailbox refresh executor preserves change hints when delta falls back
                       .upsert({.accountId = "account-1", .objectType = "Email", .queryKey = {}},
                               "email-state-1")
                       .has_value());
+    seedCanonicalWindow(databaseContext.connection, {"eml-1", "eml-removed"});
 
     FakeTransport transport;
     transport.queuedResults
@@ -1016,6 +1055,7 @@ TEST_CASE("mailbox refresh executor derives inserted email ids from full fetch f
                       .upsert({.accountId = "account-1", .objectType = "Email", .queryKey = {}},
                               "email-state-1")
                       .has_value());
+    seedCanonicalWindow(databaseContext.connection, {"eml-1"});
 
     FakeTransport transport;
     transport.queuedResults
@@ -1170,6 +1210,7 @@ TEST_CASE("mailbox refresh executor full fallback preserves unrelated account ca
                       .upsert({.accountId = "account-1", .objectType = "Email", .queryKey = {}},
                               "email-state-1")
                       .has_value());
+    seedCanonicalWindow(databaseContext.connection, {"eml-1"});
 
     FakeTransport transport;
     transport.queuedResults

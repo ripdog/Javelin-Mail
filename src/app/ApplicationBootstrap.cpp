@@ -5,6 +5,7 @@
 #include "app/CalendarNotificationService.h"
 #include "app/DesktopNotificationController.h"
 #include "app/LongPollCoordinator.h"
+#include "app/MessageNavigationCoordinator.h"
 #include "app/ProcessServices.h"
 #include "gui/settings/PreferencesDialog.h"
 #include "gui/shell/MainWindow.h"
@@ -199,7 +200,7 @@ namespace javelin::app
             m_processServices->contactIdentityLookup(), m_processServices->identityRepository(),
             m_processServices->messageViewService(), m_processServices->queryService(),
             m_processServices->translationCacheRepository(), m_processServices->composeService(),
-            m_processServices->mailService());
+            m_processServices->mailService(), m_processServices->messageNavigationCoordinator());
 
         m_mainWindow->setAttribute(Qt::WA_DeleteOnClose);
         QObject::connect(m_mainWindow, &javelin::gui::shell::MainWindow::accountSettingsChanged,
@@ -262,19 +263,20 @@ namespace javelin::app
                 m_notificationController->notifyError(connectionId, title, message, persistent,
                                                       opensSettings);
             });
-        QObject::connect(m_notificationController.get(),
-                         &DesktopNotificationController::notificationActivated, &m_application,
-                         [this](const QString& accountId, const QString& mailboxId,
-                                const QString& threadId, const QString& emailId,
-                                const QString& activationToken)
-                         {
-                             restoreMainWindow(activationToken);
-                             if (m_mainWindow != nullptr)
-                             {
-                                 m_mainWindow->openMessageFromNotification(accountId, mailboxId,
-                                                                           threadId, emailId);
-                             }
-                         });
+        QObject::connect(
+            m_notificationController.get(), &DesktopNotificationController::notificationActivated,
+            &m_application,
+            [this](const QString& accountId, const QString& mailboxId, const QString& threadId,
+                   const QString& emailId, const QString& activationToken)
+            {
+                restoreMainWindow(activationToken);
+                const auto thread = threadId.isEmpty()
+                                        ? std::optional<std::string>{std::nullopt}
+                                        : std::optional<std::string>{threadId.toStdString()};
+                static_cast<void>(m_processServices->messageNavigationCoordinator().openEmail(
+                    accountId.toStdString(), mailboxId.toStdString(), thread,
+                    emailId.toStdString()));
+            });
         QObject::connect(&m_processServices->calendarNotificationService(),
                          &CalendarNotificationService::reminderDue, m_notificationController.get(),
                          &DesktopNotificationController::notifyCalendarEvent);

@@ -169,6 +169,11 @@ Ordered Email query membership follows the additional invariants in
 windows inside the same projection transaction; cached object counts are never treated as proof of
 ordered query coverage.
 
+All Email materialization paths, including explicit pagination and notification-anchored queries,
+must rebase active Email projections after writing confirmed server objects and before publishing a
+cache change. A specialized page loader is not permission to bypass the mutation journal or expose
+a raw server snapshot to the GUI.
+
 ## Extension Checklist
 
 Every new stateful JMAP mutation must:

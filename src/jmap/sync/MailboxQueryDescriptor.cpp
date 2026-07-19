@@ -10,4 +10,11 @@ namespace javelin::jmap::sync
                "|collapseThreads:" + (descriptor.collapseThreads ? "true" : "false");
     }
 
+    std::size_t materializedMailboxWindowOffset(const std::size_t requestedOffset,
+                                                const bool anchoredRequest,
+                                                const std::size_t returnedPosition)
+    {
+        return anchoredRequest ? returnedPosition : requestedOffset;
+    }
+
 } // namespace javelin::jmap::sync

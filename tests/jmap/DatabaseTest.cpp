@@ -81,7 +81,7 @@ TEST_CASE("database connection creates the initial cache schema", "[jmap][cache]
         migrationsResult));
     const auto& migrations =
         std::get<std::vector<javelin::jmap::cache::AppliedMigration>>(migrationsResult);
-    REQUIRE(migrations.size() == 25);
+    REQUIRE(migrations.size() == 26);
     CHECK(migrations.front().version == 1);
     CHECK(migrations.front().name == QStringLiteral("initial_cache_schema"));
     CHECK(migrations.at(1).version == 2);
@@ -104,14 +104,15 @@ TEST_CASE("database connection creates the initial cache schema", "[jmap][cache]
     CHECK(migrations.at(10).name == QStringLiteral("websocket_push_capability"));
     CHECK(migrations.at(11).version == 14);
     CHECK(migrations.at(11).name == QStringLiteral("search_windows"));
-    CHECK(migrations.back().version == 27);
-    CHECK(migrations.back().name == QStringLiteral("mailbox_query_window_validity"));
+    CHECK(migrations.back().version == 28);
+    CHECK(migrations.back().name == QStringLiteral("mail_notification_outbox"));
 
     QSqlQuery tableQuery{connection.database()};
     REQUIRE(tableQuery.exec(
         QStringLiteral("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN "
                        "('accounts', 'compose_sessions', 'mailboxes', "
                        "'emails', 'jmap_transport_preferences', 'observed_notification_emails', "
+                       "'mail_notification_outbox', "
                        "'raw_message_sources', 'email_search_fts', "
                        "'schema_migrations', 'translation_cache', 'search_windows', "
                        "'search_window_items', 'mailbox_query_windows', "
@@ -126,18 +127,26 @@ TEST_CASE("database connection creates the initial cache schema", "[jmap][cache]
         tableNames.push_back(tableQuery.value(0).toString());
     }
 
-    CHECK(tableNames ==
-          QStringList{
-              QStringLiteral("accounts"), QStringLiteral("calendar_default_alerts"),
-              QStringLiteral("calendar_notification_state"), QStringLiteral("compose_sessions"),
-              QStringLiteral("consistency_domains"), QStringLiteral("email_search_fts"),
-              QStringLiteral("emails"), QStringLiteral("jmap_transport_preferences"),
-              QStringLiteral("mailbox_query_window_items"), QStringLiteral("mailbox_query_windows"),
-              QStringLiteral("mailboxes"), QStringLiteral("mutation_journal"),
-              QStringLiteral("observed_notification_emails"), QStringLiteral("raw_message_sources"),
-              QStringLiteral("schema_migrations"), QStringLiteral("search_window_items"),
-              QStringLiteral("search_windows"), QStringLiteral("sync_state"),
-              QStringLiteral("translation_cache")});
+    CHECK(tableNames == QStringList{QStringLiteral("accounts"),
+                                    QStringLiteral("calendar_default_alerts"),
+                                    QStringLiteral("calendar_notification_state"),
+                                    QStringLiteral("compose_sessions"),
+                                    QStringLiteral("consistency_domains"),
+                                    QStringLiteral("email_search_fts"),
+                                    QStringLiteral("emails"),
+                                    QStringLiteral("jmap_transport_preferences"),
+                                    QStringLiteral("mail_notification_outbox"),
+                                    QStringLiteral("mailbox_query_window_items"),
+                                    QStringLiteral("mailbox_query_windows"),
+                                    QStringLiteral("mailboxes"),
+                                    QStringLiteral("mutation_journal"),
+                                    QStringLiteral("observed_notification_emails"),
+                                    QStringLiteral("raw_message_sources"),
+                                    QStringLiteral("schema_migrations"),
+                                    QStringLiteral("search_window_items"),
+                                    QStringLiteral("search_windows"),
+                                    QStringLiteral("sync_state"),
+                                    QStringLiteral("translation_cache")});
     CHECK(pragmaValue(connection.database(), QStringLiteral("foreign_keys")) ==
           QStringLiteral("1"));
     CHECK(pragmaValue(connection.database(), QStringLiteral("journal_mode"))
@@ -180,13 +189,13 @@ TEST_CASE("database migrations are repeatable when reopening an existing cache",
         migrationsResult));
     const auto& migrations =
         std::get<std::vector<javelin::jmap::cache::AppliedMigration>>(migrationsResult);
-    REQUIRE(migrations.size() == 25);
+    REQUIRE(migrations.size() == 26);
     CHECK(migrations.front().version == 1);
     CHECK(migrations.at(1).version == 2);
     CHECK(migrations.at(2).version == 3);
     CHECK(migrations.at(6).version == 9);
-    CHECK(migrations.back().version == 27);
-    CHECK(connection.schemaVersion() == 27);
+    CHECK(migrations.back().version == 28);
+    CHECK(connection.schemaVersion() == 28);
 }
 
 TEST_CASE("thread connection factory encodes owner tag and current thread in connection names",

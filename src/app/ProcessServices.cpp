@@ -6,6 +6,7 @@
 #include "app/ComposeService.h"
 #include "app/InlineMessageSchemeHandler.h"
 #include "app/LongPollCoordinator.h"
+#include "app/MessageNavigationCoordinator.h"
 
 #include "jmap/JmapCore.h"
 #include "jmap/api/JmapMethodTransport.h"
@@ -119,6 +120,7 @@ namespace javelin::app
             m_databaseConnection, *m_jmapCore, *m_methodTransport,
             *m_stateChangeNetworkAccessManager, *m_accountRepository, *m_queryService,
             *m_contactService, *m_calendarService, *m_sieveService, *m_errorCoordinator);
+        m_messageNavigationCoordinator = std::make_unique<MessageNavigationCoordinator>();
         m_calendarNotificationService =
             std::make_unique<CalendarNotificationService>(m_databaseConnection);
     }
@@ -193,6 +195,11 @@ namespace javelin::app
     MailApplicationService& ProcessServices::mailService()
     {
         return *m_mailService;
+    }
+
+    MessageNavigationCoordinator& ProcessServices::messageNavigationCoordinator()
+    {
+        return *m_messageNavigationCoordinator;
     }
 
     ApplicationErrorCoordinator& ProcessServices::errorCoordinator()

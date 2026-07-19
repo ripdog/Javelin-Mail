@@ -2,6 +2,7 @@
 
 #include "app/ComposeService.h"
 #include "app/LongPollCoordinator.h"
+#include "app/MessageNavigationCoordinator.h"
 #include "gui/IconUtils.h"
 #include "gui/calendar/EventDialog.h"
 #include "gui/calendar/MonthCalendarWidget.h"
@@ -485,13 +486,15 @@ namespace javelin::gui::shell
         javelin::jmap::cache::QueryService& queryService,
         javelin::jmap::cache::TranslationCacheRepository& translationCacheRepository,
         javelin::app::ComposeService& composeService,
-        javelin::app::MailApplicationService& mailService, QWidget* parent)
+        javelin::app::MailApplicationService& mailService,
+        javelin::app::MessageNavigationCoordinator& messageNavigationCoordinator, QWidget* parent)
         : KXmlGuiWindow(parent), m_accountRepository(accountRepository),
           m_contactRepository(contactRepository), m_contactService(contactService),
           m_calendarService(calendarService), m_contactIdentityLookup(contactIdentityLookup),
           m_identityRepository(identityRepository), m_messageViewService(messageViewService),
           m_queryService(queryService), m_translationCacheRepository(translationCacheRepository),
-          m_composeService(composeService), m_mailService(mailService)
+          m_composeService(composeService), m_mailService(mailService),
+          m_messageNavigationCoordinator(messageNavigationCoordinator)
     {
         m_statusBar = new LayeredStatusBar(this);
         setStatusBar(m_statusBar);
@@ -504,6 +507,9 @@ namespace javelin::gui::shell
                  QStringLiteral("javelinmailui.rc"));
         updateToolbarForActiveTab();
         connectSelection();
+        connect(&m_messageNavigationCoordinator,
+                &javelin::app::MessageNavigationCoordinator::routeRequested, this,
+                &MainWindow::openEmailRoute);
         connect(&m_mailService, &javelin::app::MailApplicationService::accountStatusChanged, this,
                 [this](const QString& accountId, const auto status)
                 {
@@ -573,6 +579,7 @@ namespace javelin::gui::shell
                             m_messageView->scrollTo(m_messageModel->index(0, 0));
                         }
                     }
+                    resolveOpenEmailRoute();
                 });
         restorePersistentState();
 
@@ -582,15 +589,14 @@ namespace javelin::gui::shell
         stateSaveTimer->start();
     }
 
-    void MainWindow::openMessageFromNotification(const QString& accountId, const QString& mailboxId,
-                                                 const QString& threadId, const QString& emailId)
+    void MainWindow::openEmailRoute(const javelin::app::OpenEmailRoute& route)
     {
-        const auto account = accountId.toStdString();
-        const auto mailbox = mailboxId.toStdString();
-        const auto thread = threadId.isEmpty() ? std::optional<std::string>{std::nullopt}
-                                               : std::optional<std::string>{threadId.toStdString()};
-        const auto email = emailId.isEmpty() ? std::optional<std::string>{std::nullopt}
-                                             : std::optional<std::string>{emailId.toStdString()};
+        const auto& account = route.accountId;
+        const auto& mailbox = route.mailboxId;
+        const auto& thread = route.threadId;
+        const auto email = std::optional<std::string>{route.emailId};
+        const auto accountId = QString::fromStdString(account);
+        const auto mailboxId = QString::fromStdString(mailbox);
 
         reloadAccounts();
         QString mailboxTitle = mailboxId;
@@ -627,25 +633,74 @@ namespace javelin::gui::shell
                 mailboxTab->selection.emailId = email;
             }
         }
+        m_navigationContextRequested.reset();
         loadMailboxTabFromCache(account, mailbox, true);
-        const QModelIndex notificationIndex = restoreMessageSelection(thread, email);
-        if (notificationIndex.isValid())
+        resolveOpenEmailRoute();
+    }
+
+    const javelin::app::OpenEmailRoute* MainWindow::activeOpenEmailRoute() const
+    {
+        const auto& route = m_messageNavigationCoordinator.currentRoute();
+        if (!route.has_value() ||
+            activeAccountId() != std::optional<std::string>{route->accountId} ||
+            activeMailboxId() != std::optional<std::string>{route->mailboxId})
         {
-            m_messageView->setCurrentIndex(notificationIndex);
-            m_messageView->scrollTo(notificationIndex);
+            return nullptr;
+        }
+        return &*route;
+    }
+
+    void MainWindow::resolveOpenEmailRoute()
+    {
+        const auto* route = activeOpenEmailRoute();
+        if (route == nullptr)
+        {
+            return;
+        }
+
+        const auto routeId = route->id;
+        const auto accountId = route->accountId;
+        const auto mailboxId = route->mailboxId;
+        const auto threadId = route->threadId;
+        const auto emailId = route->emailId;
+        const QModelIndex index = restoreMessageSelection(threadId, emailId);
+        if (index.isValid())
+        {
+            m_messageView->setCurrentIndex(index);
+            m_messageView->scrollTo(index);
             syncActiveTabSelectionFromViews();
+            m_messageViewContainer->setSelection(m_messageViewService, accountId, mailboxId,
+                                                 emailId);
+            if (!m_messageViewContainer->hasReadableBody())
+            {
+                m_messageViewContainer->setLoadingState(true);
+                refreshSelectedMessageContent(accountId, emailId);
+            }
+            m_navigationContextRequested.reset();
+            m_messageNavigationCoordinator.complete(routeId);
+            return;
         }
-        if (email.has_value())
+
+        m_messageViewContainer->setSelection(m_messageViewService, accountId, mailboxId, emailId);
+        if (!m_messageViewContainer->hasReadableBody())
         {
-            m_messageViewContainer->setSelection(m_messageViewService,
-                                                 std::optional<std::string>{account},
-                                                 std::optional<std::string>{mailbox}, email);
-            refreshSelectedMessageContent(account, *email);
+            m_messageViewContainer->setLoadingState(true);
+            refreshSelectedMessageContent(accountId, emailId);
         }
-        else
+
+        auto* tab = activeTab();
+        auto* mailboxTab = tab == nullptr ? nullptr : std::get_if<MailboxTabState>(&tab->content);
+        if (mailboxTab == nullptr || mailboxTab->page.refreshInFlight ||
+            m_navigationContextRequested == std::optional<std::uint64_t>{routeId})
         {
-            refreshSelectionFromModels();
+            return;
         }
+
+        m_navigationContextRequested = routeId;
+        mailboxTab->page.anchor = emailId;
+        mailboxTab->page.anchorOffset = 0;
+        mailboxTab->page.stale = true;
+        refreshMailboxTabFromServer(*mailboxTab);
     }
 
     void MainWindow::createActions()
@@ -1237,6 +1292,7 @@ namespace javelin::gui::shell
                         return;
                     }
 
+                    m_messageNavigationCoordinator.cancel();
                     activateTab(index, false);
                 });
         connect(m_tabBar, &QTabBar::tabCloseRequested, this, &MainWindow::closeTab);
@@ -1313,6 +1369,12 @@ namespace javelin::gui::shell
             current.data(javelin::gui::messages::MessageListModel::EmailIdRole).toString();
         const auto threadId =
             current.data(javelin::gui::messages::MessageListModel::ThreadIdRole).toString();
+        if (const auto* route = activeOpenEmailRoute();
+            route != nullptr && route->emailId != emailId.toStdString() &&
+            (!route->threadId.has_value() || *route->threadId != threadId.toStdString()))
+        {
+            m_messageNavigationCoordinator.cancel();
+        }
         const bool isUnread = indexIsUnread(current);
         if (!threadId.isEmpty() && !activeTabIsSearch())
         {
@@ -3047,6 +3109,7 @@ namespace javelin::gui::shell
             .sort = m_emailListSort,
             .forceRefresh = tab.page.stale,
             .anchor = tab.page.anchor,
+            .anchorOffset = tab.page.anchorOffset,
         });
         QCoro::connect(
             std::move(task), this,
@@ -3068,6 +3131,7 @@ namespace javelin::gui::shell
                     }
                     presentError(*error);
                     updateEmptyStates();
+                    resolveOpenEmailRoute();
                     return;
                 }
 
@@ -3082,11 +3146,14 @@ namespace javelin::gui::shell
                     }
 
                     const auto& summary = std::get<javelin::app::MailboxWindowSummary>(result);
+                    mailboxTab->page.offset = summary.offset;
                     mailboxTab->page.total = summary.total;
                     mailboxTab->page.position = summary.position;
                     mailboxTab->page.returnedLimit = summary.returnedLimit;
                     mailboxTab->page.queryState = summary.queryState;
                     mailboxTab->page.refreshInFlight = false;
+                    mailboxTab->page.anchor.reset();
+                    mailboxTab->page.anchorOffset = 1;
                     if (mailboxTab->page.total.has_value() && mailboxTab->page.offset > 0 &&
                         (*mailboxTab->page.total == 0 ||
                          mailboxTab->page.position >= *mailboxTab->page.total))
@@ -3108,7 +3175,11 @@ namespace javelin::gui::shell
                     }
                     mailboxTab->page.stale = false;
                     mailboxTab->page.refreshError.clear();
+                    static_cast<void>(loadMailboxTabPageFromCache(*mailboxTab, true));
+                    if (activeTab() == &tabState)
+                        applyActiveTabPageToModel();
                     updateEmptyStates();
+                    resolveOpenEmailRoute();
                     m_statusBar->showMessage(
                         QStringLiteral("Loaded %1 mailbox conversations.")
                             .arg(static_cast<qulonglong>(summary.representativeCount)),
@@ -3128,6 +3199,8 @@ namespace javelin::gui::shell
         {
             return;
         }
+
+        m_messageNavigationCoordinator.cancel();
 
         const auto currentIndex = m_mailboxView->currentIndex();
         const auto totalThreadsValue =
@@ -3713,6 +3786,7 @@ namespace javelin::gui::shell
             else
             {
                 content.page.anchor = content.page.items.back().emailId;
+                content.page.anchorOffset = 1;
                 content.page.offset = content.page.position + content.page.items.size();
                 content.page.position = content.page.offset;
                 content.page.items.clear();
@@ -3956,6 +4030,23 @@ namespace javelin::gui::shell
         }
 
         const auto emailId = currentEmailId(*m_messageView);
+        if (!emailId.has_value())
+        {
+            if (const auto* route = activeOpenEmailRoute())
+            {
+                m_messageViewContainer->setSelection(m_messageViewService, route->accountId,
+                                                     route->mailboxId, route->emailId);
+                updateEmptyStates();
+                updateMessageListHeader();
+                updateMessageActions();
+                if (!m_messageViewContainer->hasReadableBody())
+                {
+                    m_messageViewContainer->setLoadingState(true);
+                    refreshSelectedMessageContent(route->accountId, route->emailId);
+                }
+                return;
+            }
+        }
         m_messageViewContainer->setSelection(m_messageViewService, accountId, mailboxId, emailId);
         syncActiveTabSelectionFromViews();
         updateEmptyStates();
@@ -4653,8 +4744,12 @@ namespace javelin::gui::shell
 
                 const auto currentAccount = activeAccountId();
                 const auto selectedEmails = selectedEmailIds();
+                const auto* route = activeOpenEmailRoute();
+                const bool routeOwnsDetail =
+                    route != nullptr && route->accountId == accountId && route->emailId == emailId;
                 if (currentAccount != std::optional<std::string>{accountId} ||
-                    selectedEmails.size() != 1 || selectedEmails.front() != emailId)
+                    (!routeOwnsDetail &&
+                     (selectedEmails.size() != 1 || selectedEmails.front() != emailId)))
                 {
                     return;
                 }

@@ -302,9 +302,11 @@ namespace javelin::jmap::sync
         {
             std::string queryState;
             std::string emailState;
+            std::vector<std::string> representativeIds;
             std::vector<javelin::jmap::domain::Thread> threads;
             std::vector<javelin::jmap::domain::Email> emails;
             std::size_t representativeCount = 0;
+            std::size_t returnedLimit = 100;
             std::optional<std::size_t> total;
         };
 
@@ -453,9 +455,11 @@ namespace javelin::jmap::sync
                 co_return CollapsedMailboxFetch{
                     .queryState = parsedQuery.queryState,
                     .emailState = {},
+                    .representativeIds = {},
                     .threads = {},
                     .emails = {},
                     .representativeCount = 0,
+                    .returnedLimit = static_cast<std::size_t>(parsedQuery.limit.value_or(100)),
                     .total = parsedQuery.total,
                 };
             }
@@ -495,9 +499,11 @@ namespace javelin::jmap::sync
             co_return CollapsedMailboxFetch{
                 .queryState = parsedQuery.queryState,
                 .emailState = parsedEmails.state,
+                .representativeIds = parsedQuery.ids,
                 .threads = parsedThreads.list,
                 .emails = parsedEmails.list,
                 .representativeCount = parsedQuery.ids.size(),
+                .returnedLimit = static_cast<std::size_t>(parsedQuery.limit.value_or(100)),
                 .total = parsedQuery.total,
             };
         }
@@ -781,6 +787,16 @@ namespace javelin::jmap::sync
 
     } // namespace
 
+    std::optional<OperationError>
+    rebaseActiveEmailProjections(javelin::jmap::cache::DatabaseConnection& databaseConnection,
+                                 const std::string_view accountId,
+                                 std::vector<std::string> emailIds,
+                                 const std::string_view serverState)
+    {
+        return reapplyPendingEmailPatches(databaseConnection, accountId, std::move(emailIds),
+                                          serverState);
+    }
+
     MailboxRefreshExecutor::MailboxRefreshExecutor(
         javelin::jmap::cache::DatabaseConnection& databaseConnection,
         javelin::jmap::api::MethodCaller& methodCaller,
@@ -845,6 +861,23 @@ namespace javelin::jmap::sync
         const auto& queryPlan = std::get<javelin::jmap::sync::SyncPlan>(queryPlanResult);
         const auto& emailPlan = std::get<javelin::jmap::sync::SyncPlan>(emailPlanResult);
 
+        constexpr std::size_t canonicalWindowLimit = 100;
+        const auto canonicalQueryKey = mailboxQueryKey(collapsedMailboxQueryDescriptor(mailboxId));
+        javelin::jmap::cache::MailboxWindowRepository canonicalWindows{m_databaseConnection};
+        const auto canonicalWindowResult =
+            canonicalWindows.find(accountId, canonicalQueryKey, 0, canonicalWindowLimit);
+        const auto* canonicalWindow =
+            std::get_if<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(
+                &canonicalWindowResult);
+        if (canonicalWindow == nullptr)
+        {
+            co_return javelin::jmap::operationError(
+                std::get<javelin::jmap::cache::DatabaseError>(canonicalWindowResult));
+        }
+        const bool canonicalWindowIsAuthoritative =
+            canonicalWindow->has_value() && (*canonicalWindow)->isAuthoritative;
+        const bool requireFullMaterialization = forceFullRefresh || !canonicalWindowIsAuthoritative;
+
         std::size_t representativeCount = 0;
         bool usedIncrementalRefresh = false;
         std::vector<std::string> changedEmailIds;
@@ -856,9 +889,10 @@ namespace javelin::jmap::sync
         std::vector<RefreshNotificationCandidate> notificationCandidates;
         std::optional<std::vector<std::string>> previousMailboxEmailIds;
 
-        if (forceFullRefresh ||
-            (queryPlan.kind == javelin::jmap::sync::SyncPlanKind::IncrementalChanges &&
-             emailPlan.kind == javelin::jmap::sync::SyncPlanKind::IncrementalChanges))
+        const bool hasMailboxBaseline =
+            queryPlan.kind == javelin::jmap::sync::SyncPlanKind::IncrementalChanges &&
+            queryPlan.sinceState.has_value();
+        if (hasMailboxBaseline)
         {
             const auto previousIdsResult =
                 mailboxEmailIds(m_databaseConnection, accountId, mailboxId);
@@ -871,7 +905,7 @@ namespace javelin::jmap::sync
                 std::get<std::vector<std::string>>(std::move(previousIdsResult));
         }
 
-        if (!forceFullRefresh &&
+        if (!requireFullMaterialization &&
             queryPlan.kind == javelin::jmap::sync::SyncPlanKind::IncrementalChanges &&
             queryPlan.sinceState.has_value() &&
             emailPlan.kind == javelin::jmap::sync::SyncPlanKind::IncrementalChanges &&
@@ -960,7 +994,8 @@ namespace javelin::jmap::sync
                     co_return *error;
             }
 
-            if (!incremental.requiresFullFetch)
+            if (!incremental.requiresFullFetch && !incremental.queryMembershipChanged &&
+                incremental.destroyedEmailIds.empty())
             {
                 if (const auto error = syncStateRepository.upsert(queryKey, incremental.queryState))
                 {
@@ -999,6 +1034,7 @@ namespace javelin::jmap::sync
                 co_return MailboxRefreshSummary{
                     .representativeCount = 0,
                     .usedIncrementalRefresh = false,
+                    .canonicalWindowMaterialized = false,
                     .superseded = true,
                     .changedEmailIds = {},
                     .insertedEmailIds = {},
@@ -1031,6 +1067,23 @@ namespace javelin::jmap::sync
                     m_databaseConnection, accountId, std::move(fetchedEmailIds), fetch.emailState))
             {
                 co_return *error;
+            }
+
+            if (const auto error = canonicalWindows.replace({
+                    .accountId = accountId,
+                    .mailboxId = mailboxId,
+                    .queryKey = canonicalQueryKey,
+                    .requestedOffset = 0,
+                    .requestedLimit = canonicalWindowLimit,
+                    .position = 0,
+                    .returnedLimit = fetch.returnedLimit,
+                    .total = fetch.total,
+                    .queryState = fetch.queryState,
+                    .isAuthoritative = true,
+                    .emailIds = fetch.representativeIds,
+                }))
+            {
+                co_return javelin::jmap::operationError(*error);
             }
 
             representativeCount = fetch.representativeCount;
@@ -1134,6 +1187,7 @@ namespace javelin::jmap::sync
         co_return MailboxRefreshSummary{
             .representativeCount = representativeCount,
             .usedIncrementalRefresh = usedIncrementalRefresh,
+            .canonicalWindowMaterialized = !usedIncrementalRefresh,
             .changedEmailIds = std::move(changedEmailIds),
             .insertedEmailIds = std::move(insertedEmailIds),
             .removedEmailIds = std::move(removedEmailIds),

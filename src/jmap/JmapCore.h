@@ -198,6 +198,7 @@ namespace javelin::jmap
                          std::string mailboxId, std::size_t offset = 0, std::size_t limit = 100,
                          javelin::jmap::query::EmailListSort sort = {},
                          std::optional<std::string> anchor = std::nullopt,
+                         std::int64_t anchorOffset = 1,
                          std::function<void(const QString&)> progressCallback = {});
         [[nodiscard]] QCoro::Task<MessageSearchResult>
         searchMessages(LiveConnectionSettings settings, std::string accountId, std::string query,

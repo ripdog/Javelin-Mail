@@ -15,5 +15,8 @@ namespace javelin::jmap::sync
     };
 
     [[nodiscard]] std::string mailboxQueryKey(const MailboxQueryDescriptor& descriptor);
+    [[nodiscard]] std::size_t materializedMailboxWindowOffset(std::size_t requestedOffset,
+                                                              bool anchoredRequest,
+                                                              std::size_t returnedPosition);
 
 } // namespace javelin::jmap::sync
