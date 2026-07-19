@@ -35,6 +35,12 @@ through their repositories; calendars continue to materialize CalendarEvent obje
 occurrence windows through `CalendarService`. Their state tokens, eviction rules, and optimistic
 adapters remain independent.
 
+Starting or restarting an account coordinator schedules an immediate synchronization pass for all
+configured mailboxes; a quiet push stream is not proof that their cache already exists. Likewise,
+an advertised Email state that is already recorded may suppress redundant object reconciliation
+only when every watched mailbox still has authoritative canonical query coverage. A missing or
+optimistically invalidated window always requires materialization.
+
 External navigation is an application intent, not a transient widget selection. A notification
 activation creates a typed Email route containing stable account, mailbox, thread, and Email ids.
 The process-owned coordinator keeps that route alive while the GUI restores, renders any cached

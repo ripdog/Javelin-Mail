@@ -76,6 +76,8 @@ set(JAVELIN_FORMAT_FILES
     src/app/LongPollCoordinator.h
     src/app/MailboxSelectionMutation.cpp
     src/app/MailboxSelectionMutation.h
+    src/app/MailboxSyncCoverage.cpp
+    src/app/MailboxSyncCoverage.h
     src/app/MessageNavigationCoordinator.cpp
     src/app/MessageNavigationCoordinator.h
     src/app/WebEngineSetup.h
@@ -687,6 +689,8 @@ add_library(javelin_app STATIC
     src/app/LongPollCoordinator.h
     src/app/MailboxSelectionMutation.cpp
     src/app/MailboxSelectionMutation.h
+    src/app/MailboxSyncCoverage.cpp
+    src/app/MailboxSyncCoverage.h
     src/app/MessageNavigationCoordinator.cpp
     src/app/MessageNavigationCoordinator.h
     src/app/WebEngineSetup.h

@@ -16,6 +16,10 @@ missing or invalid; caching Email objects without the matching authoritative mem
 not a successful mailbox materialization. A post-commit cache change names the canonical window so
 an open view reloads it from SQLite.
 
+An Email or EmailQuery state token is not evidence that this ordered coverage exists. Push-state
+deduplication may skip a background refresh only when the state tokens are current and every
+configured canonical mailbox window is authoritative.
+
 Sequential navigation anchors the next request to the final representative in the visible window.
 This preserves continuity when messages are inserted above the viewport. The returned `position`
 is authoritative, and the returned ID count—not the requested page size—determines the next logical

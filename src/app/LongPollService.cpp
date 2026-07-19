@@ -1,5 +1,7 @@
 #include "app/LongPollService.h"
 
+#include "app/MailboxSyncCoverage.h"
+
 #include "jmap/api/MethodCaller.h"
 #include "jmap/api/Session.h"
 #include "jmap/cache/NotificationRepository.h"
@@ -521,7 +523,7 @@ namespace javelin::app
                 m_refreshDebounceTimer.start();
                 return;
             }
-            if (pendingStateChangesAlreadyApplied())
+            if (pendingStateChangesAlreadyApplied() && watchedMailboxCoverageIsAuthoritative())
             {
                 m_pendingStateChanges.clear();
                 return;
@@ -548,6 +550,31 @@ namespace javelin::app
             }
         }
         return true;
+    }
+
+    bool AccountSyncCoordinator::watchedMailboxCoverageIsAuthoritative() const
+    {
+        if (m_runContext == nullptr)
+        {
+            return false;
+        }
+
+        std::vector<std::string> mailboxIds;
+        mailboxIds.reserve(m_runContext->configuration.mailboxes.size());
+        for (const auto& [mailboxId, mailboxName] : m_runContext->configuration.mailboxes)
+        {
+            static_cast<void>(mailboxName);
+            mailboxIds.push_back(mailboxId);
+        }
+        const auto result = hasAuthoritativeCanonicalMailboxCoverage(
+            m_databaseConnection, m_runContext->configuration.accountId, mailboxIds);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
+        {
+            qWarning().noquote() << "Could not inspect synchronized mailbox coverage"
+                                 << error->message;
+            return false;
+        }
+        return std::get<bool>(result);
     }
 
     void AccountSyncCoordinator::restartForCatchUp()
@@ -667,6 +694,7 @@ namespace javelin::app
 
                            setStatus(Status::Disconnected);
                        });
+        scheduleDebouncedRefresh();
     }
 
     void AccountSyncCoordinator::setStatus(const Status status)

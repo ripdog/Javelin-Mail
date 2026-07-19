@@ -134,6 +134,7 @@ namespace javelin::app
         void scheduleDebouncedRefresh();
         void scheduleCatchUpRefresh();
         [[nodiscard]] bool pendingStateChangesAlreadyApplied() const;
+        [[nodiscard]] bool watchedMailboxCoverageIsAuthoritative() const;
         void restartForCatchUp();
         void restart();
         void setStatus(Status status);
