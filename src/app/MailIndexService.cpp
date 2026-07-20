@@ -26,6 +26,7 @@ namespace javelin::app
         struct ParsedIndexDocument
         {
             std::optional<javelin::jmap::cache::SearchIndexDocument> document;
+            QString preview;
             QString error;
         };
 
@@ -43,10 +44,10 @@ namespace javelin::app
         {
             QFile file{path};
             if (!file.open(QIODevice::ReadOnly))
-                return {.document = std::nullopt, .error = file.errorString()};
+                return {.document = std::nullopt, .preview = {}, .error = file.errorString()};
             const QByteArray payload = file.readAll();
             if (file.error() != QFileDevice::NoError)
-                return {.document = std::nullopt, .error = file.errorString()};
+                return {.document = std::nullopt, .preview = {}, .error = file.errorString()};
             const auto parsed = javelin::jmap::cache::parseMessageSource(emailId, payload);
             QString body;
             if (parsed.plainTextBody)
@@ -57,6 +58,7 @@ namespace javelin::app
                 document.setHtml(QString::fromStdString(parsed.htmlBody->value));
                 body += document.toPlainText();
             }
+            const QString preview = body.simplified().left(256);
             return {.document =
                         javelin::jmap::cache::SearchIndexDocument{
                             .emailId = std::move(emailId),
@@ -64,7 +66,60 @@ namespace javelin::app
                             .subject = std::move(subject),
                             .body = std::move(body),
                         },
+                    .preview = preview,
                     .error = {}};
+        }
+
+        [[nodiscard]] QString
+        commitIndexDocument(const QString& databasePath, const std::string& accountId,
+                            javelin::jmap::cache::SearchIndexDocument document, QString preview)
+        {
+            const std::string emailId = document.emailId;
+            const std::string contentHash = document.sourceHash;
+            javelin::jmap::cache::ThreadConnectionFactory factory({
+                .connectionNamePrefix = QStringLiteral("mail-index-cache"),
+                .databasePath = databasePath,
+            });
+            auto opened = factory.openForCurrentThread(accountId);
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&opened))
+                return error->message;
+            auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+            javelin::jmap::cache::MailSearchIndex index{connection};
+            if (const auto error = index.upsert(accountId, document))
+                return error->message;
+
+            auto& database = connection.database();
+            if (!database.transaction())
+                return database.lastError().text();
+            QSqlQuery updatePreview{database};
+            updatePreview.prepare(QStringLiteral(
+                "UPDATE emails SET preview=:preview WHERE account_id=:account AND email_id=:email "
+                "AND preview=''"));
+            updatePreview.bindValue(QStringLiteral(":preview"), preview);
+            updatePreview.bindValue(QStringLiteral(":account"), QString::fromStdString(accountId));
+            updatePreview.bindValue(QStringLiteral(":email"), QString::fromStdString(emailId));
+            if (!updatePreview.exec())
+            {
+                const QString error = updatePreview.lastError().text();
+                database.rollback();
+                return error;
+            }
+            QSqlQuery indexed{database};
+            indexed.prepare(QStringLiteral(
+                "UPDATE mail_vault_email_refs SET indexed_hash=:hash WHERE account_id=:account "
+                "AND email_id=:email AND content_hash=:hash"));
+            indexed.bindValue(QStringLiteral(":hash"), QString::fromStdString(contentHash));
+            indexed.bindValue(QStringLiteral(":account"), QString::fromStdString(accountId));
+            indexed.bindValue(QStringLiteral(":email"), QString::fromStdString(emailId));
+            if (!indexed.exec())
+            {
+                const QString error = indexed.lastError().text();
+                database.rollback();
+                return error;
+            }
+            if (!database.commit())
+                return database.lastError().text();
+            return {};
         }
     } // namespace
 
@@ -187,8 +242,6 @@ namespace javelin::app
                               .detail = QStringLiteral("Preparing local search")};
         static_cast<void>(m_scheduler.update(jobId, WorkStatus::Running, progress));
         const auto vault = javelin::jmap::cache::MailVault::forDatabase(m_connection);
-        javelin::jmap::cache::MailSearchIndex index{m_connection};
-
         while (true)
         {
             const auto control = m_scheduler.find(jobId);
@@ -223,31 +276,21 @@ namespace javelin::app
             next.finish();
 
             auto future = QtConcurrent::run(parseDocument, path, emailId, contentHash, subject);
-            const auto parsed = co_await qCoro(future).takeResult();
+            auto parsed = co_await qCoro(future).takeResult();
             if (!parsed.document)
             {
                 static_cast<void>(m_scheduler.update(jobId, WorkStatus::Failed, progress,
                                                      QStringLiteral("{}"), parsed.error));
                 co_return;
             }
-            if (const auto failure = index.upsert(accountId, *parsed.document))
+            auto commitFuture = QtConcurrent::run(
+                commitIndexDocument, m_connection.database().databaseName(), accountId,
+                std::move(*parsed.document), std::move(parsed.preview));
+            const QString commitError = co_await qCoro(commitFuture).takeResult();
+            if (!commitError.isEmpty())
             {
                 static_cast<void>(m_scheduler.update(jobId, WorkStatus::Failed, progress,
-                                                     QStringLiteral("{}"), failure->message));
-                co_return;
-            }
-            QSqlQuery indexed{m_connection.database()};
-            indexed.prepare(QStringLiteral(
-                "UPDATE mail_vault_email_refs SET indexed_hash=:hash WHERE account_id=:account AND "
-                "email_id=:email AND content_hash=:hash"));
-            indexed.bindValue(QStringLiteral(":hash"), QString::fromStdString(contentHash));
-            indexed.bindValue(QStringLiteral(":account"), QString::fromStdString(accountId));
-            indexed.bindValue(QStringLiteral(":email"), QString::fromStdString(emailId));
-            if (!indexed.exec())
-            {
-                static_cast<void>(m_scheduler.update(jobId, WorkStatus::Failed, progress,
-                                                     QStringLiteral("{}"),
-                                                     indexed.lastError().text()));
+                                                     QStringLiteral("{}"), commitError));
                 co_return;
             }
             ++progress.completedUnits;

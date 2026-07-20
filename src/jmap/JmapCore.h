@@ -87,6 +87,8 @@ namespace javelin::jmap
         std::size_t position = 0;
         std::optional<std::size_t> total;
         std::vector<std::string> emailIds;
+        std::vector<javelin::jmap::domain::Email> emails;
+        std::string emailState;
     };
 
     using FullMailboxPageResult = std::variant<FullMailboxPage, OperationError>;

@@ -537,6 +537,7 @@ target_link_libraries(javelin_jmap
         KPim6::Mime
     PRIVATE
         QCoro6::Network
+        Qt::Concurrent
         glaze::glaze
 )
 if(JAVELIN_ENABLE_FASTTEXT_LANGUAGE_DETECTION)

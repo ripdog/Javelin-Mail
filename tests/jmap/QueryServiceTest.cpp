@@ -248,6 +248,80 @@ TEST_CASE("query service returns paged compact message list rows", "[jmap][cache
     CHECK(subjectItems[1].emailId == "eml-2");
 }
 
+TEST_CASE("offline mailbox coverage exposes only the published crawl generation and projections",
+          "[jmap][cache][query][offline]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+
+    auto newest = loadEmailFixture();
+    newest.id = "staged-newest";
+    newest.threadId = "thread-newest";
+    newest.receivedAt = "2026-07-21T03:00:00Z";
+    auto staged = newest;
+    staged.id = "staged-second";
+    staged.threadId = "thread-second";
+    staged.receivedAt = "2026-07-21T02:00:00Z";
+    auto projected = newest;
+    projected.id = "projected-addition";
+    projected.threadId = "thread-projected";
+    projected.receivedAt = "2026-07-21T01:30:00Z";
+    auto stale = newest;
+    stale.id = "old-window-only";
+    stale.threadId = "thread-stale";
+    stale.receivedAt = "2026-07-21T01:00:00Z";
+
+    javelin::jmap::cache::EmailRepository emails{databaseContext.connection};
+    REQUIRE_FALSE(emails.replaceAll("account-1", {newest, staged, projected, stale}).has_value());
+
+    QSqlQuery setup{databaseContext.connection.database()};
+    REQUIRE(setup.exec(QStringLiteral(
+        "INSERT INTO offline_mailbox_scopes(account_id,mailbox_id,desired,status,generation) "
+        "VALUES('account-1','mbx-inbox',1,'enumerating',7)")));
+    REQUIRE(setup.exec(QStringLiteral(
+        "INSERT INTO offline_mailbox_membership(account_id,mailbox_id,email_id,generation,"
+        "position) VALUES('account-1','mbx-inbox','staged-newest',7,0),"
+        "('account-1','mbx-inbox','staged-second',7,1)")));
+    REQUIRE(setup.exec(QStringLiteral(
+        "INSERT INTO mutation_journal(mutation_id,account_id,data_type,object_id,mutation_kind,"
+        "status,payload_json) VALUES('mutation-1','account-1','Email','projected-addition',"
+        "'email_patch','pending','{}')")));
+
+    javelin::jmap::cache::QueryService queries{databaseContext.connection};
+    const auto coverageResult = queries.offlineMailboxCoverage("account-1", "mbx-inbox");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::OfflineMailboxCoverage>>(
+        coverageResult));
+    const auto& coverage =
+        std::get<std::optional<javelin::jmap::cache::OfflineMailboxCoverage>>(coverageResult);
+    REQUIRE(coverage.has_value());
+    CHECK(coverage->generation == 7);
+    CHECK(coverage->representativeCount == 3);
+    CHECK_FALSE(coverage->enumerationComplete);
+
+    const auto pageResult = queries.listOfflineMailboxMessages("account-1", "mbx-inbox", 7, 10);
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MessageListItem>>(pageResult));
+    const auto& page = std::get<std::vector<javelin::jmap::cache::MessageListItem>>(pageResult);
+    REQUIRE(page.size() == 3);
+    CHECK(page[0].emailId == "staged-newest");
+    CHECK(page[1].emailId == "staged-second");
+    CHECK(page[2].emailId == "projected-addition");
+    CHECK(std::ranges::none_of(page,
+                               [](const auto& item) { return item.emailId == "old-window-only"; }));
+
+    REQUIRE(setup.exec(QStringLiteral(
+        "UPDATE offline_mailbox_scopes SET status='fetching' WHERE account_id='account-1' "
+        "AND mailbox_id='mbx-inbox'")));
+    const auto completeCoverageResult = queries.offlineMailboxCoverage("account-1", "mbx-inbox");
+    const auto& completeCoverage =
+        std::get<std::optional<javelin::jmap::cache::OfflineMailboxCoverage>>(
+            completeCoverageResult);
+    REQUIRE(completeCoverage.has_value());
+    CHECK(completeCoverage->enumerationComplete);
+}
+
 TEST_CASE("query service full text search covers cached subjects and bodies",
           "[jmap][cache][query][search]")
 {

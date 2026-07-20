@@ -27,12 +27,15 @@
 #include "jmap/sync/MailboxQueryDescriptor.h"
 #include "jmap/sync/MailboxRefreshExecutor.h"
 
+#include <QCoroFuture>
+
 #include <QDebug>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QUrl>
 #include <QUrlQuery>
 #include <QUuid>
+#include <QtConcurrentRun>
 #include <algorithm>
 #include <array>
 #include <unordered_map>
@@ -65,6 +68,29 @@ namespace javelin::jmap
             OperationError error;
             std::optional<int> httpStatus;
         };
+
+        [[nodiscard]] QString storeRawMessageSource(const QString& databasePath,
+                                                    const std::string& accountId,
+                                                    const std::string& emailId,
+                                                    const std::string& blobId, QByteArray payload)
+        {
+            javelin::jmap::cache::ThreadConnectionFactory factory({
+                .connectionNamePrefix = QStringLiteral("message-source-store"),
+                .databasePath = databasePath,
+            });
+            auto opened = factory.openForCurrentThread(accountId);
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&opened))
+                return error->message;
+            auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+            javelin::jmap::cache::RawMessageSourceRepository sources{connection};
+            if (const auto error = sources.upsert(accountId, {
+                                                                 .emailId = emailId,
+                                                                 .blobId = blobId,
+                                                                 .payload = std::move(payload),
+                                                             }))
+                return error->message;
+            return {};
+        }
 
         [[nodiscard]] std::optional<std::string>
         selectMailboxForInitialSync(const std::vector<javelin::jmap::domain::Mailbox>& mailboxes)
@@ -1282,19 +1308,18 @@ namespace javelin::jmap
             co_return error->error;
         }
 
-        const auto payload = std::get<QByteArray>(downloadResult);
-        if (const auto error = sourceRepository.upsert(accountId, {
-                                                                      .emailId = email.id,
-                                                                      .blobId = email.blobId,
-                                                                      .payload = payload,
-                                                                  }))
-        {
-            co_return operationError(*error);
-        }
+        auto payload = std::get<QByteArray>(std::move(downloadResult));
+        const auto payloadSize = payload.size();
+        auto storeFuture = QtConcurrent::run(storeRawMessageSource,
+                                             m_impl->databaseConnection->database().databaseName(),
+                                             accountId, email.id, email.blobId, std::move(payload));
+        const QString storeError = co_await qCoro(storeFuture).takeResult();
+        if (!storeError.isEmpty())
+            co_return OperationError{.message = storeError};
 
         qInfo().noquote() << "JMAP core message source refresh success"
                           << QString::fromStdString(emailId)
-                          << static_cast<qulonglong>(payload.size());
+                          << static_cast<qulonglong>(payloadSize);
         reportProgress(QStringLiteral("Message ready."));
 
         co_return MessageContentRefreshSummary{
@@ -1347,8 +1372,12 @@ namespace javelin::jmap
             };
         }
         const auto queryHandle = builder.call(*queryRequest, "full-mailbox-query");
-        const auto getRequest = javelin::jmap::api::emailGet(
-            javelin::jmap::api::getRequestFrom(accountId, queryHandle, "/ids"));
+        const auto getRequest = javelin::jmap::api::emailGet(javelin::jmap::api::getRequestFrom(
+            accountId, queryHandle, "/ids",
+            std::vector<std::string>{"id", "blobId", "threadId", "mailboxIds", "keywords", "size",
+                                     "receivedAt", "sentAt", "messageId", "inReplyTo", "references",
+                                     "hasAttachment", "subject", "from", "to", "cc", "bcc",
+                                     "replyTo"}));
         if (!getRequest.has_value())
         {
             co_return OperationError{
@@ -1384,13 +1413,6 @@ namespace javelin::jmap
                 .message = QStringLiteral("Email/get omitted messages from the full mailbox page."),
             };
         }
-        javelin::jmap::cache::EmailRepository repository{*m_impl->databaseConnection};
-        if (const auto error = repository.upsertMany(accountId, emails.list))
-            co_return operationError(*error);
-        if (const auto error = javelin::jmap::sync::rebaseActiveEmailProjections(
-                *m_impl->databaseConnection, accountId, page.ids, emails.state))
-            co_return *error;
-
         co_return FullMailboxPage{
             .accountId = std::move(accountId),
             .mailboxId = std::move(mailboxId),
@@ -1400,6 +1422,8 @@ namespace javelin::jmap
                          ? std::optional<std::size_t>{static_cast<std::size_t>(*page.total)}
                          : std::nullopt,
             .emailIds = page.ids,
+            .emails = emails.list,
+            .emailState = emails.state,
         };
     }
 

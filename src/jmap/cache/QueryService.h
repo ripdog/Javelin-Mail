@@ -69,6 +69,13 @@ namespace javelin::jmap::cache
         std::vector<MessageListItem> items;
     };
 
+    struct OfflineMailboxCoverage
+    {
+        std::uint64_t generation = 0;
+        std::size_t representativeCount = 0;
+        bool enumerationComplete = false;
+    };
+
     class QueryService
     {
       public:
@@ -80,6 +87,13 @@ namespace javelin::jmap::cache
         listMailboxMessages(std::string_view accountId, std::string_view mailboxId,
                             std::size_t limit, std::size_t offset = 0,
                             javelin::jmap::query::EmailListSort sort = {}) const;
+        [[nodiscard]] std::variant<std::optional<OfflineMailboxCoverage>, DatabaseError>
+        offlineMailboxCoverage(std::string_view accountId, std::string_view mailboxId) const;
+        [[nodiscard]] std::variant<std::vector<MessageListItem>, DatabaseError>
+        listOfflineMailboxMessages(std::string_view accountId, std::string_view mailboxId,
+                                   std::uint64_t generation, std::size_t limit,
+                                   std::size_t offset = 0,
+                                   javelin::jmap::query::EmailListSort sort = {}) const;
         [[nodiscard]] std::variant<std::size_t, DatabaseError>
         countMailboxMessages(std::string_view accountId, std::string_view mailboxId) const;
         [[nodiscard]] std::variant<std::size_t, DatabaseError>

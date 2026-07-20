@@ -4,9 +4,12 @@
 #include "app/WorkScheduler.h"
 #include "jmap/JmapCore.h"
 #include "jmap/cache/Database.h"
+#include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/MailVault.h"
 #include "jmap/cache/RawMessageSourceRepository.h"
+#include "jmap/sync/MailboxRefreshExecutor.h"
 
+#include <QCoroFuture>
 #include <QCoroTask>
 #include <QCoroTimer>
 
@@ -17,6 +20,7 @@
 #include <QSqlQuery>
 #include <QStorageInfo>
 #include <QTimer>
+#include <QtConcurrentRun>
 
 #include <algorithm>
 #include <chrono>
@@ -56,6 +60,83 @@ namespace javelin::app
         void logDatabaseFailure(const QString& operation, const QSqlQuery& query)
         {
             qWarning().noquote() << operation << query.lastError().text();
+        }
+
+        [[nodiscard]] QString
+        commitFullMailboxPage(const QString& databasePath, const std::string& accountId,
+                              const std::string& mailboxId, const std::uint64_t generation,
+                              const std::size_t position, std::vector<std::string> emailIds,
+                              std::vector<javelin::jmap::domain::Email> emails,
+                              std::string emailState)
+        {
+            javelin::jmap::cache::ThreadConnectionFactory factory({
+                .connectionNamePrefix = QStringLiteral("full-mail-page"),
+                .databasePath = databasePath,
+            });
+            auto opened = factory.openForCurrentThread(accountId);
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&opened))
+                return error->message;
+            auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+
+            QSqlQuery existingPreview{connection.database()};
+            existingPreview.prepare(QStringLiteral(
+                "SELECT preview FROM emails WHERE account_id=:account AND email_id=:email"));
+            for (auto& email : emails)
+            {
+                if (email.preview.has_value())
+                    continue;
+                existingPreview.bindValue(QStringLiteral(":account"),
+                                          QString::fromStdString(accountId));
+                existingPreview.bindValue(QStringLiteral(":email"),
+                                          QString::fromStdString(email.id));
+                if (existingPreview.exec() && existingPreview.next() &&
+                    !existingPreview.value(0).toString().isEmpty())
+                {
+                    email.preview = existingPreview.value(0).toString().toStdString();
+                }
+                existingPreview.finish();
+            }
+
+            javelin::jmap::cache::EmailRepository emailsRepository{connection};
+            if (const auto error = emailsRepository.upsertMany(accountId, emails))
+                return error->message;
+            if (const auto error = javelin::jmap::sync::rebaseActiveEmailProjections(
+                    connection, accountId, emailIds, emailState))
+                return error->message;
+
+            auto& database = connection.database();
+            if (!database.transaction())
+                return database.lastError().text();
+            QSqlQuery insert{database};
+            insert.prepare(QStringLiteral(
+                "INSERT INTO offline_mailbox_membership(account_id,mailbox_id,email_id,"
+                "generation,position) VALUES(:account,:mailbox,:email,:generation,:position) "
+                "ON CONFLICT(account_id,mailbox_id,generation,email_id) DO UPDATE SET "
+                "position=excluded.position"));
+            std::size_t pagePosition = position;
+            for (const auto& emailId : emailIds)
+            {
+                insert.bindValue(QStringLiteral(":account"), QString::fromStdString(accountId));
+                insert.bindValue(QStringLiteral(":mailbox"), QString::fromStdString(mailboxId));
+                insert.bindValue(QStringLiteral(":email"), QString::fromStdString(emailId));
+                insert.bindValue(QStringLiteral(":generation"),
+                                 static_cast<qulonglong>(generation));
+                insert.bindValue(QStringLiteral(":position"),
+                                 static_cast<qulonglong>(pagePosition++));
+                if (!insert.exec())
+                {
+                    const QString error = insert.lastError().text();
+                    database.rollback();
+                    return error;
+                }
+            }
+            if (!database.commit())
+            {
+                const QString error = database.lastError().text();
+                database.rollback();
+                return error;
+            }
+            return {};
         }
 
         [[nodiscard]] QString
@@ -399,7 +480,7 @@ namespace javelin::app
                     static_cast<void>(m_scheduler.pause(scope.jobId));
                     co_return;
                 }
-                const auto pageResult = co_await m_core.materializeFullMailboxPage(
+                auto pageResult = co_await m_core.materializeFullMailboxPage(
                     liveSettings(*accountSettings), scope.accountId, scope.mailboxId, position, 250,
                     anchor);
                 if (const auto* error = std::get_if<javelin::jmap::OperationError>(&pageResult))
@@ -422,7 +503,20 @@ namespace javelin::app
                         error->message));
                     co_return;
                 }
-                const auto& page = std::get<javelin::jmap::FullMailboxPage>(pageResult);
+                auto page = std::get<javelin::jmap::FullMailboxPage>(std::move(pageResult));
+                auto commitFuture = QtConcurrent::run(
+                    commitFullMailboxPage, m_connection.database().databaseName(), scope.accountId,
+                    scope.mailboxId, generation, position, page.emailIds, std::move(page.emails),
+                    std::move(page.emailState));
+                const QString commitError = co_await qCoro(commitFuture).takeResult();
+                if (!commitError.isEmpty())
+                {
+                    static_cast<void>(m_scheduler.update(
+                        scope.jobId, WorkStatus::Failed, progress,
+                        checkpoint(QStringLiteral("enumerating"), position, generation),
+                        commitError));
+                    co_return;
+                }
                 if (position == 0)
                 {
                     initialQueryState = page.queryState;
@@ -448,32 +542,6 @@ namespace javelin::app
                     }
                 }
                 total = page.total;
-                QSqlQuery insert{m_connection.database()};
-                insert.prepare(QStringLiteral(
-                    "INSERT INTO offline_mailbox_membership(account_id,mailbox_id,email_id,"
-                    "generation,position) VALUES(:account,:mailbox,:email,:generation,:position) "
-                    "ON CONFLICT(account_id,mailbox_id,generation,email_id) DO UPDATE SET "
-                    "position=excluded.position"));
-                std::size_t pagePosition = position;
-                for (const auto& emailId : page.emailIds)
-                {
-                    insert.bindValue(QStringLiteral(":account"),
-                                     QString::fromStdString(scope.accountId));
-                    insert.bindValue(QStringLiteral(":mailbox"),
-                                     QString::fromStdString(scope.mailboxId));
-                    insert.bindValue(QStringLiteral(":email"), QString::fromStdString(emailId));
-                    insert.bindValue(QStringLiteral(":generation"),
-                                     static_cast<qulonglong>(generation));
-                    insert.bindValue(QStringLiteral(":position"),
-                                     static_cast<qulonglong>(pagePosition++));
-                    if (!insert.exec())
-                    {
-                        static_cast<void>(m_scheduler.update(scope.jobId, WorkStatus::Failed,
-                                                             progress, QStringLiteral("{}"),
-                                                             insert.lastError().text()));
-                        co_return;
-                    }
-                }
                 position += page.emailIds.size();
                 progress.completedUnits = position;
                 progress.totalUnits = total;
