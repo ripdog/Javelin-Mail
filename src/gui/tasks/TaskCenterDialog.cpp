@@ -3,9 +3,11 @@
 #include "app/WorkScheduler.h"
 
 #include <QApplication>
+#include <QClipboard>
 #include <QEvent>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPushButton>
@@ -147,6 +149,7 @@ namespace javelin::gui::tasks
         m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
         m_table->setSelectionMode(QAbstractItemView::SingleSelection);
         m_table->setAlternatingRowColors(true);
+        m_table->setContextMenuPolicy(Qt::CustomContextMenu);
         m_table->setItemDelegateForColumn(4, new TaskActionDelegate(scheduler, *m_model, m_table));
         m_table->horizontalHeader()->setStretchLastSection(false);
         m_table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
@@ -162,6 +165,19 @@ namespace javelin::gui::tasks
         actionLayout->addWidget(closeButton);
         layout->addLayout(actionLayout);
 
+        connect(m_table, &QTableView::customContextMenuRequested, this,
+                [this](const QPoint& position)
+                {
+                    const QModelIndex index = m_table->indexAt(position);
+                    if (!index.isValid())
+                        return;
+                    const QString details = m_model->index(index.row(), 3).data().toString();
+                    QMenu menu{m_table};
+                    auto* copy = menu.addAction(QStringLiteral("Copy"));
+                    copy->setEnabled(!details.isEmpty());
+                    if (menu.exec(m_table->viewport()->mapToGlobal(position)) == copy)
+                        QApplication::clipboard()->setText(details);
+                });
         connect(closeButton, &QPushButton::clicked, this, &QDialog::close);
     }
 } // namespace javelin::gui::tasks
