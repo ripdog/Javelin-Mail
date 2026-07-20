@@ -1,6 +1,7 @@
 #include "jmap/cache/QueryService.h"
 #include "FixtureReader.h"
 #include "jmap/cache/EmailRepository.h"
+#include "jmap/cache/MailSearchIndex.h"
 #include "jmap/cache/MailboxRepository.h"
 #include "jmap/cache/MailboxWindowRepository.h"
 #include "jmap/cache/RawMessageSourceRepository.h"
@@ -276,6 +277,23 @@ TEST_CASE("query service full text search covers cached subjects and bodies",
                                       "From: alice@example.com\r\nSubject: Ordinary update\r\n"
                                       "Content-Type: text/plain; charset=utf-8\r\n\r\n"
                                       "The telescope found a rare albatross.\r\n")})
+            .has_value());
+    javelin::jmap::cache::MailSearchIndex searchIndex{databaseContext.connection};
+    const auto subjectIndexError =
+        searchIndex.upsert("account-1", {.emailId = subjectMatch.id,
+                                         .sourceHash = "subject-metadata-v1",
+                                         .subject = QStringLiteral("A rare albatross sighting"),
+                                         .body = {}});
+    const std::string subjectIndexMessage =
+        subjectIndexError ? subjectIndexError->message.toStdString() : std::string{};
+    INFO(subjectIndexMessage);
+    REQUIRE_FALSE(subjectIndexError.has_value());
+    REQUIRE_FALSE(
+        searchIndex
+            .upsert("account-1", {.emailId = bodyMatch.id,
+                                  .sourceHash = "body-source-v1",
+                                  .subject = QStringLiteral("Ordinary update"),
+                                  .body = QStringLiteral("The telescope found a rare albatross.")})
             .has_value());
 
     javelin::jmap::cache::QueryService queryService{databaseContext.connection};

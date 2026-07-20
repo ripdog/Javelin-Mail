@@ -4,11 +4,16 @@
 #include "app/ApplicationErrorCoordinator.h"
 #include "app/CalendarNotificationService.h"
 #include "app/DesktopNotificationController.h"
+#include "app/FullMailSyncService.h"
+#include "app/LocalMaintenanceService.h"
 #include "app/LongPollCoordinator.h"
+#include "app/MailIndexService.h"
 #include "app/MessageNavigationCoordinator.h"
 #include "app/ProcessServices.h"
+#include "app/WorkScheduler.h"
 #include "gui/settings/PreferencesDialog.h"
 #include "gui/shell/MainWindow.h"
+#include "gui/tasks/TaskCenterDialog.h"
 
 #include <KAboutData>
 #include <QAction>
@@ -17,7 +22,9 @@
 #include <QGuiApplication>
 #include <QIcon>
 #include <QMenu>
+#include <QStatusBar>
 #include <QSystemTrayIcon>
+#include <QToolButton>
 
 namespace javelin::app
 {
@@ -116,6 +123,16 @@ namespace javelin::app
                         .settings = toAccountConnectionSettings(settings),
                         .accountId = accountId.toStdString(),
                         .mailboxIds = std::move(mailboxIds),
+                        .fullSyncMailboxIds =
+                            [&]()
+                        {
+                            std::vector<std::string> ids;
+                            for (const auto& mailboxId :
+                                 javelin::gui::settings::PreferencesDialog::syncedMailboxIds(
+                                     accountId))
+                                ids.push_back(mailboxId.toStdString());
+                            return ids;
+                        }(),
                         .notificationMailboxIds = std::move(notificationMailboxIds),
                         .notificationMailboxSelectionConfigured = javelin::gui::settings::
                             PreferencesDialog::hasNotificationMailboxSelection(accountId),
@@ -203,6 +220,20 @@ namespace javelin::app
             m_processServices->mailService(), m_processServices->messageNavigationCoordinator());
 
         m_mainWindow->setAttribute(Qt::WA_DeleteOnClose);
+        auto* taskButton = new QToolButton(m_mainWindow);
+        taskButton->setAutoRaise(true);
+        taskButton->setToolTip(QStringLiteral("Open Task Center"));
+        m_mainWindow->statusBar()->addPermanentWidget(taskButton);
+        const auto updateTaskButton = [this, taskButton]()
+        {
+            const QString summary = m_processServices->workScheduler().summary();
+            taskButton->setText(summary);
+            taskButton->setVisible(!summary.isEmpty());
+        };
+        QObject::connect(taskButton, &QToolButton::clicked, [this]() { showTaskCenter(); });
+        QObject::connect(&m_processServices->workScheduler(), &WorkScheduler::jobsChanged,
+                         taskButton, updateTaskButton);
+        updateTaskButton();
         QObject::connect(m_mainWindow, &javelin::gui::shell::MainWindow::accountSettingsChanged,
                          m_mainWindow, [this]() { reloadAccountSynchronizationSettings(); });
 
@@ -211,7 +242,21 @@ namespace javelin::app
 
     void ApplicationBootstrap::reloadAccountSynchronizationSettings()
     {
-        m_processServices->mailService().applySettings(accountSyncConfigurations());
+        auto configurations = accountSyncConfigurations();
+        std::vector<FullSyncAccountConfiguration> fullSync;
+        std::vector<std::string> accountIds;
+        fullSync.reserve(configurations.size());
+        for (const auto& configuration : configurations)
+        {
+            fullSync.push_back({.settings = configuration.settings,
+                                .accountId = configuration.accountId,
+                                .mailboxIds = configuration.fullSyncMailboxIds});
+            accountIds.push_back(configuration.accountId);
+        }
+        m_processServices->mailService().applySettings(std::move(configurations));
+        m_processServices->fullMailSyncService().applySettings(std::move(fullSync));
+        m_processServices->mailIndexService().applyAccounts(std::move(accountIds));
+        m_processServices->localMaintenanceService().requestReplay();
     }
 
     void ApplicationBootstrap::toggleMainWindow()
@@ -234,12 +279,24 @@ namespace javelin::app
         auto* toggleAction = m_trayMenu->addAction(QStringLiteral("Toggle Javelin"));
         QObject::connect(toggleAction, &QAction::triggered, [&]() { toggleMainWindow(); });
 
+        auto* taskCenterAction = m_trayMenu->addAction(QStringLiteral("Task Center…"));
+        QObject::connect(taskCenterAction, &QAction::triggered, [this]() { showTaskCenter(); });
+
         m_trayMenu->addSeparator();
 
         auto* quitAction = m_trayMenu->addAction(QStringLiteral("Quit"));
         QObject::connect(quitAction, &QAction::triggered, [&]() { m_application.quit(); });
 
         m_trayIcon->setContextMenu(m_trayMenu.get());
+        QObject::connect(
+            &m_processServices->workScheduler(), &WorkScheduler::jobsChanged, &m_application,
+            [this]()
+            {
+                const QString summary = m_processServices->workScheduler().summary();
+                m_trayIcon->setToolTip(summary.isEmpty()
+                                           ? QStringLiteral("Javelin Mail")
+                                           : QStringLiteral("Javelin Mail — %1").arg(summary));
+            });
 
         QObject::connect(
             &m_processServices->mailService(), &MailApplicationService::notificationRaised,
@@ -254,6 +311,19 @@ namespace javelin::app
             });
         QObject::connect(&m_processServices->mailService(), &MailApplicationService::cacheCommitted,
                          &AddressSuggestionStore::instance(), &AddressSuggestionStore::refresh);
+        QObject::connect(&m_processServices->mailService(), &MailApplicationService::cacheCommitted,
+                         &m_application,
+                         [this](const MailCacheChange& change)
+                         {
+                             m_processServices->localMaintenanceService().requestReplay();
+                             m_processServices->fullMailSyncService().requestCatchUp(
+                                 change.accountId.toStdString());
+                             if (change.hasNewMail)
+                             {
+                                 m_processServices->mailIndexService().requestIndex(
+                                     change.accountId.toStdString());
+                             }
+                         });
         QObject::connect(
             &m_processServices->errorCoordinator(), &ApplicationErrorCoordinator::incidentRaised,
             m_notificationController.get(),
@@ -310,6 +380,16 @@ namespace javelin::app
                          });
 
         m_trayIcon->show();
+    }
+
+    void ApplicationBootstrap::showTaskCenter()
+    {
+        if (m_taskCenter == nullptr)
+            m_taskCenter = new javelin::gui::tasks::TaskCenterDialog(
+                m_processServices->workScheduler(), m_mainWindow);
+        m_taskCenter->show();
+        m_taskCenter->raise();
+        m_taskCenter->activateWindow();
     }
 
 } // namespace javelin::app

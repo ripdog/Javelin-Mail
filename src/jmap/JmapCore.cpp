@@ -424,6 +424,12 @@ namespace javelin::jmap
             {
                 return javelin::jmap::operationError(*error);
             }
+            javelin::jmap::cache::RawMessageSourceRepository sources{connection};
+            if (const auto projectionError = sources.replayProjectionJobs())
+            {
+                qWarning().noquote()
+                    << "Mail vault mailbox projection deferred" << projectionError->message;
+            }
 
             return QueuedEmailMutation{
                 .mutationId = mutationId.toStdString(),
@@ -1297,6 +1303,103 @@ namespace javelin::jmap
             .partCount = 1,
             .bodyValueCount = 0,
             .usedCachedContent = false,
+        };
+    }
+
+    QCoro::Task<FullMailboxPageResult>
+    JmapCore::materializeFullMailboxPage(LiveConnectionSettings settings, std::string accountId,
+                                         std::string mailboxId, const std::size_t position,
+                                         const std::size_t limit, std::optional<std::string> anchor)
+    {
+        if (m_impl->databaseConnection == nullptr || m_impl->methodTransport == nullptr)
+        {
+            co_return OperationError{
+                .message = QStringLiteral("Full mailbox synchronization is unavailable."),
+            };
+        }
+        if (const auto validationError = validateLoginSettings(settings, true))
+            co_return *validationError;
+        const auto sessionResult = loadCachedSession(*m_impl->databaseConnection, accountId);
+        if (const auto* error = std::get_if<OperationError>(&sessionResult))
+            co_return *error;
+
+        javelin::jmap::api::MethodCaller caller{*m_impl->methodTransport};
+        javelin::jmap::api::RequestBuilder builder;
+        builder.useCore().useMail();
+        const auto queryRequest = javelin::jmap::api::emailQuery({
+            .accountId = accountId,
+            .filter = javelin::jmap::api::EmailQueryFilter{.inMailbox = mailboxId},
+            .sort = {javelin::jmap::api::EmailQuerySort{.property = "receivedAt",
+                                                        .isAscending = false}},
+            .position = anchor.has_value()
+                            ? std::nullopt
+                            : std::optional<std::uint64_t>{static_cast<std::uint64_t>(position)},
+            .anchor = std::move(anchor),
+            .anchorOffset = static_cast<std::int64_t>(position),
+            .limit = static_cast<std::uint64_t>(limit),
+            .collapseThreads = false,
+            .calculateTotal = true,
+        });
+        if (!queryRequest.has_value())
+        {
+            co_return OperationError{
+                .message = QStringLiteral("Failed to encode the full mailbox query."),
+            };
+        }
+        const auto queryHandle = builder.call(*queryRequest, "full-mailbox-query");
+        const auto getRequest = javelin::jmap::api::emailGet(
+            javelin::jmap::api::getRequestFrom(accountId, queryHandle, "/ids"));
+        if (!getRequest.has_value())
+        {
+            co_return OperationError{
+                .message = QStringLiteral("Failed to encode full mailbox metadata retrieval."),
+            };
+        }
+        const auto getHandle = builder.call(*getRequest, "full-mailbox-get");
+        const auto envelopeResult = co_await caller.call(
+            buildApiRequestContext(settings, accountId,
+                                   std::get<javelin::jmap::api::Session>(sessionResult)),
+            builder);
+        if (const auto* error = std::get_if<javelin::jmap::api::TransportError>(&envelopeResult))
+            co_return operationError(*error);
+        if (const auto* error = std::get_if<javelin::jmap::api::AuthError>(&envelopeResult))
+            co_return operationError(*error);
+        if (const auto* error = std::get_if<javelin::jmap::api::ProtocolError>(&envelopeResult))
+            co_return operationError(*error);
+
+        const javelin::jmap::api::ResponseReader reader{
+            std::get<javelin::jmap::api::ResponseEnvelope>(envelopeResult)};
+        const auto queryResult = reader.require(queryHandle);
+        if (const auto* error = std::get_if<javelin::jmap::api::ResponseReaderError>(&queryResult))
+            co_return operationError(*error);
+        const auto getResult = reader.require(getHandle);
+        if (const auto* error = std::get_if<javelin::jmap::api::ResponseReaderError>(&getResult))
+            co_return operationError(*error);
+
+        const auto& page = std::get<javelin::jmap::api::EmailQueryResponse>(queryResult);
+        const auto& emails = std::get<javelin::jmap::api::EmailGetResponse>(getResult);
+        if (emails.list.size() != page.ids.size())
+        {
+            co_return OperationError{
+                .message = QStringLiteral("Email/get omitted messages from the full mailbox page."),
+            };
+        }
+        javelin::jmap::cache::EmailRepository repository{*m_impl->databaseConnection};
+        if (const auto error = repository.upsertMany(accountId, emails.list))
+            co_return operationError(*error);
+        if (const auto error = javelin::jmap::sync::rebaseActiveEmailProjections(
+                *m_impl->databaseConnection, accountId, page.ids, emails.state))
+            co_return *error;
+
+        co_return FullMailboxPage{
+            .accountId = std::move(accountId),
+            .mailboxId = std::move(mailboxId),
+            .queryState = page.queryState,
+            .position = static_cast<std::size_t>(page.position),
+            .total = page.total.has_value()
+                         ? std::optional<std::size_t>{static_cast<std::size_t>(*page.total)}
+                         : std::nullopt,
+            .emailIds = page.ids,
         };
     }
 

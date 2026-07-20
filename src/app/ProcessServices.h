@@ -19,6 +19,10 @@ namespace javelin::jmap::contacts
 
 namespace javelin::app
 {
+    class WorkScheduler;
+    class FullMailSyncService;
+    class MailIndexService;
+    class LocalMaintenanceService;
     class ApplicationErrorCoordinator;
     class ComposeService;
     class CalendarNotificationService;
@@ -90,6 +94,10 @@ namespace javelin::app
         [[nodiscard]] MessageNavigationCoordinator& messageNavigationCoordinator();
         [[nodiscard]] ApplicationErrorCoordinator& errorCoordinator();
         [[nodiscard]] CalendarNotificationService& calendarNotificationService();
+        [[nodiscard]] WorkScheduler& workScheduler();
+        [[nodiscard]] LocalMaintenanceService& localMaintenanceService();
+        [[nodiscard]] FullMailSyncService& fullMailSyncService();
+        [[nodiscard]] MailIndexService& mailIndexService();
 
       private:
         std::unique_ptr<javelin::jmap::JmapCore> m_jmapCore;
@@ -118,6 +126,10 @@ namespace javelin::app
         std::unique_ptr<MailApplicationService> m_mailService;
         std::unique_ptr<MessageNavigationCoordinator> m_messageNavigationCoordinator;
         std::unique_ptr<CalendarNotificationService> m_calendarNotificationService;
+        std::unique_ptr<WorkScheduler> m_workScheduler;
+        std::unique_ptr<FullMailSyncService> m_fullMailSyncService;
+        std::unique_ptr<MailIndexService> m_mailIndexService;
+        std::unique_ptr<LocalMaintenanceService> m_localMaintenanceService;
     };
 
 } // namespace javelin::app

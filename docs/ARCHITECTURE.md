@@ -1,5 +1,8 @@
 # Architecture
 
+Complete-offline mail storage, scheduling, pagination, and search-index invariants are defined in
+[OFFLINE_MAIL_ARCHITECTURE.md](OFFLINE_MAIL_ARCHITECTURE.md).
+
 Javelin uses a one-way dependency and control flow:
 
 ```text

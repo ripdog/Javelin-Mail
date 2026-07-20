@@ -29,6 +29,7 @@ class QNetworkAccessManager;
 
 namespace javelin::app
 {
+    class WorkScheduler;
     struct MailboxQueryWindowChange
     {
         QString mailboxId;
@@ -74,7 +75,7 @@ namespace javelin::app
                                QNetworkAccessManager& networkAccessManager,
                                javelin::jmap::cache::AccountRepository& accountRepository,
                                javelin::jmap::cache::QueryService& queryService,
-                               QObject* parent = nullptr);
+                               WorkScheduler& workScheduler, QObject* parent = nullptr);
         ~AccountSyncCoordinator() override;
 
         void applySettings(AccountConnectionSettings settings, std::string accountId,
@@ -149,6 +150,7 @@ namespace javelin::app
         QNetworkAccessManager& m_networkAccessManager;
         javelin::jmap::cache::AccountRepository& m_accountRepository;
         javelin::jmap::cache::QueryService& m_queryService;
+        WorkScheduler& m_workScheduler;
         std::optional<AccountConnectionSettings> m_settings;
         std::string m_accountId;
         std::vector<std::string> m_mailboxIds;

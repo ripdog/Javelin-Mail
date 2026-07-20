@@ -57,9 +57,13 @@ KDE cmake settings enable `QT_NO_CAST_FROM_ASCII` and `QT_NO_KEYWORDS`. All code
 - The application is expected to run continuously for notifications, so memory pressure matters at all times.
 - `QSqlDatabase` is the local system of record for synced state, not a secondary convenience cache.
 - Persist enough server state locally to minimize redundant JMAP round-trips and to support fast startup.
-- This is an online-first client, not a full-offline client. Do not expand the cache toward a full local mirror unless there is a strong, measured reason.
+- Mailboxes explicitly selected for synchronization are complete offline mirrors, including raw
+  MIME sources and attachments. Other mailboxes remain online-first working sets. Keep the mirror
+  bounded to explicit user selection and make bulk retrieval preemptible by foreground work.
 - Keep only active UI state and short-lived working sets in memory.
-- Message bodies, large MIME sections, rendered HTML artifacts, and attachment metadata should be loaded on demand and released promptly.
+- Raw MIME for complete-offline mailboxes belongs in the filesystem vault, never as SQLite BLOBs.
+  Parsed bodies and rendered artifacts remain short-lived; the rebuildable search index stores only
+  normalized searchable text.
 - Favor IDs and lightweight summaries in long-lived models. Fetch full objects only when a view needs them.
 
 ## Library Boundary

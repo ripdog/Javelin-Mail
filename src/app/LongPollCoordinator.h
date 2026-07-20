@@ -25,6 +25,7 @@
 namespace javelin::app
 {
     class ApplicationErrorCoordinator;
+    class WorkScheduler;
 
     class MailboxObservation;
 
@@ -94,6 +95,7 @@ namespace javelin::app
         AccountConnectionSettings settings;
         std::string accountId;
         std::vector<std::string> mailboxIds;
+        std::vector<std::string> fullSyncMailboxIds;
         std::vector<std::string> notificationMailboxIds;
         bool notificationMailboxSelectionConfigured = false;
     };
@@ -129,7 +131,7 @@ namespace javelin::app
                                javelin::jmap::calendar::CalendarService& calendarService,
                                javelin::jmap::sieve::SieveService& sieveService,
                                ApplicationErrorCoordinator& errorCoordinator,
-                               QObject* parent = nullptr);
+                               WorkScheduler& workScheduler, QObject* parent = nullptr);
 
         void applySettings(std::vector<AccountSyncConfiguration> configurations);
         [[nodiscard]] MailboxObservation observeMailbox(std::string accountId,
@@ -253,6 +255,7 @@ namespace javelin::app
         javelin::jmap::calendar::CalendarService& m_calendarService;
         javelin::jmap::sieve::SieveService& m_sieveService;
         ApplicationErrorCoordinator& m_errorCoordinator;
+        WorkScheduler& m_workScheduler;
         struct VisibleCalendarRange
         {
             javelin::jmap::calendar::VisibleInterval interval;

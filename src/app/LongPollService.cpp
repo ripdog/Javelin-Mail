@@ -1,6 +1,7 @@
 #include "app/LongPollService.h"
 
 #include "app/MailboxSyncCoverage.h"
+#include "app/WorkScheduler.h"
 
 #include "jmap/api/MethodCaller.h"
 #include "jmap/api/Session.h"
@@ -11,6 +12,7 @@
 #include "jmap/sync/MailboxStateRefreshExecutor.h"
 #include "jmap/sync/PreferredStateChangeSource.h"
 
+#include <QCoroTimer>
 #include <QDateTime>
 #include <QDebug>
 #include <QMetaObject>
@@ -51,10 +53,12 @@ namespace javelin::app
         javelin::jmap::api::JmapMethodTransport& methodTransport,
         QNetworkAccessManager& networkAccessManager,
         javelin::jmap::cache::AccountRepository& accountRepository,
-        javelin::jmap::cache::QueryService& queryService, QObject* parent)
+        javelin::jmap::cache::QueryService& queryService, WorkScheduler& workScheduler,
+        QObject* parent)
         : QObject(parent), m_databaseConnection(databaseConnection),
           m_methodTransport(methodTransport), m_networkAccessManager(networkAccessManager),
-          m_accountRepository(accountRepository), m_queryService(queryService)
+          m_accountRepository(accountRepository), m_queryService(queryService),
+          m_workScheduler(workScheduler)
     {
         m_refreshDebounceTimer.setSingleShot(true);
         m_refreshDebounceTimer.setInterval(refreshDebounceInterval);
@@ -361,6 +365,16 @@ namespace javelin::app
         const auto watchedMailboxes = runContext->configuration.mailboxes;
         for (const auto& [mailboxId, mailboxName] : watchedMailboxes)
         {
+            while (!m_workScheduler.mayStartBackgroundNetwork())
+            {
+                if (m_runContext == nullptr || m_runContext->generation != runContext->generation ||
+                    runContext->cancellation.isCancelled())
+                    co_return;
+                QTimer timer;
+                timer.setSingleShot(true);
+                timer.start(std::chrono::milliseconds{100});
+                co_await qCoro(timer).waitForTimeout();
+            }
             const auto refreshResult = co_await mailboxRefreshExecutor.refreshCollapsedMailbox(
                 runContext->configuration.accountId, mailboxId, {});
             if (const auto* summary =

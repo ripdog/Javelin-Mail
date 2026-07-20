@@ -79,6 +79,18 @@ namespace javelin::jmap
     using MessageContentRefreshResult =
         std::variant<MessageContentRefreshSummary, MessageContentUnavailable, OperationError>;
 
+    struct FullMailboxPage
+    {
+        std::string accountId;
+        std::string mailboxId;
+        std::string queryState;
+        std::size_t position = 0;
+        std::optional<std::size_t> total;
+        std::vector<std::string> emailIds;
+    };
+
+    using FullMailboxPageResult = std::variant<FullMailboxPage, OperationError>;
+
     struct MailboxMessagesRefreshSummary
     {
         std::string accountId;
@@ -189,6 +201,11 @@ namespace javelin::jmap
         refreshMessageContent(LiveConnectionSettings settings, std::string accountId,
                               std::string emailId,
                               std::function<void(const QString&)> progressCallback = {});
+        [[nodiscard]] QCoro::Task<FullMailboxPageResult>
+        materializeFullMailboxPage(LiveConnectionSettings settings, std::string accountId,
+                                   std::string mailboxId, std::size_t position,
+                                   std::size_t limit = 250,
+                                   std::optional<std::string> anchor = std::nullopt);
         [[nodiscard]] QCoro::Task<MailboxMessagesRefreshResult>
         refreshMailboxMessages(LiveConnectionSettings settings, std::string accountId,
                                std::string mailboxId,
