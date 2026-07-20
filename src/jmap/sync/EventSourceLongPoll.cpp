@@ -26,6 +26,7 @@
 #include <QUrlQuery>
 
 #include <algorithm>
+#include <charconv>
 #include <optional>
 #include <string_view>
 #include <unordered_map>
@@ -43,7 +44,7 @@ namespace javelin::jmap::sync
 
     struct RawPing
     {
-        std::optional<unsigned int> interval;
+        std::optional<std::variant<unsigned int, std::string>> interval;
     };
 
 } // namespace javelin::jmap::sync
@@ -64,6 +65,39 @@ template <> struct glz::meta<javelin::jmap::sync::RawPing>
 
 namespace javelin::jmap::sync
 {
+
+    EventSourcePingIntervalResult parseEventSourcePingInterval(const std::string_view eventData)
+    {
+        RawPing ping;
+        std::string buffer{eventData};
+        if (const auto readError =
+                glz::read<glz::opts{.error_on_unknown_keys = false}>(ping, buffer))
+            return std::string{glz::format_error(readError, buffer)};
+        if (!ping.interval.has_value())
+            return std::optional<std::chrono::seconds>{std::nullopt};
+
+        unsigned int interval = 0;
+        if (const auto* numeric = std::get_if<unsigned int>(&*ping.interval))
+        {
+            interval = *numeric;
+        }
+        else
+        {
+            const auto& text = std::get<std::string>(*ping.interval);
+            const auto [end, error] =
+                std::from_chars(text.data(), text.data() + text.size(), interval);
+            if (error != std::errc{} || end != text.data() + text.size())
+                return std::string{"Ping interval string is not an unsigned decimal integer."};
+        }
+
+        if (interval > 1000 && interval % 1000 == 0)
+        {
+            // Stalwart currently reports this RFC 8620 value in milliseconds.
+            interval /= 1000;
+        }
+        return interval > 0 ? std::optional<std::chrono::seconds>{std::chrono::seconds{interval}}
+                            : std::optional<std::chrono::seconds>{std::nullopt};
+    }
 
     namespace
     {
@@ -223,33 +257,23 @@ namespace javelin::jmap::sync
 
             if (eventName == "ping")
             {
-                RawPing ping;
-                std::string buffer = std::string{eventData};
-                if (const auto readError =
-                        glz::read<glz::opts{.error_on_unknown_keys = false}>(ping, buffer))
+                const auto pingIntervalResult = parseEventSourcePingInterval(eventData);
+                if (const auto* error = std::get_if<std::string>(&pingIntervalResult))
                 {
                     return ParsedEvent{
                         .status = ParsedEventStatus::Invalid,
                         .response = std::nullopt,
-                        .errorMessage = std::string{glz::format_error(readError, buffer)},
+                        .errorMessage = *error,
                         .pingInterval = std::nullopt,
                     };
-                }
-
-                auto pingInterval = ping.interval;
-                if (pingInterval.has_value() && *pingInterval > 1000 && *pingInterval % 1000 == 0)
-                {
-                    // Stalwart currently reports this RFC 8620 value in milliseconds.
-                    pingInterval = *pingInterval / 1000;
                 }
 
                 return ParsedEvent{
                     .status = ParsedEventStatus::Ignored,
                     .response = std::nullopt,
                     .errorMessage = std::nullopt,
-                    .pingInterval = pingInterval.has_value() && *pingInterval > 0
-                                        ? std::optional{std::chrono::seconds{*pingInterval}}
-                                        : std::nullopt,
+                    .pingInterval =
+                        std::get<std::optional<std::chrono::seconds>>(pingIntervalResult),
                 };
             }
 
