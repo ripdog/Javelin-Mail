@@ -199,9 +199,11 @@ namespace javelin::app
     {
         QSqlQuery query{m_connection.database()};
         if (!query.exec(
-                QStringLiteral("SELECT %1 FROM background_jobs ORDER BY CASE WHEN status IN "
-                               "('running','queued') THEN 0 ELSE 1 END,priority DESC,"
-                               "updated_at DESC")
+                QStringLiteral("SELECT %1 FROM background_jobs ORDER BY CASE status WHEN "
+                               "'running' THEN 0 WHEN 'queued' THEN 1 WHEN 'waiting_for_network' "
+                               "THEN 2 WHEN 'waiting_for_space' THEN 3 WHEN 'waiting_for_auth' "
+                               "THEN 4 WHEN 'paused' THEN 5 WHEN 'failed' THEN 6 ELSE 7 END,"
+                               "priority DESC,created_at ASC,job_id")
                     .arg(columns())))
             return queryError(QStringLiteral("List background jobs"), query);
         std::vector<WorkRecord> records;
@@ -296,7 +298,7 @@ namespace javelin::app
 
     int WorkTaskModel::columnCount(const QModelIndex& parent) const
     {
-        return parent.isValid() ? 0 : 4;
+        return parent.isValid() ? 0 : 5;
     }
 
     QVariant WorkTaskModel::data(const QModelIndex& index, const int role) const
@@ -322,6 +324,8 @@ namespace javelin::app
                                                     : QStringLiteral("—");
         case 3:
             return item.errorText.value_or(item.progress.detail);
+        case 4:
+            return {};
         default:
             return {};
         }
@@ -342,6 +346,8 @@ namespace javelin::app
             return QStringLiteral("Progress");
         case 3:
             return QStringLiteral("Details");
+        case 4:
+            return QStringLiteral("Actions");
         default:
             return {};
         }

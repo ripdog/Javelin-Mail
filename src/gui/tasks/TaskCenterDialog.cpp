@@ -2,17 +2,139 @@
 
 #include "app/WorkScheduler.h"
 
-#include <QDialogButtonBox>
+#include <QApplication>
+#include <QEvent>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QMouseEvent>
+#include <QPainter>
 #include <QPushButton>
+#include <QStyleOptionButton>
+#include <QStyledItemDelegate>
 #include <QTableView>
 #include <QVBoxLayout>
 
 namespace javelin::gui::tasks
 {
+    namespace
+    {
+        enum class RowAction
+        {
+            None,
+            Pause,
+            Resume,
+            Retry,
+        };
+
+        [[nodiscard]] RowAction actionForStatus(const javelin::app::WorkStatus status)
+        {
+            using javelin::app::WorkStatus;
+            switch (status)
+            {
+            case WorkStatus::Queued:
+            case WorkStatus::Running:
+            case WorkStatus::WaitingForSpace:
+            case WorkStatus::WaitingForNetwork:
+            case WorkStatus::WaitingForAuth:
+                return RowAction::Pause;
+            case WorkStatus::Paused:
+                return RowAction::Resume;
+            case WorkStatus::Failed:
+                return RowAction::Retry;
+            case WorkStatus::Complete:
+                return RowAction::None;
+            }
+            return RowAction::None;
+        }
+
+        [[nodiscard]] QString actionLabel(const RowAction action)
+        {
+            switch (action)
+            {
+            case RowAction::Pause:
+                return QStringLiteral("Pause");
+            case RowAction::Resume:
+                return QStringLiteral("Resume");
+            case RowAction::Retry:
+                return QStringLiteral("Retry");
+            case RowAction::None:
+                return {};
+            }
+            return {};
+        }
+
+        [[nodiscard]] QRect buttonRect(const QStyleOptionViewItem& option)
+        {
+            constexpr int buttonWidth = 76;
+            constexpr int buttonHeight = 26;
+            return QRect{option.rect.center().x() - buttonWidth / 2,
+                         option.rect.center().y() - buttonHeight / 2, buttonWidth, buttonHeight};
+        }
+
+        class TaskActionDelegate final : public QStyledItemDelegate
+        {
+          public:
+            TaskActionDelegate(javelin::app::WorkScheduler& scheduler,
+                               javelin::app::WorkTaskModel& model, QObject* parent)
+                : QStyledItemDelegate(parent), m_scheduler(scheduler), m_model(model)
+            {
+            }
+
+            void paint(QPainter* painter, const QStyleOptionViewItem& option,
+                       const QModelIndex& index) const override
+            {
+                QStyledItemDelegate::paint(painter, option, index);
+                const auto* record = m_model.recordAt(index.row());
+                if (record == nullptr)
+                    return;
+                const auto action = actionForStatus(record->status);
+                if (action == RowAction::None)
+                    return;
+                QStyleOptionButton button;
+                button.rect = buttonRect(option);
+                button.state = QStyle::State_Enabled;
+                button.text = actionLabel(action);
+                QApplication::style()->drawControl(QStyle::CE_PushButton, &button, painter);
+            }
+
+            bool editorEvent(QEvent* event, QAbstractItemModel*, const QStyleOptionViewItem& option,
+                             const QModelIndex& index) override
+            {
+                if (event->type() != QEvent::MouseButtonRelease)
+                    return false;
+                const auto* mouseEvent = static_cast<QMouseEvent*>(event);
+                if (mouseEvent->button() != Qt::LeftButton ||
+                    !buttonRect(option).contains(mouseEvent->position().toPoint()))
+                    return false;
+                const auto* record = m_model.recordAt(index.row());
+                if (record == nullptr)
+                    return false;
+                const std::string jobId = record->jobId;
+                switch (actionForStatus(record->status))
+                {
+                case RowAction::Pause:
+                    static_cast<void>(m_scheduler.pause(jobId));
+                    return true;
+                case RowAction::Resume:
+                    static_cast<void>(m_scheduler.resume(jobId));
+                    return true;
+                case RowAction::Retry:
+                    static_cast<void>(m_scheduler.retry(jobId));
+                    return true;
+                case RowAction::None:
+                    return false;
+                }
+                return false;
+            }
+
+          private:
+            javelin::app::WorkScheduler& m_scheduler;
+            javelin::app::WorkTaskModel& m_model;
+        };
+    } // namespace
+
     TaskCenterDialog::TaskCenterDialog(javelin::app::WorkScheduler& scheduler, QWidget* parent)
-        : QDialog(parent), m_scheduler(scheduler)
+        : QDialog(parent)
     {
         setWindowTitle(QStringLiteral("Task Center"));
         setAttribute(Qt::WA_DeleteOnClose);
@@ -25,63 +147,21 @@ namespace javelin::gui::tasks
         m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
         m_table->setSelectionMode(QAbstractItemView::SingleSelection);
         m_table->setAlternatingRowColors(true);
-        m_table->horizontalHeader()->setStretchLastSection(true);
+        m_table->setItemDelegateForColumn(4, new TaskActionDelegate(scheduler, *m_model, m_table));
+        m_table->horizontalHeader()->setStretchLastSection(false);
         m_table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+        m_table->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Stretch);
+        m_table->horizontalHeader()->setSectionResizeMode(4, QHeaderView::Fixed);
+        m_table->setColumnWidth(4, 96);
+        m_table->verticalHeader()->setDefaultSectionSize(34);
         layout->addWidget(m_table, 1);
 
         auto* actionLayout = new QHBoxLayout;
-        m_pauseButton = new QPushButton(QStringLiteral("Pause"), this);
-        m_resumeButton = new QPushButton(QStringLiteral("Resume"), this);
-        m_retryButton = new QPushButton(QStringLiteral("Retry"), this);
-        actionLayout->addWidget(m_pauseButton);
-        actionLayout->addWidget(m_resumeButton);
-        actionLayout->addWidget(m_retryButton);
         actionLayout->addStretch(1);
         auto* closeButton = new QPushButton(QStringLiteral("Close"), this);
         actionLayout->addWidget(closeButton);
         layout->addLayout(actionLayout);
 
         connect(closeButton, &QPushButton::clicked, this, &QDialog::close);
-        connect(m_pauseButton, &QPushButton::clicked, this, &TaskCenterDialog::pauseSelected);
-        connect(m_resumeButton, &QPushButton::clicked, this, &TaskCenterDialog::resumeSelected);
-        connect(m_retryButton, &QPushButton::clicked, this, &TaskCenterDialog::retrySelected);
-        connect(m_table->selectionModel(), &QItemSelectionModel::selectionChanged, this,
-                [this]() { updateActions(); });
-        updateActions();
-    }
-
-    void TaskCenterDialog::updateActions()
-    {
-        const auto* item = m_model->recordAt(m_table->currentIndex().row());
-        m_pauseButton->setEnabled(item != nullptr &&
-                                  (item->status == javelin::app::WorkStatus::Queued ||
-                                   item->status == javelin::app::WorkStatus::Running ||
-                                   item->status == javelin::app::WorkStatus::WaitingForNetwork ||
-                                   item->status == javelin::app::WorkStatus::WaitingForSpace));
-        m_resumeButton->setEnabled(item != nullptr &&
-                                   item->status == javelin::app::WorkStatus::Paused);
-        m_retryButton->setEnabled(item != nullptr &&
-                                  item->status == javelin::app::WorkStatus::Failed);
-    }
-
-    void TaskCenterDialog::pauseSelected()
-    {
-        if (const auto* item = m_model->recordAt(m_table->currentIndex().row()))
-            static_cast<void>(m_scheduler.pause(item->jobId));
-        updateActions();
-    }
-
-    void TaskCenterDialog::resumeSelected()
-    {
-        if (const auto* item = m_model->recordAt(m_table->currentIndex().row()))
-            static_cast<void>(m_scheduler.resume(item->jobId));
-        updateActions();
-    }
-
-    void TaskCenterDialog::retrySelected()
-    {
-        if (const auto* item = m_model->recordAt(m_table->currentIndex().row()))
-            static_cast<void>(m_scheduler.retry(item->jobId));
-        updateActions();
     }
 } // namespace javelin::gui::tasks

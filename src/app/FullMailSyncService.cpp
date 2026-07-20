@@ -57,6 +57,22 @@ namespace javelin::app
         {
             qWarning().noquote() << operation << query.lastError().text();
         }
+
+        [[nodiscard]] QString
+        mailboxDisplayName(javelin::jmap::cache::DatabaseConnection& connection,
+                           const std::string_view accountId, const std::string_view mailboxId)
+        {
+            QSqlQuery query{connection.database()};
+            query.prepare(QStringLiteral(
+                "SELECT name FROM mailboxes WHERE account_id=:account AND mailbox_id=:mailbox"));
+            query.bindValue(QStringLiteral(":account"),
+                            QString::fromStdString(std::string{accountId}));
+            query.bindValue(QStringLiteral(":mailbox"),
+                            QString::fromStdString(std::string{mailboxId}));
+            if (query.exec() && query.next() && !query.value(0).toString().isEmpty())
+                return query.value(0).toString();
+            return QString::fromStdString(std::string{mailboxId});
+        }
     } // namespace
 
     FullMailSyncService::FullMailSyncService(javelin::jmap::cache::DatabaseConnection& connection,
@@ -129,7 +145,8 @@ namespace javelin::app
                     .kind = WorkKind::FullMailSync,
                     .priority = WorkPriority::Bulk,
                     .title = QStringLiteral("Download all mail in %1")
-                                 .arg(QString::fromStdString(mailboxId)),
+                                 .arg(mailboxDisplayName(m_connection, configuration.accountId,
+                                                         mailboxId)),
                     .checkpointJson = QStringLiteral("{}"),
                 }));
             }
