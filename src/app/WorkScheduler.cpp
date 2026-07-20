@@ -114,6 +114,8 @@ namespace javelin::app
         m_quietTimer.setInterval(quietPeriod);
         connect(&m_quietTimer, &QTimer::timeout, this,
                 &WorkScheduler::foregroundAvailabilityChanged);
+        if (m_quietTimer.interval() > 0)
+            m_quietTimer.start();
     }
 
     std::optional<javelin::jmap::cache::DatabaseError> WorkScheduler::ensure(const WorkSpec& spec)

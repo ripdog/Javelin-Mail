@@ -92,7 +92,7 @@ namespace javelin::app
         explicit WorkScheduler(javelin::jmap::cache::DatabaseConnection& connection,
                                QObject* parent = nullptr,
                                std::chrono::milliseconds quietPeriod = std::chrono::milliseconds{
-                                   2000});
+                                   5000});
 
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
         ensure(const WorkSpec& spec);

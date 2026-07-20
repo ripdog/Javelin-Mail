@@ -125,6 +125,7 @@ namespace javelin::app
                                javelin::jmap::JmapCore& jmapCore,
                                javelin::jmap::api::JmapMethodTransport& methodTransport,
                                QNetworkAccessManager& networkAccessManager,
+                               javelin::jmap::api::WebSocketFailureCooldowns& cooldowns,
                                javelin::jmap::cache::AccountRepository& accountRepository,
                                javelin::jmap::cache::QueryService& queryService,
                                javelin::jmap::contacts::ContactService& contactService,
@@ -249,6 +250,7 @@ namespace javelin::app
         javelin::jmap::JmapCore& m_jmapCore;
         javelin::jmap::api::JmapMethodTransport& m_methodTransport;
         QNetworkAccessManager& m_networkAccessManager;
+        javelin::jmap::api::WebSocketFailureCooldowns& m_transportCooldowns;
         javelin::jmap::cache::AccountRepository& m_accountRepository;
         javelin::jmap::cache::QueryService& m_queryService;
         javelin::jmap::contacts::ContactService& m_contactService;

@@ -6,7 +6,6 @@
 #include <QCoroSignal>
 
 #include <QByteArray>
-#include <QDateTime>
 #include <QElapsedTimer>
 #include <QLoggingCategory>
 #include <QNetworkRequest>
@@ -57,7 +56,6 @@ namespace javelin::jmap::api
         constexpr auto connectTimeout = std::chrono::seconds{15};
         constexpr auto responseTimeout = std::chrono::seconds{60};
         constexpr auto cancellationPollInterval = std::chrono::milliseconds{250};
-        constexpr auto fallbackRetryInterval = std::chrono::hours{6};
 
         using WebSocketMessageHeader = detail::WebSocketMessageHeader;
 
@@ -442,6 +440,35 @@ namespace javelin::jmap::api
         };
     } // namespace
 
+    WebSocketFailureCooldowns::WebSocketFailureCooldowns(
+        const std::chrono::milliseconds failureCooldown)
+        : m_failureCooldown(failureCooldown)
+    {
+    }
+
+    std::optional<std::chrono::milliseconds>
+    WebSocketFailureCooldowns::retryDelay(const std::string_view url) const
+    {
+        const auto found = m_retryAfter.find(std::string{url});
+        if (found == m_retryAfter.end())
+            return std::nullopt;
+        const auto remaining = found->second - std::chrono::steady_clock::now();
+        if (remaining <= std::chrono::steady_clock::duration::zero())
+            return std::nullopt;
+        return std::chrono::ceil<std::chrono::milliseconds>(remaining);
+    }
+
+    void WebSocketFailureCooldowns::recordFailure(std::string url)
+    {
+        m_retryAfter.insert_or_assign(std::move(url),
+                                      std::chrono::steady_clock::now() + m_failureCooldown);
+    }
+
+    void WebSocketFailureCooldowns::recordSuccess(const std::string_view url)
+    {
+        m_retryAfter.erase(std::string{url});
+    }
+
     HttpJmapMethodTransport::HttpJmapMethodTransport(AbstractTransport& transport)
         : m_transport(transport)
     {
@@ -502,15 +529,17 @@ namespace javelin::jmap::api
     {
         javelin::jmap::cache::DatabaseConnection& databaseConnection;
         HttpJmapMethodTransport& httpTransport;
+        WebSocketFailureCooldowns& cooldowns;
         std::unordered_map<std::string, std::unique_ptr<WebSocketJmapConnection>> connections;
     };
 
     PreferredJmapMethodTransport::PreferredJmapMethodTransport(
         javelin::jmap::cache::DatabaseConnection& databaseConnection,
-        HttpJmapMethodTransport& httpTransport)
+        HttpJmapMethodTransport& httpTransport, WebSocketFailureCooldowns& cooldowns)
         : m_impl(std::make_unique<Impl>(Impl{
               .databaseConnection = databaseConnection,
               .httpTransport = httpTransport,
+              .cooldowns = cooldowns,
               .connections = {},
           }))
     {
@@ -555,7 +584,7 @@ namespace javelin::jmap::api
             }
             co_return co_await m_impl->httpTransport.call(std::move(request));
         }
-        if (!forceWebSocket && !target->shouldAttemptWebSocket(QDateTime::currentDateTimeUtc()))
+        if (!forceWebSocket && m_impl->cooldowns.retryDelay(target->webSocketUrl).has_value())
         {
             co_return co_await m_impl->httpTransport.call(std::move(request));
         }
@@ -569,12 +598,7 @@ namespace javelin::jmap::api
         auto attempt = co_await connection->call(target->webSocketUrl, request);
         if (attempt.validWebSocketResponse)
         {
-            if (const auto error = preferences.markWebSocketAvailable(target->ownerAccountId,
-                                                                      target->webSocketUrl))
-            {
-                qCWarning(logJmapWebSocketTransport).noquote()
-                    << "could not persist working WebSocket state" << error->message;
-            }
+            m_impl->cooldowns.recordSuccess(target->webSocketUrl);
             co_return std::move(attempt.result);
         }
 
@@ -584,18 +608,9 @@ namespace javelin::jmap::api
             co_return std::move(attempt.result);
         }
 
-        const auto retryAfter = QDateTime::currentDateTimeUtc().addSecs(
-            std::chrono::duration_cast<std::chrono::seconds>(fallbackRetryInterval).count());
-        if (const auto error = preferences.markHttpFallback(
-                target->ownerAccountId, target->webSocketUrl, retryAfter,
-                QString::fromStdString(transportError->message)))
-        {
-            qCWarning(logJmapWebSocketTransport).noquote()
-                << "could not persist HTTP fallback state" << error->message;
-        }
+        m_impl->cooldowns.recordFailure(target->webSocketUrl);
         qCWarning(logJmapWebSocketTransport).noquote()
-            << "WebSocket unavailable; remembering HTTP fallback until"
-            << retryAfter.toString(Qt::ISODateWithMs)
+            << "WebSocket unavailable; using HTTP for 15 minutes"
             << QString::fromStdString(transportError->message);
 
         if (!attempt.requestDispatched)

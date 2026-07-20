@@ -1,5 +1,6 @@
 #include "app/ComposeService.h"
 #include "app/ApplicationErrorCoordinator.h"
+#include "app/WorkScheduler.h"
 
 #include "jmap/submission/ComposeService.h"
 
@@ -8,6 +9,22 @@ namespace javelin::app
 
     namespace
     {
+        class ForegroundWorkScope final
+        {
+          public:
+            explicit ForegroundWorkScope(WorkScheduler& scheduler) : m_scheduler(scheduler)
+            {
+                m_scheduler.beginForegroundWork();
+            }
+            ~ForegroundWorkScope()
+            {
+                m_scheduler.endForegroundWork();
+            }
+
+          private:
+            WorkScheduler& m_scheduler;
+        };
+
         [[nodiscard]] javelin::jmap::LiveConnectionSettings
         toLiveConnectionSettings(AccountConnectionSettings settings)
         {
@@ -20,8 +37,9 @@ namespace javelin::app
     } // namespace
 
     ComposeService::ComposeService(javelin::jmap::submission::ComposeService& service,
-                                   ApplicationErrorCoordinator& errorCoordinator)
-        : m_service(service), m_errorCoordinator(errorCoordinator)
+                                   ApplicationErrorCoordinator& errorCoordinator,
+                                   WorkScheduler& workScheduler)
+        : m_service(service), m_errorCoordinator(errorCoordinator), m_workScheduler(workScheduler)
     {
     }
 
@@ -30,6 +48,7 @@ namespace javelin::app
     ComposeService::open(AccountConnectionSettings settings,
                          javelin::jmap::submission::OpenComposeRequest request)
     {
+        const ForegroundWorkScope foreground{m_workScheduler};
         const auto accountId = request.accountId;
         auto result =
             co_await m_service.open(toLiveConnectionSettings(settings), std::move(request));
@@ -45,6 +64,7 @@ namespace javelin::app
         std::variant<std::vector<javelin::jmap::domain::Identity>, javelin::jmap::OperationError>>
     ComposeService::loadSenderIdentities(AccountConnectionSettings settings, std::string accountId)
     {
+        const ForegroundWorkScope foreground{m_workScheduler};
         const auto reportedAccountId = accountId;
         auto result = co_await m_service.loadSenderIdentities(toLiveConnectionSettings(settings),
                                                               std::move(accountId));
@@ -61,6 +81,7 @@ namespace javelin::app
     ComposeService::saveDraft(AccountConnectionSettings settings,
                               javelin::jmap::submission::DraftSnapshot snapshot)
     {
+        const ForegroundWorkScope foreground{m_workScheduler};
         const auto accountId = snapshot.accountId;
         auto result =
             co_await m_service.saveDraft(toLiveConnectionSettings(settings), std::move(snapshot));
@@ -76,6 +97,7 @@ namespace javelin::app
     ComposeService::send(AccountConnectionSettings settings,
                          javelin::jmap::submission::DraftSnapshot snapshot)
     {
+        const ForegroundWorkScope foreground{m_workScheduler};
         const auto accountId = snapshot.accountId;
         auto result =
             co_await m_service.send(toLiveConnectionSettings(settings), std::move(snapshot));

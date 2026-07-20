@@ -25,12 +25,13 @@ namespace javelin::jmap::submission
 namespace javelin::app
 {
     class ApplicationErrorCoordinator;
+    class WorkScheduler;
 
     class ComposeService
     {
       public:
         ComposeService(javelin::jmap::submission::ComposeService& service,
-                       ApplicationErrorCoordinator& errorCoordinator);
+                       ApplicationErrorCoordinator& errorCoordinator, WorkScheduler& workScheduler);
 
         [[nodiscard]] QCoro::Task<
             std::variant<javelin::jmap::submission::DraftSnapshot, javelin::jmap::OperationError>>
@@ -57,6 +58,7 @@ namespace javelin::app
       private:
         javelin::jmap::submission::ComposeService& m_service;
         ApplicationErrorCoordinator& m_errorCoordinator;
+        WorkScheduler& m_workScheduler;
     };
 
 } // namespace javelin::app

@@ -73,3 +73,30 @@ TEST_CASE("work scheduler recovers running work and preserves explicit pauses",
     pausedRecovery.endForegroundWork();
     CHECK(pausedRecovery.mayStartBackgroundNetwork());
 }
+
+TEST_CASE("work scheduler observes a quiet period after startup and foreground work",
+          "[app][work-scheduler]")
+{
+    if (QCoreApplication::instance() == nullptr)
+    {
+        static int argc = 1;
+        static char name[] = "work-scheduler-quiet-period-test";
+        static char* argv[]{name, nullptr};
+        static const auto application = std::make_unique<QCoreApplication>(argc, argv);
+        Q_UNUSED(application);
+    }
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("work-scheduler-quiet-period-test"),
+        .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+
+    javelin::app::WorkScheduler scheduler{connection, nullptr, std::chrono::seconds{5}};
+    CHECK_FALSE(scheduler.mayStartBackgroundNetwork());
+    scheduler.beginForegroundWork();
+    scheduler.endForegroundWork();
+    CHECK_FALSE(scheduler.mayStartBackgroundNetwork());
+}

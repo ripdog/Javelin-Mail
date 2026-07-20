@@ -3,12 +3,12 @@
 #include "jmap/api/MethodEnvelope.h"
 #include "jmap/api/SessionParser.h"
 #include "jmap/api/Transport.h"
-#include "jmap/cache/JmapTransportPreferenceRepository.h"
 #include "jmap/cache/SessionRepository.h"
 
 #include <QCoroTask>
 
 #include <QCoreApplication>
+#include <QSqlQuery>
 #include <QTemporaryDir>
 
 #include <catch2/catch_test_macros.hpp>
@@ -73,8 +73,7 @@ namespace
         {
             FAIL(error->message.toStdString());
         }
-        context.connection =
-            std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+        context.connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
         return context;
     }
 
@@ -126,30 +125,22 @@ TEST_CASE("preferred JMAP transport falls back to HTTP before websocket dispatch
     FakeHttpTransport resourceTransport;
     resourceTransport.result = javelin::jmap::api::HttpResponse{
         .statusCode = 200,
-        .body = QByteArray::fromStdString(
-            javelin::tests::loadFixture("jmap/method/response.json")),
+        .body = QByteArray::fromStdString(javelin::tests::loadFixture("jmap/method/response.json")),
     };
     javelin::jmap::api::HttpJmapMethodTransport httpTransport{resourceTransport};
-    javelin::jmap::api::PreferredJmapMethodTransport preferred{database.connection,
-                                                                httpTransport};
+    javelin::jmap::api::WebSocketFailureCooldowns cooldowns;
+    javelin::jmap::api::PreferredJmapMethodTransport preferred{database.connection, httpTransport,
+                                                               cooldowns};
 
     const auto result = QCoro::waitFor(preferred.call(methodRequest()));
 
     REQUIRE(std::holds_alternative<javelin::jmap::api::ResponseEnvelope>(result));
     CHECK(resourceTransport.calls == 1);
 
-    javelin::jmap::cache::JmapTransportPreferenceRepository preferences{database.connection};
-    const auto resolved = preferences.resolve("u1");
-    REQUIRE(std::holds_alternative<
-            std::optional<javelin::jmap::cache::JmapTransportTarget>>(resolved));
-    const auto& target =
-        *std::get<std::optional<javelin::jmap::cache::JmapTransportTarget>>(resolved);
-    CHECK(target.mode == javelin::jmap::cache::JmapTransportMode::HttpFallback);
-    REQUIRE(target.lastError.has_value());
-    CHECK(target.lastError->contains(QStringLiteral("wss URL")));
+    CHECK(cooldowns.retryDelay(session.capabilities.websocket->url).has_value());
 }
 
-TEST_CASE("preferred JMAP transport honors remembered HTTP fallback",
+TEST_CASE("preferred JMAP transport ignores remembered HTTP fallback after restart",
           "[jmap][method][transport][websocket]")
 {
     ensureApplication();
@@ -158,25 +149,27 @@ TEST_CASE("preferred JMAP transport honors remembered HTTP fallback",
     const auto session = sessionWithWebSocket("wss://127.0.0.1:1/jmap");
     REQUIRE_FALSE(sessions.replace("u1", session).has_value());
 
-    javelin::jmap::cache::JmapTransportPreferenceRepository preferences{database.connection};
-    REQUIRE_FALSE(preferences
-                      .markHttpFallback("u1", session.capabilities.websocket->url,
-                                        QDateTime::currentDateTimeUtc().addDays(1),
-                                        QStringLiteral("previous handshake failure"))
-                      .has_value());
+    QSqlQuery staleFallback{database.connection.database()};
+    staleFallback.prepare(QStringLiteral(
+        "INSERT INTO jmap_transport_preferences(owner_account_id,websocket_url,mode,retry_after,"
+        "last_error) VALUES('u1',:url,'http_fallback','2999-01-01T00:00:00.000Z','old failure')"));
+    staleFallback.bindValue(QStringLiteral(":url"),
+                            QString::fromStdString(session.capabilities.websocket->url));
+    REQUIRE(staleFallback.exec());
 
     FakeHttpTransport resourceTransport;
     resourceTransport.result = javelin::jmap::api::HttpResponse{
         .statusCode = 200,
-        .body = QByteArray::fromStdString(
-            javelin::tests::loadFixture("jmap/method/response.json")),
+        .body = QByteArray::fromStdString(javelin::tests::loadFixture("jmap/method/response.json")),
     };
     javelin::jmap::api::HttpJmapMethodTransport httpTransport{resourceTransport};
-    javelin::jmap::api::PreferredJmapMethodTransport preferred{database.connection,
-                                                                httpTransport};
+    javelin::jmap::api::WebSocketFailureCooldowns cooldowns;
+    javelin::jmap::api::PreferredJmapMethodTransport preferred{database.connection, httpTransport,
+                                                               cooldowns};
 
     const auto result = QCoro::waitFor(preferred.call(methodRequest()));
 
     REQUIRE(std::holds_alternative<javelin::jmap::api::ResponseEnvelope>(result));
     CHECK(resourceTransport.calls == 1);
+    CHECK(cooldowns.retryDelay(session.capabilities.websocket->url).has_value());
 }

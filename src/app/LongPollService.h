@@ -73,6 +73,7 @@ namespace javelin::app
         AccountSyncCoordinator(javelin::jmap::cache::DatabaseConnection& databaseConnection,
                                javelin::jmap::api::JmapMethodTransport& methodTransport,
                                QNetworkAccessManager& networkAccessManager,
+                               javelin::jmap::api::WebSocketFailureCooldowns& cooldowns,
                                javelin::jmap::cache::AccountRepository& accountRepository,
                                javelin::jmap::cache::QueryService& queryService,
                                WorkScheduler& workScheduler, QObject* parent = nullptr);
@@ -148,6 +149,7 @@ namespace javelin::app
         javelin::jmap::cache::DatabaseConnection& m_databaseConnection;
         javelin::jmap::api::JmapMethodTransport& m_methodTransport;
         QNetworkAccessManager& m_networkAccessManager;
+        javelin::jmap::api::WebSocketFailureCooldowns& m_transportCooldowns;
         javelin::jmap::cache::AccountRepository& m_accountRepository;
         javelin::jmap::cache::QueryService& m_queryService;
         WorkScheduler& m_workScheduler;

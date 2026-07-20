@@ -12,7 +12,11 @@
 - Confirmed server destruction removes the local reference and mailbox projection. Unchecking a
   mailbox changes its downloaded sources to evictable cache; it does not immediately destroy them.
 - Foreground work owns network priority. An in-flight background request may finish, but no further
-  background request starts until foreground work ends and the quiet period expires.
+  background request starts until every startup, freshness, and user-initiated request has ended,
+  followed by a five-second quiet period. The quiet period also applies at process startup.
+- WebSocket failures are process-local and shared by method and state-change transports. A failure
+  selects HTTP for at most 15 minutes; the process then actively retries WebSocket. Failure state is
+  never persisted, so every new process attempts the advertised WebSocket endpoint.
 
 ## Vault and recovery
 

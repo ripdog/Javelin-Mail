@@ -79,12 +79,14 @@ namespace javelin::app
         }
         m_networkAccessManager = std::make_unique<QNetworkAccessManager>();
         m_stateChangeNetworkAccessManager = std::make_unique<QNetworkAccessManager>();
+        m_webSocketFailureCooldowns =
+            std::make_unique<javelin::jmap::api::WebSocketFailureCooldowns>();
         m_transport =
             std::make_unique<javelin::jmap::api::QtNetworkTransport>(*m_networkAccessManager);
         m_httpMethodTransport =
             std::make_unique<javelin::jmap::api::HttpJmapMethodTransport>(*m_transport);
         m_methodTransport = std::make_unique<javelin::jmap::api::PreferredJmapMethodTransport>(
-            m_databaseConnection, *m_httpMethodTransport);
+            m_databaseConnection, *m_httpMethodTransport, *m_webSocketFailureCooldowns);
         m_inlineMessageSchemeHandler =
             std::make_unique<InlineMessageSchemeHandler>(m_databaseConnection);
         QWebEngineProfile::defaultProfile()->installUrlSchemeHandler(
@@ -125,13 +127,13 @@ namespace javelin::app
         m_jmapComposeService = std::make_unique<javelin::jmap::submission::ComposeService>(
             m_databaseConnection, *m_transport, *m_methodTransport, *m_jmapCore);
         m_errorCoordinator = std::make_unique<ApplicationErrorCoordinator>();
-        m_composeService =
-            std::make_unique<ComposeService>(*m_jmapComposeService, *m_errorCoordinator);
+        m_composeService = std::make_unique<ComposeService>(*m_jmapComposeService,
+                                                            *m_errorCoordinator, *m_workScheduler);
         m_mailService = std::make_unique<MailApplicationService>(
             m_databaseConnection, *m_jmapCore, *m_methodTransport,
-            *m_stateChangeNetworkAccessManager, *m_accountRepository, *m_queryService,
-            *m_contactService, *m_calendarService, *m_sieveService, *m_errorCoordinator,
-            *m_workScheduler);
+            *m_stateChangeNetworkAccessManager, *m_webSocketFailureCooldowns, *m_accountRepository,
+            *m_queryService, *m_contactService, *m_calendarService, *m_sieveService,
+            *m_errorCoordinator, *m_workScheduler);
         m_messageNavigationCoordinator = std::make_unique<MessageNavigationCoordinator>();
         m_calendarNotificationService =
             std::make_unique<CalendarNotificationService>(m_databaseConnection);
