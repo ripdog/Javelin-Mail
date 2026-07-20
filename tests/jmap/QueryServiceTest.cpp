@@ -720,4 +720,35 @@ TEST_CASE("query service SQL plans use the intended cache indexes", "[jmap][cach
                                  detail.contains(QStringLiteral("idx_emails_thread"),
                                                  Qt::CaseInsensitive);
                       }));
+
+    const auto windowHydrationPlan = explainQueryPlan(
+        databaseContext.connection.database(),
+        QStringLiteral("WITH requested AS MATERIALIZED ("
+                       "  SELECT value AS email_id FROM json_each(:email_ids_json)"
+                       "), requested_threads AS MATERIALIZED ("
+                       "  SELECT DISTINCT e.thread_id FROM requested r "
+                       "  CROSS JOIN emails e ON e.account_id=:account_id AND e.email_id=r.email_id"
+                       "), thread_counts AS ("
+                       "  SELECT e.thread_id, COUNT(*) FROM requested_threads rt "
+                       "  CROSS JOIN emails e INDEXED BY idx_emails_thread "
+                       "    ON e.account_id=:account_id AND e.thread_id=rt.thread_id "
+                       "  GROUP BY e.thread_id"
+                       ") SELECT r.email_id FROM requested r "
+                       "CROSS JOIN emails e ON e.account_id=:account_id AND e.email_id=r.email_id "
+                       "LEFT JOIN thread_counts tc ON tc.thread_id=e.thread_id"),
+        {{QStringLiteral(":account_id"), QStringLiteral("account-1")},
+         {QStringLiteral(":email_ids_json"), QStringLiteral("[\"eml-1\"]")}});
+    CHECK(std::any_of(windowHydrationPlan.cbegin(), windowHydrationPlan.cend(),
+                      [](const QString& detail)
+                      {
+                          return detail.contains(QStringLiteral("account_id=? AND email_id=?"),
+                                                 Qt::CaseInsensitive);
+                      }));
+    CHECK(std::any_of(windowHydrationPlan.cbegin(), windowHydrationPlan.cend(),
+                      [](const QString& detail)
+                      {
+                          return detail.contains(
+                              QStringLiteral("idx_emails_thread (account_id=? AND thread_id=?)"),
+                              Qt::CaseInsensitive);
+                      }));
 }
