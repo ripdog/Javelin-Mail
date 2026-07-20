@@ -277,6 +277,7 @@ namespace javelin::jmap::cache
                                  .blobId = select.value(2).toString().toStdString(),
                                  .payload = select.value(3).toByteArray()});
         }
+        select.finish();
         for (const auto& [accountId, source] : sources)
         {
             if (const auto failure = upsert(accountId, source))
@@ -290,7 +291,9 @@ namespace javelin::jmap::cache
                 "NULL)")))
             return makeQueryError(QStringLiteral("Check legacy raw source migration"), remaining);
         remaining.next();
-        if (!remaining.value(0).toBool())
+        const bool hasRemainingSources = remaining.value(0).toBool();
+        remaining.finish();
+        if (!hasRemainingSources)
         {
             QSqlQuery clearLegacy{m_connection.database()};
             if (!clearLegacy.exec(QStringLiteral("DELETE FROM raw_message_sources")))
@@ -332,6 +335,7 @@ namespace javelin::jmap::cache
                             .size = select.value(6).toULongLong(),
                             .operation = select.value(7).toString().toStdString()});
         }
+        select.finish();
 
         const MailVault vault = MailVault::forDatabase(m_connection);
         for (const auto& job : jobs)

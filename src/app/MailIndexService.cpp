@@ -89,7 +89,11 @@ namespace javelin::app
                 "SELECT EXISTS(SELECT 1 FROM mail_vault_email_refs WHERE account_id=:account AND "
                 "(indexed_hash IS NULL OR indexed_hash<>content_hash))"));
             pending.bindValue(QStringLiteral(":account"), QString::fromStdString(accountId));
-            if (!pending.exec() || !pending.next() || !pending.value(0).toBool())
+            if (!pending.exec() || !pending.next())
+                continue;
+            const bool hasPendingIndexWork = pending.value(0).toBool();
+            pending.finish();
+            if (!hasPendingIndexWork)
                 continue;
             static_cast<void>(m_scheduler.ensure({
                 .jobId = id,
@@ -174,8 +178,10 @@ namespace javelin::app
         totalQuery.bindValue(QStringLiteral(":account"), QString::fromStdString(accountId));
         if (!totalQuery.exec() || !totalQuery.next())
             co_return;
+        const std::uint64_t total = totalQuery.value(0).toULongLong();
+        totalQuery.finish();
         WorkProgress progress{.completedUnits = 0,
-                              .totalUnits = totalQuery.value(0).toULongLong(),
+                              .totalUnits = total,
                               .completedBytes = 0,
                               .totalBytes = std::nullopt,
                               .detail = QStringLiteral("Preparing local search")};

@@ -26,6 +26,7 @@ namespace javelin::app
         void requestReplay();
 
       private:
+        [[nodiscard]] bool hasPendingMaintenance() const;
         void schedule();
         [[nodiscard]] QCoro::Task<void> run();
 

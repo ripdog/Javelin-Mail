@@ -95,8 +95,25 @@ namespace javelin::app
     void LocalMaintenanceService::requestReplay()
     {
         m_replayRequested = true;
+        if (!m_running && !hasPendingMaintenance())
+        {
+            m_replayRequested = false;
+            m_complete = true;
+            return;
+        }
         m_complete = false;
         schedule();
+    }
+
+    bool LocalMaintenanceService::hasPendingMaintenance() const
+    {
+        QSqlQuery query{m_connection.database()};
+        if (!query.exec(QStringLiteral(
+                "SELECT EXISTS(SELECT 1 FROM mail_vault_projection_jobs WHERE status='pending') "
+                "OR EXISTS(SELECT 1 FROM local_data_migrations WHERE status<>'complete')")) ||
+            !query.next())
+            return true;
+        return query.value(0).toBool();
     }
 
     void LocalMaintenanceService::schedule()
@@ -118,8 +135,14 @@ namespace javelin::app
                                               {
                                                   m_running = false;
                                                   if (m_replayRequested)
-                                                      m_complete = false;
-                                                  schedule();
+                                                  {
+                                                      m_replayRequested = false;
+                                                      requestReplay();
+                                                  }
+                                                  else
+                                                  {
+                                                      schedule();
+                                                  }
                                               });
                            });
     }

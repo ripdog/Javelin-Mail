@@ -152,26 +152,29 @@ namespace javelin::app
             }
         }
 
+        std::vector<std::pair<std::string, std::string>> existingScopes;
         QSqlQuery existing{m_connection.database()};
         if (existing.exec(QStringLiteral(
                 "SELECT account_id,mailbox_id FROM offline_mailbox_scopes WHERE desired=1")))
         {
             while (existing.next())
-            {
-                const auto accountId = existing.value(0).toString().toStdString();
-                const auto mailboxId = existing.value(1).toString().toStdString();
-                if (desiredKeys.contains(accountId + "\n" + mailboxId))
-                    continue;
-                QSqlQuery disable{m_connection.database()};
-                disable.prepare(QStringLiteral(
-                    "UPDATE offline_mailbox_scopes SET desired=0,status='paused',updated_at="
-                    "CURRENT_TIMESTAMP WHERE account_id=:account AND mailbox_id=:mailbox"));
-                disable.bindValue(QStringLiteral(":account"), QString::fromStdString(accountId));
-                disable.bindValue(QStringLiteral(":mailbox"), QString::fromStdString(mailboxId));
-                if (!disable.exec())
-                    logDatabaseFailure(QStringLiteral("Disable full mailbox scope"), disable);
-                static_cast<void>(m_scheduler.pause(jobId(accountId, mailboxId)));
-            }
+                existingScopes.emplace_back(existing.value(0).toString().toStdString(),
+                                            existing.value(1).toString().toStdString());
+            existing.finish();
+        }
+        for (const auto& [accountId, mailboxId] : existingScopes)
+        {
+            if (desiredKeys.contains(accountId + "\n" + mailboxId))
+                continue;
+            QSqlQuery disable{m_connection.database()};
+            disable.prepare(QStringLiteral(
+                "UPDATE offline_mailbox_scopes SET desired=0,status='paused',updated_at="
+                "CURRENT_TIMESTAMP WHERE account_id=:account AND mailbox_id=:mailbox"));
+            disable.bindValue(QStringLiteral(":account"), QString::fromStdString(accountId));
+            disable.bindValue(QStringLiteral(":mailbox"), QString::fromStdString(mailboxId));
+            if (!disable.exec())
+                logDatabaseFailure(QStringLiteral("Disable full mailbox scope"), disable);
+            static_cast<void>(m_scheduler.pause(jobId(accountId, mailboxId)));
         }
 
         QSqlQuery retention{m_connection.database()};
@@ -213,7 +216,11 @@ namespace javelin::app
                 "AND r.email_id IS NULL)"));
             missing.bindValue(QStringLiteral(":account"), QString::fromStdString(scope.accountId));
             missing.bindValue(QStringLiteral(":mailbox"), QString::fromStdString(scope.mailboxId));
-            if (!missing.exec() || !missing.next() || !missing.value(0).toBool())
+            if (!missing.exec() || !missing.next())
+                continue;
+            const bool hasMissingSource = missing.value(0).toBool();
+            missing.finish();
+            if (!hasMissingSource)
                 continue;
             QSqlQuery query{m_connection.database()};
             query.prepare(QStringLiteral(
@@ -314,6 +321,7 @@ namespace javelin::app
         const bool hasCompletedBaseline = !state.value(2).isNull();
         const QString scopeStatus = state.value(0).toString();
         std::uint64_t generation = state.value(1).toULongLong();
+        state.finish();
         if (!hasCompletedBaseline)
         {
             const bool resumeEnumeration =
@@ -382,6 +390,7 @@ namespace javelin::app
                 position = static_cast<std::size_t>(resume.value(2).toULongLong());
                 if (!resume.value(3).isNull())
                     total = static_cast<std::size_t>(resume.value(3).toULongLong());
+                resume.finish();
             }
             while (true)
             {
@@ -508,6 +517,7 @@ namespace javelin::app
         }
         const std::uint64_t remainingBytes = totals.value(0).toULongLong();
         const std::uint64_t missingCount = totals.value(1).toULongLong();
+        totals.finish();
         if (!hasDiskSpace(scope.accountId, scope.mailboxId, remainingBytes))
         {
             progress.totalBytes = remainingBytes;
@@ -557,6 +567,7 @@ namespace javelin::app
         while (missing.next())
             downloads.emplace_back(missing.value(0).toString().toStdString(),
                                    missing.value(1).toULongLong());
+        missing.finish();
 
         for (const auto& [emailId, size] : downloads)
         {

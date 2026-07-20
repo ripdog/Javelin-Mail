@@ -1,6 +1,7 @@
 #include "jmap/cache/Database.h"
 
 #include <QCoreApplication>
+#include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QTemporaryDir>
 
@@ -229,8 +230,10 @@ TEST_CASE("thread connection factory encodes owner tag and current thread in con
         QStringLiteral("javelin-cache-gui-thread-%1")
             .arg(javelin::jmap::cache::ThreadConnectionFactory::currentThreadTag());
     CHECK(firstConnection.connectionName() == expectedName);
+    CHECK(QSqlDatabase::contains(expectedName));
 
     firstConnection = {};
+    CHECK_FALSE(QSqlDatabase::contains(expectedName));
 
     auto secondOpen = factory.openForCurrentThread("gui");
     if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&secondOpen))

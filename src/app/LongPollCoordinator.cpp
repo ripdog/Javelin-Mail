@@ -359,6 +359,8 @@ namespace javelin::app
                                QString::fromStdString(intent.mailboxId));
         if (offlineScope.exec() && offlineScope.next())
         {
+            const QString completedGeneration = offlineScope.value(0).toString();
+            offlineScope.finish();
             const auto itemsResult = m_queryService.listMailboxMessages(
                 intent.accountId, intent.mailboxId, intent.limit, intent.offset, intent.sort);
             const auto totalResult =
@@ -372,8 +374,7 @@ namespace javelin::app
                 emailIds.reserve(items->size());
                 for (const auto& item : *items)
                     emailIds.push_back(item.emailId);
-                const std::string state =
-                    "offline:" + offlineScope.value(0).toString().toStdString();
+                const std::string state = "offline:" + completedGeneration.toStdString();
                 javelin::jmap::cache::MailboxWindowRepository windows{m_databaseConnection};
                 if (const auto error = windows.replace({
                         .accountId = intent.accountId,
@@ -404,6 +405,7 @@ namespace javelin::app
                 };
             }
         }
+        offlineScope.finish();
         if (!intent.forceRefresh && !intent.anchor.has_value())
         {
             const auto cachedResult = m_queryService.loadMailboxWindow(

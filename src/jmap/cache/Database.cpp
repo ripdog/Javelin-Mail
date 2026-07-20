@@ -353,28 +353,31 @@ namespace javelin::jmap::cache
 
         QSqlDatabase database =
             QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), options.connectionName);
+        const auto discardConnection = [&database, &options]()
+        {
+            database.close();
+            database = QSqlDatabase{};
+            QSqlDatabase::removeDatabase(options.connectionName);
+        };
         database.setDatabaseName(options.databasePath);
         if (!database.open())
         {
             const auto error =
                 makeError(DatabaseErrorCode::OpenFailed, QStringLiteral("Open database"), database);
-            database.close();
-            database = QSqlDatabase{};
+            discardConnection();
             return error;
         }
 
         if (const auto pragmaError = applyPragmas(database))
         {
-            database.close();
-            database = QSqlDatabase{};
+            discardConnection();
             return *pragmaError;
         }
 
         const auto migrationRunner = createDefaultMigrationRunner();
         if (const auto migrationError = migrationRunner.migrate(database))
         {
-            database.close();
-            database = QSqlDatabase{};
+            discardConnection();
             return *migrationError;
         }
 
@@ -461,13 +464,14 @@ namespace javelin::jmap::cache
             return;
         }
 
+        const QString connectionName = std::move(m_connectionName);
         if (m_database.isValid())
         {
             m_database.close();
         }
 
         m_database = QSqlDatabase{};
-        m_connectionName.clear();
+        QSqlDatabase::removeDatabase(connectionName);
     }
 
     ThreadConnectionFactory::ThreadConnectionFactory(ThreadConnectionFactoryOptions options)
