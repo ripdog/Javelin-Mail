@@ -14,6 +14,7 @@
 #include <QCoroTimer>
 
 #include <QCryptographicHash>
+#include <QElapsedTimer>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSqlError>
@@ -616,6 +617,8 @@ namespace javelin::app
                     .completedBytes = 0,
                     .totalBytes = remainingBytes,
                     .detail = QStringLiteral("Downloading complete messages")};
+        QElapsedTimer progressPersistenceTimer;
+        progressPersistenceTimer.start();
         QSqlQuery missing{m_connection.database()};
         missing.prepare(QStringLiteral(
             "SELECT e.email_id,e.size FROM email_mailboxes m JOIN emails e ON "
@@ -656,9 +659,15 @@ namespace javelin::app
             }
             ++progress.completedUnits;
             progress.completedBytes += size;
-            static_cast<void>(m_scheduler.update(
-                scope.jobId, WorkStatus::Running, progress,
-                checkpoint(QStringLiteral("fetching"), progress.completedUnits, generation)));
+            if (progressPersistenceTimer.elapsed() >= 1000 ||
+                (progress.totalUnits.has_value() &&
+                 progress.completedUnits == *progress.totalUnits))
+            {
+                static_cast<void>(m_scheduler.update(
+                    scope.jobId, WorkStatus::Running, progress,
+                    checkpoint(QStringLiteral("fetching"), progress.completedUnits, generation)));
+                progressPersistenceTimer.restart();
+            }
         }
 
         QSqlQuery complete{m_connection.database()};

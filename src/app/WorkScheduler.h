@@ -149,6 +149,7 @@ namespace javelin::app
       private:
         WorkScheduler& m_scheduler;
         std::vector<WorkRecord> m_records;
+        QTimer m_reloadTimer;
     };
 
     [[nodiscard]] std::string_view toString(WorkKind kind);

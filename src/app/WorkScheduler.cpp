@@ -289,7 +289,15 @@ namespace javelin::app
     WorkTaskModel::WorkTaskModel(WorkScheduler& scheduler, QObject* parent)
         : QAbstractTableModel(parent), m_scheduler(scheduler)
     {
-        connect(&m_scheduler, &WorkScheduler::jobsChanged, this, &WorkTaskModel::reload);
+        m_reloadTimer.setSingleShot(true);
+        m_reloadTimer.setInterval(std::chrono::milliseconds{100});
+        connect(&m_reloadTimer, &QTimer::timeout, this, &WorkTaskModel::reload);
+        connect(&m_scheduler, &WorkScheduler::jobsChanged, this,
+                [this]()
+                {
+                    if (!m_reloadTimer.isActive())
+                        m_reloadTimer.start();
+                });
         reload();
     }
 
@@ -368,9 +376,20 @@ namespace javelin::app
         const auto* records = std::get_if<std::vector<WorkRecord>>(&result);
         if (records == nullptr)
             return;
-        beginResetModel();
+        const bool sameRows =
+            m_records.size() == records->size() &&
+            std::ranges::equal(m_records, *records, {}, &WorkRecord::jobId, &WorkRecord::jobId);
+        if (!sameRows)
+        {
+            beginResetModel();
+            m_records = *records;
+            endResetModel();
+            return;
+        }
         m_records = *records;
-        endResetModel();
+        if (!m_records.empty())
+            Q_EMIT dataChanged(index(0, 0),
+                               index(static_cast<int>(m_records.size()) - 1, columnCount() - 1));
     }
 
     std::string_view toString(const WorkKind kind)

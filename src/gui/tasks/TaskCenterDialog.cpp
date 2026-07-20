@@ -94,6 +94,8 @@ namespace javelin::gui::tasks
                     return;
                 QStyleOptionButton button;
                 button.rect = buttonRect(option);
+                button.palette = option.palette;
+                button.fontMetrics = option.fontMetrics;
                 button.state = QStyle::State_Enabled;
                 button.text = actionLabel(action);
                 QApplication::style()->drawControl(QStyle::CE_PushButton, &button, painter);
