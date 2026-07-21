@@ -31,11 +31,13 @@ application requests an anchored window with `anchorOffset: 0`, persists the ser
 position and ordered IDs, and selects the target from that committed cache state. This contextual
 window does not alter the canonical window's identity or infer offsets from locally cached rows.
 
-`Email/queryChanges` membership changes invalidate retained mailbox windows. Definitive destroyed
-Emails are removed in the same cache transaction. Updated Emails are fetched and rebased before a
-replacement window is committed, so mailbox membership changes cannot leave stale rows shifting a
-large mailbox. Optimistic Email mutations invalidate affected mailbox windows and account search
-windows in the same `MutationProjectionTransaction` as their projected Email state.
+For a contiguous cached prefix, `Email/queryChanges` uses the final cached representative as
+`upToId`, applies removals and indexed additions across every retained page, and advances all those
+windows to the returned query state in one transaction. Updates are fetched only for objects already
+cached, plus additions that fall into the prefix; changes outside partial coverage are harmless.
+Sparse online windows that cannot be rebased exactly are invalidated. Optimistic Email mutations
+invalidate affected mailbox windows and account search windows in the same
+`MutationProjectionTransaction` as their projected Email state.
 
 Invalidated mailbox windows retain their server-ordered representative IDs as a stale projection
 scaffold. The GUI may join those positions to SQLite's effective Email state so removals and

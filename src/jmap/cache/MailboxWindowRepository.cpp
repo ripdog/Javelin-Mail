@@ -4,6 +4,9 @@
 #include <QSqlQuery>
 #include <QVariant>
 
+#include <algorithm>
+#include <unordered_set>
+
 namespace javelin::jmap::cache
 {
     namespace
@@ -54,22 +57,43 @@ namespace javelin::jmap::cache
         if (!database.transaction())
             return databaseError(QStringLiteral("Begin mailbox-window transaction"), database);
 
-        QSqlQuery deleteStaleWindows{database};
-        deleteStaleWindows.prepare(QStringLiteral(
-            "DELETE FROM mailbox_query_windows WHERE account_id=:account_id AND "
-            "mailbox_id=:mailbox_id AND query_key=:query_key AND query_state<>:query_state"));
-        deleteStaleWindows.bindValue(QStringLiteral(":account_id"),
-                                     QString::fromStdString(window.accountId));
-        deleteStaleWindows.bindValue(QStringLiteral(":mailbox_id"),
-                                     QString::fromStdString(window.mailboxId));
-        deleteStaleWindows.bindValue(QStringLiteral(":query_key"),
-                                     QString::fromStdString(window.queryKey));
-        deleteStaleWindows.bindValue(QStringLiteral(":query_state"),
-                                     QString::fromStdString(window.queryState));
-        if (!deleteStaleWindows.exec())
+        QSqlQuery offlineScope{database};
+        offlineScope.prepare(
+            QStringLiteral("SELECT 1 FROM offline_mailbox_scopes WHERE account_id=:account_id AND "
+                           "mailbox_id=:mailbox_id AND desired=1"));
+        offlineScope.bindValue(QStringLiteral(":account_id"),
+                               QString::fromStdString(window.accountId));
+        offlineScope.bindValue(QStringLiteral(":mailbox_id"),
+                               QString::fromStdString(window.mailboxId));
+        if (!offlineScope.exec())
         {
             const auto error =
-                queryError(QStringLiteral("Invalidate stale mailbox windows"), deleteStaleWindows);
+                queryError(QStringLiteral("Inspect offline mailbox scope"), offlineScope);
+            database.rollback();
+            return error;
+        }
+        const bool retainAllWindows = offlineScope.next();
+        offlineScope.finish();
+
+        QSqlQuery staleWindows{database};
+        staleWindows.prepare(
+            QStringLiteral(
+                "%1 mailbox_query_windows %2 WHERE account_id=:account_id AND "
+                "mailbox_id=:mailbox_id AND query_key=:query_key AND query_state<>:query_state")
+                .arg(retainAllWindows ? QStringLiteral("UPDATE") : QStringLiteral("DELETE FROM"),
+                     retainAllWindows ? QStringLiteral("SET is_valid=0") : QString{}));
+        staleWindows.bindValue(QStringLiteral(":account_id"),
+                               QString::fromStdString(window.accountId));
+        staleWindows.bindValue(QStringLiteral(":mailbox_id"),
+                               QString::fromStdString(window.mailboxId));
+        staleWindows.bindValue(QStringLiteral(":query_key"),
+                               QString::fromStdString(window.queryKey));
+        staleWindows.bindValue(QStringLiteral(":query_state"),
+                               QString::fromStdString(window.queryState));
+        if (!staleWindows.exec())
+        {
+            const auto error =
+                queryError(QStringLiteral("Invalidate stale mailbox windows"), staleWindows);
             database.rollback();
             return error;
         }
@@ -142,22 +166,26 @@ namespace javelin::jmap::cache
             }
         }
 
-        QSqlQuery evictWindows{database};
-        evictWindows.prepare(QStringLiteral(
-            "DELETE FROM mailbox_query_windows WHERE (account_id,query_key,requested_offset,"
-            "requested_limit) IN (SELECT account_id,query_key,requested_offset,requested_limit "
-            "FROM mailbox_query_windows WHERE account_id=:account_id AND query_key=:query_key "
-            "ORDER BY updated_at DESC,requested_offset DESC LIMIT -1 OFFSET 12)"));
-        evictWindows.bindValue(QStringLiteral(":account_id"),
-                               QString::fromStdString(window.accountId));
-        evictWindows.bindValue(QStringLiteral(":query_key"),
-                               QString::fromStdString(window.queryKey));
-        if (!evictWindows.exec())
+        if (!retainAllWindows)
         {
-            const auto error =
-                queryError(QStringLiteral("Evict old mailbox windows"), evictWindows);
-            database.rollback();
-            return error;
+            QSqlQuery evictWindows{database};
+            evictWindows.prepare(QStringLiteral(
+                "DELETE FROM mailbox_query_windows WHERE (account_id,query_key,requested_offset,"
+                "requested_limit) IN (SELECT account_id,query_key,requested_offset,"
+                "requested_limit FROM mailbox_query_windows WHERE account_id=:account_id AND "
+                "query_key=:query_key ORDER BY updated_at DESC,requested_offset DESC LIMIT -1 "
+                "OFFSET 12)"));
+            evictWindows.bindValue(QStringLiteral(":account_id"),
+                                   QString::fromStdString(window.accountId));
+            evictWindows.bindValue(QStringLiteral(":query_key"),
+                                   QString::fromStdString(window.queryKey));
+            if (!evictWindows.exec())
+            {
+                const auto error =
+                    queryError(QStringLiteral("Evict old mailbox windows"), evictWindows);
+                database.rollback();
+                return error;
+            }
         }
 
         if (!database.commit())
@@ -258,6 +286,179 @@ namespace javelin::jmap::cache
                         QString::fromStdString(std::string{mailboxId}));
         if (!query.exec())
             return queryError(QStringLiteral("Invalidate mailbox windows"), query);
+        return std::nullopt;
+    }
+
+    std::optional<DatabaseError> MailboxWindowRepository::rebaseContiguousPrefix(
+        DatabaseTransaction& transaction, const std::string_view accountId,
+        const std::string_view mailboxId, const std::string_view queryKey,
+        const std::string_view sinceQueryState, const std::string_view newQueryState,
+        std::vector<MailboxWindowAddition> additions, std::vector<std::string> removals,
+        const std::optional<std::size_t> total)
+    {
+        if (!transaction.isActive() || &transaction.connection() != &m_connection)
+        {
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message = QStringLiteral(
+                    "Mailbox-window rebasing requires an active matching transaction"),
+            };
+        }
+
+        struct Window
+        {
+            std::size_t offset = 0;
+            std::size_t limit = 0;
+        };
+        QSqlQuery readWindows{m_connection.database()};
+        readWindows.prepare(QStringLiteral(
+            "SELECT requested_offset,requested_limit FROM mailbox_query_windows WHERE "
+            "account_id=:account AND mailbox_id=:mailbox AND query_key=:query_key AND "
+            "query_state=:query_state AND is_valid=1 ORDER BY requested_offset"));
+        readWindows.bindValue(QStringLiteral(":account"),
+                              QString::fromStdString(std::string{accountId}));
+        readWindows.bindValue(QStringLiteral(":mailbox"),
+                              QString::fromStdString(std::string{mailboxId}));
+        readWindows.bindValue(QStringLiteral(":query_key"),
+                              QString::fromStdString(std::string{queryKey}));
+        readWindows.bindValue(QStringLiteral(":query_state"),
+                              QString::fromStdString(std::string{sinceQueryState}));
+        if (!readWindows.exec())
+            return queryError(QStringLiteral("Read mailbox prefix windows"), readWindows);
+        std::vector<Window> windows;
+        std::size_t coveredEnd = 0;
+        while (readWindows.next())
+        {
+            const Window candidate{
+                .offset = readWindows.value(0).toULongLong(),
+                .limit = readWindows.value(1).toULongLong(),
+            };
+            if (candidate.offset != coveredEnd || candidate.limit == 0)
+                break;
+            windows.push_back(candidate);
+            coveredEnd += candidate.limit;
+        }
+        readWindows.finish();
+        if (windows.empty())
+            return std::nullopt;
+
+        QSqlQuery readItems{m_connection.database()};
+        readItems.prepare(QStringLiteral(
+            "SELECT i.email_id FROM mailbox_query_window_items i INNER JOIN "
+            "mailbox_query_windows w ON w.account_id=i.account_id AND w.query_key=i.query_key "
+            "AND w.requested_offset=i.requested_offset AND "
+            "w.requested_limit=i.requested_limit WHERE w.account_id=:account AND "
+            "w.mailbox_id=:mailbox AND w.query_key=:query_key AND w.query_state=:query_state "
+            "AND w.is_valid=1 AND w.requested_offset<:covered_end ORDER BY "
+            "w.requested_offset,i.position"));
+        readItems.bindValue(QStringLiteral(":account"),
+                            QString::fromStdString(std::string{accountId}));
+        readItems.bindValue(QStringLiteral(":mailbox"),
+                            QString::fromStdString(std::string{mailboxId}));
+        readItems.bindValue(QStringLiteral(":query_key"),
+                            QString::fromStdString(std::string{queryKey}));
+        readItems.bindValue(QStringLiteral(":query_state"),
+                            QString::fromStdString(std::string{sinceQueryState}));
+        readItems.bindValue(QStringLiteral(":covered_end"), static_cast<qulonglong>(coveredEnd));
+        if (!readItems.exec())
+            return queryError(QStringLiteral("Read mailbox prefix items"), readItems);
+        std::vector<std::string> ids;
+        ids.reserve(coveredEnd);
+        while (readItems.next())
+            ids.push_back(readItems.value(0).toString().toStdString());
+
+        const std::unordered_set<std::string> removed(removals.begin(), removals.end());
+        std::erase_if(ids, [&removed](const auto& id) { return removed.contains(id); });
+        std::ranges::sort(additions, {}, &MailboxWindowAddition::index);
+        for (auto& addition : additions)
+        {
+            std::erase(ids, addition.emailId);
+            if (addition.index <= ids.size() && addition.index < coveredEnd)
+                ids.insert(ids.begin() + static_cast<std::ptrdiff_t>(addition.index),
+                           std::move(addition.emailId));
+        }
+        if (ids.size() > coveredEnd)
+            ids.resize(coveredEnd);
+        if (total.has_value() && ids.size() > *total)
+            ids.resize(*total);
+
+        QSqlQuery updateWindow{m_connection.database()};
+        updateWindow.prepare(QStringLiteral(
+            "UPDATE mailbox_query_windows SET query_state=:new_state,total=:total,"
+            "returned_limit=:returned_limit,is_valid=:is_valid,updated_at=CURRENT_TIMESTAMP "
+            "WHERE account_id=:account AND query_key=:query_key AND requested_offset=:offset AND "
+            "requested_limit=:limit"));
+        QSqlQuery deleteItems{m_connection.database()};
+        deleteItems.prepare(QStringLiteral(
+            "DELETE FROM mailbox_query_window_items WHERE account_id=:account AND "
+            "query_key=:query_key AND requested_offset=:offset AND requested_limit=:limit"));
+        QSqlQuery insertItem{m_connection.database()};
+        insertItem.prepare(QStringLiteral(
+            "INSERT INTO mailbox_query_window_items(account_id,query_key,requested_offset,"
+            "requested_limit,position,email_id) VALUES(:account,:query_key,:offset,:limit,"
+            ":position,:email_id)"));
+        for (const auto& window : windows)
+        {
+            const auto bindWindow = [&](QSqlQuery& query)
+            {
+                query.bindValue(QStringLiteral(":account"),
+                                QString::fromStdString(std::string{accountId}));
+                query.bindValue(QStringLiteral(":query_key"),
+                                QString::fromStdString(std::string{queryKey}));
+                query.bindValue(QStringLiteral(":offset"), static_cast<qulonglong>(window.offset));
+                query.bindValue(QStringLiteral(":limit"), static_cast<qulonglong>(window.limit));
+            };
+            bindWindow(updateWindow);
+            updateWindow.bindValue(QStringLiteral(":new_state"),
+                                   QString::fromStdString(std::string{newQueryState}));
+            updateWindow.bindValue(QStringLiteral(":total"),
+                                   total.has_value() ? QVariant{static_cast<qulonglong>(*total)}
+                                                     : QVariant{});
+            const auto end = std::min(ids.size(), window.offset + window.limit);
+            const auto returnedLimit = end > window.offset ? end - window.offset : 0;
+            const bool isAuthoritative =
+                returnedLimit == window.limit ||
+                (total.has_value() && window.offset + returnedLimit >= *total);
+            updateWindow.bindValue(QStringLiteral(":returned_limit"),
+                                   static_cast<qulonglong>(returnedLimit));
+            updateWindow.bindValue(QStringLiteral(":is_valid"), isAuthoritative ? 1 : 0);
+            if (!updateWindow.exec())
+                return queryError(QStringLiteral("Rebase mailbox prefix window"), updateWindow);
+            bindWindow(deleteItems);
+            if (!deleteItems.exec())
+                return queryError(QStringLiteral("Clear rebased mailbox prefix items"),
+                                  deleteItems);
+            for (std::size_t index = window.offset; index < end; ++index)
+            {
+                bindWindow(insertItem);
+                insertItem.bindValue(QStringLiteral(":position"),
+                                     static_cast<qulonglong>(index - window.offset));
+                insertItem.bindValue(QStringLiteral(":email_id"),
+                                     QString::fromStdString(ids[index]));
+                if (!insertItem.exec())
+                    return queryError(QStringLiteral("Write rebased mailbox prefix item"),
+                                      insertItem);
+            }
+        }
+
+        QSqlQuery invalidateSparse{m_connection.database()};
+        invalidateSparse.prepare(QStringLiteral(
+            "UPDATE mailbox_query_windows SET is_valid=0 WHERE account_id=:account AND "
+            "mailbox_id=:mailbox AND query_key=:query_key AND query_state=:old_state AND "
+            "requested_offset>=:covered_end"));
+        invalidateSparse.bindValue(QStringLiteral(":account"),
+                                   QString::fromStdString(std::string{accountId}));
+        invalidateSparse.bindValue(QStringLiteral(":mailbox"),
+                                   QString::fromStdString(std::string{mailboxId}));
+        invalidateSparse.bindValue(QStringLiteral(":query_key"),
+                                   QString::fromStdString(std::string{queryKey}));
+        invalidateSparse.bindValue(QStringLiteral(":old_state"),
+                                   QString::fromStdString(std::string{sinceQueryState}));
+        invalidateSparse.bindValue(QStringLiteral(":covered_end"),
+                                   static_cast<qulonglong>(coveredEnd));
+        if (!invalidateSparse.exec())
+            return queryError(QStringLiteral("Invalidate sparse mailbox windows"),
+                              invalidateSparse);
         return std::nullopt;
     }
 

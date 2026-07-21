@@ -325,6 +325,76 @@ namespace javelin::gui::mailboxes
         rebuild();
     }
 
+    bool MailboxTreeModel::refreshAccount(const QStringView accountId)
+    {
+        const auto id = accountId.toString().toStdString();
+        const auto result = m_queryService.listMailboxTree(id);
+        const auto* mailboxes =
+            std::get_if<std::vector<javelin::jmap::cache::MailboxTreeItem>>(&result);
+        if (mailboxes == nullptr)
+            return false;
+
+        std::unordered_map<std::string, const javelin::jmap::cache::MailboxTreeItem*> incoming;
+        incoming.reserve(mailboxes->size());
+        for (const auto& mailbox : *mailboxes)
+            incoming.emplace(mailbox.id, &mailbox);
+
+        bool structureChanged = false;
+        const auto visit = [&](const auto& self, const QModelIndex& parentIndex) -> void
+        {
+            const int rows = rowCount(parentIndex);
+            for (int row = 0; row < rows; ++row)
+            {
+                const QModelIndex current = index(row, 0, parentIndex);
+                auto* node = nodeForIndex(current);
+                if (node == nullptr || node->accountId != id)
+                {
+                    self(self, current);
+                    continue;
+                }
+                if (node->kind == Node::Kind::Mailbox)
+                {
+                    const auto found = incoming.find(node->mailboxId);
+                    if (found == incoming.end())
+                    {
+                        structureChanged = true;
+                        continue;
+                    }
+                    const auto& mailbox = *found->second;
+                    const std::optional<std::string> actualParent =
+                        node->parent != nullptr && node->parent->kind == Node::Kind::Mailbox
+                            ? std::optional<std::string>{node->parent->mailboxId}
+                            : std::nullopt;
+                    if (node->displayName != mailbox.name || node->role != mailbox.role ||
+                        actualParent != mailbox.parentId)
+                    {
+                        structureChanged = true;
+                        continue;
+                    }
+                    incoming.erase(found);
+                    const bool checked = m_options.checkedMailboxIds.contains(
+                        QString::fromStdString(node->mailboxId));
+                    if (node->unreadEmails != mailbox.unreadEmails ||
+                        node->totalThreads != mailbox.totalThreads || node->checked != checked)
+                    {
+                        node->unreadEmails = mailbox.unreadEmails;
+                        node->totalThreads = mailbox.totalThreads;
+                        node->checked = checked;
+                        Q_EMIT dataChanged(current, current,
+                                           {Qt::DisplayRole, Qt::ToolTipRole, Qt::CheckStateRole,
+                                            TotalThreadsRole});
+                    }
+                }
+                self(self, current);
+            }
+        };
+        visit(visit, {});
+        structureChanged = structureChanged || !incoming.empty();
+        if (structureChanged)
+            rebuild();
+        return structureChanged;
+    }
+
     void MailboxTreeModel::setAccountId(std::optional<std::string> accountId)
     {
         if (m_options.accountId == accountId)
@@ -391,6 +461,11 @@ namespace javelin::gui::mailboxes
     const MailboxTreeModel::Node* MailboxTreeModel::nodeForIndex(const QModelIndex& index) const
     {
         return index.isValid() ? static_cast<const Node*>(index.internalPointer()) : nullptr;
+    }
+
+    MailboxTreeModel::Node* MailboxTreeModel::nodeForIndex(const QModelIndex& index)
+    {
+        return index.isValid() ? static_cast<Node*>(index.internalPointer()) : nullptr;
     }
 
     void MailboxTreeModel::rebuild()

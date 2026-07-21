@@ -36,20 +36,27 @@ reads stop consulting the old table.
 
 ## Full synchronization and pagination
 
-A full-sync job enumerates an uncollapsed, newest-first `Email/query` in bounded pages, materializes
-each page through `Email/get`, downloads missing raw sources, and promotes its staging generation
-only after complete coverage. The first id anchors subsequent pages, and the persisted generation,
-anchor, and position make enumeration restartable without treating any page as the mailbox. If the
-anchor becomes invalid, the incomplete staging generation is discarded and safely restarted.
-Later state-change refreshes update the same Email rows and effective membership; changes observed
-while a full job is running mark the account dirty, and a follow-up catch-up downloads any source
-whose cached blob id does not match current metadata before the mirror can settle.
+A full-sync job enumerates an uncollapsed, newest-first `Email/query` in 100-object pages and
+materializes each page through `Email/get`. Every commit advances the durable crawl cursor and task
+progress and also extends the ordinary collapsed `mailbox_query_windows` prefix using the real
+server `queryState`. The GUI therefore consumes background pages through exactly the same cache
+records as user-requested pages; no private staging read path exists. Explicitly synchronized
+mailboxes retain every materialized window instead of the bounded online working set.
 
-Complete mailboxes paginate locally from effective membership. Partial, notification-only, and
-visible mailboxes retain bounded server query windows. Optimistic mailbox changes invalidate those
-windows transactionally. For a complete mailbox the replacement window is immediately regenerated
-from effective local membership, so a move appears in both source and destination without waiting
-for JMAP and without treating the visible page as the mailbox.
+The first id anchors subsequent pages. Generation, anchor, committed position, totals, and state
+tokens survive process termination, so recovery resumes at the first uncommitted page. Transient
+failures preserve that cursor; only an explicit JMAP `anchorNotFound` starts a new generation.
+`Email/queryChanges` is bounded by the cached prefix tail, rebases every contiguous retained window,
+fetches additions plus updates to objects already known locally, and ignores changes wholly beyond
+the cached prefix. Later state-change refreshes update the same Email rows and effective membership.
+Raw message bodies are downloaded only after metadata enumeration completes.
+
+Complete mailboxes paginate locally from effective membership. Partial synchronized mailboxes use
+their durable contiguous window prefix, while notification-only and visible online mailboxes retain
+bounded server query windows. Optimistic mailbox changes invalidate affected windows
+transactionally. For a complete mailbox the replacement window is immediately regenerated from
+effective local membership, so a move appears in both source and destination without waiting for
+JMAP and without treating the visible page as the mailbox.
 
 ## Tasks and search
 

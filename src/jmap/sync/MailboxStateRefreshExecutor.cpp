@@ -268,6 +268,9 @@ namespace javelin::jmap::sync
                 co_return MailboxStateRefreshSummary{
                     .mailboxCount = incrementalFetch->fetched.list.size(),
                     .usedIncrementalRefresh = true,
+                    .changed = !incrementalFetch->changes.created.empty() ||
+                               !incrementalFetch->changes.updated.empty() ||
+                               !incrementalFetch->changes.destroyed.empty(),
                 };
             }
 
@@ -299,6 +302,7 @@ namespace javelin::jmap::sync
         co_return MailboxStateRefreshSummary{
             .mailboxCount = fetched.list.size(),
             .usedIncrementalRefresh = false,
+            .changed = true,
         };
     }
 

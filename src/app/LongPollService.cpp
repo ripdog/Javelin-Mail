@@ -350,7 +350,7 @@ namespace javelin::app
             co_return;
         }
 
-        const bool mailboxStateRefreshed = co_await refreshMailboxStateOnce(runContext);
+        const bool mailboxStateChanged = co_await refreshMailboxStateOnce(runContext);
         if (m_runContext == nullptr || m_runContext->generation != runContext->generation ||
             runContext->cancellation.isCancelled())
         {
@@ -450,13 +450,14 @@ namespace javelin::app
             co_return;
         }
 
-        if (mailboxStateRefreshed || watchedMailboxRefreshed)
+        if (mailboxStateChanged || watchedMailboxRefreshed)
         {
             Q_EMIT cacheCommitted(MailCacheChange{
                 .accountId = QString::fromStdString(runContext->configuration.accountId),
                 .mailboxIds = std::move(refreshedMailboxIds),
                 .queryWindows = std::move(materializedWindows),
                 .searchWindows = {},
+                .mailboxTreeChanged = mailboxStateChanged,
                 .hasNewMail = hasNewMail,
             });
         }
@@ -505,7 +506,7 @@ namespace javelin::app
             co_return false;
         }
 
-        co_return true;
+        co_return std::get<javelin::jmap::sync::MailboxStateRefreshSummary>(refreshResult).changed;
     }
 
     void AccountSyncCoordinator::handleResumeWatchdogTimeout()

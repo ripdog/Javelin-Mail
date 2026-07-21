@@ -134,6 +134,15 @@ namespace javelin::app
             *m_stateChangeNetworkAccessManager, *m_webSocketFailureCooldowns, *m_accountRepository,
             *m_queryService, *m_contactService, *m_calendarService, *m_sieveService,
             *m_errorCoordinator, *m_workScheduler);
+        QObject::connect(
+            m_fullMailSyncService.get(), &FullMailSyncService::mailboxWindowCommitted,
+            m_mailService.get(),
+            [this](QString accountId, QString mailboxId, const quint64 offset, const quint64 limit)
+            {
+                m_mailService->publishMailboxWindowCommitted(
+                    std::move(accountId), std::move(mailboxId), static_cast<std::size_t>(offset),
+                    static_cast<std::size_t>(limit));
+            });
         m_messageNavigationCoordinator = std::make_unique<MessageNavigationCoordinator>();
         m_calendarNotificationService =
             std::make_unique<CalendarNotificationService>(m_databaseConnection);

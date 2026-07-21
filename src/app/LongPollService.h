@@ -52,6 +52,7 @@ namespace javelin::app
         QStringList mailboxIds;
         std::vector<MailboxQueryWindowChange> queryWindows;
         std::vector<SearchQueryWindowChange> searchWindows;
+        bool mailboxTreeChanged = false;
         bool hasNewMail = false;
     };
 

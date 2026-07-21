@@ -534,10 +534,11 @@ namespace javelin::gui::shell
                 [this](const javelin::app::MailCacheChange& change)
                 {
                     const auto changedAccountId = change.accountId.toStdString();
+                    if (change.mailboxTreeChanged)
                     {
                         QSignalBlocker mailboxSelectionBlocker{m_mailboxView->selectionModel()};
-                        m_mailboxModel->refresh();
-                        m_mailboxView->expandAll();
+                        if (m_mailboxModel->refreshAccount(change.accountId))
+                            m_mailboxView->expandAll();
                     }
 
                     std::unordered_set<std::string> queryWindowMailboxIds;

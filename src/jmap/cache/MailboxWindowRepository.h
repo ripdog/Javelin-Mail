@@ -27,6 +27,12 @@ namespace javelin::jmap::cache
         std::vector<std::string> emailIds;
     };
 
+    struct MailboxWindowAddition
+    {
+        std::string emailId;
+        std::size_t index = 0;
+    };
+
     using MailboxWindowResult = std::variant<std::optional<MailboxWindowRecord>, DatabaseError>;
 
     class MailboxWindowRepository
@@ -44,6 +50,12 @@ namespace javelin::jmap::cache
         [[nodiscard]] std::optional<DatabaseError>
         invalidateMailbox(DatabaseTransaction& transaction, std::string_view accountId,
                           std::string_view mailboxId);
+        [[nodiscard]] std::optional<DatabaseError>
+        rebaseContiguousPrefix(DatabaseTransaction& transaction, std::string_view accountId,
+                               std::string_view mailboxId, std::string_view queryKey,
+                               std::string_view sinceQueryState, std::string_view newQueryState,
+                               std::vector<MailboxWindowAddition> additions,
+                               std::vector<std::string> removals, std::optional<std::size_t> total);
 
       private:
         DatabaseConnection& m_connection;

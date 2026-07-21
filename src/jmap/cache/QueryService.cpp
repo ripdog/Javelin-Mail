@@ -681,12 +681,8 @@ namespace javelin::jmap::cache
         if (!window->has_value())
             return std::optional<MailboxWindowPage>{std::nullopt};
 
-        const bool isOfflineStagingWindow = (*window)->queryState.starts_with("offline-staging:");
-        const auto messagesResult =
-            isOfflineStagingWindow
-                ? listMessagesByEmailIds(accountId, (*window)->emailIds)
-                : listMailboxWindowMessagesByEmailIds(accountId, (*window)->mailboxId,
-                                                      (*window)->emailIds, sort);
+        const auto messagesResult = listMailboxWindowMessagesByEmailIds(
+            accountId, (*window)->mailboxId, (*window)->emailIds, sort);
         const auto* messages = std::get_if<std::vector<MessageListItem>>(&messagesResult);
         if (messages == nullptr)
             return std::get<DatabaseError>(messagesResult);
