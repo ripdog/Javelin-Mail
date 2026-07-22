@@ -734,6 +734,45 @@ namespace javelin::jmap::cache
         return std::nullopt;
     }
 
+    std::optional<DatabaseError> EmailRepository::markSearchIndexed(
+        const std::string_view accountId, const std::string_view emailId,
+        const std::string_view contentHash, const std::string_view preview)
+    {
+        auto transactionResult =
+            DatabaseTransaction::begin(m_connection, QStringLiteral("Record indexed email"));
+        if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
+            return *error;
+        auto transaction = std::get<DatabaseTransaction>(std::move(transactionResult));
+        auto& database = m_connection.database();
+
+        QSqlQuery updatePreview{database};
+        updatePreview.prepare(QStringLiteral(
+            "UPDATE emails SET preview=:preview WHERE account_id=:account AND email_id=:email "
+            "AND preview=''"));
+        updatePreview.bindValue(QStringLiteral(":preview"),
+                                QString::fromStdString(std::string{preview}));
+        updatePreview.bindValue(QStringLiteral(":account"),
+                                QString::fromStdString(std::string{accountId}));
+        updatePreview.bindValue(QStringLiteral(":email"),
+                                QString::fromStdString(std::string{emailId}));
+        if (!updatePreview.exec())
+            return makeQueryError(QStringLiteral("Update indexed email preview"), updatePreview);
+
+        QSqlQuery indexed{database};
+        indexed.prepare(QStringLiteral(
+            "UPDATE mail_vault_email_refs SET indexed_hash=:hash WHERE account_id=:account "
+            "AND email_id=:email AND content_hash=:hash"));
+        indexed.bindValue(QStringLiteral(":hash"),
+                          QString::fromStdString(std::string{contentHash}));
+        indexed.bindValue(QStringLiteral(":account"),
+                          QString::fromStdString(std::string{accountId}));
+        indexed.bindValue(QStringLiteral(":email"), QString::fromStdString(std::string{emailId}));
+        if (!indexed.exec())
+            return makeQueryError(QStringLiteral("Mark email search source indexed"), indexed);
+
+        return transaction.commit();
+    }
+
     std::variant<std::optional<javelin::jmap::domain::Email>, DatabaseError>
     EmailRepository::find(const std::string_view accountId, const std::string_view emailId) const
     {

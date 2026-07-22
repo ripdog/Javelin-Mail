@@ -175,6 +175,41 @@ TEST_CASE("email repository normalizes missing subject and preview for cache wri
     CHECK(loaded.preview == std::optional<std::string>{std::string{}});
 }
 
+TEST_CASE("email repository records bodyless messages as indexed without a null preview",
+          "[jmap][cache][repository][search]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    javelin::jmap::cache::EmailRepository repository{databaseContext.connection};
+    auto email = loadEmailFixture();
+    email.preview = std::nullopt;
+    REQUIRE_FALSE(repository.replaceAll("account-1", {email}).has_value());
+
+    QSqlQuery seed{databaseContext.connection.database()};
+    REQUIRE(
+        seed.exec(QStringLiteral("INSERT INTO mail_vault_objects(content_hash,relative_path,size) "
+                                 "VALUES('bodyless-hash','objects/bodyless',0)")));
+    REQUIRE(seed.exec(QStringLiteral(
+        "INSERT INTO mail_vault_email_refs(account_id,email_id,blob_id,content_hash,retention) "
+        "VALUES('account-1','eml-1','blob-1','bodyless-hash','evictable')")));
+
+    REQUIRE_FALSE(
+        repository.markSearchIndexed("account-1", "eml-1", "bodyless-hash", {}).has_value());
+
+    QSqlQuery result{databaseContext.connection.database()};
+    REQUIRE(result.exec(QStringLiteral(
+        "SELECT e.preview,e.preview IS NULL,r.indexed_hash FROM emails e JOIN "
+        "mail_vault_email_refs r ON r.account_id=e.account_id AND r.email_id=e.email_id "
+        "WHERE e.account_id='account-1' AND e.email_id='eml-1'")));
+    REQUIRE(result.next());
+    CHECK(result.value(0).toString() == QStringLiteral(""));
+    CHECK_FALSE(result.value(1).toBool());
+    CHECK(result.value(2).toString() == QStringLiteral("bodyless-hash"));
+}
+
 TEST_CASE("email repository replacement removes stale email rows", "[jmap][cache][repository]")
 {
     ApplicationGuard application;

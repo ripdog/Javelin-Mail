@@ -1,6 +1,7 @@
 #include "app/MailIndexService.h"
 
 #include "app/WorkScheduler.h"
+#include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/MailSearchIndex.h"
 #include "jmap/cache/MailVault.h"
 #include "jmap/cache/MimeMessageParser.h"
@@ -11,7 +12,6 @@
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
-#include <QSqlError>
 #include <QSqlQuery>
 #include <QTextDocument>
 #include <QTimer>
@@ -87,39 +87,10 @@ namespace javelin::app
             javelin::jmap::cache::MailSearchIndex index{connection};
             if (const auto error = index.upsert(accountId, document))
                 return error->message;
-
-            const javelin::jmap::cache::DatabaseWriteScope writeScope{connection};
-            auto& database = connection.database();
-            if (!database.transaction())
-                return database.lastError().text();
-            QSqlQuery updatePreview{database};
-            updatePreview.prepare(QStringLiteral(
-                "UPDATE emails SET preview=:preview WHERE account_id=:account AND email_id=:email "
-                "AND preview=''"));
-            updatePreview.bindValue(QStringLiteral(":preview"), preview);
-            updatePreview.bindValue(QStringLiteral(":account"), QString::fromStdString(accountId));
-            updatePreview.bindValue(QStringLiteral(":email"), QString::fromStdString(emailId));
-            if (!updatePreview.exec())
-            {
-                const QString error = updatePreview.lastError().text();
-                database.rollback();
-                return error;
-            }
-            QSqlQuery indexed{database};
-            indexed.prepare(QStringLiteral(
-                "UPDATE mail_vault_email_refs SET indexed_hash=:hash WHERE account_id=:account "
-                "AND email_id=:email AND content_hash=:hash"));
-            indexed.bindValue(QStringLiteral(":hash"), QString::fromStdString(contentHash));
-            indexed.bindValue(QStringLiteral(":account"), QString::fromStdString(accountId));
-            indexed.bindValue(QStringLiteral(":email"), QString::fromStdString(emailId));
-            if (!indexed.exec())
-            {
-                const QString error = indexed.lastError().text();
-                database.rollback();
-                return error;
-            }
-            if (!database.commit())
-                return database.lastError().text();
+            javelin::jmap::cache::EmailRepository emails{connection};
+            if (const auto error = emails.markSearchIndexed(accountId, emailId, contentHash,
+                                                            preview.toStdString()))
+                return error->message;
             return {};
         }
     } // namespace
