@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 
 namespace javelin::gui::messages
@@ -11,6 +12,45 @@ namespace javelin::gui::messages
         std::size_t start = 0;
         std::size_t end = 0;
         bool hasNext = false;
+    };
+
+    class PageRefreshState final
+    {
+      public:
+        using Token = std::uint64_t;
+
+        [[nodiscard]] bool begin(const Token token)
+        {
+            if (m_inFlight)
+                return false;
+            m_token = token;
+            m_inFlight = true;
+            return true;
+        }
+
+        void supersede()
+        {
+            m_token = 0;
+            m_inFlight = false;
+        }
+
+        [[nodiscard]] bool complete(const Token token)
+        {
+            if (!m_inFlight || token != m_token)
+                return false;
+            m_token = 0;
+            m_inFlight = false;
+            return true;
+        }
+
+        [[nodiscard]] bool isInFlight() const
+        {
+            return m_inFlight;
+        }
+
+      private:
+        Token m_token = 0;
+        bool m_inFlight = false;
     };
 
     [[nodiscard]] inline PageMetrics pageMetrics(const std::size_t position,

@@ -691,7 +691,7 @@ namespace javelin::gui::shell
 
         auto* tab = activeTab();
         auto* mailboxTab = tab == nullptr ? nullptr : std::get_if<MailboxTabState>(&tab->content);
-        if (mailboxTab == nullptr || mailboxTab->page.refreshInFlight ||
+        if (mailboxTab == nullptr || mailboxTab->page.refresh.isInFlight() ||
             m_navigationContextRequested == std::optional<std::uint64_t>{routeId})
         {
             return;
@@ -2547,7 +2547,7 @@ namespace javelin::gui::shell
                                 .anchor = std::nullopt,
                                 .items = {},
                                 .cacheLoaded = false,
-                                .refreshInFlight = false,
+                                .refresh = {},
                                 .stale = false,
                                 .refreshError = {},
                             },
@@ -2575,7 +2575,7 @@ namespace javelin::gui::shell
                         .anchor = std::nullopt,
                         .items = {},
                         .cacheLoaded = false,
-                        .refreshInFlight = false,
+                        .refresh = {},
                         .stale = false,
                         .refreshError = {},
                     },
@@ -3091,12 +3091,12 @@ namespace javelin::gui::shell
 
     void MainWindow::refreshMailboxTabFromServer(MailboxTabState& tab)
     {
-        if (tab.page.refreshInFlight)
+        const auto refreshToken = ++m_nextMailboxPageRefreshToken;
+        if (!tab.page.refresh.begin(refreshToken))
         {
             return;
         }
 
-        tab.page.refreshInFlight = true;
         tab.page.refreshError.clear();
         updateEmptyStates();
         const auto tabAccountId = tab.accountId;
@@ -3114,22 +3114,27 @@ namespace javelin::gui::shell
         });
         QCoro::connect(
             std::move(task), this,
-            [this, tabAccountId, tabMailboxId, tabOffset](javelin::app::MailboxWindowResult result)
+            [this, tabAccountId, tabMailboxId, tabOffset,
+             refreshToken](javelin::app::MailboxWindowResult result)
             {
                 if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
                 {
+                    bool handled = false;
                     for (auto& tabState : m_tabs)
                     {
                         auto* mailboxTab = std::get_if<MailboxTabState>(&tabState.content);
                         if (mailboxTab != nullptr && mailboxTab->accountId == tabAccountId &&
                             mailboxTab->mailboxId == tabMailboxId &&
-                            mailboxTab->page.offset == tabOffset)
+                            mailboxTab->page.offset == tabOffset &&
+                            mailboxTab->page.refresh.complete(refreshToken))
                         {
-                            mailboxTab->page.refreshInFlight = false;
                             mailboxTab->page.refreshError = error->message;
+                            handled = true;
                             break;
                         }
                     }
+                    if (!handled)
+                        return;
                     presentError(*error);
                     updateEmptyStates();
                     resolveOpenEmailRoute();
@@ -3141,7 +3146,8 @@ namespace javelin::gui::shell
                     auto* mailboxTab = std::get_if<MailboxTabState>(&tabState.content);
                     if (mailboxTab == nullptr || mailboxTab->accountId != tabAccountId ||
                         mailboxTab->mailboxId != tabMailboxId ||
-                        mailboxTab->page.offset != tabOffset)
+                        mailboxTab->page.offset != tabOffset ||
+                        !mailboxTab->page.refresh.complete(refreshToken))
                     {
                         continue;
                     }
@@ -3152,7 +3158,6 @@ namespace javelin::gui::shell
                     mailboxTab->page.position = summary.position;
                     mailboxTab->page.returnedLimit = summary.returnedLimit;
                     mailboxTab->page.queryState = summary.queryState;
-                    mailboxTab->page.refreshInFlight = false;
                     mailboxTab->page.anchor.reset();
                     mailboxTab->page.anchorOffset = 1;
                     if (mailboxTab->page.total.has_value() && mailboxTab->page.offset > 0 &&
@@ -3683,6 +3688,7 @@ namespace javelin::gui::shell
                     else if constexpr (!std::is_same_v<std::decay_t<decltype(content)>,
                                                        ComposeTabState>)
                     {
+                        content.page.refresh.supersede();
                         content.page.offset = 0;
                         content.page.total.reset();
                         content.page.items.clear();
@@ -3734,6 +3740,7 @@ namespace javelin::gui::shell
             {
                 const auto step = content.page.returnedLimit == 0 ? MainWindow::pageSize
                                                                   : content.page.returnedLimit;
+                content.page.refresh.supersede();
                 content.page.offset -= std::min(content.page.offset, step);
                 content.page.position = content.page.offset;
                 content.page.anchor.reset();
@@ -3786,6 +3793,7 @@ namespace javelin::gui::shell
             }
             else
             {
+                content.page.refresh.supersede();
                 content.page.anchor = content.page.items.back().emailId;
                 content.page.anchorOffset = 1;
                 content.page.offset = content.page.position + content.page.items.size();
@@ -4080,7 +4088,7 @@ namespace javelin::gui::shell
                     else
                     {
                         refreshError = content.page.refreshError;
-                        refreshInFlight = content.page.refreshInFlight;
+                        refreshInFlight = content.page.refresh.isInFlight();
                     }
                 },
                 tab->content);
@@ -5993,7 +6001,7 @@ namespace javelin::gui::shell
                             .anchor = std::nullopt,
                             .items = {},
                             .cacheLoaded = false,
-                            .refreshInFlight = false,
+                            .refresh = {},
                             .stale = false,
                             .refreshError = {},
                         },

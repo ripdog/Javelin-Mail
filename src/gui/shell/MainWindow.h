@@ -1,6 +1,7 @@
 #pragma once
 
 #include "app/LongPollCoordinator.h"
+#include "gui/messages/Pagination.h"
 #include "jmap/cache/QueryService.h"
 #include "jmap/query/EmailListSort.h"
 #include "jmap/search/EmailSearch.h"
@@ -159,7 +160,7 @@ namespace javelin::gui::shell
             std::int64_t anchorOffset = 1;
             std::vector<javelin::jmap::cache::MessageListItem> items;
             bool cacheLoaded = false;
-            bool refreshInFlight = false;
+            javelin::gui::messages::PageRefreshState refresh;
             bool stale = false;
             QString refreshError;
         };
@@ -453,6 +454,7 @@ namespace javelin::gui::shell
         QAction* m_calendarRefreshAction = nullptr;
         javelin::jmap::query::EmailListSort m_emailListSort;
         bool m_refreshInFlight = false;
+        std::uint64_t m_nextMailboxPageRefreshToken = 0;
         std::uint64_t m_nextMessageContentRequestToken = 1;
         std::optional<MessageContentRequestState> m_messageContentRequestInFlight;
         std::optional<std::uint64_t> m_navigationContextRequested;
