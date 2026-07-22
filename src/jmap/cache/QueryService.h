@@ -54,6 +54,7 @@ namespace javelin::jmap::cache
         std::size_t returnedLimit = 0;
         std::optional<std::size_t> total;
         std::string queryState;
+        bool isAuthoritative = true;
         std::vector<MessageListItem> items;
     };
 

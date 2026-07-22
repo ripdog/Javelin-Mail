@@ -80,11 +80,11 @@ namespace javelin::jmap::cache
         replaceWindow.prepare(QStringLiteral(
             "INSERT INTO search_windows "
             "(account_id, query_key, window_offset, window_limit, position, returned_limit, total, "
-            "query_state, updated_at) VALUES (:account_id, :query_key, :offset, :limit, :position, "
-            ":returned_limit, :total, :query_state, CURRENT_TIMESTAMP) "
+            "query_state, is_valid, updated_at) VALUES (:account_id, :query_key, :offset, :limit, "
+            ":position, :returned_limit, :total, :query_state, 1, CURRENT_TIMESTAMP) "
             "ON CONFLICT(account_id, query_key, window_offset, window_limit) DO UPDATE SET "
             "position = excluded.position, returned_limit = excluded.returned_limit, "
-            "total = excluded.total, query_state = excluded.query_state, "
+            "total = excluded.total, query_state = excluded.query_state, is_valid = 1, "
             "updated_at = CURRENT_TIMESTAMP"));
         bindWindowKey(replaceWindow, window.accountId, window.queryKey, window.offset,
                       window.limit);
@@ -178,10 +178,11 @@ namespace javelin::jmap::cache
         }
 
         QSqlQuery windowQuery{m_connection.database()};
-        windowQuery.prepare(QStringLiteral(
-            "SELECT position, returned_limit, total, query_state FROM search_windows WHERE "
-            "account_id = :account_id AND query_key = "
-            ":query_key AND window_offset = :offset AND window_limit = :limit"));
+        windowQuery.prepare(
+            QStringLiteral("SELECT position, returned_limit, total, query_state, is_valid FROM "
+                           "search_windows WHERE "
+                           "account_id = :account_id AND query_key = "
+                           ":query_key AND window_offset = :offset AND window_limit = :limit"));
         bindWindowKey(windowQuery, accountId, queryKey, offset, limit);
         if (!windowQuery.exec())
         {
@@ -204,6 +205,7 @@ namespace javelin::jmap::cache
                          : std::optional<std::size_t>{static_cast<std::size_t>(
                                windowQuery.value(2).toULongLong())},
             .queryState = windowQuery.value(3).toString().toStdString(),
+            .isAuthoritative = windowQuery.value(4).toInt() != 0,
             .emailIds = {},
         };
 
@@ -238,7 +240,8 @@ namespace javelin::jmap::cache
             };
         }
         QSqlQuery query{m_connection.database()};
-        query.prepare(QStringLiteral("DELETE FROM search_windows WHERE account_id=:account_id"));
+        query.prepare(
+            QStringLiteral("UPDATE search_windows SET is_valid=0 WHERE account_id=:account_id"));
         query.bindValue(QStringLiteral(":account_id"),
                         QString::fromStdString(std::string{accountId}));
         if (!query.exec())

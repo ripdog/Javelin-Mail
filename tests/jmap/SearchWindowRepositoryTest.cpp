@@ -95,6 +95,7 @@ TEST_CASE("search window repository replaces ordered query results", "[jmap][cac
     CHECK((*first)->returnedLimit == 100);
     CHECK((*first)->total == std::optional<std::size_t>{3});
     CHECK((*first)->queryState == "state-1");
+    CHECK((*first)->isAuthoritative);
     CHECK((*first)->emailIds == std::vector<std::string>{"email-2", "email-1", "email-3"});
 
     REQUIRE_FALSE(repository
@@ -139,6 +140,52 @@ TEST_CASE("search window repository replaces ordered query results", "[jmap][cac
         std::get_if<std::optional<javelin::jmap::cache::SearchWindowRecord>>(&staleSiblingResult);
     REQUIRE(staleSibling != nullptr);
     CHECK_FALSE(staleSibling->has_value());
+}
+
+TEST_CASE("search window invalidation retains every page as a stale identity window",
+          "[jmap][cache][search]")
+{
+    ApplicationGuard application;
+    auto database = makeDatabaseContext();
+    seedAccount(database.connection);
+    javelin::jmap::cache::SearchWindowRepository repository{database.connection};
+
+    for (const auto offset : {std::size_t{0}, std::size_t{100}})
+    {
+        REQUIRE_FALSE(repository
+                          .replace({
+                              .accountId = "account-1",
+                              .queryKey = "query-1",
+                              .offset = offset,
+                              .limit = 100,
+                              .position = offset,
+                              .returnedLimit = 100,
+                              .total = 200,
+                              .queryState = "state-1",
+                              .emailIds = {"email-1"},
+                          })
+                          .has_value());
+    }
+
+    auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+        database.connection, QStringLiteral("Invalidate search test"));
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(transactionResult));
+    auto transaction =
+        std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
+    REQUIRE_FALSE(repository.invalidateAccount(transaction, "account-1").has_value());
+    REQUIRE_FALSE(transaction.commit().has_value());
+
+    for (const auto offset : {std::size_t{0}, std::size_t{100}})
+    {
+        const auto result = repository.find("account-1", "query-1", offset, 100);
+        const auto* window =
+            std::get_if<std::optional<javelin::jmap::cache::SearchWindowRecord>>(&result);
+        REQUIRE(window != nullptr);
+        REQUIRE(window->has_value());
+        CHECK_FALSE((*window)->isAuthoritative);
+        CHECK((*window)->offset == offset);
+        CHECK((*window)->emailIds == std::vector<std::string>{"email-1"});
+    }
 }
 
 TEST_CASE("search window repository distinguishes pages and missing windows",

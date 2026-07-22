@@ -3263,6 +3263,18 @@ namespace javelin::gui::shell
         }
     }
 
+    void MainWindow::markSearchTabsStaleForAccount(const std::string_view accountId)
+    {
+        for (auto& tab : m_tabs)
+        {
+            auto* searchTab = std::get_if<SearchTabState>(&tab.content);
+            if (searchTab != nullptr && searchTab->session->accountId() == accountId)
+            {
+                searchTab->session->markStale();
+            }
+        }
+    }
+
     void MainWindow::openMailboxSelectionInTab(const bool refreshRemote)
     {
         const auto accountId = currentAccountId(*m_mailboxView);
@@ -3852,6 +3864,16 @@ namespace javelin::gui::shell
         m_mailboxModel->refresh();
         m_mailboxView->expandAll();
         loadActiveTabFromCache(true);
+    }
+
+    void MainWindow::refreshActiveSearchAfterMutation(const std::string_view accountId)
+    {
+        auto* tab = activeTab();
+        auto* searchTab = tab == nullptr ? nullptr : std::get_if<SearchTabState>(&tab->content);
+        if (searchTab != nullptr && searchTab->session->accountId() == accountId)
+        {
+            searchTab->session->refreshAfterMutation();
+        }
     }
 
     void MainWindow::restoreSelection(std::optional<std::string> accountId,
@@ -5476,6 +5498,7 @@ namespace javelin::gui::shell
             return;
         }
 
+        markSearchTabsStaleForAccount(accountId);
         refreshMessageListPreservingSelection();
         refreshSelectionFromModels();
         submitQueuedEmailMutations(std::move(accountId));
@@ -5508,6 +5531,7 @@ namespace javelin::gui::shell
         }
 
         m_messageView->setCurrentIndex(index);
+        markSearchTabsStaleForAccount(*accountId);
         refreshMessageListPreservingSelection();
         refreshSelectionFromModels();
         m_statusBar->showMessage(
@@ -5559,6 +5583,7 @@ namespace javelin::gui::shell
             }
         }
 
+        markSearchTabsStaleForAccount(*accountId);
         refreshMessageListPreservingSelection();
         refreshSelectionFromModels();
         m_statusBar->showMessage(
@@ -5790,6 +5815,7 @@ namespace javelin::gui::shell
 
                 refreshMessageListPreservingSelection();
                 refreshSelectionFromModels();
+                refreshActiveSearchAfterMutation(summary.accountId);
             });
     }
 

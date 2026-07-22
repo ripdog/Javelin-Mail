@@ -259,6 +259,7 @@ namespace javelin::gui::shell
         void
         markTabsStaleForAccount(std::string_view accountId,
                                 std::optional<std::string_view> refreshedMailboxId = std::nullopt);
+        void markSearchTabsStaleForAccount(std::string_view accountId);
         void executeSearch(const QString& text);
         void showAdvancedSearch();
         void clearSearch();
@@ -303,6 +304,7 @@ namespace javelin::gui::shell
         void goToPreviousPage();
         void goToNextPage();
         void refreshViewsFromCache();
+        void refreshActiveSearchAfterMutation(std::string_view accountId);
         void refreshFromServer();
         void refreshAccountFromServer(std::string accountId);
         void refreshConnectionSettings(javelin::gui::settings::ConnectionSettings settings);

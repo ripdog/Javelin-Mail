@@ -1487,6 +1487,15 @@ namespace javelin::jmap::cache
                             QStringLiteral("DROP TABLE email_search_fts"),
                         },
                 },
+                MigrationStep{
+                    .version = 31,
+                    .name = QStringLiteral("retained_stale_search_windows"),
+                    .statements =
+                        {
+                            QStringLiteral("ALTER TABLE search_windows ADD COLUMN is_valid "
+                                           "INTEGER NOT NULL DEFAULT 1 CHECK(is_valid IN (0,1))"),
+                        },
+                },
             },
         };
     }

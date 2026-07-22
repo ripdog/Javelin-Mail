@@ -86,7 +86,7 @@ TEST_CASE("database connection creates the initial cache schema", "[jmap][cache]
         migrationsResult));
     const auto& migrations =
         std::get<std::vector<javelin::jmap::cache::AppliedMigration>>(migrationsResult);
-    REQUIRE(migrations.size() == 28);
+    REQUIRE(migrations.size() == 29);
     CHECK(migrations.front().version == 1);
     CHECK(migrations.front().name == QStringLiteral("initial_cache_schema"));
     CHECK(migrations.at(1).version == 2);
@@ -109,8 +109,8 @@ TEST_CASE("database connection creates the initial cache schema", "[jmap][cache]
     CHECK(migrations.at(10).name == QStringLiteral("websocket_push_capability"));
     CHECK(migrations.at(11).version == 14);
     CHECK(migrations.at(11).name == QStringLiteral("search_windows"));
-    CHECK(migrations.back().version == 30);
-    CHECK(migrations.back().name == QStringLiteral("external_rebuildable_mail_search"));
+    CHECK(migrations.back().version == 31);
+    CHECK(migrations.back().name == QStringLiteral("retained_stale_search_windows"));
 
     QSqlQuery tableQuery{connection.database()};
     REQUIRE(tableQuery.exec(
@@ -200,13 +200,13 @@ TEST_CASE("database migrations are repeatable when reopening an existing cache",
         migrationsResult));
     const auto& migrations =
         std::get<std::vector<javelin::jmap::cache::AppliedMigration>>(migrationsResult);
-    REQUIRE(migrations.size() == 28);
+    REQUIRE(migrations.size() == 29);
     CHECK(migrations.front().version == 1);
     CHECK(migrations.at(1).version == 2);
     CHECK(migrations.at(2).version == 3);
     CHECK(migrations.at(6).version == 9);
-    CHECK(migrations.back().version == 30);
-    CHECK(connection.schemaVersion() == 30);
+    CHECK(migrations.back().version == 31);
+    CHECK(connection.schemaVersion() == 31);
 }
 
 TEST_CASE("thread connection factory encodes owner tag and current thread in connection names",

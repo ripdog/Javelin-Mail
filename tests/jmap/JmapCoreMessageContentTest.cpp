@@ -818,7 +818,8 @@ TEST_CASE("JmapCore queues exact mailbox patches as mutations", "[jmap][core][mu
     const auto* cachedSearch =
         std::get_if<std::optional<javelin::jmap::cache::SearchWindowRecord>>(&searchWindow);
     REQUIRE(cachedSearch != nullptr);
-    CHECK_FALSE(cachedSearch->has_value());
+    REQUIRE(cachedSearch->has_value());
+    CHECK_FALSE((*cachedSearch)->isAuthoritative);
 }
 
 TEST_CASE("JmapCore queues read keyword mutations as mutations", "[jmap][core][mutation-journal]")
@@ -852,6 +853,21 @@ TEST_CASE("JmapCore queues read keyword mutations as mutations", "[jmap][core][m
                           .emailIds = {"eml-1"},
                       })
                       .has_value());
+    const std::string searchKey = "search:openrouter";
+    javelin::jmap::cache::SearchWindowRepository searchWindows{databaseContext.connection};
+    REQUIRE_FALSE(searchWindows
+                      .replace({
+                          .accountId = "account-1",
+                          .queryKey = searchKey,
+                          .offset = 0,
+                          .limit = 100,
+                          .position = 0,
+                          .returnedLimit = 100,
+                          .total = 1,
+                          .queryState = "search-state-1",
+                          .emailIds = {"eml-1"},
+                      })
+                      .has_value());
 
     FakeTransport transport;
     javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
@@ -873,6 +889,15 @@ TEST_CASE("JmapCore queues read keyword mutations as mutations", "[jmap][core][m
     REQUIRE(readPage->has_value());
     REQUIRE((*readPage)->items.size() == 1);
     CHECK_FALSE((*readPage)->items.front().isUnread);
+
+    const auto searchPageResult = queryService.loadSearchWindow("account-1", searchKey, 0, 100);
+    const auto* searchPage =
+        std::get_if<std::optional<javelin::jmap::cache::SearchWindowPage>>(&searchPageResult);
+    REQUIRE(searchPage != nullptr);
+    REQUIRE(searchPage->has_value());
+    CHECK_FALSE((*searchPage)->isAuthoritative);
+    REQUIRE((*searchPage)->items.size() == 1);
+    CHECK_FALSE((*searchPage)->items.front().isUnread);
 
     const auto markUnreadResult = core.queueMarkEmailUnread("account-1", "eml-1");
     REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(markUnreadResult));

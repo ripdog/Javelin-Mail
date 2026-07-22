@@ -58,6 +58,7 @@ namespace javelin::gui::search
 
         void loadCachedPage(bool forceReload = false);
         void refreshFromServer();
+        void refreshAfterMutation();
         void markStale();
         void setSort(javelin::jmap::query::EmailListSort sort);
         [[nodiscard]] bool goToPreviousPage();
@@ -82,6 +83,7 @@ namespace javelin::gui::search
         SearchPageState m_page;
         bool m_localSearchInFlight = false;
         bool m_authoritativeResultsApplied = false;
+        bool m_refreshAfterCurrent = false;
         std::uint64_t m_generation = 0;
     };
 

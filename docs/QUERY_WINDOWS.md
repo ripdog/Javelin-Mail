@@ -39,10 +39,12 @@ Sparse online windows that cannot be rebased exactly are invalidated. Optimistic
 invalidate affected mailbox windows and account search windows in the same
 `MutationProjectionTransaction` as their projected Email state.
 
-Invalidated mailbox windows retain their server-ordered representative IDs as a stale projection
-scaffold. The GUI may join those positions to SQLite's effective Email state so removals and
-keyword changes render immediately, but a stale window is never a pagination cache hit and cannot
-derive new positions or totals. The application replaces it with an exact JMAP query window.
+Invalidated mailbox and search windows retain their server-ordered representative IDs as a stale
+projection scaffold. The GUI may join those positions to SQLite's effective Email state so
+removals and keyword changes render immediately, but a stale window is never a pagination cache hit
+and cannot derive new positions or totals. The application replaces it with an exact JMAP query
+window. After an optimistic Email mutation is submitted, the application coordinator refreshes an
+active search tab explicitly; inactive search tabs refresh when activated.
 
 Totals are authoritative conversation counts for `collapseThreads: true`. Partial cached counts
 are diagnostic values only and must not replace query totals. Expanded thread members and retained

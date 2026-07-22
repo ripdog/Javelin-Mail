@@ -663,6 +663,7 @@ namespace javelin::jmap::cache
             .returnedLimit = (*window)->returnedLimit,
             .total = (*window)->total,
             .queryState = (*window)->queryState,
+            .isAuthoritative = (*window)->isAuthoritative,
             .items = *messages,
         }};
     }

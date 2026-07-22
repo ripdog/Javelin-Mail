@@ -7,6 +7,7 @@
 #include <QFutureWatcher>
 #include <QtConcurrentRun>
 
+#include <utility>
 #include <variant>
 
 namespace javelin::gui::search
@@ -101,7 +102,7 @@ namespace javelin::gui::search
 
     void SearchSession::loadCachedPage(const bool forceReload)
     {
-        if (m_page.cacheLoaded && !forceReload)
+        if (m_page.cacheLoaded && !m_page.stale && !forceReload)
         {
             return;
         }
@@ -113,10 +114,10 @@ namespace javelin::gui::search
             std::get_if<std::optional<javelin::jmap::cache::SearchWindowPage>>(&result);
         if (page == nullptr || !page->has_value())
         {
-            m_page.items.clear();
-            m_page.total.reset();
-            m_page.cacheLoaded = page != nullptr;
-            m_authoritativeResultsApplied = false;
+            // A missing search window is not an authoritative empty result. Keep rendering the
+            // current identity set until a replacement server query commits.
+            m_page.cacheLoaded = false;
+            m_page.stale = true;
             return;
         }
 
@@ -125,7 +126,8 @@ namespace javelin::gui::search
         m_page.returnedLimit = (*page)->returnedLimit;
         m_page.total = (*page)->total;
         m_page.queryState = (*page)->queryState;
-        m_page.cacheLoaded = true;
+        m_page.cacheLoaded = (*page)->isAuthoritative;
+        m_page.stale = !(*page)->isAuthoritative;
         m_authoritativeResultsApplied = true;
     }
 
@@ -162,8 +164,13 @@ namespace javelin::gui::search
                 {
                     m_page.refreshInFlight = false;
                     m_page.refreshError = error->message;
+                    const bool refreshAgain = std::exchange(m_refreshAfterCurrent, false);
                     Q_EMIT pageChanged();
                     Q_EMIT refreshFailed(*error);
+                    if (refreshAgain)
+                    {
+                        refreshFromServer();
+                    }
                     return;
                 }
 
@@ -187,8 +194,23 @@ namespace javelin::gui::search
                 }
                 m_page.stale = false;
                 m_page.refreshError.clear();
+                const bool refreshAgain = std::exchange(m_refreshAfterCurrent, false);
                 Q_EMIT pageChanged();
+                if (refreshAgain)
+                {
+                    refreshFromServer();
+                }
             });
+    }
+
+    void SearchSession::refreshAfterMutation()
+    {
+        if (m_page.refreshInFlight)
+        {
+            m_refreshAfterCurrent = true;
+            return;
+        }
+        refreshFromServer();
     }
 
     void SearchSession::markStale()
@@ -291,6 +313,7 @@ namespace javelin::gui::search
         m_page.refreshError.clear();
         m_localSearchInFlight = false;
         m_authoritativeResultsApplied = false;
+        m_refreshAfterCurrent = false;
     }
 
 } // namespace javelin::gui::search
