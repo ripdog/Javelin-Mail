@@ -4213,14 +4213,18 @@ namespace javelin::gui::shell
             activeTabIsMailbox() && activeMailboxId().has_value() && draftsMailbox.has_value() &&
             activeMailboxId() == std::optional<std::string>{draftsMailbox->id} &&
             selectedIds.size() == 1;
-        const bool isUnread = indexIsUnread(m_messageView->currentIndex());
+        const auto* selectionModel = m_messageView->selectionModel();
+        const bool hasReadSelection =
+            selectionModel != nullptr &&
+            std::ranges::any_of(selectionModel->selectedRows(),
+                                [](const QModelIndex& index) { return !indexIsUnread(index); });
         m_newMessageAction->setEnabled(true);
         m_replyAction->setEnabled(hasEmailSelection && !activeTabIsCompose());
         m_replyAllAction->setEnabled(hasEmailSelection && !activeTabIsCompose());
         m_forwardAction->setEnabled(hasEmailSelection && !activeTabIsCompose());
         m_editDraftAction->setEnabled(canEditDraft);
         m_archiveAction->setEnabled(hasMovableSelection);
-        m_markUnreadAction->setEnabled(hasEmailSelection && !isUnread);
+        m_markUnreadAction->setEnabled(hasEmailSelection && hasReadSelection);
         m_deleteAction->setEnabled(hasMailboxSelection);
         m_permanentDeleteAction->setEnabled(hasEmailSelection);
         m_moveAction->setEnabled(hasMovableSelection);
@@ -5505,30 +5509,54 @@ namespace javelin::gui::shell
     void MainWindow::markSelectedEmailUnread()
     {
         const auto accountId = activeAccountId();
-        const auto emailId = currentEmailId(*m_messageView);
-        if (!accountId.has_value() || !emailId.has_value())
+        const auto* selectionModel = m_messageView->selectionModel();
+        if (!accountId.has_value() || selectionModel == nullptr)
         {
             m_statusBar->showMessage(QStringLiteral("Select a message to mark unread."), 3000);
             return;
         }
 
-        if (indexIsUnread(m_messageView->currentIndex()))
+        const QModelIndexList selectedRows = selectionModel->selectedRows();
+        std::vector<std::string> emailIds;
+        emailIds.reserve(static_cast<std::size_t>(selectedRows.size()));
+        for (const auto& index : selectedRows)
+        {
+            if (indexIsUnread(index))
+            {
+                continue;
+            }
+
+            const auto emailId =
+                index.data(javelin::gui::messages::MessageListModel::EmailIdRole).toString();
+            if (!emailId.isEmpty())
+            {
+                emailIds.push_back(emailId.toStdString());
+            }
+        }
+
+        if (emailIds.empty())
         {
             return;
         }
 
-        qCInfo(logUserOperations) << "mark unread requested";
-
-        const auto result = m_mailService.queueMarkEmailUnread(*accountId, *emailId);
-        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+        qCInfo(logUserOperations) << "mark unread requested" << emailIds.size() << "message(s)";
+        for (const auto& emailId : emailIds)
         {
-            presentError(*error);
-            return;
+            const auto result = m_mailService.queueMarkEmailUnread(*accountId, emailId);
+            if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+            {
+                presentError(*error);
+                return;
+            }
         }
 
         refreshMessageListPreservingSelection();
         refreshSelectionFromModels();
-        m_statusBar->showMessage(QStringLiteral("Marked unread."), 5000);
+        m_statusBar->showMessage(
+            emailIds.size() == 1
+                ? QStringLiteral("Marked unread.")
+                : QStringLiteral("Marked %1 messages unread.").arg(emailIds.size()),
+            5000);
         submitQueuedEmailMutations(*accountId);
     }
 
