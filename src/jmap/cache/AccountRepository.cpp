@@ -102,6 +102,7 @@ namespace javelin::jmap::cache
             return std::nullopt;
         }
 
+        const DatabaseWriteScope writeScope{m_connection};
         auto& database = m_connection.database();
         if (!database.transaction())
         {
@@ -173,6 +174,7 @@ namespace javelin::jmap::cache
             };
         }
 
+        const DatabaseWriteScope writeScope{m_connection};
         auto& database = m_connection.database();
         if (!database.transaction())
         {

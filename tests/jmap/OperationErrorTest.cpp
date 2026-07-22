@@ -2,6 +2,7 @@
 
 #include "jmap/api/Error.h"
 #include "jmap/api/ResponseReader.h"
+#include "jmap/cache/Database.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -69,4 +70,16 @@ TEST_CASE("response reader preserves JMAP method error classification")
 
     CHECK(error.code == javelin::jmap::OperationErrorCode::ServerUnavailable);
     CHECK(javelin::jmap::isTransientError(error));
+}
+
+TEST_CASE("SQLite writer contention is transient application state")
+{
+    const auto error = javelin::jmap::operationError(javelin::jmap::cache::DatabaseError{
+        .code = javelin::jmap::cache::DatabaseErrorCode::TransientContention,
+        .message = QStringLiteral("database is busy"),
+    });
+
+    CHECK(error.code == javelin::jmap::OperationErrorCode::LocalStorageBusy);
+    CHECK(javelin::jmap::isTransientError(error));
+    CHECK_FALSE(javelin::jmap::requiresUserIntervention(error));
 }

@@ -85,6 +85,7 @@ namespace javelin::jmap::sync
     std::variant<std::uint64_t, javelin::jmap::cache::DatabaseError>
     ConsistencyDomainRepository::advanceMutation(const ConsistencyDomain& domain)
     {
+        const javelin::jmap::cache::DatabaseWriteScope writeScope{m_connection};
         if (const auto error = m_connection.validate())
         {
             return *error;

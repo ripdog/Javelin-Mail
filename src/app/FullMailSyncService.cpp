@@ -88,7 +88,6 @@ namespace javelin::app
             std::vector<javelin::jmap::domain::Email> emails, std::string queryState,
             std::string emailState, const std::optional<std::size_t> total)
         {
-            const javelin::jmap::cache::SerializedDatabaseWrite writeGuard;
             javelin::jmap::cache::ThreadConnectionFactory factory({
                 .connectionNamePrefix = QStringLiteral("full-mail-page"),
                 .databasePath = databasePath,
@@ -131,6 +130,7 @@ namespace javelin::app
                 .collapseThreads = true,
             });
 
+            const javelin::jmap::cache::DatabaseWriteScope writeScope{connection};
             auto& database = connection.database();
             if (!database.transaction())
                 return FullMailboxPageCommit{database.lastError().text()};
@@ -326,6 +326,7 @@ namespace javelin::app
     void
     FullMailSyncService::applySettings(std::vector<FullSyncAccountConfiguration> configurations)
     {
+        const javelin::jmap::cache::DatabaseWriteScope writeScope{m_connection};
         std::unordered_set<std::string> desiredKeys;
         m_settings.clear();
         m_scopes.clear();
@@ -425,6 +426,7 @@ namespace javelin::app
 
     void FullMailSyncService::requestCatchUp(const std::string_view accountId)
     {
+        const javelin::jmap::cache::DatabaseWriteScope writeScope{m_connection};
         if (m_runningAccounts.contains(std::string{accountId}))
         {
             m_dirtyAccounts.insert(std::string{accountId});
@@ -572,6 +574,7 @@ namespace javelin::app
                 scopeStatus == QStringLiteral("enumerating") && generation != 0;
             if (!resumeEnumeration)
             {
+                const javelin::jmap::cache::DatabaseWriteScope writeScope{m_connection};
                 ++generation;
                 QSqlQuery begin{m_connection.database()};
                 begin.prepare(QStringLiteral(
@@ -647,6 +650,7 @@ namespace javelin::app
                     if (anchor.has_value() &&
                         error->protocolType == std::optional<std::string>{"anchorNotFound"})
                     {
+                        const javelin::jmap::cache::DatabaseWriteScope writeScope{m_connection};
                         QSqlQuery restart{m_connection.database()};
                         restart.prepare(QStringLiteral(
                             "UPDATE offline_mailbox_scopes SET status='pending',anchor_email_id="
@@ -738,6 +742,7 @@ namespace javelin::app
             }
             const std::string completedQueryState =
                 currentScopeState.value(0).toString().toStdString();
+            const javelin::jmap::cache::DatabaseWriteScope writeScope{m_connection};
             auto& database = m_connection.database();
             if (!database.transaction())
             {
@@ -892,6 +897,7 @@ namespace javelin::app
             }
         }
 
+        const javelin::jmap::cache::DatabaseWriteScope writeScope{m_connection};
         QSqlQuery complete{m_connection.database()};
         complete.prepare(QStringLiteral(
             "UPDATE offline_mailbox_scopes SET status='complete',completed_generation=:generation,"

@@ -51,6 +51,7 @@ namespace javelin::jmap::cache
             return error;
         }
 
+        const DatabaseWriteScope writeScope{m_connection};
         auto database = m_connection.database();
         if (!database.transaction())
         {

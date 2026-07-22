@@ -442,6 +442,8 @@ namespace javelin::app
                 handleOperationError(QStringLiteral("Synchronize mailbox"), *error);
                 if (javelin::jmap::isAuthenticationError(*error))
                     co_return;
+                if (javelin::jmap::isTransientError(*error))
+                    scheduleDebouncedRefresh();
             }
         }
         if (m_runContext == nullptr || m_runContext->generation != runContext->generation ||

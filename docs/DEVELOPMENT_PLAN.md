@@ -334,6 +334,9 @@ Authentication should be treated as architecture, not setup glue:
 
 ## Threading And Database Ownership
 
+The implemented connection and write-coordination rules are documented in
+[`DATABASE_ACCESS.md`](DATABASE_ACCESS.md).
+
 `QSqlDatabase` requires deliberate thread ownership rules:
 
 - Define database connection lifetime and thread affinity early.

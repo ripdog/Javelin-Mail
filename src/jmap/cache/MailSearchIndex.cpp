@@ -97,7 +97,9 @@ namespace javelin::jmap::cache
     std::optional<DatabaseError> MailSearchIndex::upsert(const std::string_view accountId,
                                                          const SearchIndexDocument& document) const
     {
-        IndexConnection connection{indexPath(m_cacheConnection, accountId)};
+        const QString path = indexPath(m_cacheConnection, accountId);
+        const DatabaseWriteScope writeScope{path};
+        IndexConnection connection{path};
         if (connection.failure())
             return connection.failure();
         auto& database = connection.database();
@@ -150,7 +152,9 @@ namespace javelin::jmap::cache
     std::optional<DatabaseError> MailSearchIndex::remove(const std::string_view accountId,
                                                          const std::string_view emailId) const
     {
-        IndexConnection connection{indexPath(m_cacheConnection, accountId)};
+        const QString path = indexPath(m_cacheConnection, accountId);
+        const DatabaseWriteScope writeScope{path};
+        IndexConnection connection{path};
         if (connection.failure())
             return connection.failure();
         QSqlQuery rowQuery{connection.database()};

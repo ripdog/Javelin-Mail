@@ -63,6 +63,7 @@ namespace javelin::jmap::cache
         }
         const auto& installed = std::get<MailVaultObject>(installedResult);
 
+        const DatabaseWriteScope writeScope{m_connection};
         auto& database = m_connection.database();
         if (!database.transaction())
         {
@@ -137,6 +138,7 @@ namespace javelin::jmap::cache
             return error;
         }
 
+        const DatabaseWriteScope writeScope{m_connection};
         auto& database = m_connection.database();
         if (!database.transaction())
         {
@@ -295,6 +297,11 @@ namespace javelin::jmap::cache
         remaining.finish();
         if (!hasRemainingSources)
         {
+            auto transactionResult = DatabaseTransaction::begin(
+                m_connection, QStringLiteral("Complete raw message source migration"));
+            if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
+                return *error;
+            auto transaction = std::get<DatabaseTransaction>(std::move(transactionResult));
             QSqlQuery clearLegacy{m_connection.database()};
             if (!clearLegacy.exec(QStringLiteral("DELETE FROM raw_message_sources")))
                 return makeQueryError(QStringLiteral("Clear migrated raw message sources"),
@@ -305,6 +312,8 @@ namespace javelin::jmap::cache
                     "latest_error=NULL,updated_at=CURRENT_TIMESTAMP WHERE migration_key="
                     "'raw_message_sources_to_vault'")))
                 return makeQueryError(QStringLiteral("Complete raw source migration"), complete);
+            if (const auto error = transaction.commit())
+                return *error;
         }
         return sources.size();
     }
@@ -395,6 +404,7 @@ namespace javelin::jmap::cache
                                               "%1")
                                    .arg(QString::fromStdString(job.operation))};
             }
+            const DatabaseWriteScope writeScope{m_connection};
             QSqlQuery update{m_connection.database()};
             update.prepare(QStringLiteral(
                 "UPDATE mail_vault_projection_jobs SET status=:status,last_error=:error,"

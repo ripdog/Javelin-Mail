@@ -74,7 +74,6 @@ namespace javelin::app
         commitIndexDocument(const QString& databasePath, const std::string& accountId,
                             javelin::jmap::cache::SearchIndexDocument document, QString preview)
         {
-            const javelin::jmap::cache::SerializedDatabaseWrite writeGuard;
             const std::string emailId = document.emailId;
             const std::string contentHash = document.sourceHash;
             javelin::jmap::cache::ThreadConnectionFactory factory({
@@ -89,6 +88,7 @@ namespace javelin::app
             if (const auto error = index.upsert(accountId, document))
                 return error->message;
 
+            const javelin::jmap::cache::DatabaseWriteScope writeScope{connection};
             auto& database = connection.database();
             if (!database.transaction())
                 return database.lastError().text();
@@ -166,6 +166,7 @@ namespace javelin::app
 
     void MailIndexService::requestIndex(const std::string_view accountId)
     {
+        const javelin::jmap::cache::DatabaseWriteScope writeScope{m_connection};
         const auto id = indexJobId(accountId);
         m_jobs.insert_or_assign(id, std::string{accountId});
         static_cast<void>(m_scheduler.ensure({

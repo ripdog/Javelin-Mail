@@ -68,6 +68,7 @@ namespace javelin::jmap::sync
     std::optional<javelin::jmap::cache::DatabaseError>
     MutationJournalRepository::put(const MutationRecord& record)
     {
+        const javelin::jmap::cache::DatabaseWriteScope writeScope{m_connection};
         if (const auto error = m_connection.validate())
         {
             return error;
@@ -278,6 +279,7 @@ namespace javelin::jmap::sync
                                           const std::optional<std::string_view> acceptedState,
                                           const std::optional<std::string_view> errorJson)
     {
+        const javelin::jmap::cache::DatabaseWriteScope writeScope{m_connection};
         if (const auto error = m_connection.validate())
         {
             return error;
@@ -309,6 +311,7 @@ namespace javelin::jmap::sync
     std::variant<std::size_t, javelin::jmap::cache::DatabaseError>
     MutationJournalRepository::recoverInFlight()
     {
+        const javelin::jmap::cache::DatabaseWriteScope writeScope{m_connection};
         if (const auto error = m_connection.validate())
         {
             return *error;
@@ -328,6 +331,7 @@ namespace javelin::jmap::sync
     std::optional<javelin::jmap::cache::DatabaseError>
     MutationJournalRepository::remove(const std::string_view mutationId)
     {
+        const javelin::jmap::cache::DatabaseWriteScope writeScope{m_connection};
         if (const auto error = m_connection.validate())
         {
             return error;

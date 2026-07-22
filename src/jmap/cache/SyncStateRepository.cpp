@@ -34,6 +34,7 @@ namespace javelin::jmap::cache
     std::optional<DatabaseError> SyncStateRepository::upsert(const SyncStateKey& key,
                                                              std::string_view stateToken)
     {
+        const DatabaseWriteScope writeScope{m_connection};
         if (const auto error = m_connection.validate())
         {
             return error;
@@ -91,6 +92,7 @@ namespace javelin::jmap::cache
 
     std::optional<DatabaseError> SyncStateRepository::remove(const SyncStateKey& key)
     {
+        const DatabaseWriteScope writeScope{m_connection};
         if (const auto error = m_connection.validate())
         {
             return error;

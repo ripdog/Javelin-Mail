@@ -38,6 +38,7 @@ namespace javelin::jmap
         ServerFailure,
         ProtocolViolation,
         UnsupportedCapability,
+        LocalStorageBusy,
         LocalStorageFailure,
         InvalidRequest,
         InvalidUserInput,

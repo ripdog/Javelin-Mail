@@ -30,6 +30,7 @@ namespace javelin::jmap::cache
             return *error;
         }
 
+        const DatabaseWriteScope writeScope{m_connection};
         auto& database = m_connection.database();
         if (!database.transaction())
         {
@@ -141,6 +142,7 @@ namespace javelin::jmap::cache
                                           const std::string_view mailboxId,
                                           const std::vector<std::string>& emailIds)
     {
+        const DatabaseWriteScope writeScope{m_connection};
         if (emailIds.empty())
             return std::nullopt;
         if (const auto error = m_connection.validate())

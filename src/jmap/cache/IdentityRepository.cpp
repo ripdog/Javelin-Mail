@@ -67,9 +67,8 @@ namespace javelin::jmap::cache
 
                 const auto name = object.value(QStringLiteral("name")).toString();
                 addresses.push_back(javelin::jmap::domain::EmailAddress{
-                    .name =
-                        name.isEmpty() ? std::nullopt
-                                       : std::optional<std::string>{name.toStdString()},
+                    .name = name.isEmpty() ? std::nullopt
+                                           : std::optional<std::string>{name.toStdString()},
                     .email = email.toStdString(),
                 });
             }
@@ -78,7 +77,8 @@ namespace javelin::jmap::cache
 
     } // namespace
 
-    IdentityRepository::IdentityRepository(DatabaseConnection& connection) : m_connection(connection)
+    IdentityRepository::IdentityRepository(DatabaseConnection& connection)
+        : m_connection(connection)
     {
     }
 
@@ -91,6 +91,7 @@ namespace javelin::jmap::cache
             return error;
         }
 
+        const DatabaseWriteScope writeScope{m_connection};
         auto& database = m_connection.database();
         if (!database.transaction())
         {
@@ -193,14 +194,14 @@ namespace javelin::jmap::cache
                 .email = query.value(1).toString().toStdString(),
                 .replyTo = deserializeAddressList(query.value(3).toString()),
                 .bcc = deserializeAddressList(query.value(4).toString()),
-                .textSignature = query.value(5).isNull()
-                                     ? std::nullopt
-                                     : std::optional<std::string>{
-                                           query.value(5).toString().toStdString()},
-                .htmlSignature = query.value(6).isNull()
-                                     ? std::nullopt
-                                     : std::optional<std::string>{
-                                           query.value(6).toString().toStdString()},
+                .textSignature =
+                    query.value(5).isNull()
+                        ? std::nullopt
+                        : std::optional<std::string>{query.value(5).toString().toStdString()},
+                .htmlSignature =
+                    query.value(6).isNull()
+                        ? std::nullopt
+                        : std::optional<std::string>{query.value(6).toString().toStdString()},
                 .mayDelete = query.value(7).toInt() != 0,
             });
         }
@@ -209,7 +210,8 @@ namespace javelin::jmap::cache
     }
 
     std::variant<std::optional<javelin::jmap::domain::Identity>, DatabaseError>
-    IdentityRepository::find(const std::string_view accountId, const std::string_view identityId) const
+    IdentityRepository::find(const std::string_view accountId,
+                             const std::string_view identityId) const
     {
         const auto identitiesResult = listByAccount(accountId);
         if (const auto* error = std::get_if<DatabaseError>(&identitiesResult))
@@ -219,9 +221,9 @@ namespace javelin::jmap::cache
 
         const auto& identities =
             std::get<std::vector<javelin::jmap::domain::Identity>>(identitiesResult);
-        const auto it = std::find_if(
-            identities.cbegin(), identities.cend(),
-            [identityId](const auto& identity) { return identity.id == identityId; });
+        const auto it =
+            std::find_if(identities.cbegin(), identities.cend(),
+                         [identityId](const auto& identity) { return identity.id == identityId; });
         if (it == identities.cend())
         {
             return std::optional<javelin::jmap::domain::Identity>{std::nullopt};

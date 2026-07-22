@@ -103,6 +103,7 @@ namespace javelin::app
                                  QObject* parent, const std::chrono::milliseconds quietPeriod)
         : QObject(parent), m_connection(connection)
     {
+        const javelin::jmap::cache::DatabaseWriteScope writeScope{m_connection};
         QSqlQuery recover{m_connection.database()};
         if (!recover.exec(QStringLiteral(
                 "UPDATE background_jobs SET status=CASE WHEN pause_requested=1 THEN 'paused' ELSE "
@@ -120,6 +121,7 @@ namespace javelin::app
 
     std::optional<javelin::jmap::cache::DatabaseError> WorkScheduler::ensure(const WorkSpec& spec)
     {
+        const javelin::jmap::cache::DatabaseWriteScope writeScope{m_connection};
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
             "INSERT INTO "
@@ -155,6 +157,7 @@ namespace javelin::app
                           const WorkProgress& progress, QString checkpointJson,
                           std::optional<QString> errorText)
     {
+        const javelin::jmap::cache::DatabaseWriteScope writeScope{m_connection};
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
             "UPDATE background_jobs SET status=:status,detail=:detail,completed_units=:units,"
@@ -277,6 +280,7 @@ namespace javelin::app
     WorkScheduler::setControlStatus(const std::string_view jobId, const WorkStatus status,
                                     const bool pauseRequested)
     {
+        const javelin::jmap::cache::DatabaseWriteScope writeScope{m_connection};
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
             "UPDATE background_jobs SET status=:status,pause_requested=:pause,error_text=NULL,"

@@ -50,6 +50,7 @@ namespace javelin::jmap::cache
     {
         if (const auto error = m_connection.validate())
             return *error;
+        const DatabaseWriteScope writeScope{m_connection};
         auto& database = m_connection.database();
         if (!database.transaction())
             return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
@@ -213,6 +214,7 @@ namespace javelin::jmap::cache
 
     std::optional<DatabaseError> CalendarNotificationRepository::dismiss(const std::string_view key)
     {
+        const DatabaseWriteScope writeScope{m_connection};
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
             "UPDATE calendar_notification_state SET status='dismissed',snoozed_until=NULL "
@@ -226,6 +228,7 @@ namespace javelin::jmap::cache
     std::optional<DatabaseError> CalendarNotificationRepository::snooze(const std::string_view key,
                                                                         const QDateTime& until)
     {
+        const DatabaseWriteScope writeScope{m_connection};
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
             "UPDATE calendar_notification_state SET status='snoozed',snoozed_until=:until "

@@ -422,6 +422,7 @@ namespace javelin::jmap::cache
             return error;
         }
 
+        const DatabaseWriteScope writeScope{m_connection};
         QSqlDatabase& database = m_connection.database();
         if (!database.transaction())
         {
@@ -673,6 +674,7 @@ namespace javelin::jmap::cache
             return std::nullopt;
         }
 
+        const DatabaseWriteScope writeScope{m_connection};
         QSqlDatabase& database = m_connection.database();
         if (!database.transaction())
         {

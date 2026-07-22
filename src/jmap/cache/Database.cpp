@@ -1,12 +1,15 @@
 #include "jmap/cache/Database.h"
 
-#include <QMutex>
+#include <QDir>
+#include <QFileInfo>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QThread>
 
 #include <algorithm>
 #include <cstdint>
+#include <map>
+#include <mutex>
 #include <span>
 #include <sstream>
 #include <utility>
@@ -17,12 +20,22 @@ namespace javelin::jmap::cache
     namespace
     {
 
+        [[nodiscard]] DatabaseErrorCode errorCode(const QSqlError& error,
+                                                  const DatabaseErrorCode fallback)
+        {
+            bool ok = false;
+            const int nativeCode = error.nativeErrorCode().toInt(&ok);
+            if (ok && (nativeCode & 0xff) >= 5 && (nativeCode & 0xff) <= 6)
+                return DatabaseErrorCode::TransientContention;
+            return fallback;
+        }
+
         [[nodiscard]] DatabaseError makeError(const DatabaseErrorCode code,
                                               const QString& operation,
                                               const QSqlDatabase& database)
         {
             return DatabaseError{
-                .code = code,
+                .code = errorCode(database.lastError(), code),
                 .message = operation + QStringLiteral(": ") + database.lastError().text(),
             };
         }
@@ -31,7 +44,7 @@ namespace javelin::jmap::cache
                                                    const QString& operation, const QSqlQuery& query)
         {
             return DatabaseError{
-                .code = code,
+                .code = errorCode(query.lastError(), code),
                 .message = operation + QStringLiteral(": ") + query.lastError().text(),
             };
         }
@@ -95,9 +108,27 @@ namespace javelin::jmap::cache
             return query.value(0).toInt();
         }
 
-        [[nodiscard]] QMutex& serializedDatabaseWriteMutex()
+        [[nodiscard]] QString databaseIdentity(const QString& databasePath)
         {
-            static QMutex mutex;
+            if (databasePath == QStringLiteral(":memory:") ||
+                databasePath.startsWith(QStringLiteral("file:")))
+                return databasePath;
+            return QDir::cleanPath(QFileInfo(databasePath).absoluteFilePath());
+        }
+
+        [[nodiscard]] std::shared_ptr<std::recursive_mutex>
+        writeMutexForDatabase(const QString& databasePath)
+        {
+            static std::mutex registryMutex;
+            static std::map<QString, std::weak_ptr<std::recursive_mutex>> registry;
+            const std::scoped_lock lock{registryMutex};
+            auto& weak = registry[databaseIdentity(databasePath)];
+            auto mutex = weak.lock();
+            if (!mutex)
+            {
+                mutex = std::make_shared<std::recursive_mutex>();
+                weak = mutex;
+            }
             return mutex;
         }
 
@@ -234,14 +265,17 @@ namespace javelin::jmap::cache
 
     DatabaseConnection::DatabaseConnection() = default;
 
-    DatabaseConnection::DatabaseConnection(QString connectionName, QSqlDatabase database)
-        : m_connectionName(std::move(connectionName)), m_database(std::move(database))
+    DatabaseConnection::DatabaseConnection(QString connectionName, QSqlDatabase database,
+                                           std::shared_ptr<std::recursive_mutex> writeMutex)
+        : m_connectionName(std::move(connectionName)), m_database(std::move(database)),
+          m_writeMutex(std::move(writeMutex)), m_ownerThread(QThread::currentThreadId())
     {
     }
 
     DatabaseConnection::DatabaseConnection(DatabaseConnection&& other) noexcept
         : m_connectionName(std::move(other.m_connectionName)),
-          m_database(std::move(other.m_database))
+          m_database(std::move(other.m_database)), m_writeMutex(std::move(other.m_writeMutex)),
+          m_ownerThread(std::exchange(other.m_ownerThread, nullptr))
     {
         other.m_database = QSqlDatabase{};
         other.m_connectionName.clear();
@@ -257,6 +291,8 @@ namespace javelin::jmap::cache
         reset();
         m_connectionName = std::move(other.m_connectionName);
         m_database = std::move(other.m_database);
+        m_writeMutex = std::move(other.m_writeMutex);
+        m_ownerThread = std::exchange(other.m_ownerThread, nullptr);
         other.m_database = QSqlDatabase{};
         other.m_connectionName.clear();
         return *this;
@@ -267,13 +303,25 @@ namespace javelin::jmap::cache
         reset();
     }
 
-    DatabaseTransaction::DatabaseTransaction(DatabaseConnection& connection)
-        : m_connection(&connection), m_active(true)
+    DatabaseWriteScope::DatabaseWriteScope(DatabaseConnection& connection)
+        : m_mutex(connection.m_writeMutex), m_lock(*m_mutex)
+    {
+    }
+
+    DatabaseWriteScope::DatabaseWriteScope(const QString& databasePath)
+        : m_mutex(writeMutexForDatabase(databasePath)), m_lock(*m_mutex)
+    {
+    }
+
+    DatabaseTransaction::DatabaseTransaction(DatabaseConnection& connection,
+                                             DatabaseWriteScope writeScope)
+        : m_connection(&connection), m_writeScope(std::move(writeScope)), m_active(true)
     {
     }
 
     DatabaseTransaction::DatabaseTransaction(DatabaseTransaction&& other) noexcept
         : m_connection(std::exchange(other.m_connection, nullptr)),
+          m_writeScope(std::move(other.m_writeScope)),
           m_active(std::exchange(other.m_active, false))
     {
     }
@@ -284,6 +332,7 @@ namespace javelin::jmap::cache
         {
             rollback();
             m_connection = std::exchange(other.m_connection, nullptr);
+            m_writeScope = std::move(other.m_writeScope);
             m_active = std::exchange(other.m_active, false);
         }
         return *this;
@@ -301,12 +350,13 @@ namespace javelin::jmap::cache
         {
             return *error;
         }
+        DatabaseWriteScope writeScope{connection};
         QSqlQuery begin{connection.database()};
         if (!begin.exec(QStringLiteral("BEGIN IMMEDIATE TRANSACTION")))
         {
             return makeQueryError(DatabaseErrorCode::QueryFailed, std::move(operation), begin);
         }
-        return DatabaseTransaction{connection};
+        return DatabaseTransaction{connection, std::move(writeScope)};
     }
 
     std::optional<DatabaseError> DatabaseTransaction::commit()
@@ -325,9 +375,11 @@ namespace javelin::jmap::cache
                           QStringLiteral("Commit database transaction"), m_connection->database());
             m_connection->database().rollback();
             m_active = false;
+            m_writeScope.reset();
             return error;
         }
         m_active = false;
+        m_writeScope.reset();
         return std::nullopt;
     }
 
@@ -337,6 +389,7 @@ namespace javelin::jmap::cache
         {
             m_connection->database().rollback();
             m_active = false;
+            m_writeScope.reset();
         }
     }
 
@@ -361,6 +414,8 @@ namespace javelin::jmap::cache
             };
         }
 
+        auto writeMutex = writeMutexForDatabase(options.databasePath);
+        const std::unique_lock writeLock{*writeMutex};
         QSqlDatabase database =
             QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), options.connectionName);
         const auto discardConnection = [&database, &options]()
@@ -391,16 +446,20 @@ namespace javelin::jmap::cache
             return *migrationError;
         }
 
-        return DatabaseConnection{options.connectionName, database};
+        return DatabaseConnection{options.connectionName, database, std::move(writeMutex)};
     }
 
     QSqlDatabase& DatabaseConnection::database()
     {
+        Q_ASSERT_X(m_ownerThread == QThread::currentThreadId(), "DatabaseConnection::database",
+                   "A database connection was accessed from a thread that does not own it");
         return m_database;
     }
 
     const QSqlDatabase& DatabaseConnection::database() const
     {
+        Q_ASSERT_X(m_ownerThread == QThread::currentThreadId(), "DatabaseConnection::database",
+                   "A database connection was accessed from a thread that does not own it");
         return m_database;
     }
 
@@ -411,6 +470,15 @@ namespace javelin::jmap::cache
 
     std::optional<DatabaseError> DatabaseConnection::validate() const
     {
+        if (m_ownerThread != nullptr && m_ownerThread != QThread::currentThreadId())
+        {
+            return DatabaseError{
+                .code = DatabaseErrorCode::ThreadAffinityViolation,
+                .message = QStringLiteral(
+                    "Database connection accessed from a thread that does not own it"),
+            };
+        }
+
         if (!m_database.isValid() || !m_database.isOpen())
         {
             return DatabaseError{
@@ -481,17 +549,9 @@ namespace javelin::jmap::cache
         }
 
         m_database = QSqlDatabase{};
+        m_writeMutex.reset();
+        m_ownerThread = nullptr;
         QSqlDatabase::removeDatabase(connectionName);
-    }
-
-    SerializedDatabaseWrite::SerializedDatabaseWrite()
-    {
-        serializedDatabaseWriteMutex().lock();
-    }
-
-    SerializedDatabaseWrite::~SerializedDatabaseWrite()
-    {
-        serializedDatabaseWriteMutex().unlock();
     }
 
     ThreadConnectionFactory::ThreadConnectionFactory(ThreadConnectionFactoryOptions options)

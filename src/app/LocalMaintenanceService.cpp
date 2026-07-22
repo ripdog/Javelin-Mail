@@ -26,7 +26,6 @@ namespace javelin::app
 
         [[nodiscard]] MaintenanceResult performMaintenance(QString databasePath)
         {
-            const javelin::jmap::cache::SerializedDatabaseWrite writeGuard;
             auto opened = javelin::jmap::cache::DatabaseConnection::open({
                 .connectionName =
                     QStringLiteral("local-maintenance-%1")
@@ -67,6 +66,7 @@ namespace javelin::app
         QObject* parent)
         : QObject(parent), m_connection(connection), m_scheduler(scheduler)
     {
+        const javelin::jmap::cache::DatabaseWriteScope writeScope{m_connection};
         QSqlQuery retryProjections{m_connection.database()};
         static_cast<void>(retryProjections.exec(QStringLiteral(
             "UPDATE mail_vault_projection_jobs SET status='pending' WHERE status='failed'")));

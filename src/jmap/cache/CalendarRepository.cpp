@@ -66,6 +66,7 @@ namespace javelin::jmap::cache
     {
         if (const auto error = m_connection.validate())
             return error;
+        const DatabaseWriteScope writeScope{m_connection};
         auto& database = m_connection.database();
         if (!database.transaction())
         {
@@ -443,6 +444,7 @@ namespace javelin::jmap::cache
     {
         if (const auto error = m_connection.validate())
             return error;
+        const DatabaseWriteScope writeScope{m_connection};
         auto& database = m_connection.database();
         if (!database.transaction())
             return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
@@ -480,6 +482,7 @@ namespace javelin::jmap::cache
     {
         if (const auto error = m_connection.validate())
             return error;
+        const DatabaseWriteScope writeScope{m_connection};
         auto& database = m_connection.database();
         if (!database.transaction())
             return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
@@ -700,6 +703,7 @@ namespace javelin::jmap::cache
     {
         if (const auto error = m_connection.validate())
             return error;
+        const DatabaseWriteScope writeScope{m_connection};
         auto& database = m_connection.database();
         if (!database.transaction())
             return DatabaseError{.code = DatabaseErrorCode::QueryFailed,

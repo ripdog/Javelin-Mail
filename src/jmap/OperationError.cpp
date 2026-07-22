@@ -27,6 +27,7 @@ namespace javelin::jmap
         case OperationErrorCode::Timeout:
         case OperationErrorCode::RateLimited:
         case OperationErrorCode::ServerUnavailable:
+        case OperationErrorCode::LocalStorageBusy:
             return true;
         default:
             return false;
@@ -64,6 +65,8 @@ namespace javelin::jmap
             return "protocol_violation";
         case OperationErrorCode::UnsupportedCapability:
             return "unsupported_capability";
+        case OperationErrorCode::LocalStorageBusy:
+            return "local_storage_busy";
         case OperationErrorCode::LocalStorageFailure:
             return "local_storage_failure";
         case OperationErrorCode::InvalidRequest:
@@ -180,7 +183,9 @@ namespace javelin::jmap
     OperationError operationError(const cache::DatabaseError& error)
     {
         return {
-            .code = OperationErrorCode::LocalStorageFailure,
+            .code = error.code == cache::DatabaseErrorCode::TransientContention
+                        ? OperationErrorCode::LocalStorageBusy
+                        : OperationErrorCode::LocalStorageFailure,
             .message = error.message,
         };
     }

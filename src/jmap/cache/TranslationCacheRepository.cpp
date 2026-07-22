@@ -67,6 +67,7 @@ namespace javelin::jmap::cache
     std::optional<DatabaseError>
     TranslationCacheRepository::upsert(const TranslationCacheEntry& entry)
     {
+        const DatabaseWriteScope writeScope{m_connection};
         if (const auto error = m_connection.validate())
         {
             return error;

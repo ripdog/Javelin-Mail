@@ -255,31 +255,257 @@ TEST_CASE("thread connection factory encodes owner tag and current thread in con
           javelin::jmap::cache::createDefaultMigrationRunner().latestVersion());
 }
 
-TEST_CASE("serialized database writes exclude concurrent worker commits", "[jmap][cache][database]")
+TEST_CASE("database write coordination serializes real connections with no SQLite busy timeout",
+          "[jmap][cache][database]")
 {
-    std::atomic_bool start = false;
-    std::atomic_int active = 0;
-    std::atomic_int maximum = 0;
-    const auto worker = [&]()
-    {
-        while (!start.load(std::memory_order_acquire))
-            std::this_thread::yield();
-        const javelin::jmap::cache::SerializedDatabaseWrite writeGuard;
-        const int current = active.fetch_add(1, std::memory_order_acq_rel) + 1;
-        int observed = maximum.load(std::memory_order_acquire);
-        while (current > observed &&
-               !maximum.compare_exchange_weak(observed, current, std::memory_order_acq_rel))
-        {
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds{25});
-        active.fetch_sub(1, std::memory_order_acq_rel);
-    };
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir temporaryDir;
+    REQUIRE(temporaryDir.isValid());
+    const QString databasePath = temporaryDir.filePath(QStringLiteral("cache.sqlite3"));
+    auto initialOpen = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = makeConnectionName(),
+        .databasePath = databasePath,
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(initialOpen));
+    auto initial = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(initialOpen));
 
-    std::thread first{worker};
-    std::thread second{worker};
+    std::atomic_int ready = 0;
+    std::atomic_bool start = false;
+    std::atomic_bool firstHasTransaction = false;
+    std::atomic_bool firstSucceeded = false;
+    std::atomic_bool secondSucceeded = false;
+    const auto openWorkerConnection = [&](const QString& name)
+    {
+        auto opened = javelin::jmap::cache::DatabaseConnection::open({
+            .connectionName = name,
+            .databasePath = databasePath,
+            .busyTimeout = std::chrono::milliseconds{0},
+        });
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&opened))
+        {
+            Q_UNUSED(error);
+            return std::optional<javelin::jmap::cache::DatabaseConnection>{};
+        }
+        return std::optional<javelin::jmap::cache::DatabaseConnection>{
+            std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened))};
+    };
+    std::thread first{
+        [&]()
+        {
+            auto connection = openWorkerConnection(QStringLiteral("coordinated-writer-first"));
+            ready.fetch_add(1, std::memory_order_release);
+            if (!connection)
+            {
+                firstHasTransaction.store(true, std::memory_order_release);
+                return;
+            }
+            while (!start.load(std::memory_order_acquire))
+                std::this_thread::yield();
+            auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+                *connection, QStringLiteral("First coordinated write"));
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&transactionResult))
+            {
+                Q_UNUSED(error);
+                firstHasTransaction.store(true, std::memory_order_release);
+                return;
+            }
+            auto transaction =
+                std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
+            firstHasTransaction.store(true, std::memory_order_release);
+            std::this_thread::sleep_for(std::chrono::milliseconds{50});
+            QSqlQuery query{connection->database()};
+            const bool inserted = query.exec(QStringLiteral(
+                "INSERT INTO "
+                "translation_cache(source_language,target_language,input_hash,input_text,"
+                "translated_text) VALUES('en','fr','first','one','un')"));
+            firstSucceeded.store(inserted && !transaction.commit().has_value(),
+                                 std::memory_order_release);
+        }};
+    std::thread second{
+        [&]()
+        {
+            auto connection = openWorkerConnection(QStringLiteral("coordinated-writer-second"));
+            ready.fetch_add(1, std::memory_order_release);
+            if (!connection)
+                return;
+            while (!start.load(std::memory_order_acquire))
+                std::this_thread::yield();
+            while (!firstHasTransaction.load(std::memory_order_acquire))
+                std::this_thread::yield();
+            auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+                *connection, QStringLiteral("Second coordinated write"));
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&transactionResult))
+            {
+                Q_UNUSED(error);
+                return;
+            }
+            auto transaction =
+                std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
+            QSqlQuery query{connection->database()};
+            const bool inserted = query.exec(QStringLiteral(
+                "INSERT INTO "
+                "translation_cache(source_language,target_language,input_hash,input_text,"
+                "translated_text) VALUES('en','fr','second','two','deux')"));
+            secondSucceeded.store(inserted && !transaction.commit().has_value(),
+                                  std::memory_order_release);
+        }};
+    while (ready.load(std::memory_order_acquire) != 2)
+        std::this_thread::yield();
     start.store(true, std::memory_order_release);
     first.join();
     second.join();
 
-    CHECK(maximum.load(std::memory_order_acquire) == 1);
+    CHECK(firstSucceeded.load(std::memory_order_acquire));
+    CHECK(secondSucceeded.load(std::memory_order_acquire));
+    QSqlQuery count{initial.database()};
+    REQUIRE(count.exec(QStringLiteral("SELECT COUNT(*) FROM translation_cache")));
+    REQUIRE(count.next());
+    CHECK(count.value(0).toInt() == 2);
+}
+
+TEST_CASE("external SQLite writer contention is classified as transient", "[jmap][cache][database]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir temporaryDir;
+    REQUIRE(temporaryDir.isValid());
+    const QString databasePath = temporaryDir.filePath(QStringLiteral("cache.sqlite3"));
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = makeConnectionName(),
+        .databasePath = databasePath,
+        .busyTimeout = std::chrono::milliseconds{0},
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+
+    const QString externalName = QStringLiteral("uncoordinated-external-writer");
+    {
+        auto external = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), externalName);
+        external.setDatabaseName(databasePath);
+        REQUIRE(external.open());
+        {
+            QSqlQuery lock{external};
+            REQUIRE(lock.exec(QStringLiteral("BEGIN IMMEDIATE TRANSACTION")));
+        }
+
+        auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+            connection, QStringLiteral("Contended coordinated write"));
+        REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseError>(transactionResult));
+        CHECK(std::get<javelin::jmap::cache::DatabaseError>(transactionResult).code ==
+              javelin::jmap::cache::DatabaseErrorCode::TransientContention);
+        external.rollback();
+        external.close();
+    }
+    QSqlDatabase::removeDatabase(externalName);
+}
+
+TEST_CASE("database connections reject cross-thread access", "[jmap][cache][database]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir temporaryDir;
+    REQUIRE(temporaryDir.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = makeConnectionName(),
+        .databasePath = temporaryDir.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    std::optional<javelin::jmap::cache::DatabaseError> crossThreadError;
+    std::thread worker{[&]() { crossThreadError = connection.validate(); }};
+    worker.join();
+
+    REQUIRE(crossThreadError.has_value());
+    CHECK(crossThreadError->code ==
+          javelin::jmap::cache::DatabaseErrorCode::ThreadAffinityViolation);
+}
+
+TEST_CASE("transactions and autocommit writes remain safe under mixed connection load",
+          "[jmap][cache][database]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir temporaryDir;
+    REQUIRE(temporaryDir.isValid());
+    const QString databasePath = temporaryDir.filePath(QStringLiteral("cache.sqlite3"));
+    auto initialOpen = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = makeConnectionName(),
+        .databasePath = databasePath,
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(initialOpen));
+    auto initial = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(initialOpen));
+
+    constexpr int writerCount = 4;
+    constexpr int writesPerWriter = 25;
+    std::atomic_bool start = false;
+    std::atomic_int failures = 0;
+    std::vector<std::thread> writers;
+    writers.reserve(writerCount);
+    for (int writer = 0; writer < writerCount; ++writer)
+    {
+        writers.emplace_back(
+            [&, writer]()
+            {
+                auto opened = javelin::jmap::cache::DatabaseConnection::open({
+                    .connectionName = QStringLiteral("mixed-writer-%1").arg(writer),
+                    .databasePath = databasePath,
+                    .busyTimeout = std::chrono::milliseconds{0},
+                });
+                if (!std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened))
+                {
+                    failures.fetch_add(1, std::memory_order_relaxed);
+                    return;
+                }
+                auto connection =
+                    std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+                while (!start.load(std::memory_order_acquire))
+                    std::this_thread::yield();
+                for (int item = 0; item < writesPerWriter; ++item)
+                {
+                    std::optional<javelin::jmap::cache::DatabaseTransaction> transaction;
+                    std::optional<javelin::jmap::cache::DatabaseWriteScope> autocommitScope;
+                    if (writer % 2 == 0)
+                    {
+                        auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+                            connection, QStringLiteral("Mixed load transaction"));
+                        if (!std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(
+                                transactionResult))
+                        {
+                            failures.fetch_add(1, std::memory_order_relaxed);
+                            continue;
+                        }
+                        transaction.emplace(std::get<javelin::jmap::cache::DatabaseTransaction>(
+                            std::move(transactionResult)));
+                    }
+                    else
+                    {
+                        autocommitScope.emplace(connection);
+                    }
+                    QSqlQuery insert{connection.database()};
+                    insert.prepare(QStringLiteral(
+                        "INSERT INTO translation_cache(source_language,target_language,input_hash,"
+                        "input_text,translated_text) VALUES('en','fr',:hash,:input,:translation)"));
+                    const QString key = QStringLiteral("%1-%2").arg(writer).arg(item);
+                    insert.bindValue(QStringLiteral(":hash"), key);
+                    insert.bindValue(QStringLiteral(":input"), key);
+                    insert.bindValue(QStringLiteral(":translation"), key);
+                    if (!insert.exec())
+                        failures.fetch_add(1, std::memory_order_relaxed);
+                    if (transaction && transaction->commit())
+                        failures.fetch_add(1, std::memory_order_relaxed);
+                }
+            });
+    }
+    start.store(true, std::memory_order_release);
+    for (auto& writer : writers)
+        writer.join();
+
+    CHECK(failures.load(std::memory_order_acquire) == 0);
+    QSqlQuery count{initial.database()};
+    REQUIRE(count.exec(QStringLiteral("SELECT COUNT(*) FROM translation_cache")));
+    REQUIRE(count.next());
+    CHECK(count.value(0).toInt() == writerCount * writesPerWriter);
 }

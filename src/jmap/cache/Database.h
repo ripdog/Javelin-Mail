@@ -5,6 +5,8 @@
 #include <Qt>
 
 #include <chrono>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <string_view>
@@ -14,12 +16,16 @@
 namespace javelin::jmap::cache
 {
 
+    class DatabaseWriteScope;
+
     enum class DatabaseErrorCode
     {
         DriverUnavailable,
         OpenFailed,
         QueryFailed,
         MigrationFailed,
+        TransientContention,
+        ThreadAffinityViolation,
     };
 
     struct DatabaseError
@@ -90,12 +96,33 @@ namespace javelin::jmap::cache
         appliedMigrations() const;
 
       private:
-        DatabaseConnection(QString connectionName, QSqlDatabase database);
+        friend class DatabaseWriteScope;
+
+        DatabaseConnection(QString connectionName, QSqlDatabase database,
+                           std::shared_ptr<std::recursive_mutex> writeMutex);
 
         void reset();
 
         QString m_connectionName;
         QSqlDatabase m_database;
+        std::shared_ptr<std::recursive_mutex> m_writeMutex;
+        Qt::HANDLE m_ownerThread = nullptr;
+    };
+
+    class DatabaseWriteScope final
+    {
+      public:
+        explicit DatabaseWriteScope(DatabaseConnection& connection);
+        explicit DatabaseWriteScope(const QString& databasePath);
+        DatabaseWriteScope(const DatabaseWriteScope&) = delete;
+        DatabaseWriteScope& operator=(const DatabaseWriteScope&) = delete;
+        DatabaseWriteScope(DatabaseWriteScope&&) noexcept = default;
+        DatabaseWriteScope& operator=(DatabaseWriteScope&&) noexcept = default;
+        ~DatabaseWriteScope() = default;
+
+      private:
+        std::shared_ptr<std::recursive_mutex> m_mutex;
+        std::unique_lock<std::recursive_mutex> m_lock;
     };
 
     class DatabaseTransaction
@@ -116,21 +143,11 @@ namespace javelin::jmap::cache
         [[nodiscard]] DatabaseConnection& connection() const;
 
       private:
-        explicit DatabaseTransaction(DatabaseConnection& connection);
+        DatabaseTransaction(DatabaseConnection& connection, DatabaseWriteScope writeScope);
 
         DatabaseConnection* m_connection = nullptr;
+        std::optional<DatabaseWriteScope> m_writeScope;
         bool m_active = false;
-    };
-
-    class SerializedDatabaseWrite final
-    {
-      public:
-        SerializedDatabaseWrite();
-        SerializedDatabaseWrite(const SerializedDatabaseWrite&) = delete;
-        SerializedDatabaseWrite& operator=(const SerializedDatabaseWrite&) = delete;
-        SerializedDatabaseWrite(SerializedDatabaseWrite&&) = delete;
-        SerializedDatabaseWrite& operator=(SerializedDatabaseWrite&&) = delete;
-        ~SerializedDatabaseWrite();
     };
 
     class ThreadConnectionFactory
