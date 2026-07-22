@@ -1144,13 +1144,13 @@ namespace javelin::gui::shell
         messageHeaderLayout->setSpacing(8);
         m_messageListTitleLabel = new ElidingLabel(messageHeader);
         m_messageListMetaLabel = new QLabel(messageHeader);
-        m_messageQuickFilterButton = new QToolButton(messageHeader);
-        m_messageQuickFilterButton->setIcon(
-            javelin::gui::themedSvgIcon(QStringLiteral(":/icons/thunderbird-icons/filter.svg"),
-                                        palette().color(QPalette::Text)));
-        m_messageQuickFilterButton->setText(QStringLiteral("Quick Filter"));
-        m_messageQuickFilterButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-        m_messageQuickFilterButton->setEnabled(false);
+        // m_messageQuickFilterButton = new QToolButton(messageHeader);
+        // m_messageQuickFilterButton->setIcon(
+        //     javelin::gui::themedSvgIcon(QStringLiteral(":/icons/thunderbird-icons/filter.svg"),
+        //                                 palette().color(QPalette::Text)));
+        // m_messageQuickFilterButton->setText(QStringLiteral("Quick Filter"));
+        // m_messageQuickFilterButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        // m_messageQuickFilterButton->setEnabled(false);
         m_messageSortButton = new QToolButton(messageHeader);
         m_messageSortButton->setIcon(javelin::gui::themedSvgIcon(
             QStringLiteral(":/icons/thunderbird-icons/display-options.svg"),
@@ -1190,7 +1190,7 @@ namespace javelin::gui::shell
         messageHeaderLayout->addWidget(m_nextPageButton);
         messageHeaderLayout->addWidget(m_lastPageButton);
         messageHeaderLayout->addWidget(m_messageSortButton);
-        messageHeaderLayout->addWidget(m_messageQuickFilterButton);
+        // messageHeaderLayout->addWidget(m_messageQuickFilterButton);
         m_messageEmptyState = new QLabel(
             QStringLiteral("No messages are available for the selected mailbox yet."), messagePane);
         m_messageEmptyState->setWordWrap(true);
