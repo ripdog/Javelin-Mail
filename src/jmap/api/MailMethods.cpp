@@ -96,6 +96,7 @@ namespace
         std::optional<RawEmailQueryFilter> filter;
         std::vector<RawEmailQuerySort> sort;
         bool collapseThreads = false;
+        bool calculateTotal = false;
     };
 
     struct RawEmailContentBodyPart
@@ -384,10 +385,10 @@ template <> struct glz::meta<RawEmailQueryChangesRequest>
 {
     using T = RawEmailQueryChangesRequest;
 
-    static constexpr auto value =
-        glz::object("accountId", &T::accountId, "sinceQueryState", &T::sinceQueryState,
-                    "maxChanges", &T::maxChanges, "upToId", &T::upToId, "filter", &T::filter,
-                    "sort", &T::sort, "collapseThreads", &T::collapseThreads);
+    static constexpr auto value = glz::object(
+        "accountId", &T::accountId, "sinceQueryState", &T::sinceQueryState, "maxChanges",
+        &T::maxChanges, "upToId", &T::upToId, "filter", &T::filter, "sort", &T::sort,
+        "collapseThreads", &T::collapseThreads, "calculateTotal", &T::calculateTotal);
 };
 
 template <> struct glz::meta<RawEmailContentBodyPart>
@@ -826,6 +827,7 @@ namespace javelin::jmap::api
                     : std::nullopt,
             .sort = std::move(sort),
             .collapseThreads = request.collapseThreads,
+            .calculateTotal = request.calculateTotal,
         });
     }
 

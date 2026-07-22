@@ -57,6 +57,33 @@ namespace javelin::jmap::cache
         if (!database.transaction())
             return databaseError(QStringLiteral("Begin mailbox-window transaction"), database);
 
+        auto effectiveTotal = window.total;
+        if (!effectiveTotal.has_value())
+        {
+            QSqlQuery knownTotal{database};
+            knownTotal.prepare(QStringLiteral(
+                "SELECT total FROM mailbox_query_windows WHERE account_id=:account_id AND "
+                "mailbox_id=:mailbox_id AND query_key=:query_key AND query_state=:query_state "
+                "AND is_valid=1 AND total IS NOT NULL ORDER BY requested_offset LIMIT 1"));
+            knownTotal.bindValue(QStringLiteral(":account_id"),
+                                 QString::fromStdString(window.accountId));
+            knownTotal.bindValue(QStringLiteral(":mailbox_id"),
+                                 QString::fromStdString(window.mailboxId));
+            knownTotal.bindValue(QStringLiteral(":query_key"),
+                                 QString::fromStdString(window.queryKey));
+            knownTotal.bindValue(QStringLiteral(":query_state"),
+                                 QString::fromStdString(window.queryState));
+            if (!knownTotal.exec())
+            {
+                const auto error =
+                    queryError(QStringLiteral("Read known mailbox query total"), knownTotal);
+                database.rollback();
+                return error;
+            }
+            if (knownTotal.next())
+                effectiveTotal = static_cast<std::size_t>(knownTotal.value(0).toULongLong());
+        }
+
         QSqlQuery offlineScope{database};
         offlineScope.prepare(
             QStringLiteral("SELECT 1 FROM offline_mailbox_scopes WHERE account_id=:account_id AND "
@@ -118,8 +145,8 @@ namespace javelin::jmap::cache
         replaceWindow.bindValue(QStringLiteral(":returned_limit"),
                                 static_cast<qulonglong>(window.returnedLimit));
         replaceWindow.bindValue(QStringLiteral(":total"),
-                                window.total.has_value()
-                                    ? QVariant{static_cast<qulonglong>(*window.total)}
+                                effectiveTotal.has_value()
+                                    ? QVariant{static_cast<qulonglong>(*effectiveTotal)}
                                     : QVariant{});
         replaceWindow.bindValue(QStringLiteral(":query_state"),
                                 QString::fromStdString(window.queryState));

@@ -122,6 +122,7 @@ namespace javelin::jmap::api
         std::optional<EmailQueryFilter> filter;
         std::vector<EmailQuerySort> sort;
         bool collapseThreads = false;
+        bool calculateTotal = false;
     };
 
     struct AddedItem

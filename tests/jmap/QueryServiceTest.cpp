@@ -799,6 +799,102 @@ TEST_CASE("offline mailboxes retain every materialized query window",
     CHECK(deep->emailIds == std::vector<std::string>{"id-12"});
 }
 
+TEST_CASE("same-state mailbox pages inherit authoritative query totals",
+          "[jmap][cache][query][pagination]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    QSqlQuery scope{databaseContext.connection.database()};
+    REQUIRE(scope.exec(QStringLiteral(
+        "INSERT INTO offline_mailbox_scopes(account_id,mailbox_id,desired,status,generation) "
+        "VALUES('account-1','mbx-inbox',1,'enumerating',1)")));
+
+    const std::string queryKey = "mailbox:mbx-inbox|sort:receivedAt:desc|collapseThreads:true";
+    javelin::jmap::cache::MailboxWindowRepository windows{databaseContext.connection};
+    REQUIRE_FALSE(windows
+                      .replace({
+                          .accountId = "account-1",
+                          .mailboxId = "mbx-inbox",
+                          .queryKey = queryKey,
+                          .requestedOffset = 0,
+                          .requestedLimit = 100,
+                          .position = 0,
+                          .returnedLimit = 100,
+                          .total = 500,
+                          .queryState = "state-1",
+                          .emailIds = {"id-0"},
+                      })
+                      .has_value());
+    REQUIRE_FALSE(windows
+                      .replace({
+                          .accountId = "account-1",
+                          .mailboxId = "mbx-inbox",
+                          .queryKey = queryKey,
+                          .requestedOffset = 100,
+                          .requestedLimit = 100,
+                          .position = 100,
+                          .returnedLimit = 100,
+                          .total = std::nullopt,
+                          .queryState = "state-1",
+                          .emailIds = {"id-100"},
+                      })
+                      .has_value());
+    REQUIRE_FALSE(windows
+                      .replace({
+                          .accountId = "account-1",
+                          .mailboxId = "mbx-inbox",
+                          .queryKey = queryKey,
+                          .requestedOffset = 0,
+                          .requestedLimit = 100,
+                          .position = 0,
+                          .returnedLimit = 100,
+                          .total = std::nullopt,
+                          .queryState = "state-1",
+                          .emailIds = {"id-0-new"},
+                      })
+                      .has_value());
+
+    const auto firstResult = windows.find("account-1", queryKey, 0, 100);
+    const auto secondResult = windows.find("account-1", queryKey, 100, 100);
+    const auto& first =
+        std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(firstResult);
+    const auto& second =
+        std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(secondResult);
+    REQUIRE(first.has_value());
+    REQUIRE(second.has_value());
+    CHECK(first->total == std::optional<std::size_t>{500});
+    CHECK(second->total == std::optional<std::size_t>{500});
+
+    REQUIRE_FALSE(windows
+                      .replace({
+                          .accountId = "account-1",
+                          .mailboxId = "mbx-inbox",
+                          .queryKey = queryKey,
+                          .requestedOffset = 200,
+                          .requestedLimit = 100,
+                          .position = 200,
+                          .returnedLimit = 100,
+                          .total = std::nullopt,
+                          .queryState = "state-2",
+                          .emailIds = {"id-200"},
+                      })
+                      .has_value());
+    const auto newStateResult = windows.find("account-1", queryKey, 200, 100);
+    const auto& newState =
+        std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(newStateResult);
+    REQUIRE(newState.has_value());
+    CHECK_FALSE(newState->total.has_value());
+
+    const auto staleResult = windows.find("account-1", queryKey, 0, 100);
+    const auto& stale =
+        std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(staleResult);
+    REQUIRE(stale.has_value());
+    CHECK_FALSE(stale->isAuthoritative);
+}
+
 TEST_CASE("query service SQL plans use the intended cache indexes", "[jmap][cache][query]")
 {
     ApplicationGuard application;

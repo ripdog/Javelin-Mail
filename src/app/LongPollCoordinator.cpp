@@ -373,7 +373,7 @@ namespace javelin::app
             .isAscending = javelin::jmap::query::isAscending(intent.sort),
             .collapseThreads = true,
         });
-        if (!intent.forceRefresh && !intent.anchor.has_value())
+        if (!intent.forceRefresh)
         {
             const auto cachedResult = m_queryService.loadMailboxWindow(
                 intent.accountId, queryKey, intent.offset, intent.limit, intent.sort);

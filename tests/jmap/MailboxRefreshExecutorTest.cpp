@@ -715,7 +715,7 @@ TEST_CASE("mailbox refresh executor applies updated-only deltas without full reb
                                                    javelin::jmap::api::MethodInvocation{
                                                        .name = "Email/queryChanges",
                                                        .arguments =
-                                                           R"({"accountId":"account-1","oldQueryState":"query-state-1","newQueryState":"query-state-2","added":[],"removed":[],"hasMoreChanges":false})",
+                                                           R"({"accountId":"account-1","oldQueryState":"query-state-1","newQueryState":"query-state-2","added":[],"removed":[],"hasMoreChanges":false,"total":500})",
                                                        .callId = "mailbox-query-changes",
                                                    },
                                                    javelin::
@@ -754,7 +754,7 @@ TEST_CASE("mailbox refresh executor applies updated-only deltas without full reb
 
     REQUIRE(std::holds_alternative<javelin::jmap::sync::MailboxRefreshSummary>(result));
     const auto& summary = std::get<javelin::jmap::sync::MailboxRefreshSummary>(result);
-    CHECK(summary.representativeCount == 1);
+    CHECK(summary.representativeCount == 500);
     CHECK(summary.usedIncrementalRefresh);
     CHECK(summary.changedEmailIds == std::vector<std::string>{"eml-1"});
     CHECK(summary.insertedEmailIds.empty());
@@ -762,6 +762,14 @@ TEST_CASE("mailbox refresh executor applies updated-only deltas without full reb
     CHECK_FALSE(summary.requiresNotificationScan);
     CHECK(summary.notificationCandidates.empty());
     REQUIRE(transport.requests.size() == 2);
+    CHECK(transport.requests.front().body.contains("\"calculateTotal\":true"));
+
+    javelin::jmap::cache::MailboxWindowRepository windows{databaseContext.connection};
+    const auto windowResult = windows.find("account-1", mailboxQueryKey(), 0, 100);
+    const auto& window =
+        std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(windowResult);
+    REQUIRE(window.has_value());
+    CHECK(window->total == std::optional<std::size_t>{500});
 
     const auto updatedEmailResult = emailRepository.find("account-1", "eml-1");
     REQUIRE(
@@ -807,7 +815,7 @@ TEST_CASE("mailbox refresh executor ignores updated deltas outside the cached pr
                                                    javelin::jmap::api::MethodInvocation{
                                                        .name = "Email/queryChanges",
                                                        .arguments =
-                                                           R"({"accountId":"account-1","oldQueryState":"query-state-1","newQueryState":"query-state-2","added":[],"removed":[],"hasMoreChanges":false})",
+                                                           R"({"accountId":"account-1","oldQueryState":"query-state-1","newQueryState":"query-state-2","added":[],"removed":[],"hasMoreChanges":false,"total":500})",
                                                        .callId = "mailbox-query-changes",
                                                    },
                                                    javelin::
@@ -944,7 +952,7 @@ TEST_CASE("mailbox refresh executor preserves change hints when delta falls back
                                                    javelin::jmap::api::MethodInvocation{
                                                        .name = "Email/queryChanges",
                                                        .arguments =
-                                                           R"({"accountId":"account-1","oldQueryState":"query-state-1","newQueryState":"query-state-2","added":[{"id":"eml-new","index":0}],"removed":["eml-removed"],"hasMoreChanges":true})",
+                                                           R"({"accountId":"account-1","oldQueryState":"query-state-1","newQueryState":"query-state-2","added":[{"id":"eml-new","index":0}],"removed":["eml-removed"],"hasMoreChanges":true,"total":500})",
                                                        .callId = "mailbox-query-changes",
                                                    },
                                                    javelin::

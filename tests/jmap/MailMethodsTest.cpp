@@ -186,12 +186,13 @@ TEST_CASE("email queryChanges requests serialize incremental mailbox windows",
                 },
             },
         .collapseThreads = true,
+        .calculateTotal = true,
     });
 
     REQUIRE(json.has_value());
     CHECK(
         *json ==
-        R"({"accountId":"u1","sinceQueryState":"query-state-1","maxChanges":50,"filter":{"inMailbox":"mbx-inbox"},"sort":[{"property":"receivedAt","isAscending":false}],"collapseThreads":true})");
+        R"({"accountId":"u1","sinceQueryState":"query-state-1","maxChanges":50,"filter":{"inMailbox":"mbx-inbox"},"sort":[{"property":"receivedAt","isAscending":false}],"collapseThreads":true,"calculateTotal":true})");
 }
 
 TEST_CASE("mailbox get responses parse into typed mailbox entities", "[jmap][method][mail]")

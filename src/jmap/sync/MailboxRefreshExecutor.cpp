@@ -151,21 +151,6 @@ namespace javelin::jmap::sync
             return std::get<std::vector<std::string>>(result);
         }
 
-        [[nodiscard]] std::variant<std::size_t, OperationError>
-        currentRepresentativeCount(javelin::jmap::cache::DatabaseConnection& databaseConnection,
-                                   const std::string_view accountId,
-                                   const std::string_view mailboxId)
-        {
-            javelin::jmap::cache::QueryService queryService{databaseConnection};
-            const auto result = queryService.listMailboxMessages(accountId, mailboxId, 100);
-            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
-            {
-                return javelin::jmap::operationError(*error);
-            }
-
-            return std::get<std::vector<javelin::jmap::cache::MessageListItem>>(result).size();
-        }
-
         [[nodiscard]] std::vector<javelin::jmap::sync::EmailMutationRecord>
         activeEmailMutations(const std::vector<javelin::jmap::sync::EmailMutationRecord>& actions)
         {
@@ -548,6 +533,7 @@ namespace javelin::jmap::sync
                         },
                     },
                 .collapseThreads = true,
+                .calculateTotal = true,
             });
             if (!queryChangesRequest.has_value())
             {
@@ -664,15 +650,11 @@ namespace javelin::jmap::sync
                               emailChanges.destroyed.end());
             removedIds = deduplicatedIds(std::move(removedIds));
 
-            const bool requiresFullFetch =
-                queryChanges.hasMoreChanges || emailChanges.hasMoreChanges;
-
-            const auto representativeCountResult =
-                currentRepresentativeCount(databaseConnection, accountId, mailboxId);
-            if (const auto* error = std::get_if<OperationError>(&representativeCountResult))
-            {
-                co_return *error;
-            }
+            const bool requiresFullFetch = queryChanges.hasMoreChanges ||
+                                           emailChanges.hasMoreChanges ||
+                                           !queryChanges.total.has_value();
+            const auto representativeCount =
+                static_cast<std::size_t>(queryChanges.total.value_or(0));
 
             emitProgress(QStringLiteral("Mailbox delta contains %1 updated messages.")
                              .arg(static_cast<qulonglong>(emailChanges.updated.size())));
@@ -698,9 +680,7 @@ namespace javelin::jmap::sync
                     .queryState = queryChanges.newQueryState,
                     .emailState = emailChanges.newState,
                     .updatedEmails = {},
-                    .representativeCount = queryChanges.total.has_value()
-                                               ? static_cast<std::size_t>(*queryChanges.total)
-                                               : std::get<std::size_t>(representativeCountResult),
+                    .representativeCount = representativeCount,
                     .changedEmailIds = emailChanges.updated,
                     .insertedEmailIds = std::move(addedQueryIds),
                     .windowAdditions = std::move(windowAdditions),
@@ -765,9 +745,7 @@ namespace javelin::jmap::sync
                 .emailState = emailChanges.newState,
                 .updatedEmails =
                     std::get<javelin::jmap::api::EmailGetResponse>(updatedEmailsResult).list,
-                .representativeCount = queryChanges.total.has_value()
-                                           ? static_cast<std::size_t>(*queryChanges.total)
-                                           : std::get<std::size_t>(representativeCountResult),
+                .representativeCount = representativeCount,
                 .changedEmailIds = emailChanges.updated,
                 .insertedEmailIds = std::move(addedQueryIds),
                 .windowAdditions = std::move(windowAdditions),
