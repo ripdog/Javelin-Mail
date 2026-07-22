@@ -371,6 +371,14 @@ namespace javelin::jmap::sync
         cancel();
     }
 
+    void EventSourceStateChangeSource::reportConnectedActivity() const
+    {
+        if (m_statusCallback)
+        {
+            m_statusCallback(StateChangeConnectionStatus::Connected);
+        }
+    }
+
     void EventSourceStateChangeSource::cancel()
     {
         if (m_activeReply.isNull())
@@ -437,10 +445,10 @@ namespace javelin::jmap::sync
         QObject::connect(reply, &QNetworkReply::requestSent, reply,
                          [this, &connectedReported]()
                          {
-                             if (!connectedReported && m_statusCallback)
+                             if (!connectedReported)
                              {
                                  connectedReported = true;
-                                 m_statusCallback(StateChangeConnectionStatus::Connected);
+                                 reportConnectedActivity();
                              }
                          });
 
@@ -566,10 +574,10 @@ namespace javelin::jmap::sync
                         statusCode);
                 }
                 responseHeadersValidated = true;
-                if (!connectedReported && m_statusCallback)
+                if (!connectedReported)
                 {
                     connectedReported = true;
-                    m_statusCallback(StateChangeConnectionStatus::Connected);
+                    reportConnectedActivity();
                 }
             }
 
@@ -593,6 +601,10 @@ namespace javelin::jmap::sync
                     qCDebug(logEventSource).noquote()
                         << "raw event-source bytes" << reply->url().toString() << chunk.size()
                         << summarizeBody(chunk);
+                    if (!chunk.isEmpty())
+                    {
+                        reportConnectedActivity();
+                    }
                     pendingBuffer += chunk;
                 }
                 else if (ready)
@@ -601,6 +613,10 @@ namespace javelin::jmap::sync
                     qCDebug(logEventSource).noquote()
                         << "raw event-source bytes" << reply->url().toString() << chunk.size()
                         << summarizeBody(chunk);
+                    if (!chunk.isEmpty())
+                    {
+                        reportConnectedActivity();
+                    }
                     pendingBuffer += chunk;
                 }
             }
@@ -610,6 +626,10 @@ namespace javelin::jmap::sync
                 qCDebug(logEventSource).noquote()
                     << "raw event-source bytes" << reply->url().toString() << chunk.size()
                     << summarizeBody(chunk);
+                if (!chunk.isEmpty())
+                {
+                    reportConnectedActivity();
+                }
                 pendingBuffer += chunk;
             }
 

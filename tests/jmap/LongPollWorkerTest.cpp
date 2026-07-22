@@ -1,8 +1,14 @@
 #include "jmap/sync/LongPollWorker.h"
+#include "jmap/sync/EventSourceLongPoll.h"
 
 #include <QCoroTask>
 
 #include <QCoreApplication>
+#include <QHostAddress>
+#include <QNetworkAccessManager>
+#include <QTcpServer>
+#include <QTcpSocket>
+#include <QTimer>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -305,6 +311,73 @@ TEST_CASE("state-change worker stops retrying when authentication is rejected", 
     CHECK_FALSE(summary.cancelled);
     CHECK(sleeper.delays.empty());
     CHECK(source.subscriptions.size() == 1);
+}
+
+TEST_CASE("event-source activity reasserts connected status", "[jmap][sync][network]")
+{
+    ensureApplication();
+
+    QTcpServer server;
+    REQUIRE(server.listen(QHostAddress::LocalHost, 0));
+    QObject::connect(&server, &QTcpServer::newConnection, &server,
+                     [&server]()
+                     {
+                         auto* socket = server.nextPendingConnection();
+                         if (socket == nullptr)
+                         {
+                             return;
+                         }
+                         QTimer::singleShot(0, socket,
+                                            [socket]()
+                                            {
+                                                static_cast<void>(socket->readAll());
+                                                socket->write("HTTP/1.1 200 OK\r\n"
+                                                              "Content-Type: text/event-stream\r\n"
+                                                              "Cache-Control: no-cache\r\n"
+                                                              "Connection: close\r\n\r\n"
+                                                              ": initial activity\n\n");
+                                                socket->flush();
+                                            });
+                         QTimer::singleShot(20, socket,
+                                            [socket]()
+                                            {
+                                                socket->write(": later activity\n\n");
+                                                socket->flush();
+                                            });
+                         QTimer::singleShot(40, socket,
+                                            [socket]() { socket->disconnectFromHost(); });
+                     });
+
+    QNetworkAccessManager networkAccessManager;
+    std::size_t connectedReports = 0;
+    bool indicatorConnected = false;
+    javelin::jmap::sync::EventSourceStateChangeSource source{
+        networkAccessManager,
+        QStringLiteral("http://127.0.0.1:%1/events").arg(server.serverPort()).toStdString(),
+        "token",
+        [&connectedReports,
+         &indicatorConnected](const javelin::jmap::sync::StateChangeConnectionStatus status)
+        {
+            if (status != javelin::jmap::sync::StateChangeConnectionStatus::Connected)
+            {
+                return;
+            }
+
+            ++connectedReports;
+            indicatorConnected = true;
+            if (connectedReports == 1)
+            {
+                indicatorConnected = false;
+            }
+        }};
+    javelin::jmap::sync::StateChangeCancellation cancellation;
+    FakeStateChangeConsumer consumer;
+
+    const auto result = QCoro::waitFor(source.consume(makeSubscription(), consumer, cancellation));
+
+    CHECK(std::holds_alternative<javelin::jmap::api::TransportError>(result));
+    CHECK(connectedReports >= 2);
+    CHECK(indicatorConnected);
 }
 
 TEST_CASE("state-change worker reports connection status transitions", "[jmap][sync]")

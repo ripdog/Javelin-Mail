@@ -72,6 +72,14 @@ namespace javelin::jmap::sync
         cancel();
     }
 
+    void WebSocketStateChangeSource::reportConnectedActivity() const
+    {
+        if (m_statusCallback)
+        {
+            m_statusCallback(StateChangeConnectionStatus::Connected);
+        }
+    }
+
     void WebSocketStateChangeSource::cancel()
     {
         if (m_activeSocket != nullptr)
@@ -117,10 +125,7 @@ namespace javelin::jmap::sync
                 .httpStatus = std::nullopt,
             };
         }
-        if (m_statusCallback)
-        {
-            m_statusCallback(StateChangeConnectionStatus::Connected);
-        }
+        reportConnectedActivity();
         qCInfo(logWebSocket) << "connected";
 
         const PushEnable pushEnable{
@@ -142,13 +147,18 @@ namespace javelin::jmap::sync
         QElapsedTimer lastActivity;
         lastActivity.start();
         QObject::connect(&socket, &QWebSocket::textMessageReceived, &socket,
-                         [&messages, &lastActivity](QString message)
+                         [this, &messages, &lastActivity](QString message)
                          {
                              lastActivity.restart();
+                             reportConnectedActivity();
                              messages.push_back(std::move(message));
                          });
         QObject::connect(&socket, &QWebSocket::pong, &socket,
-                         [&lastActivity](quint64, const QByteArray&) { lastActivity.restart(); });
+                         [this, &lastActivity](quint64, const QByteArray&)
+                         {
+                             lastActivity.restart();
+                             reportConnectedActivity();
+                         });
 
         // Install the receive handlers before enabling push. A server may send the initial
         // StateChange immediately in response to WebSocketPushEnable.
