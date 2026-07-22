@@ -77,4 +77,25 @@ namespace javelin::gui::messages
         const auto step = std::max<std::size_t>(effectiveLimit, 1);
         return ((total - 1) / step) * step;
     }
+
+    [[nodiscard]] inline std::size_t pageCount(const std::size_t total,
+                                               const std::size_t effectiveLimit)
+    {
+        if (total == 0)
+            return 0;
+        const auto step = std::max<std::size_t>(effectiveLimit, 1);
+        return 1 + ((total - 1) / step);
+    }
+
+    [[nodiscard]] inline std::size_t pageIndex(const std::size_t position,
+                                               const std::size_t effectiveLimit)
+    {
+        return position / std::max<std::size_t>(effectiveLimit, 1);
+    }
+
+    [[nodiscard]] inline std::size_t pageOffset(const std::size_t pageIndex,
+                                                const std::size_t effectiveLimit)
+    {
+        return pageIndex * std::max<std::size_t>(effectiveLimit, 1);
+    }
 } // namespace javelin::gui::messages

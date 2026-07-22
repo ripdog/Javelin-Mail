@@ -34,6 +34,15 @@ TEST_CASE("pagination relocates offsets after a total shrinks", "[gui][paginatio
     CHECK(javelin::gui::messages::normalizedPageOffset(100, 0, 50) == 0);
 }
 
+TEST_CASE("pagination converts between arbitrary pages and query offsets", "[gui][pagination]")
+{
+    CHECK(javelin::gui::messages::pageCount(0, 100) == 0);
+    CHECK(javelin::gui::messages::pageCount(237, 100) == 3);
+    CHECK(javelin::gui::messages::pageCount(200, 100) == 2);
+    CHECK(javelin::gui::messages::pageIndex(200, 100) == 2);
+    CHECK(javelin::gui::messages::pageOffset(2, 100) == 200);
+}
+
 TEST_CASE("superseded page refreshes cannot complete a newer navigation", "[gui][pagination]")
 {
     javelin::gui::messages::PageRefreshState refresh;

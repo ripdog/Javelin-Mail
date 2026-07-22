@@ -245,6 +245,25 @@ namespace javelin::gui::search
         return true;
     }
 
+    bool SearchSession::goToPage(const std::size_t pageIndex)
+    {
+        const auto step = m_page.returnedLimit == 0 ? m_pageSize : m_page.returnedLimit;
+        if (m_page.total.has_value() &&
+            pageIndex >= javelin::gui::messages::pageCount(*m_page.total, step))
+        {
+            return false;
+        }
+        const auto offset = javelin::gui::messages::pageOffset(pageIndex, step);
+        if (offset == m_page.offset)
+        {
+            return false;
+        }
+        m_page.offset = offset;
+        m_page.anchor.reset();
+        resetForPageChange();
+        return true;
+    }
+
     bool SearchSession::goToNextPage()
     {
         if (m_page.total.has_value() && m_page.position + m_page.items.size() >= *m_page.total)

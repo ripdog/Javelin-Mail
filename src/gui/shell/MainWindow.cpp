@@ -75,8 +75,10 @@
 #include <QScrollBar>
 #include <QSettings>
 #include <QSignalBlocker>
+#include <QSpinBox>
 #include <QSplitter>
 #include <QStackedWidget>
+#include <QStyle>
 #include <QTabBar>
 #include <QTimeZone>
 #include <QTimer>
@@ -89,6 +91,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <limits>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -1153,6 +1156,9 @@ namespace javelin::gui::shell
             QStringLiteral(":/icons/thunderbird-icons/display-options.svg"),
             palette().color(QPalette::Text)));
         m_messageSortButton->setToolTip(QStringLiteral("Sort messages"));
+        m_firstPageButton = new QToolButton(messageHeader);
+        m_firstPageButton->setIcon(style()->standardIcon(QStyle::SP_MediaSkipBackward));
+        m_firstPageButton->setToolTip(QStringLiteral("First page"));
         m_previousPageButton = new QToolButton(messageHeader);
         m_previousPageButton->setIcon(
             javelin::gui::themedSvgIcon(QStringLiteral(":/icons/thunderbird-icons/nav-left.svg"),
@@ -1163,6 +1169,13 @@ namespace javelin::gui::shell
             javelin::gui::themedSvgIcon(QStringLiteral(":/icons/thunderbird-icons/nav-right.svg"),
                                         palette().color(QPalette::Text)));
         m_nextPageButton->setToolTip(QStringLiteral("Next page"));
+        m_lastPageButton = new QToolButton(messageHeader);
+        m_lastPageButton->setIcon(style()->standardIcon(QStyle::SP_MediaSkipForward));
+        m_lastPageButton->setToolTip(QStringLiteral("Last page"));
+        m_pageNumberSpinBox = new QSpinBox(messageHeader);
+        m_pageNumberSpinBox->setPrefix(QStringLiteral("Page "));
+        m_pageNumberSpinBox->setAlignment(Qt::AlignCenter);
+        m_pageNumberSpinBox->setToolTip(QStringLiteral("Enter a page number"));
         m_messagePageLabel = new QLabel(messageHeader);
         auto titleFont = m_messageListTitleLabel->font();
         titleFont.setPointSize(titleFont.pointSize() + 4);
@@ -1170,9 +1183,12 @@ namespace javelin::gui::shell
         m_messageListTitleLabel->setFont(titleFont);
         messageHeaderLayout->addWidget(m_messageListTitleLabel, 1);
         messageHeaderLayout->addWidget(m_messageListMetaLabel);
+        messageHeaderLayout->addWidget(m_firstPageButton);
         messageHeaderLayout->addWidget(m_previousPageButton);
+        messageHeaderLayout->addWidget(m_pageNumberSpinBox);
         messageHeaderLayout->addWidget(m_messagePageLabel);
         messageHeaderLayout->addWidget(m_nextPageButton);
+        messageHeaderLayout->addWidget(m_lastPageButton);
         messageHeaderLayout->addWidget(m_messageSortButton);
         messageHeaderLayout->addWidget(m_messageQuickFilterButton);
         m_messageEmptyState = new QLabel(
@@ -1297,8 +1313,18 @@ namespace javelin::gui::shell
                     activateTab(index, true);
                 });
         connect(m_tabBar, &QTabBar::tabCloseRequested, this, &MainWindow::closeTab);
+        connect(m_firstPageButton, &QToolButton::clicked, this, &MainWindow::goToFirstPage);
         connect(m_previousPageButton, &QToolButton::clicked, this, &MainWindow::goToPreviousPage);
         connect(m_nextPageButton, &QToolButton::clicked, this, &MainWindow::goToNextPage);
+        connect(m_lastPageButton, &QToolButton::clicked, this, &MainWindow::goToLastPage);
+        connect(m_pageNumberSpinBox, &QSpinBox::editingFinished, this,
+                [this]
+                {
+                    if (m_pageNumberSpinBox->value() > 0)
+                    {
+                        goToPage(static_cast<std::size_t>(m_pageNumberSpinBox->value() - 1));
+                    }
+                });
         connect(m_messageSortButton, &QToolButton::clicked, this, &MainWindow::showSortMenu);
         connect(m_mailboxSearchEdit, &QLineEdit::returnPressed, this,
                 [this] { executeSearch(m_mailboxSearchEdit->text()); });
@@ -3775,6 +3801,105 @@ namespace javelin::gui::shell
         refreshActiveTabFromServer();
     }
 
+    void MainWindow::goToFirstPage()
+    {
+        goToPage(0);
+    }
+
+    void MainWindow::goToLastPage()
+    {
+        const auto* tab = activeTab();
+        if (tab == nullptr)
+        {
+            return;
+        }
+
+        std::optional<std::size_t> lastPage;
+        std::visit(
+            [&lastPage](const auto& content)
+            {
+                if constexpr (std::is_same_v<std::decay_t<decltype(content)>, SearchTabState>)
+                {
+                    const auto& page = content.session->page();
+                    if (page.total.has_value() && *page.total > 0)
+                    {
+                        const auto step =
+                            page.returnedLimit == 0 ? MainWindow::pageSize : page.returnedLimit;
+                        lastPage = javelin::gui::messages::pageCount(*page.total, step) - 1;
+                    }
+                }
+                else if constexpr (!std::is_same_v<std::decay_t<decltype(content)>,
+                                                   ComposeTabState>)
+                {
+                    if (content.page.total.has_value() && *content.page.total > 0)
+                    {
+                        const auto step = content.page.returnedLimit == 0
+                                              ? MainWindow::pageSize
+                                              : content.page.returnedLimit;
+                        lastPage = javelin::gui::messages::pageCount(*content.page.total, step) - 1;
+                    }
+                }
+            },
+            tab->content);
+        if (lastPage.has_value())
+        {
+            goToPage(*lastPage);
+        }
+    }
+
+    void MainWindow::goToPage(const std::size_t pageIndex)
+    {
+        auto* tab = activeTab();
+        if (tab == nullptr)
+        {
+            return;
+        }
+
+        const auto moveToPage = [pageIndex](auto& content)
+        {
+            if constexpr (std::is_same_v<std::decay_t<decltype(content)>, SearchTabState>)
+            {
+                content.selection = {};
+                return content.session->goToPage(pageIndex);
+            }
+            else if constexpr (std::is_same_v<std::decay_t<decltype(content)>, ComposeTabState>)
+            {
+                return false;
+            }
+            else
+            {
+                const auto step = content.page.returnedLimit == 0 ? MainWindow::pageSize
+                                                                  : content.page.returnedLimit;
+                if (content.page.total.has_value() &&
+                    pageIndex >= javelin::gui::messages::pageCount(*content.page.total, step))
+                {
+                    return false;
+                }
+                const auto offset = javelin::gui::messages::pageOffset(pageIndex, step);
+                if (offset == content.page.offset)
+                {
+                    return false;
+                }
+                content.page.refresh.supersede();
+                content.page.offset = offset;
+                content.page.position = offset;
+                content.page.anchor.reset();
+                content.page.items.clear();
+                content.page.cacheLoaded = false;
+                content.selection = {};
+                return true;
+            }
+        };
+        if (!std::visit(moveToPage, tab->content))
+        {
+            updateMessageListHeader();
+            return;
+        }
+
+        loadActiveTabFromCache();
+        refreshActiveTabFromServer();
+    }
+
     void MainWindow::goToNextPage()
     {
         auto* tab = activeTab();
@@ -4151,8 +4276,11 @@ namespace javelin::gui::shell
             m_messageListTitleLabel->setText(QStringLiteral("Messages"));
             m_messageListMetaLabel->clear();
             m_messagePageLabel->clear();
+            m_firstPageButton->setEnabled(false);
             m_previousPageButton->setEnabled(false);
+            m_pageNumberSpinBox->setEnabled(false);
             m_nextPageButton->setEnabled(false);
+            m_lastPageButton->setEnabled(false);
             return;
         }
 
@@ -4161,14 +4289,19 @@ namespace javelin::gui::shell
             m_messageListTitleLabel->setText(composeTab->title);
             m_messageListMetaLabel->setText(QStringLiteral("Compose"));
             m_messagePageLabel->clear();
+            m_firstPageButton->setEnabled(false);
             m_previousPageButton->setEnabled(false);
+            m_pageNumberSpinBox->setEnabled(false);
             m_nextPageButton->setEnabled(false);
+            m_lastPageButton->setEnabled(false);
             return;
         }
 
         const auto updateForPage = [this](const QString& title, const auto& page)
         {
             m_messageListTitleLabel->setText(title);
+            const auto step = page.returnedLimit == 0 ? MainWindow::pageSize : page.returnedLimit;
+            const QSignalBlocker pageNumberBlocker{m_pageNumberSpinBox};
             if (page.total.has_value())
             {
                 m_messageListMetaLabel->setText(
@@ -4189,9 +4322,25 @@ namespace javelin::gui::shell
                                                     .arg(static_cast<qulonglong>(metrics.end)));
                 }
                 m_previousPageButton->setEnabled(page.position > 0);
-                m_nextPageButton->setEnabled(javelin::gui::messages::pageMetrics(
-                                                 page.position, page.items.size(), *page.total)
-                                                 .hasNext);
+                const auto metrics = javelin::gui::messages::pageMetrics(
+                    page.position, page.items.size(), *page.total);
+                const auto pages = javelin::gui::messages::pageCount(*page.total, step);
+                const auto currentPage =
+                    pages == 0
+                        ? std::size_t{0}
+                        : std::min(javelin::gui::messages::pageIndex(page.position, step) + 1,
+                                   pages);
+                const auto maximumPage = static_cast<int>(std::min<std::size_t>(
+                    pages, static_cast<std::size_t>(std::numeric_limits<int>::max())));
+                m_pageNumberSpinBox->setRange(pages == 0 ? 0 : 1, maximumPage);
+                m_pageNumberSpinBox->setValue(static_cast<int>(std::min<std::size_t>(
+                    currentPage, static_cast<std::size_t>(std::numeric_limits<int>::max()))));
+                m_pageNumberSpinBox->setSuffix(
+                    QStringLiteral(" of %1").arg(static_cast<qulonglong>(pages)));
+                m_pageNumberSpinBox->setEnabled(pages > 0);
+                m_firstPageButton->setEnabled(page.position > 0);
+                m_nextPageButton->setEnabled(metrics.hasNext);
+                m_lastPageButton->setEnabled(metrics.hasNext);
             }
             else
             {
@@ -4201,8 +4350,14 @@ namespace javelin::gui::shell
                                         : QStringLiteral("%1 Loaded Conversations")
                                               .arg(static_cast<qulonglong>(page.items.size())));
                 m_messagePageLabel->clear();
+                m_firstPageButton->setEnabled(page.offset > 0);
                 m_previousPageButton->setEnabled(page.offset > 0);
+                m_pageNumberSpinBox->setRange(0, 0);
+                m_pageNumberSpinBox->setValue(0);
+                m_pageNumberSpinBox->setSuffix(QString{});
+                m_pageNumberSpinBox->setEnabled(false);
                 m_nextPageButton->setEnabled(false);
+                m_lastPageButton->setEnabled(false);
             }
         };
         std::visit(

@@ -61,6 +61,7 @@ namespace javelin::gui::search
         void refreshAfterMutation();
         void markStale();
         void setSort(javelin::jmap::query::EmailListSort sort);
+        [[nodiscard]] bool goToPage(std::size_t pageIndex);
         [[nodiscard]] bool goToPreviousPage();
         [[nodiscard]] bool goToNextPage();
 

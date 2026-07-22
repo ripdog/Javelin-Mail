@@ -26,6 +26,12 @@ is authoritative, and the returned ID count—not the requested page size—dete
 offset. Previous-page and invalid-offset recovery use the server-enforced limit and refresh the
 target window.
 
+First-page, last-page, and direct page-number navigation use a positional `Email/query`, calculated
+from the server-enforced limit and the authoritative total. These jumps do not fetch intermediate
+pages. Unlike anchored next-page navigation, positional jumps identify a result range rather than a
+stable boundary Email, so concurrent insertions or removals may change which conversations occupy
+the requested page before its query executes.
+
 Notification navigation is not pagination. If its Email is absent from the current window, the
 application requests an anchored window with `anchorOffset: 0`, persists the server-returned
 position and ordered IDs, and selects the target from that committed cache state. This contextual
