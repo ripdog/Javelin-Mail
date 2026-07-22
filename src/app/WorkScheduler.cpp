@@ -126,7 +126,12 @@ namespace javelin::app
             "background_jobs(job_id,parent_job_id,account_id,kind,priority,status,title,"
             "checkpoint_json) VALUES(:id,:parent,:account,:kind,:priority,'queued',:title,"
             ":checkpoint) ON CONFLICT(job_id) DO UPDATE SET title=excluded.title,priority=excluded."
-            "priority,account_id=excluded.account_id,parent_job_id=excluded.parent_job_id"));
+            "priority,account_id=excluded.account_id,parent_job_id=excluded.parent_job_id,"
+            "status=CASE WHEN background_jobs.status='failed' AND "
+            "background_jobs.pause_requested=0 THEN 'queued' ELSE background_jobs.status END,"
+            "error_text=CASE WHEN background_jobs.status='failed' AND "
+            "background_jobs.pause_requested=0 THEN NULL ELSE background_jobs.error_text END,"
+            "updated_at=CURRENT_TIMESTAMP"));
         query.bindValue(QStringLiteral(":id"), QString::fromStdString(spec.jobId));
         query.bindValue(QStringLiteral(":parent"),
                         spec.parentJobId ? QVariant{QString::fromStdString(*spec.parentJobId)}

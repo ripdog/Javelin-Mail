@@ -235,8 +235,12 @@ namespace javelin::app
             if (!canonicalState.exec())
                 return FullMailboxPageCommit{canonicalState.lastError().text()};
             if (!canonicalState.next() || canonicalState.value(0).toString().isEmpty())
+            {
+                canonicalState.finish();
                 return FullMailboxPageCommit{(*coverage)->representativeCount};
+            }
             const std::string progressiveState = canonicalState.value(0).toString().toStdString();
+            canonicalState.finish();
             std::size_t firstOffset = 0;
             QSqlQuery lastWindow{database};
             lastWindow.prepare(QStringLiteral(
@@ -252,6 +256,7 @@ namespace javelin::app
                 return FullMailboxPageCommit{lastWindow.lastError().text()};
             if (lastWindow.next() && !lastWindow.value(0).isNull())
                 firstOffset = lastWindow.value(0).toULongLong();
+            lastWindow.finish();
             const auto lastOffset =
                 ((*coverage)->representativeCount - 1) / windowSize * windowSize;
             javelin::jmap::cache::MailboxWindowRepository windows{connection};

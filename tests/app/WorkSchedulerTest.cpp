@@ -74,6 +74,69 @@ TEST_CASE("work scheduler recovers running work and preserves explicit pauses",
     CHECK(pausedRecovery.mayStartBackgroundNetwork());
 }
 
+TEST_CASE("work scheduler requeues configured failed work and preserves checkpoints",
+          "[app][work-scheduler]")
+{
+    if (QCoreApplication::instance() == nullptr)
+    {
+        static int argc = 1;
+        static char name[] = "work-scheduler-failed-retry-test";
+        static char* argv[]{name, nullptr};
+        static const auto application = std::make_unique<QCoreApplication>(argc, argv);
+        Q_UNUSED(application);
+    }
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("work-scheduler-failed-retry-test"),
+        .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    javelin::app::WorkScheduler scheduler{connection, nullptr, std::chrono::milliseconds{0}};
+
+    const javelin::app::WorkSpec spec{
+        .jobId = "failed-job",
+        .parentJobId = std::nullopt,
+        .accountId = "account-1",
+        .kind = javelin::app::WorkKind::FullMailSync,
+        .priority = javelin::app::WorkPriority::Bulk,
+        .title = QStringLiteral("Download archive"),
+        .checkpointJson = QStringLiteral("{}"),
+    };
+    REQUIRE_FALSE(scheduler.ensure(spec).has_value());
+    REQUIRE_FALSE(scheduler
+                      .update("failed-job", javelin::app::WorkStatus::Failed,
+                              {.completedUnits = 100,
+                               .totalUnits = 41391,
+                               .completedBytes = 0,
+                               .totalBytes = std::nullopt,
+                               .detail = QStringLiteral("Reading mailbox contents")},
+                              QStringLiteral("{\"generation\":3,\"position\":100}"),
+                              QStringLiteral("database is locked"))
+                      .has_value());
+
+    REQUIRE_FALSE(scheduler.ensure(spec).has_value());
+    const auto retried = scheduler.find("failed-job");
+    REQUIRE(std::holds_alternative<std::optional<javelin::app::WorkRecord>>(retried));
+    const auto& retriedRecord = std::get<std::optional<javelin::app::WorkRecord>>(retried);
+    REQUIRE(retriedRecord.has_value());
+    CHECK(retriedRecord->status == javelin::app::WorkStatus::Queued);
+    CHECK(retriedRecord->progress.completedUnits == 100);
+    CHECK(retriedRecord->progress.totalUnits == std::optional<std::uint64_t>{41391});
+    CHECK(retriedRecord->checkpointJson == QStringLiteral("{\"generation\":3,\"position\":100}"));
+    CHECK_FALSE(retriedRecord->errorText.has_value());
+
+    REQUIRE_FALSE(scheduler.pause("failed-job").has_value());
+    REQUIRE_FALSE(scheduler.ensure(spec).has_value());
+    const auto paused = scheduler.find("failed-job");
+    REQUIRE(std::holds_alternative<std::optional<javelin::app::WorkRecord>>(paused));
+    const auto& pausedRecord = std::get<std::optional<javelin::app::WorkRecord>>(paused);
+    REQUIRE(pausedRecord.has_value());
+    CHECK(pausedRecord->status == javelin::app::WorkStatus::Paused);
+    CHECK(pausedRecord->pauseRequested);
+}
+
 TEST_CASE("work scheduler observes a quiet period after startup and foreground work",
           "[app][work-scheduler]")
 {
