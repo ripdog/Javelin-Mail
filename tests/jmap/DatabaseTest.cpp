@@ -1,4 +1,5 @@
 #include "jmap/cache/Database.h"
+#include "jmap/cache/SyncStateRepository.h"
 
 #include <QCoreApplication>
 #include <QSqlDatabase>
@@ -396,6 +397,11 @@ TEST_CASE("external SQLite writer contention is classified as transient", "[jmap
         REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseError>(transactionResult));
         CHECK(std::get<javelin::jmap::cache::DatabaseError>(transactionResult).code ==
               javelin::jmap::cache::DatabaseErrorCode::TransientContention);
+        javelin::jmap::cache::SyncStateRepository states{connection};
+        const auto upsertError =
+            states.upsert({.accountId = "account", .objectType = "Email", .queryKey = {}}, "state");
+        REQUIRE(upsertError.has_value());
+        CHECK(upsertError->code == javelin::jmap::cache::DatabaseErrorCode::TransientContention);
         external.rollback();
         external.close();
     }

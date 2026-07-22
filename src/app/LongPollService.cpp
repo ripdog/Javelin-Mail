@@ -505,6 +505,8 @@ namespace javelin::app
         {
             qWarning().noquote() << "Account sync mailbox state refresh failed" << error->message;
             handleOperationError(QStringLiteral("Synchronize mailbox state"), *error);
+            if (javelin::jmap::isTransientError(*error))
+                scheduleDebouncedRefresh();
             co_return false;
         }
 

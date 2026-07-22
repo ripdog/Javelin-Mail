@@ -22,6 +22,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -745,6 +746,30 @@ TEST_CASE("mailbox refresh executor applies updated-only deltas without full reb
             .sessionState = "session-state-2",
         })),
     });
+    int interleavedWrites = 0;
+    transport.onSend = [&]()
+    {
+        if (interleavedWrites++ != 0)
+            return;
+        auto opened = javelin::jmap::cache::DatabaseConnection::open({
+            .connectionName = makeConnectionName(),
+            .databasePath = databaseContext.connection.database().databaseName(),
+            .busyTimeout = std::chrono::milliseconds{0},
+        });
+        REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+        auto writer = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+        auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+            writer, QStringLiteral("Interleave mailbox refresh write"));
+        REQUIRE(
+            std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(transactionResult));
+        auto transaction =
+            std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
+        QSqlQuery write{writer.database()};
+        REQUIRE(write.exec(QStringLiteral(
+            "INSERT INTO translation_cache(source_language,target_language,input_hash,input_text,"
+            "translated_text) VALUES('en','fr','refresh-interleave','source','translated')")));
+        REQUIRE_FALSE(transaction.commit().has_value());
+    };
 
     javelin::jmap::api::MethodCaller methodCaller{transport};
     javelin::jmap::sync::MailboxRefreshExecutor executor{databaseContext.connection, methodCaller,

@@ -2,6 +2,7 @@
 
 #include <QDir>
 #include <QFileInfo>
+#include <QLoggingCategory>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QThread>
@@ -17,36 +18,35 @@
 namespace javelin::jmap::cache
 {
 
+    Q_LOGGING_CATEGORY(logDatabaseAccess, "jmap.cache.database")
+
+    DatabaseError databaseError(const QString& operation, const QSqlError& error,
+                                const DatabaseErrorCode fallback)
+    {
+        bool ok = false;
+        const int nativeCode = error.nativeErrorCode().toInt(&ok);
+        const auto code = ok && (nativeCode & 0xff) >= 5 && (nativeCode & 0xff) <= 6
+                              ? DatabaseErrorCode::TransientContention
+                              : fallback;
+        return {
+            .code = code,
+            .message = operation + QStringLiteral(": ") + error.text(),
+        };
+    }
+
     namespace
     {
-
-        [[nodiscard]] DatabaseErrorCode errorCode(const QSqlError& error,
-                                                  const DatabaseErrorCode fallback)
-        {
-            bool ok = false;
-            const int nativeCode = error.nativeErrorCode().toInt(&ok);
-            if (ok && (nativeCode & 0xff) >= 5 && (nativeCode & 0xff) <= 6)
-                return DatabaseErrorCode::TransientContention;
-            return fallback;
-        }
-
         [[nodiscard]] DatabaseError makeError(const DatabaseErrorCode code,
                                               const QString& operation,
                                               const QSqlDatabase& database)
         {
-            return DatabaseError{
-                .code = errorCode(database.lastError(), code),
-                .message = operation + QStringLiteral(": ") + database.lastError().text(),
-            };
+            return databaseError(operation, database.lastError(), code);
         }
 
         [[nodiscard]] DatabaseError makeQueryError(const DatabaseErrorCode code,
                                                    const QString& operation, const QSqlQuery& query)
         {
-            return DatabaseError{
-                .code = errorCode(query.lastError(), code),
-                .message = operation + QStringLiteral(": ") + query.lastError().text(),
-            };
+            return databaseError(operation, query.lastError(), code);
         }
 
         [[nodiscard]] bool isSortedUnique(const std::span<const MigrationStep> steps)
@@ -304,13 +304,42 @@ namespace javelin::jmap::cache
     }
 
     DatabaseWriteScope::DatabaseWriteScope(DatabaseConnection& connection)
-        : m_mutex(connection.m_writeMutex), m_lock(*m_mutex)
+        : m_mutex(connection.m_writeMutex), m_lock(*m_mutex, std::defer_lock),
+          m_owner(connection.connectionName())
     {
+        const auto startedAt = std::chrono::steady_clock::now();
+        m_lock.lock();
+        m_acquiredAt = std::chrono::steady_clock::now();
+        const auto wait =
+            std::chrono::duration_cast<std::chrono::milliseconds>(m_acquiredAt - startedAt);
+        if (wait >= std::chrono::milliseconds{100})
+            qCWarning(logDatabaseAccess).noquote()
+                << "Database writer waited" << wait.count() << "ms" << m_owner;
     }
 
     DatabaseWriteScope::DatabaseWriteScope(const QString& databasePath)
-        : m_mutex(writeMutexForDatabase(databasePath)), m_lock(*m_mutex)
+        : m_mutex(writeMutexForDatabase(databasePath)), m_lock(*m_mutex, std::defer_lock),
+          m_owner(QFileInfo(databasePath).fileName())
     {
+        const auto startedAt = std::chrono::steady_clock::now();
+        m_lock.lock();
+        m_acquiredAt = std::chrono::steady_clock::now();
+        const auto wait =
+            std::chrono::duration_cast<std::chrono::milliseconds>(m_acquiredAt - startedAt);
+        if (wait >= std::chrono::milliseconds{100})
+            qCWarning(logDatabaseAccess).noquote()
+                << "Database writer waited" << wait.count() << "ms" << m_owner;
+    }
+
+    DatabaseWriteScope::~DatabaseWriteScope()
+    {
+        if (!m_lock.owns_lock())
+            return;
+        const auto held = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - m_acquiredAt);
+        if (held >= std::chrono::seconds{1})
+            qCWarning(logDatabaseAccess).noquote()
+                << "Database writer held lease" << held.count() << "ms" << m_owner;
     }
 
     DatabaseTransaction::DatabaseTransaction(DatabaseConnection& connection,

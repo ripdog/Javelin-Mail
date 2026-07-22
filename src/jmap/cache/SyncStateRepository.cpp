@@ -11,10 +11,7 @@ namespace javelin::jmap::cache
 
         [[nodiscard]] DatabaseError makeQueryError(const QString& operation, const QSqlQuery& query)
         {
-            return DatabaseError{
-                .code = DatabaseErrorCode::QueryFailed,
-                .message = operation + QStringLiteral(": ") + query.lastError().text(),
-            };
+            return databaseError(operation, query.lastError());
         }
 
         void bindKey(QSqlQuery& query, const SyncStateKey& key)

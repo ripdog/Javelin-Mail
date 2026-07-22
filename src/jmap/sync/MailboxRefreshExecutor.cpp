@@ -851,26 +851,30 @@ namespace javelin::jmap::sync
             canonicalWindow->has_value() && (*canonicalWindow)->isAuthoritative;
         const bool requireFullMaterialization = forceFullRefresh || !canonicalWindowIsAuthoritative;
         std::optional<std::string> cachedPrefixTail;
-        QSqlQuery cachedTailQuery{m_databaseConnection.database()};
-        cachedTailQuery.prepare(QStringLiteral(
-            "SELECT i.email_id FROM mailbox_query_windows w INNER JOIN "
-            "mailbox_query_window_items i ON i.account_id=w.account_id AND "
-            "i.query_key=w.query_key AND i.requested_offset=w.requested_offset AND "
-            "i.requested_limit=w.requested_limit WHERE w.account_id=:account AND "
-            "w.mailbox_id=:mailbox AND w.query_key=:query_key AND w.is_valid=1 ORDER BY "
-            "w.requested_offset DESC,i.position DESC LIMIT 1"));
-        cachedTailQuery.bindValue(QStringLiteral(":account"), QString::fromStdString(accountId));
-        cachedTailQuery.bindValue(QStringLiteral(":mailbox"), QString::fromStdString(mailboxId));
-        cachedTailQuery.bindValue(QStringLiteral(":query_key"),
-                                  QString::fromStdString(canonicalQueryKey));
-        if (!cachedTailQuery.exec())
-            co_return javelin::jmap::operationError(javelin::jmap::cache::DatabaseError{
-                .code = javelin::jmap::cache::DatabaseErrorCode::QueryFailed,
-                .message = QStringLiteral("Read cached mailbox prefix tail: ") +
-                           cachedTailQuery.lastError().text(),
-            });
-        if (cachedTailQuery.next())
-            cachedPrefixTail = cachedTailQuery.value(0).toString().toStdString();
+        {
+            QSqlQuery cachedTailQuery{m_databaseConnection.database()};
+            cachedTailQuery.prepare(QStringLiteral(
+                "SELECT i.email_id FROM mailbox_query_windows w INNER JOIN "
+                "mailbox_query_window_items i ON i.account_id=w.account_id AND "
+                "i.query_key=w.query_key AND i.requested_offset=w.requested_offset AND "
+                "i.requested_limit=w.requested_limit WHERE w.account_id=:account AND "
+                "w.mailbox_id=:mailbox AND w.query_key=:query_key AND w.is_valid=1 ORDER BY "
+                "w.requested_offset DESC,i.position DESC LIMIT 1"));
+            cachedTailQuery.bindValue(QStringLiteral(":account"),
+                                      QString::fromStdString(accountId));
+            cachedTailQuery.bindValue(QStringLiteral(":mailbox"),
+                                      QString::fromStdString(mailboxId));
+            cachedTailQuery.bindValue(QStringLiteral(":query_key"),
+                                      QString::fromStdString(canonicalQueryKey));
+            if (!cachedTailQuery.exec())
+                co_return javelin::jmap::operationError(javelin::jmap::cache::DatabaseError{
+                    .code = javelin::jmap::cache::DatabaseErrorCode::QueryFailed,
+                    .message = QStringLiteral("Read cached mailbox prefix tail: ") +
+                               cachedTailQuery.lastError().text(),
+                });
+            if (cachedTailQuery.next())
+                cachedPrefixTail = cachedTailQuery.value(0).toString().toStdString();
+        }
 
         std::size_t representativeCount = 0;
         bool usedIncrementalRefresh = false;

@@ -13,6 +13,8 @@
 #include <variant>
 #include <vector>
 
+class QSqlError;
+
 namespace javelin::jmap::cache
 {
 
@@ -33,6 +35,10 @@ namespace javelin::jmap::cache
         DatabaseErrorCode code;
         QString message;
     };
+
+    [[nodiscard]] DatabaseError
+    databaseError(const QString& operation, const QSqlError& error,
+                  DatabaseErrorCode fallback = DatabaseErrorCode::QueryFailed);
 
     struct MigrationStep
     {
@@ -118,11 +124,13 @@ namespace javelin::jmap::cache
         DatabaseWriteScope& operator=(const DatabaseWriteScope&) = delete;
         DatabaseWriteScope(DatabaseWriteScope&&) noexcept = default;
         DatabaseWriteScope& operator=(DatabaseWriteScope&&) noexcept = default;
-        ~DatabaseWriteScope() = default;
+        ~DatabaseWriteScope();
 
       private:
         std::shared_ptr<std::recursive_mutex> m_mutex;
         std::unique_lock<std::recursive_mutex> m_lock;
+        QString m_owner;
+        std::chrono::steady_clock::time_point m_acquiredAt;
     };
 
     class DatabaseTransaction

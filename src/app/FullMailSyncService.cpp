@@ -130,88 +130,93 @@ namespace javelin::app
                 .collapseThreads = true,
             });
 
-            const javelin::jmap::cache::DatabaseWriteScope writeScope{connection};
             auto& database = connection.database();
-            if (!database.transaction())
-                return FullMailboxPageCommit{database.lastError().text()};
-            QSqlQuery insert{database};
-            insert.prepare(QStringLiteral(
-                "INSERT INTO offline_mailbox_membership(account_id,mailbox_id,email_id,"
-                "generation,position) VALUES(:account,:mailbox,:email,:generation,:position) "
-                "ON CONFLICT(account_id,mailbox_id,generation,email_id) DO UPDATE SET "
-                "position=excluded.position"));
-            std::size_t pagePosition = position;
-            for (const auto& emailId : emailIds)
             {
-                insert.bindValue(QStringLiteral(":account"), QString::fromStdString(accountId));
-                insert.bindValue(QStringLiteral(":mailbox"), QString::fromStdString(mailboxId));
-                insert.bindValue(QStringLiteral(":email"), QString::fromStdString(emailId));
-                insert.bindValue(QStringLiteral(":generation"),
-                                 static_cast<qulonglong>(generation));
-                insert.bindValue(QStringLiteral(":position"),
-                                 static_cast<qulonglong>(pagePosition++));
-                if (!insert.exec())
+                auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+                    connection, QStringLiteral("Commit full mailbox page"));
+                if (const auto* error =
+                        std::get_if<javelin::jmap::cache::DatabaseError>(&transactionResult))
+                    return FullMailboxPageCommit{error->message};
+                auto transaction = std::get<javelin::jmap::cache::DatabaseTransaction>(
+                    std::move(transactionResult));
+                QSqlQuery insert{database};
+                insert.prepare(QStringLiteral(
+                    "INSERT INTO offline_mailbox_membership(account_id,mailbox_id,email_id,"
+                    "generation,position) VALUES(:account,:mailbox,:email,:generation,:position) "
+                    "ON CONFLICT(account_id,mailbox_id,generation,email_id) DO UPDATE SET "
+                    "position=excluded.position"));
+                std::size_t pagePosition = position;
+                for (const auto& emailId : emailIds)
                 {
-                    const QString error = insert.lastError().text();
-                    database.rollback();
+                    insert.bindValue(QStringLiteral(":account"), QString::fromStdString(accountId));
+                    insert.bindValue(QStringLiteral(":mailbox"), QString::fromStdString(mailboxId));
+                    insert.bindValue(QStringLiteral(":email"), QString::fromStdString(emailId));
+                    insert.bindValue(QStringLiteral(":generation"),
+                                     static_cast<qulonglong>(generation));
+                    insert.bindValue(QStringLiteral(":position"),
+                                     static_cast<qulonglong>(pagePosition++));
+                    if (!insert.exec())
+                    {
+                        const QString error = insert.lastError().text();
+                        transaction.rollback();
+                        return FullMailboxPageCommit{error};
+                    }
+                }
+                const auto completed = position + emailIds.size();
+                QSqlQuery saveProgress{database};
+                saveProgress.prepare(QStringLiteral(
+                    "UPDATE offline_mailbox_scopes SET anchor_email_id=COALESCE(anchor_email_id,"
+                    ":anchor),query_state=CASE WHEN query_state IS NULL OR query_state='' THEN "
+                    ":query_state ELSE query_state END,email_state=CASE WHEN email_state IS NULL "
+                    "OR email_state='' THEN :email_state ELSE email_state END,expected_total="
+                    ":total,completed_total=MAX(completed_total,:completed),updated_at="
+                    "CURRENT_TIMESTAMP WHERE account_id=:account AND mailbox_id=:mailbox AND "
+                    "generation=:generation"));
+                saveProgress.bindValue(QStringLiteral(":anchor"),
+                                       position == 0 && !emailIds.empty()
+                                           ? QVariant{QString::fromStdString(emailIds.front())}
+                                           : QVariant{});
+                saveProgress.bindValue(QStringLiteral(":query_state"),
+                                       QString::fromStdString(queryState));
+                saveProgress.bindValue(QStringLiteral(":email_state"),
+                                       QString::fromStdString(emailState));
+                saveProgress.bindValue(QStringLiteral(":total"),
+                                       total.has_value() ? QVariant{static_cast<qulonglong>(*total)}
+                                                         : QVariant{});
+                saveProgress.bindValue(QStringLiteral(":completed"),
+                                       static_cast<qulonglong>(completed));
+                saveProgress.bindValue(QStringLiteral(":account"),
+                                       QString::fromStdString(accountId));
+                saveProgress.bindValue(QStringLiteral(":mailbox"),
+                                       QString::fromStdString(mailboxId));
+                saveProgress.bindValue(QStringLiteral(":generation"),
+                                       static_cast<qulonglong>(generation));
+                if (!saveProgress.exec())
+                {
+                    const QString error = saveProgress.lastError().text();
+                    transaction.rollback();
                     return FullMailboxPageCommit{error};
                 }
-            }
-            const auto completed = position + emailIds.size();
-            QSqlQuery saveProgress{database};
-            saveProgress.prepare(QStringLiteral(
-                "UPDATE offline_mailbox_scopes SET anchor_email_id=COALESCE(anchor_email_id,"
-                ":anchor),query_state=CASE WHEN query_state IS NULL OR query_state='' THEN "
-                ":query_state ELSE query_state END,email_state=CASE WHEN email_state IS NULL OR "
-                "email_state='' THEN :email_state ELSE email_state END,expected_total=:total,"
-                "completed_total=MAX(completed_total,:completed),updated_at=CURRENT_TIMESTAMP "
-                "WHERE account_id=:account AND mailbox_id=:mailbox AND generation=:generation"));
-            saveProgress.bindValue(QStringLiteral(":anchor"),
-                                   position == 0 && !emailIds.empty()
-                                       ? QVariant{QString::fromStdString(emailIds.front())}
-                                       : QVariant{});
-            saveProgress.bindValue(QStringLiteral(":query_state"),
-                                   QString::fromStdString(queryState));
-            saveProgress.bindValue(QStringLiteral(":email_state"),
-                                   QString::fromStdString(emailState));
-            saveProgress.bindValue(QStringLiteral(":total"),
-                                   total.has_value() ? QVariant{static_cast<qulonglong>(*total)}
-                                                     : QVariant{});
-            saveProgress.bindValue(QStringLiteral(":completed"),
-                                   static_cast<qulonglong>(completed));
-            saveProgress.bindValue(QStringLiteral(":account"), QString::fromStdString(accountId));
-            saveProgress.bindValue(QStringLiteral(":mailbox"), QString::fromStdString(mailboxId));
-            saveProgress.bindValue(QStringLiteral(":generation"),
-                                   static_cast<qulonglong>(generation));
-            if (!saveProgress.exec())
-            {
-                const QString error = saveProgress.lastError().text();
-                database.rollback();
-                return FullMailboxPageCommit{error};
-            }
-            QSqlQuery saveJob{database};
-            saveJob.prepare(QStringLiteral(
-                "UPDATE background_jobs SET completed_units=:completed,total_units=:total,"
-                "detail='Reading mailbox contents',checkpoint_json=:checkpoint,"
-                "updated_at=CURRENT_TIMESTAMP WHERE job_id=:job"));
-            saveJob.bindValue(QStringLiteral(":completed"), static_cast<qulonglong>(completed));
-            saveJob.bindValue(QStringLiteral(":total"),
-                              total.has_value() ? QVariant{static_cast<qulonglong>(*total)}
-                                                : QVariant{});
-            saveJob.bindValue(QStringLiteral(":checkpoint"),
-                              checkpoint(QStringLiteral("enumerating"), completed, generation));
-            saveJob.bindValue(QStringLiteral(":job"), QString::fromStdString(syncJobId));
-            if (!saveJob.exec())
-            {
-                const QString error = saveJob.lastError().text();
-                database.rollback();
-                return FullMailboxPageCommit{error};
-            }
-            if (!database.commit())
-            {
-                const QString error = database.lastError().text();
-                database.rollback();
-                return FullMailboxPageCommit{error};
+                QSqlQuery saveJob{database};
+                saveJob.prepare(QStringLiteral(
+                    "UPDATE background_jobs SET completed_units=:completed,total_units=:total,"
+                    "detail='Reading mailbox contents',checkpoint_json=:checkpoint,"
+                    "updated_at=CURRENT_TIMESTAMP WHERE job_id=:job"));
+                saveJob.bindValue(QStringLiteral(":completed"), static_cast<qulonglong>(completed));
+                saveJob.bindValue(QStringLiteral(":total"),
+                                  total.has_value() ? QVariant{static_cast<qulonglong>(*total)}
+                                                    : QVariant{});
+                saveJob.bindValue(QStringLiteral(":checkpoint"),
+                                  checkpoint(QStringLiteral("enumerating"), completed, generation));
+                saveJob.bindValue(QStringLiteral(":job"), QString::fromStdString(syncJobId));
+                if (!saveJob.exec())
+                {
+                    const QString error = saveJob.lastError().text();
+                    transaction.rollback();
+                    return FullMailboxPageCommit{error};
+                }
+                if (const auto error = transaction.commit())
+                    return FullMailboxPageCommit{error->message};
             }
 
             javelin::jmap::cache::QueryService queries{connection};

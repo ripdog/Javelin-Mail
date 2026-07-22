@@ -17,6 +17,8 @@ process before asking SQLite for its write lock.
 - Multi-statement changes use `DatabaseTransaction`. It acquires the database's write coordinator
   before `BEGIN IMMEDIATE` and holds it through commit or rollback.
 - An autocommit write uses `DatabaseWriteScope` for the smallest block containing that write.
+- A write scope must end at the write or commit. It must never cover subsequent reads, window
+  materialization, filesystem projection, signal delivery, or other follow-up work.
 - Repository methods called from an existing transaction may take another `DatabaseWriteScope`;
   the coordinator is recursive for same-thread composition. They must not start a nested SQLite
   transaction.
@@ -34,6 +36,7 @@ transient so refresh coordination can retry them without presenting a permanent 
 Reads do not take the write coordinator. Finish or destroy `QSqlQuery` objects promptly, especially
 before dispatching more work or crossing an asynchronous suspension point. Long-lived read
 transactions prevent WAL checkpoint progress even though they do not block ordinary writers.
+No `QSqlQuery` may remain active across `co_await`.
 
 ## Testing
 

@@ -63,68 +63,71 @@ namespace javelin::jmap::cache
         }
         const auto& installed = std::get<MailVaultObject>(installedResult);
 
-        const DatabaseWriteScope writeScope{m_connection};
-        auto& database = m_connection.database();
-        if (!database.transaction())
         {
-            return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
-                                 .message = QStringLiteral("Begin raw message source update: ") +
-                                            database.lastError().text()};
-        }
+            auto transactionResult = DatabaseTransaction::begin(
+                m_connection, QStringLiteral("Update raw message source"));
+            if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
+                return *error;
+            auto transaction = std::get<DatabaseTransaction>(std::move(transactionResult));
+            auto& database = m_connection.database();
 
-        QSqlQuery objectQuery{database};
-        objectQuery.prepare(
-            QStringLiteral("INSERT INTO mail_vault_objects(content_hash,relative_path,size) VALUES"
-                           "(:hash,:path,:size) ON CONFLICT(content_hash) DO NOTHING"));
-        objectQuery.bindValue(QStringLiteral(":hash"),
-                              QString::fromStdString(installed.contentHash));
-        objectQuery.bindValue(QStringLiteral(":path"), installed.relativePath);
-        objectQuery.bindValue(QStringLiteral(":size"), static_cast<qulonglong>(installed.size));
-        if (!objectQuery.exec())
-        {
-            database.rollback();
-            return makeQueryError(QStringLiteral("Record mail vault object"), objectQuery);
-        }
-
-        QSqlQuery refQuery{database};
-        refQuery.prepare(QStringLiteral(
-            "INSERT INTO mail_vault_email_refs(account_id,email_id,blob_id,content_hash,retention) "
-            "VALUES(:account_id,:email_id,:blob_id,:hash,'evictable') ON CONFLICT(account_id,"
-            "email_id) DO UPDATE SET blob_id=excluded.blob_id,content_hash=excluded.content_hash,"
-            "updated_at=CURRENT_TIMESTAMP"));
-        refQuery.bindValue(QStringLiteral(":account_id"),
-                           QString::fromStdString(std::string{accountId}));
-        refQuery.bindValue(QStringLiteral(":email_id"), QString::fromStdString(source.emailId));
-        refQuery.bindValue(QStringLiteral(":blob_id"), QString::fromStdString(source.blobId));
-        refQuery.bindValue(QStringLiteral(":hash"), QString::fromStdString(installed.contentHash));
-        if (!refQuery.exec())
-        {
-            database.rollback();
-            return makeQueryError(QStringLiteral("Record mail vault email reference"), refQuery);
-        }
-
-        QSqlQuery projectionQuery{database};
-        projectionQuery.prepare(QStringLiteral(
-            "INSERT INTO mail_vault_projection_jobs(account_id,email_id,mailbox_id,content_hash,"
-            "operation) SELECT account_id,email_id,mailbox_id,:hash,'link' FROM email_mailboxes "
-            "WHERE account_id=:account_id AND email_id=:email_id"));
-        projectionQuery.bindValue(QStringLiteral(":hash"),
+            QSqlQuery objectQuery{database};
+            objectQuery.prepare(QStringLiteral(
+                "INSERT INTO mail_vault_objects(content_hash,relative_path,size) VALUES"
+                "(:hash,:path,:size) ON CONFLICT(content_hash) DO NOTHING"));
+            objectQuery.bindValue(QStringLiteral(":hash"),
                                   QString::fromStdString(installed.contentHash));
-        projectionQuery.bindValue(QStringLiteral(":account_id"),
-                                  QString::fromStdString(std::string{accountId}));
-        projectionQuery.bindValue(QStringLiteral(":email_id"),
-                                  QString::fromStdString(source.emailId));
-        if (!projectionQuery.exec())
-        {
-            database.rollback();
-            return makeQueryError(QStringLiteral("Queue mail vault projections"), projectionQuery);
-        }
+            objectQuery.bindValue(QStringLiteral(":path"), installed.relativePath);
+            objectQuery.bindValue(QStringLiteral(":size"), static_cast<qulonglong>(installed.size));
+            if (!objectQuery.exec())
+            {
+                transaction.rollback();
+                return makeQueryError(QStringLiteral("Record mail vault object"), objectQuery);
+            }
 
-        if (!database.commit())
-        {
-            return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
-                                 .message = QStringLiteral("Commit raw message source update: ") +
-                                            database.lastError().text()};
+            QSqlQuery refQuery{database};
+            refQuery.prepare(QStringLiteral(
+                "INSERT INTO "
+                "mail_vault_email_refs(account_id,email_id,blob_id,content_hash,retention) "
+                "VALUES(:account_id,:email_id,:blob_id,:hash,'evictable') ON CONFLICT(account_id,"
+                "email_id) DO UPDATE SET "
+                "blob_id=excluded.blob_id,content_hash=excluded.content_hash,"
+                "updated_at=CURRENT_TIMESTAMP"));
+            refQuery.bindValue(QStringLiteral(":account_id"),
+                               QString::fromStdString(std::string{accountId}));
+            refQuery.bindValue(QStringLiteral(":email_id"), QString::fromStdString(source.emailId));
+            refQuery.bindValue(QStringLiteral(":blob_id"), QString::fromStdString(source.blobId));
+            refQuery.bindValue(QStringLiteral(":hash"),
+                               QString::fromStdString(installed.contentHash));
+            if (!refQuery.exec())
+            {
+                transaction.rollback();
+                return makeQueryError(QStringLiteral("Record mail vault email reference"),
+                                      refQuery);
+            }
+
+            QSqlQuery projectionQuery{database};
+            projectionQuery.prepare(QStringLiteral(
+                "INSERT INTO "
+                "mail_vault_projection_jobs(account_id,email_id,mailbox_id,content_hash,"
+                "operation) SELECT account_id,email_id,mailbox_id,:hash,'link' FROM "
+                "email_mailboxes "
+                "WHERE account_id=:account_id AND email_id=:email_id"));
+            projectionQuery.bindValue(QStringLiteral(":hash"),
+                                      QString::fromStdString(installed.contentHash));
+            projectionQuery.bindValue(QStringLiteral(":account_id"),
+                                      QString::fromStdString(std::string{accountId}));
+            projectionQuery.bindValue(QStringLiteral(":email_id"),
+                                      QString::fromStdString(source.emailId));
+            if (!projectionQuery.exec())
+            {
+                transaction.rollback();
+                return makeQueryError(QStringLiteral("Queue mail vault projections"),
+                                      projectionQuery);
+            }
+
+            if (const auto error = transaction.commit())
+                return *error;
         }
         return replayProjectionJobs();
     }
@@ -138,47 +141,45 @@ namespace javelin::jmap::cache
             return error;
         }
 
-        const DatabaseWriteScope writeScope{m_connection};
-        auto& database = m_connection.database();
-        if (!database.transaction())
         {
-            return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
-                                 .message = QStringLiteral("Begin raw message source removal: ") +
-                                            database.lastError().text()};
-        }
-        QSqlQuery jobQuery{database};
-        jobQuery.prepare(QStringLiteral(
-            "INSERT INTO mail_vault_projection_jobs(account_id,email_id,mailbox_id,operation) "
-            "SELECT account_id,email_id,mailbox_id,'unlink' FROM email_mailboxes WHERE "
-            "account_id=:account_id AND email_id=:email_id"));
-        jobQuery.bindValue(QStringLiteral(":account_id"),
-                           QString::fromStdString(std::string{accountId}));
-        jobQuery.bindValue(QStringLiteral(":email_id"),
-                           QString::fromStdString(std::string{emailId}));
-        if (!jobQuery.exec())
-        {
-            database.rollback();
-            return makeQueryError(QStringLiteral("Queue mail vault projection removal"), jobQuery);
-        }
+            auto transactionResult = DatabaseTransaction::begin(
+                m_connection, QStringLiteral("Remove raw message source"));
+            if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
+                return *error;
+            auto transaction = std::get<DatabaseTransaction>(std::move(transactionResult));
+            auto& database = m_connection.database();
+            QSqlQuery jobQuery{database};
+            jobQuery.prepare(QStringLiteral(
+                "INSERT INTO mail_vault_projection_jobs(account_id,email_id,mailbox_id,operation) "
+                "SELECT account_id,email_id,mailbox_id,'unlink' FROM email_mailboxes WHERE "
+                "account_id=:account_id AND email_id=:email_id"));
+            jobQuery.bindValue(QStringLiteral(":account_id"),
+                               QString::fromStdString(std::string{accountId}));
+            jobQuery.bindValue(QStringLiteral(":email_id"),
+                               QString::fromStdString(std::string{emailId}));
+            if (!jobQuery.exec())
+            {
+                transaction.rollback();
+                return makeQueryError(QStringLiteral("Queue mail vault projection removal"),
+                                      jobQuery);
+            }
 
-        QSqlQuery query{database};
-        query.prepare(QStringLiteral(
-            "DELETE FROM mail_vault_email_refs WHERE account_id = :account_id AND email_id = "
-            ":email_id"));
-        query.bindValue(QStringLiteral(":account_id"),
-                        QString::fromStdString(std::string{accountId}));
-        query.bindValue(QStringLiteral(":email_id"), QString::fromStdString(std::string{emailId}));
-        if (!query.exec())
-        {
-            database.rollback();
-            return makeQueryError(QStringLiteral("Delete mail vault email reference"), query);
-        }
+            QSqlQuery query{database};
+            query.prepare(QStringLiteral(
+                "DELETE FROM mail_vault_email_refs WHERE account_id = :account_id AND email_id = "
+                ":email_id"));
+            query.bindValue(QStringLiteral(":account_id"),
+                            QString::fromStdString(std::string{accountId}));
+            query.bindValue(QStringLiteral(":email_id"),
+                            QString::fromStdString(std::string{emailId}));
+            if (!query.exec())
+            {
+                transaction.rollback();
+                return makeQueryError(QStringLiteral("Delete mail vault email reference"), query);
+            }
 
-        if (!database.commit())
-        {
-            return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
-                                 .message = QStringLiteral("Commit raw message source removal: ") +
-                                            database.lastError().text()};
+            if (const auto error = transaction.commit())
+                return *error;
         }
 
         return replayProjectionJobs();
