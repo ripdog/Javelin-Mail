@@ -272,6 +272,31 @@ namespace javelin::jmap::cache
         }};
     }
 
+    std::variant<std::optional<std::string>, DatabaseError>
+    QueryService::completeOfflineMailboxQueryState(const std::string_view accountId,
+                                                   const std::string_view mailboxId,
+                                                   const std::string_view canonicalQueryKey) const
+    {
+        if (const auto error = m_connection.validate())
+            return *error;
+
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "SELECT ss.state_token FROM offline_mailbox_scopes s INNER JOIN sync_state ss ON "
+            "ss.account_id=s.account_id AND ss.object_type='EmailQuery' AND "
+            "ss.query_key=:query_key WHERE s.account_id=:account AND s.mailbox_id=:mailbox AND "
+            "s.desired=1 AND s.status='complete'"));
+        query.bindValue(QStringLiteral(":query_key"),
+                        QString::fromStdString(std::string{canonicalQueryKey}));
+        query.bindValue(QStringLiteral(":account"), QString::fromStdString(std::string{accountId}));
+        query.bindValue(QStringLiteral(":mailbox"), QString::fromStdString(std::string{mailboxId}));
+        if (!query.exec())
+            return makeQueryError(QStringLiteral("Read complete offline mailbox state"), query);
+        if (!query.next())
+            return std::optional<std::string>{};
+        return std::optional<std::string>{query.value(0).toString().toStdString()};
+    }
+
     std::variant<std::vector<MessageListItem>, DatabaseError>
     QueryService::listOfflineMailboxMessages(const std::string_view accountId,
                                              const std::string_view mailboxId,

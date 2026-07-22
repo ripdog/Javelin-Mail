@@ -10,8 +10,6 @@
 #include <QCoroTask>
 
 #include <QDebug>
-#include <QSqlQuery>
-
 #include <algorithm>
 #include <limits>
 #include <ranges>
@@ -373,6 +371,20 @@ namespace javelin::app
             .isAscending = javelin::jmap::query::isAscending(intent.sort),
             .collapseThreads = true,
         });
+        const auto canonicalQueryKey = javelin::jmap::sync::mailboxQueryKey({
+            .mailboxId = intent.mailboxId,
+            .sortProperty = "receivedAt",
+            .isAscending = false,
+            .collapseThreads = true,
+        });
+        const auto offlineStateResult = m_queryService.completeOfflineMailboxQueryState(
+            intent.accountId, intent.mailboxId, canonicalQueryKey);
+        if (const auto* error =
+                std::get_if<javelin::jmap::cache::DatabaseError>(&offlineStateResult))
+        {
+            co_return javelin::jmap::operationError(*error);
+        }
+        const auto& offlineState = std::get<std::optional<std::string>>(offlineStateResult);
         if (!intent.forceRefresh)
         {
             const auto cachedResult = m_queryService.loadMailboxWindow(
@@ -380,7 +392,8 @@ namespace javelin::app
             if (const auto* cached =
                     std::get_if<std::optional<javelin::jmap::cache::MailboxWindowPage>>(
                         &cachedResult);
-                cached != nullptr && cached->has_value() && (*cached)->isAuthoritative)
+                cached != nullptr && cached->has_value() && (*cached)->isAuthoritative &&
+                (!offlineState.has_value() || (*cached)->queryState == *offlineState))
             {
                 co_return MailboxWindowSummary{
                     .accountId = std::move(intent.accountId),
@@ -395,22 +408,9 @@ namespace javelin::app
                 };
             }
         }
-        QSqlQuery offlineScope{m_databaseConnection.database()};
-        offlineScope.prepare(QStringLiteral(
-            "SELECT ss.state_token FROM offline_mailbox_scopes s INNER JOIN sync_state ss ON "
-            "ss.account_id=s.account_id AND ss.object_type='EmailQuery' AND "
-            "ss.query_key=:query_key WHERE s.account_id=:account AND s.mailbox_id=:mailbox AND "
-            "s.desired=1 AND s.status='complete'"));
-        offlineScope.bindValue(QStringLiteral(":query_key"), QString::fromStdString(queryKey));
-        offlineScope.bindValue(QStringLiteral(":account"),
-                               QString::fromStdString(intent.accountId));
-        offlineScope.bindValue(QStringLiteral(":mailbox"),
-                               QString::fromStdString(intent.mailboxId));
-        if (offlineScope.exec() && offlineScope.next())
+        if (offlineState.has_value())
         {
-            const QString completedQueryState = offlineScope.value(0).toString();
-            offlineScope.finish();
-            const std::string state = completedQueryState.toStdString();
+            const std::string& state = *offlineState;
             javelin::jmap::cache::MailboxWindowRepository windows{m_databaseConnection};
             if (!intent.forceRefresh)
             {
@@ -479,7 +479,6 @@ namespace javelin::app
                 };
             }
         }
-        offlineScope.finish();
 
         const ForegroundWorkScope foreground{m_workScheduler};
         auto result = co_await m_jmapCore.queryMailboxPage(

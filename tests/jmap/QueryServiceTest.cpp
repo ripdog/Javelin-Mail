@@ -5,6 +5,7 @@
 #include "jmap/cache/MailboxRepository.h"
 #include "jmap/cache/MailboxWindowRepository.h"
 #include "jmap/cache/RawMessageSourceRepository.h"
+#include "jmap/cache/SyncStateRepository.h"
 #include "jmap/cache/ThreadRepository.h"
 #include "jmap/domain/MailEntityParsers.h"
 
@@ -797,6 +798,38 @@ TEST_CASE("offline mailboxes retain every materialized query window",
     REQUIRE(deep.has_value());
     CHECK_FALSE(deep->isAuthoritative);
     CHECK(deep->emailIds == std::vector<std::string>{"id-12"});
+}
+
+TEST_CASE("complete offline mailbox state versions locally sorted page windows",
+          "[jmap][cache][query][pagination]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    QSqlQuery scope{databaseContext.connection.database()};
+    REQUIRE(scope.exec(QStringLiteral(
+        "INSERT INTO offline_mailbox_scopes(account_id,mailbox_id,desired,status,generation) "
+        "VALUES('account-1','mbx-inbox',1,'complete',1)")));
+
+    const std::string canonicalQueryKey =
+        "mailbox:mbx-inbox|sort:receivedAt:desc|collapseThreads:true";
+    javelin::jmap::cache::SyncStateRepository states{databaseContext.connection};
+    REQUIRE_FALSE(states
+                      .upsert({.accountId = "account-1",
+                               .objectType = "EmailQuery",
+                               .queryKey = canonicalQueryKey},
+                              "state-current")
+                      .has_value());
+
+    javelin::jmap::cache::QueryService queries{databaseContext.connection};
+    const auto result =
+        queries.completeOfflineMailboxQueryState("account-1", "mbx-inbox", canonicalQueryKey);
+    const auto* state = std::get_if<std::optional<std::string>>(&result);
+    REQUIRE(state != nullptr);
+    REQUIRE(state->has_value());
+    CHECK(**state == "state-current");
 }
 
 TEST_CASE("same-state mailbox pages inherit authoritative query totals",

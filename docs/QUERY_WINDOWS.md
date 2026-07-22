@@ -32,6 +32,10 @@ pages. Unlike anchored next-page navigation, positional jumps identify a result 
 stable boundary Email, so concurrent insertions or removals may change which conversations occupy
 the requested page before its query executes.
 
+For a complete offline mailbox, the same controls resolve missing windows directly from effective
+SQLite membership for every supported sort order. The canonical mailbox query state versions these
+locally generated windows so a cached arbitrary page is reused only while it remains current.
+
 Notification navigation is not pagination. If its Email is absent from the current window, the
 application requests an anchored window with `anchorOffset: 0`, persists the server-returned
 position and ordered IDs, and selects the target from that committed cache state. This contextual
