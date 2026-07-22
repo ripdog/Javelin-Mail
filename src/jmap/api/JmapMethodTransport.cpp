@@ -1,6 +1,7 @@
 #include "jmap/api/JmapMethodTransport.h"
 
 #include "jmap/api/Transport.h"
+#include "jmap/cache/Database.h"
 #include "jmap/cache/JmapTransportPreferenceRepository.h"
 
 #include <QCoroSignal>
@@ -9,7 +10,9 @@
 #include <QElapsedTimer>
 #include <QLoggingCategory>
 #include <QNetworkRequest>
+#include <QSqlQuery>
 #include <QString>
+#include <QStringList>
 #include <QTimer>
 #include <QUrl>
 #include <QWebSocket>
@@ -23,9 +26,11 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 namespace javelin::jmap::api::detail
 {
@@ -47,6 +52,193 @@ template <> struct glz::meta<javelin::jmap::api::detail::WebSocketMessageHeader>
                     &T::detail, "status", &T::status);
 };
 
+namespace javelin::jmap::api::detail
+{
+    namespace
+    {
+        struct MailboxReference
+        {
+            std::string accountId;
+            std::string mailboxId;
+        };
+
+        void appendMailboxReference(std::vector<MailboxReference>& references,
+                                    std::string accountId, std::string mailboxId)
+        {
+            if (mailboxId.empty())
+                return;
+            const auto duplicate = std::ranges::find_if(
+                references, [&accountId, &mailboxId](const MailboxReference& reference)
+                { return reference.accountId == accountId && reference.mailboxId == mailboxId; });
+            if (duplicate == references.end())
+            {
+                references.push_back(MailboxReference{
+                    .accountId = std::move(accountId),
+                    .mailboxId = std::move(mailboxId),
+                });
+            }
+        }
+
+        void replaceAll(std::string& value, const std::string_view from, const std::string_view to)
+        {
+            std::size_t position = 0;
+            while ((position = value.find(from, position)) != std::string::npos)
+            {
+                value.replace(position, from.size(), to);
+                position += to.size();
+            }
+        }
+
+        [[nodiscard]] std::string decodeJsonPointerToken(std::string token)
+        {
+            replaceAll(token, "~1", "/");
+            replaceAll(token, "~0", "~");
+            return token;
+        }
+
+        void collectMailboxReferences(const glz::generic& value, const std::string& accountId,
+                                      std::vector<MailboxReference>& references)
+        {
+            if (value.is_array())
+            {
+                for (const auto& item : value.get_array())
+                    collectMailboxReferences(item, accountId, references);
+                return;
+            }
+            if (!value.is_object())
+                return;
+
+            for (const auto& [key, child] : value.get_object())
+            {
+                if ((key == "inMailbox" || key == "mailboxId") && child.is_string())
+                {
+                    appendMailboxReference(references, accountId, child.get_string());
+                }
+                else if (key == "inMailboxOtherThan" && child.is_array())
+                {
+                    for (const auto& mailbox : child.get_array())
+                    {
+                        if (mailbox.is_string())
+                            appendMailboxReference(references, accountId, mailbox.get_string());
+                    }
+                }
+                else if (key == "mailboxIds")
+                {
+                    if (child.is_object())
+                    {
+                        for (const auto& [mailboxId, enabled] : child.get_object())
+                        {
+                            static_cast<void>(enabled);
+                            appendMailboxReference(references, accountId, mailboxId);
+                        }
+                    }
+                    else if (child.is_array())
+                    {
+                        for (const auto& mailbox : child.get_array())
+                        {
+                            if (mailbox.is_string())
+                                appendMailboxReference(references, accountId, mailbox.get_string());
+                        }
+                    }
+                }
+                else if (key.starts_with("mailboxIds/"))
+                {
+                    appendMailboxReference(references, accountId,
+                                           decodeJsonPointerToken(key.substr(11)));
+                }
+                collectMailboxReferences(child, accountId, references);
+            }
+        }
+
+        void collectMailboxMethodReferences(const MethodInvocation& invocation,
+                                            const glz::generic& arguments,
+                                            const std::string& accountId,
+                                            std::vector<MailboxReference>& references)
+        {
+            if (invocation.name == "Mailbox/get" && arguments.contains("ids") &&
+                arguments.at("ids").is_array())
+            {
+                for (const auto& mailbox : arguments.at("ids").get_array())
+                {
+                    if (mailbox.is_string())
+                        appendMailboxReference(references, accountId, mailbox.get_string());
+                }
+            }
+            else if (invocation.name == "Mailbox/set")
+            {
+                if (arguments.contains("update") && arguments.at("update").is_object())
+                {
+                    for (const auto& [mailboxId, patch] : arguments.at("update").get_object())
+                    {
+                        static_cast<void>(patch);
+                        appendMailboxReference(references, accountId, mailboxId);
+                    }
+                }
+                if (arguments.contains("destroy") && arguments.at("destroy").is_array())
+                {
+                    for (const auto& mailbox : arguments.at("destroy").get_array())
+                    {
+                        if (mailbox.is_string())
+                            appendMailboxReference(references, accountId, mailbox.get_string());
+                    }
+                }
+            }
+        }
+    } // namespace
+
+    JmapRequestLogContext
+    describeJmapRequest(javelin::jmap::cache::DatabaseConnection& databaseConnection,
+                        const JmapMethodRequest& request)
+    {
+        QStringList methodCalls;
+        std::vector<MailboxReference> references;
+        for (const auto& invocation : request.envelope.methodCalls)
+        {
+            QString method = QString::fromStdString(invocation.name);
+            if (!invocation.callId.empty())
+            {
+                method += QStringLiteral("(") + QString::fromStdString(invocation.callId) +
+                          QStringLiteral(")");
+            }
+            methodCalls.push_back(std::move(method));
+
+            glz::generic arguments;
+            auto json = invocation.arguments;
+            if (glz::read_json(arguments, json) || !arguments.is_object())
+                continue;
+            std::string accountId = request.accountId;
+            if (arguments.contains("accountId") && arguments.at("accountId").is_string())
+                accountId = arguments.at("accountId").get_string();
+            collectMailboxReferences(arguments, accountId, references);
+            collectMailboxMethodReferences(invocation, arguments, accountId, references);
+        }
+
+        QStringList mailboxLabels;
+        QSqlQuery mailboxQuery{databaseConnection.database()};
+        mailboxQuery.prepare(QStringLiteral(
+            "SELECT name FROM mailboxes WHERE account_id=:account AND mailbox_id=:mailbox"));
+        for (const auto& reference : references)
+        {
+            const QString mailboxId = QString::fromStdString(reference.mailboxId);
+            mailboxQuery.bindValue(QStringLiteral(":account"),
+                                   QString::fromStdString(reference.accountId));
+            mailboxQuery.bindValue(QStringLiteral(":mailbox"), mailboxId);
+            QString name;
+            if (mailboxQuery.exec() && mailboxQuery.next())
+                name = mailboxQuery.value(0).toString();
+            mailboxQuery.finish();
+            mailboxLabels.push_back(name.isEmpty()
+                                        ? QStringLiteral("[%1]").arg(mailboxId)
+                                        : QStringLiteral("%1 [%2]").arg(name, mailboxId));
+        }
+
+        return JmapRequestLogContext{
+            .methodCalls = methodCalls.join(QStringLiteral(", ")),
+            .mailboxes = mailboxLabels.join(QStringLiteral(", ")),
+        };
+    }
+} // namespace javelin::jmap::api::detail
+
 namespace javelin::jmap::api
 {
     Q_LOGGING_CATEGORY(logJmapWebSocketTransport, "jmap.transport.websocket")
@@ -58,6 +250,59 @@ namespace javelin::jmap::api
         constexpr auto cancellationPollInterval = std::chrono::milliseconds{250};
 
         using WebSocketMessageHeader = detail::WebSocketMessageHeader;
+
+        [[nodiscard]] QString requestContextText(const detail::JmapRequestLogContext& context)
+        {
+            QString text = QStringLiteral("methods %1").arg(context.methodCalls);
+            if (!context.mailboxes.isEmpty())
+                text += QStringLiteral("; mailboxes %1").arg(context.mailboxes);
+            return text;
+        }
+
+        [[nodiscard]] bool hasMethodErrors(const ResponseEnvelope& response)
+        {
+            return std::ranges::any_of(response.methodResponses,
+                                       [](const MethodInvocation& invocation)
+                                       { return invocation.name == "error"; });
+        }
+
+        [[nodiscard]] QString resultText(const JmapMethodTransportResult& result)
+        {
+            if (const auto* response = std::get_if<ResponseEnvelope>(&result))
+            {
+                if (!hasMethodErrors(*response))
+                    return QStringLiteral("success");
+                const auto errorCount = std::ranges::count_if(
+                    response->methodResponses,
+                    [](const MethodInvocation& invocation) { return invocation.name == "error"; });
+                return QStringLiteral("failure: %1 JMAP method error response(s)").arg(errorCount);
+            }
+            if (const auto* error = std::get_if<TransportError>(&result))
+            {
+                const QString status = error->code == TransportErrorCode::Cancelled
+                                           ? QStringLiteral("cancelled")
+                                           : QStringLiteral("failure");
+                return QStringLiteral("%1: %2: %3")
+                    .arg(status, QString::fromStdString(std::string{toString(error->code)}),
+                         QString::fromStdString(error->message));
+            }
+            const auto& error = std::get<ProtocolError>(result);
+            return QStringLiteral("failure: %1: %2")
+                .arg(QString::fromStdString(std::string{toString(error.code)}),
+                     QString::fromStdString(error.message));
+        }
+
+        [[nodiscard]] bool isSuccessfulResult(const JmapMethodTransportResult& result)
+        {
+            const auto* response = std::get_if<ResponseEnvelope>(&result);
+            return response != nullptr && !hasMethodErrors(*response);
+        }
+
+        [[nodiscard]] bool isCancelledResult(const JmapMethodTransportResult& result)
+        {
+            const auto* error = std::get_if<TransportError>(&result);
+            return error != nullptr && error->code == TransportErrorCode::Cancelled;
+        }
 
         struct BufferedWebSocketMessage
         {
@@ -164,7 +409,8 @@ namespace javelin::jmap::api
             }
 
             [[nodiscard]] QCoro::Task<WebSocketAttemptResult>
-            call(const std::string_view webSocketUrl, const JmapMethodRequest& request)
+            call(const std::string_view webSocketUrl, const JmapMethodRequest& request,
+                 const detail::JmapRequestLogContext& logContext)
             {
                 if (request.cancellation.isCancellationRequested())
                 {
@@ -194,21 +440,46 @@ namespace javelin::jmap::api
                     };
                 }
 
+                const QString requestIdText = QString::fromStdString(requestId);
+                const QString contextText = requestContextText(logContext);
+                QElapsedTimer elapsed;
+                elapsed.start();
+                qCDebug(logJmapWebSocketTransport).noquote()
+                    << "request started" << requestIdText << contextText;
+                const auto finish = [&](JmapMethodTransportResult result,
+                                        const bool requestDispatched,
+                                        const bool validWebSocketResponse)
+                {
+                    const QString outcome = resultText(result);
+                    if (isSuccessfulResult(result) || isCancelledResult(result))
+                    {
+                        qCDebug(logJmapWebSocketTransport).noquote()
+                            << "request finished" << requestIdText << outcome << elapsed.elapsed()
+                            << "ms" << contextText;
+                    }
+                    else
+                    {
+                        qCWarning(logJmapWebSocketTransport).noquote()
+                            << "request finished" << requestIdText << outcome << elapsed.elapsed()
+                            << "ms" << contextText;
+                    }
+                    return WebSocketAttemptResult{
+                        .result = std::move(result),
+                        .requestDispatched = requestDispatched,
+                        .validWebSocketResponse = validWebSocketResponse,
+                    };
+                };
+
                 const auto disconnectGeneration = m_disconnectGeneration;
                 const auto invalidMessageGeneration = m_invalidMessageGeneration;
                 const qint64 bytesQueued =
                     m_socket.sendTextMessage(QString::fromStdString(*payload));
                 if (bytesQueued < 0)
                 {
-                    co_return WebSocketAttemptResult{
-                        .result = networkError("Failed to queue JMAP WebSocket request"),
-                    };
+                    co_return finish(networkError("Failed to queue JMAP WebSocket request"), false,
+                                     false);
                 }
 
-                qCDebug(logJmapWebSocketTransport).noquote()
-                    << "request dispatched" << QString::fromStdString(requestId);
-                QElapsedTimer elapsed;
-                elapsed.start();
                 while (
                     elapsed.elapsed() <
                     std::chrono::duration_cast<std::chrono::milliseconds>(responseTimeout).count())
@@ -226,66 +497,51 @@ namespace javelin::jmap::api
                             auto json = buffered.payload;
                             if (glz::read<glz::opts{.error_on_unknown_keys = false}>(header, json))
                             {
-                                co_return WebSocketAttemptResult{
-                                    .result = decodingError(
-                                        "Failed to parse JMAP WebSocket request error"),
-                                    .requestDispatched = true,
-                                };
+                                co_return finish(
+                                    decodingError("Failed to parse JMAP WebSocket request error"),
+                                    true, false);
                             }
-                            co_return WebSocketAttemptResult{
-                                .result =
-                                    ProtocolError{
-                                        .code = ProtocolErrorCode::InvalidResponse,
-                                        .message = requestErrorMessage(header).toStdString(),
-                                    },
-                                .requestDispatched = true,
-                                .validWebSocketResponse = true,
-                            };
+                            co_return finish(
+                                ProtocolError{
+                                    .code = ProtocolErrorCode::InvalidResponse,
+                                    .message = requestErrorMessage(header).toStdString(),
+                                },
+                                true, true);
                         }
 
                         const auto parsed = parseResponseEnvelope(buffered.payload);
                         if (!parsed.ok())
                         {
-                            co_return WebSocketAttemptResult{
-                                .result = decodingError(parsed.error.value_or(
+                            co_return finish(
+                                decodingError(parsed.error.value_or(
                                     "Failed to parse JMAP WebSocket response envelope")),
-                                .requestDispatched = true,
-                            };
+                                true, false);
                         }
-                        co_return WebSocketAttemptResult{
-                            .result = std::move(*parsed.value),
-                            .requestDispatched = true,
-                            .validWebSocketResponse = true,
-                        };
+                        co_return finish(std::move(*parsed.value), true, true);
                     }
 
                     if (request.cancellation.isCancellationRequested())
                     {
                         m_ignoredRequestIds.insert(requestId);
-                        co_return WebSocketAttemptResult{
-                            .result = cancelledError(
+                        co_return finish(
+                            cancelledError(
                                 "JMAP method call cancelled while awaiting WebSocket response"),
-                            .requestDispatched = true,
-                        };
+                            true, false);
                     }
                     if (m_socket.state() != QAbstractSocket::ConnectedState ||
                         m_disconnectGeneration != disconnectGeneration)
                     {
                         m_ignoredRequestIds.insert(requestId);
-                        co_return WebSocketAttemptResult{
-                            .result = networkError(
-                                "JMAP WebSocket disconnected before the response arrived"),
-                            .requestDispatched = true,
-                        };
+                        co_return finish(
+                            networkError("JMAP WebSocket disconnected before the response arrived"),
+                            true, false);
                     }
                     if (m_invalidMessageGeneration != invalidMessageGeneration)
                     {
                         m_ignoredRequestIds.insert(requestId);
-                        co_return WebSocketAttemptResult{
-                            .result = decodingError(
-                                "JMAP WebSocket returned an invalid response message"),
-                            .requestDispatched = true,
-                        };
+                        co_return finish(
+                            decodingError("JMAP WebSocket returned an invalid response message"),
+                            true, false);
                     }
 
                     static_cast<void>(co_await qCoro(&m_socket, &QWebSocket::textMessageReceived,
@@ -293,10 +549,8 @@ namespace javelin::jmap::api
                 }
 
                 m_ignoredRequestIds.insert(requestId);
-                co_return WebSocketAttemptResult{
-                    .result = networkError("Timed out waiting for JMAP WebSocket response"),
-                    .requestDispatched = true,
-                };
+                co_return finish(networkError("Timed out waiting for JMAP WebSocket response"),
+                                 true, false);
             }
 
           private:
@@ -595,7 +849,8 @@ namespace javelin::jmap::api
             connection = std::make_unique<WebSocketJmapConnection>();
         }
 
-        auto attempt = co_await connection->call(target->webSocketUrl, request);
+        const auto logContext = detail::describeJmapRequest(m_impl->databaseConnection, request);
+        auto attempt = co_await connection->call(target->webSocketUrl, request, logContext);
         if (attempt.validWebSocketResponse)
         {
             m_impl->cooldowns.recordSuccess(target->webSocketUrl);
@@ -610,7 +865,7 @@ namespace javelin::jmap::api
 
         m_impl->cooldowns.recordFailure(target->webSocketUrl);
         qCWarning(logJmapWebSocketTransport).noquote()
-            << "WebSocket unavailable; using HTTP for 15 minutes"
+            << "WebSocket unavailable; preferring HTTP for future requests for 15 minutes"
             << QString::fromStdString(transportError->message);
 
         if (!attempt.requestDispatched)

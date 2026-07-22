@@ -140,6 +140,65 @@ TEST_CASE("preferred JMAP transport falls back to HTTP before websocket dispatch
     CHECK(cooldowns.retryDelay(session.capabilities.websocket->url).has_value());
 }
 
+TEST_CASE("JMAP request diagnostics resolve methods and human-readable mailbox names",
+          "[jmap][method][transport][websocket]")
+{
+    ensureApplication();
+    auto database = makeDatabaseContext();
+    javelin::jmap::cache::SessionRepository sessions{database.connection};
+    REQUIRE_FALSE(
+        sessions.replace("u1", sessionWithWebSocket("wss://mail.example.com/jmap/ws")).has_value());
+
+    QSqlQuery mailbox{database.connection.database()};
+    mailbox.prepare(
+        QStringLiteral("INSERT INTO mailboxes(account_id,mailbox_id,name) VALUES('u1',:id,:name)"));
+    for (const auto& [id, name] : std::vector<std::pair<QString, QString>>{
+             {QStringLiteral("mbx-archive"), QStringLiteral("Archive")},
+             {QStringLiteral("mbx-inbox"), QStringLiteral("Inbox")},
+             {QStringLiteral("mbx-trash"), QStringLiteral("Deleted Items")},
+         })
+    {
+        mailbox.bindValue(QStringLiteral(":id"), id);
+        mailbox.bindValue(QStringLiteral(":name"), name);
+        REQUIRE(mailbox.exec());
+    }
+
+    const javelin::jmap::api::JmapMethodRequest request{
+        .accountId = "u1",
+        .apiUrl = "https://mail.example.com/jmap/api",
+        .accessToken = "access-token",
+        .envelope =
+            {
+                .usingCapabilities = {"urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"},
+                .methodCalls =
+                    {
+                        {
+                            .name = "Email/query",
+                            .arguments =
+                                R"({"accountId":"u1","filter":{"operator":"AND","conditions":[{"inMailbox":"mbx-archive"}]}})",
+                            .callId = "page-query",
+                        },
+                        {
+                            .name = "Email/set",
+                            .arguments =
+                                R"({"accountId":"u1","update":{"email-1":{"mailboxIds/mbx-inbox":true,"mailboxIds/mbx-trash":null}}})",
+                            .callId = "email-set",
+                        },
+                    },
+                .createdIds = std::nullopt,
+            },
+        .cancellation = {},
+        .transportPolicy = javelin::jmap::api::JmapTransportPolicy::Preferred,
+    };
+
+    const auto context =
+        javelin::jmap::api::detail::describeJmapRequest(database.connection, request);
+    CHECK(context.methodCalls == QStringLiteral("Email/query(page-query), Email/set(email-set)"));
+    CHECK(context.mailboxes ==
+          QStringLiteral("Archive [mbx-archive], Inbox [mbx-inbox], Deleted Items "
+                         "[mbx-trash]"));
+}
+
 TEST_CASE("preferred JMAP transport ignores remembered HTTP fallback after restart",
           "[jmap][method][transport][websocket]")
 {

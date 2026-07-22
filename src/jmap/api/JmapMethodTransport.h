@@ -6,6 +6,8 @@
 
 #include <QCoroTask>
 
+#include <QString>
+
 #include <chrono>
 #include <memory>
 #include <optional>
@@ -54,6 +56,19 @@ namespace javelin::jmap::api
         CancellationToken cancellation{};
         JmapTransportPolicy transportPolicy = JmapTransportPolicy::Preferred;
     };
+
+    namespace detail
+    {
+        struct JmapRequestLogContext
+        {
+            QString methodCalls;
+            QString mailboxes;
+        };
+
+        [[nodiscard]] JmapRequestLogContext
+        describeJmapRequest(javelin::jmap::cache::DatabaseConnection& databaseConnection,
+                            const JmapMethodRequest& request);
+    } // namespace detail
 
     using JmapMethodTransportResult = std::variant<ResponseEnvelope, TransportError, ProtocolError>;
 
