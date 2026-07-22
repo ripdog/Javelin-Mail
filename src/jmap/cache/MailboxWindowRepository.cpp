@@ -19,15 +19,6 @@ namespace javelin::jmap::cache
             };
         }
 
-        [[nodiscard]] DatabaseError databaseError(const QString& operation,
-                                                  const QSqlDatabase& database)
-        {
-            return DatabaseError{
-                .code = DatabaseErrorCode::QueryFailed,
-                .message = operation + QStringLiteral(": ") + database.lastError().text(),
-            };
-        }
-
         void bindKey(QSqlQuery& query, const std::string_view accountId,
                      const std::string_view queryKey, const std::size_t requestedOffset,
                      const std::size_t requestedLimit)
@@ -53,9 +44,12 @@ namespace javelin::jmap::cache
         if (const auto error = m_connection.validate())
             return error;
 
-        auto database = m_connection.database();
-        if (!database.transaction())
-            return databaseError(QStringLiteral("Begin mailbox-window transaction"), database);
+        auto transactionResult = DatabaseTransaction::begin(
+            m_connection, QStringLiteral("Begin mailbox-window transaction"));
+        if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
+            return *error;
+        auto transaction = std::get<DatabaseTransaction>(std::move(transactionResult));
+        auto& database = m_connection.database();
 
         auto effectiveTotal = window.total;
         if (!effectiveTotal.has_value())
@@ -215,14 +209,7 @@ namespace javelin::jmap::cache
             }
         }
 
-        if (!database.commit())
-        {
-            const auto error =
-                databaseError(QStringLiteral("Commit mailbox-window transaction"), database);
-            database.rollback();
-            return error;
-        }
-        return std::nullopt;
+        return transaction.commit();
     }
 
     MailboxWindowResult MailboxWindowRepository::find(const std::string_view accountId,

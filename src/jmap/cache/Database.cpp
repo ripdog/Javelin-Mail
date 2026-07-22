@@ -1,9 +1,11 @@
 #include "jmap/cache/Database.h"
 
+#include <QMutex>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QThread>
 
+#include <algorithm>
 #include <cstdint>
 #include <span>
 #include <sstream>
@@ -93,7 +95,14 @@ namespace javelin::jmap::cache
             return query.value(0).toInt();
         }
 
-        [[nodiscard]] std::optional<DatabaseError> applyPragmas(QSqlDatabase& database)
+        [[nodiscard]] QMutex& serializedDatabaseWriteMutex()
+        {
+            static QMutex mutex;
+            return mutex;
+        }
+
+        [[nodiscard]] std::optional<DatabaseError>
+        applyPragmas(QSqlDatabase& database, const std::chrono::milliseconds busyTimeout)
         {
             const std::vector<std::pair<QString, QString>> pragmas{
                 {QStringLiteral("Enable foreign keys"), QStringLiteral("PRAGMA foreign_keys = ON")},
@@ -101,7 +110,8 @@ namespace javelin::jmap::cache
                 {QStringLiteral("Reduce fsync pressure"),
                  QStringLiteral("PRAGMA synchronous = NORMAL")},
                 {QStringLiteral("Configure busy timeout"),
-                 QStringLiteral("PRAGMA busy_timeout = 5000")},
+                 QStringLiteral("PRAGMA busy_timeout = %1")
+                     .arg(std::max<std::int64_t>(0, busyTimeout.count()))},
             };
 
             for (const auto& [operation, statement] : pragmas)
@@ -291,10 +301,10 @@ namespace javelin::jmap::cache
         {
             return *error;
         }
-        if (!connection.database().transaction())
+        QSqlQuery begin{connection.database()};
+        if (!begin.exec(QStringLiteral("BEGIN IMMEDIATE TRANSACTION")))
         {
-            return makeError(DatabaseErrorCode::QueryFailed, std::move(operation),
-                             connection.database());
+            return makeQueryError(DatabaseErrorCode::QueryFailed, std::move(operation), begin);
         }
         return DatabaseTransaction{connection};
     }
@@ -368,7 +378,7 @@ namespace javelin::jmap::cache
             return error;
         }
 
-        if (const auto pragmaError = applyPragmas(database))
+        if (const auto pragmaError = applyPragmas(database, options.busyTimeout))
         {
             discardConnection();
             return *pragmaError;
@@ -474,6 +484,16 @@ namespace javelin::jmap::cache
         QSqlDatabase::removeDatabase(connectionName);
     }
 
+    SerializedDatabaseWrite::SerializedDatabaseWrite()
+    {
+        serializedDatabaseWriteMutex().lock();
+    }
+
+    SerializedDatabaseWrite::~SerializedDatabaseWrite()
+    {
+        serializedDatabaseWriteMutex().unlock();
+    }
+
     ThreadConnectionFactory::ThreadConnectionFactory(ThreadConnectionFactoryOptions options)
         : m_options(std::move(options))
     {
@@ -490,6 +510,7 @@ namespace javelin::jmap::cache
         return DatabaseConnection::open({
             .connectionName = makeConnectionName(ownerTag),
             .databasePath = m_options.databasePath,
+            .busyTimeout = m_options.busyTimeout,
         });
     }
 

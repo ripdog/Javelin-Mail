@@ -74,6 +74,7 @@ namespace javelin::jmap
                                                     const std::string& emailId,
                                                     const std::string& blobId, QByteArray payload)
         {
+            const javelin::jmap::cache::SerializedDatabaseWrite writeGuard;
             javelin::jmap::cache::ThreadConnectionFactory factory({
                 .connectionNamePrefix = QStringLiteral("message-source-store"),
                 .databasePath = databasePath,

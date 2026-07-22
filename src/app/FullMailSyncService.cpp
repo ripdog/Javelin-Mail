@@ -88,6 +88,7 @@ namespace javelin::app
             std::vector<javelin::jmap::domain::Email> emails, std::string queryState,
             std::string emailState, const std::optional<std::size_t> total)
         {
+            const javelin::jmap::cache::SerializedDatabaseWrite writeGuard;
             javelin::jmap::cache::ThreadConnectionFactory factory({
                 .connectionNamePrefix = QStringLiteral("full-mail-page"),
                 .databasePath = databasePath,

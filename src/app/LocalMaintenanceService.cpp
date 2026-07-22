@@ -26,6 +26,7 @@ namespace javelin::app
 
         [[nodiscard]] MaintenanceResult performMaintenance(QString databasePath)
         {
+            const javelin::jmap::cache::SerializedDatabaseWrite writeGuard;
             auto opened = javelin::jmap::cache::DatabaseConnection::open({
                 .connectionName =
                     QStringLiteral("local-maintenance-%1")

@@ -10,7 +10,10 @@
 #include <QString>
 #include <QStringList>
 
+#include <atomic>
+#include <chrono>
 #include <memory>
+#include <thread>
 #include <variant>
 
 namespace
@@ -156,6 +159,8 @@ TEST_CASE("database connection creates the initial cache schema", "[jmap][cache]
           QStringLiteral("1"));
     CHECK(pragmaValue(connection.database(), QStringLiteral("journal_mode"))
               .compare(QStringLiteral("wal"), Qt::CaseInsensitive) == 0);
+    CHECK(pragmaValue(connection.database(), QStringLiteral("busy_timeout")) ==
+          QStringLiteral("5000"));
 }
 
 TEST_CASE("database migrations are repeatable when reopening an existing cache",
@@ -226,6 +231,8 @@ TEST_CASE("thread connection factory encodes owner tag and current thread in con
     }
 
     auto firstConnection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(firstOpen));
+    CHECK(pragmaValue(firstConnection.database(), QStringLiteral("busy_timeout")) ==
+          QStringLiteral("30000"));
     const QString expectedName =
         QStringLiteral("javelin-cache-gui-thread-%1")
             .arg(javelin::jmap::cache::ThreadConnectionFactory::currentThreadTag());
@@ -246,4 +253,33 @@ TEST_CASE("thread connection factory encodes owner tag and current thread in con
     CHECK(secondConnection.connectionName() == expectedName);
     CHECK(secondConnection.schemaVersion() ==
           javelin::jmap::cache::createDefaultMigrationRunner().latestVersion());
+}
+
+TEST_CASE("serialized database writes exclude concurrent worker commits", "[jmap][cache][database]")
+{
+    std::atomic_bool start = false;
+    std::atomic_int active = 0;
+    std::atomic_int maximum = 0;
+    const auto worker = [&]()
+    {
+        while (!start.load(std::memory_order_acquire))
+            std::this_thread::yield();
+        const javelin::jmap::cache::SerializedDatabaseWrite writeGuard;
+        const int current = active.fetch_add(1, std::memory_order_acq_rel) + 1;
+        int observed = maximum.load(std::memory_order_acquire);
+        while (current > observed &&
+               !maximum.compare_exchange_weak(observed, current, std::memory_order_acq_rel))
+        {
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds{25});
+        active.fetch_sub(1, std::memory_order_acq_rel);
+    };
+
+    std::thread first{worker};
+    std::thread second{worker};
+    start.store(true, std::memory_order_release);
+    first.join();
+    second.join();
+
+    CHECK(maximum.load(std::memory_order_acquire) == 1);
 }

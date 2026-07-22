@@ -74,6 +74,7 @@ namespace javelin::app
         commitIndexDocument(const QString& databasePath, const std::string& accountId,
                             javelin::jmap::cache::SearchIndexDocument document, QString preview)
         {
+            const javelin::jmap::cache::SerializedDatabaseWrite writeGuard;
             const std::string emailId = document.emailId;
             const std::string contentHash = document.sourceHash;
             javelin::jmap::cache::ThreadConnectionFactory factory({

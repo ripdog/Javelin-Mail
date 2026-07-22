@@ -4,6 +4,7 @@
 #include <QString>
 #include <Qt>
 
+#include <chrono>
 #include <optional>
 #include <span>
 #include <string_view>
@@ -57,12 +58,14 @@ namespace javelin::jmap::cache
     {
         QString connectionName;
         QString databasePath;
+        std::chrono::milliseconds busyTimeout = std::chrono::seconds{5};
     };
 
     struct ThreadConnectionFactoryOptions
     {
         QString connectionNamePrefix;
         QString databasePath;
+        std::chrono::milliseconds busyTimeout = std::chrono::seconds{30};
     };
 
     class DatabaseConnection
@@ -117,6 +120,17 @@ namespace javelin::jmap::cache
 
         DatabaseConnection* m_connection = nullptr;
         bool m_active = false;
+    };
+
+    class SerializedDatabaseWrite final
+    {
+      public:
+        SerializedDatabaseWrite();
+        SerializedDatabaseWrite(const SerializedDatabaseWrite&) = delete;
+        SerializedDatabaseWrite& operator=(const SerializedDatabaseWrite&) = delete;
+        SerializedDatabaseWrite(SerializedDatabaseWrite&&) = delete;
+        SerializedDatabaseWrite& operator=(SerializedDatabaseWrite&&) = delete;
+        ~SerializedDatabaseWrite();
     };
 
     class ThreadConnectionFactory
