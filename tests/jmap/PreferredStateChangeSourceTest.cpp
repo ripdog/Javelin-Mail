@@ -1,13 +1,12 @@
+#include "jmap/sync/PreferredStateChangeSource.h"
 #include "FixtureReader.h"
 #include "jmap/api/SessionParser.h"
-#include "jmap/cache/JmapTransportPreferenceRepository.h"
-#include "jmap/cache/SessionRepository.h"
-#include "jmap/sync/PreferredStateChangeSource.h"
 
 #include <QCoroTask>
+#include <QCoroTimer>
 
 #include <QCoreApplication>
-#include <QTemporaryDir>
+#include <QTimer>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -68,35 +67,38 @@ namespace
         }
     };
 
-    [[nodiscard]] QString makeConnectionName()
+    class CancellableWaitingSource final : public javelin::jmap::sync::StateChangeSource
     {
-        static int counter = 0;
-        ++counter;
-        return QStringLiteral("javelin-preferred-state-source-%1").arg(counter);
-    }
+      public:
+        std::size_t calls = 0;
 
-    struct TestDatabaseContext
-    {
-        QTemporaryDir temporaryDir;
-        javelin::jmap::cache::DatabaseConnection connection;
-    };
-
-    [[nodiscard]] TestDatabaseContext makeDatabaseContext()
-    {
-        TestDatabaseContext context;
-        REQUIRE(context.temporaryDir.isValid());
-        auto opened = javelin::jmap::cache::DatabaseConnection::open({
-            .connectionName = makeConnectionName(),
-            .databasePath = context.temporaryDir.filePath(QStringLiteral("cache.sqlite3")),
-        });
-        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&opened))
+        void cancel() override
         {
-            FAIL(error->message.toStdString());
+            if (m_timer != nullptr)
+                m_timer->start(std::chrono::milliseconds{0});
         }
-        context.connection =
-            std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
-        return context;
-    }
+
+        [[nodiscard]] QCoro::Task<javelin::jmap::sync::StateChangeSourceResult>
+        consume(javelin::jmap::sync::StateChangeSubscription,
+                javelin::jmap::sync::StateChangeConsumer&,
+                javelin::jmap::sync::StateChangeCancellation&) override
+        {
+            ++calls;
+            QTimer timer;
+            timer.setSingleShot(true);
+            timer.start(std::chrono::hours{1});
+            m_timer = &timer;
+            co_await qCoro(timer).waitForTimeout();
+            m_timer = nullptr;
+            co_return javelin::jmap::api::TransportError{
+                .code = javelin::jmap::api::TransportErrorCode::Cancelled,
+                .message = "cancelled",
+            };
+        }
+
+      private:
+        QTimer* m_timer = nullptr;
+    };
 
     [[nodiscard]] javelin::jmap::api::Session websocketSession()
     {
@@ -124,21 +126,10 @@ namespace
     }
 } // namespace
 
-TEST_CASE("preferred state changes honor remembered HTTP fallback",
-          "[jmap][sync][websocket]")
+TEST_CASE("a new preferred state-change source attempts websocket", "[jmap][sync][websocket]")
 {
     ensureApplication();
-    auto database = makeDatabaseContext();
     const auto session = websocketSession();
-    javelin::jmap::cache::SessionRepository sessions{database.connection};
-    REQUIRE_FALSE(sessions.replace("u1", session).has_value());
-
-    javelin::jmap::cache::JmapTransportPreferenceRepository preferences{database.connection};
-    REQUIRE_FALSE(preferences
-                      .markHttpFallback("u1", session.capabilities.websocket->url,
-                                        QDateTime::currentDateTimeUtc().addDays(1),
-                                        QStringLiteral("previous failure"))
-                      .has_value());
 
     auto websocket = std::make_unique<FakeSource>(javelin::jmap::sync::StateChangeStreamSummary{});
     auto* websocketPointer = websocket.get();
@@ -147,29 +138,25 @@ TEST_CASE("preferred state changes honor remembered HTTP fallback",
         .updateCount = 1,
     });
     auto* fallbackPointer = fallback.get();
+    javelin::jmap::api::WebSocketFailureCooldowns cooldowns;
     javelin::jmap::sync::PreferredStateChangeSource source{
-        database.connection, "u1", session.capabilities.websocket->url, std::move(websocket),
-        std::move(fallback)};
+        cooldowns, session.capabilities.websocket->url, std::move(websocket), std::move(fallback)};
     FakeConsumer consumer;
     javelin::jmap::sync::StateChangeCancellation cancellation;
 
     const auto result = QCoro::waitFor(source.consume(subscription(), consumer, cancellation));
 
     REQUIRE(std::holds_alternative<javelin::jmap::sync::StateChangeStreamSummary>(result));
-    CHECK(websocketPointer->calls == 0);
-    CHECK(fallbackPointer->calls == 1);
+    CHECK(websocketPointer->calls == 1);
+    CHECK(fallbackPointer->calls == 0);
 }
 
-TEST_CASE("preferred state changes persist owner fallback after websocket failure",
+TEST_CASE("preferred state changes remember websocket failure only in the current process",
           "[jmap][sync][websocket]")
 {
     ensureApplication();
-    auto database = makeDatabaseContext();
-    auto session = websocketSession();
-    session.accounts.emplace("u2", session.accounts.at("u1"));
-    session.accounts.at("u2").name = "Shared";
-    javelin::jmap::cache::SessionRepository sessions{database.connection};
-    REQUIRE_FALSE(sessions.replace("u1", session).has_value());
+    const auto session = websocketSession();
+    javelin::jmap::api::WebSocketFailureCooldowns cooldowns;
 
     auto websocket = std::make_unique<FakeSource>(javelin::jmap::api::TransportError{
         .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
@@ -183,26 +170,66 @@ TEST_CASE("preferred state changes persist owner fallback after websocket failur
     });
     auto* fallbackPointer = fallback.get();
     javelin::jmap::sync::PreferredStateChangeSource source{
-        database.connection, "u2", session.capabilities.websocket->url, std::move(websocket),
-        std::move(fallback)};
+        cooldowns, session.capabilities.websocket->url, std::move(websocket), std::move(fallback)};
     FakeConsumer consumer;
     javelin::jmap::sync::StateChangeCancellation cancellation;
 
-    const auto result =
-        QCoro::waitFor(source.consume(subscription("u2"), consumer, cancellation));
+    const auto result = QCoro::waitFor(source.consume(subscription(), consumer, cancellation));
 
     REQUIRE(std::holds_alternative<javelin::jmap::sync::StateChangeStreamSummary>(result));
     CHECK(websocketPointer->calls == 1);
     CHECK(fallbackPointer->calls == 1);
+    const auto retryDelay = cooldowns.retryDelay(session.capabilities.websocket->url);
+    REQUIRE(retryDelay.has_value());
+    CHECK(*retryDelay >= std::chrono::minutes{14});
+    CHECK(*retryDelay <= std::chrono::minutes{15});
 
-    javelin::jmap::cache::JmapTransportPreferenceRepository preferences{database.connection};
-    const auto resolved = preferences.resolve("u2");
-    REQUIRE(std::holds_alternative<
-            std::optional<javelin::jmap::cache::JmapTransportTarget>>(resolved));
-    const auto& target =
-        *std::get<std::optional<javelin::jmap::cache::JmapTransportTarget>>(resolved);
-    CHECK(target.ownerAccountId == "u1");
-    CHECK(target.mode == javelin::jmap::cache::JmapTransportMode::HttpFallback);
-    REQUIRE(target.lastError.has_value());
-    CHECK(*target.lastError == QStringLiteral("handshake failed"));
+    auto suppressedWebSocket =
+        std::make_unique<FakeSource>(javelin::jmap::sync::StateChangeStreamSummary{});
+    auto* suppressedWebSocketPointer = suppressedWebSocket.get();
+    auto suppressedFallback =
+        std::make_unique<FakeSource>(javelin::jmap::sync::StateChangeStreamSummary{});
+    auto* suppressedFallbackPointer = suppressedFallback.get();
+    javelin::jmap::sync::PreferredStateChangeSource suppressed{
+        cooldowns, session.capabilities.websocket->url, std::move(suppressedWebSocket),
+        std::move(suppressedFallback)};
+    static_cast<void>(QCoro::waitFor(suppressed.consume(subscription(), consumer, cancellation)));
+    CHECK(suppressedWebSocketPointer->calls == 0);
+    CHECK(suppressedFallbackPointer->calls == 1);
+
+    javelin::jmap::api::WebSocketFailureCooldowns nextProcessCooldowns;
+    auto nextProcessWebSocket =
+        std::make_unique<FakeSource>(javelin::jmap::sync::StateChangeStreamSummary{});
+    auto* nextProcessWebSocketPointer = nextProcessWebSocket.get();
+    auto nextProcessFallback =
+        std::make_unique<FakeSource>(javelin::jmap::sync::StateChangeStreamSummary{});
+    javelin::jmap::sync::PreferredStateChangeSource nextProcess{
+        nextProcessCooldowns, session.capabilities.websocket->url, std::move(nextProcessWebSocket),
+        std::move(nextProcessFallback)};
+    static_cast<void>(QCoro::waitFor(nextProcess.consume(subscription(), consumer, cancellation)));
+    CHECK(nextProcessWebSocketPointer->calls == 1);
+}
+
+TEST_CASE("preferred state changes retry websocket when the fallback cooldown expires",
+          "[jmap][sync][websocket]")
+{
+    ensureApplication();
+    const auto session = websocketSession();
+    javelin::jmap::api::WebSocketFailureCooldowns cooldowns{std::chrono::milliseconds{20}};
+    cooldowns.recordFailure(session.capabilities.websocket->url);
+
+    auto websocket = std::make_unique<FakeSource>(javelin::jmap::sync::StateChangeStreamSummary{});
+    auto* websocketPointer = websocket.get();
+    auto fallback = std::make_unique<CancellableWaitingSource>();
+    auto* fallbackPointer = fallback.get();
+    javelin::jmap::sync::PreferredStateChangeSource source{
+        cooldowns, session.capabilities.websocket->url, std::move(websocket), std::move(fallback)};
+    FakeConsumer consumer;
+    javelin::jmap::sync::StateChangeCancellation cancellation;
+
+    const auto result = QCoro::waitFor(source.consume(subscription(), consumer, cancellation));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::StateChangeStreamSummary>(result));
+    CHECK(fallbackPointer->calls == 1);
+    CHECK(websocketPointer->calls == 1);
 }

@@ -1,6 +1,6 @@
+#include "jmap/cache/JmapTransportPreferenceRepository.h"
 #include "FixtureReader.h"
 #include "jmap/api/SessionParser.h"
-#include "jmap/cache/JmapTransportPreferenceRepository.h"
 #include "jmap/cache/SessionRepository.h"
 
 #include <QCoreApplication>
@@ -58,8 +58,7 @@ namespace
         {
             FAIL(error->message.toStdString());
         }
-        context.connection =
-            std::get<javelin::jmap::cache::DatabaseConnection>(std::move(result));
+        context.connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(result));
         return context;
     }
 
@@ -79,60 +78,8 @@ namespace
     }
 } // namespace
 
-TEST_CASE("transport preferences remember HTTP fallback for an advertised websocket",
+TEST_CASE("transport endpoint resolves the currently advertised websocket",
           "[jmap][cache][transport]")
-{
-    ApplicationGuard application;
-    Q_UNUSED(application);
-
-    auto databaseContext = makeDatabaseContext();
-    javelin::jmap::cache::SessionRepository sessions{databaseContext.connection};
-    auto session = websocketSession();
-    REQUIRE_FALSE(sessions.replace("u1", session).has_value());
-
-    javelin::jmap::cache::JmapTransportPreferenceRepository preferences{
-        databaseContext.connection};
-    auto resolved = preferences.resolve("u1");
-    REQUIRE(std::holds_alternative<
-            std::optional<javelin::jmap::cache::JmapTransportTarget>>(resolved));
-    REQUIRE(std::get<std::optional<javelin::jmap::cache::JmapTransportTarget>>(resolved)
-                .has_value());
-    auto target = *std::get<std::optional<javelin::jmap::cache::JmapTransportTarget>>(resolved);
-    CHECK(target.mode == javelin::jmap::cache::JmapTransportMode::Unknown);
-    CHECK(target.shouldAttemptWebSocket(QDateTime::currentDateTimeUtc()));
-
-    const auto now = QDateTime::currentDateTimeUtc();
-    const auto retryAfter = now.addSecs(3600);
-    REQUIRE_FALSE(preferences
-                      .markHttpFallback("u1", target.webSocketUrl, retryAfter,
-                                        QStringLiteral("handshake failed"))
-                      .has_value());
-
-    resolved = preferences.resolve("u1");
-    REQUIRE(std::holds_alternative<
-            std::optional<javelin::jmap::cache::JmapTransportTarget>>(resolved));
-    target = *std::get<std::optional<javelin::jmap::cache::JmapTransportTarget>>(resolved);
-    CHECK(target.mode == javelin::jmap::cache::JmapTransportMode::HttpFallback);
-    REQUIRE(target.retryAfter.has_value());
-    CHECK_FALSE(target.shouldAttemptWebSocket(now));
-    CHECK(target.shouldAttemptWebSocket(retryAfter.addMSecs(1)));
-    REQUIRE(target.lastError.has_value());
-    CHECK(*target.lastError == QStringLiteral("handshake failed"));
-
-    REQUIRE_FALSE(sessions.replace("u1", session).has_value());
-    resolved = preferences.resolve("u1");
-    target = *std::get<std::optional<javelin::jmap::cache::JmapTransportTarget>>(resolved);
-    CHECK(target.mode == javelin::jmap::cache::JmapTransportMode::HttpFallback);
-
-    session.capabilities.websocket->url = "wss://mail.example.com/jmap/ws-v2";
-    REQUIRE_FALSE(sessions.replace("u1", session).has_value());
-    resolved = preferences.resolve("u1");
-    target = *std::get<std::optional<javelin::jmap::cache::JmapTransportTarget>>(resolved);
-    CHECK(target.mode == javelin::jmap::cache::JmapTransportMode::Unknown);
-    CHECK(target.webSocketUrl == "wss://mail.example.com/jmap/ws-v2");
-}
-
-TEST_CASE("transport preferences record a working websocket", "[jmap][cache][transport]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
@@ -142,18 +89,14 @@ TEST_CASE("transport preferences record a working websocket", "[jmap][cache][tra
     const auto session = websocketSession();
     REQUIRE_FALSE(sessions.replace("u1", session).has_value());
 
-    javelin::jmap::cache::JmapTransportPreferenceRepository preferences{
-        databaseContext.connection};
-    REQUIRE_FALSE(
-        preferences.markWebSocketAvailable("u1", session.capabilities.websocket->url).has_value());
-
+    javelin::jmap::cache::JmapTransportPreferenceRepository preferences{databaseContext.connection};
     const auto resolved = preferences.resolve("u1");
-    REQUIRE(std::holds_alternative<
-            std::optional<javelin::jmap::cache::JmapTransportTarget>>(resolved));
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::cache::JmapTransportTarget>>(resolved));
+    REQUIRE(
+        std::get<std::optional<javelin::jmap::cache::JmapTransportTarget>>(resolved).has_value());
     const auto& target =
         *std::get<std::optional<javelin::jmap::cache::JmapTransportTarget>>(resolved);
-    CHECK(target.mode == javelin::jmap::cache::JmapTransportMode::WebSocket);
-    CHECK(target.shouldAttemptWebSocket(QDateTime::currentDateTimeUtc()));
-    CHECK_FALSE(target.retryAfter.has_value());
-    CHECK_FALSE(target.lastError.has_value());
+    CHECK(target.ownerAccountId == "u1");
+    CHECK(target.webSocketUrl == session.capabilities.websocket->url);
 }

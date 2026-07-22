@@ -19,6 +19,10 @@ namespace javelin::jmap::contacts
 
 namespace javelin::app
 {
+    class WorkScheduler;
+    class FullMailSyncService;
+    class MailIndexService;
+    class LocalMaintenanceService;
     class ApplicationErrorCoordinator;
     class ComposeService;
     class CalendarNotificationService;
@@ -32,6 +36,7 @@ namespace javelin::jmap::api
     class HttpJmapMethodTransport;
     class PreferredJmapMethodTransport;
     class QtNetworkTransport;
+    class WebSocketFailureCooldowns;
 } // namespace javelin::jmap::api
 
 namespace javelin::jmap::cache
@@ -90,12 +95,17 @@ namespace javelin::app
         [[nodiscard]] MessageNavigationCoordinator& messageNavigationCoordinator();
         [[nodiscard]] ApplicationErrorCoordinator& errorCoordinator();
         [[nodiscard]] CalendarNotificationService& calendarNotificationService();
+        [[nodiscard]] WorkScheduler& workScheduler();
+        [[nodiscard]] LocalMaintenanceService& localMaintenanceService();
+        [[nodiscard]] FullMailSyncService& fullMailSyncService();
+        [[nodiscard]] MailIndexService& mailIndexService();
 
       private:
         std::unique_ptr<javelin::jmap::JmapCore> m_jmapCore;
         javelin::jmap::cache::DatabaseConnection m_databaseConnection;
         std::unique_ptr<QNetworkAccessManager> m_networkAccessManager;
         std::unique_ptr<QNetworkAccessManager> m_stateChangeNetworkAccessManager;
+        std::unique_ptr<javelin::jmap::api::WebSocketFailureCooldowns> m_webSocketFailureCooldowns;
         std::unique_ptr<javelin::jmap::api::QtNetworkTransport> m_transport;
         std::unique_ptr<javelin::jmap::api::HttpJmapMethodTransport> m_httpMethodTransport;
         std::unique_ptr<javelin::jmap::api::PreferredJmapMethodTransport> m_methodTransport;
@@ -118,6 +128,10 @@ namespace javelin::app
         std::unique_ptr<MailApplicationService> m_mailService;
         std::unique_ptr<MessageNavigationCoordinator> m_messageNavigationCoordinator;
         std::unique_ptr<CalendarNotificationService> m_calendarNotificationService;
+        std::unique_ptr<WorkScheduler> m_workScheduler;
+        std::unique_ptr<FullMailSyncService> m_fullMailSyncService;
+        std::unique_ptr<MailIndexService> m_mailIndexService;
+        std::unique_ptr<LocalMaintenanceService> m_localMaintenanceService;
     };
 
 } // namespace javelin::app

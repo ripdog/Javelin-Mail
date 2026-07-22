@@ -280,6 +280,72 @@ TEST_CASE("JmapCore reports missing message source downloads distinctly",
     CHECK(unavailable.message.contains(QStringLiteral("HTTP 404")));
 }
 
+TEST_CASE("JmapCore full mailbox pages do not request unsafe server previews",
+          "[jmap][core][offline]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    javelin::jmap::cache::SessionRepository sessions{databaseContext.connection};
+    REQUIRE_FALSE(sessions.replace("u1", loadSessionFixture()).has_value());
+
+    FakeTransport transport;
+    transport.responseFactory = [](const javelin::jmap::api::HttpRequest& request)
+    {
+        const auto envelope = javelin::jmap::api::parseRequestEnvelope(request.body.toStdString());
+        REQUIRE(envelope.ok());
+        REQUIRE(envelope.value.has_value());
+        REQUIRE(envelope.value->methodCalls.size() == 2);
+        const QString getArguments =
+            QString::fromStdString(envelope.value->methodCalls[1].arguments);
+        CHECK(getArguments.contains(QStringLiteral("\"subject\"")));
+        CHECK(getArguments.contains(QStringLiteral("\"from\"")));
+        CHECK_FALSE(getArguments.contains(QStringLiteral("\"preview\"")));
+
+        javelin::jmap::api::ResponseEnvelope response{
+            .methodResponses =
+                {
+                    javelin::jmap::api::MethodInvocation{
+                        .name = "Email/query",
+                        .arguments =
+                            R"({"accountId":"u1","queryState":"query-1","canCalculateChanges":true,"position":0,"ids":["eml-1"],"total":1})",
+                        .callId = envelope.value->methodCalls[0].callId,
+                    },
+                    javelin::jmap::api::MethodInvocation{
+                        .name = "Email/get",
+                        .arguments =
+                            R"({"accountId":"u1","state":"email-1","list":[{"id":"eml-1","blobId":"blob-1","threadId":"thr-1","mailboxIds":{"mbx-inbox":true},"keywords":{},"size":42,"receivedAt":"2026-07-21T01:00:00Z","hasAttachment":false,"subject":"Cached safely","from":[{"email":"alice@example.com"}],"to":[],"cc":[],"bcc":[],"replyTo":[]}],"notFound":[]})",
+                        .callId = envelope.value->methodCalls[1].callId,
+                    },
+                },
+            .createdIds = std::unordered_map<std::string, std::string>{},
+            .sessionState = "session-2",
+        };
+        const auto body = javelin::jmap::api::serializeResponseEnvelope(response);
+        REQUIRE(body.has_value());
+        return javelin::jmap::api::TransportResult{javelin::jmap::api::HttpResponse{
+            .statusCode = 200,
+            .body = QByteArray::fromStdString(*body),
+        }};
+    };
+
+    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
+    const auto result = QCoro::waitFor(core.materializeFullMailboxPage(
+        {
+            .sessionUrl = "https://mail.example.com/.well-known/jmap",
+            .loginEmail = "alice@example.com",
+            .apiKey = "access-token",
+        },
+        "u1", "mbx-inbox", 0, 250, std::nullopt));
+    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+        FAIL(error->message.toStdString());
+    const auto& page = std::get<javelin::jmap::FullMailboxPage>(result);
+    REQUIRE(page.emails.size() == 1);
+    CHECK(page.emails.front().subject == std::optional<std::string>{"Cached safely"});
+    CHECK_FALSE(page.emails.front().preview.has_value());
+}
+
 TEST_CASE("JmapCore caches message content from junk and trash mailboxes",
           "[jmap][core][message-content]")
 {

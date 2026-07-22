@@ -1,6 +1,7 @@
 #include "jmap/cache/Database.h"
 
 #include <QCoreApplication>
+#include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QTemporaryDir>
 
@@ -81,7 +82,7 @@ TEST_CASE("database connection creates the initial cache schema", "[jmap][cache]
         migrationsResult));
     const auto& migrations =
         std::get<std::vector<javelin::jmap::cache::AppliedMigration>>(migrationsResult);
-    REQUIRE(migrations.size() == 26);
+    REQUIRE(migrations.size() == 28);
     CHECK(migrations.front().version == 1);
     CHECK(migrations.front().name == QStringLiteral("initial_cache_schema"));
     CHECK(migrations.at(1).version == 2);
@@ -104,8 +105,8 @@ TEST_CASE("database connection creates the initial cache schema", "[jmap][cache]
     CHECK(migrations.at(10).name == QStringLiteral("websocket_push_capability"));
     CHECK(migrations.at(11).version == 14);
     CHECK(migrations.at(11).name == QStringLiteral("search_windows"));
-    CHECK(migrations.back().version == 28);
-    CHECK(migrations.back().name == QStringLiteral("mail_notification_outbox"));
+    CHECK(migrations.back().version == 30);
+    CHECK(migrations.back().name == QStringLiteral("external_rebuildable_mail_search"));
 
     QSqlQuery tableQuery{connection.database()};
     REQUIRE(tableQuery.exec(
@@ -113,7 +114,8 @@ TEST_CASE("database connection creates the initial cache schema", "[jmap][cache]
                        "('accounts', 'compose_sessions', 'mailboxes', "
                        "'emails', 'jmap_transport_preferences', 'observed_notification_emails', "
                        "'mail_notification_outbox', "
-                       "'raw_message_sources', 'email_search_fts', "
+                       "'raw_message_sources', 'mail_vault_objects', 'mail_vault_email_refs', "
+                       "'offline_mailbox_scopes', 'background_jobs', "
                        "'schema_migrations', 'translation_cache', 'search_windows', "
                        "'search_window_items', 'mailbox_query_windows', "
                        "'mailbox_query_window_items', 'sync_state', 'consistency_domains', "
@@ -128,19 +130,22 @@ TEST_CASE("database connection creates the initial cache schema", "[jmap][cache]
     }
 
     CHECK(tableNames == QStringList{QStringLiteral("accounts"),
+                                    QStringLiteral("background_jobs"),
                                     QStringLiteral("calendar_default_alerts"),
                                     QStringLiteral("calendar_notification_state"),
                                     QStringLiteral("compose_sessions"),
                                     QStringLiteral("consistency_domains"),
-                                    QStringLiteral("email_search_fts"),
                                     QStringLiteral("emails"),
                                     QStringLiteral("jmap_transport_preferences"),
                                     QStringLiteral("mail_notification_outbox"),
+                                    QStringLiteral("mail_vault_email_refs"),
+                                    QStringLiteral("mail_vault_objects"),
                                     QStringLiteral("mailbox_query_window_items"),
                                     QStringLiteral("mailbox_query_windows"),
                                     QStringLiteral("mailboxes"),
                                     QStringLiteral("mutation_journal"),
                                     QStringLiteral("observed_notification_emails"),
+                                    QStringLiteral("offline_mailbox_scopes"),
                                     QStringLiteral("raw_message_sources"),
                                     QStringLiteral("schema_migrations"),
                                     QStringLiteral("search_window_items"),
@@ -189,13 +194,13 @@ TEST_CASE("database migrations are repeatable when reopening an existing cache",
         migrationsResult));
     const auto& migrations =
         std::get<std::vector<javelin::jmap::cache::AppliedMigration>>(migrationsResult);
-    REQUIRE(migrations.size() == 26);
+    REQUIRE(migrations.size() == 28);
     CHECK(migrations.front().version == 1);
     CHECK(migrations.at(1).version == 2);
     CHECK(migrations.at(2).version == 3);
     CHECK(migrations.at(6).version == 9);
-    CHECK(migrations.back().version == 28);
-    CHECK(connection.schemaVersion() == 28);
+    CHECK(migrations.back().version == 30);
+    CHECK(connection.schemaVersion() == 30);
 }
 
 TEST_CASE("thread connection factory encodes owner tag and current thread in connection names",
@@ -225,8 +230,10 @@ TEST_CASE("thread connection factory encodes owner tag and current thread in con
         QStringLiteral("javelin-cache-gui-thread-%1")
             .arg(javelin::jmap::cache::ThreadConnectionFactory::currentThreadTag());
     CHECK(firstConnection.connectionName() == expectedName);
+    CHECK(QSqlDatabase::contains(expectedName));
 
     firstConnection = {};
+    CHECK_FALSE(QSqlDatabase::contains(expectedName));
 
     auto secondOpen = factory.openForCurrentThread("gui");
     if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&secondOpen))

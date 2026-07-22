@@ -1,6 +1,7 @@
 #include "jmap/cache/QueryService.h"
 #include "FixtureReader.h"
 #include "jmap/cache/EmailRepository.h"
+#include "jmap/cache/MailSearchIndex.h"
 #include "jmap/cache/MailboxRepository.h"
 #include "jmap/cache/MailboxWindowRepository.h"
 #include "jmap/cache/RawMessageSourceRepository.h"
@@ -247,6 +248,80 @@ TEST_CASE("query service returns paged compact message list rows", "[jmap][cache
     CHECK(subjectItems[1].emailId == "eml-2");
 }
 
+TEST_CASE("offline mailbox coverage exposes only the published crawl generation and projections",
+          "[jmap][cache][query][offline]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+
+    auto newest = loadEmailFixture();
+    newest.id = "staged-newest";
+    newest.threadId = "thread-newest";
+    newest.receivedAt = "2026-07-21T03:00:00Z";
+    auto staged = newest;
+    staged.id = "staged-second";
+    staged.threadId = "thread-second";
+    staged.receivedAt = "2026-07-21T02:00:00Z";
+    auto projected = newest;
+    projected.id = "projected-addition";
+    projected.threadId = "thread-projected";
+    projected.receivedAt = "2026-07-21T01:30:00Z";
+    auto stale = newest;
+    stale.id = "old-window-only";
+    stale.threadId = "thread-stale";
+    stale.receivedAt = "2026-07-21T01:00:00Z";
+
+    javelin::jmap::cache::EmailRepository emails{databaseContext.connection};
+    REQUIRE_FALSE(emails.replaceAll("account-1", {newest, staged, projected, stale}).has_value());
+
+    QSqlQuery setup{databaseContext.connection.database()};
+    REQUIRE(setup.exec(QStringLiteral(
+        "INSERT INTO offline_mailbox_scopes(account_id,mailbox_id,desired,status,generation) "
+        "VALUES('account-1','mbx-inbox',1,'enumerating',7)")));
+    REQUIRE(setup.exec(QStringLiteral(
+        "INSERT INTO offline_mailbox_membership(account_id,mailbox_id,email_id,generation,"
+        "position) VALUES('account-1','mbx-inbox','staged-newest',7,0),"
+        "('account-1','mbx-inbox','staged-second',7,1)")));
+    REQUIRE(setup.exec(QStringLiteral(
+        "INSERT INTO mutation_journal(mutation_id,account_id,data_type,object_id,mutation_kind,"
+        "status,payload_json) VALUES('mutation-1','account-1','Email','projected-addition',"
+        "'email_patch','pending','{}')")));
+
+    javelin::jmap::cache::QueryService queries{databaseContext.connection};
+    const auto coverageResult = queries.offlineMailboxCoverage("account-1", "mbx-inbox");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::OfflineMailboxCoverage>>(
+        coverageResult));
+    const auto& coverage =
+        std::get<std::optional<javelin::jmap::cache::OfflineMailboxCoverage>>(coverageResult);
+    REQUIRE(coverage.has_value());
+    CHECK(coverage->generation == 7);
+    CHECK(coverage->representativeCount == 3);
+    CHECK_FALSE(coverage->enumerationComplete);
+
+    const auto pageResult = queries.listOfflineMailboxMessages("account-1", "mbx-inbox", 7, 10);
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MessageListItem>>(pageResult));
+    const auto& page = std::get<std::vector<javelin::jmap::cache::MessageListItem>>(pageResult);
+    REQUIRE(page.size() == 3);
+    CHECK(page[0].emailId == "staged-newest");
+    CHECK(page[1].emailId == "staged-second");
+    CHECK(page[2].emailId == "projected-addition");
+    CHECK(std::ranges::none_of(page,
+                               [](const auto& item) { return item.emailId == "old-window-only"; }));
+
+    REQUIRE(setup.exec(QStringLiteral(
+        "UPDATE offline_mailbox_scopes SET status='fetching' WHERE account_id='account-1' "
+        "AND mailbox_id='mbx-inbox'")));
+    const auto completeCoverageResult = queries.offlineMailboxCoverage("account-1", "mbx-inbox");
+    const auto& completeCoverage =
+        std::get<std::optional<javelin::jmap::cache::OfflineMailboxCoverage>>(
+            completeCoverageResult);
+    REQUIRE(completeCoverage.has_value());
+    CHECK(completeCoverage->enumerationComplete);
+}
+
 TEST_CASE("query service full text search covers cached subjects and bodies",
           "[jmap][cache][query][search]")
 {
@@ -276,6 +351,23 @@ TEST_CASE("query service full text search covers cached subjects and bodies",
                                       "From: alice@example.com\r\nSubject: Ordinary update\r\n"
                                       "Content-Type: text/plain; charset=utf-8\r\n\r\n"
                                       "The telescope found a rare albatross.\r\n")})
+            .has_value());
+    javelin::jmap::cache::MailSearchIndex searchIndex{databaseContext.connection};
+    const auto subjectIndexError =
+        searchIndex.upsert("account-1", {.emailId = subjectMatch.id,
+                                         .sourceHash = "subject-metadata-v1",
+                                         .subject = QStringLiteral("A rare albatross sighting"),
+                                         .body = {}});
+    const std::string subjectIndexMessage =
+        subjectIndexError ? subjectIndexError->message.toStdString() : std::string{};
+    INFO(subjectIndexMessage);
+    REQUIRE_FALSE(subjectIndexError.has_value());
+    REQUIRE_FALSE(
+        searchIndex
+            .upsert("account-1", {.emailId = bodyMatch.id,
+                                  .sourceHash = "body-source-v1",
+                                  .subject = QStringLiteral("Ordinary update"),
+                                  .body = QStringLiteral("The telescope found a rare albatross.")})
             .has_value());
 
     javelin::jmap::cache::QueryService queryService{databaseContext.connection};
@@ -567,6 +659,146 @@ TEST_CASE("query service distinguishes a stale mailbox window from an empty page
     CHECK((*empty)->total == std::optional<std::size_t>{0});
 }
 
+TEST_CASE("mailbox query changes rebase every contiguous cached page",
+          "[jmap][cache][query][pagination]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    const std::string queryKey = "mailbox:mbx-inbox|sort:receivedAt:desc|collapseThreads:true";
+    javelin::jmap::cache::MailboxWindowRepository windows{databaseContext.connection};
+    for (const auto& [offset, ids] : std::vector<std::pair<std::size_t, std::vector<std::string>>>{
+             {0, {"a", "b"}}, {2, {"c", "d"}}})
+    {
+        REQUIRE_FALSE(windows
+                          .replace({
+                              .accountId = "account-1",
+                              .mailboxId = "mbx-inbox",
+                              .queryKey = queryKey,
+                              .requestedOffset = offset,
+                              .requestedLimit = 2,
+                              .position = offset,
+                              .returnedLimit = 2,
+                              .total = 100,
+                              .queryState = "state-1",
+                              .emailIds = ids,
+                          })
+                          .has_value());
+    }
+
+    auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+        databaseContext.connection, QStringLiteral("Test mailbox prefix rebase"));
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(transactionResult));
+    auto transaction =
+        std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
+    REQUIRE_FALSE(windows
+                      .rebaseContiguousPrefix(transaction, "account-1", "mbx-inbox", queryKey,
+                                              "state-1", "state-2", {{.emailId = "x", .index = 1}},
+                                              {"b"}, 100)
+                      .has_value());
+    REQUIRE_FALSE(transaction.commit().has_value());
+
+    const auto firstResult = windows.find("account-1", queryKey, 0, 2);
+    const auto secondResult = windows.find("account-1", queryKey, 2, 2);
+    const auto& first =
+        std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(firstResult);
+    const auto& second =
+        std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(secondResult);
+    REQUIRE(first.has_value());
+    REQUIRE(second.has_value());
+    CHECK(first->queryState == "state-2");
+    CHECK(second->queryState == "state-2");
+    CHECK(first->emailIds == std::vector<std::string>{"a", "x"});
+    CHECK(second->emailIds == std::vector<std::string>{"c", "d"});
+    CHECK(first->total == std::optional<std::size_t>{100});
+
+    auto secondTransactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+        databaseContext.connection, QStringLiteral("Test mailbox prefix removal"));
+    REQUIRE(
+        std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(secondTransactionResult));
+    auto secondTransaction =
+        std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(secondTransactionResult));
+    REQUIRE_FALSE(windows
+                      .rebaseContiguousPrefix(secondTransaction, "account-1", "mbx-inbox", queryKey,
+                                              "state-2", "state-3", {}, {"x"}, 99)
+                      .has_value());
+    REQUIRE_FALSE(secondTransaction.commit().has_value());
+
+    const auto shiftedFirstResult = windows.find("account-1", queryKey, 0, 2);
+    const auto shiftedSecondResult = windows.find("account-1", queryKey, 2, 2);
+    const auto& shiftedFirst =
+        std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(shiftedFirstResult);
+    const auto& shiftedSecond =
+        std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(shiftedSecondResult);
+    REQUIRE(shiftedFirst.has_value());
+    REQUIRE(shiftedSecond.has_value());
+    CHECK(shiftedFirst->isAuthoritative);
+    CHECK(shiftedFirst->emailIds == std::vector<std::string>{"a", "c"});
+    CHECK_FALSE(shiftedSecond->isAuthoritative);
+    CHECK(shiftedSecond->emailIds == std::vector<std::string>{"d"});
+}
+
+TEST_CASE("offline mailboxes retain every materialized query window",
+          "[jmap][cache][query][pagination]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    QSqlQuery scope{databaseContext.connection.database()};
+    REQUIRE(scope.exec(QStringLiteral(
+        "INSERT INTO offline_mailbox_scopes(account_id,mailbox_id,desired,status,generation) "
+        "VALUES('account-1','mbx-inbox',1,'enumerating',1)")));
+    const std::string queryKey = "mailbox:mbx-inbox|sort:receivedAt:desc|collapseThreads:true";
+    javelin::jmap::cache::MailboxWindowRepository windows{databaseContext.connection};
+    for (std::size_t page = 0; page < 13; ++page)
+    {
+        REQUIRE_FALSE(windows
+                          .replace({
+                              .accountId = "account-1",
+                              .mailboxId = "mbx-inbox",
+                              .queryKey = queryKey,
+                              .requestedOffset = page * 100,
+                              .requestedLimit = 100,
+                              .position = page * 100,
+                              .returnedLimit = 100,
+                              .total = std::nullopt,
+                              .queryState = "state-1",
+                              .emailIds = {"id-" + std::to_string(page)},
+                          })
+                          .has_value());
+    }
+    const auto firstResult = windows.find("account-1", queryKey, 0, 100);
+    const auto& first =
+        std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(firstResult);
+    REQUIRE(first.has_value());
+    CHECK(first->emailIds == std::vector<std::string>{"id-0"});
+
+    REQUIRE_FALSE(windows
+                      .replace({
+                          .accountId = "account-1",
+                          .mailboxId = "mbx-inbox",
+                          .queryKey = queryKey,
+                          .requestedOffset = 0,
+                          .requestedLimit = 100,
+                          .position = 0,
+                          .returnedLimit = 100,
+                          .total = std::nullopt,
+                          .queryState = "state-2",
+                          .emailIds = {"new-id"},
+                      })
+                      .has_value());
+    const auto deepResult = windows.find("account-1", queryKey, 1200, 100);
+    const auto& deep =
+        std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(deepResult);
+    REQUIRE(deep.has_value());
+    CHECK_FALSE(deep->isAuthoritative);
+    CHECK(deep->emailIds == std::vector<std::string>{"id-12"});
+}
+
 TEST_CASE("query service SQL plans use the intended cache indexes", "[jmap][cache][query]")
 {
     ApplicationGuard application;
@@ -627,5 +859,36 @@ TEST_CASE("query service SQL plans use the intended cache indexes", "[jmap][cach
                                                  Qt::CaseInsensitive) ||
                                  detail.contains(QStringLiteral("idx_emails_thread"),
                                                  Qt::CaseInsensitive);
+                      }));
+
+    const auto windowHydrationPlan = explainQueryPlan(
+        databaseContext.connection.database(),
+        QStringLiteral("WITH requested AS MATERIALIZED ("
+                       "  SELECT value AS email_id FROM json_each(:email_ids_json)"
+                       "), requested_threads AS MATERIALIZED ("
+                       "  SELECT DISTINCT e.thread_id FROM requested r "
+                       "  CROSS JOIN emails e ON e.account_id=:account_id AND e.email_id=r.email_id"
+                       "), thread_counts AS ("
+                       "  SELECT e.thread_id, COUNT(*) FROM requested_threads rt "
+                       "  CROSS JOIN emails e INDEXED BY idx_emails_thread "
+                       "    ON e.account_id=:account_id AND e.thread_id=rt.thread_id "
+                       "  GROUP BY e.thread_id"
+                       ") SELECT r.email_id FROM requested r "
+                       "CROSS JOIN emails e ON e.account_id=:account_id AND e.email_id=r.email_id "
+                       "LEFT JOIN thread_counts tc ON tc.thread_id=e.thread_id"),
+        {{QStringLiteral(":account_id"), QStringLiteral("account-1")},
+         {QStringLiteral(":email_ids_json"), QStringLiteral("[\"eml-1\"]")}});
+    CHECK(std::any_of(windowHydrationPlan.cbegin(), windowHydrationPlan.cend(),
+                      [](const QString& detail)
+                      {
+                          return detail.contains(QStringLiteral("account_id=? AND email_id=?"),
+                                                 Qt::CaseInsensitive);
+                      }));
+    CHECK(std::any_of(windowHydrationPlan.cbegin(), windowHydrationPlan.cend(),
+                      [](const QString& detail)
+                      {
+                          return detail.contains(
+                              QStringLiteral("idx_emails_thread (account_id=? AND thread_id=?)"),
+                              Qt::CaseInsensitive);
                       }));
 }

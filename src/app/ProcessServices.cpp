@@ -4,9 +4,13 @@
 #include "app/ApplicationErrorCoordinator.h"
 #include "app/CalendarNotificationService.h"
 #include "app/ComposeService.h"
+#include "app/FullMailSyncService.h"
 #include "app/InlineMessageSchemeHandler.h"
+#include "app/LocalMaintenanceService.h"
 #include "app/LongPollCoordinator.h"
+#include "app/MailIndexService.h"
 #include "app/MessageNavigationCoordinator.h"
+#include "app/WorkScheduler.h"
 
 #include "jmap/JmapCore.h"
 #include "jmap/api/JmapMethodTransport.h"
@@ -63,6 +67,9 @@ namespace javelin::app
 
         m_databaseConnection =
             std::get<javelin::jmap::cache::DatabaseConnection>(std::move(databaseResult));
+        m_workScheduler = std::make_unique<WorkScheduler>(m_databaseConnection);
+        m_localMaintenanceService =
+            std::make_unique<LocalMaintenanceService>(m_databaseConnection, *m_workScheduler);
         javelin::jmap::sync::MutationJournalRepository mutationJournal{m_databaseConnection};
         const auto recoveredMutations = mutationJournal.recoverInFlight();
         if (const auto* error =
@@ -72,12 +79,14 @@ namespace javelin::app
         }
         m_networkAccessManager = std::make_unique<QNetworkAccessManager>();
         m_stateChangeNetworkAccessManager = std::make_unique<QNetworkAccessManager>();
+        m_webSocketFailureCooldowns =
+            std::make_unique<javelin::jmap::api::WebSocketFailureCooldowns>();
         m_transport =
             std::make_unique<javelin::jmap::api::QtNetworkTransport>(*m_networkAccessManager);
         m_httpMethodTransport =
             std::make_unique<javelin::jmap::api::HttpJmapMethodTransport>(*m_transport);
         m_methodTransport = std::make_unique<javelin::jmap::api::PreferredJmapMethodTransport>(
-            m_databaseConnection, *m_httpMethodTransport);
+            m_databaseConnection, *m_httpMethodTransport, *m_webSocketFailureCooldowns);
         m_inlineMessageSchemeHandler =
             std::make_unique<InlineMessageSchemeHandler>(m_databaseConnection);
         QWebEngineProfile::defaultProfile()->installUrlSchemeHandler(
@@ -85,6 +94,10 @@ namespace javelin::app
             m_inlineMessageSchemeHandler.get());
         m_jmapCore = std::make_unique<javelin::jmap::JmapCore>(m_databaseConnection, *m_transport,
                                                                *m_methodTransport);
+        m_mailIndexService =
+            std::make_unique<MailIndexService>(m_databaseConnection, *m_workScheduler);
+        m_fullMailSyncService = std::make_unique<FullMailSyncService>(
+            m_databaseConnection, *m_jmapCore, *m_workScheduler, *m_mailIndexService);
         m_accountRepository =
             std::make_unique<javelin::jmap::cache::AccountRepository>(m_databaseConnection);
         m_contactRepository =
@@ -114,12 +127,22 @@ namespace javelin::app
         m_jmapComposeService = std::make_unique<javelin::jmap::submission::ComposeService>(
             m_databaseConnection, *m_transport, *m_methodTransport, *m_jmapCore);
         m_errorCoordinator = std::make_unique<ApplicationErrorCoordinator>();
-        m_composeService =
-            std::make_unique<ComposeService>(*m_jmapComposeService, *m_errorCoordinator);
+        m_composeService = std::make_unique<ComposeService>(*m_jmapComposeService,
+                                                            *m_errorCoordinator, *m_workScheduler);
         m_mailService = std::make_unique<MailApplicationService>(
             m_databaseConnection, *m_jmapCore, *m_methodTransport,
-            *m_stateChangeNetworkAccessManager, *m_accountRepository, *m_queryService,
-            *m_contactService, *m_calendarService, *m_sieveService, *m_errorCoordinator);
+            *m_stateChangeNetworkAccessManager, *m_webSocketFailureCooldowns, *m_accountRepository,
+            *m_queryService, *m_contactService, *m_calendarService, *m_sieveService,
+            *m_errorCoordinator, *m_workScheduler);
+        QObject::connect(
+            m_fullMailSyncService.get(), &FullMailSyncService::mailboxWindowCommitted,
+            m_mailService.get(),
+            [this](QString accountId, QString mailboxId, const quint64 offset, const quint64 limit)
+            {
+                m_mailService->publishMailboxWindowCommitted(
+                    std::move(accountId), std::move(mailboxId), static_cast<std::size_t>(offset),
+                    static_cast<std::size_t>(limit));
+            });
         m_messageNavigationCoordinator = std::make_unique<MessageNavigationCoordinator>();
         m_calendarNotificationService =
             std::make_unique<CalendarNotificationService>(m_databaseConnection);
@@ -210,6 +233,26 @@ namespace javelin::app
     CalendarNotificationService& ProcessServices::calendarNotificationService()
     {
         return *m_calendarNotificationService;
+    }
+
+    WorkScheduler& ProcessServices::workScheduler()
+    {
+        return *m_workScheduler;
+    }
+
+    LocalMaintenanceService& ProcessServices::localMaintenanceService()
+    {
+        return *m_localMaintenanceService;
+    }
+
+    FullMailSyncService& ProcessServices::fullMailSyncService()
+    {
+        return *m_fullMailSyncService;
+    }
+
+    MailIndexService& ProcessServices::mailIndexService()
+    {
+        return *m_mailIndexService;
     }
 
 } // namespace javelin::app

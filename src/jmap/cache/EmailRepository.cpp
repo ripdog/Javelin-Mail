@@ -6,6 +6,7 @@
 #include <QSqlQuery>
 
 #include <array>
+#include <unordered_set>
 
 namespace javelin::jmap::cache
 {
@@ -152,7 +153,8 @@ namespace javelin::jmap::cache
                                                         const std::string_view accountId,
                                                         const std::string_view emailId)
         {
-            for (const QString& table : {QStringLiteral("raw_message_sources")})
+            for (const QString& table :
+                 {QStringLiteral("raw_message_sources"), QStringLiteral("mail_vault_email_refs")})
             {
                 QSqlQuery deleteQuery{database};
                 deleteQuery.prepare(
@@ -209,6 +211,26 @@ namespace javelin::jmap::cache
 
             for (const auto& email : emails)
             {
+                std::unordered_set<std::string> previousMailboxIds;
+                QSqlQuery previousMailboxQuery{database};
+                previousMailboxQuery.prepare(QStringLiteral(
+                    "SELECT mailbox_id FROM email_mailboxes WHERE account_id=:account_id AND "
+                    "email_id=:email_id"));
+                previousMailboxQuery.bindValue(QStringLiteral(":account_id"),
+                                               QString::fromStdString(std::string{accountId}));
+                previousMailboxQuery.bindValue(QStringLiteral(":email_id"),
+                                               QString::fromStdString(email.id));
+                if (!previousMailboxQuery.exec())
+                {
+                    return makeQueryError(QStringLiteral("Read prior email mailboxes"),
+                                          previousMailboxQuery);
+                }
+                while (previousMailboxQuery.next())
+                {
+                    previousMailboxIds.insert(
+                        previousMailboxQuery.value(0).toString().toStdString());
+                }
+
                 if (const auto error = deleteEmailSummaryChildren(database, accountId, email.id))
                 {
                     return error;
@@ -262,6 +284,53 @@ namespace javelin::jmap::cache
                     }
                 }
 
+                const std::unordered_set<std::string> nextMailboxIds(email.mailboxIds.begin(),
+                                                                     email.mailboxIds.end());
+                QSqlQuery projectionQuery{database};
+                projectionQuery.prepare(QStringLiteral(
+                    "INSERT INTO mail_vault_projection_jobs(account_id,email_id,mailbox_id,"
+                    "content_hash,operation) SELECT :account_id,:email_id,:mailbox_id,"
+                    "r.content_hash,:operation FROM mail_vault_email_refs r WHERE "
+                    "r.account_id=:account_id AND r.email_id=:email_id"));
+                const auto queueProjection =
+                    [&](const std::string& mailboxId,
+                        const QString& operation) -> std::optional<DatabaseError>
+                {
+                    projectionQuery.bindValue(QStringLiteral(":account_id"),
+                                              QString::fromStdString(std::string{accountId}));
+                    projectionQuery.bindValue(QStringLiteral(":email_id"),
+                                              QString::fromStdString(email.id));
+                    projectionQuery.bindValue(QStringLiteral(":mailbox_id"),
+                                              QString::fromStdString(mailboxId));
+                    projectionQuery.bindValue(QStringLiteral(":operation"), operation);
+                    if (!projectionQuery.exec())
+                    {
+                        return makeQueryError(QStringLiteral("Queue email mailbox projection"),
+                                              projectionQuery);
+                    }
+                    return std::nullopt;
+                };
+                for (const auto& mailboxId : previousMailboxIds)
+                {
+                    if (!nextMailboxIds.contains(mailboxId))
+                    {
+                        if (const auto error = queueProjection(mailboxId, QStringLiteral("unlink")))
+                        {
+                            return error;
+                        }
+                    }
+                }
+                for (const auto& mailboxId : nextMailboxIds)
+                {
+                    if (!previousMailboxIds.contains(mailboxId))
+                    {
+                        if (const auto error = queueProjection(mailboxId, QStringLiteral("link")))
+                        {
+                            return error;
+                        }
+                    }
+                }
+
                 for (const auto& keyword : email.keywords)
                 {
                     keywordQuery.bindValue(QStringLiteral(":account_id"),
@@ -303,6 +372,20 @@ namespace javelin::jmap::cache
                 "DELETE FROM emails WHERE account_id = :account_id AND email_id = :email_id"));
             for (const auto& emailId : emailIds)
             {
+                QSqlQuery projectionQuery{database};
+                projectionQuery.prepare(QStringLiteral(
+                    "INSERT INTO mail_vault_projection_jobs(account_id,email_id,mailbox_id,"
+                    "operation) SELECT em.account_id,em.email_id,em.mailbox_id,'unlink' FROM "
+                    "email_mailboxes em JOIN mail_vault_email_refs r ON r.account_id=em.account_id "
+                    "AND r.email_id=em.email_id WHERE em.account_id=:account_id AND "
+                    "em.email_id=:email_id"));
+                projectionQuery.bindValue(QStringLiteral(":account_id"),
+                                          QString::fromStdString(std::string{accountId}));
+                projectionQuery.bindValue(QStringLiteral(":email_id"),
+                                          QString::fromStdString(emailId));
+                if (!projectionQuery.exec())
+                    return makeQueryError(QStringLiteral("Queue deleted email projections"),
+                                          projectionQuery);
                 if (const auto error = deleteEmailSummaryChildren(database, accountId, emailId))
                 {
                     return error;
@@ -347,6 +430,21 @@ namespace javelin::jmap::cache
                 .message = QStringLiteral("Begin email replacement transaction: ") +
                            database.lastError().text(),
             };
+        }
+
+        QSqlQuery projectionQuery{database};
+        projectionQuery.prepare(QStringLiteral(
+            "INSERT INTO mail_vault_projection_jobs(account_id,email_id,mailbox_id,operation) "
+            "SELECT em.account_id,em.email_id,em.mailbox_id,'unlink' FROM email_mailboxes em JOIN "
+            "mail_vault_email_refs r ON r.account_id=em.account_id AND r.email_id=em.email_id "
+            "WHERE em.account_id=:account_id"));
+        projectionQuery.bindValue(QStringLiteral(":account_id"),
+                                  QString::fromStdString(std::string{accountId}));
+        if (!projectionQuery.exec())
+        {
+            database.rollback();
+            return makeQueryError(QStringLiteral("Queue replaced email projections"),
+                                  projectionQuery);
         }
 
         for (const QString& table :
@@ -590,9 +688,25 @@ namespace javelin::jmap::cache
             "DELETE FROM email_mailboxes "
             "WHERE account_id = :account_id AND mailbox_id = :mailbox_id AND email_id = "
             ":email_id"));
+        QSqlQuery projectionQuery{database};
+        projectionQuery.prepare(QStringLiteral(
+            "INSERT INTO mail_vault_projection_jobs(account_id,email_id,mailbox_id,content_hash,"
+            "operation) SELECT :account_id,:email_id,:mailbox_id,r.content_hash,'unlink' FROM "
+            "mail_vault_email_refs r WHERE r.account_id=:account_id AND r.email_id=:email_id"));
 
         for (const auto& emailId : emailIds)
         {
+            projectionQuery.bindValue(QStringLiteral(":account_id"),
+                                      QString::fromStdString(std::string{accountId}));
+            projectionQuery.bindValue(QStringLiteral(":mailbox_id"),
+                                      QString::fromStdString(std::string{mailboxId}));
+            projectionQuery.bindValue(QStringLiteral(":email_id"), QString::fromStdString(emailId));
+            if (!projectionQuery.exec())
+            {
+                database.rollback();
+                return makeQueryError(QStringLiteral("Queue removed mailbox projection"),
+                                      projectionQuery);
+            }
             deleteQuery.bindValue(QStringLiteral(":account_id"),
                                   QString::fromStdString(std::string{accountId}));
             deleteQuery.bindValue(QStringLiteral(":mailbox_id"),

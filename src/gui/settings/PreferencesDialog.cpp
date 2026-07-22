@@ -248,9 +248,12 @@ namespace javelin::gui::settings
 
         auto* mailboxSyncPage = new QWidget(this);
         auto* mailboxSyncLayout = new QVBoxLayout(mailboxSyncPage);
-        mailboxSyncLayout->addWidget(
-            new QLabel(QStringLiteral("Keep selected mailboxes synchronized in the background."),
-                       mailboxSyncPage));
+        mailboxSyncLayout->addWidget(new QLabel(
+            QStringLiteral(
+                "Download every message and attachment in selected mailboxes for "
+                "complete offline access. Large mailboxes continue in the Task Center "
+                "and can be paused. Unchecking keeps downloaded mail as removable cache."),
+            mailboxSyncPage));
         m_mailboxSyncAccount = new QComboBox(mailboxSyncPage);
         mailboxSyncLayout->addWidget(m_mailboxSyncAccount);
         m_mailboxSyncList = new javelin::gui::mailboxes::MailboxTreeView(mailboxSyncPage);
@@ -264,7 +267,8 @@ namespace javelin::gui::settings
         m_mailboxSyncList->setModel(m_mailboxSyncModel);
         auto* mailboxLists = new QHBoxLayout();
         auto* syncListLayout = new QVBoxLayout();
-        syncListLayout->addWidget(new QLabel(QStringLiteral("Synchronize"), mailboxSyncPage));
+        syncListLayout->addWidget(
+            new QLabel(QStringLiteral("Keep complete offline copy"), mailboxSyncPage));
         syncListLayout->addWidget(m_mailboxSyncList, 1);
         mailboxLists->addLayout(syncListLayout, 1);
         auto* notificationListLayout = new QVBoxLayout();

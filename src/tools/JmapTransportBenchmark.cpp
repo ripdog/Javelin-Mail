@@ -261,7 +261,8 @@ int main(int argc, char* argv[])
         QNetworkAccessManager network;
         javelin::jmap::api::QtNetworkTransport networkTransport{network};
         javelin::jmap::api::HttpJmapMethodTransport http{networkTransport};
-        javelin::jmap::api::PreferredJmapMethodTransport preferred{database, http};
+        javelin::jmap::api::WebSocketFailureCooldowns cooldowns;
+        javelin::jmap::api::PreferredJmapMethodTransport preferred{database, http, cooldowns};
         auto task = [&]() -> QCoro::Task<void>
         {
             constexpr int measuredRunCount = 3;

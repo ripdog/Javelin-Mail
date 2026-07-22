@@ -1,21 +1,43 @@
 #include "app/LongPollCoordinator.h"
 #include "app/ApplicationErrorCoordinator.h"
+#include "app/WorkScheduler.h"
 
 #include "jmap/cache/EmailRepository.h"
+#include "jmap/cache/MailboxWindowRepository.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
 
 #include <QCoroTask>
 
 #include <QDebug>
+#include <QSqlQuery>
 
 #include <algorithm>
+#include <limits>
 #include <ranges>
 #include <unordered_set>
 #include <utility>
 
 namespace javelin::app
 {
+    namespace
+    {
+        class ForegroundWorkScope final
+        {
+          public:
+            explicit ForegroundWorkScope(WorkScheduler& scheduler) : m_scheduler(scheduler)
+            {
+                m_scheduler.beginForegroundWork();
+            }
+            ~ForegroundWorkScope()
+            {
+                m_scheduler.endForegroundWork();
+            }
+
+          private:
+            WorkScheduler& m_scheduler;
+        };
+    } // namespace
 
     namespace
     {
@@ -93,17 +115,20 @@ namespace javelin::app
         javelin::jmap::cache::DatabaseConnection& databaseConnection,
         javelin::jmap::JmapCore& jmapCore, javelin::jmap::api::JmapMethodTransport& methodTransport,
         QNetworkAccessManager& networkAccessManager,
+        javelin::jmap::api::WebSocketFailureCooldowns& cooldowns,
         javelin::jmap::cache::AccountRepository& accountRepository,
         javelin::jmap::cache::QueryService& queryService,
         javelin::jmap::contacts::ContactService& contactService,
         javelin::jmap::calendar::CalendarService& calendarService,
         javelin::jmap::sieve::SieveService& sieveService,
-        ApplicationErrorCoordinator& errorCoordinator, QObject* parent)
+        ApplicationErrorCoordinator& errorCoordinator, WorkScheduler& workScheduler,
+        QObject* parent)
         : QObject(parent), m_databaseConnection(databaseConnection), m_jmapCore(jmapCore),
           m_methodTransport(methodTransport), m_networkAccessManager(networkAccessManager),
-          m_accountRepository(accountRepository), m_queryService(queryService),
-          m_contactService(contactService), m_calendarService(calendarService),
-          m_sieveService(sieveService), m_errorCoordinator(errorCoordinator)
+          m_transportCooldowns(cooldowns), m_accountRepository(accountRepository),
+          m_queryService(queryService), m_contactService(contactService),
+          m_calendarService(calendarService), m_sieveService(sieveService),
+          m_errorCoordinator(errorCoordinator), m_workScheduler(workScheduler)
     {
         connect(&m_errorCoordinator, &ApplicationErrorCoordinator::authenticationPauseChanged, this,
                 [this](const QString& connectionId, const bool paused)
@@ -204,6 +229,7 @@ namespace javelin::app
             return;
         }
 
+        m_workScheduler.beginForegroundWork();
         const auto appliedSettings = settings;
         auto task = m_jmapCore.refreshSession(toLiveConnectionSettings(settings), ownerAccountId);
         QCoro::connect(
@@ -219,6 +245,7 @@ namespace javelin::app
                     m_errorCoordinator.reportFailure(appliedSettings, ownerAccountId,
                                                      QStringLiteral("Discover server session"),
                                                      *error);
+                    m_workScheduler.endForegroundWork();
                     return;
                 }
 
@@ -237,6 +264,7 @@ namespace javelin::app
                     }
                 }
                 Q_EMIT sessionCapabilitiesChanged(QString::fromStdString(ownerAccountId));
+                m_workScheduler.endForegroundWork();
             });
     }
 
@@ -260,7 +288,7 @@ namespace javelin::app
         {
             coordinatorIt->second = std::make_unique<AccountSyncCoordinator>(
                 m_databaseConnection, m_methodTransport, m_networkAccessManager,
-                m_accountRepository, m_queryService, this);
+                m_transportCooldowns, m_accountRepository, m_queryService, m_workScheduler, this);
             connectCoordinator(coordinatorIt->first, *coordinatorIt->second);
         }
         if (m_errorCoordinator.authenticationPaused(configuration.settings.connectionId,
@@ -309,6 +337,25 @@ namespace javelin::app
         return m_jmapCore.statusSummary();
     }
 
+    void MailApplicationService::publishMailboxWindowCommitted(QString accountId, QString mailboxId,
+                                                               const std::size_t offset,
+                                                               const std::size_t limit)
+    {
+        Q_EMIT cacheCommitted(MailCacheChange{
+            .accountId = std::move(accountId),
+            .mailboxIds = {},
+            .queryWindows = {MailboxQueryWindowChange{
+                .mailboxId = std::move(mailboxId),
+                .offset = offset,
+                .limit = limit,
+                .total = std::nullopt,
+            }},
+            .searchWindows = {},
+            .mailboxTreeChanged = false,
+            .hasNewMail = false,
+        });
+    }
+
     QCoro::Task<MailboxWindowResult>
     MailApplicationService::requestMailboxWindow(MailboxWindowIntent intent)
     {
@@ -348,7 +395,93 @@ namespace javelin::app
                 };
             }
         }
+        QSqlQuery offlineScope{m_databaseConnection.database()};
+        offlineScope.prepare(QStringLiteral(
+            "SELECT ss.state_token FROM offline_mailbox_scopes s INNER JOIN sync_state ss ON "
+            "ss.account_id=s.account_id AND ss.object_type='EmailQuery' AND "
+            "ss.query_key=:query_key WHERE s.account_id=:account AND s.mailbox_id=:mailbox AND "
+            "s.desired=1 AND s.status='complete'"));
+        offlineScope.bindValue(QStringLiteral(":query_key"), QString::fromStdString(queryKey));
+        offlineScope.bindValue(QStringLiteral(":account"),
+                               QString::fromStdString(intent.accountId));
+        offlineScope.bindValue(QStringLiteral(":mailbox"),
+                               QString::fromStdString(intent.mailboxId));
+        if (offlineScope.exec() && offlineScope.next())
+        {
+            const QString completedQueryState = offlineScope.value(0).toString();
+            offlineScope.finish();
+            const std::string state = completedQueryState.toStdString();
+            javelin::jmap::cache::MailboxWindowRepository windows{m_databaseConnection};
+            if (!intent.forceRefresh)
+            {
+                const auto cachedResult =
+                    windows.find(intent.accountId, queryKey, intent.offset, intent.limit);
+                if (const auto* error =
+                        std::get_if<javelin::jmap::cache::DatabaseError>(&cachedResult))
+                    co_return javelin::jmap::operationError(*error);
+                const auto& cached =
+                    std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(
+                        cachedResult);
+                if (cached.has_value() && cached->isAuthoritative && cached->queryState == state)
+                {
+                    co_return MailboxWindowSummary{
+                        .accountId = std::move(intent.accountId),
+                        .mailboxId = std::move(intent.mailboxId),
+                        .offset = intent.offset,
+                        .limit = intent.limit,
+                        .position = cached->position,
+                        .returnedLimit = cached->returnedLimit,
+                        .representativeCount = cached->emailIds.size(),
+                        .total = cached->total,
+                        .queryState = cached->queryState,
+                    };
+                }
+            }
+            const auto itemsResult = m_queryService.listMailboxMessages(
+                intent.accountId, intent.mailboxId, intent.limit, intent.offset, intent.sort);
+            const auto totalResult =
+                m_queryService.countMailboxMessages(intent.accountId, intent.mailboxId);
+            const auto* items =
+                std::get_if<std::vector<javelin::jmap::cache::MessageListItem>>(&itemsResult);
+            const auto* total = std::get_if<std::size_t>(&totalResult);
+            if (items != nullptr && total != nullptr)
+            {
+                std::vector<std::string> emailIds;
+                emailIds.reserve(items->size());
+                for (const auto& item : *items)
+                    emailIds.push_back(item.emailId);
+                if (const auto error = windows.replace({
+                        .accountId = intent.accountId,
+                        .mailboxId = intent.mailboxId,
+                        .queryKey = queryKey,
+                        .requestedOffset = intent.offset,
+                        .requestedLimit = intent.limit,
+                        .position = intent.offset,
+                        .returnedLimit = intent.limit,
+                        .total = *total,
+                        .queryState = state,
+                        .isAuthoritative = true,
+                        .emailIds = std::move(emailIds),
+                    }))
+                {
+                    co_return javelin::jmap::operationError(*error);
+                }
+                co_return MailboxWindowSummary{
+                    .accountId = std::move(intent.accountId),
+                    .mailboxId = std::move(intent.mailboxId),
+                    .offset = intent.offset,
+                    .limit = intent.limit,
+                    .position = intent.offset,
+                    .returnedLimit = intent.limit,
+                    .representativeCount = items->size(),
+                    .total = *total,
+                    .queryState = state,
+                };
+            }
+        }
+        offlineScope.finish();
 
+        const ForegroundWorkScope foreground{m_workScheduler};
         auto result = co_await m_jmapCore.queryMailboxPage(
             toLiveConnectionSettings(configuration->second.settings), intent.accountId,
             intent.mailboxId, intent.offset, intent.limit, intent.sort, std::move(intent.anchor),
@@ -400,6 +533,7 @@ namespace javelin::app
         }
 
         const auto queryKey = javelin::jmap::search::cacheKey(intent.criteria, intent.sort);
+        const ForegroundWorkScope foreground{m_workScheduler};
         auto result = co_await m_jmapCore.searchMessages(
             toLiveConnectionSettings(configuration->second.settings), intent.accountId,
             intent.criteria, intent.offset, intent.limit, intent.sort, std::move(intent.anchor));
@@ -548,6 +682,7 @@ namespace javelin::app
     QCoro::Task<javelin::jmap::SubmittedEmailMutationsResult>
     MailApplicationService::submitPendingEmailMutations(std::string accountId)
     {
+        const ForegroundWorkScope foreground{m_workScheduler};
         const auto configuration = m_configurations.find(accountId);
         if (configuration == m_configurations.end())
             co_return javelin::jmap::OperationError{
@@ -568,6 +703,7 @@ namespace javelin::app
             co_return javelin::jmap::OperationError{
                 .message = QStringLiteral("Account synchronization is not configured."),
             };
+        const ForegroundWorkScope foreground{m_workScheduler};
         co_return observeResult(m_errorCoordinator, configuration->second.settings, accountId,
                                 QStringLiteral("Load message content"),
                                 co_await m_jmapCore.refreshMessageContent(
@@ -579,6 +715,7 @@ namespace javelin::app
     MailApplicationService::requestAttachment(std::string accountId, std::string emailId,
                                               std::string partId)
     {
+        const ForegroundWorkScope foreground{m_workScheduler};
         const auto configuration = m_configurations.find(accountId);
         if (configuration == m_configurations.end())
             co_return javelin::jmap::OperationError{
@@ -594,6 +731,7 @@ namespace javelin::app
     QCoro::Task<javelin::jmap::MessageSourceDownloadResult>
     MailApplicationService::requestMessageSource(std::string accountId, std::string emailId)
     {
+        const ForegroundWorkScope foreground{m_workScheduler};
         co_return co_await m_jmapCore.loadCachedMessageSource(std::move(accountId),
                                                               std::move(emailId));
     }
@@ -601,6 +739,7 @@ namespace javelin::app
     QCoro::Task<javelin::jmap::LiveRefreshResult>
     MailApplicationService::bootstrapAccount(AccountBootstrapIntent intent)
     {
+        const ForegroundWorkScope foreground{m_workScheduler};
         auto result = co_await m_jmapCore.refreshFromServer(
             toLiveConnectionSettings(intent.settings), {}, std::move(intent.mailboxIds));
         co_return observeResult(m_errorCoordinator, intent.settings, {},
@@ -610,6 +749,7 @@ namespace javelin::app
     QCoro::Task<javelin::jmap::contacts::ContactRefreshResult>
     MailApplicationService::requestContacts(std::string accountId)
     {
+        const ForegroundWorkScope foreground{m_workScheduler};
         const auto configuration = m_configurations.find(accountId);
         if (configuration == m_configurations.end())
             co_return javelin::jmap::OperationError{
@@ -627,6 +767,7 @@ namespace javelin::app
         std::string ownerAccountId, javelin::jmap::calendar::VisibleInterval interval,
         javelin::jmap::calendar::TimeZoneId displayTimeZone)
     {
+        const ForegroundWorkScope foreground{m_workScheduler};
         const auto configuration = m_configurations.find(ownerAccountId);
         if (configuration == m_configurations.end())
             co_return javelin::jmap::OperationError{
@@ -654,6 +795,7 @@ namespace javelin::app
     QCoro::Task<javelin::jmap::calendar::CalendarRefreshResult>
     MailApplicationService::requestCalendarChanges(std::string ownerAccountId)
     {
+        const ForegroundWorkScope foreground{m_workScheduler};
         const auto configuration = m_configurations.find(ownerAccountId);
         const auto range = m_visibleCalendarRanges.find(ownerAccountId);
         if (configuration == m_configurations.end() || range == m_visibleCalendarRanges.end())
@@ -678,6 +820,7 @@ namespace javelin::app
     MailApplicationService::createCalendarEvent(std::string ownerAccountId,
                                                 javelin::jmap::calendar::CreateEventCommand command)
     {
+        const ForegroundWorkScope foreground{m_workScheduler};
         const auto configuration = m_configurations.find(ownerAccountId);
         if (configuration == m_configurations.end())
             co_return javelin::jmap::OperationError{
@@ -705,6 +848,7 @@ namespace javelin::app
     MailApplicationService::setDefaultCalendar(std::string ownerAccountId, std::string accountId,
                                                std::string calendarId)
     {
+        const ForegroundWorkScope foreground{m_workScheduler};
         const auto configuration = m_configurations.find(ownerAccountId);
         if (configuration == m_configurations.end())
             co_return javelin::jmap::OperationError{
@@ -732,6 +876,7 @@ namespace javelin::app
     MailApplicationService::updateCalendarEvent(std::string ownerAccountId,
                                                 javelin::jmap::calendar::UpdateEventCommand command)
     {
+        const ForegroundWorkScope foreground{m_workScheduler};
         const auto configuration = m_configurations.find(ownerAccountId);
         if (configuration == m_configurations.end())
             co_return javelin::jmap::OperationError{
@@ -759,6 +904,7 @@ namespace javelin::app
     MailApplicationService::deleteCalendarEvent(std::string ownerAccountId,
                                                 javelin::jmap::calendar::DeleteEventCommand command)
     {
+        const ForegroundWorkScope foreground{m_workScheduler};
         const auto configuration = m_configurations.find(ownerAccountId);
         if (configuration == m_configurations.end())
             co_return javelin::jmap::OperationError{
@@ -785,6 +931,7 @@ namespace javelin::app
     QCoro::Task<javelin::jmap::sieve::SieveListResult>
     MailApplicationService::requestSieveScripts(std::string ownerAccountId)
     {
+        const ForegroundWorkScope foreground{m_workScheduler};
         const auto configuration = m_configurations.find(ownerAccountId);
         if (configuration == m_configurations.end())
             co_return javelin::jmap::OperationError{
@@ -801,6 +948,7 @@ namespace javelin::app
     MailApplicationService::requestSieveScript(std::string ownerAccountId,
                                                javelin::jmap::sieve::SieveScript script)
     {
+        const ForegroundWorkScope foreground{m_workScheduler};
         const auto configuration = m_configurations.find(ownerAccountId);
         if (configuration == m_configurations.end())
             co_return javelin::jmap::OperationError{
@@ -816,6 +964,7 @@ namespace javelin::app
     QCoro::Task<javelin::jmap::sieve::SieveValidationResult>
     MailApplicationService::validateSieveScript(std::string ownerAccountId, QByteArray content)
     {
+        const ForegroundWorkScope foreground{m_workScheduler};
         const auto configuration = m_configurations.find(ownerAccountId);
         if (configuration == m_configurations.end())
             co_return javelin::jmap::OperationError{
@@ -831,6 +980,7 @@ namespace javelin::app
     QCoro::Task<javelin::jmap::sieve::SieveSaveResult> MailApplicationService::saveSieveScript(
         std::string ownerAccountId, javelin::jmap::sieve::SieveScript script, QByteArray content)
     {
+        const ForegroundWorkScope foreground{m_workScheduler};
         const auto configuration = m_configurations.find(ownerAccountId);
         if (configuration == m_configurations.end())
             co_return javelin::jmap::OperationError{
@@ -847,6 +997,7 @@ namespace javelin::app
     MailApplicationService::deleteSieveScript(std::string ownerAccountId,
                                               javelin::jmap::sieve::SieveScript script)
     {
+        const ForegroundWorkScope foreground{m_workScheduler};
         const auto configuration = m_configurations.find(ownerAccountId);
         if (configuration == m_configurations.end())
             co_return javelin::jmap::OperationError{
@@ -864,6 +1015,7 @@ namespace javelin::app
                                                  javelin::jmap::sieve::SieveScript script,
                                                  const bool active)
     {
+        const ForegroundWorkScope foreground{m_workScheduler};
         const auto configuration = m_configurations.find(ownerAccountId);
         if (configuration == m_configurations.end())
             co_return javelin::jmap::OperationError{
@@ -880,6 +1032,7 @@ namespace javelin::app
     MailApplicationService::setAddressBooks(std::string accountId,
                                             javelin::jmap::api::AddressBookSetRequest request)
     {
+        const ForegroundWorkScope foreground{m_workScheduler};
         const auto configuration = m_configurations.find(accountId);
         if (configuration == m_configurations.end())
             co_return javelin::jmap::OperationError{
@@ -897,6 +1050,7 @@ namespace javelin::app
     MailApplicationService::setContactCards(std::string accountId,
                                             javelin::jmap::api::ContactCardSetRequest request)
     {
+        const ForegroundWorkScope foreground{m_workScheduler};
         const auto configuration = m_configurations.find(accountId);
         if (configuration == m_configurations.end())
             co_return javelin::jmap::OperationError{
@@ -914,6 +1068,7 @@ namespace javelin::app
     MailApplicationService::createContactGroup(
         std::string ownerAccountId, javelin::jmap::contacts::CreateContactGroupCommand command)
     {
+        const ForegroundWorkScope foreground{m_workScheduler};
         const auto configuration = m_configurations.find(ownerAccountId);
         if (configuration == m_configurations.end())
             co_return javelin::jmap::OperationError{
@@ -932,6 +1087,7 @@ namespace javelin::app
         std::string ownerAccountId,
         javelin::jmap::contacts::SetContactGroupMembershipCommand command)
     {
+        const ForegroundWorkScope foreground{m_workScheduler};
         const auto configuration = m_configurations.find(ownerAccountId);
         if (configuration == m_configurations.end())
             co_return javelin::jmap::OperationError{
@@ -949,6 +1105,7 @@ namespace javelin::app
     MailApplicationService::copyContactCards(std::string accountId,
                                              javelin::jmap::api::ContactCardCopyRequest request)
     {
+        const ForegroundWorkScope foreground{m_workScheduler};
         const auto configuration = m_configurations.find(accountId);
         if (configuration == m_configurations.end())
             co_return javelin::jmap::OperationError{
@@ -966,6 +1123,7 @@ namespace javelin::app
     MailApplicationService::uploadContactMedia(std::string ownerAccountId, std::string accountId,
                                                QByteArray payload, std::string mediaType)
     {
+        const ForegroundWorkScope foreground{m_workScheduler};
         const auto configuration = m_configurations.find(ownerAccountId);
         if (configuration == m_configurations.end())
             co_return javelin::jmap::OperationError{
@@ -984,6 +1142,7 @@ namespace javelin::app
     MailApplicationService::downloadContactMedia(std::string ownerAccountId, std::string accountId,
                                                  std::string blobId, std::string mediaType)
     {
+        const ForegroundWorkScope foreground{m_workScheduler};
         const auto configuration = m_configurations.find(ownerAccountId);
         if (configuration == m_configurations.end())
             co_return javelin::jmap::OperationError{

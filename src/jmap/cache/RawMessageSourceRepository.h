@@ -30,6 +30,9 @@ namespace javelin::jmap::cache
                                                           std::string_view emailId);
         [[nodiscard]] std::variant<std::optional<RawMessageSource>, DatabaseError>
         find(std::string_view accountId, std::string_view emailId) const;
+        [[nodiscard]] std::variant<std::size_t, DatabaseError>
+        migrateLegacySources(std::size_t limit = 25);
+        [[nodiscard]] std::optional<DatabaseError> replayProjectionJobs(std::size_t limit = 100);
 
       private:
         DatabaseConnection& m_connection;

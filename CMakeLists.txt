@@ -66,6 +66,12 @@ set(JAVELIN_FORMAT_FILES
     src/app/ApplicationBootstrap.h
     src/app/DesktopNotificationController.cpp
     src/app/DesktopNotificationController.h
+    src/app/FullMailSyncService.cpp
+    src/app/FullMailSyncService.h
+    src/app/MailIndexService.cpp
+    src/app/MailIndexService.h
+    src/app/LocalMaintenanceService.cpp
+    src/app/LocalMaintenanceService.h
     src/app/InlineMessageSchemeHandler.cpp
     src/app/InlineMessageSchemeHandler.h
     src/app/LogStore.cpp
@@ -192,6 +198,10 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/cache/Database.h
     src/jmap/cache/EmailRepository.cpp
     src/jmap/cache/EmailRepository.h
+    src/jmap/cache/MailVault.cpp
+    src/jmap/cache/MailVault.h
+    src/jmap/cache/MailSearchIndex.cpp
+    src/jmap/cache/MailSearchIndex.h
     src/jmap/cache/IdentityRepository.cpp
     src/jmap/cache/IdentityRepository.h
     src/jmap/cache/MailboxRepository.cpp
@@ -414,6 +424,10 @@ add_library(javelin_jmap STATIC
     src/jmap/cache/Database.h
     src/jmap/cache/EmailRepository.cpp
     src/jmap/cache/EmailRepository.h
+    src/jmap/cache/MailVault.cpp
+    src/jmap/cache/MailVault.h
+    src/jmap/cache/MailSearchIndex.cpp
+    src/jmap/cache/MailSearchIndex.h
     src/jmap/cache/IdentityRepository.cpp
     src/jmap/cache/IdentityRepository.h
     src/jmap/cache/MailboxRepository.cpp
@@ -523,6 +537,7 @@ target_link_libraries(javelin_jmap
         KPim6::Mime
     PRIVATE
         QCoro6::Network
+        Qt::Concurrent
         glaze::glaze
 )
 if(JAVELIN_ENABLE_FASTTEXT_LANGUAGE_DETECTION)
@@ -681,6 +696,12 @@ add_library(javelin_app STATIC
     src/app/ApplicationBootstrap.h
     src/app/DesktopNotificationController.cpp
     src/app/DesktopNotificationController.h
+    src/app/FullMailSyncService.cpp
+    src/app/FullMailSyncService.h
+    src/app/MailIndexService.cpp
+    src/app/MailIndexService.h
+    src/app/LocalMaintenanceService.cpp
+    src/app/LocalMaintenanceService.h
     src/app/InlineMessageSchemeHandler.cpp
     src/app/InlineMessageSchemeHandler.h
     src/app/LongPollService.cpp
@@ -696,6 +717,10 @@ add_library(javelin_app STATIC
     src/app/WebEngineSetup.h
     src/app/ProcessServices.cpp
     src/app/ProcessServices.h
+    src/app/WorkScheduler.cpp
+    src/app/WorkScheduler.h
+    src/gui/tasks/TaskCenterDialog.cpp
+    src/gui/tasks/TaskCenterDialog.h
 )
 qt_add_resources(javelin_app "javelin_icons"
     PREFIX "/icons"
@@ -743,6 +768,7 @@ target_link_libraries(javelin_app
         Qt::Svg
         KF6::CoreAddons
     PRIVATE
+        Qt::Concurrent
         javelin_gui
         javelin_jmap
 )

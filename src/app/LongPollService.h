@@ -29,6 +29,7 @@ class QNetworkAccessManager;
 
 namespace javelin::app
 {
+    class WorkScheduler;
     struct MailboxQueryWindowChange
     {
         QString mailboxId;
@@ -51,6 +52,7 @@ namespace javelin::app
         QStringList mailboxIds;
         std::vector<MailboxQueryWindowChange> queryWindows;
         std::vector<SearchQueryWindowChange> searchWindows;
+        bool mailboxTreeChanged = false;
         bool hasNewMail = false;
     };
 
@@ -72,9 +74,10 @@ namespace javelin::app
         AccountSyncCoordinator(javelin::jmap::cache::DatabaseConnection& databaseConnection,
                                javelin::jmap::api::JmapMethodTransport& methodTransport,
                                QNetworkAccessManager& networkAccessManager,
+                               javelin::jmap::api::WebSocketFailureCooldowns& cooldowns,
                                javelin::jmap::cache::AccountRepository& accountRepository,
                                javelin::jmap::cache::QueryService& queryService,
-                               QObject* parent = nullptr);
+                               WorkScheduler& workScheduler, QObject* parent = nullptr);
         ~AccountSyncCoordinator() override;
 
         void applySettings(AccountConnectionSettings settings, std::string accountId,
@@ -147,8 +150,10 @@ namespace javelin::app
         javelin::jmap::cache::DatabaseConnection& m_databaseConnection;
         javelin::jmap::api::JmapMethodTransport& m_methodTransport;
         QNetworkAccessManager& m_networkAccessManager;
+        javelin::jmap::api::WebSocketFailureCooldowns& m_transportCooldowns;
         javelin::jmap::cache::AccountRepository& m_accountRepository;
         javelin::jmap::cache::QueryService& m_queryService;
+        WorkScheduler& m_workScheduler;
         std::optional<AccountConnectionSettings> m_settings;
         std::string m_accountId;
         std::vector<std::string> m_mailboxIds;

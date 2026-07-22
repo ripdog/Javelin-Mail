@@ -1,9 +1,9 @@
 #include "jmap/cache/QueryService.h"
 
+#include "jmap/cache/MailSearchIndex.h"
 #include "jmap/cache/MailboxWindowRepository.h"
 
 #include "jmap/cache/MailboxRepository.h"
-#include "jmap/cache/MimeMessageParser.h"
 #include "jmap/cache/SearchWindowRepository.h"
 
 #include <glaze/glaze.hpp>
@@ -228,6 +228,153 @@ namespace javelin::jmap::cache
         return items;
     }
 
+    std::variant<std::optional<OfflineMailboxCoverage>, DatabaseError>
+    QueryService::offlineMailboxCoverage(const std::string_view accountId,
+                                         const std::string_view mailboxId) const
+    {
+        if (const auto error = m_connection.validate())
+            return *error;
+
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "WITH active_additions AS ("
+            "  SELECT DISTINCT j.object_id AS email_id FROM mutation_journal j "
+            "  INNER JOIN email_mailboxes em ON em.account_id=j.account_id "
+            "    AND em.email_id=j.object_id AND em.mailbox_id=:mailbox_id "
+            "  WHERE j.account_id=:account_id AND j.data_type='Email' "
+            "    AND j.status IN ('pending','in_flight','unknown')"
+            "), candidates AS ("
+            "  SELECT m.email_id FROM offline_mailbox_scopes s "
+            "  INNER JOIN offline_mailbox_membership m ON m.account_id=s.account_id "
+            "    AND m.mailbox_id=s.mailbox_id AND m.generation=s.generation "
+            "  INNER JOIN email_mailboxes em ON em.account_id=m.account_id "
+            "    AND em.email_id=m.email_id AND em.mailbox_id=m.mailbox_id "
+            "  WHERE s.account_id=:account_id AND s.mailbox_id=:mailbox_id "
+            "  UNION SELECT email_id FROM active_additions"
+            ") SELECT s.generation,s.status,COUNT(DISTINCT e.thread_id) "
+            "FROM offline_mailbox_scopes s LEFT JOIN candidates c ON TRUE "
+            "LEFT JOIN emails e ON e.account_id=s.account_id AND e.email_id=c.email_id "
+            "WHERE s.account_id=:account_id AND s.mailbox_id=:mailbox_id AND s.desired=1 "
+            "AND s.status IN ('enumerating','fetching','reconciling') "
+            "GROUP BY s.generation,s.status"));
+        query.bindValue(QStringLiteral(":account_id"),
+                        QString::fromStdString(std::string{accountId}));
+        query.bindValue(QStringLiteral(":mailbox_id"),
+                        QString::fromStdString(std::string{mailboxId}));
+        if (!query.exec())
+            return makeQueryError(QStringLiteral("Read offline mailbox coverage"), query);
+        if (!query.next())
+            return std::optional<OfflineMailboxCoverage>{};
+        return std::optional{OfflineMailboxCoverage{
+            .generation = query.value(0).toULongLong(),
+            .representativeCount = static_cast<std::size_t>(query.value(2).toULongLong()),
+            .enumerationComplete = query.value(1).toString() != QStringLiteral("enumerating"),
+        }};
+    }
+
+    std::variant<std::vector<MessageListItem>, DatabaseError>
+    QueryService::listOfflineMailboxMessages(const std::string_view accountId,
+                                             const std::string_view mailboxId,
+                                             const std::uint64_t generation,
+                                             const std::size_t limit, const std::size_t offset,
+                                             javelin::jmap::query::EmailListSort sort) const
+    {
+        if (const auto error = m_connection.validate())
+            return *error;
+
+        const auto orderDirection = javelin::jmap::query::isAscending(sort)
+                                        ? QStringLiteral("ASC")
+                                        : QStringLiteral("DESC");
+        const auto sortKey = sortKeyExpression(sort.property);
+        QSqlQuery query{m_connection.database()};
+        query.prepare(
+            QStringLiteral(
+                "WITH candidates AS ("
+                "  SELECT m.email_id FROM offline_mailbox_membership m "
+                "  INNER JOIN email_mailboxes em ON em.account_id=m.account_id "
+                "    AND em.email_id=m.email_id AND em.mailbox_id=m.mailbox_id "
+                "  WHERE m.account_id=:account_id AND m.mailbox_id=:mailbox_id "
+                "    AND m.generation=:generation "
+                "  UNION SELECT DISTINCT j.object_id FROM mutation_journal j "
+                "  INNER JOIN email_mailboxes em ON em.account_id=j.account_id "
+                "    AND em.email_id=j.object_id AND em.mailbox_id=:mailbox_id "
+                "  WHERE j.account_id=:account_id AND j.data_type='Email' "
+                "    AND j.status IN ('pending','in_flight','unknown')"
+                "), ranked_threads AS ("
+                "  SELECT e.email_id,e.thread_id,e.subject,e.preview,e.received_at,e.sent_at,"
+                "         %2 AS sort_key,"
+                "         ROW_NUMBER() OVER (PARTITION BY e.thread_id "
+                "           ORDER BY %2 %1,e.email_id %1) AS thread_rank,"
+                "         COUNT(*) OVER (PARTITION BY e.thread_id) AS thread_message_count,"
+                "         MAX(e.has_attachment) OVER (PARTITION BY e.thread_id) AS "
+                "thread_has_attachment,"
+                "         MAX(CASE WHEN seen.email_id IS NULL THEN 1 ELSE 0 END) OVER "
+                "           (PARTITION BY e.thread_id) AS thread_has_unread,"
+                "         MAX(CASE WHEN flagged.email_id IS NULL THEN 0 ELSE 1 END) OVER "
+                "           (PARTITION BY e.thread_id) AS thread_has_flagged "
+                "  FROM candidates c INNER JOIN emails e ON e.account_id=:account_id "
+                "    AND e.email_id=c.email_id "
+                "  LEFT JOIN email_keywords seen ON seen.account_id=e.account_id "
+                "    AND seen.email_id=e.email_id AND seen.keyword='$seen' "
+                "  LEFT JOIN email_keywords flagged ON flagged.account_id=e.account_id "
+                "    AND flagged.email_id=e.email_id AND flagged.keyword='$flagged'"
+                ") SELECT rt.email_id,rt.thread_id,rt.subject,rt.preview,rt.received_at,"
+                "rt.sent_at,rt.thread_message_count,rt.thread_has_attachment,"
+                "rt.thread_has_unread,rt.thread_has_flagged,"
+                "(SELECT a.display_name FROM email_addresses a WHERE a.account_id=:account_id "
+                " AND a.email_id=rt.email_id AND a.field_name='from' ORDER BY a.position LIMIT 1),"
+                "(SELECT a.address FROM email_addresses a WHERE a.account_id=:account_id "
+                " AND a.email_id=rt.email_id AND a.field_name='from' ORDER BY a.position LIMIT 1) "
+                "FROM ranked_threads rt WHERE rt.thread_rank=1 "
+                "ORDER BY rt.sort_key %1,rt.email_id %1 LIMIT :limit OFFSET :offset")
+                .arg(orderDirection, sortKey));
+        query.bindValue(QStringLiteral(":account_id"),
+                        QString::fromStdString(std::string{accountId}));
+        query.bindValue(QStringLiteral(":mailbox_id"),
+                        QString::fromStdString(std::string{mailboxId}));
+        query.bindValue(QStringLiteral(":generation"), static_cast<qulonglong>(generation));
+        query.bindValue(QStringLiteral(":limit"), static_cast<qulonglong>(limit));
+        query.bindValue(QStringLiteral(":offset"), static_cast<qulonglong>(offset));
+        if (!query.exec())
+            return makeQueryError(QStringLiteral("Read offline mailbox page"), query);
+
+        std::vector<MessageListItem> items;
+        while (query.next())
+        {
+            MessageListItem item{
+                .emailId = query.value(0).toString().toStdString(),
+                .threadId = query.value(1).toString().toStdString(),
+                .subject = query.value(2).isNull()
+                               ? std::nullopt
+                               : std::optional{query.value(2).toString().toStdString()},
+                .preview = query.value(3).isNull()
+                               ? std::nullopt
+                               : std::optional{query.value(3).toString().toStdString()},
+                .receivedAt = query.value(4).toString().toStdString(),
+                .sentAt = query.value(5).isNull()
+                              ? std::nullopt
+                              : std::optional{query.value(5).toString().toStdString()},
+                .threadMessageCount = query.value(6).toULongLong(),
+                .hasAttachment = query.value(7).toInt() != 0,
+                .isUnread = query.value(8).toInt() != 0,
+                .isFlagged = query.value(9).toInt() != 0,
+                .from = std::nullopt,
+                .mailboxNames = {},
+            };
+            if (!query.value(11).isNull())
+            {
+                item.from = javelin::jmap::domain::EmailAddress{
+                    .name = query.value(10).isNull()
+                                ? std::nullopt
+                                : std::optional{query.value(10).toString().toStdString()},
+                    .email = query.value(11).toString().toStdString(),
+                };
+            }
+            items.push_back(std::move(item));
+        }
+        return items;
+    }
+
     std::variant<std::vector<MessageListItem>, DatabaseError>
     QueryService::listMessagesByEmailIds(const std::string_view accountId,
                                          const std::vector<std::string>& emailIds) const
@@ -254,9 +401,12 @@ namespace javelin::jmap::cache
 
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
-            "WITH requested AS ("
+            "WITH requested AS MATERIALIZED ("
             "  SELECT value AS email_id, CAST(key AS INTEGER) AS sort_index "
             "  FROM json_each(:email_ids_json)"
+            "), requested_threads AS MATERIALIZED ("
+            "  SELECT DISTINCT e.thread_id FROM requested r "
+            "  CROSS JOIN emails e ON e.account_id=:account_id AND e.email_id=r.email_id"
             ") "
             "SELECT e.email_id, e.thread_id, e.subject, e.preview, e.received_at, e.sent_at, "
             "       COALESCE(thread_size.thread_message_count, 1) AS thread_message_count, "
@@ -290,11 +440,12 @@ namespace javelin::jmap::cache
             "         )"
             "       ) AS mailbox_names_json "
             "FROM requested r "
-            "INNER JOIN emails e ON e.account_id = :account_id AND e.email_id = r.email_id "
+            "CROSS JOIN emails e ON e.account_id = :account_id AND e.email_id = r.email_id "
             "LEFT JOIN ("
             "  SELECT e2.thread_id, COUNT(*) AS thread_message_count "
-            "  FROM emails e2 "
-            "  WHERE e2.account_id = :account_id "
+            "  FROM requested_threads rt "
+            "  CROSS JOIN emails e2 INDEXED BY idx_emails_thread "
+            "       ON e2.account_id=:account_id AND e2.thread_id=rt.thread_id "
             "  GROUP BY e2.thread_id"
             ") AS thread_size ON thread_size.thread_id = e.thread_id "
             "LEFT JOIN ("
@@ -303,12 +454,13 @@ namespace javelin::jmap::cache
             "thread_has_unread, "
             "         MAX(CASE WHEN flagged3.email_id IS NULL THEN 0 ELSE 1 END) AS "
             "thread_has_flagged "
-            "  FROM emails e3 "
+            "  FROM requested_threads rt "
+            "  CROSS JOIN emails e3 INDEXED BY idx_emails_thread "
+            "       ON e3.account_id=:account_id AND e3.thread_id=rt.thread_id "
             "  LEFT JOIN email_keywords seen3 ON seen3.account_id = e3.account_id "
             "       AND seen3.email_id = e3.email_id AND seen3.keyword = '$seen' "
             "  LEFT JOIN email_keywords flagged3 ON flagged3.account_id = e3.account_id "
             "       AND flagged3.email_id = e3.email_id AND flagged3.keyword = '$flagged' "
-            "  WHERE e3.account_id = :account_id "
             "  GROUP BY e3.thread_id"
             ") AS thread_flags ON thread_flags.thread_id = e.thread_id "
             "LEFT JOIN email_keywords seen ON seen.account_id = e.account_id "
@@ -398,19 +550,20 @@ namespace javelin::jmap::cache
         QSqlQuery query{m_connection.database()};
         query.prepare(
             QStringLiteral(
-                "WITH requested AS ("
+                "WITH requested AS MATERIALIZED ("
                 "  SELECT value AS email_id,CAST(key AS INTEGER) AS window_position "
                 "  FROM json_each(:email_ids_json)"
                 "),requested_threads AS ("
                 "  SELECT r.window_position,e.thread_id FROM requested r "
-                "  INNER JOIN emails e ON e.account_id=:account_id AND e.email_id=r.email_id"
+                "  CROSS JOIN emails e ON e.account_id=:account_id AND e.email_id=r.email_id"
                 "),ranked_members AS ("
                 "  SELECT rt.window_position,e.email_id,"
                 "         ROW_NUMBER() OVER (PARTITION BY rt.window_position "
                 "           ORDER BY %2 %1,e.email_id %1) AS thread_rank "
                 "  FROM requested_threads rt "
-                "  INNER JOIN emails e ON e.account_id=:account_id AND e.thread_id=rt.thread_id "
-                "  INNER JOIN email_mailboxes em ON em.account_id=e.account_id "
+                "  CROSS JOIN emails e INDEXED BY idx_emails_thread "
+                "    ON e.account_id=:account_id AND e.thread_id=rt.thread_id "
+                "  CROSS JOIN email_mailboxes em ON em.account_id=e.account_id "
                 "    AND em.email_id=e.email_id AND em.mailbox_id=:mailbox_id"
                 ") SELECT email_id FROM ranked_members WHERE thread_rank=1 "
                 "ORDER BY window_position")
@@ -444,78 +597,12 @@ namespace javelin::jmap::cache
             return std::vector<MessageListItem>{};
         }
 
-        QSqlQuery missingBodyQuery{m_connection.database()};
-        missingBodyQuery.prepare(
-            QStringLiteral("SELECT r.email_id,r.blob_id,r.payload FROM raw_message_sources r "
-                           "INNER JOIN email_search_fts f ON f.account_id=r.account_id AND "
-                           "f.email_id=r.email_id WHERE r.account_id=:account_id AND "
-                           "f.body_blob_id<>r.blob_id"));
-        missingBodyQuery.bindValue(QStringLiteral(":account_id"),
-                                   QString::fromStdString(std::string{accountId}));
-        if (!missingBodyQuery.exec())
-        {
-            return makeQueryError(QStringLiteral("Read unindexed cached message bodies"),
-                                  missingBodyQuery);
-        }
-        while (missingBodyQuery.next())
-        {
-            const auto emailId = missingBodyQuery.value(0).toString();
-            const auto blobId = missingBodyQuery.value(1).toString();
-            const auto parsed =
-                parseMessageSource(emailId.toStdString(), missingBodyQuery.value(2).toByteArray());
-            QString body;
-            if (parsed.plainTextBody.has_value())
-            {
-                body += QString::fromStdString(parsed.plainTextBody->value);
-            }
-            if (parsed.htmlBody.has_value())
-            {
-                if (!body.isEmpty())
-                {
-                    body += QLatin1Char('\n');
-                }
-                body += QString::fromStdString(parsed.htmlBody->value);
-            }
-            QSqlQuery update{m_connection.database()};
-            update.prepare(
-                QStringLiteral("UPDATE email_search_fts SET body=:body,body_blob_id=:blob_id WHERE "
-                               "account_id=:account_id AND email_id=:email_id"));
-            update.bindValue(QStringLiteral(":body"), body);
-            update.bindValue(QStringLiteral(":blob_id"), blobId);
-            update.bindValue(QStringLiteral(":account_id"),
-                             QString::fromStdString(std::string{accountId}));
-            update.bindValue(QStringLiteral(":email_id"), emailId);
-            if (!update.exec())
-            {
-                return makeQueryError(QStringLiteral("Index cached message body"), update);
-            }
-        }
-
-        QString match = QStringLiteral("\"");
-        match += QString::fromStdString(std::string{text})
-                     .replace(QLatin1String("\""), QStringLiteral("\"\""));
-        match += QLatin1Char('"');
-
-        QSqlQuery query{m_connection.database()};
-        query.prepare(QStringLiteral(
-            "SELECT email_id FROM email_search_fts WHERE email_search_fts MATCH :match AND "
-            "account_id = :account_id ORDER BY bm25(email_search_fts) LIMIT :candidate_limit"));
-        query.bindValue(QStringLiteral(":match"), match);
-        query.bindValue(QStringLiteral(":account_id"),
-                        QString::fromStdString(std::string{accountId}));
-        query.bindValue(QStringLiteral(":candidate_limit"),
-                        static_cast<qulonglong>((limit + offset) * 4));
-        if (!query.exec())
-        {
-            return makeQueryError(QStringLiteral("Search cached message text"), query);
-        }
-
-        std::vector<std::string> emailIds;
-        while (query.next())
-        {
-            emailIds.push_back(query.value(0).toString().toStdString());
-        }
-        const auto itemResult = listMessagesByEmailIds(accountId, emailIds);
+        MailSearchIndex index{m_connection};
+        const auto indexedIds = index.search(accountId, text, (limit + offset) * 4);
+        const auto* emailIds = std::get_if<std::vector<std::string>>(&indexedIds);
+        if (emailIds == nullptr)
+            return std::get<DatabaseError>(indexedIds);
+        const auto itemResult = listMessagesByEmailIds(accountId, *emailIds);
         if (const auto* error = std::get_if<DatabaseError>(&itemResult))
         {
             return *error;

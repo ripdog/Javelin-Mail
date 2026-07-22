@@ -1,25 +1,20 @@
 #pragma once
 
+#include "jmap/api/JmapMethodTransport.h"
 #include "jmap/sync/StateChangeSource.h"
 
 #include <memory>
 #include <string>
-
-namespace javelin::jmap::cache
-{
-    class DatabaseConnection;
-}
 
 namespace javelin::jmap::sync
 {
     class PreferredStateChangeSource final : public StateChangeSource
     {
       public:
-        PreferredStateChangeSource(
-            javelin::jmap::cache::DatabaseConnection& databaseConnection,
-            std::string accountId, std::string webSocketUrl,
-            std::unique_ptr<StateChangeSource> webSocketSource,
-            std::unique_ptr<StateChangeSource> httpFallbackSource);
+        PreferredStateChangeSource(javelin::jmap::api::WebSocketFailureCooldowns& cooldowns,
+                                   std::string webSocketUrl,
+                                   std::unique_ptr<StateChangeSource> webSocketSource,
+                                   std::unique_ptr<StateChangeSource> httpFallbackSource);
         ~PreferredStateChangeSource() override;
 
         PreferredStateChangeSource(const PreferredStateChangeSource&) = delete;
@@ -34,8 +29,7 @@ namespace javelin::jmap::sync
                 StateChangeCancellation& cancellation) override;
 
       private:
-        javelin::jmap::cache::DatabaseConnection& m_databaseConnection;
-        std::string m_accountId;
+        javelin::jmap::api::WebSocketFailureCooldowns& m_cooldowns;
         std::string m_webSocketUrl;
         std::unique_ptr<StateChangeSource> m_webSocketSource;
         std::unique_ptr<StateChangeSource> m_httpFallbackSource;

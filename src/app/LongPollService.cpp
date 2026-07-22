@@ -1,6 +1,7 @@
 #include "app/LongPollService.h"
 
 #include "app/MailboxSyncCoverage.h"
+#include "app/WorkScheduler.h"
 
 #include "jmap/api/MethodCaller.h"
 #include "jmap/api/Session.h"
@@ -11,6 +12,7 @@
 #include "jmap/sync/MailboxStateRefreshExecutor.h"
 #include "jmap/sync/PreferredStateChangeSource.h"
 
+#include <QCoroTimer>
 #include <QDateTime>
 #include <QDebug>
 #include <QMetaObject>
@@ -27,6 +29,22 @@ namespace javelin::app
         constexpr auto refreshDebounceInterval = std::chrono::milliseconds{750};
         constexpr auto resumeWatchdogInterval = std::chrono::seconds{30};
         constexpr auto resumeWatchdogStallThreshold = std::chrono::seconds{90};
+
+        class ForegroundWorkScope final
+        {
+          public:
+            explicit ForegroundWorkScope(WorkScheduler& scheduler) : m_scheduler(scheduler)
+            {
+                m_scheduler.beginForegroundWork();
+            }
+            ~ForegroundWorkScope()
+            {
+                m_scheduler.endForegroundWork();
+            }
+
+          private:
+            WorkScheduler& m_scheduler;
+        };
 
         [[nodiscard]] AccountSyncCoordinator::Status
         toServiceStatus(const javelin::jmap::sync::StateChangeConnectionStatus status)
@@ -50,11 +68,14 @@ namespace javelin::app
         javelin::jmap::cache::DatabaseConnection& databaseConnection,
         javelin::jmap::api::JmapMethodTransport& methodTransport,
         QNetworkAccessManager& networkAccessManager,
+        javelin::jmap::api::WebSocketFailureCooldowns& cooldowns,
         javelin::jmap::cache::AccountRepository& accountRepository,
-        javelin::jmap::cache::QueryService& queryService, QObject* parent)
+        javelin::jmap::cache::QueryService& queryService, WorkScheduler& workScheduler,
+        QObject* parent)
         : QObject(parent), m_databaseConnection(databaseConnection),
           m_methodTransport(methodTransport), m_networkAccessManager(networkAccessManager),
-          m_accountRepository(accountRepository), m_queryService(queryService)
+          m_transportCooldowns(cooldowns), m_accountRepository(accountRepository),
+          m_queryService(queryService), m_workScheduler(workScheduler)
     {
         m_refreshDebounceTimer.setSingleShot(true);
         m_refreshDebounceTimer.setInterval(refreshDebounceInterval);
@@ -302,6 +323,7 @@ namespace javelin::app
             co_return;
         }
 
+        const ForegroundWorkScope foreground{m_workScheduler};
         m_refreshInFlight = true;
         const auto generation = runContext->generation;
         do
@@ -328,7 +350,7 @@ namespace javelin::app
             co_return;
         }
 
-        const bool mailboxStateRefreshed = co_await refreshMailboxStateOnce(runContext);
+        const bool mailboxStateChanged = co_await refreshMailboxStateOnce(runContext);
         if (m_runContext == nullptr || m_runContext->generation != runContext->generation ||
             runContext->cancellation.isCancelled())
         {
@@ -428,13 +450,14 @@ namespace javelin::app
             co_return;
         }
 
-        if (mailboxStateRefreshed || watchedMailboxRefreshed)
+        if (mailboxStateChanged || watchedMailboxRefreshed)
         {
             Q_EMIT cacheCommitted(MailCacheChange{
                 .accountId = QString::fromStdString(runContext->configuration.accountId),
                 .mailboxIds = std::move(refreshedMailboxIds),
                 .queryWindows = std::move(materializedWindows),
                 .searchWindows = {},
+                .mailboxTreeChanged = mailboxStateChanged,
                 .hasNewMail = hasNewMail,
             });
         }
@@ -483,7 +506,7 @@ namespace javelin::app
             co_return false;
         }
 
-        co_return true;
+        co_return std::get<javelin::jmap::sync::MailboxStateRefreshSummary>(refreshResult).changed;
     }
 
     void AccountSyncCoordinator::handleResumeWatchdogTimeout()
@@ -646,8 +669,7 @@ namespace javelin::app
                         nextConfiguration->settings.apiKey, sourceStatusCallback);
             }
             runContext->source = std::make_unique<javelin::jmap::sync::PreferredStateChangeSource>(
-                m_databaseConnection, nextConfiguration->accountId,
-                nextConfiguration->websocket->url, std::move(webSocketSource),
+                m_transportCooldowns, nextConfiguration->websocket->url, std::move(webSocketSource),
                 std::move(httpFallbackSource));
         }
         else

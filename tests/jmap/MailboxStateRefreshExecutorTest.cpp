@@ -205,6 +205,7 @@ TEST_CASE("mailbox state refresh executor bootstraps mailbox metadata",
     const auto& summary = std::get<javelin::jmap::sync::MailboxStateRefreshSummary>(result);
     CHECK(summary.mailboxCount == 1);
     CHECK_FALSE(summary.usedIncrementalRefresh);
+    CHECK(summary.changed);
 
     javelin::jmap::cache::QueryService queryService{databaseContext.connection};
     const auto mailboxTreeResult = queryService.listMailboxTree("account-1");
@@ -287,6 +288,7 @@ TEST_CASE("mailbox state refresh executor applies mailbox changes", "[jmap][sync
     const auto& summary = std::get<javelin::jmap::sync::MailboxStateRefreshSummary>(result);
     CHECK(summary.mailboxCount == 1);
     CHECK(summary.usedIncrementalRefresh);
+    CHECK(summary.changed);
     REQUIRE(transport.requests.size() == 1);
     const auto requestEnvelope =
         javelin::jmap::api::parseRequestEnvelope(transport.requests.front().body.toStdString());

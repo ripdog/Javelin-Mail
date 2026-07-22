@@ -25,6 +25,7 @@
 namespace javelin::app
 {
     class ApplicationErrorCoordinator;
+    class WorkScheduler;
 
     class MailboxObservation;
 
@@ -94,6 +95,7 @@ namespace javelin::app
         AccountConnectionSettings settings;
         std::string accountId;
         std::vector<std::string> mailboxIds;
+        std::vector<std::string> fullSyncMailboxIds;
         std::vector<std::string> notificationMailboxIds;
         bool notificationMailboxSelectionConfigured = false;
     };
@@ -123,19 +125,22 @@ namespace javelin::app
                                javelin::jmap::JmapCore& jmapCore,
                                javelin::jmap::api::JmapMethodTransport& methodTransport,
                                QNetworkAccessManager& networkAccessManager,
+                               javelin::jmap::api::WebSocketFailureCooldowns& cooldowns,
                                javelin::jmap::cache::AccountRepository& accountRepository,
                                javelin::jmap::cache::QueryService& queryService,
                                javelin::jmap::contacts::ContactService& contactService,
                                javelin::jmap::calendar::CalendarService& calendarService,
                                javelin::jmap::sieve::SieveService& sieveService,
                                ApplicationErrorCoordinator& errorCoordinator,
-                               QObject* parent = nullptr);
+                               WorkScheduler& workScheduler, QObject* parent = nullptr);
 
         void applySettings(std::vector<AccountSyncConfiguration> configurations);
         [[nodiscard]] MailboxObservation observeMailbox(std::string accountId,
                                                         std::string mailboxId);
         [[nodiscard]] bool requestAccountSynchronization(std::string_view accountId);
         [[nodiscard]] QString statusSummary() const;
+        void publishMailboxWindowCommitted(QString accountId, QString mailboxId, std::size_t offset,
+                                           std::size_t limit);
         [[nodiscard]] QCoro::Task<MailboxWindowResult>
         requestMailboxWindow(MailboxWindowIntent intent);
         [[nodiscard]] QCoro::Task<SearchWindowResult>
@@ -247,12 +252,14 @@ namespace javelin::app
         javelin::jmap::JmapCore& m_jmapCore;
         javelin::jmap::api::JmapMethodTransport& m_methodTransport;
         QNetworkAccessManager& m_networkAccessManager;
+        javelin::jmap::api::WebSocketFailureCooldowns& m_transportCooldowns;
         javelin::jmap::cache::AccountRepository& m_accountRepository;
         javelin::jmap::cache::QueryService& m_queryService;
         javelin::jmap::contacts::ContactService& m_contactService;
         javelin::jmap::calendar::CalendarService& m_calendarService;
         javelin::jmap::sieve::SieveService& m_sieveService;
         ApplicationErrorCoordinator& m_errorCoordinator;
+        WorkScheduler& m_workScheduler;
         struct VisibleCalendarRange
         {
             javelin::jmap::calendar::VisibleInterval interval;

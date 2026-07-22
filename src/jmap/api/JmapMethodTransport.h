@@ -6,8 +6,12 @@
 
 #include <QCoroTask>
 
+#include <chrono>
 #include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
+#include <unordered_map>
 #include <variant>
 
 namespace javelin::jmap::cache
@@ -18,6 +22,22 @@ namespace javelin::jmap::cache
 namespace javelin::jmap::api
 {
     class AbstractTransport;
+
+    class WebSocketFailureCooldowns final
+    {
+      public:
+        explicit WebSocketFailureCooldowns(
+            std::chrono::milliseconds failureCooldown = std::chrono::minutes{15});
+
+        [[nodiscard]] std::optional<std::chrono::milliseconds>
+        retryDelay(std::string_view url) const;
+        void recordFailure(std::string url);
+        void recordSuccess(std::string_view url);
+
+      private:
+        std::chrono::milliseconds m_failureCooldown;
+        std::unordered_map<std::string, std::chrono::steady_clock::time_point> m_retryAfter;
+    };
 
     enum class JmapTransportPolicy
     {
@@ -62,7 +82,8 @@ namespace javelin::jmap::api
     {
       public:
         PreferredJmapMethodTransport(javelin::jmap::cache::DatabaseConnection& databaseConnection,
-                                     HttpJmapMethodTransport& httpTransport);
+                                     HttpJmapMethodTransport& httpTransport,
+                                     WebSocketFailureCooldowns& cooldowns);
         ~PreferredJmapMethodTransport() override;
 
         PreferredJmapMethodTransport(const PreferredJmapMethodTransport&) = delete;

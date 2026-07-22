@@ -771,7 +771,7 @@ TEST_CASE("mailbox refresh executor applies updated-only deltas without full reb
           std::optional<std::string>{"Quarterly update v2"});
 }
 
-TEST_CASE("mailbox refresh executor rebuilds window when updated delta is missing locally",
+TEST_CASE("mailbox refresh executor ignores updated deltas outside the cached prefix",
           "[jmap][sync][refresh]")
 {
     ApplicationGuard application;
@@ -882,15 +882,15 @@ TEST_CASE("mailbox refresh executor rebuilds window when updated delta is missin
 
     REQUIRE(std::holds_alternative<javelin::jmap::sync::MailboxRefreshSummary>(result));
     const auto& summary = std::get<javelin::jmap::sync::MailboxRefreshSummary>(result);
-    CHECK_FALSE(summary.usedIncrementalRefresh);
+    CHECK(summary.usedIncrementalRefresh);
     CHECK(summary.changedEmailIds == std::vector<std::string>{"eml-1"});
-    CHECK(summary.insertedEmailIds == std::vector<std::string>{"eml-1"});
-    REQUIRE(transport.requests.size() == 2);
+    CHECK(summary.insertedEmailIds.empty());
+    REQUIRE(transport.requests.size() == 1);
 
     javelin::jmap::cache::EmailRepository emailRepository{databaseContext.connection};
     const auto emailResult = emailRepository.find("account-1", "eml-1");
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(emailResult));
-    REQUIRE(std::get<std::optional<javelin::jmap::domain::Email>>(emailResult).has_value());
+    CHECK_FALSE(std::get<std::optional<javelin::jmap::domain::Email>>(emailResult).has_value());
 }
 
 TEST_CASE("mailbox refresh executor preserves change hints when delta falls back to full fetch",
@@ -925,6 +925,11 @@ TEST_CASE("mailbox refresh executor preserves change hints when delta falls back
                       .has_value());
     seedCanonicalWindow(databaseContext.connection, {"eml-1", "eml-removed"});
 
+    auto addedEmailFixture = javelin::tests::loadFixture("jmap/entities/email.json");
+    const auto fixtureId = addedEmailFixture.find("\"eml-1\"");
+    REQUIRE(fixtureId != std::string::npos);
+    addedEmailFixture.replace(fixtureId, std::string{"\"eml-1\""}.size(), "\"eml-new\"");
+
     FakeTransport transport;
     transport.queuedResults
         .push_back(javelin::jmap::api::
@@ -939,7 +944,7 @@ TEST_CASE("mailbox refresh executor preserves change hints when delta falls back
                                                    javelin::jmap::api::MethodInvocation{
                                                        .name = "Email/queryChanges",
                                                        .arguments =
-                                                           R"({"accountId":"account-1","oldQueryState":"query-state-1","newQueryState":"query-state-2","added":[{"id":"eml-new","index":0}],"removed":["eml-removed"],"hasMoreChanges":false})",
+                                                           R"({"accountId":"account-1","oldQueryState":"query-state-1","newQueryState":"query-state-2","added":[{"id":"eml-new","index":0}],"removed":["eml-removed"],"hasMoreChanges":true})",
                                                        .callId = "mailbox-query-changes",
                                                    },
                                                    javelin::
@@ -954,6 +959,21 @@ TEST_CASE("mailbox refresh executor preserves change hints when delta falls back
                                            .sessionState = "session-state-2",
                                        })),
                        });
+    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body = QByteArray::fromStdString(serializeResponseEnvelope({
+            .methodResponses =
+                {
+                    javelin::jmap::api::MethodInvocation{
+                        .name = "Email/get",
+                        .arguments = emailGetArguments("email-state-2", addedEmailFixture),
+                        .callId = "updated-emails-get",
+                    },
+                },
+            .createdIds = std::nullopt,
+            .sessionState = "session-state-2",
+        })),
+    });
     transport
         .queuedResults.push_back(javelin::jmap::
                                      api::
@@ -1021,7 +1041,7 @@ TEST_CASE("mailbox refresh executor preserves change hints when delta falls back
     CHECK(summary.removedEmailIds == std::vector<std::string>{"eml-removed"});
     CHECK(summary.requiresNotificationScan);
     CHECK(summary.notificationCandidates.empty());
-    REQUIRE(transport.requests.size() == 2);
+    REQUIRE(transport.requests.size() == 3);
     const auto removedResult = emailRepository.find("account-1", "eml-removed");
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(removedResult));
     CHECK_FALSE(std::get<std::optional<javelin::jmap::domain::Email>>(removedResult).has_value());
