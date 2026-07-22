@@ -2218,27 +2218,6 @@ namespace javelin::jmap
             };
         }
 
-        if (const auto validationError = validateLoginSettings(settings, true))
-        {
-            co_return *validationError;
-        }
-        const auto sessionResult = loadCachedSession(*m_impl->databaseConnection, accountId);
-        if (const auto* error = std::get_if<OperationError>(&sessionResult))
-        {
-            co_return *error;
-        }
-        javelin::jmap::api::MethodCaller methodCaller{*m_impl->methodTransport};
-        javelin::jmap::sync::MailboxRefreshExecutor mailboxRefreshExecutor{
-            *m_impl->databaseConnection, methodCaller,
-            buildApiRequestContext(settings, accountId,
-                                   std::get<javelin::jmap::api::Session>(sessionResult))};
-        const auto refreshResult = co_await mailboxRefreshExecutor.refreshCollapsedMailbox(
-            accountId, mailboxId, reportProgress, true);
-        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&refreshResult))
-        {
-            co_return javelin::jmap::operationError(*error);
-        }
-
         const bool anchoredRequest = anchor.has_value();
         const auto pageResult = co_await performCollapsedQueryPage(
             *m_impl->databaseConnection, *m_impl->methodTransport, settings, accountId,

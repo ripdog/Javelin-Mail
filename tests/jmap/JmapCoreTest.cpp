@@ -2,6 +2,7 @@
 
 #include "FixtureReader.h"
 #include "jmap/api/JmapMethodTransport.h"
+#include "jmap/api/MethodEnvelope.h"
 #include "jmap/api/Transport.h"
 #include "jmap/cache/SessionRepository.h"
 
@@ -56,6 +57,14 @@ namespace
         ++counter;
         return QStringLiteral("javelin-core-session-refresh-%1").arg(counter);
     }
+
+    [[nodiscard]] std::string
+    serializeResponseEnvelope(const javelin::jmap::api::ResponseEnvelope& envelope)
+    {
+        const auto serialized = javelin::jmap::api::serializeResponseEnvelope(envelope);
+        REQUIRE(serialized.has_value());
+        return *serialized;
+    }
 } // namespace
 
 TEST_CASE("JmapCore exposes a non-empty status summary", "[jmap]")
@@ -81,8 +90,7 @@ TEST_CASE("JmapCore startup session refresh discovers and caches websocket capab
     {
         FAIL(error->message.toStdString());
     }
-    auto database =
-        std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    auto database = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
 
     FakeTransport transport;
     transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
@@ -115,9 +123,88 @@ TEST_CASE("JmapCore startup session refresh discovers and caches websocket capab
     const auto loaded = sessions.load("u1");
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::api::Session>>(loaded));
     REQUIRE(std::get<std::optional<javelin::jmap::api::Session>>(loaded).has_value());
-    const auto& session =
-        *std::get<std::optional<javelin::jmap::api::Session>>(loaded);
+    const auto& session = *std::get<std::optional<javelin::jmap::api::Session>>(loaded);
     REQUIRE(session.capabilities.websocket.has_value());
     CHECK(session.capabilities.websocket->url == "wss://mail.example.com/jmap/ws");
     CHECK(session.capabilities.websocket->supportsPush);
+}
+
+TEST_CASE("JmapCore mailbox pages use one requested-page envelope", "[jmap][core][pagination]")
+{
+    ensureApplication();
+    QTemporaryDir temporaryDir;
+    REQUIRE(temporaryDir.isValid());
+
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = makeConnectionName(),
+        .databasePath = temporaryDir.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto database = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body = QByteArray::fromStdString(
+            javelin::tests::loadFixture("jmap/session/websocket_session.json")),
+    });
+    javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
+    javelin::jmap::JmapCore core{database, transport, methodTransport};
+    const javelin::jmap::LiveConnectionSettings settings{
+        .sessionUrl = "https://mail.example.com/.well-known/jmap",
+        .loginEmail = "alice@example.com",
+        .apiKey = "access-token",
+    };
+    REQUIRE(std::holds_alternative<javelin::jmap::SessionRefreshSummary>(
+        QCoro::waitFor(core.refreshSession(settings, "u1"))));
+
+    const auto email = javelin::tests::loadFixture("jmap/entities/email.json");
+    const auto emailGetArguments =
+        std::string{R"({"accountId":"u1","state":"email-state-1","list":[)"} + email +
+        R"(],"notFound":[]})";
+    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body = QByteArray::fromStdString(serializeResponseEnvelope({
+            .methodResponses =
+                {
+                    {
+                        .name = "Email/query",
+                        .arguments =
+                            R"({"accountId":"u1","queryState":"query-state-1","canCalculateChanges":true,"position":100,"ids":["eml-1"],"total":101,"limit":100})",
+                        .callId = "page-query",
+                    },
+                    {
+                        .name = "Email/get",
+                        .arguments = emailGetArguments,
+                        .callId = "page-representatives-get",
+                    },
+                    {
+                        .name = "Thread/get",
+                        .arguments =
+                            R"({"accountId":"u1","state":"thread-state-1","list":[{"id":"thr-123","emailIds":["eml-1"]}],"notFound":[]})",
+                        .callId = "page-threads-get",
+                    },
+                    {
+                        .name = "Email/get",
+                        .arguments = emailGetArguments,
+                        .callId = "page-emails-get",
+                    },
+                },
+            .createdIds = std::nullopt,
+            .sessionState = "session-state-2",
+        })),
+    });
+
+    const auto result = QCoro::waitFor(core.queryMailboxPage(settings, "u1", "mbx-inbox", 100));
+    REQUIRE(std::holds_alternative<javelin::jmap::MailboxPageSummary>(result));
+    const auto& page = std::get<javelin::jmap::MailboxPageSummary>(result);
+    CHECK(page.offset == 100);
+    CHECK(page.position == 100);
+    CHECK(page.representativeCount == 1);
+    CHECK(page.total == std::optional<std::size_t>{101});
+    REQUIRE(page.results.size() == 1);
+    CHECK(page.results.front().emailId == "eml-1");
+    REQUIRE(transport.requests.size() == 2);
+    CHECK(transport.requests.back().url ==
+          QUrl{QStringLiteral("https://mail.example.com/jmap/api")});
 }
