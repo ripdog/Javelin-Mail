@@ -245,7 +245,14 @@ namespace javelin::gui::messages
                                    std::optional<std::string> mailboxId,
                                    std::vector<javelin::jmap::cache::MessageListItem> items)
     {
-        if (m_accountId != accountId || m_mailboxId != mailboxId || !m_expandedThreadIds.empty())
+        // A disjoint query page is one logical replacement. Publishing it as a long sequence of
+        // row removals and insertions makes QItemSelectionModel visit transient row identities.
+        const bool pagesAreDisjoint =
+            (!m_threads.empty() || !items.empty()) &&
+            std::ranges::none_of(items, [this](const auto& item)
+                                 { return findThreadIndex(item.threadId).has_value(); });
+        if (m_accountId != accountId || m_mailboxId != mailboxId || !m_expandedThreadIds.empty() ||
+            pagesAreDisjoint)
         {
             beginResetModel();
             m_accountId = std::move(accountId);

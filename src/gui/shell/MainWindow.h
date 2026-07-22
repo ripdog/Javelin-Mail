@@ -302,6 +302,7 @@ namespace javelin::gui::shell
         [[nodiscard]] const TabState* activeTab() const;
         [[nodiscard]] TabState* activeTab();
         void applyActiveTabPageToModel();
+        void applyActiveTabPagePreservingSelection(std::optional<int> previousMessageRow);
         void goToFirstPage();
         void goToLastPage();
         void goToPage(std::size_t pageIndex);

@@ -2665,21 +2665,7 @@ namespace javelin::gui::shell
                         return;
                     }
 
-                    const auto previousMessageRow = currentMessageRow(*m_messageView);
-                    bool autoSelectedFallback = false;
-                    {
-                        QSignalBlocker blocker{m_messageView->selectionModel()};
-                        applyActiveTabPageToModel();
-                        autoSelectedFallback = restoreActiveTabMessageSelection(previousMessageRow);
-                    }
-                    if (autoSelectedFallback)
-                    {
-                        handleCurrentMessageChanged(m_messageView->currentIndex());
-                    }
-                    else
-                    {
-                        refreshSelectionFromModels();
-                    }
+                    applyActiveTabPagePreservingSelection(currentMessageRow(*m_messageView));
                     updateEmptyStates();
                     updateMessageListHeader();
                 });
@@ -2961,6 +2947,25 @@ namespace javelin::gui::shell
         m_messageModel->clear();
     }
 
+    void
+    MainWindow::applyActiveTabPagePreservingSelection(const std::optional<int> previousMessageRow)
+    {
+        bool autoSelectedFallback = false;
+        {
+            QSignalBlocker messageSelectionBlocker{m_messageView->selectionModel()};
+            applyActiveTabPageToModel();
+            autoSelectedFallback = restoreActiveTabMessageSelection(previousMessageRow);
+        }
+        if (autoSelectedFallback)
+        {
+            handleCurrentMessageChanged(m_messageView->currentIndex());
+        }
+        else
+        {
+            refreshSelectionFromModels();
+        }
+    }
+
     void MainWindow::loadMailboxTabFromCache(const std::string_view accountId,
                                              const std::string_view mailboxId,
                                              const bool applyIfActive,
@@ -2987,21 +2992,7 @@ namespace javelin::gui::shell
             return;
         }
 
-        const auto previousMessageRow = currentMessageRow(*m_messageView);
-        bool autoSelectedFallback = false;
-        {
-            QSignalBlocker messageSelectionBlocker{m_messageView->selectionModel()};
-            applyActiveTabPageToModel();
-            autoSelectedFallback = restoreActiveTabMessageSelection(previousMessageRow);
-        }
-        if (autoSelectedFallback)
-        {
-            handleCurrentMessageChanged(m_messageView->currentIndex());
-        }
-        else
-        {
-            refreshSelectionFromModels();
-        }
+        applyActiveTabPagePreservingSelection(currentMessageRow(*m_messageView));
     }
 
     void MainWindow::ensureMailboxObservation(MailboxTabState& tab)
@@ -3025,12 +3016,14 @@ namespace javelin::gui::shell
             return;
         }
 
+        MailboxTabState* mailboxTabToRefresh = nullptr;
+        javelin::gui::search::SearchSession* searchSessionToRefresh = nullptr;
         if (auto* mailboxTab = std::get_if<MailboxTabState>(&tab->content))
         {
             static_cast<void>(loadMailboxTabPageFromCache(*mailboxTab, forceReload));
             if (refreshRemote)
             {
-                refreshMailboxTabFromServer(*mailboxTab);
+                mailboxTabToRefresh = mailboxTab;
             }
         }
         else if (auto* searchTab = std::get_if<SearchTabState>(&tab->content))
@@ -3039,7 +3032,7 @@ namespace javelin::gui::shell
             if (refreshRemote && searchTab->session->page().stale &&
                 !searchTab->session->page().refreshInFlight)
             {
-                searchTab->session->refreshFromServer();
+                searchSessionToRefresh = searchTab->session;
             }
         }
         else
@@ -3055,20 +3048,14 @@ namespace javelin::gui::shell
             return;
         }
 
-        const auto previousMessageRow = currentMessageRow(*m_messageView);
-        bool autoSelectedFallback = false;
+        applyActiveTabPagePreservingSelection(currentMessageRow(*m_messageView));
+        if (mailboxTabToRefresh != nullptr)
         {
-            QSignalBlocker messageSelectionBlocker{m_messageView->selectionModel()};
-            applyActiveTabPageToModel();
-            autoSelectedFallback = restoreActiveTabMessageSelection(previousMessageRow);
+            refreshMailboxTabFromServer(*mailboxTabToRefresh);
         }
-        if (autoSelectedFallback)
+        else if (searchSessionToRefresh != nullptr)
         {
-            handleCurrentMessageChanged(m_messageView->currentIndex());
-        }
-        else
-        {
-            refreshSelectionFromModels();
+            searchSessionToRefresh->refreshFromServer();
         }
     }
 
@@ -3190,6 +3177,9 @@ namespace javelin::gui::shell
                         (*mailboxTab->page.total == 0 ||
                          mailboxTab->page.position >= *mailboxTab->page.total))
                     {
+                        const auto previousMessageRow = activeTab() == &tabState
+                                                            ? currentMessageRow(*m_messageView)
+                                                            : std::optional<int>{};
                         const auto step = mailboxTab->page.returnedLimit == 0
                                               ? pageSize
                                               : mailboxTab->page.returnedLimit;
@@ -3201,15 +3191,18 @@ namespace javelin::gui::shell
                         mailboxTab->page.cacheLoaded = false;
                         mailboxTab->page.stale = true;
                         if (activeTab() == &tabState)
-                            applyActiveTabPageToModel();
+                            applyActiveTabPagePreservingSelection(previousMessageRow);
                         refreshMailboxTabFromServer(*mailboxTab);
                         return;
                     }
                     mailboxTab->page.stale = false;
                     mailboxTab->page.refreshError.clear();
+                    const auto previousMessageRow = activeTab() == &tabState
+                                                        ? currentMessageRow(*m_messageView)
+                                                        : std::optional<int>{};
                     static_cast<void>(loadMailboxTabPageFromCache(*mailboxTab, true));
                     if (activeTab() == &tabState)
-                        applyActiveTabPageToModel();
+                        applyActiveTabPagePreservingSelection(previousMessageRow);
                     updateEmptyStates();
                     resolveOpenEmailRoute();
                     m_statusBar->showMessage(
