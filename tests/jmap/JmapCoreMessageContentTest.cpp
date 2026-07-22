@@ -10,6 +10,7 @@
 #include "jmap/cache/RawMessageSourceRepository.h"
 #include "jmap/cache/SearchWindowRepository.h"
 #include "jmap/cache/SessionRepository.h"
+#include "jmap/cache/SyncStateRepository.h"
 #include "jmap/cache/ThreadRepository.h"
 #include "jmap/domain/MailEntityParsers.h"
 #include "jmap/search/EmailSearch.h"
@@ -1116,6 +1117,11 @@ TEST_CASE("JmapCore submits queued mailbox mutations through Email/set",
 
     javelin::jmap::cache::EmailRepository emailRepository{databaseContext.connection};
     REQUIRE_FALSE(emailRepository.replaceAll("u1", {email}).has_value());
+    javelin::jmap::cache::SyncStateRepository syncStates{databaseContext.connection};
+    REQUIRE_FALSE(
+        syncStates
+            .upsert({.accountId = "u1", .objectType = "Email", .queryKey = {}}, "email-state-0")
+            .has_value());
 
     FakeTransport transport;
     transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
@@ -1163,6 +1169,13 @@ TEST_CASE("JmapCore submits queued mailbox mutations through Email/set",
     REQUIRE(refreshedEmail.has_value());
     CHECK(refreshedEmail->mailboxIds == std::vector<std::string>{"mbx-archive"});
     CHECK(refreshedEmail->keywords == std::vector<std::string>{"$seen"});
+    const auto staleState =
+        syncStates.find({.accountId = "u1", .objectType = "Email", .queryKey = {}});
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::cache::SyncStateRecord>>(staleState));
+    REQUIRE(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(staleState).has_value());
+    CHECK(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(staleState)->stateToken ==
+          "email-state-0");
 
     javelin::jmap::sync::EmailMutationJournal emailMutationJournal{databaseContext.connection};
     const auto pendingResult = emailMutationJournal.listForEmail("u1", "eml-1");
@@ -1322,6 +1335,11 @@ TEST_CASE("JmapCore submits queued read keyword mutations through Email/set",
 
     javelin::jmap::cache::EmailRepository emailRepository{databaseContext.connection};
     REQUIRE_FALSE(emailRepository.replaceAll("u1", {email}).has_value());
+    javelin::jmap::cache::SyncStateRepository syncStates{databaseContext.connection};
+    REQUIRE_FALSE(
+        syncStates
+            .upsert({.accountId = "u1", .objectType = "Email", .queryKey = {}}, "email-state-1")
+            .has_value());
 
     FakeTransport transport;
     transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
@@ -1365,6 +1383,15 @@ TEST_CASE("JmapCore submits queued read keyword mutations through Email/set",
         std::get<std::optional<javelin::jmap::domain::Email>>(refreshedEmailResult);
     REQUIRE(refreshedEmail.has_value());
     CHECK(refreshedEmail->keywords == std::vector<std::string>{"$seen"});
+    const auto acceptedState =
+        syncStates.find({.accountId = "u1", .objectType = "Email", .queryKey = {}});
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::SyncStateRecord>>(
+        acceptedState));
+    REQUIRE(
+        std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(acceptedState).has_value());
+    CHECK(
+        std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(acceptedState)->stateToken ==
+        "email-state-2");
 }
 
 TEST_CASE("JmapCore preserves ambiguous Email mutation outcomes for reconciliation",

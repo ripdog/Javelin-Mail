@@ -1294,7 +1294,7 @@ namespace javelin::gui::shell
                     }
 
                     m_messageNavigationCoordinator.cancel();
-                    activateTab(index, false);
+                    activateTab(index, true);
                 });
         connect(m_tabBar, &QTabBar::tabCloseRequested, this, &MainWindow::closeTab);
         connect(m_previousPageButton, &QToolButton::clicked, this, &MainWindow::goToPreviousPage);
@@ -5994,10 +5994,7 @@ namespace javelin::gui::shell
         m_activeTabIndex = std::clamp(activeTabIndexValue, 0, static_cast<int>(m_tabs.size() - 1));
         updateTabBar();
         activateTab(*m_activeTabIndex, false);
-        for (std::size_t index = 0; index < m_tabs.size(); ++index)
-        {
-            refreshTabFromServer(index);
-        }
+        refreshTabFromServer(static_cast<std::size_t>(*m_activeTabIndex));
     }
 
     void MainWindow::restoreMailboxTab(const QSettings& settings, const QString& accountId)

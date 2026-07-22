@@ -128,9 +128,18 @@ namespace javelin::app
                   updatedConfiguration->websocket->supportsPush ==
                       m_runContext->configuration.websocket->supportsPush)))
             {
+                const bool watchedMailboxesChanged =
+                    m_runContext->configuration.mailboxes != updatedConfiguration->mailboxes;
+                const bool notificationMailboxesChanged =
+                    m_runContext->configuration.notificationMailboxIds !=
+                    updatedConfiguration->notificationMailboxIds;
                 m_runContext->configuration.mailboxes = updatedConfiguration->mailboxes;
                 m_runContext->configuration.notificationMailboxIds =
                     updatedConfiguration->notificationMailboxIds;
+                if (!watchedMailboxesChanged && !notificationMailboxesChanged)
+                {
+                    return;
+                }
                 QStringList mailboxNames;
                 for (const auto& mailbox : updatedConfiguration->mailboxes)
                 {
@@ -138,7 +147,7 @@ namespace javelin::app
                 }
                 qInfo().noquote() << "Update watched mailboxes to"
                                   << mailboxNames.join(QStringLiteral(", "));
-                scheduleDebouncedRefresh();
+                scheduleDebouncedRefresh(true);
                 return;
             }
         }
@@ -164,6 +173,8 @@ namespace javelin::app
         m_refreshDebounceTimer.stop();
         m_refreshInFlight = false;
         m_refreshAgainRequested = false;
+        m_refreshEmailAgainRequested = false;
+        m_forceEmailRefreshRequested = false;
         setStatus(Status::Disconnected);
         m_shouldCatchUpRefreshOnReconnect = false;
     }
@@ -185,7 +196,7 @@ namespace javelin::app
             return true;
         if (m_runContext == nullptr)
             return false;
-        scheduleDebouncedRefresh();
+        scheduleDebouncedRefresh(true);
         return true;
     }
 
@@ -309,7 +320,8 @@ namespace javelin::app
         co_await runContext->worker->run(subscription, runContext->cancellation);
     }
 
-    QCoro::Task<void> AccountSyncCoordinator::refreshWatchedMailbox()
+    QCoro::Task<void>
+    AccountSyncCoordinator::refreshWatchedMailbox(const bool refreshEmailMailboxes)
     {
         auto runContext = m_runContext;
         if (runContext == nullptr || !hasValidSettings())
@@ -320,17 +332,21 @@ namespace javelin::app
         if (m_refreshInFlight)
         {
             m_refreshAgainRequested = true;
+            m_refreshEmailAgainRequested = m_refreshEmailAgainRequested || refreshEmailMailboxes;
             co_return;
         }
 
         const ForegroundWorkScope foreground{m_workScheduler};
         m_refreshInFlight = true;
         const auto generation = runContext->generation;
+        bool refreshEmail = refreshEmailMailboxes;
         do
         {
             m_refreshAgainRequested = false;
-            co_await refreshWatchedMailboxOnce(runContext);
+            m_refreshEmailAgainRequested = false;
+            co_await refreshWatchedMailboxOnce(runContext, refreshEmail);
             runContext = m_runContext;
+            refreshEmail = m_refreshEmailAgainRequested;
         } while (m_refreshAgainRequested && runContext != nullptr &&
                  runContext->generation == generation && !runContext->cancellation.isCancelled());
 
@@ -341,7 +357,8 @@ namespace javelin::app
     }
 
     QCoro::Task<void>
-    AccountSyncCoordinator::refreshWatchedMailboxOnce(std::shared_ptr<RunContext> runContext)
+    AccountSyncCoordinator::refreshWatchedMailboxOnce(std::shared_ptr<RunContext> runContext,
+                                                      const bool refreshEmailMailboxes)
     {
         if (runContext == nullptr || !hasValidSettings() ||
             runContext->cancellation.isCancelled() || m_runContext == nullptr ||
@@ -354,6 +371,22 @@ namespace javelin::app
         if (m_runContext == nullptr || m_runContext->generation != runContext->generation ||
             runContext->cancellation.isCancelled())
         {
+            co_return;
+        }
+
+        if (!refreshEmailMailboxes)
+        {
+            if (mailboxStateChanged)
+            {
+                Q_EMIT cacheCommitted(MailCacheChange{
+                    .accountId = QString::fromStdString(runContext->configuration.accountId),
+                    .mailboxIds = {},
+                    .queryWindows = {},
+                    .searchWindows = {},
+                    .mailboxTreeChanged = true,
+                    .hasNewMail = false,
+                });
+            }
             co_return;
         }
 
@@ -381,10 +414,12 @@ namespace javelin::app
         std::vector<MailboxQueryWindowChange> materializedWindows;
         bool hasNewMail = false;
         const auto watchedMailboxes = runContext->configuration.mailboxes;
+        bool accountEmailStateRefreshed = false;
         for (const auto& [mailboxId, mailboxName] : watchedMailboxes)
         {
             const auto refreshResult = co_await mailboxRefreshExecutor.refreshCollapsedMailbox(
-                runContext->configuration.accountId, mailboxId, {});
+                runContext->configuration.accountId, mailboxId, {}, false,
+                !accountEmailStateRefreshed);
             if (const auto* summary =
                     std::get_if<javelin::jmap::sync::MailboxRefreshSummary>(&refreshResult))
             {
@@ -394,6 +429,8 @@ namespace javelin::app
                     continue;
                 }
                 m_shouldCatchUpRefreshOnReconnect = false;
+                accountEmailStateRefreshed =
+                    accountEmailStateRefreshed || summary->usedIncrementalRefresh;
                 watchedMailboxRefreshed = true;
                 refreshedMailboxIds.push_back(QString::fromStdString(mailboxId));
                 if (summary->canonicalWindowMaterialized)
@@ -443,7 +480,7 @@ namespace javelin::app
                 if (javelin::jmap::isAuthenticationError(*error))
                     co_return;
                 if (javelin::jmap::isTransientError(*error))
-                    scheduleDebouncedRefresh();
+                    scheduleDebouncedRefresh(true);
             }
         }
         if (m_runContext == nullptr || m_runContext->generation != runContext->generation ||
@@ -506,7 +543,7 @@ namespace javelin::app
             qWarning().noquote() << "Account sync mailbox state refresh failed" << error->message;
             handleOperationError(QStringLiteral("Synchronize mailbox state"), *error);
             if (javelin::jmap::isTransientError(*error))
-                scheduleDebouncedRefresh();
+                scheduleDebouncedRefresh(true);
             co_return false;
         }
 
@@ -531,18 +568,20 @@ namespace javelin::app
         restartForCatchUp();
     }
 
-    void AccountSyncCoordinator::scheduleDebouncedRefresh()
+    void AccountSyncCoordinator::scheduleDebouncedRefresh(const bool forceEmailRefresh)
     {
         if (!hasValidSettings() || m_runContext == nullptr)
         {
             return;
         }
 
+        m_forceEmailRefreshRequested = m_forceEmailRefreshRequested || forceEmailRefresh;
         m_refreshDebounceTimer.start();
     }
 
     void AccountSyncCoordinator::scheduleCatchUpRefresh()
     {
+        const bool coverageIsAuthoritative = watchedMailboxCoverageIsAuthoritative();
         if (!m_pendingStateChanges.empty())
         {
             if (m_refreshInFlight)
@@ -550,28 +589,44 @@ namespace javelin::app
                 m_refreshDebounceTimer.start();
                 return;
             }
-            if (pendingStateChangesAlreadyApplied() && watchedMailboxCoverageIsAuthoritative())
+            if (pendingStateChangesAlreadyApplied() && coverageIsAuthoritative &&
+                !m_forceEmailRefreshRequested)
             {
                 m_pendingStateChanges.clear();
                 return;
             }
-            m_pendingStateChanges.clear();
         }
-        auto task = refreshWatchedMailbox();
+
+        bool refreshEmailMailboxes = m_forceEmailRefreshRequested || !coverageIsAuthoritative;
+        if (const auto email = m_pendingStateChanges.find("Email");
+            email != m_pendingStateChanges.end() &&
+            !pendingStateChangeAlreadyApplied(email->first, email->second))
+        {
+            refreshEmailMailboxes = true;
+        }
+        m_forceEmailRefreshRequested = false;
+        m_pendingStateChanges.clear();
+        auto task = refreshWatchedMailbox(refreshEmailMailboxes);
         QCoro::connect(std::move(task), this, []() {});
+    }
+
+    bool
+    AccountSyncCoordinator::pendingStateChangeAlreadyApplied(const std::string_view type,
+                                                             const std::string_view state) const
+    {
+        javelin::jmap::cache::SyncStateRepository states{m_databaseConnection};
+        const auto cached = states.find(
+            {.accountId = m_accountId, .objectType = std::string{type}, .queryKey = {}});
+        const auto* record =
+            std::get_if<std::optional<javelin::jmap::cache::SyncStateRecord>>(&cached);
+        return record != nullptr && record->has_value() && record->value().stateToken == state;
     }
 
     bool AccountSyncCoordinator::pendingStateChangesAlreadyApplied() const
     {
-        javelin::jmap::cache::SyncStateRepository states{m_databaseConnection};
         for (const auto& [type, advertisedState] : m_pendingStateChanges)
         {
-            const auto cached =
-                states.find({.accountId = m_accountId, .objectType = type, .queryKey = {}});
-            const auto* record =
-                std::get_if<std::optional<javelin::jmap::cache::SyncStateRecord>>(&cached);
-            if (record == nullptr || !record->has_value() ||
-                record->value().stateToken != advertisedState)
+            if (!pendingStateChangeAlreadyApplied(type, advertisedState))
             {
                 return false;
             }
@@ -615,7 +670,7 @@ namespace javelin::app
         if (m_runContext != nullptr)
         {
             m_shouldCatchUpRefreshOnReconnect = true;
-            scheduleDebouncedRefresh();
+            scheduleDebouncedRefresh(true);
         }
     }
 
@@ -720,7 +775,7 @@ namespace javelin::app
 
                            setStatus(Status::Disconnected);
                        });
-        scheduleDebouncedRefresh();
+        scheduleDebouncedRefresh(true);
     }
 
     void AccountSyncCoordinator::setStatus(const Status status)
@@ -729,7 +784,7 @@ namespace javelin::app
         {
             if (status == Status::Disconnected && m_shouldCatchUpRefreshOnReconnect)
             {
-                scheduleDebouncedRefresh();
+                scheduleDebouncedRefresh(true);
             }
             return;
         }
@@ -743,7 +798,7 @@ namespace javelin::app
         if (status == Status::Connected && m_shouldCatchUpRefreshOnReconnect &&
             m_runContext != nullptr)
         {
-            scheduleDebouncedRefresh();
+            scheduleDebouncedRefresh(true);
         }
         Q_EMIT statusChanged(m_status);
     }

@@ -926,6 +926,74 @@ TEST_CASE("mailbox refresh executor ignores updated deltas outside the cached pr
     CHECK_FALSE(std::get<std::optional<javelin::jmap::domain::Email>>(emailResult).has_value());
 }
 
+TEST_CASE("mailbox refresh executor reuses an account Email state refreshed by an earlier mailbox",
+          "[jmap][sync][refresh]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+
+    javelin::jmap::cache::SyncStateRepository syncStateRepository{databaseContext.connection};
+    REQUIRE_FALSE(syncStateRepository
+                      .upsert({.accountId = "account-1",
+                               .objectType = "EmailQuery",
+                               .queryKey = mailboxQueryKey()},
+                              "query-state-1")
+                      .has_value());
+    REQUIRE_FALSE(syncStateRepository
+                      .upsert({.accountId = "account-1", .objectType = "Email", .queryKey = {}},
+                              "email-state-2")
+                      .has_value());
+    seedCanonicalWindow(databaseContext.connection);
+
+    FakeTransport transport;
+    transport.queuedResults
+        .push_back(
+            javelin::jmap::api::HttpResponse{
+                .statusCode = 200,
+                .body =
+                    QByteArray::fromStdString(
+                        serializeResponseEnvelope(
+                            {
+                                .methodResponses =
+                                    {
+                                        javelin::jmap::api::MethodInvocation{
+                                            .name = "Email/queryChanges",
+                                            .arguments =
+                                                R"({"accountId":"account-1","oldQueryState":"query-state-1","newQueryState":"query-state-2","added":[],"removed":[],"hasMoreChanges":false,"total":1})",
+                                            .callId = "mailbox-query-changes",
+                                        },
+                                    },
+                                .createdIds = std::nullopt,
+                                .sessionState = "session-state-2",
+                            })),
+            });
+
+    javelin::jmap::api::MethodCaller methodCaller{transport};
+    javelin::jmap::sync::MailboxRefreshExecutor executor{databaseContext.connection, methodCaller,
+                                                         makeRequestContext()};
+    const auto result = QCoro::waitFor(
+        executor.refreshCollapsedMailbox("account-1", "mbx-inbox", {}, false, false));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailboxRefreshSummary>(result));
+    const auto& summary = std::get<javelin::jmap::sync::MailboxRefreshSummary>(result);
+    CHECK(summary.usedIncrementalRefresh);
+    CHECK(summary.representativeCount == 1);
+    REQUIRE(transport.requests.size() == 1);
+    CHECK(transport.requests.front().body.contains("\"Email/queryChanges\""));
+    CHECK_FALSE(transport.requests.front().body.contains("\"Email/changes\""));
+
+    const auto emailState =
+        syncStateRepository.find({.accountId = "account-1", .objectType = "Email", .queryKey = {}});
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::cache::SyncStateRecord>>(emailState));
+    REQUIRE(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(emailState).has_value());
+    CHECK(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(emailState)->stateToken ==
+          "email-state-2");
+}
+
 TEST_CASE("mailbox refresh executor preserves change hints when delta falls back to full fetch",
           "[jmap][sync][refresh]")
 {

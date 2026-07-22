@@ -1934,6 +1934,17 @@ namespace javelin::jmap
             {
                 co_return javelin::jmap::operationError(*error);
             }
+
+            javelin::jmap::cache::SyncStateRepository states{*m_impl->databaseConnection};
+            const auto stateAdvanced = states.advanceIfCurrent(
+                transaction.cacheTransaction(),
+                {.accountId = accountId, .objectType = "Email", .queryKey = {}}, parsed.oldState,
+                parsed.newState);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&stateAdvanced))
+            {
+                co_return javelin::jmap::operationError(*error);
+            }
         }
 
         for (const auto& [emailId, email] : mergedEmails)

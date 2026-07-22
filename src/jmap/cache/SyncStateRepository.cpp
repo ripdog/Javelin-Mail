@@ -55,6 +55,40 @@ namespace javelin::jmap::cache
         return std::nullopt;
     }
 
+    std::variant<bool, DatabaseError>
+    SyncStateRepository::advanceIfCurrent(DatabaseTransaction& transaction, const SyncStateKey& key,
+                                          const std::string_view expectedState,
+                                          const std::string_view newState)
+    {
+        if (const auto error = m_connection.validate())
+        {
+            return *error;
+        }
+        if (!transaction.isActive() || &transaction.connection() != &m_connection)
+        {
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message = QStringLiteral("Sync state advancement requires a matching transaction"),
+            };
+        }
+
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "UPDATE sync_state SET state_token=:new_state, updated_at=CURRENT_TIMESTAMP "
+            "WHERE account_id=:account_id AND object_type=:object_type AND query_key=:query_key "
+            "AND state_token=:expected_state"));
+        bindKey(query, key);
+        query.bindValue(QStringLiteral(":new_state"),
+                        QString::fromStdString(std::string{newState}));
+        query.bindValue(QStringLiteral(":expected_state"),
+                        QString::fromStdString(std::string{expectedState}));
+        if (!query.exec())
+        {
+            return makeQueryError(QStringLiteral("Conditionally advance sync_state"), query);
+        }
+        return query.numRowsAffected() == 1;
+    }
+
     std::variant<std::optional<SyncStateRecord>, DatabaseError>
     SyncStateRepository::find(const SyncStateKey& key) const
     {
