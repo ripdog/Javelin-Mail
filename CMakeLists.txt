@@ -247,6 +247,8 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/query/QueryDiff.h
     src/jmap/render/HtmlMessageDocumentBuilder.cpp
     src/jmap/render/HtmlMessageDocumentBuilder.h
+    src/jmap/render/HtmlTextExtractor.cpp
+    src/jmap/render/HtmlTextExtractor.h
     src/jmap/render/InlineMessageUrl.cpp
     src/jmap/render/InlineMessageUrl.h
     src/jmap/search/EmailSearch.cpp
@@ -325,6 +327,7 @@ set(JAVELIN_FORMAT_FILES
     tests/jmap/DatabaseTest.cpp
     tests/jmap/EmailRepositoryTest.cpp
     tests/jmap/HtmlMessageDocumentBuilderTest.cpp
+    tests/jmap/HtmlTextExtractorTest.cpp
     tests/jmap/InlineMessageUrlTest.cpp
     tests/jmap/JmapCoreMessageContentTest.cpp
     tests/jmap/JmapCoreTest.cpp
@@ -465,6 +468,8 @@ add_library(javelin_jmap STATIC
     src/jmap/query/QueryDiff.h
     src/jmap/render/HtmlMessageDocumentBuilder.cpp
     src/jmap/render/HtmlMessageDocumentBuilder.h
+    src/jmap/render/HtmlTextExtractor.cpp
+    src/jmap/render/HtmlTextExtractor.h
     src/jmap/render/InlineMessageUrl.cpp
     src/jmap/render/InlineMessageUrl.h
     src/jmap/search/EmailSearch.cpp

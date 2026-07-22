@@ -5,6 +5,7 @@
 #include "jmap/cache/MailSearchIndex.h"
 #include "jmap/cache/MailVault.h"
 #include "jmap/cache/MimeMessageParser.h"
+#include "jmap/render/HtmlTextExtractor.h"
 
 #include <QCoroFuture>
 #include <QCoroTask>
@@ -13,7 +14,6 @@
 #include <QDir>
 #include <QFile>
 #include <QSqlQuery>
-#include <QTextDocument>
 #include <QTimer>
 #include <QtConcurrentRun>
 
@@ -53,11 +53,8 @@ namespace javelin::app
             if (parsed.plainTextBody)
                 body += QString::fromStdString(parsed.plainTextBody->value);
             else if (parsed.htmlBody)
-            {
-                QTextDocument document;
-                document.setHtml(QString::fromStdString(parsed.htmlBody->value));
-                body += document.toPlainText();
-            }
+                body += javelin::jmap::render::plainTextFromHtml(
+                    QString::fromStdString(parsed.htmlBody->value));
             const QString preview = body.simplified().left(256);
             return {.document =
                         javelin::jmap::cache::SearchIndexDocument{
