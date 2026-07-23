@@ -336,10 +336,12 @@ TEST_CASE("query service full text search covers cached subjects and bodies",
     subjectMatch.id = "subject-match";
     subjectMatch.threadId = "subject-thread";
     subjectMatch.subject = "A rare albatross sighting";
+    subjectMatch.receivedAt = "2026-03-30T06:06:00Z";
     auto bodyMatch = subjectMatch;
     bodyMatch.id = "body-match";
     bodyMatch.threadId = "body-thread";
     bodyMatch.subject = "Ordinary update";
+    bodyMatch.receivedAt = "2026-04-01T21:56:00Z";
 
     javelin::jmap::cache::EmailRepository emailRepository{databaseContext.connection};
     REQUIRE_FALSE(emailRepository.replaceAll("account-1", {subjectMatch, bodyMatch}).has_value());
@@ -387,7 +389,20 @@ TEST_CASE("query service full text search covers cached subjects and bodies",
     const auto& snapshotItems =
         std::get<std::vector<javelin::jmap::cache::MessageListItem>>(snapshot);
     REQUIRE(snapshotItems.size() == 2);
-    CHECK(snapshotItems.at(0).threadId != snapshotItems.at(1).threadId);
+    CHECK(snapshotItems.at(0).emailId == "body-match");
+    CHECK(snapshotItems.at(1).emailId == "subject-match");
+
+    const auto ascendingSnapshot = queryService.searchAllCachedMessageText(
+        "account-1", "rare albatross",
+        {.property = javelin::jmap::query::EmailListSortProperty::ReceivedAt,
+         .direction = javelin::jmap::query::EmailListSortDirection::Ascending});
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MessageListItem>>(
+        ascendingSnapshot));
+    const auto& ascendingItems =
+        std::get<std::vector<javelin::jmap::cache::MessageListItem>>(ascendingSnapshot);
+    REQUIRE(ascendingItems.size() == 2);
+    CHECK(ascendingItems.at(0).emailId == "subject-match");
+    CHECK(ascendingItems.at(1).emailId == "body-match");
 }
 
 TEST_CASE("query service returns thread messages in cached thread order", "[jmap][cache][query]")

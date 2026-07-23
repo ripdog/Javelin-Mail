@@ -109,7 +109,8 @@ namespace javelin::jmap::cache
         searchCachedMessageText(std::string_view accountId, std::string_view text,
                                 std::size_t limit, std::size_t offset = 0) const;
         [[nodiscard]] std::variant<std::vector<MessageListItem>, DatabaseError>
-        searchAllCachedMessageText(std::string_view accountId, std::string_view text) const;
+        searchAllCachedMessageText(std::string_view accountId, std::string_view text,
+                                   javelin::jmap::query::EmailListSort sort = {}) const;
         [[nodiscard]] QString databasePath() const;
         [[nodiscard]] std::variant<std::optional<SearchWindowPage>, DatabaseError>
         loadSearchWindow(std::string_view accountId, std::string_view queryKey, std::size_t offset,
@@ -131,6 +132,10 @@ namespace javelin::jmap::cache
         listMailboxWindowMessagesByEmailIds(std::string_view accountId, std::string_view mailboxId,
                                             const std::vector<std::string>& emailIds,
                                             javelin::jmap::query::EmailListSort sort) const;
+        [[nodiscard]] std::variant<std::vector<MessageListItem>, DatabaseError>
+        listSortedSearchMessagesByEmailIds(std::string_view accountId,
+                                           const std::vector<std::string>& emailIds,
+                                           javelin::jmap::query::EmailListSort sort) const;
         DatabaseConnection& m_connection;
     };
 

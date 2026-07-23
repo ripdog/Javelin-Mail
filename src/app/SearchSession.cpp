@@ -20,9 +20,9 @@ namespace javelin::app
         constexpr std::size_t completeManifestThreshold = 2000;
         constexpr std::size_t readAheadPages = 2;
 
-        [[nodiscard]] LocalSearchResult runLocalSearch(const QString& databasePath,
-                                                       const std::string& accountId,
-                                                       const std::string& text)
+        [[nodiscard]] LocalSearchResult
+        runLocalSearch(const QString& databasePath, const std::string& accountId,
+                       const std::string& text, const javelin::jmap::query::EmailListSort sort)
         {
             javelin::jmap::cache::ThreadConnectionFactory factory{
                 {.connectionNamePrefix = QStringLiteral("javelin-local-search"),
@@ -37,7 +37,7 @@ namespace javelin::app
             auto connection =
                 std::get<javelin::jmap::cache::DatabaseConnection>(std::move(connectionResult));
             javelin::jmap::cache::QueryService queryService{connection};
-            return queryService.searchAllCachedMessageText(accountId, text);
+            return queryService.searchAllCachedMessageText(accountId, text, sort);
         }
     } // namespace
 
@@ -467,9 +467,13 @@ namespace javelin::app
             {
                 auto result = watcher->result();
                 watcher->deleteLater();
-                if (generation != m_generation || m_mode != SearchMode::Local)
-                    return;
                 m_localSearchInFlight = false;
+                if (generation != m_generation || m_mode != SearchMode::Local)
+                {
+                    if (!m_closed && m_mode == SearchMode::Local && !m_localSnapshotLoaded)
+                        startLocalSnapshot();
+                    return;
+                }
                 if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
                 {
                     m_page.refreshError = error->message;
@@ -486,7 +490,7 @@ namespace javelin::app
                 Q_EMIT pageChanged();
             });
         watcher->setFuture(QtConcurrent::run(runLocalSearch, m_queryService.databasePath(),
-                                             m_accountId, *m_criteria.text));
+                                             m_accountId, *m_criteria.text, m_sort));
     }
 
     void SearchSession::applyLocalPage()
