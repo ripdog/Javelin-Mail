@@ -2,7 +2,7 @@
 
 ## Product Direction
 
-Javelin Mail is a permanent-running desktop JMAP email client built with Qt Widgets, Qt 6, and C++20. The application should feel conventional in the Thunderbird sense, but the implementation should be aggressively modern:
+Javelin Mail is a permanent-running desktop JMAP email client built with Qt Widgets, Qt 6, and C++23. The application should feel conventional in the Thunderbird sense, but the implementation should be aggressively modern:
 
 - JMAP is the only mail protocol.
 - The local SQL cache is the primary working set.
@@ -16,7 +16,7 @@ The specs in [`specs/rfc8620.txt`](/home/ripdog/CLionProjects/Javelin-Mail/specs
 
 ## Non-Negotiable Technical Decisions
 
-- Use Qt 6, C++20, widgets, QCoro, and `QNetworkAccessManager`.
+- Use Qt 6, C++23, widgets, QCoro, and `QNetworkAccessManager`.
 - Parse protocol JSON with `glaze` into typed structures.
 - Use `QSqlDatabase` for persistent sync state, query results, message metadata, body fragments, and pending client actions.
 - Keep the JMAP implementation in a self-contained internal library.

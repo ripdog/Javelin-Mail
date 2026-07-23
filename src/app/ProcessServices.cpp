@@ -7,7 +7,7 @@
 #include "app/FullMailSyncService.h"
 #include "app/InlineMessageSchemeHandler.h"
 #include "app/LocalMaintenanceService.h"
-#include "app/LongPollCoordinator.h"
+#include "app/MailApplicationService.h"
 #include "app/MailIndexService.h"
 #include "app/MessageNavigationCoordinator.h"
 #include "app/WorkScheduler.h"

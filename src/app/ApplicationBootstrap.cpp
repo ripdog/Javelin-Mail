@@ -6,7 +6,7 @@
 #include "app/DesktopNotificationController.h"
 #include "app/FullMailSyncService.h"
 #include "app/LocalMaintenanceService.h"
-#include "app/LongPollCoordinator.h"
+#include "app/MailApplicationService.h"
 #include "app/MailIndexService.h"
 #include "app/MessageNavigationCoordinator.h"
 #include "app/ProcessServices.h"

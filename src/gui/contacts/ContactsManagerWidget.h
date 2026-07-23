@@ -1,6 +1,6 @@
 #pragma once
 
-#include "app/LongPollCoordinator.h"
+#include "app/MailApplicationService.h"
 #include "jmap/api/ContactsMethods.h"
 #include "jmap/cache/ContactRepository.h"
 #include "jmap/contacts/ContactTypes.h"

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "app/LongPollCoordinator.h"
+#include "app/MailApplicationService.h"
 #include "jmap/cache/MessageViewService.h"
 
 #include <QCoroTask>

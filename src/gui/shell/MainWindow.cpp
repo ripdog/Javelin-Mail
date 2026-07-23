@@ -1,7 +1,7 @@
 #include "gui/shell/MainWindow.h"
 
 #include "app/ComposeService.h"
-#include "app/LongPollCoordinator.h"
+#include "app/MailApplicationService.h"
 #include "app/MailboxSession.h"
 #include "app/MessageListSession.h"
 #include "app/MessageNavigationCoordinator.h"

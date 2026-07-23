@@ -8,7 +8,7 @@ If you have made meaningful changes during your turn, always commit at the end.
 
 This repository is for a Qt Widgets JMAP email client. Treat it as a modern-only codebase:
 
-- Target Qt 6 and C++20 directly.
+- Target Qt 6 and C++23 directly.
 - Do not add fallbacks for older Qt, older compilers, or alternate protocol paths.
 - Do not preserve legacy patterns "just in case".
 - Prefer removing obsolete code over abstracting around it.
@@ -23,7 +23,7 @@ This repository is for a Qt Widgets JMAP email client. Treat it as a modern-only
 
 ## Programming Preferences
 
-- Use modern C++20 idioms aggressively: RAII, value semantics, move semantics, `enum class`, `std::optional`, `std::variant`, `std::span`, `std::chrono`, designated helper structs where they improve clarity.
+- Use modern C++23 idioms aggressively: RAII, value semantics, move semantics, `enum class`, `std::optional`, `std::variant`, `std::span`, `std::chrono`, designated helper structs where they improve clarity.
 - Prefer explicit ownership. Use stack values first, `std::unique_ptr` for exclusive heap ownership, and Qt parent ownership only where QObject lifetime is naturally hierarchical.
 - Avoid shared ownership unless it is required by the design and documented at the point of use.
 - Use typed signal/slot connections only. Do not use string-based `SIGNAL` or `SLOT`.

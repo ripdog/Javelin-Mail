@@ -1,4 +1,4 @@
-#include "app/LongPollCoordinator.h"
+#include "app/MailApplicationService.h"
 #include "app/ApplicationErrorCoordinator.h"
 #include "app/WorkScheduler.h"
 

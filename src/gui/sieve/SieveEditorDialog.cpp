@@ -1,6 +1,6 @@
 #include "gui/sieve/SieveEditorDialog.h"
 
-#include "app/LongPollCoordinator.h"
+#include "app/MailApplicationService.h"
 
 #include <QCoroTask>
 

@@ -5,6 +5,9 @@ Complete-offline mail storage, scheduling, pagination, and search-index invarian
 
 Javelin uses a one-way dependency and control flow:
 
+The project targets Qt 6 and C++23. C++23 is required by the typed Glaze protocol parser used at
+the JMAP boundary.
+
 ```text
 GUI -> application intents -> synchronization/cache policy -> typed JMAP client -> transport
 ```

@@ -78,8 +78,8 @@ set(JAVELIN_FORMAT_FILES
     src/app/LogStore.h
     src/app/LongPollService.cpp
     src/app/LongPollService.h
-    src/app/LongPollCoordinator.cpp
-    src/app/LongPollCoordinator.h
+    src/app/MailApplicationService.cpp
+    src/app/MailApplicationService.h
     src/app/MailboxSelectionMutation.cpp
     src/app/MailboxSelectionMutation.h
     src/app/MailboxSyncCoverage.cpp
@@ -124,8 +124,6 @@ set(JAVELIN_FORMAT_FILES
     src/gui/messages/MessageListModel.cpp
     src/gui/messages/Pagination.h
     src/gui/messages/MessageListModel.h
-    src/gui/messages/MessageListDelegate.cpp
-    src/gui/messages/MessageListDelegate.h
     src/gui/messages/MessageListDelegate.cpp
     src/gui/messages/MessageListDelegate.h
     src/gui/messageview/GoogleHtmlTranslator.cpp
@@ -540,7 +538,6 @@ target_link_libraries(javelin_jmap
         Qt::Gui
         Qt::Network
         Qt::Sql
-        Qt::WebEngineCore
         Qt::WebSockets
         KPim6::Mime
     PRIVATE
@@ -717,8 +714,8 @@ add_library(javelin_app STATIC
     src/app/InlineMessageSchemeHandler.h
     src/app/LongPollService.cpp
     src/app/LongPollService.h
-    src/app/LongPollCoordinator.cpp
-    src/app/LongPollCoordinator.h
+    src/app/MailApplicationService.cpp
+    src/app/MailApplicationService.h
     src/app/MailboxSelectionMutation.cpp
     src/app/MailboxSelectionMutation.h
     src/app/MailboxSyncCoverage.cpp

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "app/LongPollCoordinator.h"
+#include "app/MailApplicationService.h"
 #include "app/MessageListSession.h"
 #include "jmap/cache/QueryService.h"
 #include "jmap/query/EmailListSort.h"
