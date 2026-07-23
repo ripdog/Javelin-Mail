@@ -42,14 +42,14 @@ TEST_CASE("search move replaces all mailbox memberships", "[app][mailbox-mutatio
 {
     const javelin::app::MailboxSelectionMutationIntent intent{
         .accountId = "account-1",
-        .emailIds = {"email-1"},
+        .selection = {javelin::app::SelectedEmail{.emailId = "email-1"}},
         .operation = javelin::app::MailboxSelectionOperation::Move,
         .sourceMailboxId = std::nullopt,
         .destinationMailboxId = "destination",
     };
 
     const auto result = javelin::app::planMailboxSelectionMutation(
-        intent, {email("email-1", {"inbox", "projects"})}, mailboxes);
+        intent, {"email-1"}, {email("email-1", {"inbox", "projects"})}, mailboxes);
     REQUIRE(std::holds_alternative<javelin::app::PlannedMailboxSelectionMutation>(result));
     const auto& plan = std::get<javelin::app::PlannedMailboxSelectionMutation>(result);
     REQUIRE(plan.mutations.size() == 1);
@@ -62,15 +62,16 @@ TEST_CASE("search copy preserves existing memberships and skips existing destina
 {
     const javelin::app::MailboxSelectionMutationIntent intent{
         .accountId = "account-1",
-        .emailIds = {"email-1", "email-2"},
+        .selection = {javelin::app::SelectedEmail{.emailId = "email-1"},
+                      javelin::app::SelectedEmail{.emailId = "email-2"}},
         .operation = javelin::app::MailboxSelectionOperation::Copy,
         .sourceMailboxId = std::nullopt,
         .destinationMailboxId = "destination",
     };
 
     const auto result = javelin::app::planMailboxSelectionMutation(
-        intent, {email("email-1", {"inbox"}), email("email-2", {"inbox", "destination"})},
-        mailboxes);
+        intent, {"email-1", "email-2"},
+        {email("email-1", {"inbox"}), email("email-2", {"inbox", "destination"})}, mailboxes);
     REQUIRE(std::holds_alternative<javelin::app::PlannedMailboxSelectionMutation>(result));
     const auto& plan = std::get<javelin::app::PlannedMailboxSelectionMutation>(result);
     REQUIRE(plan.mutations.size() == 1);
@@ -84,15 +85,16 @@ TEST_CASE("search archive removes Inbox and preserves other memberships", "[app]
 {
     const javelin::app::MailboxSelectionMutationIntent intent{
         .accountId = "account-1",
-        .emailIds = {"email-1", "email-2"},
+        .selection = {javelin::app::SelectedEmail{.emailId = "email-1"},
+                      javelin::app::SelectedEmail{.emailId = "email-2"}},
         .operation = javelin::app::MailboxSelectionOperation::Archive,
         .sourceMailboxId = std::nullopt,
         .destinationMailboxId = std::nullopt,
     };
 
     const auto result = javelin::app::planMailboxSelectionMutation(
-        intent, {email("email-1", {"inbox", "projects"}), email("email-2", {"projects"})},
-        mailboxes);
+        intent, {"email-1", "email-2"},
+        {email("email-1", {"inbox", "projects"}), email("email-2", {"projects"})}, mailboxes);
     REQUIRE(std::holds_alternative<javelin::app::PlannedMailboxSelectionMutation>(result));
     const auto& plan = std::get<javelin::app::PlannedMailboxSelectionMutation>(result);
     REQUIRE(plan.mutations.size() == 1);
@@ -105,14 +107,14 @@ TEST_CASE("mailbox move removes only its explicit source", "[app][mailbox-mutati
 {
     const javelin::app::MailboxSelectionMutationIntent intent{
         .accountId = "account-1",
-        .emailIds = {"email-1"},
+        .selection = {javelin::app::SelectedEmail{.emailId = "email-1"}},
         .operation = javelin::app::MailboxSelectionOperation::Move,
         .sourceMailboxId = "inbox",
         .destinationMailboxId = "destination",
     };
 
     const auto result = javelin::app::planMailboxSelectionMutation(
-        intent, {email("email-1", {"inbox", "projects"})}, mailboxes);
+        intent, {"email-1"}, {email("email-1", {"inbox", "projects"})}, mailboxes);
     REQUIRE(std::holds_alternative<javelin::app::PlannedMailboxSelectionMutation>(result));
     const auto& plan = std::get<javelin::app::PlannedMailboxSelectionMutation>(result);
     REQUIRE(plan.mutations.size() == 1);
@@ -126,14 +128,14 @@ TEST_CASE("mailbox mutation planning rejects insufficient rights before queuing"
     restrictedMailboxes.back().myRights.mayAddItems = false;
     const javelin::app::MailboxSelectionMutationIntent intent{
         .accountId = "account-1",
-        .emailIds = {"email-1"},
+        .selection = {javelin::app::SelectedEmail{.emailId = "email-1"}},
         .operation = javelin::app::MailboxSelectionOperation::Copy,
         .sourceMailboxId = std::nullopt,
         .destinationMailboxId = "destination",
     };
 
     const auto result = javelin::app::planMailboxSelectionMutation(
-        intent, {email("email-1", {"inbox"})}, restrictedMailboxes);
+        intent, {"email-1"}, {email("email-1", {"inbox"})}, restrictedMailboxes);
     REQUIRE(std::holds_alternative<QString>(result));
     CHECK(std::get<QString>(result).contains(QStringLiteral("permission")));
 }
@@ -144,14 +146,16 @@ TEST_CASE("search move preflights removal rights for every membership", "[app][m
     restrictedMailboxes.front().myRights.mayRemoveItems = false;
     const javelin::app::MailboxSelectionMutationIntent intent{
         .accountId = "account-1",
-        .emailIds = {"email-1", "email-2"},
+        .selection = {javelin::app::SelectedEmail{.emailId = "email-1"},
+                      javelin::app::SelectedEmail{.emailId = "email-2"}},
         .operation = javelin::app::MailboxSelectionOperation::Move,
         .sourceMailboxId = std::nullopt,
         .destinationMailboxId = "destination",
     };
 
     const auto result = javelin::app::planMailboxSelectionMutation(
-        intent, {email("email-1", {"projects"}), email("email-2", {"inbox"})}, restrictedMailboxes);
+        intent, {"email-1", "email-2"},
+        {email("email-1", {"projects"}), email("email-2", {"inbox"})}, restrictedMailboxes);
     REQUIRE(std::holds_alternative<QString>(result));
     CHECK(std::get<QString>(result).contains(QStringLiteral("Inbox")));
 }

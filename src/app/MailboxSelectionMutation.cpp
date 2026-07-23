@@ -49,7 +49,7 @@ namespace javelin::app
     } // namespace
 
     MailboxSelectionMutationPlanResult planMailboxSelectionMutation(
-        const MailboxSelectionMutationIntent& intent,
+        const MailboxSelectionMutationIntent& intent, const std::vector<std::string>& emailIds,
         const std::vector<javelin::jmap::domain::Email>& emails,
         const std::vector<javelin::jmap::cache::MailboxTreeItem>& mailboxes)
     {
@@ -99,9 +99,9 @@ namespace javelin::app
         }
 
         PlannedMailboxSelectionMutation plan;
-        plan.mutations.reserve(intent.emailIds.size());
+        plan.mutations.reserve(emailIds.size());
         std::unordered_set<std::string_view> seenEmailIds;
-        for (const auto& emailId : intent.emailIds)
+        for (const auto& emailId : emailIds)
         {
             if (!seenEmailIds.insert(emailId).second)
             {

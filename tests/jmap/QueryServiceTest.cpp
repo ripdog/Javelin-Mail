@@ -1,5 +1,6 @@
 #include "jmap/cache/QueryService.h"
 #include "FixtureReader.h"
+#include "app/MessageSelection.h"
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/MailSearchIndex.h"
 #include "jmap/cache/MailboxRepository.h"
@@ -504,6 +505,18 @@ TEST_CASE("mailbox thread queries exclude members moved to another mailbox", "[j
         std::get<std::vector<javelin::jmap::cache::MessageListItem>>(mailboxThread);
     REQUIRE(members.size() == 1);
     CHECK(members.front().emailId == "eml-inbox");
+
+    const javelin::app::MessageSelection selection{
+        javelin::app::SelectedEmail{.emailId = "eml-inbox"},
+        javelin::app::SelectedCollapsedThread{
+            .threadId = "thr-1",
+            .representativeEmailId = "eml-archive",
+        },
+    };
+    const auto resolved =
+        javelin::app::resolveMessageSelection(queryService, "account-1", "mbx-inbox", selection);
+    REQUIRE(std::holds_alternative<std::vector<std::string>>(resolved));
+    CHECK(std::get<std::vector<std::string>>(resolved) == std::vector<std::string>{"eml-inbox"});
 }
 
 TEST_CASE("query service rehydrates cached representative rows by email id order",

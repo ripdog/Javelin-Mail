@@ -2,6 +2,7 @@ add_executable(javelin_jmap_tests
     ${PROJECT_SOURCE_DIR}/src/app/ApplicationErrorCoordinator.cpp
     ${PROJECT_SOURCE_DIR}/src/app/ApplicationErrorCoordinator.h
     ${PROJECT_SOURCE_DIR}/src/app/MailboxSelectionMutation.cpp
+    ${PROJECT_SOURCE_DIR}/src/app/MessageSelection.cpp
     ${PROJECT_SOURCE_DIR}/src/app/MailboxSyncCoverage.cpp
     ${PROJECT_SOURCE_DIR}/src/app/MessageNavigationCoordinator.cpp
     ${PROJECT_SOURCE_DIR}/src/app/WorkScheduler.cpp

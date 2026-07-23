@@ -1094,15 +1094,9 @@ namespace javelin::gui::shell
                         return;
                     }
 
-                    auto idsResult = selectedEmailIdsForMailboxAction(*sourceAccount);
-                    if (const auto* error = std::get_if<QString>(&idsResult))
-                    {
-                        m_statusBar->showMessage(*error, 10000);
-                        return;
-                    }
-                    auto ids = std::get<std::vector<std::string>>(std::move(idsResult));
+                    auto selection = selectedMessageActionItems();
                     queueMoveEmails(sourceAccountId.toStdString(), *sourceMailboxId,
-                                    destinationMailboxId.toStdString(), std::move(ids),
+                                    destinationMailboxId.toStdString(), std::move(selection),
                                     QStringLiteral("Queued move."));
                 });
 
@@ -4682,8 +4676,8 @@ namespace javelin::gui::shell
         return emailIds;
     }
 
-    std::variant<std::vector<std::string>, QString>
-    MainWindow::selectedEmailIdsForMailboxAction(const std::string_view accountId) const
+    javelin::app::MessageSelection
+    MainWindow::selectedMessageActionItems(const bool excludeUnread) const
     {
         std::vector<QModelIndex> indexes;
         const auto* selectionModel = m_messageView->selectionModel();
@@ -4708,24 +4702,23 @@ namespace javelin::gui::shell
         std::ranges::sort(indexes, [](const QModelIndex& left, const QModelIndex& right)
                           { return left.row() < right.row(); });
 
-        std::vector<std::string> emailIds;
-        std::unordered_set<std::string> seen;
-        const auto appendEmailId = [&emailIds, &seen](std::string emailId)
-        {
-            if (!emailId.empty() && seen.insert(emailId).second)
-            {
-                emailIds.push_back(std::move(emailId));
-            }
-        };
+        javelin::app::MessageSelection selection;
+        std::unordered_set<std::string> seenEmailIds;
+        std::unordered_set<std::string> seenThreadIds;
 
         for (const auto& index : indexes)
         {
-            const auto emailId = index.data(javelin::gui::messages::MessageListModel::EmailIdRole)
-                                     .toString()
-                                     .toStdString();
-            const auto threadId = index.data(javelin::gui::messages::MessageListModel::ThreadIdRole)
-                                      .toString()
-                                      .toStdString();
+            if (excludeUnread && indexIsUnread(index))
+            {
+                continue;
+            }
+
+            auto emailId = index.data(javelin::gui::messages::MessageListModel::EmailIdRole)
+                               .toString()
+                               .toStdString();
+            auto threadId = index.data(javelin::gui::messages::MessageListModel::ThreadIdRole)
+                                .toString()
+                                .toStdString();
             const auto rowKind = static_cast<javelin::gui::messages::MessageListModel::RowKind>(
                 index.data(javelin::gui::messages::MessageListModel::RowKindRole).toInt());
             const auto threadMessageCount =
@@ -4735,38 +4728,25 @@ namespace javelin::gui::shell
                 rowKind == javelin::gui::messages::MessageListModel::RowKind::ThreadSummary &&
                 !index.data(javelin::gui::messages::MessageListModel::IsExpandedRole).toBool() &&
                 threadMessageCount > 1;
-            if (!isCollapsedThreadSummary)
+            if (isCollapsedThreadSummary)
             {
-                appendEmailId(emailId);
+                if (!threadId.empty() && seenThreadIds.insert(threadId).second)
+                {
+                    selection.emplace_back(javelin::app::SelectedCollapsedThread{
+                        .threadId = std::move(threadId),
+                        .representativeEmailId = std::move(emailId),
+                    });
+                }
                 continue;
             }
 
-            const auto mailboxId = activeMailboxId();
-            const auto threadMessagesResult =
-                mailboxId.has_value()
-                    ? m_queryService.listMailboxThreadMessages(accountId, *mailboxId, threadId)
-                    : m_queryService.listThreadMessages(accountId, threadId);
-            if (const auto* error =
-                    std::get_if<javelin::jmap::cache::DatabaseError>(&threadMessagesResult))
+            if (!emailId.empty() && seenEmailIds.insert(emailId).second)
             {
-                return error->message;
-            }
-
-            const auto& threadMessages =
-                std::get<std::vector<javelin::jmap::cache::MessageListItem>>(threadMessagesResult);
-            if (threadMessages.empty())
-            {
-                appendEmailId(emailId);
-                continue;
-            }
-
-            for (const auto& item : threadMessages)
-            {
-                appendEmailId(item.emailId);
+                selection.emplace_back(javelin::app::SelectedEmail{.emailId = std::move(emailId)});
             }
         }
 
-        return emailIds;
+        return selection;
     }
 
     std::vector<javelin::jmap::cache::MessageListItem> MainWindow::selectedMessageSummaries() const
@@ -4869,21 +4849,14 @@ namespace javelin::gui::shell
             return;
         }
 
-        auto emailIdsResult = selectedEmailIdsForMailboxAction(*accountId);
-        if (const auto* error = std::get_if<QString>(&emailIdsResult))
-        {
-            m_statusBar->showMessage(*error, 10000);
-            return;
-        }
-
-        auto emailIds = std::get<std::vector<std::string>>(std::move(emailIdsResult));
-        if (emailIds.empty())
+        auto selection = selectedMessageActionItems();
+        if (selection.empty())
         {
             m_statusBar->showMessage(QStringLiteral("Select a message to archive."), 3000);
             return;
         }
 
-        queueArchiveEmails(*accountId, mailboxId, std::move(emailIds));
+        queueArchiveEmails(*accountId, mailboxId, std::move(selection));
     }
 
     void MainWindow::deleteSelectedEmail()
@@ -4896,15 +4869,8 @@ namespace javelin::gui::shell
             return;
         }
 
-        auto emailIdsResult = selectedEmailIdsForMailboxAction(*accountId);
-        if (const auto* error = std::get_if<QString>(&emailIdsResult))
-        {
-            m_statusBar->showMessage(*error, 10000);
-            return;
-        }
-
-        auto emailIds = std::get<std::vector<std::string>>(std::move(emailIdsResult));
-        if (emailIds.empty())
+        auto selection = selectedMessageActionItems();
+        if (selection.empty())
         {
             m_statusBar->showMessage(QStringLiteral("Select a message to delete."), 3000);
             return;
@@ -4913,7 +4879,7 @@ namespace javelin::gui::shell
         const auto trashMailbox = findMailboxByRole(m_queryService, *accountId, "trash");
         if (trashMailbox.has_value() && trashMailbox->id == *mailboxId)
         {
-            const auto count = emailIds.size();
+            const auto count = selection.size();
             const auto prompt =
                 count == 1 ? QStringLiteral(
                                  "Permanently delete the selected message? This cannot be undone.")
@@ -4926,11 +4892,11 @@ namespace javelin::gui::shell
             {
                 return;
             }
-            queueDestroyEmails(*accountId, std::move(emailIds));
+            queueDestroyEmails(*accountId, mailboxId, std::move(selection));
             return;
         }
 
-        queueDeleteEmails(*accountId, *mailboxId, std::move(emailIds));
+        queueDeleteEmails(*accountId, *mailboxId, std::move(selection));
     }
 
     void MainWindow::permanentlyDeleteSelectedEmail()
@@ -4942,21 +4908,14 @@ namespace javelin::gui::shell
             return;
         }
 
-        auto emailIdsResult = selectedEmailIdsForMailboxAction(*accountId);
-        if (const auto* error = std::get_if<QString>(&emailIdsResult))
-        {
-            m_statusBar->showMessage(*error, 10000);
-            return;
-        }
-
-        auto emailIds = std::get<std::vector<std::string>>(std::move(emailIdsResult));
-        if (emailIds.empty())
+        auto selection = selectedMessageActionItems();
+        if (selection.empty())
         {
             m_statusBar->showMessage(QStringLiteral("Select a message to delete."), 3000);
             return;
         }
 
-        const auto count = emailIds.size();
+        const auto count = selection.size();
         const auto prompt =
             count == 1
                 ? QStringLiteral("Permanently delete the selected message? This cannot be undone.")
@@ -4969,7 +4928,7 @@ namespace javelin::gui::shell
             return;
         }
 
-        queueDestroyEmails(*accountId, std::move(emailIds));
+        queueDestroyEmails(*accountId, activeMailboxId(), std::move(selection));
     }
 
     void MainWindow::showMoveMenu()
@@ -4982,15 +4941,8 @@ namespace javelin::gui::shell
             return;
         }
 
-        auto emailIdsResult = selectedEmailIdsForMailboxAction(*accountId);
-        if (const auto* error = std::get_if<QString>(&emailIdsResult))
-        {
-            m_statusBar->showMessage(*error, 10000);
-            return;
-        }
-
-        auto emailIds = std::get<std::vector<std::string>>(std::move(emailIdsResult));
-        if (emailIds.empty())
+        auto selection = selectedMessageActionItems();
+        if (selection.empty())
         {
             m_statusBar->showMessage(QStringLiteral("Select a message to move."), 3000);
             return;
@@ -5015,10 +4967,10 @@ namespace javelin::gui::shell
                 auto* action = menu.addAction(QString::fromStdString(mailbox->name));
                 connect(action, &QAction::triggered, this,
                         [this, accountId = *accountId, sourceMailboxId,
-                         destinationMailboxId = mailbox->id, emailIds]
+                         destinationMailboxId = mailbox->id, selection]
                         {
                             queueMoveEmails(accountId, sourceMailboxId, destinationMailboxId,
-                                            emailIds, QStringLiteral("Queued move."));
+                                            selection, QStringLiteral("Queued move."));
                         });
             }
         }
@@ -5041,15 +4993,8 @@ namespace javelin::gui::shell
             return;
         }
 
-        auto emailIdsResult = selectedEmailIdsForMailboxAction(*accountId);
-        if (const auto* error = std::get_if<QString>(&emailIdsResult))
-        {
-            m_statusBar->showMessage(*error, 10000);
-            return;
-        }
-
-        auto emailIds = std::get<std::vector<std::string>>(std::move(emailIdsResult));
-        if (emailIds.empty())
+        auto selection = selectedMessageActionItems();
+        if (selection.empty())
         {
             m_statusBar->showMessage(QStringLiteral("Select a message to copy."), 3000);
             return;
@@ -5074,10 +5019,10 @@ namespace javelin::gui::shell
                 auto* action = menu.addAction(QString::fromStdString(mailbox->name));
                 connect(action, &QAction::triggered, this,
                         [this, accountId = *accountId, sourceMailboxId,
-                         destinationMailboxId = mailbox->id, emailIds]
+                         destinationMailboxId = mailbox->id, selection]
                         {
                             queueCopyEmails(accountId, sourceMailboxId, destinationMailboxId,
-                                            emailIds, QStringLiteral("Queued copy."));
+                                            selection, QStringLiteral("Queued copy."));
                         });
             }
         }
@@ -5092,13 +5037,13 @@ namespace javelin::gui::shell
 
     void MainWindow::queueArchiveEmails(std::string accountId,
                                         std::optional<std::string> sourceMailboxId,
-                                        std::vector<std::string> emailIds)
+                                        javelin::app::MessageSelection selection)
     {
         const bool searchArchive = !sourceMailboxId.has_value();
         const auto result = m_mailService.queueMailboxSelectionMutation(
             javelin::app::MailboxSelectionMutationIntent{
                 .accountId = accountId,
-                .emailIds = std::move(emailIds),
+                .selection = std::move(selection),
                 .operation = javelin::app::MailboxSelectionOperation::Archive,
                 .sourceMailboxId = std::move(sourceMailboxId),
                 .destinationMailboxId = std::nullopt,
@@ -5143,22 +5088,8 @@ namespace javelin::gui::shell
         submitQueuedEmailMutations(std::move(accountId));
     }
 
-    void MainWindow::queueDeleteEmail(std::string accountId, std::string mailboxId,
-                                      std::string emailId)
-    {
-        const auto trashMailbox = findMailboxByRole(m_queryService, accountId, "trash");
-        if (!trashMailbox.has_value())
-        {
-            m_statusBar->showMessage(QStringLiteral("No Trash mailbox is available."), 5000);
-            return;
-        }
-
-        queueMoveEmail(std::move(accountId), std::move(mailboxId), trashMailbox->id,
-                       std::move(emailId), QStringLiteral("Queued delete."));
-    }
-
     void MainWindow::queueDeleteEmails(std::string accountId, std::string mailboxId,
-                                       std::vector<std::string> emailIds)
+                                       javelin::app::MessageSelection selection)
     {
         const auto trashMailbox = findMailboxByRole(m_queryService, accountId, "trash");
         if (!trashMailbox.has_value())
@@ -5168,24 +5099,25 @@ namespace javelin::gui::shell
         }
 
         queueMoveEmails(std::move(accountId), std::move(mailboxId), trashMailbox->id,
-                        std::move(emailIds), QStringLiteral("Queued delete."));
+                        std::move(selection), QStringLiteral("Queued delete."));
     }
 
-    void MainWindow::queueDestroyEmails(std::string accountId, std::vector<std::string> emailIds)
+    void MainWindow::queueDestroyEmails(std::string accountId,
+                                        std::optional<std::string> sourceMailboxId,
+                                        javelin::app::MessageSelection selection)
     {
-        const auto selectedCount = emailIds.size();
-        qCInfo(logUserOperations) << "permanently delete requested" << selectedCount
-                                  << "message(s)";
-        for (const auto& emailId : emailIds)
+        qCInfo(logUserOperations) << "permanently delete requested" << selection.size()
+                                  << "selection item(s)";
+        const auto result = m_mailService.queueDestroyMessages(
+            accountId, std::move(sourceMailboxId), std::move(selection));
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
         {
-            const auto result = m_mailService.queueDestroyEmail(accountId, emailId);
-            if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
-            {
-                presentError(*error);
-                return;
-            }
+            presentError(*error);
+            return;
         }
 
+        const auto selectedCount =
+            std::get<javelin::app::QueuedMessageSelectionMutation>(result).queuedEmailCount;
         markTabsStaleForAccount(accountId);
         refreshMessageListPreservingSelection();
         refreshSelectionFromModels();
@@ -5202,15 +5134,16 @@ namespace javelin::gui::shell
     void MainWindow::queueMoveEmails(std::string accountId,
                                      std::optional<std::string> sourceMailboxId,
                                      std::string destinationMailboxId,
-                                     std::vector<std::string> emailIds, QString successMessage)
+                                     javelin::app::MessageSelection selection,
+                                     QString successMessage)
     {
-        const auto selectedCount = emailIds.size();
-        qCInfo(logUserOperations).noquote() << "move requested" << selectedCount << "message(s) to"
-                                            << QString::fromStdString(destinationMailboxId);
+        qCInfo(logUserOperations).noquote()
+            << "move requested" << selection.size() << "selection item(s) to"
+            << QString::fromStdString(destinationMailboxId);
         const auto result = m_mailService.queueMailboxSelectionMutation(
             javelin::app::MailboxSelectionMutationIntent{
                 .accountId = accountId,
-                .emailIds = std::move(emailIds),
+                .selection = std::move(selection),
                 .operation = javelin::app::MailboxSelectionOperation::Move,
                 .sourceMailboxId = std::move(sourceMailboxId),
                 .destinationMailboxId = std::move(destinationMailboxId),
@@ -5263,15 +5196,16 @@ namespace javelin::gui::shell
     void MainWindow::queueCopyEmails(std::string accountId,
                                      std::optional<std::string> sourceMailboxId,
                                      std::string destinationMailboxId,
-                                     std::vector<std::string> emailIds, QString successMessage)
+                                     javelin::app::MessageSelection selection,
+                                     QString successMessage)
     {
-        const auto selectedCount = emailIds.size();
-        qCInfo(logUserOperations).noquote() << "copy requested" << selectedCount << "message(s) to"
-                                            << QString::fromStdString(destinationMailboxId);
+        qCInfo(logUserOperations).noquote()
+            << "copy requested" << selection.size() << "selection item(s) to"
+            << QString::fromStdString(destinationMailboxId);
         const auto result = m_mailService.queueMailboxSelectionMutation(
             javelin::app::MailboxSelectionMutationIntent{
                 .accountId = accountId,
-                .emailIds = std::move(emailIds),
+                .selection = std::move(selection),
                 .operation = javelin::app::MailboxSelectionOperation::Copy,
                 .sourceMailboxId = std::move(sourceMailboxId),
                 .destinationMailboxId = std::move(destinationMailboxId),
@@ -5319,15 +5253,6 @@ namespace javelin::gui::shell
         }
 
         submitQueuedEmailMutations(std::move(accountId));
-    }
-
-    void MainWindow::queueMoveEmail(std::string accountId, std::string sourceMailboxId,
-                                    std::string destinationMailboxId, std::string emailId,
-                                    QString successMessage)
-    {
-        queueMoveEmails(std::move(accountId), std::move(sourceMailboxId),
-                        std::move(destinationMailboxId), {std::move(emailId)},
-                        std::move(successMessage));
     }
 
     void MainWindow::queueMarkEmailRead(std::string accountId, std::string emailId)
@@ -5391,47 +5316,30 @@ namespace javelin::gui::shell
             return;
         }
 
-        const QModelIndexList selectedRows = selectionModel->selectedRows();
-        std::vector<std::string> emailIds;
-        emailIds.reserve(static_cast<std::size_t>(selectedRows.size()));
-        for (const auto& index : selectedRows)
-        {
-            if (indexIsUnread(index))
-            {
-                continue;
-            }
-
-            const auto emailId =
-                index.data(javelin::gui::messages::MessageListModel::EmailIdRole).toString();
-            if (!emailId.isEmpty())
-            {
-                emailIds.push_back(emailId.toStdString());
-            }
-        }
-
-        if (emailIds.empty())
+        auto selection = selectedMessageActionItems(true);
+        if (selection.empty())
         {
             return;
         }
 
-        qCInfo(logUserOperations) << "mark unread requested" << emailIds.size() << "message(s)";
-        for (const auto& emailId : emailIds)
+        qCInfo(logUserOperations) << "mark unread requested" << selection.size()
+                                  << "selection item(s)";
+        const auto result = m_mailService.queueMarkMessagesUnread(*accountId, activeMailboxId(),
+                                                                  std::move(selection));
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
         {
-            const auto result = m_mailService.queueMarkEmailUnread(*accountId, emailId);
-            if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
-            {
-                presentError(*error);
-                return;
-            }
+            presentError(*error);
+            return;
         }
 
+        const auto markedCount =
+            std::get<javelin::app::QueuedMessageSelectionMutation>(result).queuedEmailCount;
         markSearchTabsStaleForAccount(*accountId);
         refreshMessageListPreservingSelection();
         refreshSelectionFromModels();
         m_statusBar->showMessage(
-            emailIds.size() == 1
-                ? QStringLiteral("Marked unread.")
-                : QStringLiteral("Marked %1 messages unread.").arg(emailIds.size()),
+            markedCount == 1 ? QStringLiteral("Marked unread.")
+                             : QStringLiteral("Marked %1 messages unread.").arg(markedCount),
             5000);
         submitQueuedEmailMutations(*accountId);
     }
@@ -5479,7 +5387,7 @@ namespace javelin::gui::shell
                                                                QItemSelectionModel::Rows);
             m_messageView->setCurrentIndex(index);
         }
-        const auto emailIds = selectedEmailIds();
+        const auto selection = selectedMessageActionItems();
 
         QMenu menu{this};
         menu.addAction(m_viewSourceAction);
@@ -5525,18 +5433,18 @@ namespace javelin::gui::shell
                     auto* action = moveMenu->addAction(QString::fromStdString(mailbox->name));
                     connect(action, &QAction::triggered, this,
                             [this, accountId = *accountId, sourceMailboxId,
-                             destinationMailboxId = mailbox->id, emailIds]
+                             destinationMailboxId = mailbox->id, selection]
                             {
                                 queueMoveEmails(accountId, sourceMailboxId, destinationMailboxId,
-                                                emailIds, QStringLiteral("Queued move."));
+                                                selection, QStringLiteral("Queued move."));
                             });
                     auto* copyAction = copyMenu->addAction(QString::fromStdString(mailbox->name));
                     connect(copyAction, &QAction::triggered, this,
                             [this, accountId = *accountId, sourceMailboxId,
-                             destinationMailboxId = mailbox->id, emailIds]
+                             destinationMailboxId = mailbox->id, selection]
                             {
                                 queueCopyEmails(accountId, sourceMailboxId, destinationMailboxId,
-                                                emailIds, QStringLiteral("Queued copy."));
+                                                selection, QStringLiteral("Queued copy."));
                             });
                 }
             }

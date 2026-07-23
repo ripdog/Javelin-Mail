@@ -117,6 +117,15 @@ namespace javelin::app
     using QueuedMailboxSelectionMutationResult =
         std::variant<QueuedMailboxSelectionMutation, javelin::jmap::OperationError>;
 
+    struct QueuedMessageSelectionMutation
+    {
+        std::string accountId;
+        std::size_t queuedEmailCount = 0;
+    };
+
+    using QueuedMessageSelectionMutationResult =
+        std::variant<QueuedMessageSelectionMutation, javelin::jmap::OperationError>;
+
     class MailApplicationService final : public QObject
     {
         Q_OBJECT
@@ -146,20 +155,16 @@ namespace javelin::app
         [[nodiscard]] QCoro::Task<SearchWindowResult>
         requestSearchWindow(SearchWindowIntent intent);
         void retireSearchWindow(std::string accountId, std::string windowKey);
-        [[nodiscard]] javelin::jmap::QueuedEmailMutationResult
-        queueDestroyEmail(std::string accountId, std::string emailId);
-        [[nodiscard]] javelin::jmap::QueuedEmailMutationResult
-        queueMoveEmail(std::string accountId, std::string emailId, std::string sourceMailboxId,
-                       std::string destinationMailboxId);
-        [[nodiscard]] javelin::jmap::QueuedEmailMutationResult
-        queueCopyEmail(std::string accountId, std::string emailId, std::string sourceMailboxId,
-                       std::string destinationMailboxId);
         [[nodiscard]] QueuedMailboxSelectionMutationResult
         queueMailboxSelectionMutation(MailboxSelectionMutationIntent intent);
+        [[nodiscard]] QueuedMessageSelectionMutationResult
+        queueDestroyMessages(std::string accountId, std::optional<std::string> sourceMailboxId,
+                             MessageSelection selection);
+        [[nodiscard]] QueuedMessageSelectionMutationResult
+        queueMarkMessagesUnread(std::string accountId, std::optional<std::string> sourceMailboxId,
+                                MessageSelection selection);
         [[nodiscard]] javelin::jmap::QueuedEmailMutationResult
         queueMarkEmailRead(std::string accountId, std::string emailId);
-        [[nodiscard]] javelin::jmap::QueuedEmailMutationResult
-        queueMarkEmailUnread(std::string accountId, std::string emailId);
         [[nodiscard]] javelin::jmap::QueuedEmailMutationResult
         queueSetEmailFlagged(std::string accountId, std::string emailId, bool flagged);
         [[nodiscard]] QCoro::Task<javelin::jmap::SubmittedEmailMutationsResult>
@@ -237,6 +242,16 @@ namespace javelin::app
       private:
         friend class MailboxObservation;
 
+        enum class SelectedMessageMutation
+        {
+            Destroy,
+            MarkUnread,
+        };
+
+        [[nodiscard]] QueuedMessageSelectionMutationResult
+        queueSelectedMessageMutation(std::string accountId,
+                                     std::optional<std::string> sourceMailboxId,
+                                     MessageSelection selection, SelectedMessageMutation mutation);
         void connectCoordinator(const std::string& accountId, AccountSyncCoordinator& coordinator);
         [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarRefreshResult>
         requestCalendarChanges(std::string ownerAccountId);

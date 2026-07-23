@@ -288,26 +288,23 @@ namespace javelin::gui::shell
         void resolveOpenEmailRoute();
         [[nodiscard]] const javelin::app::OpenEmailRoute* activeOpenEmailRoute() const;
         [[nodiscard]] std::vector<std::string> selectedEmailIds() const;
-        [[nodiscard]] std::variant<std::vector<std::string>, QString>
-        selectedEmailIdsForMailboxAction(std::string_view accountId) const;
+        [[nodiscard]] javelin::app::MessageSelection
+        selectedMessageActionItems(bool excludeUnread = false) const;
         [[nodiscard]] std::vector<javelin::jmap::cache::MessageListItem>
         selectedMessageSummaries() const;
         void selectMessageAlone(const QString& emailId);
-        void queueDeleteEmail(std::string accountId, std::string mailboxId, std::string emailId);
         void queueArchiveEmails(std::string accountId, std::optional<std::string> sourceMailboxId,
-                                std::vector<std::string> emailIds);
+                                javelin::app::MessageSelection selection);
         void queueDeleteEmails(std::string accountId, std::string mailboxId,
-                               std::vector<std::string> emailIds);
-        void queueDestroyEmails(std::string accountId, std::vector<std::string> emailIds);
+                               javelin::app::MessageSelection selection);
+        void queueDestroyEmails(std::string accountId, std::optional<std::string> sourceMailboxId,
+                                javelin::app::MessageSelection selection);
         void queueMoveEmails(std::string accountId, std::optional<std::string> sourceMailboxId,
-                             std::string destinationMailboxId, std::vector<std::string> emailIds,
-                             QString successMessage);
+                             std::string destinationMailboxId,
+                             javelin::app::MessageSelection selection, QString successMessage);
         void queueCopyEmails(std::string accountId, std::optional<std::string> sourceMailboxId,
-                             std::string destinationMailboxId, std::vector<std::string> emailIds,
-                             QString successMessage);
-        void queueMoveEmail(std::string accountId, std::string sourceMailboxId,
-                            std::string destinationMailboxId, std::string emailId,
-                            QString successMessage);
+                             std::string destinationMailboxId,
+                             javelin::app::MessageSelection selection, QString successMessage);
         void queueMarkEmailRead(std::string accountId, std::string emailId);
         void toggleMessageFlagged(const QModelIndex& index);
         void markSelectedEmailUnread();

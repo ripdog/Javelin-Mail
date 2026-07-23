@@ -588,35 +588,17 @@ namespace javelin::app
         static_cast<void>(m_queryService.eraseSearchWindows(accountId, windowKey));
     }
 
-    javelin::jmap::QueuedEmailMutationResult
-    MailApplicationService::queueDestroyEmail(std::string accountId, std::string emailId)
-    {
-        return m_jmapCore.queueDestroyEmail(std::move(accountId), std::move(emailId));
-    }
-
-    javelin::jmap::QueuedEmailMutationResult
-    MailApplicationService::queueMoveEmail(std::string accountId, std::string emailId,
-                                           std::string sourceMailboxId,
-                                           std::string destinationMailboxId)
-    {
-        return m_jmapCore.queueMoveEmail(std::move(accountId), std::move(emailId),
-                                         std::move(sourceMailboxId),
-                                         std::move(destinationMailboxId));
-    }
-
-    javelin::jmap::QueuedEmailMutationResult
-    MailApplicationService::queueCopyEmail(std::string accountId, std::string emailId,
-                                           std::string sourceMailboxId,
-                                           std::string destinationMailboxId)
-    {
-        return m_jmapCore.queueCopyEmail(std::move(accountId), std::move(emailId),
-                                         std::move(sourceMailboxId),
-                                         std::move(destinationMailboxId));
-    }
-
     QueuedMailboxSelectionMutationResult
     MailApplicationService::queueMailboxSelectionMutation(MailboxSelectionMutationIntent intent)
     {
+        auto emailIdsResult = resolveMessageSelection(m_queryService, intent.accountId,
+                                                      intent.sourceMailboxId, intent.selection);
+        if (const auto* error = std::get_if<QString>(&emailIdsResult))
+        {
+            return javelin::jmap::OperationError{.message = *error};
+        }
+        auto emailIds = std::get<std::vector<std::string>>(std::move(emailIdsResult));
+
         const auto mailboxesResult = m_queryService.listMailboxTree(intent.accountId);
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&mailboxesResult))
         {
@@ -625,14 +607,9 @@ namespace javelin::app
 
         javelin::jmap::cache::EmailRepository emailRepository{m_databaseConnection};
         std::vector<javelin::jmap::domain::Email> emails;
-        emails.reserve(intent.emailIds.size());
-        std::unordered_set<std::string_view> seenEmailIds;
-        for (const auto& emailId : intent.emailIds)
+        emails.reserve(emailIds.size());
+        for (const auto& emailId : emailIds)
         {
-            if (!seenEmailIds.insert(emailId).second)
-            {
-                continue;
-            }
             const auto emailResult = emailRepository.find(intent.accountId, emailId);
             if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&emailResult))
             {
@@ -650,7 +627,7 @@ namespace javelin::app
         }
 
         auto planResult = planMailboxSelectionMutation(
-            intent, emails,
+            intent, emailIds, emails,
             std::get<std::vector<javelin::jmap::cache::MailboxTreeItem>>(mailboxesResult));
         if (const auto* error = std::get_if<QString>(&planResult))
         {
@@ -676,16 +653,58 @@ namespace javelin::app
         };
     }
 
+    QueuedMessageSelectionMutationResult
+    MailApplicationService::queueDestroyMessages(std::string accountId,
+                                                 std::optional<std::string> sourceMailboxId,
+                                                 MessageSelection selection)
+    {
+        return queueSelectedMessageMutation(std::move(accountId), std::move(sourceMailboxId),
+                                            std::move(selection), SelectedMessageMutation::Destroy);
+    }
+
+    QueuedMessageSelectionMutationResult
+    MailApplicationService::queueMarkMessagesUnread(std::string accountId,
+                                                    std::optional<std::string> sourceMailboxId,
+                                                    MessageSelection selection)
+    {
+        return queueSelectedMessageMutation(std::move(accountId), std::move(sourceMailboxId),
+                                            std::move(selection),
+                                            SelectedMessageMutation::MarkUnread);
+    }
+
+    QueuedMessageSelectionMutationResult MailApplicationService::queueSelectedMessageMutation(
+        std::string accountId, std::optional<std::string> sourceMailboxId,
+        MessageSelection selection, const SelectedMessageMutation mutation)
+    {
+        auto emailIdsResult =
+            resolveMessageSelection(m_queryService, accountId, sourceMailboxId, selection);
+        if (const auto* error = std::get_if<QString>(&emailIdsResult))
+        {
+            return javelin::jmap::OperationError{.message = *error};
+        }
+
+        auto emailIds = std::get<std::vector<std::string>>(std::move(emailIdsResult));
+        for (const auto& emailId : emailIds)
+        {
+            const auto result = mutation == SelectedMessageMutation::Destroy
+                                    ? m_jmapCore.queueDestroyEmail(accountId, emailId)
+                                    : m_jmapCore.queueMarkEmailUnread(accountId, emailId);
+            if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+            {
+                return *error;
+            }
+        }
+
+        return QueuedMessageSelectionMutation{
+            .accountId = std::move(accountId),
+            .queuedEmailCount = emailIds.size(),
+        };
+    }
+
     javelin::jmap::QueuedEmailMutationResult
     MailApplicationService::queueMarkEmailRead(std::string accountId, std::string emailId)
     {
         return m_jmapCore.queueMarkEmailRead(std::move(accountId), std::move(emailId));
-    }
-
-    javelin::jmap::QueuedEmailMutationResult
-    MailApplicationService::queueMarkEmailUnread(std::string accountId, std::string emailId)
-    {
-        return m_jmapCore.queueMarkEmailUnread(std::move(accountId), std::move(emailId));
     }
 
     javelin::jmap::QueuedEmailMutationResult

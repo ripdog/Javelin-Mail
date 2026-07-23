@@ -82,6 +82,8 @@ set(JAVELIN_FORMAT_FILES
     src/app/MailApplicationService.h
     src/app/MailboxSelectionMutation.cpp
     src/app/MailboxSelectionMutation.h
+    src/app/MessageSelection.cpp
+    src/app/MessageSelection.h
     src/app/MailboxSyncCoverage.cpp
     src/app/MailboxSyncCoverage.h
     src/app/MessageNavigationCoordinator.cpp
@@ -718,6 +720,8 @@ add_library(javelin_app STATIC
     src/app/MailApplicationService.h
     src/app/MailboxSelectionMutation.cpp
     src/app/MailboxSelectionMutation.h
+    src/app/MessageSelection.cpp
+    src/app/MessageSelection.h
     src/app/MailboxSyncCoverage.cpp
     src/app/MailboxSyncCoverage.h
     src/app/MessageNavigationCoordinator.cpp
