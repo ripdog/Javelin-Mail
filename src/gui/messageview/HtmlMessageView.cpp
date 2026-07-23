@@ -4,10 +4,12 @@
 
 #include <QAction>
 #include <QContextMenuEvent>
+#include <QDebug>
 #include <QDesktopServices>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QMenu>
+#include <QPaintEvent>
 #include <QPointer>
 #include <QString>
 #include <QVBoxLayout>
@@ -79,12 +81,23 @@ namespace javelin::gui::messageview
         class FilteredWebEngineView final : public QWebEngineView
         {
           public:
-            explicit FilteredWebEngineView(std::function<void()> viewSourceAction, QWidget* parent)
-                : QWebEngineView(parent), m_viewSourceAction(std::move(viewSourceAction))
+            explicit FilteredWebEngineView(std::function<void()> viewSourceAction,
+                                           std::function<void()> painted, QWidget* parent)
+                : QWebEngineView(parent), m_viewSourceAction(std::move(viewSourceAction)),
+                  m_painted(std::move(painted))
             {
             }
 
           protected:
+            void paintEvent(QPaintEvent* event) override
+            {
+                QWebEngineView::paintEvent(event);
+                if (m_painted)
+                {
+                    m_painted();
+                }
+            }
+
             void contextMenuEvent(QContextMenuEvent* event) override
             {
                 const QPointer<QWebEngineContextMenuRequest> request = lastContextMenuRequest();
@@ -137,6 +150,7 @@ namespace javelin::gui::messageview
 
           private:
             std::function<void()> m_viewSourceAction;
+            std::function<void()> m_painted;
         };
 
     } // namespace
@@ -146,7 +160,8 @@ namespace javelin::gui::messageview
         auto* layout = new QVBoxLayout(this);
         layout->setContentsMargins(0, 0, 0, 0);
 
-        m_view = new FilteredWebEngineView([this] { Q_EMIT viewSourceRequested(); }, this);
+        m_view = new FilteredWebEngineView([this] { Q_EMIT viewSourceRequested(); },
+                                           [this] { recordViewPaint(); }, this);
         m_view->setPage(new MessageWebEnginePage(m_view));
         connect(m_view->page(), &QWebEnginePage::linkHovered, this,
                 [this](const QString& url) { Q_EMIT hoveredLinkChanged(url); });
@@ -159,6 +174,7 @@ namespace javelin::gui::messageview
                         return;
                     }
 
+                    traceRenderEvent(QStringLiteral("render-ready-title"));
                     m_expectedReadyTitle.clear();
                     Q_EMIT documentLoaded(m_expectedDocumentId);
                 });
@@ -172,6 +188,12 @@ namespace javelin::gui::messageview
         connect(m_view->page(), &QWebEnginePage::loadingChanged, this,
                 [this](const QWebEngineLoadingInfo& loadingInfo)
                 {
+                    traceRenderEvent(
+                        QStringLiteral("loading-changed"),
+                        QStringLiteral("status=%1 eventUrl=%2 expected=%3 matches=%4")
+                            .arg(static_cast<int>(loadingInfo.status()))
+                            .arg(loadingInfo.url().toString(), m_expectedDocumentUrl.toString())
+                            .arg(loadingInfo.url() == m_expectedDocumentUrl));
                     if (loadingInfo.status() != QWebEngineLoadingInfo::LoadSucceededStatus ||
                         loadingInfo.url() != m_expectedDocumentUrl)
                     {
@@ -181,6 +203,7 @@ namespace javelin::gui::messageview
                     const auto documentUrl = m_expectedDocumentUrl;
                     const auto readyTitle = m_expectedReadyTitle;
                     const QPointer<HtmlMessageView> guard{this};
+                    traceRenderEvent(QStringLiteral("navigation-succeeded"));
                     applyRemoteContentPolicy(
                         [guard, documentUrl, readyTitle]
                         {
@@ -215,6 +238,12 @@ namespace javelin::gui::messageview
             QString::number(static_cast<qulonglong>(++m_documentGeneration))));
         m_expectedReadyTitle = QStringLiteral("__javelin_render_ready_%1")
                                    .arg(static_cast<qulonglong>(m_documentGeneration));
+        m_renderTimer.restart();
+        m_tracedPaintCount = 0;
+        m_readyPaintCount = 0;
+        m_tracePaints = true;
+        traceRenderEvent(QStringLiteral("navigation-requested"),
+                         QStringLiteral("htmlBytes=%1").arg(static_cast<qulonglong>(html.size())));
         m_view->setHtml(QString::fromUtf8(html.data(), static_cast<qsizetype>(html.size())),
                         m_expectedDocumentUrl);
     }
@@ -226,6 +255,7 @@ namespace javelin::gui::messageview
         m_expectedDocumentId.clear();
         m_expectedDocumentUrl = {};
         m_expectedReadyTitle.clear();
+        m_tracePaints = false;
         m_view->setHtml(QString{});
     }
 
@@ -435,12 +465,14 @@ namespace javelin::gui::messageview
         if (documentUrl != m_expectedDocumentUrl || readyTitle != m_expectedReadyTitle ||
             m_view->url() != documentUrl)
         {
+            traceRenderEvent(QStringLiteral("render-wait-discarded"));
             return;
         }
 
         // LoadSucceededStatus only covers navigation. Keeping the view visible behind the native
         // overlay and crossing two animation frames gives Chromium an opportunity to submit the
         // replacement document before titleChanged releases that overlay.
+        traceRenderEvent(QStringLiteral("render-wait-scheduled"));
         m_view->page()->runJavaScript(QStringLiteral(
                                           R"JS(
 (() => {
@@ -453,6 +485,50 @@ namespace javelin::gui::messageview
 })();
 )JS")
                                           .arg(readyTitle));
+    }
+
+    void HtmlMessageView::recordViewPaint()
+    {
+        if (!m_tracePaints)
+        {
+            return;
+        }
+
+        const bool readyWasReported = m_expectedReadyTitle.isEmpty();
+        if (readyWasReported)
+        {
+            ++m_readyPaintCount;
+        }
+
+        if (m_tracedPaintCount < 8 || (readyWasReported && m_readyPaintCount <= 3))
+        {
+            ++m_tracedPaintCount;
+            traceRenderEvent(QStringLiteral("view-painted"),
+                             QStringLiteral("paint=%1 readyPaint=%2 readyReported=%3")
+                                 .arg(m_tracedPaintCount)
+                                 .arg(m_readyPaintCount)
+                                 .arg(readyWasReported));
+        }
+
+        if (m_readyPaintCount >= 3)
+        {
+            m_tracePaints = false;
+        }
+    }
+
+    void HtmlMessageView::traceRenderEvent(const QString& event, const QString& detail) const
+    {
+        auto documentId = m_expectedDocumentId;
+        documentId.replace(QLatin1Char('\n'), QLatin1Char('/'));
+        qInfo().noquote() << QStringLiteral(
+                                 "HTML message render generation=%1 elapsedMs=%2 event=%3 "
+                                 "document=%4 viewVisible=%5 pageVisible=%6 url=%7 %8")
+                                 .arg(static_cast<qulonglong>(m_documentGeneration))
+                                 .arg(m_renderTimer.isValid() ? m_renderTimer.elapsed() : -1)
+                                 .arg(event, documentId)
+                                 .arg(m_view->isVisible())
+                                 .arg(m_view->page()->isVisible())
+                                 .arg(m_view->url().toString(), detail);
     }
 
 } // namespace javelin::gui::messageview

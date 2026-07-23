@@ -12,6 +12,7 @@
 #include <QAction>
 #include <QApplication>
 #include <QDateTime>
+#include <QDebug>
 #include <QDesktopServices>
 #include <QFileIconProvider>
 #include <QFileInfo>
@@ -803,6 +804,11 @@ namespace javelin::gui::messageview
                     {
                         return;
                     }
+                    qInfo().noquote() << "HTML message overlay release"
+                                      << QStringLiteral("account=%1 email=%2 overlayVisible=%3")
+                                             .arg(QString::fromStdString(*m_accountId),
+                                                  QString::fromStdString(*m_emailId))
+                                             .arg(m_htmlLoadingOverlay->isVisible());
                     m_htmlDocumentLoaded = true;
                     m_loading = false;
                     updatePresentation(false);
@@ -1492,7 +1498,6 @@ namespace javelin::gui::messageview
         updateRemoteContentButton();
         updateLanguageBanner();
         m_loadingIndicator->setVisible(false);
-        m_htmlLoadingOverlay->setVisible(false);
         m_placeholderDetailLabel->setVisible(true);
 
         const auto presentation =
@@ -1613,6 +1618,12 @@ namespace javelin::gui::messageview
                     : QString::fromStdString(m_snapshot->htmlBody->value);
             m_htmlDocumentLoaded = false;
             m_loading = true;
+            m_htmlLoadingOverlay->setVisible(true);
+            m_htmlLoadingOverlay->raise();
+            qInfo().noquote() << "HTML message overlay shown"
+                              << QStringLiteral("account=%1 email=%2")
+                                     .arg(QString::fromStdString(*m_accountId),
+                                          QString::fromStdString(*m_emailId));
             m_htmlView->setDocumentHtml(renderDocument.toStdString(),
                                         *m_accountId + "\n" + *m_emailId);
         }
@@ -1626,6 +1637,7 @@ namespace javelin::gui::messageview
         if (m_snapshot->htmlBody.has_value())
         {
             setActiveView(ActiveView::Html);
+            m_htmlLoadingOverlay->setVisible(!m_htmlDocumentLoaded);
             if (m_htmlDocumentLoaded)
             {
                 startLanguageDetection();

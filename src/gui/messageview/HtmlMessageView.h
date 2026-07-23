@@ -2,6 +2,7 @@
 
 #include <QWidget>
 
+#include <QElapsedTimer>
 #include <QStringList>
 #include <QUrl>
 #include <QVector>
@@ -39,6 +40,8 @@ namespace javelin::gui::messageview
       private:
         void applyRemoteContentPolicy(std::function<void()> callback = {});
         void awaitRenderedDocument(const QUrl& documentUrl, const QString& readyTitle);
+        void recordViewPaint();
+        void traceRenderEvent(const QString& event, const QString& detail = {}) const;
 
         QWebEngineView* m_view = nullptr;
         bool m_remoteContentEnabled = false;
@@ -46,6 +49,10 @@ namespace javelin::gui::messageview
         QString m_expectedDocumentId;
         QUrl m_expectedDocumentUrl;
         QString m_expectedReadyTitle;
+        QElapsedTimer m_renderTimer;
+        int m_tracedPaintCount = 0;
+        int m_readyPaintCount = 0;
+        bool m_tracePaints = false;
     };
 
 } // namespace javelin::gui::messageview
