@@ -371,12 +371,6 @@ namespace javelin::gui::shell
         connect(m_messageFileController, &MessageFileController::userInterventionRequired, this,
                 &MainWindow::presentUserInterventionError);
         setupUi();
-        m_messageListPanePresenter =
-            std::make_unique<javelin::gui::messages::MessageListPanePresenter>(
-                *m_messageListTitleLabel, *m_messageListMetaLabel, *m_messagePageLabel,
-                *m_messageEmptyState, *m_messageView, *m_searchServerButton, *m_firstPageButton,
-                *m_previousPageButton, *m_pageNumberSpinBox, *m_nextPageButton, *m_lastPageButton,
-                pageSize);
         connect(&m_mailService, &javelin::app::MailApplicationService::sessionCapabilitiesChanged,
                 this, [this](const QString&) { reloadAccounts(); });
         createActions();
@@ -1138,6 +1132,12 @@ namespace javelin::gui::shell
         centralLayout->addWidget(m_contentStack);
 
         setCentralWidget(centralContainer);
+        m_messageListPanePresenter =
+            std::make_unique<javelin::gui::messages::MessageListPanePresenter>(
+                *m_messageListTitleLabel, *m_messageListMetaLabel, *m_messagePageLabel,
+                *m_messageEmptyState, *m_messageView, *m_searchServerButton, *m_firstPageButton,
+                *m_previousPageButton, *m_pageNumberSpinBox, *m_nextPageButton, *m_lastPageButton,
+                pageSize);
         updateEmptyStates();
         updateMessageListHeader();
     }
