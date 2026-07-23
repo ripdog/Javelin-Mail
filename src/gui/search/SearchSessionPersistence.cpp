@@ -151,12 +151,6 @@ namespace javelin::gui::search
 
     PersistedSearchState readSearchSessionSettings(const QSettings& settings)
     {
-        auto text = optionalStringSetting(settings, QStringLiteral("searchText"));
-        if (!text.has_value())
-        {
-            text = optionalStringSetting(settings, QStringLiteral("query"));
-        }
-
         const auto cachedItems =
             QJsonDocument::fromJson(settings.value(QStringLiteral("cachedItems")).toByteArray())
                 .array();
@@ -173,7 +167,7 @@ namespace javelin::gui::search
         return PersistedSearchState{
             .criteria =
                 javelin::jmap::search::EmailSearchCriteria{
-                    .text = std::move(text),
+                    .text = optionalStringSetting(settings, QStringLiteral("searchText")),
                     .with = optionalStringSetting(settings, QStringLiteral("searchWith")),
                     .from = optionalStringSetting(settings, QStringLiteral("searchFrom")),
                     .to = optionalStringSetting(settings, QStringLiteral("searchTo")),
@@ -219,7 +213,6 @@ namespace javelin::gui::search
     void writeSearchSessionSettings(QSettings& settings, const javelin::app::SearchSession& session)
     {
         settings.setValue(QStringLiteral("type"), QStringLiteral("search"));
-        settings.setValue(QStringLiteral("query"), QString::fromStdString(session.query()));
         settings.setValue(QStringLiteral("onlineSearch"),
                           session.mode() == javelin::app::SearchMode::Online);
         settings.setValue(QStringLiteral("searchSessionId"),

@@ -128,6 +128,8 @@ set(JAVELIN_FORMAT_FILES
     src/gui/messages/MessageListModel.h
     src/gui/messages/MessageListDelegate.cpp
     src/gui/messages/MessageListDelegate.h
+    src/gui/messages/MessageDragListView.cpp
+    src/gui/messages/MessageDragListView.h
     src/gui/messageview/GoogleHtmlTranslator.cpp
     src/gui/messageview/GoogleHtmlTranslator.h
     src/gui/messageview/HtmlMessageView.cpp
@@ -603,6 +605,8 @@ add_library(javelin_gui STATIC
     src/gui/messages/MessageListModel.h
     src/gui/messages/MessageListDelegate.cpp
     src/gui/messages/MessageListDelegate.h
+    src/gui/messages/MessageDragListView.cpp
+    src/gui/messages/MessageDragListView.h
     src/gui/messageview/GoogleHtmlTranslator.cpp
     src/gui/messageview/GoogleHtmlTranslator.h
     src/gui/messageview/HtmlMessageView.cpp
