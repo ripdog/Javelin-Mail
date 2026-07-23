@@ -70,12 +70,15 @@ add_executable(javelin_jmap_tests
     gui/MonthCalendarWidgetTest.cpp
     gui/RecurrencePatternTest.cpp
     gui/MailboxSortTest.cpp
+    gui/MainWindowStateStoreTest.cpp
     gui/MessageViewPresentationTest.cpp
     gui/PaginationTest.cpp
     gui/PlainTextLinkifierTest.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/calendar/MonthCalendarLayout.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/calendar/RecurrencePattern.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/messageview/PlainTextLinkifier.cpp
+    ${PROJECT_SOURCE_DIR}/src/gui/search/SearchSessionPersistence.cpp
+    ${PROJECT_SOURCE_DIR}/src/gui/shell/MainWindowStateStore.cpp
 )
 
 target_include_directories(javelin_jmap_tests

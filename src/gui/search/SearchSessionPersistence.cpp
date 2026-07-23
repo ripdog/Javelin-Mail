@@ -210,14 +210,14 @@ namespace javelin::gui::search
         };
     }
 
-    void writeSearchSessionSettings(QSettings& settings, const javelin::app::SearchSession& session)
+    void writeSearchSessionSettings(QSettings& settings, const PersistedSearchState& state)
     {
         settings.setValue(QStringLiteral("type"), QStringLiteral("search"));
         settings.setValue(QStringLiteral("onlineSearch"),
-                          session.mode() == javelin::app::SearchMode::Online);
+                          state.restored.mode == javelin::app::SearchMode::Online);
         settings.setValue(QStringLiteral("searchSessionId"),
-                          QString::fromStdString(session.sessionId()));
-        const auto& criteria = session.criteria();
+                          QString::fromStdString(state.restored.sessionId));
+        const auto& criteria = state.criteria;
         writeOptionalField(settings, QStringLiteral("searchText"), criteria.text);
         writeOptionalField(settings, QStringLiteral("searchWith"), criteria.with);
         writeOptionalField(settings, QStringLiteral("searchFrom"), criteria.from);
@@ -227,7 +227,7 @@ namespace javelin::gui::search
         writeOptionalField(settings, QStringLiteral("searchSubject"), criteria.subject);
         writeOptionalField(settings, QStringLiteral("searchBody"), criteria.body);
 
-        const auto& page = session.page();
+        const auto& page = state.restored.page;
         settings.setValue(QStringLiteral("offset"), static_cast<qulonglong>(page.offset));
         settings.setValue(QStringLiteral("position"), static_cast<qulonglong>(page.position));
         settings.setValue(QStringLiteral("returnedLimit"),

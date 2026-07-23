@@ -1,6 +1,7 @@
 #pragma once
 
 #include "app/MailApplicationService.h"
+#include "gui/contacts/ContactsViewState.h"
 #include "jmap/api/ContactsMethods.h"
 #include "jmap/cache/ContactRepository.h"
 #include "jmap/contacts/ContactTypes.h"
@@ -26,18 +27,6 @@ class QStackedWidget;
 namespace javelin::gui::contacts
 {
     class ContactFieldEditor;
-
-    struct ContactsViewState
-    {
-        std::string accountId;
-        std::string addressBookId;
-        std::string contactId;
-        QString filter;
-        int sortMode = 0;
-        int groupFilterMode = 0;
-        std::string groupId;
-        std::vector<std::string> selectedContactKeys;
-    };
 
     class ContactsManagerWidget final : public QWidget
     {

@@ -26,7 +26,6 @@ class QMenu;
 class QPoint;
 class QSplitter;
 class QStackedWidget;
-class QSettings;
 class QSpinBox;
 class QTabBar;
 class QToolButton;
@@ -82,6 +81,10 @@ namespace javelin::gui::shell
 {
     class ElidingLabel;
     class MessageFileController;
+    struct PersistedMailboxTab;
+    struct PersistedSearchTab;
+    struct PersistedComposeTab;
+    struct PersistedContactsTab;
 } // namespace javelin::gui::shell
 
 namespace javelin::gui::messages
@@ -344,14 +347,13 @@ namespace javelin::gui::shell
         void submitQueuedEmailMutations(std::string accountId);
         void refreshSelectionFromModels();
         void restorePersistentState();
-        void restoreMailboxTab(const QSettings& settings, const QString& accountId);
-        void restoreSearchTab(const QSettings& settings, const QString& accountId);
-        void restoreComposeTab(const QSettings& settings);
-        void restoreContactsTab(const QSettings& settings, const QString& accountId);
+        void restoreMailboxTab(const PersistedMailboxTab& tab);
+        void restoreSearchTab(PersistedSearchTab tab);
+        void restoreComposeTab(const PersistedComposeTab& tab);
+        void restoreContactsTab(const PersistedContactsTab& tab);
         [[nodiscard]] javelin::gui::contacts::ContactsManagerWidget*
         appendContactsTab(std::string ownerAccountId, QString title);
         void savePersistentState() const;
-        void writePersistentTab(QSettings& settings, const TabState& tab) const;
         void updateEmptyStates();
         void updateMessageListHeader();
         void updateMessageActions();

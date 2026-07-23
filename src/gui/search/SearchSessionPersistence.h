@@ -14,7 +14,6 @@ namespace javelin::gui::search
     };
 
     [[nodiscard]] PersistedSearchState readSearchSessionSettings(const QSettings& settings);
-    void writeSearchSessionSettings(QSettings& settings,
-                                    const javelin::app::SearchSession& session);
+    void writeSearchSessionSettings(QSettings& settings, const PersistedSearchState& state);
 
 } // namespace javelin::gui::search

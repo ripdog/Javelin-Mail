@@ -111,6 +111,7 @@ set(JAVELIN_FORMAT_FILES
     src/gui/compose/ComposeTabWidget.h
     src/gui/contacts/ContactsManagerWidget.cpp
     src/gui/contacts/ContactsManagerWidget.h
+    src/gui/contacts/ContactsViewState.h
     src/gui/widgets/EmailAddressLineEdit.cpp
     src/gui/widgets/EmailAddressLineEdit.h
     src/gui/calendar/MonthCalendarWidget.cpp
@@ -156,6 +157,8 @@ set(JAVELIN_FORMAT_FILES
     src/gui/shell/MessageFileUtils.h
     src/gui/shell/MessageFileController.cpp
     src/gui/shell/MessageFileController.h
+    src/gui/shell/MainWindowStateStore.cpp
+    src/gui/shell/MainWindowStateStore.h
     src/gui/shell/LayeredStatusBar.cpp
     src/gui/shell/LayeredStatusBar.h
     src/gui/shell/MainWindow.cpp
@@ -582,6 +585,7 @@ add_library(javelin_gui STATIC
     src/gui/compose/ComposeTabWidget.h
     src/gui/contacts/ContactsManagerWidget.cpp
     src/gui/contacts/ContactsManagerWidget.h
+    src/gui/contacts/ContactsViewState.h
     src/gui/widgets/EmailAddressLineEdit.cpp
     src/gui/widgets/EmailAddressLineEdit.h
     src/gui/calendar/MonthCalendarWidget.cpp
@@ -633,6 +637,8 @@ add_library(javelin_gui STATIC
     src/gui/shell/MessageFileUtils.h
     src/gui/shell/MessageFileController.cpp
     src/gui/shell/MessageFileController.h
+    src/gui/shell/MainWindowStateStore.cpp
+    src/gui/shell/MainWindowStateStore.h
     src/gui/shell/LayeredStatusBar.cpp
     src/gui/shell/LayeredStatusBar.h
     src/gui/shell/MainWindow.cpp

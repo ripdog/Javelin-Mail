@@ -23,10 +23,10 @@
 #include "gui/messages/Pagination.h"
 #include "gui/messageview/MessageViewContainer.h"
 #include "gui/search/AdvancedSearchDialog.h"
-#include "gui/search/SearchSessionPersistence.h"
 #include "gui/settings/PreferencesDialog.h"
 #include "gui/shell/ElidingLabel.h"
 #include "gui/shell/LayeredStatusBar.h"
+#include "gui/shell/MainWindowStateStore.h"
 #include "gui/shell/MessageFileController.h"
 #include "gui/sieve/SieveEditorDialog.h"
 #include "jmap/cache/AccountRepository.h"
@@ -70,7 +70,6 @@
 #include <QMouseEvent>
 #include <QPushButton>
 #include <QScrollBar>
-#include <QSettings>
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QSplitter>
@@ -109,14 +108,6 @@ namespace javelin::gui::shell
 
     namespace
     {
-        constexpr auto windowGroup = "mainWindow";
-        constexpr auto geometryKey = "geometry";
-        constexpr auto splitterKey = "splitterState";
-        constexpr auto activeTabIndexKey = "activeTabIndex";
-        constexpr auto emailListSortPropertyKey = "emailListSortProperty";
-        constexpr auto emailListSortDirectionKey = "emailListSortDirection";
-        constexpr auto tabsKey = "tabs";
-
         /// Returns the account ID for the currently selected mailbox tree index.
         /// Works for both account-level nodes and mailbox nodes.
         [[nodiscard]] std::optional<std::string> currentAccountId(const QTreeView& mailboxView)
@@ -308,79 +299,6 @@ namespace javelin::gui::shell
             }
 
             return std::nullopt;
-        }
-
-        [[nodiscard]] std::optional<std::string> optionalStringSetting(const QSettings& settings,
-                                                                       const QString& key)
-        {
-            const auto value = settings.value(key).toString();
-            return value.isEmpty() ? std::nullopt : std::optional<std::string>{value.toStdString()};
-        }
-
-        void writeCommonTabSettings(QSettings& settings, const std::string& accountId,
-                                    const QString& title, const std::size_t offset,
-                                    const std::optional<std::string>& threadId,
-                                    const std::optional<std::string>& emailId)
-        {
-            settings.setValue(QStringLiteral("accountId"), QString::fromStdString(accountId));
-            settings.setValue(QStringLiteral("title"), title);
-            settings.setValue(QStringLiteral("offset"), static_cast<qulonglong>(offset));
-            settings.setValue(QStringLiteral("threadId"),
-                              threadId.has_value() ? QString::fromStdString(*threadId) : QString{});
-            settings.setValue(QStringLiteral("emailId"),
-                              emailId.has_value() ? QString::fromStdString(*emailId) : QString{});
-        }
-
-        [[nodiscard]] javelin::jmap::query::EmailListSortProperty
-        sortPropertyFromSetting(const QString& value)
-        {
-            if (value == QStringLiteral("sentAt"))
-            {
-                return javelin::jmap::query::EmailListSortProperty::SentAt;
-            }
-            if (value == QStringLiteral("from"))
-            {
-                return javelin::jmap::query::EmailListSortProperty::From;
-            }
-            if (value == QStringLiteral("to"))
-            {
-                return javelin::jmap::query::EmailListSortProperty::To;
-            }
-            if (value == QStringLiteral("subject"))
-            {
-                return javelin::jmap::query::EmailListSortProperty::Subject;
-            }
-            if (value == QStringLiteral("size"))
-            {
-                return javelin::jmap::query::EmailListSortProperty::Size;
-            }
-
-            return javelin::jmap::query::EmailListSortProperty::ReceivedAt;
-        }
-
-        [[nodiscard]] QString
-        sortPropertySetting(const javelin::jmap::query::EmailListSortProperty property)
-        {
-            return QString::fromStdString(javelin::jmap::query::propertyName(property));
-        }
-
-        [[nodiscard]] javelin::jmap::query::EmailListSortDirection
-        sortDirectionFromSetting(const QString& value)
-        {
-            if (value == QStringLiteral("ascending"))
-            {
-                return javelin::jmap::query::EmailListSortDirection::Ascending;
-            }
-
-            return javelin::jmap::query::EmailListSortDirection::Descending;
-        }
-
-        [[nodiscard]] QString
-        sortDirectionSetting(const javelin::jmap::query::EmailListSortDirection direction)
-        {
-            return direction == javelin::jmap::query::EmailListSortDirection::Ascending
-                       ? QStringLiteral("ascending")
-                       : QStringLiteral("descending");
         }
 
         [[nodiscard]] QString
@@ -3403,14 +3321,7 @@ namespace javelin::gui::shell
                 tabState.content);
         }
 
-        QSettings settings;
-        settings.beginGroup(QLatin1StringView{windowGroup});
-        settings.setValue(QLatin1StringView{emailListSortPropertyKey},
-                          sortPropertySetting(m_emailListSort.property));
-        settings.setValue(QLatin1StringView{emailListSortDirectionKey},
-                          sortDirectionSetting(m_emailListSort.direction));
-        settings.endGroup();
-        settings.sync();
+        saveEmailListSort(m_emailListSort);
 
         updateSortButton();
         loadActiveTabFromCache(true);
@@ -5248,91 +5159,46 @@ namespace javelin::gui::shell
 
     void MainWindow::restorePersistentState()
     {
-        QSettings settings;
-        settings.beginGroup(QLatin1StringView{windowGroup});
+        auto state = loadMainWindowState(m_emailListSort);
+        if (!state.geometry.isEmpty())
+            restoreGeometry(state.geometry);
+        if (!state.splitterState.isEmpty())
+            m_mainSplitter->restoreState(state.splitterState);
 
-        if (const auto geometry = settings.value(QLatin1StringView{geometryKey}).toByteArray();
-            !geometry.isEmpty())
-        {
-            restoreGeometry(geometry);
-        }
-
-        if (const auto splitterState = settings.value(QLatin1StringView{splitterKey}).toByteArray();
-            !splitterState.isEmpty())
-        {
-            m_mainSplitter->restoreState(splitterState);
-        }
-
-        m_emailListSort.property =
-            sortPropertyFromSetting(settings
-                                        .value(QLatin1StringView{emailListSortPropertyKey},
-                                               sortPropertySetting(m_emailListSort.property))
-                                        .toString());
-        m_emailListSort.direction =
-            sortDirectionFromSetting(settings
-                                         .value(QLatin1StringView{emailListSortDirectionKey},
-                                                sortDirectionSetting(m_emailListSort.direction))
-                                         .toString());
+        m_emailListSort = state.emailListSort;
         updateSortButton();
 
-        const auto activeTabIndexValue =
-            settings.value(QLatin1StringView{activeTabIndexKey}, 0).toInt();
-        const auto tabCount = settings.beginReadArray(QLatin1StringView{tabsKey});
         m_tabs.clear();
-        m_tabs.reserve(static_cast<std::size_t>(std::max(0, tabCount)));
-        for (int tabIndex = 0; tabIndex < tabCount; ++tabIndex)
+        m_tabs.reserve(state.tabs.size());
+        for (auto& tab : state.tabs)
         {
-            settings.setArrayIndex(tabIndex);
-            const auto type = settings.value(QStringLiteral("type")).toString();
-            const auto accountId = settings.value(QStringLiteral("accountId")).toString();
-            if (type.isEmpty() || accountId.isEmpty())
-            {
-                continue;
-            }
-
-            if (type == QStringLiteral("mailbox"))
-            {
-                restoreMailboxTab(settings, accountId);
-                continue;
-            }
-
-            if (type == QStringLiteral("search"))
-            {
-                restoreSearchTab(settings, accountId);
-                continue;
-            }
-
-            if (type == QStringLiteral("compose"))
-            {
-                restoreComposeTab(settings);
-                continue;
-            }
-
-            if (type == QStringLiteral("contacts"))
-            {
-                restoreContactsTab(settings, accountId);
-                continue;
-            }
-
-            if (type == QStringLiteral("calendar"))
-            {
-                openCalendar();
-                if (!m_tabs.empty())
+            std::visit(
+                [this](auto& persisted)
                 {
-                    if (auto* calendarTab = std::get_if<CalendarTabState>(&m_tabs.back().content))
+                    using Persisted = std::decay_t<decltype(persisted)>;
+                    if constexpr (std::is_same_v<Persisted, PersistedMailboxTab>)
+                        restoreMailboxTab(persisted);
+                    else if constexpr (std::is_same_v<Persisted, PersistedSearchTab>)
+                        restoreSearchTab(std::move(persisted));
+                    else if constexpr (std::is_same_v<Persisted, PersistedComposeTab>)
+                        restoreComposeTab(persisted);
+                    else if constexpr (std::is_same_v<Persisted, PersistedContactsTab>)
+                        restoreContactsTab(persisted);
+                    else if constexpr (std::is_same_v<Persisted, PersistedCalendarTab>)
                     {
-                        const auto month = QDate::fromString(
-                            settings.value(QStringLiteral("displayedMonth")).toString(),
-                            Qt::ISODate);
-                        if (month.isValid() && calendarTab->widget != nullptr)
-                            calendarTab->widget->setDisplayedMonth(month);
+                        openCalendar();
+                        if (!m_tabs.empty() && persisted.displayedMonth.isValid())
+                        {
+                            if (auto* calendar =
+                                    std::get_if<CalendarTabState>(&m_tabs.back().content);
+                                calendar != nullptr && calendar->widget != nullptr)
+                                calendar->widget->setDisplayedMonth(persisted.displayedMonth);
+                        }
                     }
-                }
-            }
+                },
+                tab);
         }
-        settings.endArray();
 
-        settings.endGroup();
         if (m_tabs.empty())
         {
             for (int rootRow = 0; rootRow < m_mailboxModel->rowCount(); ++rootRow)
@@ -5356,32 +5222,23 @@ namespace javelin::gui::shell
             return;
         }
 
-        m_activeTabIndex = std::clamp(activeTabIndexValue, 0, static_cast<int>(m_tabs.size() - 1));
+        m_activeTabIndex = std::clamp(state.activeTabIndex, 0, static_cast<int>(m_tabs.size() - 1));
         updateTabBar();
         activateTab(*m_activeTabIndex, false);
         refreshTabFromServer(static_cast<std::size_t>(*m_activeTabIndex));
     }
 
-    void MainWindow::restoreMailboxTab(const QSettings& settings, const QString& accountId)
+    void MainWindow::restoreMailboxTab(const PersistedMailboxTab& tab)
     {
-        const auto mailboxId = settings.value(QStringLiteral("mailboxId")).toString();
-        if (mailboxId.isEmpty())
-        {
-            return;
-        }
-
-        const auto offset =
-            static_cast<std::size_t>(settings.value(QStringLiteral("offset"), 0).toULongLong());
         auto* session = new javelin::app::MailboxSession(
-            accountId.toStdString(), mailboxId.toStdString(),
-            settings.value(QStringLiteral("title"), mailboxId).toString(),
-            optionalStringSetting(settings, QStringLiteral("mailboxRole")), m_emailListSort,
-            m_queryService, m_mailService, pageSize,
+            tab.common.accountId, tab.mailboxId,
+            tab.common.title.isEmpty() ? QString::fromStdString(tab.mailboxId) : tab.common.title,
+            tab.mailboxRole, m_emailListSort, m_queryService, m_mailService, pageSize,
             javelin::app::RestoredMailboxState{
                 .page =
                     javelin::app::MessageListPage{
-                        .offset = offset,
-                        .position = offset,
+                        .offset = tab.offset,
+                        .position = tab.offset,
                         .returnedLimit = pageSize,
                         .total = std::nullopt,
                         .queryState = {},
@@ -5401,20 +5258,19 @@ namespace javelin::gui::shell
                     .session = session,
                     .selection =
                         TabSelectionState{
-                            .threadId = optionalStringSetting(settings, QStringLiteral("threadId")),
-                            .emailId = optionalStringSetting(settings, QStringLiteral("emailId")),
+                            .threadId = tab.common.selection.threadId,
+                            .emailId = tab.common.selection.emailId,
                             .selectedEmailIds = {},
                         },
                 },
         });
     }
 
-    void MainWindow::restoreSearchTab(const QSettings& settings, const QString& accountId)
+    void MainWindow::restoreSearchTab(PersistedSearchTab tab)
     {
-        auto persisted = javelin::gui::search::readSearchSessionSettings(settings);
         auto* session = new javelin::app::SearchSession(
-            accountId.toStdString(), std::move(persisted.criteria), m_emailListSort, m_queryService,
-            m_mailService, pageSize, std::move(persisted.restored), this);
+            tab.common.accountId, std::move(tab.search.criteria), m_emailListSort, m_queryService,
+            m_mailService, pageSize, std::move(tab.search.restored), this);
         connectSearchSession(*session);
         m_tabs.push_back(TabState{
             .content =
@@ -5422,23 +5278,17 @@ namespace javelin::gui::shell
                     .session = session,
                     .selection =
                         TabSelectionState{
-                            .threadId = optionalStringSetting(settings, QStringLiteral("threadId")),
-                            .emailId = optionalStringSetting(settings, QStringLiteral("emailId")),
+                            .threadId = std::move(tab.common.selection.threadId),
+                            .emailId = std::move(tab.common.selection.emailId),
                             .selectedEmailIds = {},
                         },
                 },
         });
     }
 
-    void MainWindow::restoreComposeTab(const QSettings& settings)
+    void MainWindow::restoreComposeTab(const PersistedComposeTab& tab)
     {
-        const auto composeSessionId = settings.value(QStringLiteral("composeSessionId")).toString();
-        if (composeSessionId.isEmpty())
-        {
-            return;
-        }
-
-        const auto draftResult = m_composeService.loadWorkingCopy(composeSessionId.toStdString());
+        const auto draftResult = m_composeService.loadWorkingCopy(tab.composeSessionId);
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&draftResult))
         {
             presentError(*error);
@@ -5457,8 +5307,8 @@ namespace javelin::gui::shell
                 ComposeTabState{
                     .accountId = snapshot->accountId,
                     .composeSessionId = snapshot->composeSessionId,
-                    .title = settings.value(QStringLiteral("title"), QStringLiteral("Compose"))
-                                 .toString(),
+                    .title =
+                        tab.common.title.isEmpty() ? QStringLiteral("Compose") : tab.common.title,
                     .widget = nullptr,
                     .selection = {},
                 },
@@ -5469,132 +5319,115 @@ namespace javelin::gui::shell
         attachComposeWidget(widget, static_cast<int>(m_tabs.size() - 1));
     }
 
-    void MainWindow::restoreContactsTab(const QSettings& settings, const QString& accountId)
+    void MainWindow::restoreContactsTab(const PersistedContactsTab& tab)
     {
-        auto* widget = appendContactsTab(
-            accountId.toStdString(),
-            settings.value(QStringLiteral("title"), QStringLiteral("Contacts")).toString());
+        auto* widget = appendContactsTab(tab.common.accountId, tab.common.title.isEmpty()
+                                                                   ? QStringLiteral("Contacts")
+                                                                   : tab.common.title);
         if (widget == nullptr)
             return;
-        std::vector<std::string> selectedContactKeys;
-        for (const auto& key : settings.value(QStringLiteral("selectedContactKeys")).toStringList())
-            selectedContactKeys.push_back(key.toStdString());
-        widget->restoreViewState({
-            .accountId =
-                settings.value(QStringLiteral("contactAccountId")).toString().toStdString(),
-            .addressBookId =
-                settings.value(QStringLiteral("addressBookId")).toString().toStdString(),
-            .contactId = settings.value(QStringLiteral("contactId")).toString().toStdString(),
-            .filter = settings.value(QStringLiteral("contactFilter")).toString(),
-            .sortMode = settings.value(QStringLiteral("contactSortMode"), 0).toInt(),
-            .groupFilterMode = settings.value(QStringLiteral("contactGroupFilterMode"), 0).toInt(),
-            .groupId = settings.value(QStringLiteral("contactGroupId")).toString().toStdString(),
-            .selectedContactKeys = std::move(selectedContactKeys),
-        });
+        widget->restoreViewState(tab.view);
     }
 
     void MainWindow::savePersistentState() const
     {
-        QSettings settings;
-        settings.beginGroup(QLatin1StringView{windowGroup});
-        settings.setValue(QLatin1StringView{geometryKey}, saveGeometry());
-        settings.setValue(QLatin1StringView{splitterKey}, m_mainSplitter->saveState());
-        settings.setValue(QLatin1StringView{activeTabIndexKey}, m_activeTabIndex.value_or(0));
-        settings.setValue(QLatin1StringView{emailListSortPropertyKey},
-                          sortPropertySetting(m_emailListSort.property));
-        settings.setValue(QLatin1StringView{emailListSortDirectionKey},
-                          sortDirectionSetting(m_emailListSort.direction));
-        settings.beginWriteArray(QLatin1StringView{tabsKey});
-        for (int tabIndex = 0; tabIndex < static_cast<int>(m_tabs.size()); ++tabIndex)
+        PersistedMainWindowState state{
+            .geometry = saveGeometry(),
+            .splitterState = m_mainSplitter->saveState(),
+            .activeTabIndex = m_activeTabIndex.value_or(0),
+            .emailListSort = m_emailListSort,
+            .tabs = {},
+        };
+        state.tabs.reserve(m_tabs.size());
+        for (const auto& tab : m_tabs)
         {
-            settings.setArrayIndex(tabIndex);
-            const auto& tab = m_tabs[static_cast<std::size_t>(tabIndex)];
-            writePersistentTab(settings, tab);
-        }
-        settings.endArray();
-        settings.endGroup();
-        settings.sync();
-    }
-
-    void MainWindow::writePersistentTab(QSettings& settings, const TabState& tab) const
-    {
-        std::visit(
-            [&settings](const auto& content)
-            {
-                if constexpr (std::is_same_v<std::decay_t<decltype(content)>, SearchTabState>)
+            state.tabs.push_back(std::visit(
+                [](const auto& content) -> PersistedTab
                 {
-                    writeCommonTabSettings(settings, content.session->accountId(),
-                                           content.session->title(), content.session->page().offset,
-                                           content.selection.threadId, content.selection.emailId);
-                }
-                else if constexpr (std::is_same_v<std::decay_t<decltype(content)>, MailboxTabState>)
-                {
-                    writeCommonTabSettings(settings, content.session->accountId(),
-                                           content.session->title(), content.session->page().offset,
-                                           content.selection.threadId, content.selection.emailId);
-                }
-                else
-                {
-                    writeCommonTabSettings(settings, content.accountId, content.title, 0,
-                                           content.selection.threadId, content.selection.emailId);
-                }
-                if constexpr (std::is_same_v<std::decay_t<decltype(content)>, MailboxTabState>)
-                {
-                    settings.setValue(QStringLiteral("type"), QStringLiteral("mailbox"));
-                    settings.setValue(QStringLiteral("mailboxId"),
-                                      QString::fromStdString(content.session->mailboxId()));
-                    settings.setValue(QStringLiteral("mailboxRole"),
-                                      content.session->role().has_value()
-                                          ? QString::fromStdString(*content.session->role())
-                                          : QString{});
-                }
-                else if constexpr (std::is_same_v<std::decay_t<decltype(content)>, SearchTabState>)
-                {
-                    javelin::gui::search::writeSearchSessionSettings(settings, *content.session);
-                }
-                else if constexpr (std::is_same_v<std::decay_t<decltype(content)>, ComposeTabState>)
-                {
-                    settings.setValue(QStringLiteral("type"), QStringLiteral("compose"));
-                    settings.setValue(QStringLiteral("composeSessionId"),
-                                      QString::fromStdString(content.composeSessionId));
-                }
-                else if constexpr (std::is_same_v<std::decay_t<decltype(content)>,
-                                                  CalendarTabState>)
-                {
-                    settings.setValue(QStringLiteral("type"), QStringLiteral("calendar"));
-                    settings.setValue(QStringLiteral("displayedMonth"),
-                                      content.widget != nullptr
-                                          ? content.widget->displayedMonth().toString(Qt::ISODate)
-                                          : QString{});
-                }
-                else if constexpr (std::is_same_v<std::decay_t<decltype(content)>,
-                                                  ContactsTabState>)
-                {
-                    settings.setValue(QStringLiteral("type"), QStringLiteral("contacts"));
-                    if (content.widget != nullptr)
+                    using Content = std::decay_t<decltype(content)>;
+                    const auto selection = PersistedTabSelection{
+                        .threadId = content.selection.threadId,
+                        .emailId = content.selection.emailId,
+                    };
+                    if constexpr (std::is_same_v<Content, MailboxTabState>)
                     {
-                        const auto state = content.widget->viewState();
-                        settings.setValue(QStringLiteral("contactAccountId"),
-                                          QString::fromStdString(state.accountId));
-                        settings.setValue(QStringLiteral("addressBookId"),
-                                          QString::fromStdString(state.addressBookId));
-                        settings.setValue(QStringLiteral("contactId"),
-                                          QString::fromStdString(state.contactId));
-                        settings.setValue(QStringLiteral("contactFilter"), state.filter);
-                        settings.setValue(QStringLiteral("contactSortMode"), state.sortMode);
-                        settings.setValue(QStringLiteral("contactGroupFilterMode"),
-                                          state.groupFilterMode);
-                        settings.setValue(QStringLiteral("contactGroupId"),
-                                          QString::fromStdString(state.groupId));
-                        QStringList selectedContactKeys;
-                        for (const auto& key : state.selectedContactKeys)
-                            selectedContactKeys.push_back(QString::fromStdString(key));
-                        settings.setValue(QStringLiteral("selectedContactKeys"),
-                                          selectedContactKeys);
+                        return PersistedMailboxTab{
+                            .common =
+                                {
+                                    .accountId = content.session->accountId(),
+                                    .title = content.session->title(),
+                                    .selection = selection,
+                                },
+                            .mailboxId = content.session->mailboxId(),
+                            .mailboxRole = content.session->role(),
+                            .offset = content.session->page().offset,
+                        };
                     }
-                }
-            },
-            tab.content);
+                    else if constexpr (std::is_same_v<Content, SearchTabState>)
+                    {
+                        return PersistedSearchTab{
+                            .common =
+                                {
+                                    .accountId = content.session->accountId(),
+                                    .title = content.session->title(),
+                                    .selection = selection,
+                                },
+                            .search =
+                                {
+                                    .criteria = content.session->criteria(),
+                                    .restored =
+                                        {
+                                            .page = content.session->page(),
+                                            .mode = content.session->mode(),
+                                            .sessionId = content.session->sessionId(),
+                                        },
+                                },
+                        };
+                    }
+                    else if constexpr (std::is_same_v<Content, ComposeTabState>)
+                    {
+                        return PersistedComposeTab{
+                            .common =
+                                {
+                                    .accountId = content.accountId,
+                                    .title = content.title,
+                                    .selection = selection,
+                                },
+                            .composeSessionId = content.composeSessionId,
+                        };
+                    }
+                    else if constexpr (std::is_same_v<Content, ContactsTabState>)
+                    {
+                        return PersistedContactsTab{
+                            .common =
+                                {
+                                    .accountId = content.accountId,
+                                    .title = content.title,
+                                    .selection = selection,
+                                },
+                            .view = content.widget != nullptr
+                                        ? content.widget->viewState()
+                                        : javelin::gui::contacts::ContactsViewState{},
+                        };
+                    }
+                    else
+                    {
+                        return PersistedCalendarTab{
+                            .common =
+                                {
+                                    .accountId = content.accountId,
+                                    .title = content.title,
+                                    .selection = selection,
+                                },
+                            .displayedMonth = content.widget != nullptr
+                                                  ? content.widget->displayedMonth()
+                                                  : QDate{},
+                        };
+                    }
+                },
+                tab.content));
+        }
+        saveMainWindowState(state);
     }
 
     void MainWindow::closeEvent(QCloseEvent* event)
