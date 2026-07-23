@@ -529,7 +529,7 @@ namespace javelin::gui::messageview
         }
     }
 
-    void HtmlMessageView::recordViewPaint(const QObject* paintedObject)
+    void HtmlMessageView::recordViewPaint(QObject* paintedObject)
     {
         if (!m_tracePaints)
         {
@@ -575,6 +575,25 @@ namespace javelin::gui::messageview
                     traceRenderEvent(QStringLiteral("surface-paint-ready"),
                                      QStringLiteral("readyPaints=%1").arg(m_readyPaintCount));
                     Q_EMIT documentLoaded(documentId);
+                },
+                Qt::QueuedConnection);
+        }
+        else if (m_waitingForSurfacePaint && isRenderSurface && m_readyPaintCount == 1)
+        {
+            const auto generation = m_documentGeneration;
+            const QPointer<QWidget> renderWidget{qobject_cast<QWidget*>(paintedObject)};
+            QMetaObject::invokeMethod(
+                this,
+                [this, generation, renderWidget]
+                {
+                    if (generation != m_documentGeneration || !m_waitingForSurfacePaint ||
+                        renderWidget.isNull())
+                    {
+                        return;
+                    }
+
+                    traceRenderEvent(QStringLiteral("surface-repaint-requested"));
+                    renderWidget->update();
                 },
                 Qt::QueuedConnection);
         }

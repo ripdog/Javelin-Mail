@@ -42,7 +42,7 @@ namespace javelin::gui::messageview
         void awaitRenderedDocument(const QUrl& documentUrl, const QString& readyTitle);
         bool eventFilter(QObject* watched, QEvent* event) override;
         void installRenderEventFilter(QObject* object);
-        void recordViewPaint(const QObject* paintedObject);
+        void recordViewPaint(QObject* paintedObject);
         void traceRenderEvent(const QString& event, const QString& detail = {}) const;
 
         QWebEngineView* m_view = nullptr;
