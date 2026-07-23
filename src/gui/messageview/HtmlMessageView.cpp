@@ -3,6 +3,7 @@
 #include "jmap/render/InlineMessageUrl.h"
 
 #include <QAction>
+#include <QChildEvent>
 #include <QContextMenuEvent>
 #include <QCryptographicHash>
 #include <QDebug>
@@ -10,7 +11,6 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QMenu>
-#include <QPaintEvent>
 #include <QPointer>
 #include <QString>
 #include <QVBoxLayout>
@@ -98,23 +98,12 @@ namespace javelin::gui::messageview
         class FilteredWebEngineView final : public QWebEngineView
         {
           public:
-            explicit FilteredWebEngineView(std::function<void()> viewSourceAction,
-                                           std::function<void()> painted, QWidget* parent)
-                : QWebEngineView(parent), m_viewSourceAction(std::move(viewSourceAction)),
-                  m_painted(std::move(painted))
+            explicit FilteredWebEngineView(std::function<void()> viewSourceAction, QWidget* parent)
+                : QWebEngineView(parent), m_viewSourceAction(std::move(viewSourceAction))
             {
             }
 
           protected:
-            void paintEvent(QPaintEvent* event) override
-            {
-                QWebEngineView::paintEvent(event);
-                if (m_painted)
-                {
-                    m_painted();
-                }
-            }
-
             void contextMenuEvent(QContextMenuEvent* event) override
             {
                 const QPointer<QWebEngineContextMenuRequest> request = lastContextMenuRequest();
@@ -167,7 +156,6 @@ namespace javelin::gui::messageview
 
           private:
             std::function<void()> m_viewSourceAction;
-            std::function<void()> m_painted;
         };
 
     } // namespace
@@ -177,9 +165,9 @@ namespace javelin::gui::messageview
         auto* layout = new QVBoxLayout(this);
         layout->setContentsMargins(0, 0, 0, 0);
 
-        m_view = new FilteredWebEngineView([this] { Q_EMIT viewSourceRequested(); },
-                                           [this] { recordViewPaint(); }, this);
+        m_view = new FilteredWebEngineView([this] { Q_EMIT viewSourceRequested(); }, this);
         m_view->setPage(new MessageWebEnginePage(m_view));
+        installRenderEventFilter(m_view);
         connect(m_view->page(), &QWebEnginePage::linkHovered, this,
                 [this](const QString& url) { Q_EMIT hoveredLinkChanged(url); });
         connect(m_view->page(), &QWebEnginePage::titleChanged, this,
@@ -193,7 +181,7 @@ namespace javelin::gui::messageview
 
                     traceRenderEvent(QStringLiteral("render-ready-title"));
                     m_expectedReadyTitle.clear();
-                    Q_EMIT documentLoaded(m_expectedDocumentId);
+                    m_waitingForSurfacePaint = true;
                 });
         auto* settings = m_view->settings();
         settings->setAttribute(QWebEngineSettings::JavascriptEnabled, true);
@@ -205,12 +193,12 @@ namespace javelin::gui::messageview
         connect(m_view->page(), &QWebEnginePage::loadingChanged, this,
                 [this](const QWebEngineLoadingInfo& loadingInfo)
                 {
-                    traceRenderEvent(QStringLiteral("loading-changed"),
-                                     QStringLiteral("status=%1 eventUrl=%2 expected=%3 matches=%4")
-                                         .arg(static_cast<int>(loadingInfo.status()))
-                                         .arg(summarizeUrl(loadingInfo.url()),
-                                              summarizeUrl(m_expectedDocumentUrl))
-                                         .arg(loadingInfo.url() == m_expectedDocumentUrl));
+                    auto detail = QStringLiteral("status=%1 matches=%2")
+                                      .arg(static_cast<int>(loadingInfo.status()))
+                                      .arg(loadingInfo.url() == m_expectedDocumentUrl);
+                    detail += QStringLiteral(" eventUrl=") + summarizeUrl(loadingInfo.url());
+                    detail += QStringLiteral(" expected=") + summarizeUrl(m_expectedDocumentUrl);
+                    traceRenderEvent(QStringLiteral("loading-changed"), detail);
                     if (loadingInfo.status() != QWebEngineLoadingInfo::LoadSucceededStatus ||
                         loadingInfo.url() != m_expectedDocumentUrl)
                     {
@@ -259,6 +247,7 @@ namespace javelin::gui::messageview
         m_tracedPaintCount = 0;
         m_readyPaintCount = 0;
         m_tracePaints = true;
+        m_waitingForSurfacePaint = false;
         traceRenderEvent(QStringLiteral("navigation-requested"),
                          QStringLiteral("htmlBytes=%1").arg(static_cast<qulonglong>(html.size())));
         m_view->setHtml(QString::fromUtf8(html.data(), static_cast<qsizetype>(html.size())),
@@ -273,6 +262,7 @@ namespace javelin::gui::messageview
         m_expectedDocumentUrl = {};
         m_expectedReadyTitle.clear();
         m_tracePaints = false;
+        m_waitingForSurfacePaint = false;
         m_view->setHtml(QString{});
     }
 
@@ -488,7 +478,8 @@ namespace javelin::gui::messageview
 
         // LoadSucceededStatus only covers navigation. Keeping the view visible behind the native
         // overlay and crossing two animation frames gives Chromium an opportunity to submit the
-        // replacement document before titleChanged releases that overlay.
+        // replacement document. The first internal render-widget paint after that milestone can
+        // still contain the previous framebuffer, so the overlay remains through two such paints.
         traceRenderEvent(QStringLiteral("render-wait-scheduled"));
         m_view->page()->runJavaScript(QStringLiteral(
                                           R"JS(
@@ -504,7 +495,41 @@ namespace javelin::gui::messageview
                                           .arg(readyTitle));
     }
 
-    void HtmlMessageView::recordViewPaint()
+    bool HtmlMessageView::eventFilter(QObject* watched, QEvent* event)
+    {
+        if (event->type() == QEvent::ChildAdded)
+        {
+            const auto* childEvent = static_cast<QChildEvent*>(event);
+            if (childEvent->child() != nullptr)
+            {
+                installRenderEventFilter(childEvent->child());
+            }
+        }
+        else if (event->type() == QEvent::Paint)
+        {
+            recordViewPaint(watched);
+        }
+
+        return QWidget::eventFilter(watched, event);
+    }
+
+    void HtmlMessageView::installRenderEventFilter(QObject* object)
+    {
+        auto* widget = qobject_cast<QWidget*>(object);
+        if (widget == nullptr)
+        {
+            return;
+        }
+
+        widget->installEventFilter(this);
+        const auto children = widget->children();
+        for (QObject* child : children)
+        {
+            installRenderEventFilter(child);
+        }
+    }
+
+    void HtmlMessageView::recordViewPaint(const QObject* paintedObject)
     {
         if (!m_tracePaints)
         {
@@ -512,7 +537,8 @@ namespace javelin::gui::messageview
         }
 
         const bool readyWasReported = m_expectedReadyTitle.isEmpty();
-        if (readyWasReported)
+        const bool isRenderSurface = paintedObject->inherits("QQuickWidget");
+        if (readyWasReported && isRenderSurface)
         {
             ++m_readyPaintCount;
         }
@@ -520,11 +546,37 @@ namespace javelin::gui::messageview
         if (m_tracedPaintCount < 8 || (readyWasReported && m_readyPaintCount <= 3))
         {
             ++m_tracedPaintCount;
-            traceRenderEvent(QStringLiteral("view-painted"),
-                             QStringLiteral("paint=%1 readyPaint=%2 readyReported=%3")
-                                 .arg(m_tracedPaintCount)
-                                 .arg(m_readyPaintCount)
-                                 .arg(readyWasReported));
+            traceRenderEvent(
+                QStringLiteral("view-painted"),
+                QStringLiteral("paint=%1 readyPaint=%2 readyReported=%3 object=%4")
+                    .arg(m_tracedPaintCount)
+                    .arg(m_readyPaintCount)
+                    .arg(readyWasReported)
+                    .arg(QString::fromLatin1(paintedObject->metaObject()->className())));
+        }
+
+        if (m_waitingForSurfacePaint && isRenderSurface && m_readyPaintCount >= 2)
+        {
+            m_waitingForSurfacePaint = false;
+            const auto generation = m_documentGeneration;
+            const auto documentId = m_expectedDocumentId;
+            const auto documentUrl = m_expectedDocumentUrl;
+            QMetaObject::invokeMethod(
+                this,
+                [this, generation, documentId, documentUrl]
+                {
+                    if (generation != m_documentGeneration || documentId != m_expectedDocumentId ||
+                        documentUrl != m_expectedDocumentUrl)
+                    {
+                        traceRenderEvent(QStringLiteral("surface-paint-release-discarded"));
+                        return;
+                    }
+
+                    traceRenderEvent(QStringLiteral("surface-paint-ready"),
+                                     QStringLiteral("readyPaints=%1").arg(m_readyPaintCount));
+                    Q_EMIT documentLoaded(documentId);
+                },
+                Qt::QueuedConnection);
         }
 
         if (m_readyPaintCount >= 3)
