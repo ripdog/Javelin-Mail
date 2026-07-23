@@ -32,7 +32,6 @@ namespace javelin::gui::settings
     namespace
     {
         constexpr auto accountsGroup = "accounts";
-        constexpr auto legacyConnectionGroup = "connection";
         constexpr auto sizeKey = "size";
         constexpr auto idKey = "id";
         constexpr auto revisionKey = "revision";
@@ -96,30 +95,6 @@ namespace javelin::gui::settings
             }
             return account.loginEmail.isEmpty() ? QStringLiteral("New account")
                                                 : account.loginEmail;
-        }
-
-        [[nodiscard]] std::optional<ConnectionSettings> loadLegacyAccount()
-        {
-            QSettings settings;
-            settings.beginGroup(QLatin1StringView{legacyConnectionGroup});
-            const auto loginEmail =
-                settings.value(QLatin1StringView{loginEmailKey}).toString().trimmed();
-            const ConnectionSettings account{
-                .id = QUuid::createUuid().toString(QUuid::WithoutBraces),
-                .revision = 1,
-                .displayName = loginEmail,
-                .sessionUrl = settings.value(QLatin1StringView{sessionUrlKey}).toString().trimmed(),
-                .loginEmail = loginEmail,
-                .apiKey = settings.value(QLatin1StringView{apiKeyKey}).toString().trimmed(),
-                .cachedAccountIds = {},
-            };
-            settings.endGroup();
-            if (account.sessionUrl.isEmpty() && account.loginEmail.isEmpty() &&
-                account.apiKey.isEmpty())
-            {
-                return std::nullopt;
-            }
-            return account;
         }
 
         [[nodiscard]] QStringList remoteContentAllowList(const QLatin1StringView key)
@@ -489,15 +464,6 @@ namespace javelin::gui::settings
         }
         settings.endArray();
         settings.endGroup();
-        if (accounts.empty())
-        {
-            const auto legacyAccount = loadLegacyAccount();
-            if (legacyAccount.has_value())
-            {
-                accounts.push_back(*legacyAccount);
-                saveAccounts(accounts);
-            }
-        }
         return accounts;
     }
 
