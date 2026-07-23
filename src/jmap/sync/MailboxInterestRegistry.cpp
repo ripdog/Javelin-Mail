@@ -65,9 +65,4 @@ namespace javelin::jmap::sync
                       { return !accountIds.contains(entry.second.accountId); });
     }
 
-    void MailboxInterestRegistry::clear()
-    {
-        m_observations.clear();
-    }
-
 } // namespace javelin::jmap::sync

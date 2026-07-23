@@ -15,7 +15,6 @@ namespace javelin::gui::shell
         explicit LayeredStatusBar(QWidget* parent = nullptr);
 
         void showMessage(const QString& message, int timeoutMs = 0);
-        void clearMessage();
         void setOverlayMessage(QString message);
 
       private:

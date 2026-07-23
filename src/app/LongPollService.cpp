@@ -185,11 +185,6 @@ namespace javelin::app
         setStatus(Status::AuthenticationPaused);
     }
 
-    AccountSyncCoordinator::Status AccountSyncCoordinator::status() const
-    {
-        return m_status;
-    }
-
     bool AccountSyncCoordinator::requestSynchronization()
     {
         if (m_status == Status::AuthenticationPaused)

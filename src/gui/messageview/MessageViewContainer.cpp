@@ -953,11 +953,6 @@ namespace javelin::gui::messageview
         updatePresentation();
     }
 
-    bool MessageViewContainer::hasContentSnapshot() const
-    {
-        return m_snapshot.has_value();
-    }
-
     bool MessageViewContainer::hasReadableBody() const
     {
         return m_snapshot.has_value() &&

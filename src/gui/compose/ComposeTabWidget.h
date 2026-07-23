@@ -60,10 +60,8 @@ namespace javelin::gui::compose
         ~ComposeTabWidget() override = default;
 
         [[nodiscard]] QString tabTitle() const;
-        [[nodiscard]] std::string accountId() const;
         [[nodiscard]] std::string composeSessionId() const;
         [[nodiscard]] std::optional<std::string> draftEmailId() const;
-        [[nodiscard]] javelin::jmap::submission::DraftSnapshot snapshot() const;
         [[nodiscard]] bool isEmptyDraft() const;
         [[nodiscard]] bool closeWithoutPrompt() const;
         [[nodiscard]] bool operationInFlight() const;

@@ -88,7 +88,6 @@ namespace javelin::app
         void pauseForAuthentication();
         [[nodiscard]] bool requestSynchronization();
 
-        [[nodiscard]] Status status() const;
         [[nodiscard]] QCoro::Task<void>
         onStateChange(javelin::jmap::sync::StateChangeEvent event) override;
 

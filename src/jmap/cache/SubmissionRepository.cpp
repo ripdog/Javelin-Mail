@@ -24,22 +24,6 @@ namespace javelin::jmap::cache
     {
     }
 
-    std::optional<DatabaseError> SubmissionRepository::upsert(const SubmissionRecord& record)
-    {
-        if (const auto error = m_connection.validate())
-        {
-            return error;
-        }
-        auto transactionResult =
-            DatabaseTransaction::begin(m_connection, QStringLiteral("Store submission"));
-        if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
-            return *error;
-        auto transaction = std::get<DatabaseTransaction>(std::move(transactionResult));
-        if (const auto error = upsert(transaction, record))
-            return error;
-        return transaction.commit();
-    }
-
     std::optional<DatabaseError> SubmissionRepository::upsert(DatabaseTransaction& transaction,
                                                               const SubmissionRecord& record)
     {

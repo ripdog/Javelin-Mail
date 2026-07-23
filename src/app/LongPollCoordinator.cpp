@@ -1173,19 +1173,6 @@ namespace javelin::app
                                     std::move(mediaType)));
     }
 
-    void MailApplicationService::stop()
-    {
-        for (const auto& [accountId, coordinator] : m_coordinators)
-        {
-            Q_EMIT accountStatusChanged(QString::fromStdString(accountId),
-                                        AccountSyncCoordinator::Status::Disconnected);
-            disconnect(coordinator.get(), nullptr, this, nullptr);
-        }
-        m_coordinators.clear();
-        m_configurations.clear();
-        m_mailboxInterests.clear();
-    }
-
     void MailApplicationService::connectCoordinator(const std::string& accountId,
                                                     AccountSyncCoordinator& coordinator)
     {

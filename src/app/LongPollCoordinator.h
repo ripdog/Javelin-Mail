@@ -223,8 +223,6 @@ namespace javelin::app
         [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactDownloadResult>
         downloadContactMedia(std::string ownerAccountId, std::string accountId, std::string blobId,
                              std::string mediaType);
-        void stop();
-
       Q_SIGNALS:
         void accountStatusChanged(const QString& accountId,
                                   javelin::app::AccountSyncCoordinator::Status status);

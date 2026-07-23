@@ -23,7 +23,6 @@ namespace javelin::jmap::cache
       public:
         explicit SubmissionRepository(DatabaseConnection& connection);
 
-        [[nodiscard]] std::optional<DatabaseError> upsert(const SubmissionRecord& record);
         [[nodiscard]] std::optional<DatabaseError> upsert(DatabaseTransaction& transaction,
                                                           const SubmissionRecord& record);
 

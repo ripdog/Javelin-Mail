@@ -150,16 +150,6 @@ namespace javelin::app
 
     ProcessServices::~ProcessServices() = default;
 
-    javelin::jmap::JmapCore& ProcessServices::jmapCore()
-    {
-        return *m_jmapCore;
-    }
-
-    const javelin::jmap::JmapCore& ProcessServices::jmapCore() const
-    {
-        return *m_jmapCore;
-    }
-
     javelin::jmap::cache::AccountRepository& ProcessServices::accountRepository()
     {
         return *m_accountRepository;
@@ -178,11 +168,6 @@ namespace javelin::app
     javelin::jmap::calendar::CalendarService& ProcessServices::calendarService()
     {
         return *m_calendarService;
-    }
-
-    javelin::jmap::sieve::SieveService& ProcessServices::sieveService()
-    {
-        return *m_sieveService;
     }
 
     javelin::jmap::contacts::ContactIdentityLookup& ProcessServices::contactIdentityLookup()

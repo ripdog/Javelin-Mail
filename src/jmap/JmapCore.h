@@ -93,16 +93,6 @@ namespace javelin::jmap
 
     using FullMailboxPageResult = std::variant<FullMailboxPage, OperationError>;
 
-    struct MailboxMessagesRefreshSummary
-    {
-        std::string accountId;
-        std::string mailboxId;
-        std::size_t emailCount = 0;
-    };
-
-    using MailboxMessagesRefreshResult =
-        std::variant<MailboxMessagesRefreshSummary, OperationError>;
-
     struct MessageSearchSummary
     {
         std::string accountId;
@@ -181,7 +171,6 @@ namespace javelin::jmap
     class JmapCore
     {
       public:
-        JmapCore();
         JmapCore(javelin::jmap::cache::DatabaseConnection& databaseConnection,
                  javelin::jmap::api::AbstractTransport& resourceTransport,
                  javelin::jmap::api::JmapMethodTransport& methodTransport);
@@ -207,10 +196,6 @@ namespace javelin::jmap
                                    std::string mailboxId, std::size_t position,
                                    std::size_t limit = 250,
                                    std::optional<std::string> anchor = std::nullopt);
-        [[nodiscard]] QCoro::Task<MailboxMessagesRefreshResult>
-        refreshMailboxMessages(LiveConnectionSettings settings, std::string accountId,
-                               std::string mailboxId,
-                               std::function<void(const QString&)> progressCallback = {});
         [[nodiscard]] QCoro::Task<MailboxPageResult>
         queryMailboxPage(LiveConnectionSettings settings, std::string accountId,
                          std::string mailboxId, std::size_t offset = 0, std::size_t limit = 100,

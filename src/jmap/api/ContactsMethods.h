@@ -103,28 +103,6 @@ namespace javelin::jmap::api
         bool calculateTotal = false;
     };
 
-    struct ContactCardQueryResponse
-    {
-        std::string accountId;
-        std::string queryState;
-        bool canCalculateChanges = false;
-        std::uint64_t position = 0;
-        std::vector<std::string> ids;
-        std::optional<std::uint64_t> total;
-        std::optional<std::uint64_t> limit;
-    };
-
-    struct ContactCardQueryChangesRequest
-    {
-        std::string accountId;
-        std::string sinceQueryState;
-        std::optional<std::uint64_t> maxChanges;
-        std::optional<std::string> upToId;
-        std::optional<ContactCardQueryFilter> filter;
-        std::vector<ContactCardComparator> sort;
-        bool calculateTotal = false;
-    };
-
     using ContactCardQueryChangesResponse = EmailQueryChangesResponse;
 
     struct ContactDocument
@@ -181,8 +159,6 @@ namespace javelin::jmap::api
     [[nodiscard]] std::optional<std::string>
     serializeContactCardQueryRequest(const ContactCardQueryRequest& request);
     [[nodiscard]] std::optional<std::string>
-    serializeContactCardQueryChangesRequest(const ContactCardQueryChangesRequest& request);
-    [[nodiscard]] std::optional<std::string>
     serializeAddressBookSetRequest(const AddressBookSetRequest& request);
     [[nodiscard]] std::optional<std::string>
     serializeContactCardSetRequest(const ContactCardSetRequest& request);
@@ -199,8 +175,6 @@ namespace javelin::jmap::api
     parseAddressBookGetResponse(std::string_view json);
     [[nodiscard]] ParsedEnvelope<ContactCardGetResponse>
     parseContactCardGetResponse(std::string_view json);
-    [[nodiscard]] ParsedEnvelope<ContactCardQueryResponse>
-    parseContactCardQueryResponse(std::string_view json);
     [[nodiscard]] ParsedEnvelope<ContactCardQueryChangesResponse>
     parseContactCardQueryChangesResponse(std::string_view json);
     [[nodiscard]] ParsedEnvelope<SetResult> parseContactsSetResponse(std::string_view json);

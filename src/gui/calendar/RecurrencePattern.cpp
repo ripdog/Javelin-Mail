@@ -43,28 +43,6 @@ namespace javelin::gui::calendar
         return Weekday::Monday;
     }
 
-    Qt::DayOfWeek qtWeekday(const Weekday day)
-    {
-        switch (day)
-        {
-        case Weekday::Monday:
-            return Qt::Monday;
-        case Weekday::Tuesday:
-            return Qt::Tuesday;
-        case Weekday::Wednesday:
-            return Qt::Wednesday;
-        case Weekday::Thursday:
-            return Qt::Thursday;
-        case Weekday::Friday:
-            return Qt::Friday;
-        case Weekday::Saturday:
-            return Qt::Saturday;
-        case Weekday::Sunday:
-            return Qt::Sunday;
-        }
-        return Qt::Monday;
-    }
-
     int ordinalWeekday(const QDate& date)
     {
         if (!date.isValid())

@@ -450,20 +450,6 @@ namespace javelin::gui::settings
         return m_hasPendingChanges;
     }
 
-    ConnectionSettings PreferencesDialog::settings() const
-    {
-        if (m_currentRow < 0 || m_currentRow >= static_cast<int>(m_accounts.size()))
-        {
-            return {};
-        }
-        auto result = m_accounts[static_cast<std::size_t>(m_currentRow)];
-        result.displayName = m_displayNameEdit->text().trimmed();
-        result.sessionUrl = m_sessionUrlEdit->text().trimmed();
-        result.loginEmail = m_loginEmailEdit->text().trimmed();
-        result.apiKey = m_apiKeyEdit->text().trimmed();
-        return result;
-    }
-
     void PreferencesDialog::selectConfiguredAccount(const QString& connectionId)
     {
         const auto found = std::ranges::find(m_accounts, connectionId, &ConnectionSettings::id);

@@ -33,13 +33,6 @@ namespace javelin::gui::shell
         updateVisibleMessage();
     }
 
-    void LayeredStatusBar::clearMessage()
-    {
-        m_backgroundTimer->stop();
-        m_backgroundMessage.clear();
-        updateVisibleMessage();
-    }
-
     void LayeredStatusBar::setOverlayMessage(QString message)
     {
         m_overlayMessage = std::move(message);

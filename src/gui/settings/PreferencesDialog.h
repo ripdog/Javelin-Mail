@@ -55,7 +55,6 @@ namespace javelin::gui::settings
                                    QWidget* parent = nullptr);
         ~PreferencesDialog() override;
 
-        [[nodiscard]] ConnectionSettings settings() const;
         void selectConfiguredAccount(const QString& connectionId);
 
         [[nodiscard]] static std::vector<ConnectionSettings> loadAccounts();

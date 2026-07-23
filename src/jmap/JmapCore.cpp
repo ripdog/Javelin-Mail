@@ -919,10 +919,6 @@ namespace javelin::jmap
 
     } // namespace
 
-    JmapCore::JmapCore() : m_impl(std::make_unique<Impl>())
-    {
-    }
-
     JmapCore::JmapCore(javelin::jmap::cache::DatabaseConnection& databaseConnection,
                        javelin::jmap::api::AbstractTransport& resourceTransport,
                        javelin::jmap::api::JmapMethodTransport& methodTransport)
@@ -2029,71 +2025,6 @@ namespace javelin::jmap
             .attemptedEmailCount = mergedEmails.size(),
             .updatedEmailCount = updatedEmailIds.size() + destroyedEmailIds.size(),
             .failedEmailCount = failedEmailIds.size(),
-        };
-    }
-
-    QCoro::Task<MailboxMessagesRefreshResult>
-    JmapCore::refreshMailboxMessages(LiveConnectionSettings settings, std::string accountId,
-                                     std::string mailboxId,
-                                     std::function<void(const QString&)> progressCallback)
-    {
-        const auto reportProgress = [&progressCallback](const QString& message)
-        {
-            if (progressCallback)
-            {
-                progressCallback(message);
-            }
-        };
-
-        qInfo().noquote() << "JMAP core mailbox refresh start" << QString::fromStdString(accountId)
-                          << QString::fromStdString(mailboxId);
-        reportProgress(QStringLiteral("Fetching messages for selected mailbox..."));
-        if (m_impl->databaseConnection == nullptr || m_impl->methodTransport == nullptr)
-        {
-            co_return OperationError{
-                .message = QStringLiteral("JMAP core is not wired to the cache and transport yet."),
-            };
-        }
-
-        if (const auto validationError = validateLoginSettings(settings, true))
-        {
-            co_return *validationError;
-        }
-
-        const auto sessionResult = loadCachedSession(*m_impl->databaseConnection, accountId);
-        if (const auto* error = std::get_if<OperationError>(&sessionResult))
-        {
-            co_return *error;
-        }
-        const auto& session = std::get<javelin::jmap::api::Session>(sessionResult);
-
-        javelin::jmap::api::MethodCaller methodCaller{*m_impl->methodTransport};
-        const auto apiRequestContext = buildApiRequestContext(settings, accountId, session);
-
-        javelin::jmap::sync::MailboxRefreshExecutor mailboxRefreshExecutor{
-            *m_impl->databaseConnection, methodCaller, apiRequestContext};
-        const auto refreshResult = co_await mailboxRefreshExecutor.refreshCollapsedMailbox(
-            accountId, mailboxId, reportProgress, false);
-        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&refreshResult))
-        {
-            co_return javelin::jmap::operationError(*error);
-        }
-
-        const auto representativeCount =
-            std::get<javelin::jmap::sync::MailboxRefreshSummary>(refreshResult).representativeCount;
-
-        const auto pendingSubmit = co_await submitPendingEmailMutations(settings, accountId);
-        if (const auto* summary = std::get_if<SubmittedEmailMutations>(&pendingSubmit);
-            summary != nullptr && summary->updatedEmailCount > 0)
-        {
-            reportProgress(QStringLiteral("Submitted %1 queued mailbox updates.")
-                               .arg(summary->updatedEmailCount));
-        }
-
-        co_return MailboxMessagesRefreshSummary{
-            .accountId = std::move(accountId),
-            .mailboxId = std::move(mailboxId),
-            .emailCount = representativeCount,
         };
     }
 

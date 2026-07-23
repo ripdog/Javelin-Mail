@@ -136,24 +136,6 @@ template <> struct glz::meta<javelin::jmap::api::ContactCardQueryRequest>
                     &T::limit, "calculateTotal", &T::calculateTotal);
 };
 
-template <> struct glz::meta<javelin::jmap::api::ContactCardQueryResponse>
-{
-    using T = javelin::jmap::api::ContactCardQueryResponse;
-    static constexpr auto value =
-        glz::object("accountId", &T::accountId, "queryState", &T::queryState, "canCalculateChanges",
-                    &T::canCalculateChanges, "position", &T::position, "ids", &T::ids, "total",
-                    &T::total, "limit", &T::limit);
-};
-
-template <> struct glz::meta<javelin::jmap::api::ContactCardQueryChangesRequest>
-{
-    using T = javelin::jmap::api::ContactCardQueryChangesRequest;
-    static constexpr auto value =
-        glz::object("accountId", &T::accountId, "sinceQueryState", &T::sinceQueryState,
-                    "maxChanges", &T::maxChanges, "upToId", &T::upToId, "filter", &T::filter,
-                    "sort", &T::sort, "calculateTotal", &T::calculateTotal);
-};
-
 template <> struct glz::meta<javelin::jmap::api::detail::RawDocumentSetRequest>
 {
     using T = javelin::jmap::api::detail::RawDocumentSetRequest;
@@ -255,12 +237,6 @@ namespace javelin::jmap::api
 
     std::optional<std::string>
     serializeContactCardQueryRequest(const ContactCardQueryRequest& request)
-    {
-        return serialize(request);
-    }
-
-    std::optional<std::string>
-    serializeContactCardQueryChangesRequest(const ContactCardQueryChangesRequest& request)
     {
         return serialize(request);
     }
@@ -369,11 +345,6 @@ namespace javelin::jmap::api
                                               .document = std::move(document)});
         }
         return {.value = std::move(result), .error = std::nullopt};
-    }
-
-    ParsedEnvelope<ContactCardQueryResponse> parseContactCardQueryResponse(std::string_view json)
-    {
-        return parse<ContactCardQueryResponse>(json);
     }
 
     ParsedEnvelope<ContactCardQueryChangesResponse>

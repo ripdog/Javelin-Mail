@@ -28,7 +28,6 @@ namespace javelin::jmap::sync
         [[nodiscard]] std::size_t observationCount(std::string_view accountId,
                                                    std::string_view mailboxId) const;
         void eraseAccountsNotIn(const std::unordered_set<std::string>& accountIds);
-        void clear();
 
       private:
         std::unordered_map<ObservationId, Interest> m_observations;

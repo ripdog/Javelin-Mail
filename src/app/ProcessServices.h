@@ -77,13 +77,10 @@ namespace javelin::app
         ProcessServices(ProcessServices&&) = delete;
         ProcessServices& operator=(ProcessServices&&) = delete;
 
-        [[nodiscard]] javelin::jmap::JmapCore& jmapCore();
-        [[nodiscard]] const javelin::jmap::JmapCore& jmapCore() const;
         [[nodiscard]] javelin::jmap::cache::AccountRepository& accountRepository();
         [[nodiscard]] javelin::jmap::cache::ContactRepository& contactRepository();
         [[nodiscard]] javelin::jmap::contacts::ContactService& contactService();
         [[nodiscard]] javelin::jmap::calendar::CalendarService& calendarService();
-        [[nodiscard]] javelin::jmap::sieve::SieveService& sieveService();
         [[nodiscard]] javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup();
         [[nodiscard]] javelin::jmap::cache::IdentityRepository& identityRepository();
         [[nodiscard]] javelin::jmap::cache::MessageViewService& messageViewService();

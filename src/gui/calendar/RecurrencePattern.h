@@ -51,6 +51,5 @@ namespace javelin::gui::calendar
     [[nodiscard]] javelin::jmap::calendar::RecurrenceRule
     recurrenceRule(const FriendlyRecurrencePattern& pattern, const QDateTime& eventStart);
     [[nodiscard]] javelin::jmap::calendar::Weekday weekday(Qt::DayOfWeek day);
-    [[nodiscard]] Qt::DayOfWeek qtWeekday(javelin::jmap::calendar::Weekday day);
     [[nodiscard]] int ordinalWeekday(const QDate& date);
 } // namespace javelin::gui::calendar

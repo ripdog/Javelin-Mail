@@ -598,11 +598,6 @@ namespace javelin::gui::compose
         return subject.isEmpty() ? defaultTitleForMode(m_snapshot.mode) : subject;
     }
 
-    std::string ComposeTabWidget::accountId() const
-    {
-        return m_snapshot.accountId;
-    }
-
     std::string ComposeTabWidget::composeSessionId() const
     {
         return m_snapshot.composeSessionId;
@@ -611,11 +606,6 @@ namespace javelin::gui::compose
     std::optional<std::string> ComposeTabWidget::draftEmailId() const
     {
         return m_snapshot.draftEmailId;
-    }
-
-    javelin::jmap::submission::DraftSnapshot ComposeTabWidget::snapshot() const
-    {
-        return m_snapshot;
     }
 
     bool ComposeTabWidget::isEmptyDraft() const

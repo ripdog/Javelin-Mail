@@ -55,7 +55,6 @@ namespace javelin::gui::messageview
         void refresh(javelin::jmap::cache::MessageViewService& messageViewService);
         void setLoadingState(bool loading);
         void setErrorState(const QString& errorMessage);
-        [[nodiscard]] bool hasContentSnapshot() const;
         [[nodiscard]] bool hasReadableBody() const;
 
       Q_SIGNALS:
