@@ -4,6 +4,7 @@
 
 #include <QAction>
 #include <QContextMenuEvent>
+#include <QCryptographicHash>
 #include <QDebug>
 #include <QDesktopServices>
 #include <QJsonArray>
@@ -33,6 +34,22 @@ namespace javelin::gui::messageview
             const auto scheme = url.scheme();
             return scheme == QStringLiteral("http") || scheme == QStringLiteral("https") ||
                    scheme == QStringLiteral("mailto");
+        }
+
+        [[nodiscard]] QString summarizeUrl(const QUrl& url)
+        {
+            const auto encoded = url.toEncoded();
+            if (url.scheme() != QStringLiteral("data") && encoded.size() <= 256)
+            {
+                return QString::fromUtf8(encoded);
+            }
+
+            const auto digest =
+                QCryptographicHash::hash(encoded, QCryptographicHash::Sha256).toHex().left(16);
+            return QStringLiteral("%1:[bytes=%2 sha256=%3]")
+                .arg(url.scheme())
+                .arg(encoded.size())
+                .arg(QString::fromLatin1(digest));
         }
 
         class ExternalNavigationPage final : public QWebEnginePage
@@ -188,12 +205,12 @@ namespace javelin::gui::messageview
         connect(m_view->page(), &QWebEnginePage::loadingChanged, this,
                 [this](const QWebEngineLoadingInfo& loadingInfo)
                 {
-                    traceRenderEvent(
-                        QStringLiteral("loading-changed"),
-                        QStringLiteral("status=%1 eventUrl=%2 expected=%3 matches=%4")
-                            .arg(static_cast<int>(loadingInfo.status()))
-                            .arg(loadingInfo.url().toString(), m_expectedDocumentUrl.toString())
-                            .arg(loadingInfo.url() == m_expectedDocumentUrl));
+                    traceRenderEvent(QStringLiteral("loading-changed"),
+                                     QStringLiteral("status=%1 eventUrl=%2 expected=%3 matches=%4")
+                                         .arg(static_cast<int>(loadingInfo.status()))
+                                         .arg(summarizeUrl(loadingInfo.url()),
+                                              summarizeUrl(m_expectedDocumentUrl))
+                                         .arg(loadingInfo.url() == m_expectedDocumentUrl));
                     if (loadingInfo.status() != QWebEngineLoadingInfo::LoadSucceededStatus ||
                         loadingInfo.url() != m_expectedDocumentUrl)
                     {
@@ -528,7 +545,7 @@ namespace javelin::gui::messageview
                                  .arg(event, documentId)
                                  .arg(m_view->isVisible())
                                  .arg(m_view->page()->isVisible())
-                                 .arg(m_view->url().toString(), detail);
+                                 .arg(summarizeUrl(m_view->url()), detail);
     }
 
 } // namespace javelin::gui::messageview
