@@ -9,7 +9,6 @@
 #include <KXmlGuiWindow>
 #include <QIcon>
 #include <QModelIndex>
-#include <QTemporaryDir>
 
 #include <cstdint>
 #include <optional>
@@ -82,7 +81,8 @@ namespace javelin::gui::settings
 namespace javelin::gui::shell
 {
     class ElidingLabel;
-}
+    class MessageFileController;
+} // namespace javelin::gui::shell
 
 namespace javelin::gui::messages
 {
@@ -326,9 +326,6 @@ namespace javelin::gui::shell
         void showMailboxContextMenu(const QPoint& position);
         void showMessageListContextMenu(const QPoint& position);
         void viewSelectedMessageSource();
-        void saveAttachment(std::string accountId, std::string emailId, std::string partId);
-        void saveAllAttachments(std::string accountId, std::string emailId);
-        void openAttachment(std::string accountId, std::string emailId, std::string partId);
         void openPreferences();
         void reloadAccounts();
         void restoreSelection(std::optional<std::string> accountId,
@@ -374,6 +371,7 @@ namespace javelin::gui::shell
         javelin::app::ComposeService& m_composeService;
         javelin::app::MailApplicationService& m_mailService;
         javelin::app::MessageNavigationCoordinator& m_messageNavigationCoordinator;
+        MessageFileController* m_messageFileController = nullptr;
         QSplitter* m_mainSplitter = nullptr;
         QStackedWidget* m_contentStack = nullptr;
         QWidget* m_mailboxPane = nullptr;
@@ -444,7 +442,6 @@ namespace javelin::gui::shell
         bool m_syncingNavigation = false;
         std::optional<int> m_activeTabIndex;
         std::vector<TabState> m_tabs;
-        QTemporaryDir m_openAttachmentDirectory;
     };
 
 } // namespace javelin::gui::shell

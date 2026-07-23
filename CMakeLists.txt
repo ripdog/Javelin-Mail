@@ -152,6 +152,8 @@ set(JAVELIN_FORMAT_FILES
     src/gui/shell/ElidingLabel.h
     src/gui/shell/MessageFileUtils.cpp
     src/gui/shell/MessageFileUtils.h
+    src/gui/shell/MessageFileController.cpp
+    src/gui/shell/MessageFileController.h
     src/gui/shell/LayeredStatusBar.cpp
     src/gui/shell/LayeredStatusBar.h
     src/gui/shell/MainWindow.cpp
@@ -625,6 +627,8 @@ add_library(javelin_gui STATIC
     src/gui/shell/ElidingLabel.h
     src/gui/shell/MessageFileUtils.cpp
     src/gui/shell/MessageFileUtils.h
+    src/gui/shell/MessageFileController.cpp
+    src/gui/shell/MessageFileController.h
     src/gui/shell/LayeredStatusBar.cpp
     src/gui/shell/LayeredStatusBar.h
     src/gui/shell/MainWindow.cpp
