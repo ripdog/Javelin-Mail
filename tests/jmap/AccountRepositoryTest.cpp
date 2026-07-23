@@ -96,9 +96,8 @@ namespace
                      const QString& username, const QString& apiUrl)
     {
         QSqlQuery query{connection.database()};
-        query.prepare(QStringLiteral(
-            "INSERT INTO sessions (account_id, api_url, state, username) "
-            "VALUES (:account_id, :api_url, :state, :username)"));
+        query.prepare(QStringLiteral("INSERT INTO sessions (account_id, api_url, state, username) "
+                                     "VALUES (:account_id, :api_url, :state, :username)"));
         query.bindValue(QStringLiteral(":account_id"), accountId);
         query.bindValue(QStringLiteral(":api_url"), apiUrl);
         query.bindValue(QStringLiteral(":state"), QStringLiteral("state"));
@@ -176,9 +175,11 @@ TEST_CASE("removing a configured login resolves session ownership without saved 
     seedAccount(databaseContext.connection, QStringLiteral("other-owner"), QStringLiteral("Other"),
                 true);
     seedSession(databaseContext.connection, QStringLiteral("stalwart-owner"),
-                QStringLiteral("admin@example.com"), QStringLiteral("https://mail.example.com/jmap/"));
+                QStringLiteral("admin@example.com"),
+                QStringLiteral("https://mail.example.com/jmap/"));
     seedSession(databaseContext.connection, QStringLiteral("other-owner"),
-                QStringLiteral("admin@example.com"), QStringLiteral("https://other.example.com/jmap/"));
+                QStringLiteral("admin@example.com"),
+                QStringLiteral("https://other.example.com/jmap/"));
 
     QSqlQuery mailbox{databaseContext.connection.database()};
     mailbox.prepare(QStringLiteral(
@@ -190,11 +191,11 @@ TEST_CASE("removing a configured login resolves session ownership without saved 
     REQUIRE(mailbox.exec());
 
     javelin::jmap::cache::AccountRepository repository{databaseContext.connection};
-    REQUIRE_FALSE(repository
-                      .removeConfiguredAccount(QStringLiteral("admin@example.com"),
-                                               QStringLiteral("https://mail.example.com/jmap/session"),
-                                               {})
-                      .has_value());
+    REQUIRE_FALSE(
+        repository
+            .removeConfiguredAccount(QStringLiteral("admin@example.com"),
+                                     QStringLiteral("https://mail.example.com/jmap/session"), {})
+            .has_value());
 
     QSqlQuery accounts{databaseContext.connection.database()};
     REQUIRE(accounts.exec(QStringLiteral("SELECT account_id FROM accounts ORDER BY account_id")));

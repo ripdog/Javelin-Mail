@@ -405,14 +405,15 @@ namespace javelin::jmap::sync
 
     void EventSourceStateChangeSource::cancel()
     {
-        if (m_activeReply.isNull())
+        auto* activeReply = m_activeReply.data();
+        if (activeReply == nullptr)
         {
             return;
         }
 
         qInfo().noquote() << "State-change source aborting active event-source request"
-                          << m_activeReply->url().toString();
-        m_activeReply->abort();
+                          << activeReply->url().toString();
+        activeReply->abort();
     }
 
     QCoro::Task<StateChangeSourceResult>

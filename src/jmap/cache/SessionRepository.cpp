@@ -405,52 +405,49 @@ namespace javelin::jmap::cache
             return std::optional<javelin::jmap::api::Session>{std::nullopt};
         }
 
-        javelin::jmap::api::Session session{
-            .username = sessionQuery.value(5).toString().toStdString(),
-            .apiUrl = sessionQuery.value(0).toString().toStdString(),
-            .downloadUrl = sessionQuery.value(1).toString().toStdString(),
-            .uploadUrl = sessionQuery.value(2).toString().toStdString(),
-            .eventSourceUrl = sessionQuery.value(3).isNull()
-                                  ? std::nullopt
-                                  : std::optional{sessionQuery.value(3).toString().toStdString()},
-            .state = sessionQuery.value(4).toString().toStdString(),
-            .capabilities =
-                {
-                    .core = sessionQuery.value(6).toInt() != 0,
-                    .coreDetails = deserializeCoreCapability(sessionQuery.value(11).toString()),
-                    .mail = sessionQuery.value(7).toInt() != 0,
-                    .submission = sessionQuery.value(8).toInt() != 0,
-                    .contacts = sessionQuery.value(9).toInt() != 0,
-                    .calendars = sessionQuery.value(10).toInt() != 0,
-                    .websocket = sessionQuery.value(16).isNull()
-                                     ? std::nullopt
-                                     : std::optional{javelin::jmap::api::WebSocketCapability{
-                                           .url = sessionQuery.value(16).toString().toStdString(),
-                                           .supportsPush = sessionQuery.value(17).toInt() != 0,
-                                       }},
-                },
-            .accounts = {},
-            .primaryAccounts =
-                {
-                    .mailAccountId =
-                        sessionQuery.value(12).isNull()
-                            ? std::nullopt
-                            : std::optional{sessionQuery.value(12).toString().toStdString()},
-                    .submissionAccountId =
-                        sessionQuery.value(13).isNull()
-                            ? std::nullopt
-                            : std::optional{sessionQuery.value(13).toString().toStdString()},
-                    .contactsAccountId =
-                        sessionQuery.value(14).isNull()
-                            ? std::nullopt
-                            : std::optional{sessionQuery.value(14).toString().toStdString()},
-                    .calendarsAccountId =
-                        sessionQuery.value(15).isNull()
-                            ? std::nullopt
-                            : std::optional{sessionQuery.value(15).toString().toStdString()},
-                    .sieveAccountId = std::nullopt,
-                },
-        };
+        javelin::jmap::api::Session session{};
+        session.username = sessionQuery.value(5).toString().toStdString();
+        session.apiUrl = sessionQuery.value(0).toString().toStdString();
+        session.downloadUrl = sessionQuery.value(1).toString().toStdString();
+        session.uploadUrl = sessionQuery.value(2).toString().toStdString();
+        if (!sessionQuery.value(3).isNull())
+        {
+            session.eventSourceUrl = sessionQuery.value(3).toString().toStdString();
+        }
+        session.state = sessionQuery.value(4).toString().toStdString();
+        session.capabilities.core = sessionQuery.value(6).toInt() != 0;
+        session.capabilities.coreDetails =
+            deserializeCoreCapability(sessionQuery.value(11).toString());
+        session.capabilities.mail = sessionQuery.value(7).toInt() != 0;
+        session.capabilities.submission = sessionQuery.value(8).toInt() != 0;
+        session.capabilities.contacts = sessionQuery.value(9).toInt() != 0;
+        session.capabilities.calendars = sessionQuery.value(10).toInt() != 0;
+        if (!sessionQuery.value(16).isNull())
+        {
+            session.capabilities.websocket = javelin::jmap::api::WebSocketCapability{
+                .url = sessionQuery.value(16).toString().toStdString(),
+                .supportsPush = sessionQuery.value(17).toInt() != 0,
+            };
+        }
+        if (!sessionQuery.value(12).isNull())
+        {
+            session.primaryAccounts.mailAccountId = sessionQuery.value(12).toString().toStdString();
+        }
+        if (!sessionQuery.value(13).isNull())
+        {
+            session.primaryAccounts.submissionAccountId =
+                sessionQuery.value(13).toString().toStdString();
+        }
+        if (!sessionQuery.value(14).isNull())
+        {
+            session.primaryAccounts.contactsAccountId =
+                sessionQuery.value(14).toString().toStdString();
+        }
+        if (!sessionQuery.value(15).isNull())
+        {
+            session.primaryAccounts.calendarsAccountId =
+                sessionQuery.value(15).toString().toStdString();
+        }
 
         QSqlQuery accountQuery{m_connection.database()};
         accountQuery.prepare(QStringLiteral(

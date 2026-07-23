@@ -177,13 +177,14 @@ namespace javelin::jmap::api
                 {
                     return;
                 }
+                auto* activeReply = reply.data();
                 QMetaObject::invokeMethod(
-                    reply.data(),
+                    activeReply,
                     [reply]()
                     {
-                        if (!reply.isNull())
+                        if (auto* queuedReply = reply.data())
                         {
-                            reply->abort();
+                            queuedReply->abort();
                         }
                     },
                     Qt::QueuedConnection);

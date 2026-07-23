@@ -250,9 +250,12 @@ namespace javelin::gui::calendar
         if (event.recurrenceRule)
         {
             const auto& rule = *event.recurrenceRule;
-            auto simpleRule = javelin::jmap::calendar::RecurrenceRule{};
-            simpleRule.frequency = rule.frequency;
-            const auto isSimple = rule == simpleRule;
+            const bool isSimple =
+                rule.interval == 1 && !rule.rscale.has_value() && !rule.skip.has_value() &&
+                !rule.firstDayOfWeek.has_value() && rule.byDay.empty() && rule.byMonthDay.empty() &&
+                rule.byMonth.empty() && rule.byYearDay.empty() && rule.byWeekNo.empty() &&
+                rule.byHour.empty() && rule.byMinute.empty() && rule.bySecond.empty() &&
+                rule.bySetPosition.empty() && !rule.count.has_value() && !rule.until.has_value();
             if (isSimple)
             {
                 switch (rule.frequency)

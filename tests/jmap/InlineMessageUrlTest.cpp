@@ -4,8 +4,8 @@
 
 TEST_CASE("inline message urls round-trip encoded identifiers", "[jmap][render][inline-url]")
 {
-    const auto url = javelin::jmap::render::buildInlineMessageUrl(
-        "account/1", "email 1", "part:3", "blob?4");
+    const auto url =
+        javelin::jmap::render::buildInlineMessageUrl("account/1", "email 1", "part:3", "blob?4");
 
     const auto parsed =
         javelin::jmap::render::parseInlineMessageUrl(QUrl{QString::fromStdString(url)});

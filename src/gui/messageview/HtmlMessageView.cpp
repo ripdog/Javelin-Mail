@@ -454,8 +454,9 @@ namespace javelin::gui::messageview
 )JS"),
             [guard, generation](const QVariant& result)
             {
-                if (!guard || generation != guard->m_documentGeneration ||
-                    guard->m_documentReadyAccepted)
+                auto* view = guard.data();
+                if (view == nullptr || generation != view->m_documentGeneration ||
+                    view->m_documentReadyAccepted)
                 {
                     return;
                 }
@@ -464,31 +465,31 @@ namespace javelin::gui::messageview
                     QStringLiteral("%1:complete").arg(static_cast<qulonglong>(generation));
                 if (result.toString() == expected)
                 {
-                    guard->m_documentReadyAccepted = true;
-                    const auto documentUrl = guard->m_expectedDocumentUrl;
-                    const auto readyTitle = guard->m_expectedReadyTitle;
-                    guard->applyRemoteContentPolicy(
+                    view->m_documentReadyAccepted = true;
+                    const auto documentUrl = view->m_expectedDocumentUrl;
+                    const auto readyTitle = view->m_expectedReadyTitle;
+                    view->applyRemoteContentPolicy(
                         [guard, documentUrl, readyTitle]
                         {
-                            if (guard)
+                            if (auto* activeView = guard.data())
                             {
-                                guard->awaitRenderedDocument(documentUrl, readyTitle);
+                                activeView->awaitRenderedDocument(documentUrl, readyTitle);
                             }
                         });
                     return;
                 }
 
-                if (guard->m_renderTimer.elapsed() >= 30000)
+                if (view->m_renderTimer.elapsed() >= 30000)
                 {
                     return;
                 }
 
-                QTimer::singleShot(25, guard,
+                QTimer::singleShot(25, view,
                                    [guard, generation]
                                    {
-                                       if (guard)
+                                       if (auto* activeView = guard.data())
                                        {
-                                           guard->probeDocumentReady(generation);
+                                           activeView->probeDocumentReady(generation);
                                        }
                                    });
             });

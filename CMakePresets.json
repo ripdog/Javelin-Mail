@@ -2,7 +2,7 @@
   "version": 6,
   "cmakeMinimumRequired": {
     "major": 3,
-    "minor": 19,
+    "minor": 25,
     "patch": 0
   },
   "configurePresets": [
@@ -46,12 +46,92 @@
       "configurePreset": "debug"
     },
     {
+      "name": "debug-format-check",
+      "configurePreset": "debug",
+      "targets": [
+        "format-check"
+      ]
+    },
+    {
       "name": "asan",
       "configurePreset": "asan"
     },
     {
       "name": "release",
       "configurePreset": "release"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "debug",
+      "configurePreset": "debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "asan",
+      "configurePreset": "asan",
+      "output": {
+        "outputOnFailure": true
+      },
+      "environment": {
+        "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1",
+        "UBSAN_OPTIONS": "halt_on_error=1:print_stacktrace=1"
+      }
+    }
+  ],
+  "workflowPresets": [
+    {
+      "name": "debug-check",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "debug"
+        },
+        {
+          "type": "build",
+          "name": "debug"
+        },
+        {
+          "type": "test",
+          "name": "debug"
+        },
+        {
+          "type": "build",
+          "name": "debug-format-check"
+        }
+      ]
+    },
+    {
+      "name": "release-check",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "release"
+        },
+        {
+          "type": "build",
+          "name": "release"
+        }
+      ]
+    },
+    {
+      "name": "asan-check",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "asan"
+        },
+        {
+          "type": "build",
+          "name": "asan"
+        },
+        {
+          "type": "test",
+          "name": "asan"
+        }
+      ]
     }
   ]
 }

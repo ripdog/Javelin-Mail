@@ -79,8 +79,7 @@ namespace javelin::jmap::api
     {
         std::string buffer{json};
         RawMethodError raw{};
-        const auto readError =
-            glz::read<glz::opts{.error_on_unknown_keys = false}>(raw, buffer);
+        const auto readError = glz::read<glz::opts{.error_on_unknown_keys = false}>(raw, buffer);
         if (readError)
         {
             return {

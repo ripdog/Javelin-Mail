@@ -176,8 +176,7 @@ TEST_CASE("refresh notification planner returns empty candidates when nothing wa
     CHECK(std::get<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(result).empty());
 }
 
-TEST_CASE("notification outbox persists pending mail until delivery",
-          "[jmap][cache][notification]")
+TEST_CASE("notification outbox persists pending mail until delivery", "[jmap][cache][notification]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);

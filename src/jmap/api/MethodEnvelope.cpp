@@ -59,8 +59,8 @@ template <> struct glz::meta<RawWebSocketRequestEnvelope>
     using T = RawWebSocketRequestEnvelope;
 
     static constexpr auto value =
-        glz::object("@type", &T::type, "id", &T::id, "using", &T::usingCapabilities,
-                    "methodCalls", &T::methodCalls, "createdIds", &T::createdIds);
+        glz::object("@type", &T::type, "id", &T::id, "using", &T::usingCapabilities, "methodCalls",
+                    &T::methodCalls, "createdIds", &T::createdIds);
 };
 
 template <> struct glz::meta<RawResponseEnvelope>
@@ -229,8 +229,8 @@ namespace javelin::jmap::api
         return serializeEnvelope(envelope);
     }
 
-    std::optional<std::string>
-    serializeWebSocketRequestEnvelope(const RequestEnvelope& request, const std::string_view requestId)
+    std::optional<std::string> serializeWebSocketRequestEnvelope(const RequestEnvelope& request,
+                                                                 const std::string_view requestId)
     {
         RawWebSocketRequestEnvelope envelope{
             .type = "Request",

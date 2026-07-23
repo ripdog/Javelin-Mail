@@ -30,14 +30,12 @@ namespace javelin::jmap::sync
         for (const auto& insertedEmailId : refreshSummary.insertedEmailIds)
         {
             const auto emailResult = emailRepository.find(accountId, insertedEmailId);
-            if (const auto* error =
-                    std::get_if<javelin::jmap::cache::DatabaseError>(&emailResult))
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&emailResult))
             {
                 return *error;
             }
 
-            const auto& email =
-                std::get<std::optional<javelin::jmap::domain::Email>>(emailResult);
+            const auto& email = std::get<std::optional<javelin::jmap::domain::Email>>(emailResult);
             if (!email.has_value())
             {
                 continue;

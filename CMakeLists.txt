@@ -902,7 +902,13 @@ javelin_set_project_warnings(Javelin-Mail)
 javelin_enable_static_analysis(Javelin-Mail)
 javelin_enable_sanitizers(Javelin-Mail)
 
-javelin_add_format_targets(${JAVELIN_FORMAT_FILES})
+file(GLOB_RECURSE JAVELIN_ALL_FORMAT_FILES CONFIGURE_DEPENDS
+    "${PROJECT_SOURCE_DIR}/src/*.cpp"
+    "${PROJECT_SOURCE_DIR}/src/*.h"
+    "${PROJECT_SOURCE_DIR}/tests/*.cpp"
+    "${PROJECT_SOURCE_DIR}/tests/*.h"
+)
+javelin_add_format_targets(${JAVELIN_ALL_FORMAT_FILES})
 
 include(cmake/CheckCoroutineOwnership.cmake)
 

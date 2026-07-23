@@ -50,9 +50,8 @@ namespace javelin::jmap::api
         }
 
         template <typename Response>
-        [[nodiscard]] CallHandle<Response>
-        call(const MethodRequest<Response>& request,
-             std::optional<std::string> callId = std::nullopt)
+        [[nodiscard]] CallHandle<Response> call(const MethodRequest<Response>& request,
+                                                std::optional<std::string> callId = std::nullopt)
         {
             const auto resolvedCallId =
                 callId.has_value() ? std::move(*callId)

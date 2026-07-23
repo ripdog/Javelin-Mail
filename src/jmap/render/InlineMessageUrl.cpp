@@ -11,8 +11,7 @@ namespace javelin::jmap::render
     }
 
     std::string buildInlineMessageUrl(const std::string_view accountId,
-                                      const std::string_view emailId,
-                                      const std::string_view partId,
+                                      const std::string_view emailId, const std::string_view partId,
                                       const std::string_view blobId)
     {
         QUrl url;
@@ -22,12 +21,9 @@ namespace javelin::jmap::render
         QUrlQuery query;
         query.addQueryItem(QStringLiteral("account"),
                            QString::fromStdString(std::string{accountId}));
-        query.addQueryItem(QStringLiteral("email"),
-                           QString::fromStdString(std::string{emailId}));
-        query.addQueryItem(QStringLiteral("part"),
-                           QString::fromStdString(std::string{partId}));
-        query.addQueryItem(QStringLiteral("blob"),
-                           QString::fromStdString(std::string{blobId}));
+        query.addQueryItem(QStringLiteral("email"), QString::fromStdString(std::string{emailId}));
+        query.addQueryItem(QStringLiteral("part"), QString::fromStdString(std::string{partId}));
+        query.addQueryItem(QStringLiteral("blob"), QString::fromStdString(std::string{blobId}));
         url.setQuery(query);
 
         return url.toString(QUrl::FullyEncoded).toStdString();

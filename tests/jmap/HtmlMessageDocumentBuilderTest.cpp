@@ -24,12 +24,13 @@ TEST_CASE("html message document builder rewrites cid references to internal url
     };
 
     javelin::jmap::render::HtmlMessageDocumentBuilder builder;
-    const auto document = builder.build("account-1", "eml-1",
-                                        R"(<img src="cid:chart@cid">)", parts);
+    const auto document =
+        builder.build("account-1", "eml-1", R"(<img src="cid:chart@cid">)", parts);
 
     CHECK(document.inlineResourceCount == 1);
     CHECK(document.blockedRemoteResourceCount == 0);
-    CHECK(document.html.find("javelin-message-inline://message?account=account-1&email=eml-1&part=3&blob=blob-inline") !=
+    CHECK(document.html.find("javelin-message-inline://"
+                             "message?account=account-1&email=eml-1&part=3&blob=blob-inline") !=
           std::string::npos);
 }
 
@@ -37,16 +38,16 @@ TEST_CASE("html message document builder blocks remote resources and strips scri
           "[jmap][render][html]")
 {
     javelin::jmap::render::HtmlMessageDocumentBuilder builder;
-    const auto document =
-        builder.build("account-1", "eml-1",
-                      R"(<script>alert('x')</script><img src="https://tracker.example.com/pixel.png">)",
-                      {});
+    const auto document = builder.build(
+        "account-1", "eml-1",
+        R"(<script>alert('x')</script><img src="https://tracker.example.com/pixel.png">)", {});
 
     CHECK(document.inlineResourceCount == 0);
     CHECK(document.blockedRemoteResourceCount == 1);
     CHECK(document.html.find("<script") == std::string::npos);
-    CHECK(document.html.find("data-javelin-blocked-src=\"https://tracker.example.com/pixel.png\"") !=
-          std::string::npos);
+    CHECK(
+        document.html.find("data-javelin-blocked-src=\"https://tracker.example.com/pixel.png\"") !=
+        std::string::npos);
     CHECK(document.html.find("data-javelin-remote-attr=\"src\"") != std::string::npos);
     CHECK(document.html.find("default-src 'none'") != std::string::npos);
 }

@@ -2,8 +2,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-TEST_CASE("message navigation routes are superseded and cleared by identity",
-          "[app][navigation]")
+TEST_CASE("message navigation routes are superseded and cleared by identity", "[app][navigation]")
 {
     javelin::app::MessageNavigationCoordinator coordinator;
 
@@ -28,8 +27,7 @@ TEST_CASE("message navigation routes are superseded and cleared by identity",
 TEST_CASE("message navigation cancellation clears the active route", "[app][navigation]")
 {
     javelin::app::MessageNavigationCoordinator coordinator;
-    static_cast<void>(
-        coordinator.openEmail("account-1", "mailbox-1", "thread-1", "email-1"));
+    static_cast<void>(coordinator.openEmail("account-1", "mailbox-1", "thread-1", "email-1"));
 
     coordinator.cancel();
 

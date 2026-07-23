@@ -14,8 +14,8 @@ TEST_CASE("request builder emits multi-call envelopes with preserved call ids",
             .arguments = R"({"accountId":"u1"})",
         },
         "mailbox-query");
-    const auto second = builder.call(
-        javelin::jmap::api::MethodRequest<javelin::jmap::api::EmailGetResponse>{
+    const auto second =
+        builder.call(javelin::jmap::api::MethodRequest<javelin::jmap::api::EmailGetResponse>{
             .name = "Email/get",
             .arguments = R"({"accountId":"u1","ids":["eml-1"]})",
         });
@@ -66,7 +66,8 @@ TEST_CASE("response reader surfaces method errors by call handle", "[jmap][api][
             {
                 javelin::jmap::api::MethodInvocation{
                     .name = "error",
-                    .arguments = R"({"type":"cannotCalculateChanges","description":"delta unavailable"})",
+                    .arguments =
+                        R"({"type":"cannotCalculateChanges","description":"delta unavailable"})",
                     .callId = "mailbox-query-changes",
                 },
             },

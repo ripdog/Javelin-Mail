@@ -147,10 +147,15 @@ namespace javelin::gui::contacts
             auto* layout = new QHBoxLayout(this);
             layout->setContentsMargins(0, 0, 0, 0);
             layout->setSpacing(6);
-            m_value = emailAddress
-                          ? static_cast<QLineEdit*>(new javelin::gui::widgets::EmailAddressLineEdit(
-                                QString::fromStdString(m_original.value), false, this))
-                          : new QLineEdit(QString::fromStdString(m_original.value), this);
+            const QString value = QString::fromStdString(m_original.value);
+            if (emailAddress)
+            {
+                m_value = new javelin::gui::widgets::EmailAddressLineEdit(value, false, this);
+            }
+            else
+            {
+                m_value = new QLineEdit(value, this);
+            }
             m_value->setPlaceholderText(placeholder);
             m_context = new QComboBox(this);
             m_context->addItem(QStringLiteral("Other"), QStringLiteral(""));
@@ -162,11 +167,18 @@ namespace javelin::gui::contacts
             {
                 const auto active = std::ranges::find_if(
                     m_original.contexts, [](const auto& context) { return context.second; });
-                const int index = m_context->findData(QString::fromStdString(active->first));
-                if (index >= 0)
-                    m_context->setCurrentIndex(index);
-                else
+                if (active == m_original.contexts.end())
+                {
                     addPreservedContext();
+                }
+                else
+                {
+                    const int index = m_context->findData(QString::fromStdString(active->first));
+                    if (index >= 0)
+                        m_context->setCurrentIndex(index);
+                    else
+                        addPreservedContext();
+                }
             }
             else if (activeContexts > 0)
                 addPreservedContext();
