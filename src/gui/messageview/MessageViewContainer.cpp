@@ -12,7 +12,6 @@
 #include <QAction>
 #include <QApplication>
 #include <QDateTime>
-#include <QDebug>
 #include <QDesktopServices>
 #include <QFileIconProvider>
 #include <QFileInfo>
@@ -30,7 +29,6 @@
 #include <QSettings>
 #include <QSignalBlocker>
 #include <QSizePolicy>
-#include <QStackedLayout>
 #include <QStackedWidget>
 #include <QStringList>
 #include <QStyle>
@@ -729,69 +727,8 @@ namespace javelin::gui::messageview
         m_multipleSelectionLayout->setSpacing(0);
         m_multipleSelectionScrollArea->setWidget(m_multipleSelectionWidget);
 
-        m_htmlViewHost = new QWidget(this);
-        auto* htmlViewLayout = new QStackedLayout(m_htmlViewHost);
-        htmlViewLayout->setContentsMargins(0, 0, 0, 0);
-        htmlViewLayout->setStackingMode(QStackedLayout::StackAll);
-
-        // WebEngine must remain visible while loading so Chromium renders the replacement
-        // document. This native overlay prevents its previous frame from reaching the user.
-        m_htmlView = new HtmlMessageView(m_htmlViewHost);
+        m_htmlView = new HtmlMessageView(this);
         m_htmlView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-        htmlViewLayout->addWidget(m_htmlView);
-
-        m_htmlLoadingOverlay = new QWidget(m_htmlViewHost);
-        m_htmlLoadingOverlay->setObjectName(QStringLiteral("htmlMessageLoadingOverlay"));
-        m_htmlLoadingOverlay->setAttribute(Qt::WA_StyledBackground, true);
-        m_htmlLoadingOverlay->setStyleSheet(
-            QStringLiteral("#htmlMessageLoadingOverlay { background: palette(window); }"));
-        auto* htmlLoadingOuterLayout = new QVBoxLayout(m_htmlLoadingOverlay);
-        htmlLoadingOuterLayout->setContentsMargins(0, 12, 0, 12);
-        htmlLoadingOuterLayout->addStretch(1);
-
-        auto* htmlLoadingCard = new QWidget(m_htmlLoadingOverlay);
-        htmlLoadingCard->setObjectName(QStringLiteral("htmlMessageLoadingCard"));
-        htmlLoadingCard->setMinimumWidth(280);
-        htmlLoadingCard->setMaximumWidth(520);
-        htmlLoadingCard->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
-        htmlLoadingCard->setStyleSheet(
-            QStringLiteral("#htmlMessageLoadingCard {"
-                           " background: #1f2126;"
-                           " border: 1px solid #393d46;"
-                           " border-radius: 16px;"
-                           "}"
-                           "#htmlMessageLoadingCard QLabel { color: #e6e9ef; }"));
-        auto* htmlLoadingCardLayout = new QVBoxLayout(htmlLoadingCard);
-        htmlLoadingCardLayout->setContentsMargins(24, 22, 24, 22);
-        htmlLoadingCardLayout->setSpacing(10);
-
-        auto* htmlLoadingTitle = new QLabel(QStringLiteral("Loading message"), htmlLoadingCard);
-        auto htmlLoadingTitleFont = htmlLoadingTitle->font();
-        htmlLoadingTitleFont.setPointSize(htmlLoadingTitleFont.pointSize() + 2);
-        htmlLoadingTitleFont.setBold(true);
-        htmlLoadingTitle->setFont(htmlLoadingTitleFont);
-
-        auto* htmlLoadingIndicator = new QProgressBar(htmlLoadingCard);
-        htmlLoadingIndicator->setRange(0, 0);
-        htmlLoadingIndicator->setTextVisible(false);
-        htmlLoadingIndicator->setFixedHeight(8);
-        htmlLoadingIndicator->setStyleSheet(QStringLiteral("QProgressBar {"
-                                                           " background: #2a2d34;"
-                                                           " border: 1px solid #393d46;"
-                                                           " border-radius: 4px;"
-                                                           "}"
-                                                           "QProgressBar::chunk {"
-                                                           " background: #7fb0ff;"
-                                                           " border-radius: 4px;"
-                                                           "}"));
-
-        htmlLoadingCardLayout->addWidget(htmlLoadingTitle);
-        htmlLoadingCardLayout->addWidget(htmlLoadingIndicator);
-        htmlLoadingOuterLayout->addWidget(htmlLoadingCard, 0, Qt::AlignHCenter);
-        htmlLoadingOuterLayout->addStretch(1);
-        htmlViewLayout->addWidget(m_htmlLoadingOverlay);
-        htmlViewLayout->setCurrentWidget(m_htmlLoadingOverlay);
-
         connect(m_htmlView, &HtmlMessageView::viewSourceRequested, this,
                 &MessageViewContainer::viewSourceRequested);
         connect(m_htmlView, &HtmlMessageView::hoveredLinkChanged, this,
@@ -804,11 +741,6 @@ namespace javelin::gui::messageview
                     {
                         return;
                     }
-                    qInfo().noquote() << "HTML message overlay release"
-                                      << QStringLiteral("account=%1 email=%2 overlayVisible=%3")
-                                             .arg(QString::fromStdString(*m_accountId),
-                                                  QString::fromStdString(*m_emailId))
-                                             .arg(m_htmlLoadingOverlay->isVisible());
                     m_htmlDocumentLoaded = true;
                     m_loading = false;
                     updatePresentation(false);
@@ -821,7 +753,7 @@ namespace javelin::gui::messageview
         m_bodyStack->addWidget(m_placeholderPanel);
         m_bodyStack->addWidget(m_multipleSelectionScrollArea);
         m_bodyStack->addWidget(m_plainTextView);
-        m_bodyStack->addWidget(m_htmlViewHost);
+        m_bodyStack->addWidget(m_htmlView);
 
         m_attachmentStatusLabel = new QLabel(this);
         m_attachmentStatusLabel->setWordWrap(false);
@@ -901,6 +833,7 @@ namespace javelin::gui::messageview
             return;
         }
 
+        m_htmlView->clearDocument();
         m_accountId = std::move(accountId);
         m_mailboxId = std::move(mailboxId);
         m_emailId = std::move(emailId);
@@ -998,7 +931,7 @@ namespace javelin::gui::messageview
             m_bodyStack->setCurrentWidget(m_plainTextView);
             break;
         case ActiveView::Html:
-            m_bodyStack->setCurrentWidget(m_htmlViewHost);
+            m_bodyStack->setCurrentWidget(m_htmlView);
             break;
         }
     }
@@ -1618,12 +1551,6 @@ namespace javelin::gui::messageview
                     : QString::fromStdString(m_snapshot->htmlBody->value);
             m_htmlDocumentLoaded = false;
             m_loading = true;
-            m_htmlLoadingOverlay->setVisible(true);
-            m_htmlLoadingOverlay->raise();
-            qInfo().noquote() << "HTML message overlay shown"
-                              << QStringLiteral("account=%1 email=%2")
-                                     .arg(QString::fromStdString(*m_accountId),
-                                          QString::fromStdString(*m_emailId));
             m_htmlView->setDocumentHtml(renderDocument.toStdString(),
                                         *m_accountId + "\n" + *m_emailId);
         }
@@ -1637,15 +1564,9 @@ namespace javelin::gui::messageview
         if (m_snapshot->htmlBody.has_value())
         {
             setActiveView(ActiveView::Html);
-            m_htmlLoadingOverlay->setVisible(!m_htmlDocumentLoaded);
             if (m_htmlDocumentLoaded)
             {
                 startLanguageDetection();
-            }
-            else
-            {
-                m_htmlLoadingOverlay->setVisible(true);
-                m_htmlLoadingOverlay->raise();
             }
         }
         else if (m_snapshot->plainTextBody.has_value())

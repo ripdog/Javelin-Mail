@@ -138,8 +138,6 @@ namespace javelin::gui::messageview
         QWidget* m_multipleSelectionWidget = nullptr;
         QVBoxLayout* m_multipleSelectionLayout = nullptr;
         QTextBrowser* m_plainTextView = nullptr;
-        QWidget* m_htmlViewHost = nullptr;
-        QWidget* m_htmlLoadingOverlay = nullptr;
         HtmlMessageView* m_htmlView = nullptr;
         QWidget* m_attachmentListWidget = nullptr;
         QGridLayout* m_attachmentListLayout = nullptr;

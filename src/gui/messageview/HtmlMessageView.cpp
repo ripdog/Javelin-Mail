@@ -266,7 +266,7 @@ namespace javelin::gui::messageview
         m_tracePaints = false;
         m_waitingForSurfacePaint = false;
         m_documentReadyAccepted = false;
-        m_view->setHtml(QString{});
+        m_view->setUrl(QUrl{QStringLiteral("about:blank")});
     }
 
     void HtmlMessageView::setRemoteContentEnabled(const bool enabled)
