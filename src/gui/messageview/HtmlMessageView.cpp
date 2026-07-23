@@ -12,7 +12,9 @@
 #include <QJsonDocument>
 #include <QMenu>
 #include <QPointer>
+#include <QRegularExpression>
 #include <QString>
+#include <QTimer>
 #include <QVBoxLayout>
 #include <QVariant>
 #include <QWebEngineContextMenuRequest>
@@ -173,8 +175,7 @@ namespace javelin::gui::messageview
         connect(m_view->page(), &QWebEnginePage::titleChanged, this,
                 [this](const QString& title)
                 {
-                    if (m_expectedReadyTitle.isEmpty() || title != m_expectedReadyTitle ||
-                        m_view->url() != m_expectedDocumentUrl)
+                    if (m_expectedReadyTitle.isEmpty() || title != m_expectedReadyTitle)
                     {
                         return;
                     }
@@ -199,24 +200,6 @@ namespace javelin::gui::messageview
                     detail += QStringLiteral(" eventUrl=") + summarizeUrl(loadingInfo.url());
                     detail += QStringLiteral(" expected=") + summarizeUrl(m_expectedDocumentUrl);
                     traceRenderEvent(QStringLiteral("loading-changed"), detail);
-                    if (loadingInfo.status() != QWebEngineLoadingInfo::LoadSucceededStatus ||
-                        loadingInfo.url() != m_expectedDocumentUrl)
-                    {
-                        return;
-                    }
-
-                    const auto documentUrl = m_expectedDocumentUrl;
-                    const auto readyTitle = m_expectedReadyTitle;
-                    const QPointer<HtmlMessageView> guard{this};
-                    traceRenderEvent(QStringLiteral("navigation-succeeded"));
-                    applyRemoteContentPolicy(
-                        [guard, documentUrl, readyTitle]
-                        {
-                            if (guard)
-                            {
-                                guard->awaitRenderedDocument(documentUrl, readyTitle);
-                            }
-                        });
                 });
 
         layout->addWidget(m_view);
@@ -248,10 +231,29 @@ namespace javelin::gui::messageview
         m_readyPaintCount = 0;
         m_tracePaints = true;
         m_waitingForSurfacePaint = false;
+        m_documentReadyAccepted = false;
         traceRenderEvent(QStringLiteral("navigation-requested"),
                          QStringLiteral("htmlBytes=%1").arg(static_cast<qulonglong>(html.size())));
-        m_view->setHtml(QString::fromUtf8(html.data(), static_cast<qsizetype>(html.size())),
-                        m_expectedDocumentUrl);
+
+        auto documentHtml = QString::fromUtf8(html.data(), static_cast<qsizetype>(html.size()));
+        const auto generationMarker =
+            QStringLiteral("<meta name=\"javelin-document-generation\" content=\"%1\">")
+                .arg(static_cast<qulonglong>(m_documentGeneration));
+        const QRegularExpression headElement{QStringLiteral("<head\\b[^>]*>"),
+                                             QRegularExpression::CaseInsensitiveOption};
+        const auto headMatch = headElement.match(documentHtml);
+        if (headMatch.hasMatch())
+        {
+            documentHtml.insert(headMatch.capturedEnd(), generationMarker);
+        }
+        else
+        {
+            documentHtml.prepend(generationMarker);
+        }
+
+        m_view->setHtml(documentHtml, m_expectedDocumentUrl);
+        const auto generation = m_documentGeneration;
+        QTimer::singleShot(0, this, [this, generation] { probeDocumentReady(generation); });
     }
 
     void HtmlMessageView::clearDocument()
@@ -263,6 +265,7 @@ namespace javelin::gui::messageview
         m_expectedReadyTitle.clear();
         m_tracePaints = false;
         m_waitingForSurfacePaint = false;
+        m_documentReadyAccepted = false;
         m_view->setHtml(QString{});
     }
 
@@ -467,10 +470,70 @@ namespace javelin::gui::messageview
             });
     }
 
+    void HtmlMessageView::probeDocumentReady(const std::uint64_t generation)
+    {
+        if (generation != m_documentGeneration || m_documentReadyAccepted)
+        {
+            return;
+        }
+
+        const QPointer<HtmlMessageView> guard{this};
+        m_view->page()->runJavaScript(
+            QStringLiteral(
+                R"JS(
+(() => {
+  const marker = document.querySelector('meta[name="javelin-document-generation"]');
+  return `${marker ? marker.content : ''}:${document.readyState}`;
+})();
+)JS"),
+            [guard, generation](const QVariant& result)
+            {
+                if (!guard || generation != guard->m_documentGeneration ||
+                    guard->m_documentReadyAccepted)
+                {
+                    return;
+                }
+
+                const auto expected =
+                    QStringLiteral("%1:complete").arg(static_cast<qulonglong>(generation));
+                if (result.toString() == expected)
+                {
+                    guard->m_documentReadyAccepted = true;
+                    guard->traceRenderEvent(QStringLiteral("document-ready-probe"));
+                    const auto documentUrl = guard->m_expectedDocumentUrl;
+                    const auto readyTitle = guard->m_expectedReadyTitle;
+                    guard->applyRemoteContentPolicy(
+                        [guard, documentUrl, readyTitle]
+                        {
+                            if (guard)
+                            {
+                                guard->awaitRenderedDocument(documentUrl, readyTitle);
+                            }
+                        });
+                    return;
+                }
+
+                if (guard->m_renderTimer.elapsed() >= 30000)
+                {
+                    guard->traceRenderEvent(QStringLiteral("document-ready-probe-timeout"),
+                                            QStringLiteral("observed=%1").arg(result.toString()));
+                    return;
+                }
+
+                QTimer::singleShot(25, guard,
+                                   [guard, generation]
+                                   {
+                                       if (guard)
+                                       {
+                                           guard->probeDocumentReady(generation);
+                                       }
+                                   });
+            });
+    }
+
     void HtmlMessageView::awaitRenderedDocument(const QUrl& documentUrl, const QString& readyTitle)
     {
-        if (documentUrl != m_expectedDocumentUrl || readyTitle != m_expectedReadyTitle ||
-            m_view->url() != documentUrl)
+        if (documentUrl != m_expectedDocumentUrl || readyTitle != m_expectedReadyTitle)
         {
             traceRenderEvent(QStringLiteral("render-wait-discarded"));
             return;

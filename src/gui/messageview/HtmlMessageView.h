@@ -40,6 +40,7 @@ namespace javelin::gui::messageview
       private:
         void applyRemoteContentPolicy(std::function<void()> callback = {});
         void awaitRenderedDocument(const QUrl& documentUrl, const QString& readyTitle);
+        void probeDocumentReady(std::uint64_t generation);
         bool eventFilter(QObject* watched, QEvent* event) override;
         void installRenderEventFilter(QObject* object);
         void recordViewPaint(QObject* paintedObject);
@@ -56,6 +57,7 @@ namespace javelin::gui::messageview
         int m_readyPaintCount = 0;
         bool m_tracePaints = false;
         bool m_waitingForSurfacePaint = false;
+        bool m_documentReadyAccepted = false;
     };
 
 } // namespace javelin::gui::messageview
