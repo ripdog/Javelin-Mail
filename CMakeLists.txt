@@ -127,6 +127,8 @@ set(JAVELIN_FORMAT_FILES
     src/gui/messages/MessageListModel.cpp
     src/gui/messages/Pagination.h
     src/gui/messages/MessageListModel.h
+    src/gui/messages/MessageListPanePresenter.cpp
+    src/gui/messages/MessageListPanePresenter.h
     src/gui/messages/MessageListDelegate.cpp
     src/gui/messages/MessageListDelegate.h
     src/gui/messages/MessageDragListView.cpp
@@ -607,6 +609,8 @@ add_library(javelin_gui STATIC
     src/gui/messages/MessageListModel.cpp
     src/gui/messages/Pagination.h
     src/gui/messages/MessageListModel.h
+    src/gui/messages/MessageListPanePresenter.cpp
+    src/gui/messages/MessageListPanePresenter.h
     src/gui/messages/MessageListDelegate.cpp
     src/gui/messages/MessageListDelegate.h
     src/gui/messages/MessageDragListView.cpp

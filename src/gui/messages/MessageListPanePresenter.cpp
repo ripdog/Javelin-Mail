@@ -1,0 +1,142 @@
+#include "gui/messages/MessageListPanePresenter.h"
+
+#include "gui/messages/Pagination.h"
+#include "gui/shell/ElidingLabel.h"
+
+#include <QLabel>
+#include <QListView>
+#include <QSignalBlocker>
+#include <QSpinBox>
+#include <QToolButton>
+
+#include <algorithm>
+#include <limits>
+
+namespace javelin::gui::messages
+{
+    MessageListPanePresenter::MessageListPanePresenter(
+        javelin::gui::shell::ElidingLabel& titleLabel, QLabel& metaLabel, QLabel& pageLabel,
+        QLabel& emptyState, QListView& messageView, QToolButton& searchServerButton,
+        QToolButton& firstPageButton, QToolButton& previousPageButton, QSpinBox& pageNumberSpinBox,
+        QToolButton& nextPageButton, QToolButton& lastPageButton, const std::size_t defaultPageSize)
+        : m_titleLabel(titleLabel), m_metaLabel(metaLabel), m_pageLabel(pageLabel),
+          m_emptyState(emptyState), m_messageView(messageView),
+          m_searchServerButton(searchServerButton), m_firstPageButton(firstPageButton),
+          m_previousPageButton(previousPageButton), m_pageNumberSpinBox(pageNumberSpinBox),
+          m_nextPageButton(nextPageButton), m_lastPageButton(lastPageButton),
+          m_defaultPageSize(defaultPageSize)
+    {
+    }
+
+    void MessageListPanePresenter::showEmptyState(const MessageListEmptyState& state) const
+    {
+        if (!state.refreshError.isEmpty())
+        {
+            m_emptyState.setText(
+                QStringLiteral("Could not refresh the message list.\n%1").arg(state.refreshError));
+            m_emptyState.setStyleSheet(QStringLiteral("color: #e58b8b;"));
+        }
+        else if (state.refreshInFlight && state.itemCount == 0)
+        {
+            m_emptyState.setText(QStringLiteral("Loading messages..."));
+            m_emptyState.setStyleSheet(QString{});
+        }
+        else if (state.collection == MessageCollectionKind::LocalSearch)
+        {
+            m_emptyState.setText(
+                QStringLiteral("No indexed messages on this device matched your search."));
+            m_emptyState.setStyleSheet(QString{});
+        }
+        else if (state.collection == MessageCollectionKind::OnlineSearch)
+        {
+            m_emptyState.setText(
+                QStringLiteral("No server results matched your search in this account."));
+            m_emptyState.setStyleSheet(QString{});
+        }
+        else
+        {
+            m_emptyState.setText(
+                QStringLiteral("No messages are available for the selected mailbox yet."));
+            m_emptyState.setStyleSheet(QString{});
+        }
+        m_emptyState.setVisible(state.itemCount == 0 || !state.refreshError.isEmpty());
+        m_messageView.setVisible(true);
+    }
+
+    void MessageListPanePresenter::showNoContext() const
+    {
+        m_titleLabel.setText(QStringLiteral("Messages"));
+        m_metaLabel.clear();
+        m_searchServerButton.setVisible(false);
+        disablePagination();
+    }
+
+    void MessageListPanePresenter::showContext(const MessageListContextHeader& header) const
+    {
+        m_titleLabel.setText(header.title);
+        m_metaLabel.setText(header.context);
+        m_searchServerButton.setVisible(false);
+        disablePagination();
+    }
+
+    void MessageListPanePresenter::showPage(const MessageListPageHeader& header) const
+    {
+        m_titleLabel.setText(header.title);
+        m_searchServerButton.setVisible(header.canSearchServer);
+        const auto step = header.returnedLimit == 0 ? m_defaultPageSize : header.returnedLimit;
+        const QSignalBlocker pageNumberBlocker{&m_pageNumberSpinBox};
+        if (!header.total)
+        {
+            m_metaLabel.setText(header.search
+                                    ? QStringLiteral("%1 Loaded Matches")
+                                          .arg(static_cast<qulonglong>(header.itemCount))
+                                    : QStringLiteral("%1 Loaded Conversations")
+                                          .arg(static_cast<qulonglong>(header.itemCount)));
+            m_pageLabel.clear();
+            m_firstPageButton.setEnabled(header.offset > 0);
+            m_previousPageButton.setEnabled(header.offset > 0);
+            m_pageNumberSpinBox.setRange(0, 0);
+            m_pageNumberSpinBox.setValue(0);
+            m_pageNumberSpinBox.setSuffix(QString{});
+            m_pageNumberSpinBox.setEnabled(false);
+            m_nextPageButton.setEnabled(false);
+            m_lastPageButton.setEnabled(false);
+            return;
+        }
+
+        m_metaLabel.setText(
+            header.indexedSearch
+                ? QStringLiteral("%1 Indexed Matches").arg(static_cast<qulonglong>(*header.total))
+            : header.search
+                ? QStringLiteral("%1 Matches").arg(static_cast<qulonglong>(*header.total))
+                : QStringLiteral("%1 Conversations").arg(static_cast<qulonglong>(*header.total)));
+        const auto metrics = pageMetrics(header.position, header.itemCount, *header.total);
+        m_pageLabel.setText(*header.total == 0 ? QStringLiteral("0-0")
+                                               : QStringLiteral("%1-%2")
+                                                     .arg(static_cast<qulonglong>(metrics.start))
+                                                     .arg(static_cast<qulonglong>(metrics.end)));
+        const auto pages = pageCount(*header.total, step);
+        const auto currentPage =
+            pages == 0 ? std::size_t{0} : std::min(pageIndex(header.position, step) + 1, pages);
+        const auto intMaximum = static_cast<std::size_t>(std::numeric_limits<int>::max());
+        m_pageNumberSpinBox.setRange(pages == 0 ? 0 : 1,
+                                     static_cast<int>(std::min(pages, intMaximum)));
+        m_pageNumberSpinBox.setValue(static_cast<int>(std::min(currentPage, intMaximum)));
+        m_pageNumberSpinBox.setSuffix(QStringLiteral(" of %1").arg(static_cast<qulonglong>(pages)));
+        m_pageNumberSpinBox.setEnabled(pages > 0);
+        m_firstPageButton.setEnabled(header.position > 0);
+        m_previousPageButton.setEnabled(header.position > 0);
+        m_nextPageButton.setEnabled(metrics.hasNext);
+        m_lastPageButton.setEnabled(metrics.hasNext);
+    }
+
+    void MessageListPanePresenter::disablePagination() const
+    {
+        m_pageLabel.clear();
+        m_firstPageButton.setEnabled(false);
+        m_previousPageButton.setEnabled(false);
+        m_pageNumberSpinBox.setEnabled(false);
+        m_nextPageButton.setEnabled(false);
+        m_lastPageButton.setEnabled(false);
+    }
+} // namespace javelin::gui::messages

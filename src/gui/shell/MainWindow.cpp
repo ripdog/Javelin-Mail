@@ -20,6 +20,7 @@
 #include "gui/messages/MessageDragListView.h"
 #include "gui/messages/MessageListDelegate.h"
 #include "gui/messages/MessageListModel.h"
+#include "gui/messages/MessageListPanePresenter.h"
 #include "gui/messages/Pagination.h"
 #include "gui/messageview/MessageViewContainer.h"
 #include "gui/search/AdvancedSearchDialog.h"
@@ -85,7 +86,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <limits>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -371,6 +371,12 @@ namespace javelin::gui::shell
         connect(m_messageFileController, &MessageFileController::userInterventionRequired, this,
                 &MainWindow::presentUserInterventionError);
         setupUi();
+        m_messageListPanePresenter =
+            std::make_unique<javelin::gui::messages::MessageListPanePresenter>(
+                *m_messageListTitleLabel, *m_messageListMetaLabel, *m_messagePageLabel,
+                *m_messageEmptyState, *m_messageView, *m_searchServerButton, *m_firstPageButton,
+                *m_previousPageButton, *m_pageNumberSpinBox, *m_nextPageButton, *m_lastPageButton,
+                pageSize);
         connect(&m_mailService, &javelin::app::MailApplicationService::sessionCapabilitiesChanged,
                 this, [this](const QString&) { reloadAccounts(); });
         createActions();
@@ -434,6 +440,8 @@ namespace javelin::gui::shell
         connect(stateSaveTimer, &QTimer::timeout, this, &MainWindow::savePersistentState);
         stateSaveTimer->start();
     }
+
+    MainWindow::~MainWindow() = default;
 
     void MainWindow::openEmailRoute(const javelin::app::OpenEmailRoute& route)
     {
@@ -3723,58 +3731,36 @@ namespace javelin::gui::shell
 
     void MainWindow::updateEmptyStates()
     {
-        const bool hasMessages = m_messageModel->rowCount() > 0;
-        QString refreshError;
-        bool refreshInFlight = false;
-        bool localSearch = false;
+        javelin::gui::messages::MessageListEmptyState state{
+            .itemCount = static_cast<std::size_t>(m_messageModel->rowCount()),
+            .refreshError = {},
+            .refreshInFlight = false,
+            .collection = javelin::gui::messages::MessageCollectionKind::Mailbox,
+        };
         if (const auto* tab = activeTab())
         {
             std::visit(
-                [&refreshError, &refreshInFlight, &localSearch](const auto& content)
+                [&state](const auto& content)
                 {
                     if constexpr (std::is_same_v<std::decay_t<decltype(content)>, SearchTabState>)
                     {
-                        refreshError = content.session->page().refreshError;
-                        refreshInFlight = content.session->page().refreshInFlight;
-                        localSearch = content.session->mode() == javelin::app::SearchMode::Local;
+                        state.refreshError = content.session->page().refreshError;
+                        state.refreshInFlight = content.session->page().refreshInFlight;
+                        state.collection =
+                            content.session->mode() == javelin::app::SearchMode::Local
+                                ? javelin::gui::messages::MessageCollectionKind::LocalSearch
+                                : javelin::gui::messages::MessageCollectionKind::OnlineSearch;
                     }
                     else if constexpr (std::is_same_v<std::decay_t<decltype(content)>,
                                                       MailboxTabState>)
                     {
-                        refreshError = content.session->page().refreshError;
-                        refreshInFlight = content.session->page().refreshInFlight;
+                        state.refreshError = content.session->page().refreshError;
+                        state.refreshInFlight = content.session->page().refreshInFlight;
                     }
                 },
                 tab->content);
         }
-
-        if (!refreshError.isEmpty())
-        {
-            m_messageEmptyState->setText(
-                QStringLiteral("Could not refresh the message list.\n%1").arg(refreshError));
-            m_messageEmptyState->setStyleSheet(QStringLiteral("color: #e58b8b;"));
-        }
-        else if (refreshInFlight && !hasMessages)
-        {
-            m_messageEmptyState->setText(QStringLiteral("Loading messages..."));
-            m_messageEmptyState->setStyleSheet(QString{});
-        }
-        else if (activeTabIsSearch())
-        {
-            m_messageEmptyState->setText(
-                localSearch
-                    ? QStringLiteral("No indexed messages on this device matched your search.")
-                    : QStringLiteral("No server results matched your search in this account."));
-            m_messageEmptyState->setStyleSheet(QString{});
-        }
-        else
-        {
-            m_messageEmptyState->setText(
-                QStringLiteral("No messages are available for the selected mailbox yet."));
-            m_messageEmptyState->setStyleSheet(QString{});
-        }
-        m_messageEmptyState->setVisible(!hasMessages || !refreshError.isEmpty());
-        m_messageView->setVisible(true);
+        m_messageListPanePresenter->showEmptyState(state);
     }
 
     void MainWindow::updateMessageListHeader()
@@ -3782,145 +3768,60 @@ namespace javelin::gui::shell
         const auto* tab = activeTab();
         if (tab == nullptr)
         {
-            m_messageListTitleLabel->setText(QStringLiteral("Messages"));
-            m_messageListMetaLabel->clear();
-            m_searchServerButton->setVisible(false);
-            m_messagePageLabel->clear();
-            m_firstPageButton->setEnabled(false);
-            m_previousPageButton->setEnabled(false);
-            m_pageNumberSpinBox->setEnabled(false);
-            m_nextPageButton->setEnabled(false);
-            m_lastPageButton->setEnabled(false);
+            m_messageListPanePresenter->showNoContext();
             return;
         }
 
         if (const auto* composeTab = std::get_if<ComposeTabState>(&tab->content))
         {
-            m_messageListTitleLabel->setText(composeTab->title);
-            m_messageListMetaLabel->setText(QStringLiteral("Compose"));
-            m_searchServerButton->setVisible(false);
-            m_messagePageLabel->clear();
-            m_firstPageButton->setEnabled(false);
-            m_previousPageButton->setEnabled(false);
-            m_pageNumberSpinBox->setEnabled(false);
-            m_nextPageButton->setEnabled(false);
-            m_lastPageButton->setEnabled(false);
+            m_messageListPanePresenter->showContext(
+                {.title = composeTab->title, .context = QStringLiteral("Compose")});
             return;
         }
 
         if (const auto* contactsTab = std::get_if<ContactsTabState>(&tab->content))
         {
-            m_messageListTitleLabel->setText(contactsTab->title);
-            m_messageListMetaLabel->setText(QStringLiteral("Contacts"));
-            m_searchServerButton->setVisible(false);
-            m_messagePageLabel->clear();
-            m_firstPageButton->setEnabled(false);
-            m_previousPageButton->setEnabled(false);
-            m_pageNumberSpinBox->setEnabled(false);
-            m_nextPageButton->setEnabled(false);
-            m_lastPageButton->setEnabled(false);
+            m_messageListPanePresenter->showContext(
+                {.title = contactsTab->title, .context = QStringLiteral("Contacts")});
             return;
         }
 
         if (const auto* calendarTab = std::get_if<CalendarTabState>(&tab->content))
         {
-            m_messageListTitleLabel->setText(calendarTab->title);
-            m_messageListMetaLabel->setText(QStringLiteral("Calendar"));
-            m_searchServerButton->setVisible(false);
-            m_messagePageLabel->clear();
-            m_firstPageButton->setEnabled(false);
-            m_previousPageButton->setEnabled(false);
-            m_pageNumberSpinBox->setEnabled(false);
-            m_nextPageButton->setEnabled(false);
-            m_lastPageButton->setEnabled(false);
+            m_messageListPanePresenter->showContext(
+                {.title = calendarTab->title, .context = QStringLiteral("Calendar")});
             return;
         }
 
-        const auto updateForPage = [this](const QString& title, const auto& page)
-        {
-            m_messageListTitleLabel->setText(title);
-            const auto step = page.returnedLimit == 0 ? MainWindow::pageSize : page.returnedLimit;
-            const QSignalBlocker pageNumberBlocker{m_pageNumberSpinBox};
-            if (page.total.has_value())
-            {
-                m_messageListMetaLabel->setText(
-                    activeTabIsSearch()
-                        ? QStringLiteral("%1 Matches").arg(static_cast<qulonglong>(*page.total))
-                        : QStringLiteral("%1 Conversations")
-                              .arg(static_cast<qulonglong>(*page.total)));
-                if (*page.total == 0)
-                {
-                    m_messagePageLabel->setText(QStringLiteral("0-0"));
-                }
-                else
-                {
-                    const auto metrics = javelin::gui::messages::pageMetrics(
-                        page.position, page.items.size(), *page.total);
-                    m_messagePageLabel->setText(QStringLiteral("%1-%2")
-                                                    .arg(static_cast<qulonglong>(metrics.start))
-                                                    .arg(static_cast<qulonglong>(metrics.end)));
-                }
-                m_previousPageButton->setEnabled(page.position > 0);
-                const auto metrics = javelin::gui::messages::pageMetrics(
-                    page.position, page.items.size(), *page.total);
-                const auto pages = javelin::gui::messages::pageCount(*page.total, step);
-                const auto currentPage =
-                    pages == 0
-                        ? std::size_t{0}
-                        : std::min(javelin::gui::messages::pageIndex(page.position, step) + 1,
-                                   pages);
-                const auto maximumPage = static_cast<int>(std::min<std::size_t>(
-                    pages, static_cast<std::size_t>(std::numeric_limits<int>::max())));
-                m_pageNumberSpinBox->setRange(pages == 0 ? 0 : 1, maximumPage);
-                m_pageNumberSpinBox->setValue(static_cast<int>(std::min<std::size_t>(
-                    currentPage, static_cast<std::size_t>(std::numeric_limits<int>::max()))));
-                m_pageNumberSpinBox->setSuffix(
-                    QStringLiteral(" of %1").arg(static_cast<qulonglong>(pages)));
-                m_pageNumberSpinBox->setEnabled(pages > 0);
-                m_firstPageButton->setEnabled(page.position > 0);
-                m_nextPageButton->setEnabled(metrics.hasNext);
-                m_lastPageButton->setEnabled(metrics.hasNext);
-            }
-            else
-            {
-                m_messageListMetaLabel->setText(
-                    activeTabIsSearch() ? QStringLiteral("%1 Loaded Matches")
-                                              .arg(static_cast<qulonglong>(page.items.size()))
-                                        : QStringLiteral("%1 Loaded Conversations")
-                                              .arg(static_cast<qulonglong>(page.items.size())));
-                m_messagePageLabel->clear();
-                m_firstPageButton->setEnabled(page.offset > 0);
-                m_previousPageButton->setEnabled(page.offset > 0);
-                m_pageNumberSpinBox->setRange(0, 0);
-                m_pageNumberSpinBox->setValue(0);
-                m_pageNumberSpinBox->setSuffix(QString{});
-                m_pageNumberSpinBox->setEnabled(false);
-                m_nextPageButton->setEnabled(false);
-                m_lastPageButton->setEnabled(false);
-            }
-        };
         std::visit(
-            [this, &updateForPage](const auto& content)
+            [this](const auto& content)
             {
                 if constexpr (std::is_same_v<std::decay_t<decltype(content)>, SearchTabState>)
                 {
-                    m_searchServerButton->setVisible(content.session->canPromoteToOnline());
-                    updateForPage(content.session->title(), content.session->page());
-                    if (content.session->mode() == javelin::app::SearchMode::Local &&
-                        content.session->page().total.has_value())
-                    {
-                        m_messageListMetaLabel->setText(
-                            QStringLiteral("%1 Indexed Matches")
-                                .arg(static_cast<qulonglong>(*content.session->page().total)));
-                    }
+                    const auto& page = content.session->page();
+                    m_messageListPanePresenter->showPage({
+                        .title = content.session->title(),
+                        .offset = page.offset,
+                        .position = page.position,
+                        .itemCount = page.items.size(),
+                        .returnedLimit = page.returnedLimit,
+                        .total = page.total,
+                        .search = true,
+                        .indexedSearch = content.session->mode() == javelin::app::SearchMode::Local,
+                        .canSearchServer = content.session->canPromoteToOnline(),
+                    });
                 }
-                else
+                else if constexpr (std::is_same_v<std::decay_t<decltype(content)>, MailboxTabState>)
                 {
-                    m_searchServerButton->setVisible(false);
-                    if constexpr (std::is_same_v<std::decay_t<decltype(content)>, MailboxTabState>)
-                    {
-                        updateForPage(mailboxTitle(content), content.session->page());
-                    }
+                    const auto& page = content.session->page();
+                    m_messageListPanePresenter->showPage({
+                        .title = mailboxTitle(content),
+                        .offset = page.offset,
+                        .position = page.position,
+                        .itemCount = page.items.size(),
+                        .returnedLimit = page.returnedLimit,
+                        .total = page.total,
+                    });
                 }
             },
             tab->content);

@@ -11,6 +11,7 @@
 #include <QModelIndex>
 
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <type_traits>
@@ -89,8 +90,9 @@ namespace javelin::gui::shell
 
 namespace javelin::gui::messages
 {
+    class MessageListPanePresenter;
     class MessageListModel;
-}
+} // namespace javelin::gui::messages
 
 namespace javelin::gui::messageview
 {
@@ -133,7 +135,7 @@ namespace javelin::gui::shell
             javelin::app::MailApplicationService& mailService,
             javelin::app::MessageNavigationCoordinator& messageNavigationCoordinator,
             QWidget* parent = nullptr);
-        ~MainWindow() override = default;
+        ~MainWindow() override;
         void openPreferencesForConnection(const QString& connectionId);
 
       Q_SIGNALS:
@@ -374,6 +376,8 @@ namespace javelin::gui::shell
         javelin::app::MailApplicationService& m_mailService;
         javelin::app::MessageNavigationCoordinator& m_messageNavigationCoordinator;
         MessageFileController* m_messageFileController = nullptr;
+        std::unique_ptr<javelin::gui::messages::MessageListPanePresenter>
+            m_messageListPanePresenter;
         QSplitter* m_mainSplitter = nullptr;
         QStackedWidget* m_contentStack = nullptr;
         QWidget* m_mailboxPane = nullptr;
