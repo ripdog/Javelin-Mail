@@ -49,8 +49,6 @@ namespace javelin::jmap
         javelin::jmap::cache::DatabaseConnection* databaseConnection = nullptr;
         javelin::jmap::api::AbstractTransport* resourceTransport = nullptr;
         javelin::jmap::api::JmapMethodTransport* methodTransport = nullptr;
-        QString statusSummary = QStringLiteral(
-            "JMAP core scaffolded. Session discovery and typed protocol live here next.");
     };
 
     namespace
@@ -937,11 +935,6 @@ namespace javelin::jmap
 
     JmapCore::~JmapCore() = default;
 
-    QString JmapCore::statusSummary() const
-    {
-        return m_impl->statusSummary;
-    }
-
     QCoro::Task<SessionRefreshResult> JmapCore::refreshSession(LiveConnectionSettings settings,
                                                                std::string ownerAccountId)
     {
@@ -1182,11 +1175,11 @@ namespace javelin::jmap
             reportProgress(QStringLiteral("Cached %1 threaded conversations.").arg(emailCount));
         }
 
-        m_impl->statusSummary = QStringLiteral("Loaded %1 mailboxes and %2 messages from %3.")
-                                    .arg(parsedMailboxes.list.size())
-                                    .arg(emailCount)
-                                    .arg(QString::fromStdString(settings.loginEmail));
-        qInfo().noquote() << "JMAP core refresh success" << m_impl->statusSummary;
+        const auto refreshSummary = QStringLiteral("Loaded %1 mailboxes and %2 messages from %3.")
+                                        .arg(parsedMailboxes.list.size())
+                                        .arg(emailCount)
+                                        .arg(QString::fromStdString(settings.loginEmail));
+        qInfo().noquote() << "JMAP core refresh success" << refreshSummary;
 
         const auto pendingSubmit = co_await submitPendingEmailMutations(settings, accountId);
         if (const auto* summary = std::get_if<SubmittedEmailMutations>(&pendingSubmit);

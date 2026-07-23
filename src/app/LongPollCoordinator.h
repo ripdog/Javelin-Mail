@@ -139,7 +139,6 @@ namespace javelin::app
         [[nodiscard]] MailboxObservation observeMailbox(std::string accountId,
                                                         std::string mailboxId);
         [[nodiscard]] bool requestAccountSynchronization(std::string_view accountId);
-        [[nodiscard]] QString statusSummary() const;
         void publishMailboxWindowCommitted(QString accountId, QString mailboxId, std::size_t offset,
                                            std::size_t limit);
         [[nodiscard]] QCoro::Task<MailboxWindowResult>

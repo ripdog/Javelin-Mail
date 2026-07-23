@@ -330,11 +330,6 @@ namespace javelin::app
         return coordinator->second->requestSynchronization();
     }
 
-    QString MailApplicationService::statusSummary() const
-    {
-        return m_jmapCore.statusSummary();
-    }
-
     void MailApplicationService::publishMailboxWindowCommitted(QString accountId, QString mailboxId,
                                                                const std::size_t offset,
                                                                const std::size_t limit)

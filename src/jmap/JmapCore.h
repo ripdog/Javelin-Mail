@@ -192,7 +192,6 @@ namespace javelin::jmap
         JmapCore(JmapCore&&) = delete;
         JmapCore& operator=(JmapCore&&) = delete;
 
-        [[nodiscard]] QString statusSummary() const;
         [[nodiscard]] QCoro::Task<LiveRefreshResult>
         refreshFromServer(LiveConnectionSettings settings,
                           std::function<void(const QString&)> progressCallback = {},

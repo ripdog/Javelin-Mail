@@ -1274,7 +1274,6 @@ namespace javelin::gui::shell
         centralLayout->addWidget(m_contentStack);
 
         setCentralWidget(centralContainer);
-        m_statusBar->showMessage(m_mailService.statusSummary());
         updateEmptyStates();
         updateMessageListHeader();
     }

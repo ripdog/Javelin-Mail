@@ -67,14 +67,6 @@ namespace
     }
 } // namespace
 
-TEST_CASE("JmapCore exposes a non-empty status summary", "[jmap]")
-{
-    const javelin::jmap::JmapCore core;
-
-    CHECK_FALSE(core.statusSummary().isEmpty());
-    CHECK(core.statusSummary().contains(QStringLiteral("JMAP")));
-}
-
 TEST_CASE("JmapCore startup session refresh discovers and caches websocket capability",
           "[jmap][core][session][websocket]")
 {
