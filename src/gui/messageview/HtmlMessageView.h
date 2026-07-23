@@ -44,7 +44,6 @@ namespace javelin::gui::messageview
         bool eventFilter(QObject* watched, QEvent* event) override;
         void installRenderEventFilter(QObject* object);
         void recordViewPaint(QObject* paintedObject);
-        void traceRenderEvent(const QString& event, const QString& detail = {}) const;
 
         QWebEngineView* m_view = nullptr;
         bool m_remoteContentEnabled = false;
@@ -53,7 +52,6 @@ namespace javelin::gui::messageview
         QUrl m_expectedDocumentUrl;
         QString m_expectedReadyTitle;
         QElapsedTimer m_renderTimer;
-        int m_tracedPaintCount = 0;
         int m_readyPaintCount = 0;
         bool m_tracePaints = false;
         bool m_waitingForSurfacePaint = false;

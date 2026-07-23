@@ -5,8 +5,6 @@
 #include <QAction>
 #include <QChildEvent>
 #include <QContextMenuEvent>
-#include <QCryptographicHash>
-#include <QDebug>
 #include <QDesktopServices>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -18,7 +16,6 @@
 #include <QVBoxLayout>
 #include <QVariant>
 #include <QWebEngineContextMenuRequest>
-#include <QWebEngineLoadingInfo>
 #include <QWebEnginePage>
 #include <QWebEngineSettings>
 #include <QWebEngineView>
@@ -36,22 +33,6 @@ namespace javelin::gui::messageview
             const auto scheme = url.scheme();
             return scheme == QStringLiteral("http") || scheme == QStringLiteral("https") ||
                    scheme == QStringLiteral("mailto");
-        }
-
-        [[nodiscard]] QString summarizeUrl(const QUrl& url)
-        {
-            const auto encoded = url.toEncoded();
-            if (url.scheme() != QStringLiteral("data") && encoded.size() <= 256)
-            {
-                return QString::fromUtf8(encoded);
-            }
-
-            const auto digest =
-                QCryptographicHash::hash(encoded, QCryptographicHash::Sha256).toHex().left(16);
-            return QStringLiteral("%1:[bytes=%2 sha256=%3]")
-                .arg(url.scheme())
-                .arg(encoded.size())
-                .arg(QString::fromLatin1(digest));
         }
 
         class ExternalNavigationPage final : public QWebEnginePage
@@ -180,7 +161,6 @@ namespace javelin::gui::messageview
                         return;
                     }
 
-                    traceRenderEvent(QStringLiteral("render-ready-title"));
                     m_expectedReadyTitle.clear();
                     m_waitingForSurfacePaint = true;
                 });
@@ -191,17 +171,6 @@ namespace javelin::gui::messageview
         settings->setAttribute(QWebEngineSettings::ErrorPageEnabled, false);
         settings->setAttribute(QWebEngineSettings::PluginsEnabled, false);
         settings->setAttribute(QWebEngineSettings::PlaybackRequiresUserGesture, true);
-        connect(m_view->page(), &QWebEnginePage::loadingChanged, this,
-                [this](const QWebEngineLoadingInfo& loadingInfo)
-                {
-                    auto detail = QStringLiteral("status=%1 matches=%2")
-                                      .arg(static_cast<int>(loadingInfo.status()))
-                                      .arg(loadingInfo.url() == m_expectedDocumentUrl);
-                    detail += QStringLiteral(" eventUrl=") + summarizeUrl(loadingInfo.url());
-                    detail += QStringLiteral(" expected=") + summarizeUrl(m_expectedDocumentUrl);
-                    traceRenderEvent(QStringLiteral("loading-changed"), detail);
-                });
-
         layout->addWidget(m_view);
     }
 
@@ -227,13 +196,10 @@ namespace javelin::gui::messageview
         m_expectedReadyTitle = QStringLiteral("__javelin_render_ready_%1")
                                    .arg(static_cast<qulonglong>(m_documentGeneration));
         m_renderTimer.restart();
-        m_tracedPaintCount = 0;
         m_readyPaintCount = 0;
         m_tracePaints = true;
         m_waitingForSurfacePaint = false;
         m_documentReadyAccepted = false;
-        traceRenderEvent(QStringLiteral("navigation-requested"),
-                         QStringLiteral("htmlBytes=%1").arg(static_cast<qulonglong>(html.size())));
 
         auto documentHtml = QString::fromUtf8(html.data(), static_cast<qsizetype>(html.size()));
         const auto generationMarker =
@@ -499,7 +465,6 @@ namespace javelin::gui::messageview
                 if (result.toString() == expected)
                 {
                     guard->m_documentReadyAccepted = true;
-                    guard->traceRenderEvent(QStringLiteral("document-ready-probe"));
                     const auto documentUrl = guard->m_expectedDocumentUrl;
                     const auto readyTitle = guard->m_expectedReadyTitle;
                     guard->applyRemoteContentPolicy(
@@ -515,8 +480,6 @@ namespace javelin::gui::messageview
 
                 if (guard->m_renderTimer.elapsed() >= 30000)
                 {
-                    guard->traceRenderEvent(QStringLiteral("document-ready-probe-timeout"),
-                                            QStringLiteral("observed=%1").arg(result.toString()));
                     return;
                 }
 
@@ -535,15 +498,12 @@ namespace javelin::gui::messageview
     {
         if (documentUrl != m_expectedDocumentUrl || readyTitle != m_expectedReadyTitle)
         {
-            traceRenderEvent(QStringLiteral("render-wait-discarded"));
             return;
         }
 
-        // LoadSucceededStatus only covers navigation. Keeping the view visible behind the native
-        // overlay and crossing two animation frames gives Chromium an opportunity to submit the
-        // replacement document. The first internal render-widget paint after that milestone can
-        // still contain the previous framebuffer, so the overlay remains through two such paints.
-        traceRenderEvent(QStringLiteral("render-wait-scheduled"));
+        // Crossing two animation frames gives Chromium an opportunity to submit the replacement
+        // document. The first internal render-widget paint after that milestone can still contain
+        // the previous framebuffer, so documentLoaded waits through two such paints.
         m_view->page()->runJavaScript(QStringLiteral(
                                           R"JS(
 (() => {
@@ -606,18 +566,6 @@ namespace javelin::gui::messageview
             ++m_readyPaintCount;
         }
 
-        if (m_tracedPaintCount < 8 || (readyWasReported && m_readyPaintCount <= 3))
-        {
-            ++m_tracedPaintCount;
-            traceRenderEvent(
-                QStringLiteral("view-painted"),
-                QStringLiteral("paint=%1 readyPaint=%2 readyReported=%3 object=%4")
-                    .arg(m_tracedPaintCount)
-                    .arg(m_readyPaintCount)
-                    .arg(readyWasReported)
-                    .arg(QString::fromLatin1(paintedObject->metaObject()->className())));
-        }
-
         if (m_waitingForSurfacePaint && isRenderSurface && m_readyPaintCount >= 2)
         {
             m_waitingForSurfacePaint = false;
@@ -631,12 +579,9 @@ namespace javelin::gui::messageview
                     if (generation != m_documentGeneration || documentId != m_expectedDocumentId ||
                         documentUrl != m_expectedDocumentUrl)
                     {
-                        traceRenderEvent(QStringLiteral("surface-paint-release-discarded"));
                         return;
                     }
 
-                    traceRenderEvent(QStringLiteral("surface-paint-ready"),
-                                     QStringLiteral("readyPaints=%1").arg(m_readyPaintCount));
                     Q_EMIT documentLoaded(documentId);
                 },
                 Qt::QueuedConnection);
@@ -655,7 +600,6 @@ namespace javelin::gui::messageview
                         return;
                     }
 
-                    traceRenderEvent(QStringLiteral("surface-repaint-requested"));
                     renderWidget->update();
                 },
                 Qt::QueuedConnection);
@@ -665,21 +609,6 @@ namespace javelin::gui::messageview
         {
             m_tracePaints = false;
         }
-    }
-
-    void HtmlMessageView::traceRenderEvent(const QString& event, const QString& detail) const
-    {
-        auto documentId = m_expectedDocumentId;
-        documentId.replace(QLatin1Char('\n'), QLatin1Char('/'));
-        qInfo().noquote() << QStringLiteral(
-                                 "HTML message render generation=%1 elapsedMs=%2 event=%3 "
-                                 "document=%4 viewVisible=%5 pageVisible=%6 url=%7 %8")
-                                 .arg(static_cast<qulonglong>(m_documentGeneration))
-                                 .arg(m_renderTimer.isValid() ? m_renderTimer.elapsed() : -1)
-                                 .arg(event, documentId)
-                                 .arg(m_view->isVisible())
-                                 .arg(m_view->page()->isVisible())
-                                 .arg(summarizeUrl(m_view->url()), detail);
     }
 
 } // namespace javelin::gui::messageview
