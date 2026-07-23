@@ -37,13 +37,15 @@ namespace javelin::gui::messageview
         void hoveredLinkChanged(QString url);
 
       private:
-        void applyRemoteContentPolicy();
+        void applyRemoteContentPolicy(std::function<void()> callback = {});
+        void awaitRenderedDocument(const QUrl& documentUrl, const QString& readyTitle);
 
         QWebEngineView* m_view = nullptr;
         bool m_remoteContentEnabled = false;
         std::uint64_t m_documentGeneration = 0;
         QString m_expectedDocumentId;
         QUrl m_expectedDocumentUrl;
+        QString m_expectedReadyTitle;
     };
 
 } // namespace javelin::gui::messageview

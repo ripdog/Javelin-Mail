@@ -11,6 +11,7 @@
 #include <QPointer>
 #include <QString>
 #include <QVBoxLayout>
+#include <QVariant>
 #include <QWebEngineContextMenuRequest>
 #include <QWebEngineLoadingInfo>
 #include <QWebEnginePage>
@@ -149,6 +150,18 @@ namespace javelin::gui::messageview
         m_view->setPage(new MessageWebEnginePage(m_view));
         connect(m_view->page(), &QWebEnginePage::linkHovered, this,
                 [this](const QString& url) { Q_EMIT hoveredLinkChanged(url); });
+        connect(m_view->page(), &QWebEnginePage::titleChanged, this,
+                [this](const QString& title)
+                {
+                    if (m_expectedReadyTitle.isEmpty() || title != m_expectedReadyTitle ||
+                        m_view->url() != m_expectedDocumentUrl)
+                    {
+                        return;
+                    }
+
+                    m_expectedReadyTitle.clear();
+                    Q_EMIT documentLoaded(m_expectedDocumentId);
+                });
         auto* settings = m_view->settings();
         settings->setAttribute(QWebEngineSettings::JavascriptEnabled, true);
         settings->setAttribute(QWebEngineSettings::LocalContentCanAccessFileUrls, false);
@@ -164,8 +177,18 @@ namespace javelin::gui::messageview
                     {
                         return;
                     }
-                    applyRemoteContentPolicy();
-                    Q_EMIT documentLoaded(m_expectedDocumentId);
+
+                    const auto documentUrl = m_expectedDocumentUrl;
+                    const auto readyTitle = m_expectedReadyTitle;
+                    const QPointer<HtmlMessageView> guard{this};
+                    applyRemoteContentPolicy(
+                        [guard, documentUrl, readyTitle]
+                        {
+                            if (guard)
+                            {
+                                guard->awaitRenderedDocument(documentUrl, readyTitle);
+                            }
+                        });
                 });
 
         layout->addWidget(m_view);
@@ -190,6 +213,8 @@ namespace javelin::gui::messageview
         m_expectedDocumentUrl.setFragment(QStringLiteral("%1:%2").arg(
             m_expectedDocumentId,
             QString::number(static_cast<qulonglong>(++m_documentGeneration))));
+        m_expectedReadyTitle = QStringLiteral("__javelin_render_ready_%1")
+                                   .arg(static_cast<qulonglong>(m_documentGeneration));
         m_view->setHtml(QString::fromUtf8(html.data(), static_cast<qsizetype>(html.size())),
                         m_expectedDocumentUrl);
     }
@@ -200,6 +225,7 @@ namespace javelin::gui::messageview
         ++m_documentGeneration;
         m_expectedDocumentId.clear();
         m_expectedDocumentUrl = {};
+        m_expectedReadyTitle.clear();
         m_view->setHtml(QString{});
     }
 
@@ -367,7 +393,7 @@ namespace javelin::gui::messageview
 )JS"));
     }
 
-    void HtmlMessageView::applyRemoteContentPolicy()
+    void HtmlMessageView::applyRemoteContentPolicy(std::function<void()> callback)
     {
         m_view->settings()->setAttribute(QWebEngineSettings::LocalContentCanAccessRemoteUrls,
                                          m_remoteContentEnabled);
@@ -394,7 +420,39 @@ namespace javelin::gui::messageview
   });
 })();
 )JS")
-                .arg(m_remoteContentEnabled ? QStringLiteral("true") : QStringLiteral("false")));
+                .arg(m_remoteContentEnabled ? QStringLiteral("true") : QStringLiteral("false")),
+            [callback = std::move(callback)](const QVariant&)
+            {
+                if (callback)
+                {
+                    callback();
+                }
+            });
+    }
+
+    void HtmlMessageView::awaitRenderedDocument(const QUrl& documentUrl, const QString& readyTitle)
+    {
+        if (documentUrl != m_expectedDocumentUrl || readyTitle != m_expectedReadyTitle ||
+            m_view->url() != documentUrl)
+        {
+            return;
+        }
+
+        // LoadSucceededStatus only covers navigation. Keeping the view visible behind the native
+        // overlay and crossing two animation frames gives Chromium an opportunity to submit the
+        // replacement document before titleChanged releases that overlay.
+        m_view->page()->runJavaScript(QStringLiteral(
+                                          R"JS(
+(() => {
+  const readyTitle = "%1";
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      document.title = readyTitle;
+    });
+  });
+})();
+)JS")
+                                          .arg(readyTitle));
     }
 
 } // namespace javelin::gui::messageview

@@ -29,6 +29,7 @@
 #include <QSettings>
 #include <QSignalBlocker>
 #include <QSizePolicy>
+#include <QStackedLayout>
 #include <QStackedWidget>
 #include <QStringList>
 #include <QStyle>
@@ -727,8 +728,69 @@ namespace javelin::gui::messageview
         m_multipleSelectionLayout->setSpacing(0);
         m_multipleSelectionScrollArea->setWidget(m_multipleSelectionWidget);
 
-        m_htmlView = new HtmlMessageView(this);
+        m_htmlViewHost = new QWidget(this);
+        auto* htmlViewLayout = new QStackedLayout(m_htmlViewHost);
+        htmlViewLayout->setContentsMargins(0, 0, 0, 0);
+        htmlViewLayout->setStackingMode(QStackedLayout::StackAll);
+
+        // WebEngine must remain visible while loading so Chromium renders the replacement
+        // document. This native overlay prevents its previous frame from reaching the user.
+        m_htmlView = new HtmlMessageView(m_htmlViewHost);
         m_htmlView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+        htmlViewLayout->addWidget(m_htmlView);
+
+        m_htmlLoadingOverlay = new QWidget(m_htmlViewHost);
+        m_htmlLoadingOverlay->setObjectName(QStringLiteral("htmlMessageLoadingOverlay"));
+        m_htmlLoadingOverlay->setAttribute(Qt::WA_StyledBackground, true);
+        m_htmlLoadingOverlay->setStyleSheet(
+            QStringLiteral("#htmlMessageLoadingOverlay { background: palette(window); }"));
+        auto* htmlLoadingOuterLayout = new QVBoxLayout(m_htmlLoadingOverlay);
+        htmlLoadingOuterLayout->setContentsMargins(0, 12, 0, 12);
+        htmlLoadingOuterLayout->addStretch(1);
+
+        auto* htmlLoadingCard = new QWidget(m_htmlLoadingOverlay);
+        htmlLoadingCard->setObjectName(QStringLiteral("htmlMessageLoadingCard"));
+        htmlLoadingCard->setMinimumWidth(280);
+        htmlLoadingCard->setMaximumWidth(520);
+        htmlLoadingCard->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
+        htmlLoadingCard->setStyleSheet(
+            QStringLiteral("#htmlMessageLoadingCard {"
+                           " background: #1f2126;"
+                           " border: 1px solid #393d46;"
+                           " border-radius: 16px;"
+                           "}"
+                           "#htmlMessageLoadingCard QLabel { color: #e6e9ef; }"));
+        auto* htmlLoadingCardLayout = new QVBoxLayout(htmlLoadingCard);
+        htmlLoadingCardLayout->setContentsMargins(24, 22, 24, 22);
+        htmlLoadingCardLayout->setSpacing(10);
+
+        auto* htmlLoadingTitle = new QLabel(QStringLiteral("Loading message"), htmlLoadingCard);
+        auto htmlLoadingTitleFont = htmlLoadingTitle->font();
+        htmlLoadingTitleFont.setPointSize(htmlLoadingTitleFont.pointSize() + 2);
+        htmlLoadingTitleFont.setBold(true);
+        htmlLoadingTitle->setFont(htmlLoadingTitleFont);
+
+        auto* htmlLoadingIndicator = new QProgressBar(htmlLoadingCard);
+        htmlLoadingIndicator->setRange(0, 0);
+        htmlLoadingIndicator->setTextVisible(false);
+        htmlLoadingIndicator->setFixedHeight(8);
+        htmlLoadingIndicator->setStyleSheet(QStringLiteral("QProgressBar {"
+                                                           " background: #2a2d34;"
+                                                           " border: 1px solid #393d46;"
+                                                           " border-radius: 4px;"
+                                                           "}"
+                                                           "QProgressBar::chunk {"
+                                                           " background: #7fb0ff;"
+                                                           " border-radius: 4px;"
+                                                           "}"));
+
+        htmlLoadingCardLayout->addWidget(htmlLoadingTitle);
+        htmlLoadingCardLayout->addWidget(htmlLoadingIndicator);
+        htmlLoadingOuterLayout->addWidget(htmlLoadingCard, 0, Qt::AlignHCenter);
+        htmlLoadingOuterLayout->addStretch(1);
+        htmlViewLayout->addWidget(m_htmlLoadingOverlay);
+        htmlViewLayout->setCurrentWidget(m_htmlLoadingOverlay);
+
         connect(m_htmlView, &HtmlMessageView::viewSourceRequested, this,
                 &MessageViewContainer::viewSourceRequested);
         connect(m_htmlView, &HtmlMessageView::hoveredLinkChanged, this,
@@ -753,7 +815,7 @@ namespace javelin::gui::messageview
         m_bodyStack->addWidget(m_placeholderPanel);
         m_bodyStack->addWidget(m_multipleSelectionScrollArea);
         m_bodyStack->addWidget(m_plainTextView);
-        m_bodyStack->addWidget(m_htmlView);
+        m_bodyStack->addWidget(m_htmlViewHost);
 
         m_attachmentStatusLabel = new QLabel(this);
         m_attachmentStatusLabel->setWordWrap(false);
@@ -930,7 +992,7 @@ namespace javelin::gui::messageview
             m_bodyStack->setCurrentWidget(m_plainTextView);
             break;
         case ActiveView::Html:
-            m_bodyStack->setCurrentWidget(m_htmlView);
+            m_bodyStack->setCurrentWidget(m_htmlViewHost);
             break;
         }
     }
@@ -1430,6 +1492,7 @@ namespace javelin::gui::messageview
         updateRemoteContentButton();
         updateLanguageBanner();
         m_loadingIndicator->setVisible(false);
+        m_htmlLoadingOverlay->setVisible(false);
         m_placeholderDetailLabel->setVisible(true);
 
         const auto presentation =
@@ -1562,18 +1625,15 @@ namespace javelin::gui::messageview
 
         if (m_snapshot->htmlBody.has_value())
         {
+            setActiveView(ActiveView::Html);
             if (m_htmlDocumentLoaded)
             {
-                setActiveView(ActiveView::Html);
                 startLanguageDetection();
             }
             else
             {
-                m_placeholderTitleLabel->setText(QStringLiteral("Loading message"));
-                m_placeholderDetailLabel->clear();
-                m_placeholderDetailLabel->setVisible(false);
-                m_loadingIndicator->setVisible(true);
-                setActiveView(ActiveView::Placeholder);
+                m_htmlLoadingOverlay->setVisible(true);
+                m_htmlLoadingOverlay->raise();
             }
         }
         else if (m_snapshot->plainTextBody.has_value())
