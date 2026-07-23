@@ -93,11 +93,10 @@ namespace javelin::gui::shell
 {
     Q_LOGGING_CATEGORY(logGuiMailbox, "gui.mailbox")
     Q_LOGGING_CATEGORY(logUserOperations, "user.operations")
-    void MainWindow::presentError(const javelin::jmap::OperationError& error, const QString& title)
+    void MainWindow::presentError(const javelin::jmap::OperationError& error)
     {
         qCWarning(logUserOperations).noquote() << "operation failed" << error.message;
         m_statusBar->showMessage(error.message, 10000);
-        Q_UNUSED(title);
     }
 
     void MainWindow::presentUserInterventionError(const QString& message)
@@ -992,13 +991,6 @@ namespace javelin::gui::shell
             QStringLiteral("Replace results indexed on this device with authoritative server "
                            "results"));
         m_searchServerButton->setVisible(false);
-        // m_messageQuickFilterButton = new QToolButton(messageHeader);
-        // m_messageQuickFilterButton->setIcon(
-        //     javelin::gui::themedSvgIcon(QStringLiteral(":/icons/thunderbird-icons/filter.svg"),
-        //                                 palette().color(QPalette::Text)));
-        // m_messageQuickFilterButton->setText(QStringLiteral("Quick Filter"));
-        // m_messageQuickFilterButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-        // m_messageQuickFilterButton->setEnabled(false);
         m_messageSortButton = new QToolButton(messageHeader);
         m_messageSortButton->setIcon(javelin::gui::themedSvgIcon(
             QStringLiteral(":/icons/thunderbird-icons/display-options.svg"),
@@ -1039,7 +1031,6 @@ namespace javelin::gui::shell
         messageHeaderLayout->addWidget(m_nextPageButton);
         messageHeaderLayout->addWidget(m_lastPageButton);
         messageHeaderLayout->addWidget(m_messageSortButton);
-        // messageHeaderLayout->addWidget(m_messageQuickFilterButton);
         m_messageEmptyState = new QLabel(
             QStringLiteral("No messages are available for the selected mailbox yet."), messagePane);
         m_messageEmptyState->setWordWrap(true);

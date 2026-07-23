@@ -220,8 +220,7 @@ namespace javelin::gui::shell
         };
 
         void createActions();
-        void presentError(const javelin::jmap::OperationError& error,
-                          const QString& title = QStringLiteral("Action Required"));
+        void presentError(const javelin::jmap::OperationError& error);
         void presentUserInterventionError(const QString& message);
         void setupUi();
         void connectSelection();
@@ -392,7 +391,6 @@ namespace javelin::gui::shell
         QLabel* m_messageListMetaLabel = nullptr;
         QLabel* m_messagePageLabel = nullptr;
         QToolButton* m_searchServerButton = nullptr;
-        QToolButton* m_messageQuickFilterButton = nullptr;
         QToolButton* m_messageSortButton = nullptr;
         QToolButton* m_firstPageButton = nullptr;
         QToolButton* m_previousPageButton = nullptr;
