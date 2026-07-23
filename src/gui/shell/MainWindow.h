@@ -23,6 +23,7 @@ class QCloseEvent;
 class QLabel;
 class QLineEdit;
 class QListView;
+class QMenu;
 class QPoint;
 class QSplitter;
 class QStackedWidget;
@@ -200,6 +201,12 @@ namespace javelin::gui::shell
             Calendar,
         };
 
+        enum class MessageTransferOperation
+        {
+            Move,
+            Copy,
+        };
+
         struct MessageContentRequestState
         {
             std::string accountId;
@@ -299,12 +306,14 @@ namespace javelin::gui::shell
                                javelin::app::MessageSelection selection);
         void queueDestroyEmails(std::string accountId, std::optional<std::string> sourceMailboxId,
                                 javelin::app::MessageSelection selection);
-        void queueMoveEmails(std::string accountId, std::optional<std::string> sourceMailboxId,
-                             std::string destinationMailboxId,
-                             javelin::app::MessageSelection selection, QString successMessage);
-        void queueCopyEmails(std::string accountId, std::optional<std::string> sourceMailboxId,
-                             std::string destinationMailboxId,
-                             javelin::app::MessageSelection selection, QString successMessage);
+        void populateMailboxDestinationMenus(QMenu* moveMenu, QMenu* copyMenu,
+                                             std::string accountId,
+                                             std::optional<std::string> sourceMailboxId,
+                                             javelin::app::MessageSelection selection);
+        void queueTransferEmails(std::string accountId, std::optional<std::string> sourceMailboxId,
+                                 std::string destinationMailboxId,
+                                 javelin::app::MessageSelection selection,
+                                 MessageTransferOperation operation, QString successMessage);
         void queueMarkEmailRead(std::string accountId, std::string emailId);
         void toggleMessageFlagged(const QModelIndex& index);
         void markSelectedEmailUnread();
