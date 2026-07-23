@@ -7,6 +7,7 @@
 #include "app/MessageNavigationCoordinator.h"
 #include "app/SearchSession.h"
 #include "gui/IconUtils.h"
+#include "gui/calendar/CalendarPresentation.h"
 #include "gui/calendar/EventDialog.h"
 #include "gui/calendar/MonthCalendarWidget.h"
 #include "gui/compose/ComposeTabWidget.h"
@@ -1438,7 +1439,6 @@ namespace javelin::gui::shell
         {
             std::vector<javelin::gui::calendar::MonthEvent> displayEvents;
             std::vector<javelin::gui::calendar::CalendarDisplay> calendarDisplays;
-            std::unordered_map<std::string, QColor> calendarColors;
             const javelin::jmap::calendar::VisibleInterval interval{
                 .start = {.value = start.toString(Qt::ISODate).toStdString() + "T00:00:00"},
                 .end = {.value = end.toString(Qt::ISODate).toStdString() + "T00:00:00"}};
@@ -1449,79 +1449,19 @@ namespace javelin::gui::shell
                 const auto listed = m_calendarService.calendars(account.accountId);
                 const auto* calendars =
                     std::get_if<std::vector<javelin::jmap::calendar::Calendar>>(&listed);
-                if (calendars != nullptr)
-                {
-                    for (const auto& calendar : *calendars)
-                    {
-                        const auto key = account.accountId + '\n' + calendar.id;
-                        const auto color = calendar.color
-                                               ? QColor{QString::fromStdString(*calendar.color)}
-                                               : widget->palette().color(QPalette::Highlight);
-                        calendarColors.emplace(key, color);
-                        calendarDisplays.push_back({.id = key,
-                                                    .name = QStringLiteral("%1 — %2").arg(
-                                                        QString::fromStdString(calendar.name),
-                                                        QString::fromStdString(account.name)),
-                                                    .color = color,
-                                                    .visible = calendar.isVisible,
-                                                    .writable = calendar.myRights.mayWriteAll ||
-                                                                calendar.myRights.mayWriteOwn,
-                                                    .defaultDestination = calendar.isDefault});
-                    }
-                }
                 const auto loaded =
                     m_calendarService.loadCached(account.accountId, interval, timeZone);
                 const auto* window =
                     std::get_if<std::optional<javelin::jmap::cache::CalendarWindow>>(&loaded);
-                if (window == nullptr || !window->has_value())
-                    continue;
-                std::unordered_map<std::string, const javelin::jmap::calendar::CalendarEvent*>
-                    events;
-                for (const auto& event : window->value().events)
-                    events.emplace(event.id, &event);
-                for (const auto& occurrence : window->value().occurrences)
-                {
-                    const auto event = events.find(occurrence.eventId);
-                    if (event == events.end())
-                        continue;
-                    const auto calendarId = std::ranges::find_if(
-                        event->second->calendarIds, [](const auto& item) { return item.second; });
-                    auto startTime = QDateTime::fromString(
-                        QString::fromStdString(occurrence.localStart.value), Qt::ISODate);
-                    auto endTime = QDateTime::fromString(
-                        QString::fromStdString(occurrence.localEnd.value), Qt::ISODate);
-                    if (!endTime.isValid() || endTime <= startTime)
-                        endTime = startTime.addSecs(3600);
-                    const auto displayCalendarId =
-                        calendarId == event->second->calendarIds.end()
-                            ? account.accountId + '\n'
-                            : account.accountId + '\n' + calendarId->first;
-                    const auto color = calendarColors.find(displayCalendarId);
-                    auto title = event->second->title;
-                    if (occurrence.recurrenceId)
-                    {
-                        const auto occurrenceOverride =
-                            event->second->recurrenceOverrides.find(occurrence.recurrenceId->value);
-                        if (occurrenceOverride != event->second->recurrenceOverrides.end() &&
-                            occurrenceOverride->second.title)
-                            title = *occurrenceOverride->second.title;
-                    }
-                    displayEvents.push_back(
-                        {.accountId = account.accountId,
-                         .calendarId = displayCalendarId,
-                         .eventId = event->second->id,
-                         .title = QString::fromStdString(title),
-                         .color = color == calendarColors.end()
-                                      ? widget->palette().color(QPalette::Highlight)
-                                      : color->second,
-                         .start = startTime,
-                         .end = endTime,
-                         .allDay = occurrence.allDay,
-                         .recurrenceId = occurrence.recurrenceId
-                                             ? std::optional{occurrence.recurrenceId->value}
-                                             : std::nullopt,
-                         .recurring = occurrence.recurrenceId.has_value()});
-                }
+                auto presentation = javelin::gui::calendar::buildCalendarAccountPresentation(
+                    account,
+                    calendars != nullptr ? *calendars
+                                         : std::vector<javelin::jmap::calendar::Calendar>{},
+                    window != nullptr ? *window
+                                      : std::optional<javelin::jmap::cache::CalendarWindow>{},
+                    widget->palette().color(QPalette::Highlight));
+                calendarDisplays.append_range(std::move(presentation.calendars));
+                displayEvents.append_range(std::move(presentation.events));
             }
             widget->setCalendars(std::move(calendarDisplays));
             widget->setEvents(std::move(displayEvents));

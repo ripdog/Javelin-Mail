@@ -120,6 +120,8 @@ set(JAVELIN_FORMAT_FILES
     src/gui/calendar/MonthCalendarLayout.h
     src/gui/calendar/EventDialog.cpp
     src/gui/calendar/EventDialog.h
+    src/gui/calendar/CalendarPresentation.cpp
+    src/gui/calendar/CalendarPresentation.h
     src/gui/calendar/RecurrenceDialog.cpp
     src/gui/calendar/RecurrenceDialog.h
     src/gui/calendar/RecurrencePattern.cpp
@@ -596,6 +598,8 @@ add_library(javelin_gui STATIC
     src/gui/calendar/MonthCalendarLayout.h
     src/gui/calendar/EventDialog.cpp
     src/gui/calendar/EventDialog.h
+    src/gui/calendar/CalendarPresentation.cpp
+    src/gui/calendar/CalendarPresentation.h
     src/gui/calendar/RecurrenceDialog.cpp
     src/gui/calendar/RecurrenceDialog.h
     src/gui/calendar/RecurrencePattern.cpp
