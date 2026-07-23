@@ -183,9 +183,9 @@ namespace javelin::gui::search
                     .body = optionalStringSetting(settings, QStringLiteral("searchBody")),
                 },
             .restored =
-                RestoredSearchState{
+                javelin::app::RestoredSearchState{
                     .page =
-                        SearchPageState{
+                        javelin::app::MessageListPage{
                             .offset = static_cast<std::size_t>(
                                 settings.value(QStringLiteral("offset"), 0).toULongLong()),
                             .position = static_cast<std::size_t>(
@@ -207,15 +207,23 @@ namespace javelin::gui::search
                             .stale = true,
                             .refreshError = {},
                         },
-                    .authoritativeResults = true,
+                    .mode = settings.value(QStringLiteral("onlineSearch"), false).toBool()
+                                ? javelin::app::SearchMode::Online
+                                : javelin::app::SearchMode::Local,
+                    .sessionId =
+                        settings.value(QStringLiteral("searchSessionId")).toString().toStdString(),
                 },
         };
     }
 
-    void writeSearchSessionSettings(QSettings& settings, const SearchSession& session)
+    void writeSearchSessionSettings(QSettings& settings, const javelin::app::SearchSession& session)
     {
         settings.setValue(QStringLiteral("type"), QStringLiteral("search"));
         settings.setValue(QStringLiteral("query"), QString::fromStdString(session.query()));
+        settings.setValue(QStringLiteral("onlineSearch"),
+                          session.mode() == javelin::app::SearchMode::Online);
+        settings.setValue(QStringLiteral("searchSessionId"),
+                          QString::fromStdString(session.sessionId()));
         const auto& criteria = session.criteria();
         writeOptionalField(settings, QStringLiteral("searchText"), criteria.text);
         writeOptionalField(settings, QStringLiteral("searchWith"), criteria.with);

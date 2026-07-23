@@ -2107,19 +2107,21 @@ namespace javelin::jmap
     QCoro::Task<MessageSearchResult> JmapCore::searchMessages(
         LiveConnectionSettings settings, std::string accountId, std::string query,
         const std::size_t offset, const std::size_t limit, javelin::jmap::query::EmailListSort sort,
-        std::optional<std::string> anchor, std::function<void(const QString&)> progressCallback)
+        std::optional<std::string> anchor, std::optional<std::string> windowKey,
+        std::function<void(const QString&)> progressCallback)
     {
         co_return co_await searchMessages(
             std::move(settings), std::move(accountId),
             javelin::jmap::search::EmailSearchCriteria{.text = std::move(query)}, offset, limit,
-            std::move(sort), std::move(anchor), std::move(progressCallback));
+            std::move(sort), std::move(anchor), std::move(windowKey), std::move(progressCallback));
     }
 
     QCoro::Task<MessageSearchResult> JmapCore::searchMessages(
         LiveConnectionSettings settings, std::string accountId,
         javelin::jmap::search::EmailSearchCriteria criteria, const std::size_t offset,
         const std::size_t limit, javelin::jmap::query::EmailListSort sort,
-        std::optional<std::string> anchor, std::function<void(const QString&)> progressCallback)
+        std::optional<std::string> anchor, std::optional<std::string> windowKey,
+        std::function<void(const QString&)> progressCallback)
     {
         const auto reportProgress = [&progressCallback](const QString& message)
         {
@@ -2130,7 +2132,7 @@ namespace javelin::jmap
         };
 
         auto query = javelin::jmap::search::displayString(criteria);
-        const auto queryKey = javelin::jmap::search::cacheKey(criteria, sort);
+        const auto queryKey = windowKey.value_or(javelin::jmap::search::cacheKey(criteria, sort));
         qInfo().noquote() << "JMAP core search start" << QString::fromStdString(accountId)
                           << QString::fromStdString(query);
         reportProgress(QStringLiteral("Searching the server..."));

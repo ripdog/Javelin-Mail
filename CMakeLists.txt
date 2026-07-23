@@ -139,8 +139,11 @@ set(JAVELIN_FORMAT_FILES
     src/gui/messageview/PlainTextLinkifier.h
     src/gui/search/AdvancedSearchDialog.cpp
     src/gui/search/AdvancedSearchDialog.h
-    src/gui/search/SearchSession.cpp
-    src/gui/search/SearchSession.h
+    src/app/SearchSession.cpp
+    src/app/SearchSession.h
+    src/app/MessageListSession.h
+    src/app/MailboxSession.cpp
+    src/app/MailboxSession.h
     src/gui/search/SearchSessionPersistence.cpp
     src/gui/search/SearchSessionPersistence.h
     src/gui/settings/PreferencesDialog.cpp
@@ -610,8 +613,11 @@ add_library(javelin_gui STATIC
     src/gui/messageview/PlainTextLinkifier.h
     src/gui/search/AdvancedSearchDialog.cpp
     src/gui/search/AdvancedSearchDialog.h
-    src/gui/search/SearchSession.cpp
-    src/gui/search/SearchSession.h
+    src/app/SearchSession.cpp
+    src/app/SearchSession.h
+    src/app/MessageListSession.h
+    src/app/MailboxSession.cpp
+    src/app/MailboxSession.h
     src/gui/search/SearchSessionPersistence.cpp
     src/gui/search/SearchSessionPersistence.h
     src/gui/settings/PreferencesDialog.cpp

@@ -224,6 +224,39 @@ TEST_CASE("search window repository distinguishes pages and missing windows",
     CHECK_FALSE(missing->has_value());
 }
 
+TEST_CASE("search window repository removes one promoted search session", "[jmap][cache][search]")
+{
+    ApplicationGuard application;
+    auto database = makeDatabaseContext();
+    seedAccount(database.connection);
+    javelin::jmap::cache::SearchWindowRepository repository{database.connection};
+
+    for (const auto key : {"query|session:one", "query|session:two"})
+    {
+        REQUIRE_FALSE(repository
+                          .replace({
+                              .accountId = "account-1",
+                              .queryKey = key,
+                              .offset = 0,
+                              .limit = 100,
+                              .position = 0,
+                              .returnedLimit = 100,
+                              .total = 1,
+                              .queryState = "state-1",
+                              .emailIds = {"email-1"},
+                          })
+                          .has_value());
+    }
+
+    REQUIRE_FALSE(repository.eraseQuery("account-1", "query|session:one").has_value());
+    const auto erased = repository.find("account-1", "query|session:one", 0, 100);
+    const auto retained = repository.find("account-1", "query|session:two", 0, 100);
+    REQUIRE(std::get<std::optional<javelin::jmap::cache::SearchWindowRecord>>(erased) ==
+            std::nullopt);
+    REQUIRE(
+        std::get<std::optional<javelin::jmap::cache::SearchWindowRecord>>(retained).has_value());
+}
+
 TEST_CASE("mailbox windows preserve exact sparse server positions and invalidate by mailbox",
           "[jmap][cache][mailbox-window]")
 {

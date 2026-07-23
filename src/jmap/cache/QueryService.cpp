@@ -652,6 +652,34 @@ namespace javelin::jmap::cache
         return results;
     }
 
+    std::variant<std::vector<MessageListItem>, DatabaseError>
+    QueryService::searchAllCachedMessageText(const std::string_view accountId,
+                                             const std::string_view text) const
+    {
+        if (const auto error = m_connection.validate())
+            return *error;
+        if (text.empty())
+            return std::vector<MessageListItem>{};
+
+        MailSearchIndex index{m_connection};
+        const auto indexedIds = index.searchAll(accountId, text);
+        const auto* emailIds = std::get_if<std::vector<std::string>>(&indexedIds);
+        if (emailIds == nullptr)
+            return std::get<DatabaseError>(indexedIds);
+        const auto itemResult = listMessagesByEmailIds(accountId, *emailIds);
+        if (const auto* error = std::get_if<DatabaseError>(&itemResult))
+            return *error;
+
+        std::vector<MessageListItem> results;
+        std::unordered_set<std::string> threadIds;
+        for (auto& item : std::get<std::vector<MessageListItem>>(itemResult))
+        {
+            if (threadIds.insert(item.threadId).second)
+                results.push_back(std::move(item));
+        }
+        return results;
+    }
+
     QString QueryService::databasePath() const
     {
         return m_connection.database().databaseName();
@@ -691,6 +719,14 @@ namespace javelin::jmap::cache
             .isAuthoritative = (*window)->isAuthoritative,
             .items = *messages,
         }};
+    }
+
+    std::optional<DatabaseError>
+    QueryService::eraseSearchWindows(const std::string_view accountId,
+                                     const std::string_view queryKey) const
+    {
+        SearchWindowRepository repository{m_connection};
+        return repository.eraseQuery(accountId, queryKey);
     }
 
     std::variant<std::optional<MailboxWindowPage>, DatabaseError> QueryService::loadMailboxWindow(

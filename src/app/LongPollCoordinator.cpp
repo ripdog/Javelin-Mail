@@ -531,11 +531,20 @@ namespace javelin::app
             };
         }
 
-        const auto queryKey = javelin::jmap::search::cacheKey(intent.criteria, intent.sort);
+        const auto queryKey = intent.windowKey.empty()
+                                  ? javelin::jmap::search::cacheKey(intent.criteria, intent.sort)
+                                  : intent.windowKey;
+        if (m_retiredSearchWindowKeys.contains(queryKey))
+        {
+            co_return javelin::jmap::OperationError{
+                .message = QStringLiteral("The search tab has been closed."),
+            };
+        }
         const ForegroundWorkScope foreground{m_workScheduler};
         auto result = co_await m_jmapCore.searchMessages(
             toLiveConnectionSettings(configuration->second.settings), intent.accountId,
-            intent.criteria, intent.offset, intent.limit, intent.sort, std::move(intent.anchor));
+            intent.criteria, intent.offset, intent.limit, intent.sort, std::move(intent.anchor),
+            queryKey);
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
         {
             m_errorCoordinator.reportFailure(configuration->second.settings, intent.accountId,
@@ -545,6 +554,13 @@ namespace javelin::app
         m_errorCoordinator.reportSuccess(configuration->second.settings.connectionId);
 
         const auto& page = std::get<javelin::jmap::MessageSearchSummary>(result);
+        if (m_retiredSearchWindowKeys.contains(queryKey))
+        {
+            static_cast<void>(m_queryService.eraseSearchWindows(intent.accountId, queryKey));
+            co_return javelin::jmap::OperationError{
+                .message = QStringLiteral("The search tab has been closed."),
+            };
+        }
         SearchWindowSummary summary{
             .accountId = page.accountId,
             .queryKey = queryKey,
@@ -569,6 +585,12 @@ namespace javelin::app
             .hasNewMail = false,
         });
         co_return summary;
+    }
+
+    void MailApplicationService::retireSearchWindow(std::string accountId, std::string windowKey)
+    {
+        m_retiredSearchWindowKeys.insert(windowKey);
+        static_cast<void>(m_queryService.eraseSearchWindows(accountId, windowKey));
     }
 
     javelin::jmap::QueuedEmailMutationResult

@@ -381,6 +381,13 @@ TEST_CASE("query service full text search covers cached subjects and bodies",
                               [](const auto& item) { return item.emailId == "subject-match"; }));
     CHECK(
         std::ranges::any_of(items, [](const auto& item) { return item.emailId == "body-match"; }));
+
+    const auto snapshot = queryService.searchAllCachedMessageText("account-1", "rare albatross");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::cache::MessageListItem>>(snapshot));
+    const auto& snapshotItems =
+        std::get<std::vector<javelin::jmap::cache::MessageListItem>>(snapshot);
+    REQUIRE(snapshotItems.size() == 2);
+    CHECK(snapshotItems.at(0).threadId != snapshotItems.at(1).threadId);
 }
 
 TEST_CASE("query service returns thread messages in cached thread order", "[jmap][cache][query]")

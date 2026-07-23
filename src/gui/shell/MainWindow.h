@@ -1,7 +1,6 @@
 #pragma once
 
 #include "app/LongPollCoordinator.h"
-#include "gui/messages/Pagination.h"
 #include "jmap/cache/QueryService.h"
 #include "jmap/query/EmailListSort.h"
 #include "jmap/search/EmailSearch.h"
@@ -43,13 +42,12 @@ namespace javelin::jmap
 namespace javelin::app
 {
     class ComposeService;
+    class MailboxSession;
+    class MessageListSession;
     class MessageNavigationCoordinator;
+    class SearchSession;
     struct OpenEmailRoute;
 } // namespace javelin::app
-namespace javelin::gui::search
-{
-    class SearchSession;
-}
 namespace javelin::jmap::contacts
 {
     class ContactService;
@@ -150,36 +148,15 @@ namespace javelin::gui::shell
             std::vector<std::string> selectedEmailIds;
         };
 
-        struct PageState
-        {
-            std::size_t offset = 0;
-            std::size_t position = 0;
-            std::size_t returnedLimit = pageSize;
-            std::optional<std::size_t> total;
-            std::string queryState;
-            std::optional<std::string> anchor;
-            std::int64_t anchorOffset = 1;
-            std::vector<javelin::jmap::cache::MessageListItem> items;
-            bool cacheLoaded = false;
-            javelin::gui::messages::PageRefreshState refresh;
-            bool stale = false;
-            QString refreshError;
-        };
-
         struct MailboxTabState
         {
-            std::string accountId;
-            std::string mailboxId;
-            QString title;
-            std::optional<std::string> role;
-            PageState page;
+            javelin::app::MailboxSession* session = nullptr;
             TabSelectionState selection;
-            std::optional<javelin::app::MailboxObservation> observationId;
         };
 
         struct SearchTabState
         {
-            javelin::gui::search::SearchSession* session = nullptr;
+            javelin::app::SearchSession* session = nullptr;
             TabSelectionState selection;
         };
 
@@ -189,7 +166,6 @@ namespace javelin::gui::shell
             std::string composeSessionId;
             QString title;
             javelin::gui::compose::ComposeTabWidget* widget = nullptr;
-            PageState page;
             TabSelectionState selection;
         };
 
@@ -198,7 +174,6 @@ namespace javelin::gui::shell
             std::string accountId;
             QString title;
             javelin::gui::contacts::ContactsManagerWidget* widget = nullptr;
-            PageState page;
             TabSelectionState selection;
         };
 
@@ -207,7 +182,6 @@ namespace javelin::gui::shell
             std::string accountId;
             QString title;
             javelin::gui::calendar::MonthCalendarWidget* widget = nullptr;
-            PageState page;
             TabSelectionState selection;
         };
 
@@ -278,17 +252,10 @@ namespace javelin::gui::shell
         void syncNavigationForActiveTab();
         void syncActiveTabSelectionFromViews();
         void loadActiveTabFromCache(bool forceReload = false, bool refreshRemote = true);
-        void loadMailboxTabFromCache(std::string_view accountId, std::string_view mailboxId,
-                                     bool applyIfActive,
-                                     std::optional<std::size_t> requiredOffset = std::nullopt);
-        [[nodiscard]] bool loadMailboxTabPageFromCache(MailboxTabState& tab,
-                                                       bool forceReload = false);
-        void ensureMailboxObservation(MailboxTabState& tab);
-        void releaseMailboxObservation(MailboxTabState& tab);
         void refreshActiveTabFromServer();
         void refreshTabFromServer(std::size_t tabIndex);
-        void refreshMailboxTabFromServer(MailboxTabState& tab);
-        void connectSearchSession(javelin::gui::search::SearchSession& session);
+        void connectMessageListSession(javelin::app::MessageListSession& session);
+        void connectSearchSession(javelin::app::SearchSession& session);
         [[nodiscard]] QString titleForTab(const TabState& tab) const;
         [[nodiscard]] QString mailboxTitle(const MailboxTabState& tab) const;
         [[nodiscard]] QIcon iconForTab(const TabState& tab) const;
@@ -414,6 +381,7 @@ namespace javelin::gui::shell
         ElidingLabel* m_messageListTitleLabel = nullptr;
         QLabel* m_messageListMetaLabel = nullptr;
         QLabel* m_messagePageLabel = nullptr;
+        QToolButton* m_searchServerButton = nullptr;
         QToolButton* m_messageQuickFilterButton = nullptr;
         QToolButton* m_messageSortButton = nullptr;
         QToolButton* m_firstPageButton = nullptr;
@@ -464,7 +432,6 @@ namespace javelin::gui::shell
         QAction* m_calendarRefreshAction = nullptr;
         javelin::jmap::query::EmailListSort m_emailListSort;
         bool m_refreshInFlight = false;
-        std::uint64_t m_nextMailboxPageRefreshToken = 0;
         std::uint64_t m_nextMessageContentRequestToken = 1;
         std::optional<MessageContentRequestState> m_messageContentRequestInFlight;
         std::optional<std::uint64_t> m_navigationContextRequested;

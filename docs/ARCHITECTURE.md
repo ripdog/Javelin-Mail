@@ -15,6 +15,11 @@ opaque observation registered with the application coordinator. Pagination, sear
 downloads, contact operations, mutations, bootstrap, and explicit synchronization are typed
 application requests.
 
+Mailbox and search tabs are backed by application-layer message-list sessions. These sessions own
+query-window cache reads, request generations, observation lifetimes, pagination, stale recovery,
+and search promotion/prefetch. The GUI owns only tab presentation, selection, and binding the
+active session page to the message model; it does not coordinate mailbox or search loading.
+
 The account synchronization service owns state-change consumption, debounce and single-flight
 refresh, mailbox interest, state tokens, cache reconciliation, retries, and post-commit events.
 Consumers receive one `MailCacheChange` after a synchronization pass commits and reload affected

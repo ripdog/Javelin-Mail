@@ -144,7 +144,7 @@ namespace javelin::jmap::cache
             "DELETE FROM search_windows WHERE (account_id,query_key,window_offset,window_limit) "
             "IN (SELECT account_id,query_key,window_offset,window_limit FROM search_windows WHERE "
             "account_id=:account_id AND query_key=:query_key ORDER BY updated_at DESC,"
-            "window_offset DESC LIMIT -1 OFFSET 12)"));
+            "window_offset DESC LIMIT -1 OFFSET 64)"));
         evictWindows.bindValue(QStringLiteral(":account_id"),
                                QString::fromStdString(window.accountId));
         evictWindows.bindValue(QStringLiteral(":query_key"),
@@ -246,6 +246,24 @@ namespace javelin::jmap::cache
                         QString::fromStdString(std::string{accountId}));
         if (!query.exec())
             return queryError(QStringLiteral("Invalidate search windows"), query);
+        return std::nullopt;
+    }
+
+    std::optional<DatabaseError>
+    SearchWindowRepository::eraseQuery(const std::string_view accountId,
+                                       const std::string_view queryKey)
+    {
+        if (const auto error = m_connection.validate())
+            return *error;
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "DELETE FROM search_windows WHERE account_id=:account_id AND query_key=:query_key"));
+        query.bindValue(QStringLiteral(":account_id"),
+                        QString::fromStdString(std::string{accountId}));
+        query.bindValue(QStringLiteral(":query_key"),
+                        QString::fromStdString(std::string{queryKey}));
+        if (!query.exec())
+            return queryError(QStringLiteral("Delete search session windows"), query);
         return std::nullopt;
     }
 

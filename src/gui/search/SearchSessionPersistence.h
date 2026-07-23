@@ -1,6 +1,6 @@
 #pragma once
 
-#include "gui/search/SearchSession.h"
+#include "app/SearchSession.h"
 
 class QSettings;
 
@@ -10,10 +10,11 @@ namespace javelin::gui::search
     struct PersistedSearchState
     {
         javelin::jmap::search::EmailSearchCriteria criteria;
-        RestoredSearchState restored;
+        javelin::app::RestoredSearchState restored;
     };
 
     [[nodiscard]] PersistedSearchState readSearchSessionSettings(const QSettings& settings);
-    void writeSearchSessionSettings(QSettings& settings, const SearchSession& session);
+    void writeSearchSessionSettings(QSettings& settings,
+                                    const javelin::app::SearchSession& session);
 
 } // namespace javelin::gui::search

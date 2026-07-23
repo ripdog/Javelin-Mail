@@ -49,6 +49,7 @@ namespace javelin::app
         std::size_t limit = 0;
         javelin::jmap::query::EmailListSort sort;
         std::optional<std::string> anchor;
+        std::string windowKey;
     };
 
     struct MailboxWindowSummary
@@ -145,6 +146,7 @@ namespace javelin::app
         requestMailboxWindow(MailboxWindowIntent intent);
         [[nodiscard]] QCoro::Task<SearchWindowResult>
         requestSearchWindow(SearchWindowIntent intent);
+        void retireSearchWindow(std::string accountId, std::string windowKey);
         [[nodiscard]] javelin::jmap::QueuedEmailMutationResult
         queueDestroyEmail(std::string accountId, std::string emailId);
         [[nodiscard]] javelin::jmap::QueuedEmailMutationResult
@@ -269,6 +271,7 @@ namespace javelin::app
         std::unordered_map<std::string, std::unique_ptr<AccountSyncCoordinator>> m_coordinators;
         std::unordered_map<std::string, AccountSyncConfiguration> m_configurations;
         std::unordered_set<std::string> m_sessionRefreshesInFlight;
+        std::unordered_set<std::string> m_retiredSearchWindowKeys;
         javelin::jmap::sync::MailboxInterestRegistry m_mailboxInterests;
     };
 

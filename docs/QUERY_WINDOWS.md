@@ -10,6 +10,19 @@ position and enforced limit, total, `queryState`, and ordered representative Ema
 joins those IDs to cached Email data in stored order. A missing window is a cache miss even when the
 database contains enough unrelated mailbox rows.
 
+Quick search is offline-first. It captures one complete, thread-collapsed FTS result snapshot and
+paginates only that immutable snapshot, so indexing activity cannot reorder later pages. The UI
+may promote that tab once to an authoritative server search. Promotion replaces the local snapshot
+with a session-scoped server query identity; it is not a reversible display toggle.
+
+An online search session retains its fetched windows until the tab is explicitly closed and reads
+ahead after the visible window commits. Small result sets acquire every server window in the
+background; large result sets retain a bounded read-ahead. Prefetch may extend a manifest only
+while every response has the initial `queryState`. A different state stops acquisition and marks
+the session stale rather than combining ranges from different ordered queries. Closing the tab
+deletes only that session's windows. Application shutdown does not delete them because restored
+tabs reuse the same session identity.
+
 Every watched mailbox has a canonical window: offset 0, limit 100, `receivedAt` descending, and
 `collapseThreads: true`. Background synchronization must materialize that window whenever it is
 missing or invalid; caching Email objects without the matching authoritative membership window is

@@ -38,6 +38,8 @@ namespace javelin::jmap::cache
                                               std::size_t offset, std::size_t limit) const;
         [[nodiscard]] std::optional<DatabaseError>
         invalidateAccount(DatabaseTransaction& transaction, std::string_view accountId);
+        [[nodiscard]] std::optional<DatabaseError> eraseQuery(std::string_view accountId,
+                                                              std::string_view queryKey);
 
       private:
         DatabaseConnection& m_connection;

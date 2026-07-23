@@ -475,7 +475,7 @@ TEST_CASE("JmapCore searchMessages uses Email/query text filters and caches thre
             .loginEmail = "alice@example.com",
             .apiKey = "access-token",
         },
-        "u1", "quarterly", 0));
+        "u1", "quarterly", 0, 100, {}, std::nullopt, std::string{"session-query"}));
 
     if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
     {
@@ -497,13 +497,7 @@ TEST_CASE("JmapCore searchMessages uses Email/query text filters and caches thre
     CHECK(summary.results.front().from->email == "alice@example.com");
 
     javelin::jmap::cache::QueryService queryService{databaseContext.connection};
-    const auto cachedWindowResult = queryService.loadSearchWindow(
-        "u1",
-        javelin::jmap::search::cacheKey(
-            {.text = "quarterly"},
-            {.property = javelin::jmap::query::EmailListSortProperty::ReceivedAt,
-             .direction = javelin::jmap::query::EmailListSortDirection::Descending}),
-        0, 100);
+    const auto cachedWindowResult = queryService.loadSearchWindow("u1", "session-query", 0, 100);
     const auto* cachedWindow =
         std::get_if<std::optional<javelin::jmap::cache::SearchWindowPage>>(&cachedWindowResult);
     REQUIRE(cachedWindow != nullptr);

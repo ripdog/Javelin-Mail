@@ -1,4 +1,5 @@
 #include "gui/messages/Pagination.h"
+#include "app/MessageListSession.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -41,6 +42,9 @@ TEST_CASE("pagination converts between arbitrary pages and query offsets", "[gui
     CHECK(javelin::gui::messages::pageCount(200, 100) == 2);
     CHECK(javelin::gui::messages::pageIndex(200, 100) == 2);
     CHECK(javelin::gui::messages::pageOffset(2, 100) == 200);
+    CHECK(javelin::app::messageListPageCount(237, 100) == 3);
+    CHECK(javelin::app::messageListPageOffset(2, 100) == 200);
+    CHECK(javelin::app::normalizedMessageListPageOffset(300, 237, 50) == 200);
 }
 
 TEST_CASE("superseded page refreshes cannot complete a newer navigation", "[gui][pagination]")

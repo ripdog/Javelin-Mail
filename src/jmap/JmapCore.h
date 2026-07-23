@@ -224,12 +224,14 @@ namespace javelin::jmap
                        std::size_t offset = 0, std::size_t limit = 100,
                        javelin::jmap::query::EmailListSort sort = {},
                        std::optional<std::string> anchor = std::nullopt,
+                       std::optional<std::string> windowKey = std::nullopt,
                        std::function<void(const QString&)> progressCallback = {});
         [[nodiscard]] QCoro::Task<MessageSearchResult>
         searchMessages(LiveConnectionSettings settings, std::string accountId,
                        javelin::jmap::search::EmailSearchCriteria criteria, std::size_t offset = 0,
                        std::size_t limit = 100, javelin::jmap::query::EmailListSort sort = {},
                        std::optional<std::string> anchor = std::nullopt,
+                       std::optional<std::string> windowKey = std::nullopt,
                        std::function<void(const QString&)> progressCallback = {});
         [[nodiscard]] QCoro::Task<AttachmentDownloadResult>
         downloadAttachment(LiveConnectionSettings settings, std::string accountId,
