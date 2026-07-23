@@ -1625,8 +1625,7 @@ namespace javelin::gui::messageview
                                      .arg(QString::fromStdString(*m_accountId),
                                           QString::fromStdString(*m_emailId));
             m_htmlView->setDocumentHtml(renderDocument.toStdString(),
-                                        *m_accountId + "\n" + *m_emailId,
-                                        HtmlMessageView::SurfacePolicy::Replace);
+                                        *m_accountId + "\n" + *m_emailId);
         }
         updateSenderRemoteContentPermit();
 

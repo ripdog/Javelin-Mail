@@ -12,7 +12,6 @@
 #include <string_view>
 
 class QWebEngineView;
-class QVBoxLayout;
 
 namespace javelin::gui::messageview
 {
@@ -22,17 +21,10 @@ namespace javelin::gui::messageview
         Q_OBJECT
 
       public:
-        enum class SurfacePolicy
-        {
-            Reuse,
-            Replace,
-        };
-
         explicit HtmlMessageView(QWidget* parent = nullptr);
         ~HtmlMessageView() override;
 
-        void setDocumentHtml(std::string_view html, std::string_view documentId = {},
-                             SurfacePolicy surfacePolicy = SurfacePolicy::Reuse);
+        void setDocumentHtml(std::string_view html, std::string_view documentId = {});
         void clearDocument();
         void setRemoteContentEnabled(bool enabled);
         [[nodiscard]] bool remoteContentEnabled() const;
@@ -46,8 +38,6 @@ namespace javelin::gui::messageview
         void hoveredLinkChanged(QString url);
 
       private:
-        void createWebEngineView();
-        void destroyWebEngineView();
         void applyRemoteContentPolicy(std::function<void()> callback = {});
         void awaitRenderedDocument(const QUrl& documentUrl, const QString& readyTitle);
         void probeDocumentReady(std::uint64_t generation);
@@ -56,7 +46,6 @@ namespace javelin::gui::messageview
         void recordViewPaint(QObject* paintedObject);
         void traceRenderEvent(const QString& event, const QString& detail = {}) const;
 
-        QVBoxLayout* m_layout = nullptr;
         QWebEngineView* m_view = nullptr;
         bool m_remoteContentEnabled = false;
         std::uint64_t m_documentGeneration = 0;

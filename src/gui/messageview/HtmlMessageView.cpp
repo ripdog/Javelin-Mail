@@ -164,19 +164,9 @@ namespace javelin::gui::messageview
 
     HtmlMessageView::HtmlMessageView(QWidget* parent) : QWidget(parent)
     {
-        m_layout = new QVBoxLayout(this);
-        m_layout->setContentsMargins(0, 0, 0, 0);
-        createWebEngineView();
-    }
+        auto* layout = new QVBoxLayout(this);
+        layout->setContentsMargins(0, 0, 0, 0);
 
-    HtmlMessageView::~HtmlMessageView()
-    {
-        m_tracePaints = false;
-        destroyWebEngineView();
-    }
-
-    void HtmlMessageView::createWebEngineView()
-    {
         m_view = new FilteredWebEngineView([this] { Q_EMIT viewSourceRequested(); }, this);
         m_view->setPage(new MessageWebEnginePage(m_view));
         installRenderEventFilter(m_view);
@@ -212,33 +202,19 @@ namespace javelin::gui::messageview
                     traceRenderEvent(QStringLiteral("loading-changed"), detail);
                 });
 
-        m_layout->addWidget(m_view);
+        layout->addWidget(m_view);
     }
 
-    void HtmlMessageView::destroyWebEngineView()
+    HtmlMessageView::~HtmlMessageView()
     {
-        if (m_view == nullptr)
+        if (m_view && m_view->page())
         {
-            return;
+            m_view->setPage(nullptr);
         }
-
-        auto* oldView = m_view;
-        if (oldView->page() != nullptr)
-        {
-            disconnect(oldView->page(), nullptr, this, nullptr);
-        }
-        m_tracePaints = false;
-        m_waitingForSurfacePaint = false;
-        m_view = nullptr;
-        m_layout->removeWidget(oldView);
-        oldView->hide();
-        oldView->setPage(nullptr);
-        delete oldView;
     }
 
     void HtmlMessageView::setDocumentHtml(const std::string_view html,
-                                          const std::string_view documentId,
-                                          const SurfacePolicy surfacePolicy)
+                                          const std::string_view documentId)
     {
         m_remoteContentEnabled = false;
         m_expectedDocumentId =
@@ -250,21 +226,12 @@ namespace javelin::gui::messageview
             QString::number(static_cast<qulonglong>(++m_documentGeneration))));
         m_expectedReadyTitle = QStringLiteral("__javelin_render_ready_%1")
                                    .arg(static_cast<qulonglong>(m_documentGeneration));
-        if (surfacePolicy == SurfacePolicy::Replace)
-        {
-            destroyWebEngineView();
-            createWebEngineView();
-        }
         m_renderTimer.restart();
         m_tracedPaintCount = 0;
         m_readyPaintCount = 0;
         m_tracePaints = true;
         m_waitingForSurfacePaint = false;
         m_documentReadyAccepted = false;
-        if (surfacePolicy == SurfacePolicy::Replace)
-        {
-            traceRenderEvent(QStringLiteral("render-surface-replaced"));
-        }
         traceRenderEvent(QStringLiteral("navigation-requested"),
                          QStringLiteral("htmlBytes=%1").arg(static_cast<qulonglong>(html.size())));
 
