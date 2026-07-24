@@ -23,7 +23,6 @@ class QCloseEvent;
 class QLabel;
 class QLineEdit;
 class QListView;
-class QMenu;
 class QPoint;
 class QSplitter;
 class QStackedWidget;
@@ -81,6 +80,7 @@ namespace javelin::gui::settings
 namespace javelin::gui::shell
 {
     class ElidingLabel;
+    class MessageCommandController;
     class MessageFileController;
     struct PersistedMailboxTab;
     struct PersistedSearchTab;
@@ -206,12 +206,6 @@ namespace javelin::gui::shell
             Calendar,
         };
 
-        enum class MessageTransferOperation
-        {
-            Move,
-            Copy,
-        };
-
         struct MessageContentRequestState
         {
             std::string accountId;
@@ -299,33 +293,9 @@ namespace javelin::gui::shell
         void resolveOpenEmailRoute();
         [[nodiscard]] const javelin::app::OpenEmailRoute* activeOpenEmailRoute() const;
         [[nodiscard]] std::vector<std::string> selectedEmailIds() const;
-        [[nodiscard]] javelin::app::MessageSelection
-        selectedMessageActionItems(bool excludeUnread = false) const;
         [[nodiscard]] std::vector<javelin::jmap::cache::MessageListItem>
         selectedMessageSummaries() const;
         void selectMessageAlone(const QString& emailId);
-        void queueArchiveEmails(std::string accountId, std::optional<std::string> sourceMailboxId,
-                                javelin::app::MessageSelection selection);
-        void queueDeleteEmails(std::string accountId, std::string mailboxId,
-                               javelin::app::MessageSelection selection);
-        void queueDestroyEmails(std::string accountId, std::optional<std::string> sourceMailboxId,
-                                javelin::app::MessageSelection selection);
-        void populateMailboxDestinationMenus(QMenu* moveMenu, QMenu* copyMenu,
-                                             std::string accountId,
-                                             std::optional<std::string> sourceMailboxId,
-                                             javelin::app::MessageSelection selection);
-        void queueTransferEmails(std::string accountId, std::optional<std::string> sourceMailboxId,
-                                 std::string destinationMailboxId,
-                                 javelin::app::MessageSelection selection,
-                                 MessageTransferOperation operation, QString successMessage);
-        void queueMarkEmailRead(std::string accountId, std::string emailId);
-        void toggleMessageFlagged(const QModelIndex& index);
-        void markSelectedEmailUnread();
-        void archiveSelectedEmail();
-        void deleteSelectedEmail();
-        void permanentlyDeleteSelectedEmail();
-        void showMoveMenu();
-        void showCopyMenu();
         void findConversationsWithSender(const QModelIndex& index);
         void showMailboxContextMenu(const QPoint& position);
         void showMessageListContextMenu(const QPoint& position);
@@ -374,6 +344,7 @@ namespace javelin::gui::shell
         javelin::app::ComposeService& m_composeService;
         javelin::app::MailApplicationService& m_mailService;
         javelin::app::MessageNavigationCoordinator& m_messageNavigationCoordinator;
+        MessageCommandController* m_messageCommandController = nullptr;
         MessageFileController* m_messageFileController = nullptr;
         std::unique_ptr<javelin::gui::messages::MessageListPanePresenter>
             m_messageListPanePresenter;

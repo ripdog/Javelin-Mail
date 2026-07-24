@@ -18,6 +18,11 @@ opaque observation registered with the application coordinator. Pagination, sear
 downloads, contact operations, mutations, bootstrap, and explicit synchronization are typed
 application requests.
 
+Message-list commands are coordinated by the GUI-owned `MessageCommandController`. It converts
+Qt selection rows into typed `MessageSelection` values, presents destination and confirmation UI,
+and invokes `MailApplicationService`. It reports cache invalidation and submission intents back to
+the window; `MainWindow` retains only active-tab context and tab/view refresh policy.
+
 Mailbox and search tabs are backed by application-layer message-list sessions. These sessions own
 query-window cache reads, request generations, observation lifetimes, pagination, stale recovery,
 and search promotion/prefetch. The GUI owns only tab presentation, selection, and binding the

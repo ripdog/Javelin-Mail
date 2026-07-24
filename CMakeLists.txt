@@ -135,6 +135,8 @@ set(JAVELIN_FORMAT_FILES
     src/gui/messages/MessageListDelegate.h
     src/gui/messages/MessageDragListView.cpp
     src/gui/messages/MessageDragListView.h
+    src/gui/messages/MessageActionSelection.cpp
+    src/gui/messages/MessageActionSelection.h
     src/gui/messageview/GoogleHtmlTranslator.cpp
     src/gui/messageview/GoogleHtmlTranslator.h
     src/gui/messageview/HtmlMessageView.cpp
@@ -161,6 +163,8 @@ set(JAVELIN_FORMAT_FILES
     src/gui/shell/MessageFileUtils.h
     src/gui/shell/MessageFileController.cpp
     src/gui/shell/MessageFileController.h
+    src/gui/shell/MessageCommandController.cpp
+    src/gui/shell/MessageCommandController.h
     src/gui/shell/MainWindowStateStore.cpp
     src/gui/shell/MainWindowStateStore.h
     src/gui/shell/LayeredStatusBar.cpp
@@ -619,6 +623,8 @@ add_library(javelin_gui STATIC
     src/gui/messages/MessageListDelegate.h
     src/gui/messages/MessageDragListView.cpp
     src/gui/messages/MessageDragListView.h
+    src/gui/messages/MessageActionSelection.cpp
+    src/gui/messages/MessageActionSelection.h
     src/gui/messageview/HtmlMessageView.cpp
     src/gui/messageview/HtmlMessageView.h
     src/gui/messageview/MessageViewContainer.cpp
@@ -643,6 +649,8 @@ add_library(javelin_gui STATIC
     src/gui/shell/MessageFileUtils.h
     src/gui/shell/MessageFileController.cpp
     src/gui/shell/MessageFileController.h
+    src/gui/shell/MessageCommandController.cpp
+    src/gui/shell/MessageCommandController.h
     src/gui/shell/MainWindowStateStore.cpp
     src/gui/shell/MainWindowStateStore.h
     src/gui/shell/LayeredStatusBar.cpp
