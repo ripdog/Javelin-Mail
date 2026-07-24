@@ -3407,12 +3407,26 @@ namespace javelin::gui::shell
     {
         if (emailId.has_value())
         {
-            const QModelIndex selectedMessageIndex = findIndexByRole(
+            QModelIndex selectedMessageIndex = findIndexByRole(
                 *m_messageModel, javelin::gui::messages::MessageListModel::EmailIdRole,
                 QString::fromStdString(*emailId));
             if (selectedMessageIndex.isValid())
             {
                 return selectedMessageIndex;
+            }
+
+            // A collapsed thread exposes only its representative email. Notification routes can
+            // target any member, so reveal the members before falling back to the representative.
+            if (threadId.has_value())
+            {
+                static_cast<void>(m_messageModel->setThreadExpanded(*threadId, true));
+                selectedMessageIndex = findIndexByRole(
+                    *m_messageModel, javelin::gui::messages::MessageListModel::EmailIdRole,
+                    QString::fromStdString(*emailId));
+                if (selectedMessageIndex.isValid())
+                {
+                    return selectedMessageIndex;
+                }
             }
         }
 
