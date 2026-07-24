@@ -6,6 +6,7 @@
 #include "app/MessageListSession.h"
 #include "app/MessageNavigationCoordinator.h"
 #include "app/SearchSession.h"
+#include "app/TranslationService.h"
 #include "gui/IconUtils.h"
 #include "gui/calendar/CalendarPresentation.h"
 #include "gui/calendar/EventDialog.h"
@@ -333,24 +334,24 @@ namespace javelin::gui::shell
 
     } // namespace
 
-    MainWindow::MainWindow(
-        javelin::jmap::cache::AccountRepository& accountRepository,
-        javelin::jmap::cache::ContactRepository& contactRepository,
-        javelin::jmap::contacts::ContactService& contactService,
-        javelin::jmap::calendar::CalendarService& calendarService,
-        javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
-        javelin::jmap::cache::IdentityRepository& identityRepository,
-        javelin::jmap::cache::MessageViewService& messageViewService,
-        javelin::jmap::cache::QueryService& queryService,
-        javelin::jmap::cache::TranslationCacheRepository& translationCacheRepository,
-        javelin::app::ComposeService& composeService,
-        javelin::app::MailApplicationService& mailService,
-        javelin::app::MessageNavigationCoordinator& messageNavigationCoordinator, QWidget* parent)
+    MainWindow::MainWindow(javelin::jmap::cache::AccountRepository& accountRepository,
+                           javelin::jmap::cache::ContactRepository& contactRepository,
+                           javelin::jmap::contacts::ContactService& contactService,
+                           javelin::jmap::calendar::CalendarService& calendarService,
+                           javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
+                           javelin::jmap::cache::IdentityRepository& identityRepository,
+                           javelin::jmap::cache::MessageViewService& messageViewService,
+                           javelin::jmap::cache::QueryService& queryService,
+                           javelin::app::TranslationService& translationService,
+                           javelin::app::ComposeService& composeService,
+                           javelin::app::MailApplicationService& mailService,
+                           javelin::app::MessageNavigationCoordinator& messageNavigationCoordinator,
+                           QWidget* parent)
         : KXmlGuiWindow(parent), m_accountRepository(accountRepository),
           m_contactRepository(contactRepository), m_contactService(contactService),
           m_calendarService(calendarService), m_contactIdentityLookup(contactIdentityLookup),
           m_identityRepository(identityRepository), m_messageViewService(messageViewService),
-          m_queryService(queryService), m_translationCacheRepository(translationCacheRepository),
+          m_queryService(queryService), m_translationService(translationService),
           m_composeService(composeService), m_mailService(mailService),
           m_messageNavigationCoordinator(messageNavigationCoordinator)
     {
@@ -1034,7 +1035,7 @@ namespace javelin::gui::shell
         messageLayout->addWidget(m_messageView, 1);
 
         m_messageViewContainer = new javelin::gui::messageview::MessageViewContainer(
-            m_translationCacheRepository, m_contactIdentityLookup, this);
+            m_translationService, m_contactIdentityLookup, this);
         connect(m_messageViewContainer,
                 &javelin::gui::messageview::MessageViewContainer::saveAttachmentRequested, this,
                 [this](const QString& accountId, const QString& emailId, const QString& partId)
@@ -3900,7 +3901,9 @@ namespace javelin::gui::shell
             dialog.selectConfiguredAccount(connectionId);
         if (dialog.exec() == QDialog::Accepted)
         {
-            m_statusBar->showMessage(QStringLiteral("Saved connection preferences."), 3000);
+            m_translationService.reloadSettings();
+            m_messageViewContainer->translationSettingsChanged();
+            m_statusBar->showMessage(QStringLiteral("Saved preferences."), 3000);
             Q_EMIT accountSettingsChanged();
             m_mailboxModel->refresh();
             const auto accountId = activeAccountId().has_value() ? activeAccountId()

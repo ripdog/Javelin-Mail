@@ -1,5 +1,7 @@
 #pragma once
 
+#include "app/TranslationService.h"
+
 #include <KConfigDialog>
 #include <QHash>
 #include <QSet>
@@ -7,6 +9,7 @@
 #include <cstdint>
 #include <vector>
 
+class QCheckBox;
 class QLineEdit;
 class QListWidget;
 class QPushButton;
@@ -85,6 +88,7 @@ namespace javelin::gui::settings
         void removeSelectedRemoteContentPermits();
         void refreshAutoTranslateList();
         void removeSelectedAutoTranslateEntries();
+        void updateTranslationControls();
         void selectAttachmentDirectory();
         [[nodiscard]] bool validateCurrentSettings();
         void updateAttachmentDirectoryControls();
@@ -100,6 +104,7 @@ namespace javelin::gui::settings
         QStringList m_loadedAccountIds;
         QStringList m_remoteContentSenders;
         QStringList m_remoteContentDomains;
+        javelin::app::TranslationSettings m_translationSettings;
         QStringList m_autoTranslateSenders;
         QStringList m_autoTranslateDomains;
         AttachmentSaveSettings m_attachmentSaveSettings;
@@ -113,6 +118,10 @@ namespace javelin::gui::settings
         QLineEdit* m_apiKeyEdit = nullptr;
         QListWidget* m_remoteContentList = nullptr;
         QPushButton* m_removeRemoteContentButton = nullptr;
+        QCheckBox* m_translationEnabledCheckBox = nullptr;
+        QWidget* m_translationControls = nullptr;
+        QComboBox* m_translationTargetLanguage = nullptr;
+        QLineEdit* m_translationApiKeyEdit = nullptr;
         QListWidget* m_autoTranslateList = nullptr;
         QPushButton* m_removeAutoTranslateButton = nullptr;
         QRadioButton* m_askAttachmentDirectoryRadio = nullptr;

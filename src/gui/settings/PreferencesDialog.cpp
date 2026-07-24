@@ -43,9 +43,6 @@ namespace javelin::gui::settings
         constexpr auto remoteContentGroup = "remoteContent";
         constexpr auto allowedSendersKey = "allowedSenders";
         constexpr auto allowedDomainsKey = "allowedDomains";
-        constexpr auto translationGroup = "translation";
-        constexpr auto autoTranslateSendersKey = "autoTranslateSenders";
-        constexpr auto autoTranslateDomainsKey = "autoTranslateDomains";
         constexpr auto attachmentsGroup = "attachments";
         constexpr auto alwaysAskKey = "alwaysAsk";
         constexpr auto directoryKey = "directory";
@@ -122,31 +119,18 @@ namespace javelin::gui::settings
             settings.sync();
         }
 
-        [[nodiscard]] QStringList settingsList(const QLatin1StringView group,
-                                               const QLatin1StringView key)
+        [[nodiscard]] QString selectedTranslationLanguageCode(const QComboBox& comboBox)
         {
-            QSettings settings;
-            settings.beginGroup(group);
-            auto values = settings.value(key).toStringList();
-            settings.endGroup();
-            values.removeAll(QString{});
-            values.removeDuplicates();
-            values.sort(Qt::CaseInsensitive);
-            return values;
-        }
-
-        void saveSettingsList(const QLatin1StringView group, const QLatin1StringView key,
-                              QStringList values)
-        {
-            values.removeAll(QString{});
-            values.removeDuplicates();
-            values.sort(Qt::CaseInsensitive);
-
-            QSettings settings;
-            settings.beginGroup(group);
-            settings.setValue(key, values);
-            settings.endGroup();
-            settings.sync();
+            const int index = comboBox.currentIndex();
+            if (index >= 0 && comboBox.currentText() == comboBox.itemText(index))
+            {
+                const auto code = comboBox.itemData(index).toString();
+                if (!code.isEmpty())
+                {
+                    return code;
+                }
+            }
+            return comboBox.currentText().trimmed();
         }
 
         void saveAttachmentSaveSettings(const AttachmentSaveSettings& value)
@@ -168,10 +152,9 @@ namespace javelin::gui::settings
           m_accounts(loadAccounts()),
           m_remoteContentSenders(remoteContentAllowList(QLatin1StringView{allowedSendersKey})),
           m_remoteContentDomains(remoteContentAllowList(QLatin1StringView{allowedDomainsKey})),
-          m_autoTranslateSenders(settingsList(QLatin1StringView{translationGroup},
-                                              QLatin1StringView{autoTranslateSendersKey})),
-          m_autoTranslateDomains(settingsList(QLatin1StringView{translationGroup},
-                                              QLatin1StringView{autoTranslateDomainsKey})),
+          m_translationSettings(javelin::app::TranslationService::loadSettings()),
+          m_autoTranslateSenders(m_translationSettings.autoTranslateSenders),
+          m_autoTranslateDomains(m_translationSettings.autoTranslateDomains),
           m_attachmentSaveSettings(loadAttachmentSaveSettings())
     {
         setWindowTitle(QStringLiteral("Preferences"));
@@ -281,16 +264,68 @@ namespace javelin::gui::settings
 
         auto* translationPage = new QWidget(this);
         auto* translationLayout = new QVBoxLayout(translationPage);
-        translationLayout->addWidget(
-            new QLabel(QStringLiteral("Auto-Translate Entries"), translationPage));
-        m_autoTranslateList = new QListWidget(translationPage);
+        m_translationEnabledCheckBox =
+            new QCheckBox(QStringLiteral("Enable message translation"), translationPage);
+        m_translationEnabledCheckBox->setChecked(m_translationSettings.enabled);
+        translationLayout->addWidget(m_translationEnabledCheckBox);
+
+        m_translationControls = new QWidget(translationPage);
+        auto* translationControlsLayout = new QVBoxLayout(m_translationControls);
+        translationControlsLayout->setContentsMargins(0, 0, 0, 0);
+        auto* translationDescription = new QLabel(
+            QStringLiteral("Translated message text is sent to Google Translate. Leave the API "
+                           "key empty to use Javelin's built-in default key."),
+            m_translationControls);
+        translationDescription->setWordWrap(true);
+        translationControlsLayout->addWidget(translationDescription);
+
+        auto* translationForm = new QFormLayout();
+        m_translationTargetLanguage = new QComboBox(m_translationControls);
+        m_translationTargetLanguage->setEditable(true);
+        m_translationTargetLanguage->addItem(QStringLiteral("English"), QStringLiteral("en"));
+        m_translationTargetLanguage->addItem(QStringLiteral("Chinese (Simplified)"),
+                                             QStringLiteral("zh-cn"));
+        m_translationTargetLanguage->addItem(QStringLiteral("Chinese (Traditional)"),
+                                             QStringLiteral("zh-tw"));
+        m_translationTargetLanguage->addItem(QStringLiteral("French"), QStringLiteral("fr"));
+        m_translationTargetLanguage->addItem(QStringLiteral("German"), QStringLiteral("de"));
+        m_translationTargetLanguage->addItem(QStringLiteral("Italian"), QStringLiteral("it"));
+        m_translationTargetLanguage->addItem(QStringLiteral("Japanese"), QStringLiteral("ja"));
+        m_translationTargetLanguage->addItem(QStringLiteral("Korean"), QStringLiteral("ko"));
+        m_translationTargetLanguage->addItem(QStringLiteral("Portuguese"), QStringLiteral("pt"));
+        m_translationTargetLanguage->addItem(QStringLiteral("Russian"), QStringLiteral("ru"));
+        m_translationTargetLanguage->addItem(QStringLiteral("Spanish"), QStringLiteral("es"));
+        const int targetLanguageIndex =
+            m_translationTargetLanguage->findData(m_translationSettings.targetLanguage);
+        if (targetLanguageIndex >= 0)
+        {
+            m_translationTargetLanguage->setCurrentIndex(targetLanguageIndex);
+        }
+        else
+        {
+            m_translationTargetLanguage->setEditText(m_translationSettings.targetLanguage);
+        }
+        translationForm->addRow(QStringLiteral("Target language"), m_translationTargetLanguage);
+
+        m_translationApiKeyEdit = new QLineEdit(m_translationControls);
+        m_translationApiKeyEdit->setEchoMode(QLineEdit::Password);
+        m_translationApiKeyEdit->setPlaceholderText(QStringLiteral("Use built-in default key"));
+        m_translationApiKeyEdit->setText(m_translationSettings.apiKeyOverride);
+        translationForm->addRow(QStringLiteral("API key override"), m_translationApiKeyEdit);
+        translationControlsLayout->addLayout(translationForm);
+
+        translationControlsLayout->addWidget(
+            new QLabel(QStringLiteral("Auto-Translate Entries"), m_translationControls));
+        m_autoTranslateList = new QListWidget(m_translationControls);
         m_autoTranslateList->setSelectionMode(QAbstractItemView::ExtendedSelection);
-        translationLayout->addWidget(m_autoTranslateList, 1);
+        translationControlsLayout->addWidget(m_autoTranslateList, 1);
         auto* translationButtons = new QHBoxLayout();
         translationButtons->addStretch(1);
-        m_removeAutoTranslateButton = new QPushButton(QStringLiteral("Remove"), translationPage);
+        m_removeAutoTranslateButton =
+            new QPushButton(QStringLiteral("Remove"), m_translationControls);
         translationButtons->addWidget(m_removeAutoTranslateButton);
-        translationLayout->addLayout(translationButtons);
+        translationControlsLayout->addLayout(translationButtons);
+        translationLayout->addWidget(m_translationControls, 1);
         addPage(translationPage, QStringLiteral("Translation"),
                 QStringLiteral("preferences-desktop-locale"), QString{}, false);
 
@@ -336,6 +371,26 @@ namespace javelin::gui::settings
                 {
                     m_removeRemoteContentButton->setEnabled(
                         !m_remoteContentList->selectedItems().empty());
+                });
+        connect(m_translationEnabledCheckBox, &QCheckBox::toggled, this,
+                [this](const bool enabled)
+                {
+                    m_translationSettings.enabled = enabled;
+                    updateTranslationControls();
+                    noteUnsavedChanges();
+                });
+        connect(m_translationTargetLanguage, &QComboBox::currentTextChanged, this,
+                [this]
+                {
+                    m_translationSettings.targetLanguage =
+                        selectedTranslationLanguageCode(*m_translationTargetLanguage);
+                    noteUnsavedChanges();
+                });
+        connect(m_translationApiKeyEdit, &QLineEdit::textEdited, this,
+                [this](const QString& apiKey)
+                {
+                    m_translationSettings.apiKeyOverride = apiKey;
+                    noteUnsavedChanges();
                 });
         connect(m_removeAutoTranslateButton, &QPushButton::clicked, this,
                 &PreferencesDialog::removeSelectedAutoTranslateEntries);
@@ -401,6 +456,7 @@ namespace javelin::gui::settings
         refreshRemoteContentList();
         refreshAutoTranslateList();
         refreshMailboxSyncAccounts();
+        updateTranslationControls();
         updateAttachmentDirectoryControls();
         m_accountList->setCurrentRow(0);
         m_hasPendingChanges = false;
@@ -704,10 +760,13 @@ namespace javelin::gui::settings
         saveAccounts(m_accounts);
         saveRemoteContentAllowList(QLatin1StringView{allowedSendersKey}, m_remoteContentSenders);
         saveRemoteContentAllowList(QLatin1StringView{allowedDomainsKey}, m_remoteContentDomains);
-        saveSettingsList(QLatin1StringView{translationGroup},
-                         QLatin1StringView{autoTranslateSendersKey}, m_autoTranslateSenders);
-        saveSettingsList(QLatin1StringView{translationGroup},
-                         QLatin1StringView{autoTranslateDomainsKey}, m_autoTranslateDomains);
+        m_translationSettings.enabled = m_translationEnabledCheckBox->isChecked();
+        m_translationSettings.apiKeyOverride = m_translationApiKeyEdit->text();
+        m_translationSettings.targetLanguage =
+            selectedTranslationLanguageCode(*m_translationTargetLanguage);
+        m_translationSettings.autoTranslateSenders = m_autoTranslateSenders;
+        m_translationSettings.autoTranslateDomains = m_autoTranslateDomains;
+        javelin::app::TranslationService::saveSettings(m_translationSettings);
         saveAttachmentSaveSettings(m_attachmentSaveSettings);
         storeMailboxSyncSelection();
         QSettings mailboxSettings;
@@ -934,6 +993,11 @@ namespace javelin::gui::settings
         noteUnsavedChanges();
     }
 
+    void PreferencesDialog::updateTranslationControls()
+    {
+        m_translationControls->setEnabled(m_translationEnabledCheckBox->isChecked());
+    }
+
     void PreferencesDialog::selectAttachmentDirectory()
     {
         const auto directory =
@@ -951,6 +1015,15 @@ namespace javelin::gui::settings
 
     bool PreferencesDialog::validateCurrentSettings()
     {
+        if (m_translationEnabledCheckBox->isChecked() &&
+            selectedTranslationLanguageCode(*m_translationTargetLanguage).isEmpty())
+        {
+            QMessageBox::warning(this, QStringLiteral("Invalid translation language"),
+                                 QStringLiteral("Choose or enter a target language code."));
+            m_translationTargetLanguage->setFocus();
+            return false;
+        }
+
         if (m_attachmentSaveSettings.alwaysAsk)
         {
             return true;

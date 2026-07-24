@@ -619,8 +619,6 @@ add_library(javelin_gui STATIC
     src/gui/messages/MessageListDelegate.h
     src/gui/messages/MessageDragListView.cpp
     src/gui/messages/MessageDragListView.h
-    src/gui/messageview/GoogleHtmlTranslator.cpp
-    src/gui/messageview/GoogleHtmlTranslator.h
     src/gui/messageview/HtmlMessageView.cpp
     src/gui/messageview/HtmlMessageView.h
     src/gui/messageview/MessageViewContainer.cpp
@@ -751,6 +749,8 @@ add_library(javelin_app STATIC
     src/app/WebEngineSetup.h
     src/app/ProcessServices.cpp
     src/app/ProcessServices.h
+    src/app/TranslationService.cpp
+    src/app/TranslationService.h
     src/app/WorkScheduler.cpp
     src/app/WorkScheduler.h
     src/gui/tasks/TaskCenterDialog.cpp
@@ -802,7 +802,9 @@ target_link_libraries(javelin_app
         Qt::Svg
         KF6::CoreAddons
     PRIVATE
+        QCoro6::Network
         Qt::Concurrent
+        Qt::Network
         javelin_gui
         javelin_jmap
 )

@@ -29,6 +29,7 @@ namespace javelin::app
     class MessageNavigationCoordinator;
     class InlineMessageSchemeHandler;
     class MailApplicationService;
+    class TranslationService;
 } // namespace javelin::app
 
 namespace javelin::jmap::api
@@ -85,8 +86,7 @@ namespace javelin::app
         [[nodiscard]] javelin::jmap::cache::IdentityRepository& identityRepository();
         [[nodiscard]] javelin::jmap::cache::MessageViewService& messageViewService();
         [[nodiscard]] javelin::jmap::cache::QueryService& queryService();
-        [[nodiscard]] javelin::jmap::cache::TranslationCacheRepository&
-        translationCacheRepository();
+        [[nodiscard]] TranslationService& translationService();
         [[nodiscard]] ComposeService& composeService();
         [[nodiscard]] MailApplicationService& mailService();
         [[nodiscard]] MessageNavigationCoordinator& messageNavigationCoordinator();
@@ -118,6 +118,7 @@ namespace javelin::app
         std::unique_ptr<javelin::jmap::cache::QueryService> m_queryService;
         std::unique_ptr<javelin::jmap::cache::TranslationCacheRepository>
             m_translationCacheRepository;
+        std::unique_ptr<TranslationService> m_translationService;
         std::unique_ptr<javelin::jmap::cache::SubmissionRepository> m_submissionRepository;
         std::unique_ptr<javelin::jmap::submission::ComposeService> m_jmapComposeService;
         std::unique_ptr<ComposeService> m_composeService;

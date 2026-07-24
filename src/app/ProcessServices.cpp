@@ -10,6 +10,7 @@
 #include "app/MailApplicationService.h"
 #include "app/MailIndexService.h"
 #include "app/MessageNavigationCoordinator.h"
+#include "app/TranslationService.h"
 #include "app/WorkScheduler.h"
 
 #include "jmap/JmapCore.h"
@@ -122,6 +123,8 @@ namespace javelin::app
         m_translationCacheRepository =
             std::make_unique<javelin::jmap::cache::TranslationCacheRepository>(
                 m_databaseConnection);
+        m_translationService = std::make_unique<TranslationService>(*m_networkAccessManager,
+                                                                    *m_translationCacheRepository);
         m_submissionRepository =
             std::make_unique<javelin::jmap::cache::SubmissionRepository>(m_databaseConnection);
         m_jmapComposeService = std::make_unique<javelin::jmap::submission::ComposeService>(
@@ -190,9 +193,9 @@ namespace javelin::app
         return *m_queryService;
     }
 
-    javelin::jmap::cache::TranslationCacheRepository& ProcessServices::translationCacheRepository()
+    TranslationService& ProcessServices::translationService()
     {
-        return *m_translationCacheRepository;
+        return *m_translationService;
     }
 
     ComposeService& ProcessServices::composeService()

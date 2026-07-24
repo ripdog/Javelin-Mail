@@ -7,6 +7,7 @@
 #include <QWidget>
 
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <string>
 
@@ -21,9 +22,9 @@ class QToolButton;
 class QVBoxLayout;
 class QWidget;
 
-namespace javelin::jmap::cache
+namespace javelin::app
 {
-    class TranslationCacheRepository;
+    class TranslationService;
 }
 namespace javelin::jmap::contacts
 {
@@ -32,7 +33,6 @@ namespace javelin::jmap::contacts
 
 namespace javelin::gui::messageview
 {
-    class GoogleHtmlTranslator;
     class HtmlMessageView;
 
     class MessageViewContainer : public QWidget
@@ -41,7 +41,7 @@ namespace javelin::gui::messageview
 
       public:
         explicit MessageViewContainer(
-            javelin::jmap::cache::TranslationCacheRepository& translationCacheRepository,
+            javelin::app::TranslationService& translationService,
             javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
             QWidget* parent = nullptr);
         ~MessageViewContainer() override;
@@ -55,6 +55,7 @@ namespace javelin::gui::messageview
         void refresh(javelin::jmap::cache::MessageViewService& messageViewService);
         void setLoadingState(bool loading);
         void setErrorState(const QString& errorMessage);
+        void translationSettingsChanged();
         [[nodiscard]] bool hasReadableBody() const;
 
       Q_SIGNALS:
@@ -81,7 +82,7 @@ namespace javelin::gui::messageview
         void updateLanguageBanner();
         void startLanguageDetection();
         void translateCurrentMessage();
-        void translateCurrentMessageFromCacheOrNetwork(bool automatic, bool allowNetwork);
+        void translateCurrentMessage(bool automatic, bool allowNetwork);
         void restoreCurrentTranslation();
         void updateTranslateOptionsMenu();
         void setAutoTranslateSender(bool enabled);
@@ -127,8 +128,7 @@ namespace javelin::gui::messageview
         QLabel* m_languageStatusLabel = nullptr;
         QToolButton* m_translateButton = nullptr;
         QToolButton* m_translateOptionsButton = nullptr;
-        GoogleHtmlTranslator* m_translator = nullptr;
-        javelin::jmap::cache::TranslationCacheRepository& m_translationCacheRepository;
+        javelin::app::TranslationService& m_translationService;
         javelin::jmap::contacts::ContactIdentityLookup& m_contactIdentityLookup;
         QWidget* m_bodyControlsWidget = nullptr;
         QStackedWidget* m_bodyStack = nullptr;
@@ -144,6 +144,7 @@ namespace javelin::gui::messageview
         bool m_attachmentsExpanded = false;
         bool m_attachmentsCollapsed = false;
         bool m_translationInProgress = false;
+        std::uint64_t m_translationRequestToken = 0;
         bool m_messageTranslated = false;
         QString m_originalPlainText;
         QString m_translationError;

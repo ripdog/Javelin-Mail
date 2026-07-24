@@ -46,6 +46,7 @@ namespace javelin::app
     class MessageListSession;
     class MessageNavigationCoordinator;
     class SearchSession;
+    class TranslationService;
     struct OpenEmailRoute;
 } // namespace javelin::app
 namespace javelin::jmap::contacts
@@ -65,7 +66,6 @@ namespace javelin::jmap::cache
     class IdentityRepository;
     class MessageViewService;
     class QueryService;
-    class TranslationCacheRepository;
 } // namespace javelin::jmap::cache
 
 namespace javelin::gui::mailboxes
@@ -130,7 +130,7 @@ namespace javelin::gui::shell
             javelin::jmap::cache::IdentityRepository& identityRepository,
             javelin::jmap::cache::MessageViewService& messageViewService,
             javelin::jmap::cache::QueryService& queryService,
-            javelin::jmap::cache::TranslationCacheRepository& translationCacheRepository,
+            javelin::app::TranslationService& translationService,
             javelin::app::ComposeService& composeService,
             javelin::app::MailApplicationService& mailService,
             javelin::app::MessageNavigationCoordinator& messageNavigationCoordinator,
@@ -370,7 +370,7 @@ namespace javelin::gui::shell
         javelin::jmap::cache::IdentityRepository& m_identityRepository;
         javelin::jmap::cache::MessageViewService& m_messageViewService;
         javelin::jmap::cache::QueryService& m_queryService;
-        javelin::jmap::cache::TranslationCacheRepository& m_translationCacheRepository;
+        javelin::app::TranslationService& m_translationService;
         javelin::app::ComposeService& m_composeService;
         javelin::app::MailApplicationService& m_mailService;
         javelin::app::MessageNavigationCoordinator& m_messageNavigationCoordinator;

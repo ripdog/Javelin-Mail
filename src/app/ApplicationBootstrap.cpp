@@ -216,7 +216,7 @@ namespace javelin::app
             m_processServices->contactService(), m_processServices->calendarService(),
             m_processServices->contactIdentityLookup(), m_processServices->identityRepository(),
             m_processServices->messageViewService(), m_processServices->queryService(),
-            m_processServices->translationCacheRepository(), m_processServices->composeService(),
+            m_processServices->translationService(), m_processServices->composeService(),
             m_processServices->mailService(), m_processServices->messageNavigationCoordinator());
 
         m_mainWindow->setAttribute(Qt::WA_DeleteOnClose);

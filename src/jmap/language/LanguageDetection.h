@@ -14,7 +14,8 @@ namespace javelin::jmap::language
         double englishConfidence = 0.0;
     };
 
-    [[nodiscard]] bool shouldOfferTranslation(const LanguageDetectionResult& detection);
+    [[nodiscard]] bool shouldOfferTranslation(const LanguageDetectionResult& detection,
+                                              std::string_view targetLanguageCode);
 
     class LanguageDetectionService
     {
