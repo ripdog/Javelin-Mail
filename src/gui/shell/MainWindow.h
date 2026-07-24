@@ -1,22 +1,19 @@
 #pragma once
 
 #include "app/MailApplicationService.h"
+#include "gui/shell/TabWorkspace.h"
 #include "jmap/cache/QueryService.h"
 #include "jmap/query/EmailListSort.h"
 #include "jmap/search/EmailSearch.h"
 #include "jmap/submission/ComposeTypes.h"
 
 #include <KXmlGuiWindow>
-#include <QIcon>
 #include <QModelIndex>
 
 #include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
-#include <type_traits>
-#include <utility>
-#include <variant>
 #include <vector>
 
 class QCloseEvent;
@@ -82,6 +79,7 @@ namespace javelin::gui::shell
     class ElidingLabel;
     class MessageCommandController;
     class MessageFileController;
+    class TabBarPresenter;
     struct PersistedMailboxTab;
     struct PersistedSearchTab;
     struct PersistedComposeTab;
@@ -147,57 +145,6 @@ namespace javelin::gui::shell
       private:
         static constexpr std::size_t pageSize = 100;
 
-        struct TabSelectionState
-        {
-            std::optional<std::string> threadId;
-            std::optional<std::string> emailId;
-            std::vector<std::string> selectedEmailIds;
-        };
-
-        struct MailboxTabState
-        {
-            javelin::app::MailboxSession* session = nullptr;
-            TabSelectionState selection;
-        };
-
-        struct SearchTabState
-        {
-            javelin::app::SearchSession* session = nullptr;
-            TabSelectionState selection;
-        };
-
-        struct ComposeTabState
-        {
-            std::string accountId;
-            std::string composeSessionId;
-            QString title;
-            javelin::gui::compose::ComposeTabWidget* widget = nullptr;
-            TabSelectionState selection;
-        };
-
-        struct ContactsTabState
-        {
-            std::string accountId;
-            QString title;
-            javelin::gui::contacts::ContactsManagerWidget* widget = nullptr;
-            TabSelectionState selection;
-        };
-
-        struct CalendarTabState
-        {
-            std::string accountId;
-            QString title;
-            javelin::gui::calendar::MonthCalendarWidget* widget = nullptr;
-            TabSelectionState selection;
-        };
-
-        struct TabState
-        {
-            std::variant<MailboxTabState, SearchTabState, ComposeTabState, ContactsTabState,
-                         CalendarTabState>
-                content;
-        };
-
         enum class ToolbarContext
         {
             Mail,
@@ -261,9 +208,6 @@ namespace javelin::gui::shell
         void refreshTabFromServer(std::size_t tabIndex);
         void connectMessageListSession(javelin::app::MessageListSession& session);
         void connectSearchSession(javelin::app::SearchSession& session);
-        [[nodiscard]] QString titleForTab(const TabState& tab) const;
-        [[nodiscard]] QString mailboxTitle(const MailboxTabState& tab) const;
-        [[nodiscard]] QIcon iconForTab(const TabState& tab) const;
         [[nodiscard]] bool activeTabIsMailbox() const;
         [[nodiscard]] bool activeTabIsSearch() const;
         [[nodiscard]] bool activeTabIsCompose() const;
@@ -285,7 +229,6 @@ namespace javelin::gui::shell
         void refreshFromServer();
         void refreshAccountFromServer(std::string accountId);
         void refreshConnectionSettings(javelin::gui::settings::ConnectionSettings settings);
-        void updateWindowTitle();
         [[nodiscard]] ToolbarContext toolbarContextForActiveTab() const;
         void updateToolbarForActiveTab();
         void refreshSelectedMessageContent(std::string accountId, std::string emailId);
@@ -346,6 +289,7 @@ namespace javelin::gui::shell
         javelin::app::MessageNavigationCoordinator& m_messageNavigationCoordinator;
         MessageCommandController* m_messageCommandController = nullptr;
         MessageFileController* m_messageFileController = nullptr;
+        TabBarPresenter* m_tabBarPresenter = nullptr;
         std::unique_ptr<javelin::gui::messages::MessageListPanePresenter>
             m_messageListPanePresenter;
         QSplitter* m_mainSplitter = nullptr;

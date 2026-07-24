@@ -28,6 +28,12 @@ query-window cache reads, request generations, observation lifetimes, pagination
 and search promotion/prefetch. The GUI owns only tab presentation, selection, and binding the
 active session page to the message model; it does not coordinate mailbox or search loading.
 
+Tab variants and shared selection state live in the shell-level `TabWorkspace` model rather than
+inside the main window. Pure workspace policy validates the active index, protects the mail home
+tab, and selects the next active tab after closure. `TabBarPresenter` renders account-qualified
+titles, unread mailbox counts, icons, visibility, and close controls. `MainWindow` still owns widget
+creation, activation side effects, and resource cleanup, but it does not calculate tab-bar state.
+
 The account synchronization service owns state-change consumption, debounce and single-flight
 refresh, mailbox interest, state tokens, cache reconciliation, retries, and post-commit events.
 Consumers receive one `MailCacheChange` after a synchronization pass commits and reload affected

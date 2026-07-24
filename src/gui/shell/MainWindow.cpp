@@ -31,6 +31,7 @@
 #include "gui/shell/MainWindowStateStore.h"
 #include "gui/shell/MessageCommandController.h"
 #include "gui/shell/MessageFileController.h"
+#include "gui/shell/TabBarPresenter.h"
 #include "gui/sieve/SieveEditorDialog.h"
 #include "jmap/cache/AccountRepository.h"
 #include "jmap/cache/ContactRepository.h"
@@ -941,6 +942,8 @@ namespace javelin::gui::shell
         m_tabBar->setStyleSheet(
             QStringLiteral("QTabBar::tab { max-width: 220px; min-width: 120px; }"));
         m_tabBar->hide();
+        m_tabBarPresenter =
+            new TabBarPresenter(*m_tabBar, *this, m_accountRepository, m_queryService, this);
 
         m_mailboxView = new javelin::gui::mailboxes::MailboxTreeView(this);
         m_mailboxView->setModel(m_mailboxModel);
@@ -1214,6 +1217,7 @@ namespace javelin::gui::shell
                     activateTab(index, true);
                 });
         connect(m_tabBar, &QTabBar::tabCloseRequested, this, &MainWindow::closeTab);
+        connect(m_tabBarPresenter, &TabBarPresenter::closeRequested, this, &MainWindow::closeTab);
         connect(m_firstPageButton, &QToolButton::clicked, this, &MainWindow::goToFirstPage);
         connect(m_previousPageButton, &QToolButton::clicked, this, &MainWindow::goToPreviousPage);
         connect(m_nextPageButton, &QToolButton::clicked, this, &MainWindow::goToNextPage);
@@ -1995,309 +1999,84 @@ namespace javelin::gui::shell
         });
     }
 
-    const MainWindow::TabState* MainWindow::activeTab() const
+    const TabState* MainWindow::activeTab() const
     {
-        if (!m_activeTabIndex.has_value() || *m_activeTabIndex < 0 ||
-            static_cast<std::size_t>(*m_activeTabIndex) >= m_tabs.size())
-        {
-            return nullptr;
-        }
-
-        return &m_tabs[static_cast<std::size_t>(*m_activeTabIndex)];
+        return activeWorkspaceTab(m_tabs, m_activeTabIndex);
     }
 
-    MainWindow::TabState* MainWindow::activeTab()
+    TabState* MainWindow::activeTab()
     {
-        if (!m_activeTabIndex.has_value() || *m_activeTabIndex < 0 ||
-            static_cast<std::size_t>(*m_activeTabIndex) >= m_tabs.size())
-        {
-            return nullptr;
-        }
-
-        return &m_tabs[static_cast<std::size_t>(*m_activeTabIndex)];
+        return activeWorkspaceTab(m_tabs, m_activeTabIndex);
     }
 
     bool MainWindow::activeTabIsMailbox() const
     {
         const auto* tab = activeTab();
-        return tab != nullptr && std::holds_alternative<MailboxTabState>(tab->content);
+        return tab != nullptr && tabKind(*tab) == TabKind::Mailbox;
     }
 
     bool MainWindow::activeTabIsSearch() const
     {
         const auto* tab = activeTab();
-        return tab != nullptr && std::holds_alternative<SearchTabState>(tab->content);
+        return tab != nullptr && tabKind(*tab) == TabKind::Search;
     }
 
     bool MainWindow::activeTabIsCompose() const
     {
         const auto* tab = activeTab();
-        return tab != nullptr && std::holds_alternative<ComposeTabState>(tab->content);
+        return tab != nullptr && tabKind(*tab) == TabKind::Compose;
     }
 
     bool MainWindow::activeTabIsContacts() const
     {
         const auto* tab = activeTab();
-        return tab != nullptr && std::holds_alternative<ContactsTabState>(tab->content);
+        return tab != nullptr && tabKind(*tab) == TabKind::Contacts;
     }
 
     bool MainWindow::activeTabIsCalendar() const
     {
         const auto* tab = activeTab();
-        return tab != nullptr && std::holds_alternative<CalendarTabState>(tab->content);
+        return tab != nullptr && tabKind(*tab) == TabKind::Calendar;
     }
 
     std::optional<std::string> MainWindow::activeAccountId() const
     {
         const auto* tab = activeTab();
-        if (tab == nullptr)
-        {
-            return std::nullopt;
-        }
-
-        if (const auto* mailboxTab = std::get_if<MailboxTabState>(&tab->content))
-        {
-            return mailboxTab->session->accountId();
-        }
-
-        if (const auto* searchTab = std::get_if<SearchTabState>(&tab->content))
-        {
-            return searchTab->session->accountId();
-        }
-
-        if (const auto* contactsTab = std::get_if<ContactsTabState>(&tab->content))
-        {
-            return contactsTab->accountId;
-        }
-
-        if (const auto* calendarTab = std::get_if<CalendarTabState>(&tab->content))
-        {
-            return calendarTab->accountId;
-        }
-
-        return std::get<ComposeTabState>(tab->content).accountId;
+        return tab == nullptr ? std::optional<std::string>{std::nullopt} : tabAccountId(*tab);
     }
 
     std::optional<std::string> MainWindow::activeMailboxId() const
     {
         const auto* tab = activeTab();
-        if (tab == nullptr)
-        {
-            return std::nullopt;
-        }
-
-        if (const auto* mailboxTab = std::get_if<MailboxTabState>(&tab->content))
-        {
-            return mailboxTab->session->mailboxId();
-        }
-
-        return std::nullopt;
-    }
-
-    QString MainWindow::titleForTab(const TabState& tab) const
-    {
-        QString title;
-        std::string accountId;
-        if (const auto* mailboxTab = std::get_if<MailboxTabState>(&tab.content))
-        {
-            title = mailboxTitle(*mailboxTab);
-            accountId = mailboxTab->session->accountId();
-        }
-        else if (const auto* searchTab = std::get_if<SearchTabState>(&tab.content))
-        {
-            title = searchTab->session->title();
-            accountId = searchTab->session->accountId();
-        }
-        else if (const auto* contactsTab = std::get_if<ContactsTabState>(&tab.content))
-        {
-            title = contactsTab->title;
-            accountId = contactsTab->accountId;
-        }
-        else if (const auto* calendarTab = std::get_if<CalendarTabState>(&tab.content))
-        {
-            title = calendarTab->title;
-            accountId = calendarTab->accountId;
-        }
-        else
-        {
-            const auto& composeTab = std::get<ComposeTabState>(tab.content);
-            title = composeTab.title;
-            accountId = composeTab.accountId;
-        }
-
-        const auto settings = javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
-            QString::fromStdString(accountId));
-        auto accountName = settings.displayName;
-        if (accountName.isEmpty())
-        {
-            const auto cached = m_accountRepository.listAll();
-            if (const auto* accounts =
-                    std::get_if<std::vector<javelin::jmap::cache::CachedAccount>>(&cached))
-            {
-                const auto account = std::ranges::find(
-                    *accounts, accountId, &javelin::jmap::cache::CachedAccount::accountId);
-                if (account != accounts->end())
-                    accountName = QString::fromStdString(account->name);
-            }
-        }
-        if (accountName.isEmpty())
-            accountName = settings.loginEmail;
-        return accountName.isEmpty() ? title : QStringLiteral("%1 - %2").arg(title, accountName);
-    }
-
-    QString MainWindow::mailboxTitle(const MailboxTabState& tab) const
-    {
-        const auto unreadResult = m_queryService.countUnreadMailboxEmails(tab.session->accountId(),
-                                                                          tab.session->mailboxId());
-        const auto* unread = std::get_if<std::size_t>(&unreadResult);
-        if (unread == nullptr || *unread == 0)
-        {
-            return tab.session->title();
-        }
-        return QStringLiteral("%1 (%2)")
-            .arg(tab.session->title())
-            .arg(static_cast<qulonglong>(*unread));
-    }
-
-    QIcon MainWindow::iconForTab(const TabState& tab) const
-    {
-        const auto color = palette().color(QPalette::Text);
-        if (const auto* mailboxTab = std::get_if<MailboxTabState>(&tab.content))
-        {
-            return javelin::gui::mailboxes::mailboxIcon(mailboxTab->session->role(), color);
-        }
-
-        if (std::holds_alternative<SearchTabState>(tab.content))
-        {
-            return javelin::gui::themedSvgIcon(
-                QStringLiteral(":/icons/thunderbird-icons/search.svg"), color);
-        }
-
-        if (std::holds_alternative<ContactsTabState>(tab.content))
-        {
-            return QIcon::fromTheme(QStringLiteral("view-pim-contacts"));
-        }
-
-        if (std::holds_alternative<CalendarTabState>(tab.content))
-        {
-            return QIcon::fromTheme(QStringLiteral("view-calendar-month"));
-        }
-
-        return javelin::gui::themedSvgIcon(QStringLiteral(":/icons/thunderbird-icons/new-mail.svg"),
-                                           color);
+        return tab == nullptr ? std::optional<std::string>{std::nullopt} : tabMailboxId(*tab);
     }
 
     void MainWindow::updateTabBar()
     {
-        QSignalBlocker blocker{m_tabBar};
-        if (m_tabBar->count() != static_cast<int>(m_tabs.size()))
-        {
-            while (m_tabBar->count() > 0)
-            {
-                m_tabBar->removeTab(0);
-            }
-
-            for (const auto& tab : m_tabs)
-            {
-                m_tabBar->addTab(iconForTab(tab), titleForTab(tab));
-            }
-
-            for (int index = 0; index < m_tabBar->count(); ++index)
-            {
-                m_tabBar->setTabButton(index, QTabBar::RightSide, nullptr);
-            }
-            if (m_tabBar->count() > 0)
-            {
-                for (int index = 0; index < m_tabBar->count(); ++index)
-                {
-                    const auto& content = m_tabs[static_cast<std::size_t>(index)].content;
-                    const bool canClose = index != 0 ||
-                                          std::holds_alternative<ComposeTabState>(content) ||
-                                          std::holds_alternative<ContactsTabState>(content) ||
-                                          std::holds_alternative<CalendarTabState>(content);
-                    if (!canClose)
-                    {
-                        continue;
-                    }
-                    auto* closeButton = new QToolButton(m_tabBar);
-                    closeButton->setAutoRaise(true);
-                    closeButton->setText(QStringLiteral("x"));
-                    connect(closeButton, &QToolButton::clicked, this,
-                            [this, index] { closeTab(index); });
-                    m_tabBar->setTabButton(index, QTabBar::RightSide, closeButton);
-                }
-            }
-        }
-        else
-        {
-            for (int index = 0; index < static_cast<int>(m_tabs.size()); ++index)
-            {
-                const auto title = titleForTab(m_tabs[static_cast<std::size_t>(index)]);
-                if (m_tabBar->tabText(index) != title)
-                {
-                    m_tabBar->setTabText(index, title);
-                }
-                const auto icon = iconForTab(m_tabs[static_cast<std::size_t>(index)]);
-                m_tabBar->setTabIcon(index, icon);
-            }
-        }
-
-        for (int index = 0; index < static_cast<int>(m_tabs.size()); ++index)
-        {
-            const auto& content = m_tabs[static_cast<std::size_t>(index)].content;
-            const bool canClose = index != 0 || std::holds_alternative<ComposeTabState>(content) ||
-                                  std::holds_alternative<ContactsTabState>(content) ||
-                                  std::holds_alternative<CalendarTabState>(content);
-            if (!canClose)
-            {
-                m_tabBar->setTabButton(index, QTabBar::RightSide, nullptr);
-                continue;
-            }
-
-            if (m_tabBar->tabButton(index, QTabBar::RightSide) != nullptr)
-            {
-                continue;
-            }
-
-            auto* closeButton = new QToolButton(m_tabBar);
-            closeButton->setAutoRaise(true);
-            closeButton->setText(QStringLiteral("x"));
-            connect(closeButton, &QToolButton::clicked, this, [this, index] { closeTab(index); });
-            m_tabBar->setTabButton(index, QTabBar::RightSide, closeButton);
-        }
-
-        if (m_activeTabIndex.has_value() && *m_activeTabIndex >= 0 &&
-            *m_activeTabIndex < m_tabBar->count() && m_tabBar->currentIndex() != *m_activeTabIndex)
-        {
-            m_tabBar->setCurrentIndex(*m_activeTabIndex);
-        }
-        m_tabBar->setVisible(m_tabs.size() > 1);
-        updateWindowTitle();
-    }
-
-    void MainWindow::updateWindowTitle()
-    {
-        const auto* tab = activeTab();
-        if (tab == nullptr)
-        {
-            setWindowTitle(QStringLiteral("Javelin Mail"));
-            return;
-        }
-
-        setWindowTitle(titleForTab(*tab));
+        m_tabBarPresenter->refresh(m_tabs, m_activeTabIndex);
     }
 
     MainWindow::ToolbarContext MainWindow::toolbarContextForActiveTab() const
     {
         const auto* tab = activeTab();
-        if (tab == nullptr || std::holds_alternative<MailboxTabState>(tab->content) ||
-            std::holds_alternative<SearchTabState>(tab->content))
+        if (tab == nullptr)
+        {
             return ToolbarContext::Mail;
-        if (std::holds_alternative<ComposeTabState>(tab->content))
+        }
+
+        switch (tabKind(*tab))
+        {
+        case TabKind::Mailbox:
+        case TabKind::Search:
+            return ToolbarContext::Mail;
+        case TabKind::Compose:
             return ToolbarContext::Compose;
-        if (std::holds_alternative<ContactsTabState>(tab->content))
+        case TabKind::Contacts:
             return ToolbarContext::Contacts;
-        return ToolbarContext::Calendar;
+        case TabKind::Calendar:
+            return ToolbarContext::Calendar;
+        }
+        return ToolbarContext::Mail;
     }
 
     void MainWindow::updateToolbarForActiveTab()
@@ -2479,16 +2258,7 @@ namespace javelin::gui::shell
                     const auto* tab = activeTab();
                     if (tab == nullptr)
                         return;
-                    const auto* activeSession = std::visit(
-                        [](const auto& content) -> const javelin::app::MessageListSession*
-                        {
-                            using Content = std::decay_t<decltype(content)>;
-                            if constexpr (std::is_same_v<Content, MailboxTabState> ||
-                                          std::is_same_v<Content, SearchTabState>)
-                                return content.session;
-                            return nullptr;
-                        },
-                        tab->content);
+                    const auto* activeSession = messageListSession(*tab);
                     if (activeSession != session)
                     {
                         return;
@@ -2576,9 +2346,7 @@ namespace javelin::gui::shell
         {
             return;
         }
-        if (index == 0 && !std::holds_alternative<ComposeTabState>(m_tabs[0].content) &&
-            !std::holds_alternative<ContactsTabState>(m_tabs[0].content) &&
-            !std::holds_alternative<CalendarTabState>(m_tabs[0].content))
+        if (!tabCanClose(m_tabs[static_cast<std::size_t>(index)], static_cast<std::size_t>(index)))
         {
             return;
         }
@@ -2625,18 +2393,14 @@ namespace javelin::gui::shell
             searchTab->session->close();
             searchTab->session->deleteLater();
         }
+        m_activeTabIndex = activeTabIndexAfterClose(m_tabs.size(), m_activeTabIndex, index);
         m_tabs.erase(m_tabs.begin() + index);
-        if (m_tabs.empty())
+        if (!m_activeTabIndex.has_value())
         {
-            m_activeTabIndex.reset();
             activateTab(-1, false);
             return;
         }
 
-        if (!m_activeTabIndex.has_value() || *m_activeTabIndex >= index)
-        {
-            m_activeTabIndex = std::max(0, index - 1);
-        }
         updateTabBar();
         activateTab(*m_activeTabIndex, false);
     }
@@ -3460,8 +3224,7 @@ namespace javelin::gui::shell
                 .emailId = currentEmailId(*m_messageView),
                 .selectedEmailIds = selectedEmailIds(),
             };
-            std::visit([&selection](auto& content) { content.selection = selection; },
-                       tab->content);
+            tabSelection(*tab) = std::move(selection);
         }
     }
 
@@ -3544,8 +3307,7 @@ namespace javelin::gui::shell
             return false;
         }
 
-        const auto& selection = std::visit([](const auto& content) -> const TabSelectionState&
-                                           { return content.selection; }, tab->content);
+        const auto& selection = tabSelection(*tab);
         return restoreSelectionAfterMessageRefresh(activeAccountId(), activeMailboxId(),
                                                    selection.threadId, selection.emailId,
                                                    selection.selectedEmailIds, previousMessageRow);
@@ -3804,7 +3566,7 @@ namespace javelin::gui::shell
                 {
                     const auto& page = content.session->page();
                     m_messageListPanePresenter->showPage({
-                        .title = mailboxTitle(content),
+                        .title = m_tabBarPresenter->mailboxTitle(content),
                         .offset = page.offset,
                         .position = page.position,
                         .itemCount = page.items.size(),
