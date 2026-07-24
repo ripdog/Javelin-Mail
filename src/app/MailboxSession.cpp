@@ -145,6 +145,7 @@ namespace javelin::app
                 }
 
                 const auto& summary = std::get<MailboxWindowSummary>(result);
+                m_page.offset = summary.offset;
                 m_page.total = summary.total;
                 m_page.position = summary.position;
                 m_page.returnedLimit = summary.returnedLimit;
