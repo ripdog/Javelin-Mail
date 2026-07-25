@@ -33,6 +33,7 @@
 #include "gui/shell/MessageCommandController.h"
 #include "gui/shell/MessageFileController.h"
 #include "gui/shell/MessageListTabController.h"
+#include "gui/shell/TabActivationPolicy.h"
 #include "gui/shell/TabBarPresenter.h"
 #include "gui/shell/TabPersistence.h"
 #include "gui/sieve/SieveEditorDialog.h"
@@ -2279,14 +2280,15 @@ namespace javelin::gui::shell
         timer.start();
         if (index < 0 || static_cast<std::size_t>(index) >= m_tabs.size())
         {
+            const auto plan = planTabActivation({});
             m_activeTabIndex.reset();
             m_messageModel->clear();
             m_messageViewContainer->setSelection(m_messageViewService, std::nullopt, std::nullopt,
                                                  std::nullopt);
             if (m_contentStack != nullptr)
-            {
                 m_contentStack->setCurrentIndex(0);
-            }
+            if (m_mailboxPane != nullptr)
+                m_mailboxPane->setVisible(plan.showMailboxPane);
             updateTabBar();
             updateEmptyStates();
             updateMessageListHeader();
@@ -2296,26 +2298,31 @@ namespace javelin::gui::shell
         }
 
         m_activeTabIndex = index;
+        auto& tab = m_tabs[static_cast<std::size_t>(index)];
+        const auto initialPlan = planTabActivation({
+            .kind = tabKind(tab),
+            .homeTab = index == 0,
+            .messagePageStale = m_messageListTabController->pageStale(tab),
+            .remoteRefreshRequested = refreshRemote,
+        });
+
         updateToolbarForActiveTab();
         if (m_tabBar->currentIndex() != index)
         {
             QSignalBlocker blocker{m_tabBar};
             m_tabBar->setCurrentIndex(index);
         }
-        if (const auto* composeTab =
-                std::get_if<ComposeTabState>(&m_tabs[static_cast<std::size_t>(index)].content);
+        if (const auto* composeTab = std::get_if<ComposeTabState>(&tab.content);
             composeTab != nullptr && composeTab->widget != nullptr)
         {
             m_contentStack->setCurrentWidget(composeTab->widget);
         }
-        else if (const auto* contactsTab = std::get_if<ContactsTabState>(
-                     &m_tabs[static_cast<std::size_t>(index)].content);
+        else if (const auto* contactsTab = std::get_if<ContactsTabState>(&tab.content);
                  contactsTab != nullptr && contactsTab->widget != nullptr)
         {
             m_contentStack->setCurrentWidget(contactsTab->widget);
         }
-        else if (const auto* calendarTab = std::get_if<CalendarTabState>(
-                     &m_tabs[static_cast<std::size_t>(index)].content);
+        else if (const auto* calendarTab = std::get_if<CalendarTabState>(&tab.content);
                  calendarTab != nullptr && calendarTab->widget != nullptr)
         {
             m_contentStack->setCurrentWidget(calendarTab->widget);
@@ -2324,12 +2331,17 @@ namespace javelin::gui::shell
         {
             m_contentStack->setCurrentIndex(0);
         }
-        syncNavigationForActiveTab();
-        loadActiveTabFromCache();
-        if (refreshRemote)
-        {
-            refreshActiveTabFromServer();
-        }
+
+        syncNavigationForActiveTab(initialPlan.showMailboxPane);
+        loadActiveTabFromCache(false, false);
+        const auto loadedPlan = planTabActivation({
+            .kind = tabKind(tab),
+            .homeTab = index == 0,
+            .messagePageStale = m_messageListTabController->pageStale(tab),
+            .remoteRefreshRequested = refreshRemote,
+        });
+        if (loadedPlan.refreshRemote)
+            refreshTabFromServer(static_cast<std::size_t>(index));
 
         qCDebug(logGuiMailbox).noquote() << "activate tab" << index << "refreshRemote"
                                          << refreshRemote << "ms" << timer.elapsed();
@@ -2392,24 +2404,13 @@ namespace javelin::gui::shell
         activateTab(*m_activeTabIndex, false);
     }
 
-    void MainWindow::syncNavigationForActiveTab()
+    void MainWindow::syncNavigationForActiveTab(const bool showMailboxPane)
     {
         const auto* tab = activeTab();
-        if (tab == nullptr)
-        {
-            if (m_mailboxPane != nullptr)
-            {
-                m_mailboxPane->setVisible(true);
-            }
-            return;
-        }
-
         if (m_mailboxPane != nullptr)
-        {
-            m_mailboxPane->setVisible(m_activeTabIndex == std::optional<int>{0} &&
-                                      !activeTabIsCompose() && !activeTabIsContacts() &&
-                                      !activeTabIsCalendar());
-        }
+            m_mailboxPane->setVisible(showMailboxPane);
+        if (tab == nullptr)
+            return;
 
         m_syncingNavigation = true;
         QSignalBlocker mailboxBlocker{m_mailboxView->selectionModel()};
@@ -2503,19 +2504,13 @@ namespace javelin::gui::shell
             return;
         }
 
-        javelin::app::MessageListSession* session = nullptr;
-        if (auto* mailboxTab = std::get_if<MailboxTabState>(&tab->content))
+        if (!m_messageListTabController->loadCachedPage(*tab, forceReload))
         {
-            session = mailboxTab->session;
-        }
-        else if (auto* searchTab = std::get_if<SearchTabState>(&tab->content))
-        {
-            session = searchTab->session;
-        }
-        else
-        {
-            if (std::holds_alternative<ContactsTabState>(tab->content) ||
-                std::holds_alternative<CalendarTabState>(tab->content))
+            const auto plan = planTabActivation({
+                .kind = tabKind(*tab),
+                .homeTab = m_activeTabIndex == std::optional<int>{0},
+            });
+            if (plan.clearMessagePresentation)
             {
                 m_messageModel->clear();
                 m_messageViewContainer->setSelection(m_messageViewService, std::nullopt,
@@ -2525,11 +2520,12 @@ namespace javelin::gui::shell
             return;
         }
 
-        session->loadCachedPage(forceReload);
         applyActiveTabPagePreservingSelection(currentMessageRow(*m_messageView));
         if (refreshRemote &&
-            (std::holds_alternative<MailboxTabState>(tab->content) || session->page().stale))
-            session->refresh();
+            (tabKind(*tab) == TabKind::Mailbox || m_messageListTabController->pageStale(*tab)))
+        {
+            static_cast<void>(m_messageListTabController->refresh(*tab));
+        }
     }
 
     void MainWindow::refreshActiveTabFromServer()
@@ -2551,17 +2547,8 @@ namespace javelin::gui::shell
         }
 
         auto& tab = m_tabs[tabIndex];
-        if (auto* mailboxTab = std::get_if<MailboxTabState>(&tab.content))
-        {
-            mailboxTab->session->refresh();
+        if (m_messageListTabController->refresh(tab))
             return;
-        }
-
-        if (auto* searchTab = std::get_if<SearchTabState>(&tab.content))
-        {
-            searchTab->session->refresh();
-            return;
-        }
 
         if (auto* contactsTab = std::get_if<ContactsTabState>(&tab.content);
             contactsTab != nullptr && contactsTab->widget != nullptr)

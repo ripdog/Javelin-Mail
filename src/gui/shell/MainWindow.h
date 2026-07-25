@@ -202,7 +202,7 @@ namespace javelin::gui::shell
                                      javelin::jmap::search::EmailSearchCriteria criteria,
                                      bool refreshRemote);
         void closeTab(int index);
-        void syncNavigationForActiveTab();
+        void syncNavigationForActiveTab(bool showMailboxPane);
         void syncActiveTabSelectionFromViews();
         void loadActiveTabFromCache(bool forceReload = false, bool refreshRemote = true);
         void refreshActiveTabFromServer();

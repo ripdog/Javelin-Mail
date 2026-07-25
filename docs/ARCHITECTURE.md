@@ -40,7 +40,10 @@ widget restoration, and visible-shell side effects, but it does not calculate ta
 orchestrate message-list session lifetimes, or serialize message-list sessions.
 Message selection restoration is likewise split into deterministic workspace policy and thin Qt
 application: the policy decides surviving multi-selection, current-message fallback, and the
-nearest row after removal, while `MainWindow` only applies that plan to the active view.
+nearest row after removal, while `MainWindow` only applies that plan to the active view. Pure
+`TabActivationPolicy` selects mailbox-pane visibility, message presentation behavior, and whether
+activation needs one remote refresh. Concrete widget switching remains in `MainWindow`, while
+message-list cache loads and refresh calls go through `MessageListTabController`.
 
 The account synchronization service owns state-change consumption, debounce and single-flight
 refresh, mailbox interest, state tokens, cache reconciliation, retries, and post-commit events.

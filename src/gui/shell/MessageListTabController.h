@@ -80,6 +80,9 @@ namespace javelin::gui::shell
         markTabsStaleForAccount(std::vector<TabState>& tabs, std::string_view accountId,
                                 std::optional<std::string_view> refreshedMailboxId = std::nullopt);
         void markSearchTabsStaleForAccount(std::vector<TabState>& tabs, std::string_view accountId);
+        [[nodiscard]] bool loadCachedPage(TabState& tab, bool forceReload = false);
+        [[nodiscard]] bool refresh(TabState& tab);
+        [[nodiscard]] bool pageStale(const TabState& tab) const;
         void releaseSession(TabState& tab);
 
       Q_SIGNALS:

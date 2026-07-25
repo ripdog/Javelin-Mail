@@ -103,6 +103,32 @@ namespace javelin::gui::shell
         }
     }
 
+    bool MessageListTabController::loadCachedPage(TabState& tab, const bool forceReload)
+    {
+        auto* session = messageListSession(tab);
+        if (session == nullptr)
+            return false;
+
+        session->loadCachedPage(forceReload);
+        return true;
+    }
+
+    bool MessageListTabController::refresh(TabState& tab)
+    {
+        auto* session = messageListSession(tab);
+        if (session == nullptr)
+            return false;
+
+        session->refresh();
+        return true;
+    }
+
+    bool MessageListTabController::pageStale(const TabState& tab) const
+    {
+        const auto* session = messageListSession(tab);
+        return session != nullptr && session->page().stale;
+    }
+
     void MessageListTabController::releaseSession(TabState& tab)
     {
         if (auto* mailbox = std::get_if<MailboxTabState>(&tab.content);

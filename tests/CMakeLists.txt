@@ -76,6 +76,7 @@ add_executable(javelin_jmap_tests
     gui/MessageActionSelectionTest.cpp
     gui/MessageSelectionRestorationTest.cpp
     gui/MessageListTabPolicyTest.cpp
+    gui/TabActivationPolicyTest.cpp
     gui/TabPersistenceTest.cpp
     gui/TabWorkspaceTest.cpp
     gui/MainWindowStateStoreTest.cpp
@@ -87,6 +88,7 @@ add_executable(javelin_jmap_tests
     ${PROJECT_SOURCE_DIR}/src/gui/messages/MessageActionSelection.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/messages/MessageSelectionRestoration.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/shell/MessageListTabPolicy.cpp
+    ${PROJECT_SOURCE_DIR}/src/gui/shell/TabActivationPolicy.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/shell/TabPersistencePolicy.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/shell/TabWorkspacePolicy.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/messageview/PlainTextLinkifier.cpp
