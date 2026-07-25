@@ -32,7 +32,7 @@ namespace javelin::jmap::sync
     struct PushEnable
     {
         std::string type = "WebSocketPushEnable";
-        std::vector<std::string> dataTypes{"Email", "Mailbox"};
+        std::vector<std::string> dataTypes;
         std::optional<std::string> pushState;
     };
 
@@ -60,6 +60,21 @@ template <> struct glz::meta<javelin::jmap::sync::PushEnable>
 
 namespace javelin::jmap::sync
 {
+    std::optional<std::string>
+    encodeWebSocketPushEnable(const StateChangeSubscription& subscription)
+    {
+        const PushEnable pushEnable{
+            .type = "WebSocketPushEnable",
+            .dataTypes = subscription.types,
+            .pushState = subscription.lastState.empty() ? std::nullopt
+                                                        : std::optional{subscription.lastState},
+        };
+        std::string encoded;
+        if (glz::write_json(pushEnable, encoded))
+            return std::nullopt;
+        return encoded;
+    }
+
     WebSocketStateChangeSource::WebSocketStateChangeSource(std::string url, std::string accessToken,
                                                            StateChangeStatusCallback statusCallback)
         : m_url(std::move(url)), m_accessToken(std::move(accessToken)),
@@ -128,14 +143,8 @@ namespace javelin::jmap::sync
         reportConnectedActivity();
         qCInfo(logWebSocket) << "connected";
 
-        const PushEnable pushEnable{
-            .type = "WebSocketPushEnable",
-            .dataTypes = {"Email", "Mailbox"},
-            .pushState = subscription.lastState.empty() ? std::nullopt
-                                                        : std::optional{subscription.lastState},
-        };
-        std::string enable;
-        if (glz::write_json(pushEnable, enable))
+        const auto enable = encodeWebSocketPushEnable(subscription);
+        if (!enable)
         {
             co_return javelin::jmap::api::TransportError{
                 .code = javelin::jmap::api::TransportErrorCode::ResponseDecodingFailed,
@@ -162,8 +171,12 @@ namespace javelin::jmap::sync
 
         // Install the receive handlers before enabling push. A server may send the initial
         // StateChange immediately in response to WebSocketPushEnable.
-        socket.sendTextMessage(QString::fromStdString(enable));
-        qCDebug(logWebSocket) << "push subscription sent for Email and Mailbox";
+        socket.sendTextMessage(QString::fromStdString(*enable));
+        QStringList subscribedTypes;
+        for (const auto& type : subscription.types)
+            subscribedTypes.push_back(QString::fromStdString(type));
+        qCDebug(logWebSocket).noquote()
+            << "push subscription sent for" << subscribedTypes.join(QStringLiteral(", "));
 
         QTimer pingTimer;
         pingTimer.setInterval(std::chrono::seconds{30});

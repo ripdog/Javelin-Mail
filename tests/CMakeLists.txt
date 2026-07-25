@@ -70,6 +70,7 @@ add_executable(javelin_jmap_tests
     jmap/SyncReconcilerTest.cpp
     jmap/ThreadRepositoryTest.cpp
     jmap/TranslationCacheRepositoryTest.cpp
+    jmap/WebSocketPushChannelTest.cpp
     gui/MonthCalendarWidgetTest.cpp
     gui/RecurrencePatternTest.cpp
     gui/ConnectionSettingsAdapterTest.cpp

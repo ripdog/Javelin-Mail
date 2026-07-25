@@ -2,10 +2,15 @@
 
 #include "jmap/sync/StateChangeSource.h"
 
+#include <optional>
+
 class QWebSocket;
 
 namespace javelin::jmap::sync
 {
+    [[nodiscard]] std::optional<std::string>
+    encodeWebSocketPushEnable(const StateChangeSubscription& subscription);
+
     class WebSocketStateChangeSource final : public StateChangeSource
     {
       public:
