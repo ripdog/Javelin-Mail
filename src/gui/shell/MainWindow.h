@@ -77,6 +77,7 @@ namespace javelin::gui::settings
 namespace javelin::gui::shell
 {
     class AccountRefreshController;
+    class ComposeTabController;
     class ElidingLabel;
     class MessageCommandController;
     class MessageContentController;
@@ -104,10 +105,6 @@ namespace javelin::gui::messageview
     class MessageViewContainer;
 }
 
-namespace javelin::gui::compose
-{
-    class ComposeTabWidget;
-}
 namespace javelin::gui::contacts
 {
     class ContactsManagerWidget;
@@ -180,8 +177,6 @@ namespace javelin::gui::shell
                                       std::optional<std::size_t> total, bool refreshRemote);
         void openMailboxSelectionInTab(bool refreshRemote);
         void openComposeForRequest(javelin::jmap::submission::OpenComposeRequest request);
-        void openOrActivateComposeTab(javelin::jmap::submission::DraftSnapshot snapshot);
-        void attachComposeWidget(javelin::gui::compose::ComposeTabWidget* widget, int tabIndex);
         [[nodiscard]] bool closeComposeTab(int index);
         void
         markTabsStaleForAccount(std::string_view accountId,
@@ -263,6 +258,7 @@ namespace javelin::gui::shell
         javelin::app::MailApplicationService& m_mailService;
         javelin::app::MessageNavigationCoordinator& m_messageNavigationCoordinator;
         AccountRefreshController* m_accountRefreshController = nullptr;
+        ComposeTabController* m_composeTabController = nullptr;
         MessageCommandController* m_messageCommandController = nullptr;
         MessageContentController* m_messageContentController = nullptr;
         MessageFileController* m_messageFileController = nullptr;

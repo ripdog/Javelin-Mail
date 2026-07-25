@@ -11,7 +11,6 @@
 #include "gui/calendar/CalendarPresentation.h"
 #include "gui/calendar/EventDialog.h"
 #include "gui/calendar/MonthCalendarWidget.h"
-#include "gui/compose/ComposeTabWidget.h"
 #include "gui/contacts/ContactsManagerWidget.h"
 #include "gui/logging/LogViewerDialog.h"
 #include "gui/mailboxes/MailboxIconUtils.h"
@@ -25,9 +24,10 @@
 #include "gui/messages/MessageListPanePresenter.h"
 #include "gui/messageview/MessageViewContainer.h"
 #include "gui/search/AdvancedSearchDialog.h"
-#include "gui/settings/ConnectionSettingsAdapter.h"
 #include "gui/settings/PreferencesDialog.h"
 #include "gui/shell/AccountRefreshController.h"
+#include "gui/shell/ComposeTabController.h"
+#include "gui/shell/ComposeTabPolicy.h"
 #include "gui/shell/ElidingLabel.h"
 #include "gui/shell/LayeredStatusBar.h"
 #include "gui/shell/MainWindowStateStore.h"
@@ -309,6 +309,27 @@ namespace javelin::gui::shell
         connect(m_accountRefreshController, &AccountRefreshController::contactsRefreshed, this,
                 [this](const javelin::jmap::contacts::ContactRefreshSummary&)
                 { reloadAccounts(); });
+        m_composeTabController =
+            new ComposeTabController(m_composeService, m_identityRepository,
+                                     m_contactIdentityLookup, *m_contentStack, m_tabs, this);
+        connect(m_composeTabController, &ComposeTabController::tabReady, this,
+                [this](const int index)
+                {
+                    m_activeTabIndex = index;
+                    updateTabBar();
+                    activateTab(index, false);
+                });
+        connect(m_composeTabController, &ComposeTabController::tabBarChanged, this,
+                &MainWindow::updateTabBar);
+        connect(m_composeTabController, &ComposeTabController::closeRequested, this,
+                &MainWindow::closeTab);
+        connect(m_composeTabController, &ComposeTabController::statusMessage, this,
+                [this](const QString& message, const int durationMilliseconds)
+                { m_statusBar->showMessage(message, durationMilliseconds); });
+        connect(m_composeTabController, &ComposeTabController::userInterventionRequired, this,
+                &MainWindow::presentUserInterventionError);
+        connect(m_composeTabController, &ComposeTabController::operationFailed, this,
+                [this](const javelin::jmap::OperationError& error) { presentError(error); });
         m_messageListTabBindingPresenter = std::make_unique<MessageListTabBindingPresenter>(
             *m_mailboxModel, *m_mailboxView, *m_mailboxSearchEdit, *m_messageModel, *m_mailboxPane);
         m_messageSelectionController = std::make_unique<MessageSelectionController>(
@@ -682,25 +703,13 @@ namespace javelin::gui::shell
         m_composeSendAction = new QAction(QIcon::fromTheme(QStringLiteral("mail-send")),
                                           QStringLiteral("Send"), this);
         connect(m_composeSendAction, &QAction::triggered, this,
-                [this]
-                {
-                    if (auto* tab = activeTab())
-                        if (auto* compose = std::get_if<ComposeTabState>(&tab->content);
-                            compose != nullptr && compose->widget != nullptr)
-                            compose->widget->sendMessage();
-                });
+                [this] { m_composeTabController->sendMessage(activeTab()); });
         actionCollection()->addAction(QStringLiteral("compose_send"), m_composeSendAction);
 
         m_composeSaveDraftAction = new QAction(QIcon::fromTheme(QStringLiteral("document-save")),
                                                QStringLiteral("Save Draft"), this);
         connect(m_composeSaveDraftAction, &QAction::triggered, this,
-                [this]
-                {
-                    if (auto* tab = activeTab())
-                        if (auto* compose = std::get_if<ComposeTabState>(&tab->content);
-                            compose != nullptr && compose->widget != nullptr)
-                            compose->widget->saveDraft();
-                });
+                [this] { m_composeTabController->saveDraft(activeTab()); });
         actionCollection()->addAction(QStringLiteral("compose_save_draft"),
                                       m_composeSaveDraftAction);
 
@@ -708,13 +717,7 @@ namespace javelin::gui::shell
             new QAction(QIcon::fromTheme(QStringLiteral("mail-attachment")),
                         QStringLiteral("Attach Files"), this);
         connect(m_composeAttachFilesAction, &QAction::triggered, this,
-                [this]
-                {
-                    if (auto* tab = activeTab())
-                        if (auto* compose = std::get_if<ComposeTabState>(&tab->content);
-                            compose != nullptr && compose->widget != nullptr)
-                            compose->widget->attachFiles();
-                });
+                [this] { m_composeTabController->attachFiles(activeTab()); });
         actionCollection()->addAction(QStringLiteral("compose_attach_files"),
                                       m_composeAttachFilesAction);
 
@@ -2235,10 +2238,10 @@ namespace javelin::gui::shell
             QSignalBlocker blocker{m_tabBar};
             m_tabBar->setCurrentIndex(index);
         }
-        if (const auto* composeTab = std::get_if<ComposeTabState>(&tab.content);
-            composeTab != nullptr && composeTab->widget != nullptr)
+        if (auto* composeWidget = m_composeTabController->contentWidgetForTab(&tab);
+            composeWidget != nullptr)
         {
-            m_contentStack->setCurrentWidget(composeTab->widget);
+            m_contentStack->setCurrentWidget(composeWidget);
         }
         else if (const auto* contactsTab = std::get_if<ContactsTabState>(&tab.content);
                  contactsTab != nullptr && contactsTab->widget != nullptr)
@@ -2281,8 +2284,7 @@ namespace javelin::gui::shell
             return;
         }
 
-        if (std::holds_alternative<ComposeTabState>(
-                m_tabs[static_cast<std::size_t>(index)].content) &&
+        if (tabKind(m_tabs[static_cast<std::size_t>(index)]) == TabKind::Compose &&
             !closeComposeTab(index))
         {
             return;
@@ -2485,188 +2487,26 @@ namespace javelin::gui::shell
 
     void MainWindow::openComposeForRequest(javelin::jmap::submission::OpenComposeRequest request)
     {
-        const auto settings = javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
-            QString::fromStdString(request.accountId));
-        if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
-            settings.apiKey.isEmpty())
-        {
-            presentUserInterventionError(
-                QStringLiteral("Set Session URL, Login Email, and API Key in Preferences first."));
-            return;
-        }
-
-        auto task = m_composeService.open(
-            javelin::gui::settings::toAccountConnectionSettings(settings), std::move(request));
-        QCoro::connect(
-            std::move(task), this,
-            [this](std::variant<javelin::jmap::submission::DraftSnapshot,
-                                javelin::jmap::OperationError>
-                       result)
-            {
-                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
-                {
-                    qWarning().noquote() << "GUI compose open failed" << error->message;
-                    presentError(*error);
-                    return;
-                }
-
-                openOrActivateComposeTab(
-                    std::get<javelin::jmap::submission::DraftSnapshot>(std::move(result)));
-            });
-    }
-
-    void MainWindow::openOrActivateComposeTab(javelin::jmap::submission::DraftSnapshot snapshot)
-    {
-        for (std::size_t index = 0; index < m_tabs.size(); ++index)
-        {
-            if (auto* composeTab = std::get_if<ComposeTabState>(&m_tabs[index].content);
-                composeTab != nullptr && composeTab->composeSessionId == snapshot.composeSessionId)
-            {
-                composeTab->title = snapshot.subject.has_value()
-                                        ? QString::fromStdString(*snapshot.subject)
-                                        : composeTab->title;
-                m_activeTabIndex = static_cast<int>(index);
-                updateTabBar();
-                activateTab(*m_activeTabIndex, false);
-                return;
-            }
-        }
-
-        m_tabs.push_back(TabState{
-            .content =
-                ComposeTabState{
-                    .accountId = snapshot.accountId,
-                    .composeSessionId = snapshot.composeSessionId,
-                    .title = snapshot.subject.has_value()
-                                 ? QString::fromStdString(*snapshot.subject)
-                                 : QStringLiteral("Compose"),
-                    .widget = nullptr,
-                    .selection = {},
-                },
-        });
-        const auto index = static_cast<int>(m_tabs.size() - 1);
-        auto* widget = new javelin::gui::compose::ComposeTabWidget(
-            m_composeService, m_identityRepository, m_contactIdentityLookup, std::move(snapshot),
-            m_contentStack);
-        attachComposeWidget(widget, index);
-        m_activeTabIndex = index;
-        updateTabBar();
-        activateTab(index, false);
-    }
-
-    void MainWindow::attachComposeWidget(javelin::gui::compose::ComposeTabWidget* widget,
-                                         const int tabIndex)
-    {
-        if (widget == nullptr || tabIndex < 0 ||
-            static_cast<std::size_t>(tabIndex) >= m_tabs.size())
-        {
-            return;
-        }
-
-        auto* composeTab =
-            std::get_if<ComposeTabState>(&m_tabs[static_cast<std::size_t>(tabIndex)].content);
-        if (composeTab == nullptr)
-        {
-            return;
-        }
-
-        composeTab->widget = widget;
-        composeTab->title = widget->tabTitle();
-        m_contentStack->addWidget(widget);
-        connect(widget, &javelin::gui::compose::ComposeTabWidget::titleChanged, this,
-                [this, widget](const QString& title)
-                {
-                    for (std::size_t index = 0; index < m_tabs.size(); ++index)
-                    {
-                        auto* matchingTab = std::get_if<ComposeTabState>(&m_tabs[index].content);
-                        if (matchingTab == nullptr || matchingTab->widget != widget)
-                        {
-                            continue;
-                        }
-
-                        matchingTab->title = title;
-                        updateTabBar();
-                        return;
-                    }
-                });
-        connect(widget, &javelin::gui::compose::ComposeTabWidget::accountChanged, this,
-                [this, widget](const QString& accountId)
-                {
-                    for (auto& tab : m_tabs)
-                    {
-                        auto* matchingTab = std::get_if<ComposeTabState>(&tab.content);
-                        if (matchingTab != nullptr && matchingTab->widget == widget)
-                        {
-                            matchingTab->accountId = accountId.toStdString();
-                            return;
-                        }
-                    }
-                });
-        connect(widget, &javelin::gui::compose::ComposeTabWidget::statusMessageRequested, this,
-                [this](const QString& message, const int timeoutMs)
-                { m_statusBar->showMessage(message, timeoutMs); });
-        connect(widget, &javelin::gui::compose::ComposeTabWidget::userInterventionRequired, this,
-                [this](const QString& message)
-                { QMessageBox::critical(this, QStringLiteral("Action Required"), message); });
-        connect(widget, &javelin::gui::compose::ComposeTabWidget::closeRequested, this,
-                [this, widget]
-                {
-                    for (std::size_t index = 0; index < m_tabs.size(); ++index)
-                    {
-                        auto* matchingTab = std::get_if<ComposeTabState>(&m_tabs[index].content);
-                        if (matchingTab != nullptr && matchingTab->widget == widget)
-                        {
-                            closeTab(static_cast<int>(index));
-                            return;
-                        }
-                    }
-                });
+        m_composeTabController->open(std::move(request));
     }
 
     bool MainWindow::closeComposeTab(const int index)
     {
-        if (index < 0 || static_cast<std::size_t>(index) >= m_tabs.size())
-        {
+        const auto input = m_composeTabController->closeInput(index);
+        if (!input.has_value())
             return false;
-        }
 
-        auto* composeTab =
-            std::get_if<ComposeTabState>(&m_tabs[static_cast<std::size_t>(index)].content);
-        if (composeTab == nullptr || composeTab->widget == nullptr)
+        switch (planComposeTabClose(*input))
         {
-            return false;
-        }
-
-        auto* widget = composeTab->widget;
-        if (widget->operationInFlight())
-        {
+        case ComposeTabClosePlan::BlockWhileBusy:
             m_statusBar->showMessage(
                 QStringLiteral("Wait for the current compose operation to finish first."), 5000);
             return false;
-        }
-
-        if (widget->closeWithoutPrompt())
-        {
-            m_contentStack->removeWidget(widget);
-            widget->deleteLater();
-            composeTab->widget = nullptr;
-            return true;
-        }
-
-        if (widget->isEmptyDraft())
-        {
-            if (const auto error = m_composeService.discard(widget->composeSessionId()))
-            {
-                presentError(*error);
-                return false;
-            }
-            m_contentStack->removeWidget(widget);
-            widget->deleteLater();
-            composeTab->widget = nullptr;
-            return true;
-        }
-
-        if (widget->draftEmailId().has_value())
+        case ComposeTabClosePlan::CloseImmediately:
+            return m_composeTabController->closeImmediately(index);
+        case ComposeTabClosePlan::DiscardWorkingCopyAndClose:
+            return m_composeTabController->discardAndClose(index);
+        case ComposeTabClosePlan::ConfirmKeepSavedDraft:
         {
             QMessageBox messageBox{this};
             messageBox.setWindowTitle(QStringLiteral("Close Draft"));
@@ -2677,50 +2517,31 @@ namespace javelin::gui::shell
             messageBox.addButton(QMessageBox::Cancel);
             messageBox.exec();
             if (messageBox.clickedButton() != keepDraftButton)
+                return false;
+            return m_composeTabController->discardAndClose(index);
+        }
+        case ComposeTabClosePlan::ConfirmSaveOrDiscard:
+        {
+            QMessageBox messageBox{this};
+            messageBox.setWindowTitle(QStringLiteral("Close Compose Tab"));
+            messageBox.setText(QStringLiteral("Save this message as a draft before closing?"));
+            QAbstractButton* saveButton =
+                messageBox.addButton(QStringLiteral("Save Draft"), QMessageBox::AcceptRole);
+            QAbstractButton* discardButton =
+                messageBox.addButton(QStringLiteral("Discard"), QMessageBox::DestructiveRole);
+            messageBox.addButton(QMessageBox::Cancel);
+            messageBox.exec();
+            if (messageBox.clickedButton() == saveButton)
             {
+                m_composeTabController->saveDraftAndClose(index);
                 return false;
             }
-
-            if (const auto error = m_composeService.discard(widget->composeSessionId()))
-            {
-                presentError(*error);
+            if (messageBox.clickedButton() != discardButton)
                 return false;
-            }
-            m_contentStack->removeWidget(widget);
-            widget->deleteLater();
-            composeTab->widget = nullptr;
-            return true;
+            return m_composeTabController->discardAndClose(index);
         }
-
-        QMessageBox messageBox{this};
-        messageBox.setWindowTitle(QStringLiteral("Close Compose Tab"));
-        messageBox.setText(QStringLiteral("Save this message as a draft before closing?"));
-        QAbstractButton* saveButton =
-            messageBox.addButton(QStringLiteral("Save Draft"), QMessageBox::AcceptRole);
-        QAbstractButton* discardButton =
-            messageBox.addButton(QStringLiteral("Discard"), QMessageBox::DestructiveRole);
-        messageBox.addButton(QMessageBox::Cancel);
-        messageBox.exec();
-        if (messageBox.clickedButton() == saveButton)
-        {
-            widget->saveDraftAndClose();
-            return false;
         }
-        if (messageBox.clickedButton() != discardButton)
-        {
-            return false;
-        }
-
-        if (const auto error = m_composeService.discard(widget->composeSessionId()))
-        {
-            presentError(*error);
-            return false;
-        }
-
-        m_contentStack->removeWidget(widget);
-        widget->deleteLater();
-        composeTab->widget = nullptr;
-        return true;
+        return false;
     }
 
     void MainWindow::executeSearch(const QString& text)
@@ -3462,35 +3283,7 @@ namespace javelin::gui::shell
 
     void MainWindow::restoreComposeTab(const PersistedComposeTab& tab)
     {
-        const auto draftResult = m_composeService.loadWorkingCopy(tab.composeSessionId);
-        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&draftResult))
-        {
-            presentError(*error);
-            return;
-        }
-
-        const auto& snapshot =
-            std::get<std::optional<javelin::jmap::submission::DraftSnapshot>>(draftResult);
-        if (!snapshot.has_value())
-        {
-            return;
-        }
-
-        m_tabs.push_back(TabState{
-            .content =
-                ComposeTabState{
-                    .accountId = snapshot->accountId,
-                    .composeSessionId = snapshot->composeSessionId,
-                    .title =
-                        tab.common.title.isEmpty() ? QStringLiteral("Compose") : tab.common.title,
-                    .widget = nullptr,
-                    .selection = {},
-                },
-        });
-        auto* widget = new javelin::gui::compose::ComposeTabWidget(
-            m_composeService, m_identityRepository, m_contactIdentityLookup, *snapshot,
-            m_contentStack);
-        attachComposeWidget(widget, static_cast<int>(m_tabs.size() - 1));
+        static_cast<void>(m_composeTabController->restore(tab));
     }
 
     void MainWindow::restoreContactsTab(const PersistedContactsTab& tab)

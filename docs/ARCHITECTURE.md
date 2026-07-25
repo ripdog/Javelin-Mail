@@ -26,6 +26,10 @@ summaries. `MainWindow` retains only active-tab context and visible cache-reconc
 state, resolved-session persistence, cached-account association, and the follow-up contact refresh.
 Plain `ConnectionSettings` data and its application-intent conversion are independent of the KDE
 preferences dialog; the window only applies busy/status/error and visible-cache refresh effects.
+`ComposeTabController` owns compose credential lookup, asynchronous open/reuse, working-copy
+restoration, concrete compose-widget ownership, tab title/account synchronization, toolbar commands,
+and working-copy discard. Pure `ComposeTabPolicy` selects session reuse and close behavior;
+`MainWindow` retains only confirmation dialogs, active-tab changes, and visible status/error effects.
 
 Mailbox and search tabs are backed by application-layer message-list sessions. These sessions own
 query-window cache reads, request generations, observation lifetimes, pagination, stale recovery,
@@ -40,9 +44,9 @@ creation, signal binding, reuse, stale propagation, pagination, sorting, and rel
 narrow `MessageListTabController`; pure `MessageListTabPolicy` decides identity matches and stale
 targets.
 `TabPersistence` converts runtime tabs into storage records and reconstructs cache-only
-mailbox/search restore plans. `MainWindow` still owns widget creation, active-tab changes, concrete
-widget restoration, and visible-shell side effects, but it does not calculate tab-bar state,
-orchestrate message-list session lifetimes, or serialize message-list sessions.
+mailbox/search restore plans. `MainWindow` still owns active-tab changes, contacts/calendar widget
+assembly, and visible-shell side effects, but it does not calculate tab-bar state, orchestrate
+message-list or compose lifetimes, or serialize message-list sessions.
 Message selection restoration is likewise split into deterministic workspace policy and a Qt
 adapter: the policy decides surviving multi-selection, current-message fallback, and the nearest
 row after removal. `MessageSelectionController` extracts current and multi-selection state,
