@@ -34,8 +34,10 @@ tab, and selects the next active tab after closure. `TabBarPresenter` renders ac
 titles, unread mailbox counts, icons, visibility, and close controls. Mailbox and search session
 creation, signal binding, reuse, stale propagation, and release belong to the narrow
 `MessageListTabController`; pure `MessageListTabPolicy` decides identity matches and stale targets.
-`MainWindow` still owns widget creation, active-tab changes, and visible-shell side effects, but it
-does not calculate tab-bar state or orchestrate message-list session lifetimes.
+`TabPersistence` converts runtime tabs into storage records and reconstructs cache-only
+mailbox/search restore plans. `MainWindow` still owns widget creation, active-tab changes, concrete
+widget restoration, and visible-shell side effects, but it does not calculate tab-bar state,
+orchestrate message-list session lifetimes, or serialize message-list sessions.
 Message selection restoration is likewise split into deterministic workspace policy and thin Qt
 application: the policy decides surviving multi-selection, current-message fallback, and the
 nearest row after removal, while `MainWindow` only applies that plan to the active view.

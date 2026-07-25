@@ -171,6 +171,9 @@ set(JAVELIN_FORMAT_FILES
     src/gui/shell/MessageListTabController.h
     src/gui/shell/MessageListTabPolicy.cpp
     src/gui/shell/MessageListTabPolicy.h
+    src/gui/shell/TabPersistence.cpp
+    src/gui/shell/TabPersistencePolicy.cpp
+    src/gui/shell/TabPersistence.h
     src/gui/shell/TabWorkspace.cpp
     src/gui/shell/TabWorkspacePolicy.cpp
     src/gui/shell/TabWorkspace.h
@@ -668,6 +671,9 @@ add_library(javelin_gui STATIC
     src/gui/shell/MessageListTabController.h
     src/gui/shell/MessageListTabPolicy.cpp
     src/gui/shell/MessageListTabPolicy.h
+    src/gui/shell/TabPersistence.cpp
+    src/gui/shell/TabPersistencePolicy.cpp
+    src/gui/shell/TabPersistence.h
     src/gui/shell/TabWorkspace.cpp
     src/gui/shell/TabWorkspacePolicy.cpp
     src/gui/shell/TabWorkspace.h

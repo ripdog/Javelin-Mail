@@ -34,6 +34,7 @@
 #include "gui/shell/MessageFileController.h"
 #include "gui/shell/MessageListTabController.h"
 #include "gui/shell/TabBarPresenter.h"
+#include "gui/shell/TabPersistence.h"
 #include "gui/sieve/SieveEditorDialog.h"
 #include "jmap/cache/AccountRepository.h"
 #include "jmap/cache/ContactRepository.h"
@@ -4250,52 +4251,29 @@ namespace javelin::gui::shell
 
     void MainWindow::restoreMailboxTab(const PersistedMailboxTab& tab)
     {
+        auto plan = planMailboxTabRestore(tab, pageSize);
         auto restoredTab = m_messageListTabController->createMailboxTab({
-            .accountId = tab.common.accountId,
-            .mailboxId = tab.mailboxId,
-            .title = tab.common.title.isEmpty() ? QString::fromStdString(tab.mailboxId)
-                                                : tab.common.title,
-            .role = tab.mailboxRole,
+            .accountId = std::move(plan.accountId),
+            .mailboxId = std::move(plan.mailboxId),
+            .title = std::move(plan.title),
+            .role = std::move(plan.mailboxRole),
             .sort = m_emailListSort,
-            .restored =
-                javelin::app::RestoredMailboxState{
-                    .page =
-                        javelin::app::MessageListPage{
-                            .offset = tab.offset,
-                            .position = tab.offset,
-                            .returnedLimit = pageSize,
-                            .total = std::nullopt,
-                            .queryState = {},
-                            .anchor = std::nullopt,
-                            .items = {},
-                            .cacheLoaded = false,
-                            .refreshInFlight = false,
-                            .stale = false,
-                            .refreshError = {},
-                        },
-                },
+            .restored = std::move(plan.restored),
         });
-        tabSelection(restoredTab) = {
-            .threadId = tab.common.selection.threadId,
-            .emailId = tab.common.selection.emailId,
-            .selectedEmailIds = {},
-        };
+        tabSelection(restoredTab) = std::move(plan.selection);
         m_tabs.push_back(std::move(restoredTab));
     }
 
     void MainWindow::restoreSearchTab(PersistedSearchTab tab)
     {
+        auto plan = planSearchTabRestore(std::move(tab));
         auto restoredTab = m_messageListTabController->createSearchTab({
-            .accountId = tab.common.accountId,
-            .criteria = std::move(tab.search.criteria),
+            .accountId = std::move(plan.accountId),
+            .criteria = std::move(plan.criteria),
             .sort = m_emailListSort,
-            .restored = std::move(tab.search.restored),
+            .restored = std::move(plan.restored),
         });
-        tabSelection(restoredTab) = {
-            .threadId = std::move(tab.common.selection.threadId),
-            .emailId = std::move(tab.common.selection.emailId),
-            .selectedEmailIds = {},
-        };
+        tabSelection(restoredTab) = std::move(plan.selection);
         m_tabs.push_back(std::move(restoredTab));
     }
 
@@ -4353,93 +4331,7 @@ namespace javelin::gui::shell
         };
         state.tabs.reserve(m_tabs.size());
         for (const auto& tab : m_tabs)
-        {
-            state.tabs.push_back(std::visit(
-                [](const auto& content) -> PersistedTab
-                {
-                    using Content = std::decay_t<decltype(content)>;
-                    const auto selection = PersistedTabSelection{
-                        .threadId = content.selection.threadId,
-                        .emailId = content.selection.emailId,
-                    };
-                    if constexpr (std::is_same_v<Content, MailboxTabState>)
-                    {
-                        return PersistedMailboxTab{
-                            .common =
-                                {
-                                    .accountId = content.session->accountId(),
-                                    .title = content.session->title(),
-                                    .selection = selection,
-                                },
-                            .mailboxId = content.session->mailboxId(),
-                            .mailboxRole = content.session->role(),
-                            .offset = content.session->page().offset,
-                        };
-                    }
-                    else if constexpr (std::is_same_v<Content, SearchTabState>)
-                    {
-                        return PersistedSearchTab{
-                            .common =
-                                {
-                                    .accountId = content.session->accountId(),
-                                    .title = content.session->title(),
-                                    .selection = selection,
-                                },
-                            .search =
-                                {
-                                    .criteria = content.session->criteria(),
-                                    .restored =
-                                        {
-                                            .page = content.session->page(),
-                                            .mode = content.session->mode(),
-                                            .sessionId = content.session->sessionId(),
-                                        },
-                                },
-                        };
-                    }
-                    else if constexpr (std::is_same_v<Content, ComposeTabState>)
-                    {
-                        return PersistedComposeTab{
-                            .common =
-                                {
-                                    .accountId = content.accountId,
-                                    .title = content.title,
-                                    .selection = selection,
-                                },
-                            .composeSessionId = content.composeSessionId,
-                        };
-                    }
-                    else if constexpr (std::is_same_v<Content, ContactsTabState>)
-                    {
-                        return PersistedContactsTab{
-                            .common =
-                                {
-                                    .accountId = content.accountId,
-                                    .title = content.title,
-                                    .selection = selection,
-                                },
-                            .view = content.widget != nullptr
-                                        ? content.widget->viewState()
-                                        : javelin::gui::contacts::ContactsViewState{},
-                        };
-                    }
-                    else
-                    {
-                        return PersistedCalendarTab{
-                            .common =
-                                {
-                                    .accountId = content.accountId,
-                                    .title = content.title,
-                                    .selection = selection,
-                                },
-                            .displayedMonth = content.widget != nullptr
-                                                  ? content.widget->displayedMonth()
-                                                  : QDate{},
-                        };
-                    }
-                },
-                tab.content));
-        }
+            state.tabs.push_back(persistTab(tab));
         saveMainWindowState(state);
     }
 
