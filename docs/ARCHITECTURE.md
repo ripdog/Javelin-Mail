@@ -39,9 +39,11 @@ targets.
 mailbox/search restore plans. `MainWindow` still owns widget creation, active-tab changes, concrete
 widget restoration, and visible-shell side effects, but it does not calculate tab-bar state,
 orchestrate message-list session lifetimes, or serialize message-list sessions.
-Message selection restoration is likewise split into deterministic workspace policy and thin Qt
-application: the policy decides surviving multi-selection, current-message fallback, and the
-nearest row after removal, while `MainWindow` only applies that plan to the active view.
+Message selection restoration is likewise split into deterministic workspace policy and a Qt
+adapter: the policy decides surviving multi-selection, current-message fallback, and the nearest
+row after removal. `MessageSelectionController` extracts current and multi-selection state,
+builds selected-message summaries, synchronizes tab selection, and applies restoration plans;
+`MainWindow` only presents the resulting message context and triggers application intents.
 `MessageNavigationController` owns routed-message matching, one-shot mailbox reveal requests,
 refresh waiting, and route completion; pure navigation policy keeps those decisions independent of
 Qt indexes and widgets.

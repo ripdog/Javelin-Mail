@@ -83,6 +83,7 @@ namespace javelin::gui::shell
     class MessageListTabController;
     class MessageListTabPresenter;
     class MessageNavigationController;
+    class MessageSelectionController;
     class TabBarPresenter;
     struct PersistedMailboxTab;
     struct PersistedSearchTab;
@@ -205,7 +206,6 @@ namespace javelin::gui::shell
                                      javelin::jmap::search::EmailSearchCriteria criteria,
                                      bool refreshRemote);
         void closeTab(int index);
-        void syncActiveTabSelectionFromViews();
         void loadActiveTabFromCache(bool forceReload = false, bool refreshRemote = true);
         void refreshActiveTabFromServer();
         void refreshTabFromServer(std::size_t tabIndex);
@@ -234,21 +234,12 @@ namespace javelin::gui::shell
         void refreshSelectedMessageContent(std::string accountId, std::string emailId);
         void openEmailRoute(const javelin::app::OpenEmailRoute& route);
         void resolveOpenEmailRoute();
-        [[nodiscard]] std::vector<std::string> selectedEmailIds() const;
-        [[nodiscard]] std::vector<javelin::jmap::cache::MessageListItem>
-        selectedMessageSummaries() const;
-        void selectMessageAlone(const QString& emailId);
         void findConversationsWithSender(const QModelIndex& index);
         void showMailboxContextMenu(const QPoint& position);
         void showMessageListContextMenu(const QPoint& position);
         void viewSelectedMessageSource();
         void openPreferences();
         void reloadAccounts();
-        void restoreSelection(std::optional<std::string> accountId,
-                              std::optional<std::string> mailboxId,
-                              std::optional<std::string> threadId,
-                              std::optional<std::string> emailId, bool scrollToSelection = true);
-        [[nodiscard]] bool restoreActiveTabMessageSelection(std::optional<int> previousMessageRow);
         void refreshMessageListPreservingSelection();
         void submitQueuedEmailMutations(std::string accountId);
         void refreshSelectionFromModels();
@@ -284,6 +275,7 @@ namespace javelin::gui::shell
         std::unique_ptr<MessageListTabBindingPresenter> m_messageListTabBindingPresenter;
         MessageListTabController* m_messageListTabController = nullptr;
         std::unique_ptr<MessageNavigationController> m_messageNavigationController;
+        std::unique_ptr<MessageSelectionController> m_messageSelectionController;
         TabBarPresenter* m_tabBarPresenter = nullptr;
         std::unique_ptr<javelin::gui::messages::MessageListPanePresenter>
             m_messageListPanePresenter;
