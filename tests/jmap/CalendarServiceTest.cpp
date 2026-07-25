@@ -457,10 +457,16 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
         .sessionState = "session-scheduling-failure"});
     auto scheduledEvent = event();
     scheduledEvent.id.clear();
+    scheduledEvent.uid.clear();
 
     const auto scheduling = QCoro::waitFor(service.create(
         settings, "a1", {.accountId = "a1", .event = scheduledEvent, .ifInState = std::nullopt}));
 
+    REQUIRE_FALSE(transport.requests.empty());
+    REQUIRE(transport.requests.back().envelope.methodCalls.size() == 1);
+    const auto& createArguments = transport.requests.back().envelope.methodCalls.front().arguments;
+    CHECK(createArguments.find(R"("uid":")") != std::string::npos);
+    CHECK(createArguments.find(R"("uid":"")") == std::string::npos);
     REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(scheduling));
     CHECK(std::get<javelin::jmap::OperationError>(scheduling).code ==
           javelin::jmap::OperationErrorCode::SchedulingUnsupported);

@@ -1547,6 +1547,9 @@ namespace javelin::jmap::calendar
                 co_return *serviceError;
             command.ifInState = std::get<std::string>(state);
         }
+        if (command.event.uid.empty())
+            command.event.uid =
+                QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
         const auto id = command.event.id.empty() ? std::string{"event"} : command.event.id;
         std::vector<std::string> calendarIds;
         for (const auto& [calendarId, present] : command.event.calendarIds)
