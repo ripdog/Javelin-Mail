@@ -6,6 +6,8 @@
 #include "gui/messages/MessageListModel.h"
 #include "jmap/cache/QueryService.h"
 
+#include <QCoroTask>
+
 #include <QAction>
 #include <QCursor>
 #include <QItemSelectionModel>
@@ -272,7 +274,7 @@ namespace javelin::gui::shell
         {
             Q_EMIT statusMessage(std::move(successMessage), 5000);
         }
-        Q_EMIT submitRequested(QString::fromStdString(accountId));
+        submitQueuedMutations(std::move(accountId));
     }
 
     void MessageCommandController::markEmailRead(std::string accountId, std::string emailId)
@@ -287,7 +289,7 @@ namespace javelin::gui::shell
 
         const auto account = QString::fromStdString(accountId);
         Q_EMIT messageMetadataChanged(account);
-        Q_EMIT submitRequested(account);
+        submitQueuedMutations(std::move(accountId));
     }
 
     void MessageCommandController::toggleFlagged(std::optional<std::string> accountId,
@@ -321,7 +323,7 @@ namespace javelin::gui::shell
         Q_EMIT messageMetadataChanged(account);
         Q_EMIT statusMessage(
             flagged ? QStringLiteral("Removed star.") : QStringLiteral("Added star."), 5000);
-        Q_EMIT submitRequested(account);
+        submitQueuedMutations(*accountId);
     }
 
     void MessageCommandController::markSelectionUnread(std::optional<std::string> accountId,
@@ -357,7 +359,7 @@ namespace javelin::gui::shell
                                  ? QStringLiteral("Marked unread.")
                                  : QStringLiteral("Marked %1 messages unread.").arg(markedCount),
                              5000);
-        Q_EMIT submitRequested(account);
+        submitQueuedMutations(*accountId);
     }
 
     void MessageCommandController::queueArchive(std::string accountId,
@@ -406,7 +408,7 @@ namespace javelin::gui::shell
                                            .arg(summary.queuedEmailCount),
                                  5000);
         }
-        Q_EMIT submitRequested(QString::fromStdString(accountId));
+        submitQueuedMutations(std::move(accountId));
     }
 
     void MessageCommandController::queueDelete(std::string accountId, std::string sourceMailboxId,
@@ -445,7 +447,30 @@ namespace javelin::gui::shell
                 ? QStringLiteral("Queued permanent deletion.")
                 : QStringLiteral("Queued permanent deletion for %1 messages.").arg(selectedCount),
             5000);
-        Q_EMIT submitRequested(QString::fromStdString(accountId));
+        submitQueuedMutations(std::move(accountId));
+    }
+
+    void MessageCommandController::submitQueuedMutations(std::string accountId)
+    {
+        auto task = m_mailService.submitPendingEmailMutations(accountId);
+        QCoro::connect(std::move(task), this,
+                       [this](javelin::jmap::SubmittedEmailMutationsResult submitResult)
+                       {
+                           if (const auto* error =
+                                   std::get_if<javelin::jmap::OperationError>(&submitResult))
+                           {
+                               Q_EMIT operationFailed(*error);
+                               return;
+                           }
+
+                           const auto& summary =
+                               std::get<javelin::jmap::SubmittedEmailMutations>(submitResult);
+                           Q_EMIT emailMutationsSubmitted({
+                               .accountId = summary.accountId,
+                               .updatedEmailCount = summary.updatedEmailCount,
+                               .failedEmailCount = summary.failedEmailCount,
+                           });
+                       });
     }
 
     bool

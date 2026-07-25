@@ -964,9 +964,29 @@ namespace javelin::gui::shell
                     refreshMessageListPreservingSelection();
                     refreshSelectionFromModels();
                 });
-        connect(m_messageCommandController, &MessageCommandController::submitRequested, this,
-                [this](const QString& accountId)
-                { submitQueuedEmailMutations(accountId.toStdString()); });
+        connect(m_messageCommandController, &MessageCommandController::emailMutationsSubmitted,
+                this,
+                [this](const EmailMutationSubmissionSummary& summary)
+                {
+                    if (summary.failedEmailCount > 0)
+                    {
+                        markTabsStaleForAccount(summary.accountId);
+                        refreshActiveTabFromServer();
+                        presentError(javelin::jmap::OperationError{
+                            .message = QStringLiteral("The server rejected %1 email mutation(s). "
+                                                      "The mailbox has been refreshed to restore "
+                                                      "the server state.")
+                                           .arg(summary.failedEmailCount),
+                        });
+                        return;
+                    }
+                    if (summary.updatedEmailCount == 0)
+                        return;
+
+                    refreshMessageListPreservingSelection();
+                    refreshSelectionFromModels();
+                    refreshActiveSearchAfterMutation(summary.accountId);
+                });
 
         connect(m_mailboxModel, &javelin::gui::mailboxes::MailboxTreeModel::emailsDropped, this,
                 [this](const QString& sourceAccountId, const QString& destinationAccountId,
@@ -3326,44 +3346,6 @@ namespace javelin::gui::shell
 
         QSignalBlocker blocker{m_messageView->selectionModel()};
         loadActiveTabFromCache(true, false);
-    }
-
-    void MainWindow::submitQueuedEmailMutations(std::string accountId)
-    {
-        auto task = m_mailService.submitPendingEmailMutations(accountId);
-        QCoro::connect(
-            std::move(task), this,
-            [this](javelin::jmap::SubmittedEmailMutationsResult submitResult)
-            {
-                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&submitResult))
-                {
-                    presentError(*error);
-                    return;
-                }
-
-                const auto& summary =
-                    std::get<javelin::jmap::SubmittedEmailMutations>(submitResult);
-                if (summary.failedEmailCount > 0)
-                {
-                    markTabsStaleForAccount(summary.accountId);
-                    refreshActiveTabFromServer();
-                    presentError(javelin::jmap::OperationError{
-                        .message = QStringLiteral("The server rejected %1 email mutation(s). "
-                                                  "The mailbox has been refreshed to restore "
-                                                  "the server state.")
-                                       .arg(summary.failedEmailCount),
-                    });
-                    return;
-                }
-                if (summary.updatedEmailCount == 0)
-                {
-                    return;
-                }
-
-                refreshMessageListPreservingSelection();
-                refreshSelectionFromModels();
-                refreshActiveSearchAfterMutation(summary.accountId);
-            });
     }
 
     void MainWindow::viewSelectedMessageSource()

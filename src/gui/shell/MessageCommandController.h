@@ -8,6 +8,7 @@
 #include <QPointer>
 #include <QString>
 
+#include <cstddef>
 #include <optional>
 #include <string>
 
@@ -32,6 +33,13 @@ namespace javelin::gui::shell
     {
         Move,
         Copy,
+    };
+
+    struct EmailMutationSubmissionSummary
+    {
+        std::string accountId;
+        std::size_t updatedEmailCount = 0;
+        std::size_t failedEmailCount = 0;
     };
 
     class MessageCommandController final : public QObject
@@ -73,7 +81,7 @@ namespace javelin::gui::shell
         void operationFailed(javelin::jmap::OperationError error);
         void mailboxMembershipChanged(QString accountId);
         void messageMetadataChanged(QString accountId);
-        void submitRequested(QString accountId);
+        void emailMutationsSubmitted(const EmailMutationSubmissionSummary& summary);
 
       private:
         void queueArchive(std::string accountId, std::optional<std::string> sourceMailboxId,
@@ -82,6 +90,7 @@ namespace javelin::gui::shell
                          javelin::app::MessageSelection selection);
         void queueDestroy(std::string accountId, std::optional<std::string> sourceMailboxId,
                           javelin::app::MessageSelection selection);
+        void submitQueuedMutations(std::string accountId);
         [[nodiscard]] bool confirmPermanentDelete(std::size_t selectionItemCount) const;
 
         javelin::app::MailApplicationService& m_mailService;

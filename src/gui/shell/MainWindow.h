@@ -234,7 +234,6 @@ namespace javelin::gui::shell
         void openPreferences();
         void reloadAccounts();
         void refreshMessageListPreservingSelection();
-        void submitQueuedEmailMutations(std::string accountId);
         void refreshSelectionFromModels();
         void restorePersistentState();
         void restoreMailboxTab(const PersistedMailboxTab& tab);
