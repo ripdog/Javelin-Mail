@@ -34,6 +34,10 @@ and working-copy discard. Pure `ComposeTabPolicy` selects session reuse and clos
 visibility/default-calendar changes, owner-deduplicated range refresh, recurrence edit scope, event
 create/update/delete operations, toolbar commands, persistence restoration, and widget disposal. The
 window only activates the tab and presents controller status or errors.
+`ContactsTabController` owns contacts tab reuse and materialization, concrete widget ownership,
+toolbar commands and availability, group-menu population, persistence restoration, refresh,
+compose/search request forwarding, and busy-close protection. Contact editing and mutation UI remain
+encapsulated inside `ContactsManagerWidget`; the window only handles resulting navigation intents.
 
 Mailbox and search tabs are backed by application-layer message-list sessions. These sessions own
 query-window cache reads, request generations, observation lifetimes, pagination, stale recovery,
@@ -48,9 +52,9 @@ creation, signal binding, reuse, stale propagation, pagination, sorting, and rel
 narrow `MessageListTabController`; pure `MessageListTabPolicy` decides identity matches and stale
 targets.
 `TabPersistence` converts runtime tabs into storage records and reconstructs cache-only
-mailbox/search restore plans. `MainWindow` still owns active-tab changes, contacts widget assembly,
-and visible-shell side effects, but it does not calculate tab-bar state, orchestrate message-list,
-compose, or calendar lifetimes, or serialize message-list sessions.
+mailbox/search restore plans. `MainWindow` still owns active-tab changes and visible-shell side
+effects, but it does not calculate tab-bar state, orchestrate message-list, compose, contacts, or
+calendar lifetimes, or serialize message-list sessions.
 Message selection restoration is likewise split into deterministic workspace policy and a Qt
 adapter: the policy decides surviving multi-selection, current-message fallback, and the nearest
 row after removal. `MessageSelectionController` extracts current and multi-selection state,

@@ -213,11 +213,11 @@ namespace javelin::app
 
         m_mainWindow = new javelin::gui::shell::MainWindow(
             m_processServices->accountRepository(), m_processServices->contactRepository(),
-            m_processServices->contactService(), m_processServices->calendarService(),
-            m_processServices->contactIdentityLookup(), m_processServices->identityRepository(),
-            m_processServices->messageViewService(), m_processServices->queryService(),
-            m_processServices->translationService(), m_processServices->composeService(),
-            m_processServices->mailService(), m_processServices->messageNavigationCoordinator());
+            m_processServices->calendarService(), m_processServices->contactIdentityLookup(),
+            m_processServices->identityRepository(), m_processServices->messageViewService(),
+            m_processServices->queryService(), m_processServices->translationService(),
+            m_processServices->composeService(), m_processServices->mailService(),
+            m_processServices->messageNavigationCoordinator());
 
         m_mainWindow->setAttribute(Qt::WA_DeleteOnClose);
         auto* taskButton = new QToolButton(m_mainWindow);

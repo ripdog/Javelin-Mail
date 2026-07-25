@@ -47,7 +47,6 @@ namespace javelin::app
 } // namespace javelin::app
 namespace javelin::jmap::contacts
 {
-    class ContactService;
     class ContactIdentityLookup;
 } // namespace javelin::jmap::contacts
 namespace javelin::jmap::calendar
@@ -78,6 +77,7 @@ namespace javelin::gui::shell
 {
     class AccountRefreshController;
     class CalendarTabController;
+    class ContactsTabController;
     class ComposeTabController;
     class ElidingLabel;
     class MessageCommandController;
@@ -106,10 +106,6 @@ namespace javelin::gui::messageview
     class MessageViewContainer;
 }
 
-namespace javelin::gui::contacts
-{
-    class ContactsManagerWidget;
-}
 namespace javelin::gui::shell
 {
     class LayeredStatusBar;
@@ -122,7 +118,6 @@ namespace javelin::gui::shell
         explicit MainWindow(
             javelin::jmap::cache::AccountRepository& accountRepository,
             javelin::jmap::cache::ContactRepository& contactRepository,
-            javelin::jmap::contacts::ContactService& contactService,
             javelin::jmap::calendar::CalendarService& calendarService,
             javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
             javelin::jmap::cache::IdentityRepository& identityRepository,
@@ -231,8 +226,6 @@ namespace javelin::gui::shell
         void restoreSearchTab(PersistedSearchTab tab);
         void restoreComposeTab(const PersistedComposeTab& tab);
         void restoreContactsTab(const PersistedContactsTab& tab);
-        [[nodiscard]] javelin::gui::contacts::ContactsManagerWidget*
-        appendContactsTab(std::string ownerAccountId, QString title);
         void savePersistentState() const;
         void updateEmptyStates();
         void updateMessageListHeader();
@@ -243,7 +236,6 @@ namespace javelin::gui::shell
 
         javelin::jmap::cache::AccountRepository& m_accountRepository;
         javelin::jmap::cache::ContactRepository& m_contactRepository;
-        javelin::jmap::contacts::ContactService& m_contactService;
         javelin::jmap::calendar::CalendarService& m_calendarService;
         javelin::jmap::contacts::ContactIdentityLookup& m_contactIdentityLookup;
         javelin::jmap::cache::IdentityRepository& m_identityRepository;
@@ -255,6 +247,7 @@ namespace javelin::gui::shell
         javelin::app::MessageNavigationCoordinator& m_messageNavigationCoordinator;
         AccountRefreshController* m_accountRefreshController = nullptr;
         CalendarTabController* m_calendarTabController = nullptr;
+        ContactsTabController* m_contactsTabController = nullptr;
         ComposeTabController* m_composeTabController = nullptr;
         MessageCommandController* m_messageCommandController = nullptr;
         MessageContentController* m_messageContentController = nullptr;

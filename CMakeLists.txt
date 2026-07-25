@@ -191,6 +191,8 @@ set(JAVELIN_FORMAT_FILES
     src/gui/shell/MainWindow.h
     src/gui/shell/CalendarTabController.cpp
     src/gui/shell/CalendarTabController.h
+    src/gui/shell/ContactsTabController.cpp
+    src/gui/shell/ContactsTabController.h
     src/gui/shell/ComposeTabController.cpp
     src/gui/shell/ComposeTabController.h
     src/gui/shell/ComposeTabPolicy.cpp
@@ -724,6 +726,8 @@ add_library(javelin_gui STATIC
     src/gui/shell/MainWindow.h
     src/gui/shell/CalendarTabController.cpp
     src/gui/shell/CalendarTabController.h
+    src/gui/shell/ContactsTabController.cpp
+    src/gui/shell/ContactsTabController.h
     src/gui/shell/ComposeTabController.cpp
     src/gui/shell/ComposeTabController.h
     src/gui/shell/ComposeTabPolicy.cpp

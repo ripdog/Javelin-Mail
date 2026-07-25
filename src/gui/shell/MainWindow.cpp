@@ -8,7 +8,6 @@
 #include "app/SearchSession.h"
 #include "app/TranslationService.h"
 #include "gui/IconUtils.h"
-#include "gui/contacts/ContactsManagerWidget.h"
 #include "gui/logging/LogViewerDialog.h"
 #include "gui/mailboxes/MailboxIconUtils.h"
 #include "gui/mailboxes/MailboxPropertiesDialog.h"
@@ -26,6 +25,7 @@
 #include "gui/shell/CalendarTabController.h"
 #include "gui/shell/ComposeTabController.h"
 #include "gui/shell/ComposeTabPolicy.h"
+#include "gui/shell/ContactsTabController.h"
 #include "gui/shell/ElidingLabel.h"
 #include "gui/shell/LayeredStatusBar.h"
 #include "gui/shell/MainWindowStateStore.h"
@@ -227,7 +227,6 @@ namespace javelin::gui::shell
 
     MainWindow::MainWindow(javelin::jmap::cache::AccountRepository& accountRepository,
                            javelin::jmap::cache::ContactRepository& contactRepository,
-                           javelin::jmap::contacts::ContactService& contactService,
                            javelin::jmap::calendar::CalendarService& calendarService,
                            javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
                            javelin::jmap::cache::IdentityRepository& identityRepository,
@@ -239,12 +238,11 @@ namespace javelin::gui::shell
                            javelin::app::MessageNavigationCoordinator& messageNavigationCoordinator,
                            QWidget* parent)
         : KXmlGuiWindow(parent), m_accountRepository(accountRepository),
-          m_contactRepository(contactRepository), m_contactService(contactService),
-          m_calendarService(calendarService), m_contactIdentityLookup(contactIdentityLookup),
-          m_identityRepository(identityRepository), m_messageViewService(messageViewService),
-          m_queryService(queryService), m_translationService(translationService),
-          m_composeService(composeService), m_mailService(mailService),
-          m_messageNavigationCoordinator(messageNavigationCoordinator)
+          m_contactRepository(contactRepository), m_calendarService(calendarService),
+          m_contactIdentityLookup(contactIdentityLookup), m_identityRepository(identityRepository),
+          m_messageViewService(messageViewService), m_queryService(queryService),
+          m_translationService(translationService), m_composeService(composeService),
+          m_mailService(mailService), m_messageNavigationCoordinator(messageNavigationCoordinator)
     {
         m_statusBar = new LayeredStatusBar(this);
         setStatusBar(m_statusBar);
@@ -318,6 +316,48 @@ namespace javelin::gui::shell
                 { m_statusBar->showMessage(message, durationMilliseconds); });
         connect(m_calendarTabController, &CalendarTabController::operationFailed, this,
                 [this](const javelin::jmap::OperationError& error) { presentError(error); });
+        m_contactsTabController = new ContactsTabController(m_contactRepository, m_mailService,
+                                                            *m_contentStack, m_tabs, this);
+        connect(m_contactsTabController, &ContactsTabController::tabReady, this,
+                [this](const int index)
+                {
+                    m_activeTabIndex = index;
+                    updateTabBar();
+                    activateTab(index, false);
+                });
+        connect(m_contactsTabController, &ContactsTabController::toolbarStateChanged, this,
+                &MainWindow::updateToolbarForActiveTab);
+        connect(m_contactsTabController, &ContactsTabController::statusMessage, this,
+                [this](const QString& message, const int durationMilliseconds)
+                { m_statusBar->showMessage(message, durationMilliseconds); });
+        connect(m_contactsTabController, &ContactsTabController::userInterventionRequired, this,
+                &MainWindow::presentUserInterventionError);
+        connect(m_contactsTabController, &ContactsTabController::composeMailRequested, this,
+                [this](const QString& accountId, const QString& name, const QString& email)
+                {
+                    openComposeForRequest({
+                        .accountId = accountId.toStdString(),
+                        .mode = javelin::jmap::submission::ComposeMode::NewMessage,
+                        .referenceEmailId = std::nullopt,
+                        .draftEmailId = std::nullopt,
+                        .initialTo = {{.name = name.isEmpty()
+                                                   ? std::nullopt
+                                                   : std::optional<std::string>{name.toStdString()},
+                                       .email = email.toStdString()}},
+                    });
+                });
+        connect(m_contactsTabController, &ContactsTabController::searchMailFromRequested, this,
+                [this](const QString& accountId, const QString& email)
+                {
+                    const auto normalizedAccountId = accountId.trimmed();
+                    const auto normalizedEmail = email.trimmed();
+                    if (normalizedAccountId.isEmpty() || normalizedEmail.isEmpty())
+                        return;
+                    openOrActivateSearchTab(normalizedAccountId.toStdString(),
+                                            javelin::jmap::search::EmailSearchCriteria{
+                                                .from = normalizedEmail.toStdString()},
+                                            true);
+                });
         m_composeTabController =
             new ComposeTabController(m_composeService, m_identityRepository,
                                      m_contactIdentityLookup, *m_contentStack, m_tabs, this);
@@ -730,81 +770,59 @@ namespace javelin::gui::shell
         actionCollection()->addAction(QStringLiteral("compose_attach_files"),
                                       m_composeAttachFilesAction);
 
-        const auto invokeContact = [this](const auto operation)
-        {
-            if (auto* tab = activeTab())
-                if (auto* contacts = std::get_if<ContactsTabState>(&tab->content);
-                    contacts != nullptr && contacts->widget != nullptr)
-                    (contacts->widget->*operation)();
-        };
+        const auto invokeContact = [this](const ContactsTabCommand command)
+        { m_contactsTabController->invoke(activeTab(), command); };
         m_contactNewAction = new QAction(QIcon::fromTheme(QStringLiteral("contact-new")),
                                          QStringLiteral("Add"), this);
-        connect(
-            m_contactNewAction, &QAction::triggered, this, [invokeContact]
-            { invokeContact(&javelin::gui::contacts::ContactsManagerWidget::beginCreateContact); });
+        connect(m_contactNewAction, &QAction::triggered, this,
+                [invokeContact] { invokeContact(ContactsTabCommand::CreateContact); });
         auto* contactAddMenu = new QMenu(this);
         auto* newContact = contactAddMenu->addAction(
             QIcon::fromTheme(QStringLiteral("contact-new")), QStringLiteral("New Contact"));
-        connect(
-            newContact, &QAction::triggered, this, [invokeContact]
-            { invokeContact(&javelin::gui::contacts::ContactsManagerWidget::beginCreateContact); });
+        connect(newContact, &QAction::triggered, this,
+                [invokeContact] { invokeContact(ContactsTabCommand::CreateContact); });
         auto* newGroup = contactAddMenu->addAction(QIcon::fromTheme(QStringLiteral("system-users")),
                                                    QStringLiteral("New Group"));
-        connect(
-            newGroup, &QAction::triggered, this, [invokeContact]
-            { invokeContact(&javelin::gui::contacts::ContactsManagerWidget::beginCreateGroup); });
+        connect(newGroup, &QAction::triggered, this,
+                [invokeContact] { invokeContact(ContactsTabCommand::CreateGroup); });
         m_contactNewAction->setMenu(contactAddMenu);
         actionCollection()->addAction(QStringLiteral("contact_new"), m_contactNewAction);
         m_contactEditAction = new QAction(QIcon::fromTheme(QStringLiteral("document-edit")),
                                           QStringLiteral("Edit Contact"), this);
-        connect(
-            m_contactEditAction, &QAction::triggered, this, [invokeContact]
-            { invokeContact(&javelin::gui::contacts::ContactsManagerWidget::beginEditContact); });
+        connect(m_contactEditAction, &QAction::triggered, this,
+                [invokeContact] { invokeContact(ContactsTabCommand::EditContact); });
         actionCollection()->addAction(QStringLiteral("contact_edit"), m_contactEditAction);
         m_contactDeleteAction = new QAction(QIcon::fromTheme(QStringLiteral("edit-delete")),
                                             QStringLiteral("Delete Contact"), this);
-        connect(m_contactDeleteAction, &QAction::triggered, this, [invokeContact]
-                { invokeContact(&javelin::gui::contacts::ContactsManagerWidget::deleteContact); });
+        connect(m_contactDeleteAction, &QAction::triggered, this,
+                [invokeContact] { invokeContact(ContactsTabCommand::DeleteContact); });
         actionCollection()->addAction(QStringLiteral("contact_delete"), m_contactDeleteAction);
         m_contactCopyAction = new QAction(QIcon::fromTheme(QStringLiteral("edit-copy")),
                                           QStringLiteral("Copy Contact"), this);
-        connect(m_contactCopyAction, &QAction::triggered, this, [invokeContact]
-                { invokeContact(&javelin::gui::contacts::ContactsManagerWidget::copyContact); });
+        connect(m_contactCopyAction, &QAction::triggered, this,
+                [invokeContact] { invokeContact(ContactsTabCommand::CopyContact); });
         actionCollection()->addAction(QStringLiteral("contact_copy"), m_contactCopyAction);
         m_contactImportAction = new QAction(QIcon::fromTheme(QStringLiteral("document-import")),
                                             QStringLiteral("Import vCard…"), this);
-        connect(m_contactImportAction, &QAction::triggered, this, [invokeContact]
-                { invokeContact(&javelin::gui::contacts::ContactsManagerWidget::importVCard); });
+        connect(m_contactImportAction, &QAction::triggered, this,
+                [invokeContact] { invokeContact(ContactsTabCommand::ImportVCard); });
         actionCollection()->addAction(QStringLiteral("contact_import"), m_contactImportAction);
         m_contactExportAction = new QAction(QIcon::fromTheme(QStringLiteral("document-export")),
                                             QStringLiteral("Export vCard…"), this);
-        connect(m_contactExportAction, &QAction::triggered, this, [invokeContact]
-                { invokeContact(&javelin::gui::contacts::ContactsManagerWidget::exportVCard); });
+        connect(m_contactExportAction, &QAction::triggered, this,
+                [invokeContact] { invokeContact(ContactsTabCommand::ExportVCard); });
         actionCollection()->addAction(QStringLiteral("contact_export"), m_contactExportAction);
         m_contactDuplicatesAction = new QAction(QIcon::fromTheme(QStringLiteral("merge")),
                                                 QStringLiteral("Find Duplicates…"), this);
         connect(m_contactDuplicatesAction, &QAction::triggered, this,
-                [invokeContact]
-                {
-                    invokeContact(
-                        &javelin::gui::contacts::ContactsManagerWidget::findAndMergeDuplicates);
-                });
+                [invokeContact] { invokeContact(ContactsTabCommand::FindDuplicates); });
         actionCollection()->addAction(QStringLiteral("contact_duplicates"),
                                       m_contactDuplicatesAction);
         m_contactAddToGroupAction = new QAction(QIcon::fromTheme(QStringLiteral("list-add")),
                                                 QStringLiteral("Add to Group"), this);
         auto* addToGroupMenu = new QMenu(this);
-        connect(addToGroupMenu, &QMenu::aboutToShow, this,
-                [this, addToGroupMenu]
-                {
-                    const auto* tab = activeTab();
-                    const auto* contacts =
-                        tab == nullptr ? nullptr : std::get_if<ContactsTabState>(&tab->content);
-                    if (contacts != nullptr && contacts->widget != nullptr)
-                        contacts->widget->populateAddToGroupMenu(*addToGroupMenu);
-                    else
-                        addToGroupMenu->clear();
-                });
+        connect(addToGroupMenu, &QMenu::aboutToShow, this, [this, addToGroupMenu]
+                { m_contactsTabController->populateAddToGroupMenu(activeTab(), *addToGroupMenu); });
         m_contactAddToGroupAction->setMenu(addToGroupMenu);
         actionCollection()->addAction(QStringLiteral("contact_add_to_group"),
                                       m_contactAddToGroupAction);
@@ -815,13 +833,8 @@ namespace javelin::gui::shell
         connect(removeFromGroupMenu, &QMenu::aboutToShow, this,
                 [this, removeFromGroupMenu]
                 {
-                    const auto* tab = activeTab();
-                    const auto* contacts =
-                        tab == nullptr ? nullptr : std::get_if<ContactsTabState>(&tab->content);
-                    if (contacts != nullptr && contacts->widget != nullptr)
-                        contacts->widget->populateRemoveFromGroupMenu(*removeFromGroupMenu);
-                    else
-                        removeFromGroupMenu->clear();
+                    m_contactsTabController->populateRemoveFromGroupMenu(activeTab(),
+                                                                         *removeFromGroupMenu);
                 });
         m_contactRemoveFromGroupAction->setMenu(removeFromGroupMenu);
         actionCollection()->addAction(QStringLiteral("contact_remove_from_group"),
@@ -830,17 +843,13 @@ namespace javelin::gui::shell
             new QAction(QIcon::fromTheme(QStringLiteral("view-list-details")),
                         QStringLiteral("Manage Address Books…"), this);
         connect(m_contactManageAddressBooksAction, &QAction::triggered, this,
-                [invokeContact]
-                {
-                    invokeContact(
-                        &javelin::gui::contacts::ContactsManagerWidget::showAddressBookManager);
-                });
+                [invokeContact] { invokeContact(ContactsTabCommand::ManageAddressBooks); });
         actionCollection()->addAction(QStringLiteral("contact_manage_address_books"),
                                       m_contactManageAddressBooksAction);
         m_contactRefreshAction = new QAction(QIcon::fromTheme(QStringLiteral("view-refresh")),
                                              QStringLiteral("Refresh Contacts"), this);
-        connect(m_contactRefreshAction, &QAction::triggered, this, [invokeContact]
-                { invokeContact(&javelin::gui::contacts::ContactsManagerWidget::requestRefresh); });
+        connect(m_contactRefreshAction, &QAction::triggered, this,
+                [invokeContact] { invokeContact(ContactsTabCommand::Refresh); });
         actionCollection()->addAction(QStringLiteral("contact_refresh"), m_contactRefreshAction);
 
         const auto invokeCalendar = [this](const CalendarTabCommand command)
@@ -1331,103 +1340,7 @@ namespace javelin::gui::shell
 
     void MainWindow::openContacts()
     {
-        for (std::size_t index = 0; index < m_tabs.size(); ++index)
-        {
-            if (std::holds_alternative<ContactsTabState>(m_tabs[index].content))
-            {
-                m_activeTabIndex = static_cast<int>(index);
-                updateTabBar();
-                activateTab(*m_activeTabIndex, false);
-                return;
-            }
-        }
-
-        const auto result = m_contactRepository.listAccounts();
-        const auto* accounts =
-            std::get_if<std::vector<javelin::jmap::cache::ContactAccount>>(&result);
-        if (accounts == nullptr || accounts->empty())
-        {
-            m_statusBar->showMessage(
-                QStringLiteral("The configured server does not support JMAP Contacts."), 10000);
-            return;
-        }
-        const auto active = activeAccountId();
-        auto selected = accounts->begin();
-        if (active.has_value())
-        {
-            const auto match = std::ranges::find(*accounts, *active,
-                                                 &javelin::jmap::cache::ContactAccount::accountId);
-            if (match != accounts->end())
-            {
-                selected = match;
-            }
-        }
-        auto* widget = appendContactsTab(selected->ownerAccountId, QStringLiteral("Contacts"));
-        if (widget == nullptr)
-            return;
-        m_activeTabIndex = static_cast<int>(m_tabs.size() - 1);
-        updateTabBar();
-        activateTab(*m_activeTabIndex, false);
-        widget->requestRefresh();
-    }
-
-    javelin::gui::contacts::ContactsManagerWidget*
-    MainWindow::appendContactsTab(std::string ownerAccountId, QString title)
-    {
-        const auto availableAccounts = m_contactRepository.listAccounts(ownerAccountId);
-        const auto* accounts =
-            std::get_if<std::vector<javelin::jmap::cache::ContactAccount>>(&availableAccounts);
-        if (accounts == nullptr || accounts->empty())
-            return nullptr;
-        auto* widget = new javelin::gui::contacts::ContactsManagerWidget(
-            m_contactRepository, m_mailService, ownerAccountId, m_contentStack);
-        connect(widget, &javelin::gui::contacts::ContactsManagerWidget::statusMessageRequested,
-                m_statusBar, &LayeredStatusBar::showMessage);
-        connect(widget, &javelin::gui::contacts::ContactsManagerWidget::userInterventionRequired,
-                this, &MainWindow::presentUserInterventionError);
-        connect(widget, &javelin::gui::contacts::ContactsManagerWidget::composeMailRequested, this,
-                [this](const QString& accountId, const QString& name, const QString& email)
-                {
-                    openComposeForRequest({
-                        .accountId = accountId.toStdString(),
-                        .mode = javelin::jmap::submission::ComposeMode::NewMessage,
-                        .referenceEmailId = std::nullopt,
-                        .draftEmailId = std::nullopt,
-                        .initialTo = {{.name = name.isEmpty()
-                                                   ? std::nullopt
-                                                   : std::optional<std::string>{name.toStdString()},
-                                       .email = email.toStdString()}},
-                    });
-                });
-        connect(widget, &javelin::gui::contacts::ContactsManagerWidget::searchMailFromRequested,
-                this,
-                [this](const QString& accountId, const QString& email)
-                {
-                    const auto normalizedAccountId = accountId.trimmed();
-                    const auto normalizedEmail = email.trimmed();
-                    if (normalizedAccountId.isEmpty() || normalizedEmail.isEmpty())
-                        return;
-                    openOrActivateSearchTab(normalizedAccountId.toStdString(),
-                                            javelin::jmap::search::EmailSearchCriteria{
-                                                .from = normalizedEmail.toStdString()},
-                                            true);
-                });
-        connect(widget, &javelin::gui::contacts::ContactsManagerWidget::toolbarStateChanged, this,
-                [this, widget]
-                {
-                    const auto* tab = activeTab();
-                    const auto* contacts =
-                        tab == nullptr ? nullptr : std::get_if<ContactsTabState>(&tab->content);
-                    if (contacts != nullptr && contacts->widget == widget)
-                        updateToolbarForActiveTab();
-                });
-        m_contentStack->addWidget(widget);
-        m_tabs.push_back(
-            TabState{.content = ContactsTabState{.accountId = std::move(ownerAccountId),
-                                                 .title = std::move(title),
-                                                 .widget = widget,
-                                                 .selection = {}}});
-        return widget;
+        m_contactsTabController->open(activeAccountId());
     }
 
     void MainWindow::openSieveEditor()
@@ -1642,39 +1555,18 @@ namespace javelin::gui::shell
         setToolBarVisible(QStringLiteral("calendarToolBar"), context == ToolbarContext::Calendar);
         if (context == ToolbarContext::Contacts)
         {
-            bool busy = true;
-            bool selected = false;
-            if (const auto* tab = activeTab())
-                if (const auto* contacts = std::get_if<ContactsTabState>(&tab->content);
-                    contacts != nullptr && contacts->widget != nullptr)
-                {
-                    busy = contacts->widget->operationInFlight();
-                    selected = contacts->widget->hasSelectedContact();
-                }
-            const auto* contacts = activeTab() == nullptr
-                                       ? nullptr
-                                       : std::get_if<ContactsTabState>(&activeTab()->content);
-            const auto* widget = contacts == nullptr ? nullptr : contacts->widget;
-            m_contactNewAction->setEnabled(!busy && widget != nullptr &&
-                                           widget->canCreateContact());
-            m_contactEditAction->setEnabled(!busy && selected && widget != nullptr &&
-                                            widget->canEditContact());
-            m_contactDeleteAction->setEnabled(!busy && selected && widget != nullptr &&
-                                              widget->canDeleteContact());
-            m_contactCopyAction->setEnabled(!busy && widget != nullptr &&
-                                            widget->hasSingleSelectedContact());
-            m_contactImportAction->setEnabled(!busy && widget != nullptr &&
-                                              widget->canCreateContact());
-            m_contactExportAction->setEnabled(!busy && widget != nullptr &&
-                                              widget->hasSingleSelectedContact());
-            m_contactDuplicatesAction->setEnabled(!busy);
-            m_contactAddToGroupAction->setEnabled(
-                !busy && widget != nullptr &&
-                (widget->canCreateGroup() || widget->canAddSelectedContactToGroup()));
-            m_contactRemoveFromGroupAction->setEnabled(!busy && widget != nullptr &&
-                                                       widget->canRemoveSelectedContactFromGroup());
-            m_contactManageAddressBooksAction->setEnabled(!busy);
-            m_contactRefreshAction->setEnabled(!busy);
+            const auto state = m_contactsTabController->toolbarState(activeTab());
+            m_contactNewAction->setEnabled(state.canCreateContact);
+            m_contactEditAction->setEnabled(state.canEditContact);
+            m_contactDeleteAction->setEnabled(state.canDeleteContact);
+            m_contactCopyAction->setEnabled(state.canCopyContact);
+            m_contactImportAction->setEnabled(state.canCreateContact);
+            m_contactExportAction->setEnabled(state.canExportContact);
+            m_contactDuplicatesAction->setEnabled(state.canFindDuplicates);
+            m_contactAddToGroupAction->setEnabled(state.canAddToGroup);
+            m_contactRemoveFromGroupAction->setEnabled(state.canRemoveFromGroup);
+            m_contactManageAddressBooksAction->setEnabled(state.canManageAddressBooks);
+            m_contactRefreshAction->setEnabled(state.canRefresh);
         }
         if (context == ToolbarContext::Calendar)
         {
@@ -1819,10 +1711,10 @@ namespace javelin::gui::shell
         {
             m_contentStack->setCurrentWidget(composeWidget);
         }
-        else if (const auto* contactsTab = std::get_if<ContactsTabState>(&tab.content);
-                 contactsTab != nullptr && contactsTab->widget != nullptr)
+        else if (auto* contactsWidget = m_contactsTabController->contentWidgetForTab(&tab);
+                 contactsWidget != nullptr)
         {
-            m_contentStack->setCurrentWidget(contactsTab->widget);
+            m_contentStack->setCurrentWidget(contactsWidget);
         }
         else if (auto* calendarWidget = m_calendarTabController->contentWidgetForTab(&tab);
                  calendarWidget != nullptr)
@@ -1866,20 +1758,10 @@ namespace javelin::gui::shell
             return;
         }
 
-        if (auto* contactsTab =
-                std::get_if<ContactsTabState>(&m_tabs[static_cast<std::size_t>(index)].content))
+        if (tabKind(m_tabs[static_cast<std::size_t>(index)]) == TabKind::Contacts &&
+            !m_contactsTabController->close(m_tabs[static_cast<std::size_t>(index)]))
         {
-            if (contactsTab->widget != nullptr && contactsTab->widget->operationInFlight())
-            {
-                m_statusBar->showMessage(
-                    QStringLiteral("Wait for the Contacts operation to finish."), 5000);
-                return;
-            }
-            if (contactsTab->widget != nullptr)
-            {
-                m_contentStack->removeWidget(contactsTab->widget);
-                contactsTab->widget->deleteLater();
-            }
+            return;
         }
 
         if (tabKind(m_tabs[static_cast<std::size_t>(index)]) == TabKind::Calendar)
@@ -1971,15 +1853,9 @@ namespace javelin::gui::shell
         if (m_messageListTabController->refresh(tab))
             return;
 
-        if (auto* contactsTab = std::get_if<ContactsTabState>(&tab.content);
-            contactsTab != nullptr && contactsTab->widget != nullptr)
-        {
-            contactsTab->widget->requestRefresh();
-        }
-        else
-        {
-            static_cast<void>(m_calendarTabController->refresh(&tab));
-        }
+        if (m_contactsTabController->refresh(&tab))
+            return;
+        static_cast<void>(m_calendarTabController->refresh(&tab));
     }
 
     void MainWindow::activateMailboxSelection(const bool refreshRemote)
@@ -2848,12 +2724,7 @@ namespace javelin::gui::shell
 
     void MainWindow::restoreContactsTab(const PersistedContactsTab& tab)
     {
-        auto* widget = appendContactsTab(tab.common.accountId, tab.common.title.isEmpty()
-                                                                   ? QStringLiteral("Contacts")
-                                                                   : tab.common.title);
-        if (widget == nullptr)
-            return;
-        widget->restoreViewState(tab.view);
+        static_cast<void>(m_contactsTabController->restore(tab));
     }
 
     void MainWindow::savePersistentState() const
