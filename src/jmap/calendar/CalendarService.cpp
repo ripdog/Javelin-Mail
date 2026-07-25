@@ -126,6 +126,34 @@ namespace javelin::jmap::calendar
             return operationError(value);
         }
 
+        const std::vector<std::string>& calendarEventReadProperties()
+        {
+            static const std::vector<std::string> properties{
+                "id",
+                "baseEventId",
+                "recurrenceId",
+                "uid",
+                "calendarIds",
+                "title",
+                "description",
+                "locations",
+                "start",
+                "duration",
+                "timeZone",
+                "showWithoutTime",
+                "isDraft",
+                "isOrigin",
+                "useDefaultAlerts",
+                "alerts",
+                "utcStart",
+                "utcEnd",
+                "recurrenceRule",
+                "recurrenceOverrides",
+                "participants",
+            };
+            return properties;
+        }
+
         template <typename IsCurrent>
         QCoro::Task<BatchedCalendarEvents>
         getCalendarEventsBatched(api::MethodCaller& caller, const LiveConnectionSettings& settings,
@@ -151,7 +179,7 @@ namespace javelin::jmap::calendar
                 const auto request =
                     api::calendarEventGet({.accountId = accountId,
                                            .ids = std::move(batch),
-                                           .properties = std::nullopt,
+                                           .properties = calendarEventReadProperties(),
                                            .recurrenceOverridesBefore = std::nullopt,
                                            .recurrenceOverridesAfter = std::nullopt,
                                            .reduceParticipants = false,
@@ -990,7 +1018,7 @@ namespace javelin::jmap::calendar
                 const auto getRequest =
                     api::calendarEventGet({.accountId = accountId,
                                            .ids = changedIds,
-                                           .properties = std::nullopt,
+                                           .properties = calendarEventReadProperties(),
                                            .recurrenceOverridesBefore = std::nullopt,
                                            .recurrenceOverridesAfter = std::nullopt,
                                            .reduceParticipants = false,

@@ -802,6 +802,11 @@ TEST_CASE("calendar refresh recovers a recurring base omitted by the bounded bas
     CHECK(window->occurrences.front().eventId == "base-water");
     CHECK(window->occurrences.front().localStart.value == "2026-07-01T02:20:00");
     REQUIRE(transport.requests.size() == 5);
+    REQUIRE(transport.requests[1].envelope.methodCalls.size() == 1);
+    CHECK(transport.requests[1].envelope.methodCalls.front().arguments.find(
+              R"("properties":[)") != std::string::npos);
+    CHECK(transport.requests[1].envelope.methodCalls.front().arguments.find(
+              R"("baseEventId")") != std::string::npos);
     CHECK(transport.requests[3].envelope.methodCalls.front().arguments.find(
               R"("uid":"water-series-uid")") != std::string::npos);
     CHECK(transport.requests[3].envelope.methodCalls.front().arguments.find(R"("after")") ==
