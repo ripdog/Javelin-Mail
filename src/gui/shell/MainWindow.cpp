@@ -33,6 +33,8 @@
 #include "gui/shell/MainWindowStateStore.h"
 #include "gui/shell/MessageActionPolicy.h"
 #include "gui/shell/MessageCommandController.h"
+#include "gui/shell/MessageContentController.h"
+#include "gui/shell/MessageContentPolicy.h"
 #include "gui/shell/MessageFileController.h"
 #include "gui/shell/MessageListTabBindingPresenter.h"
 #include "gui/shell/MessageListTabController.h"
@@ -315,6 +317,58 @@ namespace javelin::gui::shell
             new MessageListTabController(m_queryService, m_mailService, pageSize, this, this);
         m_messageNavigationController = std::make_unique<MessageNavigationController>(
             m_messageNavigationCoordinator, *m_messageListTabController);
+        m_messageContentController = new MessageContentController(m_mailService, this);
+        connect(m_messageContentController, &MessageContentController::contentUnavailable, this,
+                [this](const javelin::jmap::MessageContentUnavailable& unavailable)
+                {
+                    markTabsStaleForAccount(unavailable.accountId);
+                    refreshActiveTabFromServer();
+                    const auto message =
+                        unavailable.message + QStringLiteral(" Refreshing the current view…");
+                    m_messageViewContainer->setErrorState(message);
+                    m_statusBar->showMessage(message, 10000);
+                });
+        connect(m_messageContentController, &MessageContentController::operationFailed, this,
+                [this](const javelin::jmap::OperationError& error)
+                {
+                    m_messageViewContainer->setErrorState(error.message);
+                    presentError(error);
+                });
+        connect(m_messageContentController, &MessageContentController::contentRefreshed, this,
+                [this](const javelin::jmap::MessageContentRefreshSummary& summary)
+                {
+                    const auto currentAccount = activeAccountId();
+                    const auto selectedEmails = m_messageSelectionController->selectedEmailIds();
+                    const auto* route = m_messageNavigationController->activeRoute(activeTab());
+                    const auto currentAccountView =
+                        currentAccount.has_value()
+                            ? std::optional<std::string_view>{*currentAccount}
+                            : std::optional<std::string_view>{std::nullopt};
+                    const auto routeAccountId =
+                        route != nullptr ? std::optional<std::string_view>{route->accountId}
+                                         : std::optional<std::string_view>{std::nullopt};
+                    const auto routeEmailId = route != nullptr
+                                                  ? std::optional<std::string_view>{route->emailId}
+                                                  : std::optional<std::string_view>{std::nullopt};
+                    if (!ownsMessageContentResult({
+                            .requestAccountId = summary.accountId,
+                            .requestEmailId = summary.emailId,
+                            .activeAccountId = currentAccountView,
+                            .selectedEmailIds = selectedEmails,
+                            .routeAccountId = routeAccountId,
+                            .routeEmailId = routeEmailId,
+                        }))
+                    {
+                        return;
+                    }
+
+                    m_messageViewContainer->refresh(m_messageViewService);
+                    updateEmptyStates();
+                    updateMessageListHeader();
+                    updateMessageActions();
+                    if (!summary.usedCachedContent)
+                        m_statusBar->showMessage(QStringLiteral("Message ready."), 5000);
+                });
         connect(m_messageListTabController, &MessageListTabController::pageChanged, this,
                 [this](javelin::app::MessageListSession* session)
                 {
@@ -455,7 +509,7 @@ namespace javelin::gui::shell
         if (!m_messageViewContainer->hasReadableBody())
         {
             m_messageViewContainer->setLoadingState(true);
-            refreshSelectedMessageContent(route.accountId, route.emailId);
+            m_messageContentController->request(route.accountId, route.emailId);
         }
     }
 
@@ -1239,7 +1293,7 @@ namespace javelin::gui::shell
             {
                 m_messageViewContainer->setLoadingState(true);
             }
-            refreshSelectedMessageContent(*accountId, emailId.toStdString());
+            m_messageContentController->request(*accountId, emailId.toStdString());
             if (isUnread)
             {
                 m_messageCommandController->markEmailRead(*accountId, emailId.toStdString());
@@ -2905,7 +2959,7 @@ namespace javelin::gui::shell
                 if (!m_messageViewContainer->hasReadableBody())
                 {
                     m_messageViewContainer->setLoadingState(true);
-                    refreshSelectedMessageContent(route->accountId, route->emailId);
+                    m_messageContentController->request(route->accountId, route->emailId);
                 }
                 return;
             }
@@ -2920,7 +2974,7 @@ namespace javelin::gui::shell
             !m_messageViewContainer->hasReadableBody())
         {
             m_messageViewContainer->setLoadingState(true);
-            refreshSelectedMessageContent(*accountId, *emailId);
+            m_messageContentController->request(*accountId, *emailId);
         }
     }
 
@@ -3116,95 +3170,6 @@ namespace javelin::gui::shell
     void MainWindow::refreshAccountFromServer(std::string accountId)
     {
         m_accountRefreshController->refreshAccount(std::move(accountId));
-    }
-
-    void MainWindow::refreshSelectedMessageContent(std::string accountId, std::string emailId)
-    {
-        if (m_messageContentRequestInFlight.has_value() &&
-            m_messageContentRequestInFlight->accountId == accountId &&
-            m_messageContentRequestInFlight->emailId == emailId)
-        {
-            qDebug().noquote() << "GUI message content refresh already in flight"
-                               << QString::fromStdString(emailId);
-            return;
-        }
-
-        const auto requestToken = m_nextMessageContentRequestToken++;
-        m_messageContentRequestInFlight = MessageContentRequestState{
-            .accountId = accountId,
-            .emailId = emailId,
-            .token = requestToken,
-        };
-
-        auto task = m_mailService.requestMessageContent(accountId, emailId);
-        QCoro::connect(
-            std::move(task), this,
-            [this, accountId = std::move(accountId), emailId = std::move(emailId),
-             requestToken](javelin::jmap::MessageContentRefreshResult result)
-            {
-                const bool isCurrentRequest =
-                    m_messageContentRequestInFlight.has_value() &&
-                    m_messageContentRequestInFlight->token == requestToken &&
-                    m_messageContentRequestInFlight->accountId == accountId &&
-                    m_messageContentRequestInFlight->emailId == emailId;
-                if (!isCurrentRequest)
-                {
-                    qDebug().noquote() << "GUI message content refresh ignored stale completion"
-                                       << QString::fromStdString(emailId);
-                    return;
-                }
-
-                m_messageContentRequestInFlight.reset();
-                if (const auto* unavailable =
-                        std::get_if<javelin::jmap::MessageContentUnavailable>(&result))
-                {
-                    markTabsStaleForAccount(accountId);
-                    refreshActiveTabFromServer();
-                    const QString message =
-                        unavailable->message + QStringLiteral(" Refreshing the current view…");
-                    m_messageViewContainer->setErrorState(message);
-                    m_statusBar->showMessage(message, 10000);
-                    qWarning().noquote()
-                        << "GUI message content unavailable" << unavailable->message;
-                    return;
-                }
-
-                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
-                {
-                    m_messageViewContainer->setErrorState(error->message);
-                    qWarning().noquote() << "GUI message content refresh failed" << error->message;
-                    presentError(*error);
-                    return;
-                }
-
-                const auto currentAccount = activeAccountId();
-                const auto selectedEmails = m_messageSelectionController->selectedEmailIds();
-                const auto* route = m_messageNavigationController->activeRoute(activeTab());
-                const bool routeOwnsDetail =
-                    route != nullptr && route->accountId == accountId && route->emailId == emailId;
-                if (currentAccount != std::optional<std::string>{accountId} ||
-                    (!routeOwnsDetail &&
-                     (selectedEmails.size() != 1 || selectedEmails.front() != emailId)))
-                {
-                    return;
-                }
-
-                m_messageViewContainer->refresh(m_messageViewService);
-                updateEmptyStates();
-                updateMessageListHeader();
-                updateMessageActions();
-
-                const auto& summary = std::get<javelin::jmap::MessageContentRefreshSummary>(result);
-                qInfo().noquote() << "GUI message content refresh succeeded"
-                                  << QString::fromStdString(summary.emailId)
-                                  << static_cast<qulonglong>(summary.partCount)
-                                  << static_cast<qulonglong>(summary.bodyValueCount)
-                                  << summary.usedCachedContent;
-                if (!summary.usedCachedContent)
-                {
-                    m_statusBar->showMessage(QStringLiteral("Message ready."), 5000);
-                }
-            });
     }
 
     void MainWindow::findConversationsWithSender(const QModelIndex& index)

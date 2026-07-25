@@ -50,7 +50,10 @@ builds selected-message summaries, synchronizes tab selection, and applies resto
 `MainWindow` only presents the resulting message context and triggers application intents.
 `MessageNavigationController` owns routed-message matching, one-shot mailbox reveal requests,
 refresh waiting, and route completion; pure navigation policy keeps those decisions independent of
-Qt indexes and widgets.
+Qt indexes and widgets. `MessageContentController` owns content-request deduplication, stale
+completion fencing, and typed result dispatch. Pure content ownership policy decides whether a
+completion still belongs to the active selection or routed detail before the window refreshes the
+visible message.
 `MessageActionPolicy` decides command availability from tab context, selection size, Drafts
 membership, and read state; the window only gathers those facts and updates actions.
 `MessageListPresentationPolicy` maps tab state into page headers and empty-state semantics, while

@@ -79,6 +79,7 @@ namespace javelin::gui::shell
     class AccountRefreshController;
     class ElidingLabel;
     class MessageCommandController;
+    class MessageContentController;
     class MessageFileController;
     class MessageListTabBindingPresenter;
     class MessageListTabController;
@@ -159,13 +160,6 @@ namespace javelin::gui::shell
             Calendar,
         };
 
-        struct MessageContentRequestState
-        {
-            std::string accountId;
-            std::string emailId;
-            std::uint64_t token = 0;
-        };
-
         void createActions();
         void presentError(const javelin::jmap::OperationError& error);
         void presentUserInterventionError(const QString& message);
@@ -231,7 +225,6 @@ namespace javelin::gui::shell
         void refreshAccountFromServer(std::string accountId);
         [[nodiscard]] ToolbarContext toolbarContextForActiveTab() const;
         void updateToolbarForActiveTab();
-        void refreshSelectedMessageContent(std::string accountId, std::string emailId);
         void openEmailRoute(const javelin::app::OpenEmailRoute& route);
         void resolveOpenEmailRoute();
         void findConversationsWithSender(const QModelIndex& index);
@@ -272,6 +265,7 @@ namespace javelin::gui::shell
         javelin::app::MessageNavigationCoordinator& m_messageNavigationCoordinator;
         AccountRefreshController* m_accountRefreshController = nullptr;
         MessageCommandController* m_messageCommandController = nullptr;
+        MessageContentController* m_messageContentController = nullptr;
         MessageFileController* m_messageFileController = nullptr;
         std::unique_ptr<MessageListTabBindingPresenter> m_messageListTabBindingPresenter;
         MessageListTabController* m_messageListTabController = nullptr;
@@ -343,8 +337,6 @@ namespace javelin::gui::shell
         QAction* m_calendarListAction = nullptr;
         QAction* m_calendarRefreshAction = nullptr;
         javelin::jmap::query::EmailListSort m_emailListSort;
-        std::uint64_t m_nextMessageContentRequestToken = 1;
-        std::optional<MessageContentRequestState> m_messageContentRequestInFlight;
         std::optional<int> m_activeTabIndex;
         std::vector<TabState> m_tabs;
     };
