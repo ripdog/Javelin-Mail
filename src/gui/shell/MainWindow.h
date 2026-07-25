@@ -77,6 +77,7 @@ namespace javelin::gui::settings
 namespace javelin::gui::shell
 {
     class AccountRefreshController;
+    class CalendarTabController;
     class ComposeTabController;
     class ElidingLabel;
     class MessageCommandController;
@@ -109,11 +110,6 @@ namespace javelin::gui::contacts
 {
     class ContactsManagerWidget;
 }
-namespace javelin::gui::calendar
-{
-    class MonthCalendarWidget;
-}
-
 namespace javelin::gui::shell
 {
     class LayeredStatusBar;
@@ -258,6 +254,7 @@ namespace javelin::gui::shell
         javelin::app::MailApplicationService& m_mailService;
         javelin::app::MessageNavigationCoordinator& m_messageNavigationCoordinator;
         AccountRefreshController* m_accountRefreshController = nullptr;
+        CalendarTabController* m_calendarTabController = nullptr;
         ComposeTabController* m_composeTabController = nullptr;
         MessageCommandController* m_messageCommandController = nullptr;
         MessageContentController* m_messageContentController = nullptr;

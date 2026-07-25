@@ -189,6 +189,8 @@ set(JAVELIN_FORMAT_FILES
     src/gui/shell/LayeredStatusBar.h
     src/gui/shell/MainWindow.cpp
     src/gui/shell/MainWindow.h
+    src/gui/shell/CalendarTabController.cpp
+    src/gui/shell/CalendarTabController.h
     src/gui/shell/ComposeTabController.cpp
     src/gui/shell/ComposeTabController.h
     src/gui/shell/ComposeTabPolicy.cpp
@@ -720,6 +722,8 @@ add_library(javelin_gui STATIC
     src/gui/shell/LayeredStatusBar.h
     src/gui/shell/MainWindow.cpp
     src/gui/shell/MainWindow.h
+    src/gui/shell/CalendarTabController.cpp
+    src/gui/shell/CalendarTabController.h
     src/gui/shell/ComposeTabController.cpp
     src/gui/shell/ComposeTabController.h
     src/gui/shell/ComposeTabPolicy.cpp
