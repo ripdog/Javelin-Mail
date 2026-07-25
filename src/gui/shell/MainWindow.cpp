@@ -23,13 +23,13 @@
 #include "gui/messages/MessageListModel.h"
 #include "gui/messages/MessageListPanePresenter.h"
 #include "gui/messages/MessageSelectionRestoration.h"
-#include "gui/messages/Pagination.h"
 #include "gui/messageview/MessageViewContainer.h"
 #include "gui/search/AdvancedSearchDialog.h"
 #include "gui/settings/PreferencesDialog.h"
 #include "gui/shell/ElidingLabel.h"
 #include "gui/shell/LayeredStatusBar.h"
 #include "gui/shell/MainWindowStateStore.h"
+#include "gui/shell/MessageActionPolicy.h"
 #include "gui/shell/MessageCommandController.h"
 #include "gui/shell/MessageFileController.h"
 #include "gui/shell/MessageListTabController.h"
@@ -3365,37 +3365,41 @@ namespace javelin::gui::shell
     void MainWindow::updateMessageActions()
     {
         const auto selectedIds = selectedEmailIds();
-        const bool hasEmailSelection =
-            activeAccountId().has_value() && !selectedIds.empty() && !activeTabIsContacts();
-        const bool hasMailboxSelection = activeTabIsMailbox() && activeAccountId().has_value() &&
-                                         activeMailboxId().has_value() && !selectedIds.empty();
-        const bool hasMovableSelection = (activeTabIsMailbox() || activeTabIsSearch()) &&
-                                         activeAccountId().has_value() && !selectedIds.empty();
+        const auto accountId = activeAccountId();
+        const auto mailboxId = activeMailboxId();
         const auto draftsMailbox =
-            activeAccountId().has_value()
-                ? findMailboxByRole(m_queryService, *activeAccountId(), "drafts")
+            accountId.has_value()
+                ? findMailboxByRole(m_queryService, *accountId, "drafts")
                 : std::optional<javelin::jmap::cache::MailboxTreeItem>{std::nullopt};
-        const bool canEditDraft =
-            activeTabIsMailbox() && activeMailboxId().has_value() && draftsMailbox.has_value() &&
-            activeMailboxId() == std::optional<std::string>{draftsMailbox->id} &&
-            selectedIds.size() == 1;
         const auto* selectionModel = m_messageView->selectionModel();
         const bool hasReadSelection =
             selectionModel != nullptr &&
             std::ranges::any_of(selectionModel->selectedRows(),
                                 [](const QModelIndex& index) { return !indexIsUnread(index); });
-        m_newMessageAction->setEnabled(true);
-        m_replyAction->setEnabled(hasEmailSelection && !activeTabIsCompose());
-        m_replyAllAction->setEnabled(hasEmailSelection && !activeTabIsCompose());
-        m_forwardAction->setEnabled(hasEmailSelection && !activeTabIsCompose());
-        m_editDraftAction->setEnabled(canEditDraft);
-        m_archiveAction->setEnabled(hasMovableSelection);
-        m_markUnreadAction->setEnabled(hasEmailSelection && hasReadSelection);
-        m_deleteAction->setEnabled(hasMailboxSelection);
-        m_permanentDeleteAction->setEnabled(hasEmailSelection);
-        m_moveAction->setEnabled(hasMovableSelection);
-        m_copyAction->setEnabled(hasMovableSelection);
-        m_viewSourceAction->setEnabled(hasEmailSelection);
+        const auto* tab = activeTab();
+        const auto actions = messageActionAvailability({
+            .tabKind = tab == nullptr ? std::optional<TabKind>{std::nullopt}
+                                      : std::optional<TabKind>{tabKind(*tab)},
+            .hasAccount = accountId.has_value(),
+            .hasMailbox = mailboxId.has_value(),
+            .selectedCount = selectedIds.size(),
+            .activeMailboxIsDrafts = mailboxId.has_value() && draftsMailbox.has_value() &&
+                                     *mailboxId == draftsMailbox->id,
+            .hasReadSelection = hasReadSelection,
+        });
+
+        m_newMessageAction->setEnabled(actions.newMessage);
+        m_replyAction->setEnabled(actions.reply);
+        m_replyAllAction->setEnabled(actions.replyAll);
+        m_forwardAction->setEnabled(actions.forward);
+        m_editDraftAction->setEnabled(actions.editDraft);
+        m_archiveAction->setEnabled(actions.archive);
+        m_markUnreadAction->setEnabled(actions.markUnread);
+        m_deleteAction->setEnabled(actions.deleteFromMailbox);
+        m_permanentDeleteAction->setEnabled(actions.permanentDelete);
+        m_moveAction->setEnabled(actions.move);
+        m_copyAction->setEnabled(actions.copy);
+        m_viewSourceAction->setEnabled(actions.viewSource);
     }
 
     void MainWindow::updateSortButton()

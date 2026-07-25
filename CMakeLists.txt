@@ -187,6 +187,8 @@ set(JAVELIN_FORMAT_FILES
     src/gui/shell/LayeredStatusBar.h
     src/gui/shell/MainWindow.cpp
     src/gui/shell/MainWindow.h
+    src/gui/shell/MessageActionPolicy.cpp
+    src/gui/shell/MessageActionPolicy.h
     src/jmap/api/Error.cpp
     src/jmap/api/Error.h
     src/jmap/api/ContactsMethods.cpp
@@ -689,6 +691,8 @@ add_library(javelin_gui STATIC
     src/gui/shell/LayeredStatusBar.h
     src/gui/shell/MainWindow.cpp
     src/gui/shell/MainWindow.h
+    src/gui/shell/MessageActionPolicy.cpp
+    src/gui/shell/MessageActionPolicy.h
     src/gui/sieve/SieveEditorDialog.cpp
     src/gui/sieve/SieveEditorDialog.h
 )

@@ -41,7 +41,9 @@ widget restoration, and visible-shell side effects, but it does not calculate ta
 orchestrate message-list session lifetimes, or serialize message-list sessions.
 Message selection restoration is likewise split into deterministic workspace policy and thin Qt
 application: the policy decides surviving multi-selection, current-message fallback, and the
-nearest row after removal, while `MainWindow` only applies that plan to the active view. Pure
+nearest row after removal, while `MainWindow` only applies that plan to the active view.
+`MessageActionPolicy` decides command availability from tab context, selection size, Drafts
+membership, and read state; the window only gathers those facts and updates actions. Pure
 `TabActivationPolicy` selects mailbox-pane visibility, message presentation behavior, and whether
 activation needs one remote refresh. Concrete widget switching remains in `MainWindow`, while
 message-list cache loads, page movement, sorting, and refresh calls go through
