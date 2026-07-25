@@ -95,6 +95,7 @@ namespace javelin::app
         void statusChanged(javelin::app::AccountSyncCoordinator::Status status);
         void cacheCommitted(javelin::app::MailCacheChange change);
         void calendarStateChanged(const QString& ownerAccountId);
+        void contactStateChanged(const QString& ownerAccountId);
         void notificationRaised(const QString& accountId, const QString& mailboxId,
                                 const QString& threadId, const QString& emailId,
                                 const QString& mailboxName, const QString& title,
@@ -112,6 +113,7 @@ namespace javelin::app
             std::string eventSourceUrl;
             std::optional<javelin::jmap::api::WebSocketCapability> websocket;
             bool calendarCapable = false;
+            bool contactsCapable = false;
         };
 
         struct RunContext

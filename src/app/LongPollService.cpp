@@ -1,6 +1,7 @@
 #include "app/LongPollService.h"
 
 #include "app/MailboxSyncCoverage.h"
+#include "app/StateChangePolicy.h"
 #include "app/WorkScheduler.h"
 
 #include "jmap/api/MethodCaller.h"
@@ -120,6 +121,8 @@ namespace javelin::app
                     m_runContext->configuration.eventSourceUrl &&
                 updatedConfiguration->calendarCapable ==
                     m_runContext->configuration.calendarCapable &&
+                updatedConfiguration->contactsCapable ==
+                    m_runContext->configuration.contactsCapable &&
                 updatedConfiguration->websocket.has_value() ==
                     m_runContext->configuration.websocket.has_value() &&
                 (!updatedConfiguration->websocket.has_value() ||
@@ -199,18 +202,13 @@ namespace javelin::app
     AccountSyncCoordinator::onStateChange(javelin::jmap::sync::StateChangeEvent event)
     {
         m_lastEventId = event.newState;
-        bool calendarChanged = false;
-        for (auto& [type, state] : event.changedStates)
-        {
-            if (type == "Calendar" || type == "CalendarEvent")
-            {
-                calendarChanged = true;
-                continue;
-            }
+        auto routed = routeStateChanges(std::move(event.changedStates));
+        for (auto& [type, state] : routed.mailStates)
             m_pendingStateChanges.insert_or_assign(std::move(type), std::move(state));
-        }
-        if (calendarChanged)
+        if (routed.calendarChanged)
             Q_EMIT calendarStateChanged(QString::fromStdString(m_accountId));
+        if (routed.contactsChanged)
+            Q_EMIT contactStateChanged(QString::fromStdString(m_accountId));
         if (!m_pendingStateChanges.empty())
             scheduleDebouncedRefresh();
         co_return;
@@ -279,10 +277,12 @@ namespace javelin::app
         }
 
         bool calendarCapable = false;
+        bool contactsCapable = false;
         for (const auto& [accountId, account] : session->value().accounts)
         {
             Q_UNUSED(accountId);
             calendarCapable = calendarCapable || account.accountCapabilities.calendars.has_value();
+            contactsCapable = contactsCapable || account.accountCapabilities.contacts.has_value();
         }
 
         return RunConfiguration{
@@ -295,17 +295,15 @@ namespace javelin::app
             .eventSourceUrl = session->value().eventSourceUrl.value_or(std::string{}),
             .websocket = session->value().capabilities.websocket,
             .calendarCapable = calendarCapable,
+            .contactsCapable = contactsCapable,
         };
     }
 
     QCoro::Task<void> AccountSyncCoordinator::runLoop(std::shared_ptr<RunContext> runContext)
     {
-        std::vector<std::string> types{"Email", "Mailbox"};
-        if (runContext->configuration.calendarCapable)
-        {
-            types.emplace_back("Calendar");
-            types.emplace_back("CalendarEvent");
-        }
+        auto types =
+            subscribedStateChangeTypes({.calendar = runContext->configuration.calendarCapable,
+                                        .contacts = runContext->configuration.contactsCapable});
         javelin::jmap::sync::StateChangeSubscription subscription{
             .accountId = runContext->configuration.accountId,
             .lastState = m_lastEventId,

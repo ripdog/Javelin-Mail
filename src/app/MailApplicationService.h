@@ -253,6 +253,11 @@ namespace javelin::app
                                      std::optional<std::string> sourceMailboxId,
                                      MessageSelection selection, SelectedMessageMutation mutation);
         void connectCoordinator(const std::string& accountId, AccountSyncCoordinator& coordinator);
+        void scheduleContactRefresh(std::string ownerAccountId);
+        void scheduleContactRefreshPump();
+        void pumpContactRefreshes();
+        [[nodiscard]] QCoro::Task<void> runContactRefresh(std::string ownerAccountId,
+                                                          std::string jobId);
         [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarRefreshResult>
         requestCalendarChanges(std::string ownerAccountId);
         void applyAccountConfiguration(const std::string& accountId);
@@ -283,7 +288,10 @@ namespace javelin::app
         std::unordered_map<std::string, std::unique_ptr<AccountSyncCoordinator>> m_coordinators;
         std::unordered_map<std::string, AccountSyncConfiguration> m_configurations;
         std::unordered_set<std::string> m_sessionRefreshesInFlight;
+        std::unordered_set<std::string> m_pendingContactRefreshes;
+        std::unordered_set<std::string> m_runningContactRefreshes;
         std::unordered_set<std::string> m_retiredSearchWindowKeys;
+        bool m_contactRefreshPumpScheduled = false;
         javelin::jmap::sync::MailboxInterestRegistry m_mailboxInterests;
     };
 

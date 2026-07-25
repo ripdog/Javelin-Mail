@@ -40,6 +40,7 @@ add_executable(javelin_jmap_tests
     app/MailboxSelectionMutationTest.cpp
     app/MailboxSyncCoverageTest.cpp
     app/MessageNavigationCoordinatorTest.cpp
+    app/StateChangePolicyTest.cpp
     app/TranslationServiceTest.cpp
     app/WorkSchedulerTest.cpp
     jmap/MailMethodsTest.cpp

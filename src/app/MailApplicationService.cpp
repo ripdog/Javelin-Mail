@@ -10,7 +10,9 @@
 #include <QCoroTask>
 
 #include <QDebug>
+#include <QTimer>
 #include <algorithm>
+#include <chrono>
 #include <limits>
 #include <ranges>
 #include <unordered_set>
@@ -47,6 +49,13 @@ namespace javelin::app
                 .loginEmail = settings.loginEmail,
                 .apiKey = settings.apiKey,
             };
+        }
+
+        constexpr auto contactRefreshRetryDelay = std::chrono::seconds{30};
+
+        [[nodiscard]] std::string contactRefreshJobId(const std::string_view ownerAccountId)
+        {
+            return "contact-refresh:" + std::string{ownerAccountId};
         }
 
         template <typename Result>
@@ -128,6 +137,10 @@ namespace javelin::app
           m_calendarService(calendarService), m_sieveService(sieveService),
           m_errorCoordinator(errorCoordinator), m_workScheduler(workScheduler)
     {
+        connect(&m_workScheduler, &WorkScheduler::jobsChanged, this,
+                [this]() { scheduleContactRefreshPump(); });
+        connect(&m_workScheduler, &WorkScheduler::foregroundAvailabilityChanged, this,
+                [this]() { scheduleContactRefreshPump(); });
         connect(&m_errorCoordinator, &ApplicationErrorCoordinator::authenticationPauseChanged, this,
                 [this](const QString& connectionId, const bool paused)
                 {
@@ -186,6 +199,9 @@ namespace javelin::app
         }
         std::erase_if(m_configurations, [&configuredAccountIds](const auto& entry)
                       { return !configuredAccountIds.contains(entry.first); });
+        std::erase_if(m_pendingContactRefreshes,
+                      [&configuredAccountIds](const std::string& accountId)
+                      { return !configuredAccountIds.contains(accountId); });
         m_mailboxInterests.eraseAccountsNotIn(configuredAccountIds);
         for (const auto& connectionId : previousConnectionIds)
         {
@@ -299,6 +315,8 @@ namespace javelin::app
                                              std::move(configuration.mailboxIds),
                                              std::move(configuration.notificationMailboxIds),
                                              configuration.notificationMailboxSelectionConfigured);
+        if (m_pendingContactRefreshes.contains(accountId))
+            scheduleContactRefresh(accountId);
     }
 
     MailboxObservation MailApplicationService::observeMailbox(std::string accountId,
@@ -781,6 +799,187 @@ namespace javelin::app
                                 QStringLiteral("Synchronize account"), std::move(result));
     }
 
+    void MailApplicationService::scheduleContactRefresh(std::string ownerAccountId)
+    {
+        const auto configuration = m_configurations.find(ownerAccountId);
+        if (configuration == m_configurations.end())
+            return;
+
+        m_pendingContactRefreshes.insert(ownerAccountId);
+        const auto jobId = contactRefreshJobId(ownerAccountId);
+        if (const auto error = m_workScheduler.ensure({
+                .jobId = jobId,
+                .parentJobId = std::nullopt,
+                .accountId = ownerAccountId,
+                .kind = WorkKind::ContactRefresh,
+                .priority = WorkPriority::Freshness,
+                .title = QStringLiteral("Refresh contacts"),
+                .checkpointJson = QStringLiteral("{}"),
+            }))
+        {
+            qWarning().noquote() << "Could not queue contact refresh" << error->message;
+            return;
+        }
+
+        const auto current = m_workScheduler.find(jobId);
+        const auto* job = std::get_if<std::optional<WorkRecord>>(&current);
+        if (job == nullptr || !job->has_value())
+        {
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&current))
+                qWarning().noquote() << "Could not inspect contact refresh" << error->message;
+            return;
+        }
+
+        if (m_errorCoordinator.authenticationPaused(configuration->second.settings.connectionId,
+                                                    configuration->second.settings.revision))
+        {
+            if ((*job)->status != WorkStatus::Paused)
+            {
+                WorkProgress authenticationProgress;
+                authenticationProgress.detail =
+                    QStringLiteral("Waiting for account authentication");
+                static_cast<void>(m_workScheduler.update(jobId, WorkStatus::WaitingForAuth,
+                                                         authenticationProgress,
+                                                         QStringLiteral("{}")));
+            }
+            return;
+        }
+
+        if ((*job)->status != WorkStatus::Queued && (*job)->status != WorkStatus::Running &&
+            (*job)->status != WorkStatus::Paused)
+        {
+            static_cast<void>(
+                m_workScheduler.update(jobId, WorkStatus::Queued, {}, QStringLiteral("{}")));
+        }
+        scheduleContactRefreshPump();
+    }
+
+    void MailApplicationService::scheduleContactRefreshPump()
+    {
+        if (m_pendingContactRefreshes.empty() || m_contactRefreshPumpScheduled)
+            return;
+        m_contactRefreshPumpScheduled = true;
+        QTimer::singleShot(0, this,
+                           [this]()
+                           {
+                               m_contactRefreshPumpScheduled = false;
+                               pumpContactRefreshes();
+                           });
+    }
+
+    void MailApplicationService::pumpContactRefreshes()
+    {
+        if (!m_workScheduler.mayStartBackgroundNetwork())
+            return;
+
+        const std::vector<std::string> pending{m_pendingContactRefreshes.begin(),
+                                               m_pendingContactRefreshes.end()};
+        for (const auto& ownerAccountId : pending)
+        {
+            if (m_runningContactRefreshes.contains(ownerAccountId))
+                continue;
+            if (!m_configurations.contains(ownerAccountId))
+            {
+                m_pendingContactRefreshes.erase(ownerAccountId);
+                continue;
+            }
+
+            const auto jobId = contactRefreshJobId(ownerAccountId);
+            const auto current = m_workScheduler.find(jobId);
+            const auto* job = std::get_if<std::optional<WorkRecord>>(&current);
+            if (job == nullptr || !job->has_value() || (*job)->status != WorkStatus::Queued)
+                continue;
+
+            m_pendingContactRefreshes.erase(ownerAccountId);
+            m_runningContactRefreshes.insert(ownerAccountId);
+            auto task = runContactRefresh(ownerAccountId, jobId);
+            QCoro::connect(std::move(task), this,
+                           [this, ownerAccountId, jobId]()
+                           {
+                               m_runningContactRefreshes.erase(ownerAccountId);
+                               if (m_pendingContactRefreshes.contains(ownerAccountId))
+                               {
+                                   const auto completedJobResult = m_workScheduler.find(jobId);
+                                   const auto* completedJob =
+                                       std::get_if<std::optional<WorkRecord>>(&completedJobResult);
+                                   if (completedJob != nullptr && completedJob->has_value() &&
+                                       ((*completedJob)->status == WorkStatus::Complete ||
+                                        (*completedJob)->status == WorkStatus::Failed))
+                                   {
+                                       static_cast<void>(m_workScheduler.update(
+                                           jobId, WorkStatus::Queued, {}, QStringLiteral("{}")));
+                                   }
+                               }
+                               scheduleContactRefreshPump();
+                           });
+        }
+    }
+
+    QCoro::Task<void> MailApplicationService::runContactRefresh(std::string ownerAccountId,
+                                                                std::string jobId)
+    {
+        WorkProgress progress;
+        progress.detail = QStringLiteral("Checking for contact changes");
+        static_cast<void>(
+            m_workScheduler.update(jobId, WorkStatus::Running, progress, QStringLiteral("{}")));
+
+        const auto configuration = m_configurations.find(ownerAccountId);
+        if (configuration == m_configurations.end())
+        {
+            static_cast<void>(m_workScheduler.update(
+                jobId, WorkStatus::Failed, progress, QStringLiteral("{}"),
+                QStringLiteral("Account synchronization is not configured.")));
+            co_return;
+        }
+        const auto settings = configuration->second.settings;
+        auto result = observeResult(m_errorCoordinator, settings, ownerAccountId,
+                                    QStringLiteral("Synchronize contacts after state change"),
+                                    co_await m_contactService.refreshAll(
+                                        toLiveConnectionSettings(settings), ownerAccountId));
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+        {
+            WorkStatus status = WorkStatus::Failed;
+            if (javelin::jmap::isAuthenticationError(*error))
+                status = WorkStatus::WaitingForAuth;
+            else if (javelin::jmap::isTransientError(*error))
+                status = WorkStatus::WaitingForNetwork;
+            progress.detail = error->message;
+            static_cast<void>(m_workScheduler.update(jobId, status, progress, QStringLiteral("{}"),
+                                                     error->message));
+
+            if (status == WorkStatus::WaitingForAuth || status == WorkStatus::WaitingForNetwork)
+                m_pendingContactRefreshes.insert(ownerAccountId);
+            if (status == WorkStatus::WaitingForNetwork)
+            {
+                QTimer::singleShot(contactRefreshRetryDelay, this,
+                                   [this, ownerAccountId, jobId]()
+                                   {
+                                       if (!m_pendingContactRefreshes.contains(ownerAccountId))
+                                           return;
+                                       const auto current = m_workScheduler.find(jobId);
+                                       const auto* job =
+                                           std::get_if<std::optional<WorkRecord>>(&current);
+                                       if (job == nullptr || !job->has_value() ||
+                                           (*job)->status != WorkStatus::WaitingForNetwork)
+                                           return;
+                                       static_cast<void>(m_workScheduler.update(
+                                           jobId, WorkStatus::Queued, {}, QStringLiteral("{}")));
+                                       scheduleContactRefreshPump();
+                                   });
+            }
+            co_return;
+        }
+
+        const auto& summary = std::get<javelin::jmap::contacts::ContactRefreshSummary>(result);
+        progress.completedUnits = summary.contactCount;
+        progress.totalUnits = summary.contactCount;
+        progress.detail = QStringLiteral("%1 contacts across %2 address books")
+                              .arg(summary.contactCount)
+                              .arg(summary.addressBookCount);
+        static_cast<void>(
+            m_workScheduler.update(jobId, WorkStatus::Complete, progress, QStringLiteral("{}")));
+    }
+
     QCoro::Task<javelin::jmap::contacts::ContactRefreshResult>
     MailApplicationService::requestContacts(std::string accountId)
     {
@@ -1200,6 +1399,9 @@ namespace javelin::app
                 { Q_EMIT accountStatusChanged(QString::fromStdString(accountId), status); });
         connect(&coordinator, &AccountSyncCoordinator::cacheCommitted, this,
                 &MailApplicationService::cacheCommitted);
+        connect(&coordinator, &AccountSyncCoordinator::contactStateChanged, this,
+                [this](const QString& ownerAccountId)
+                { scheduleContactRefresh(ownerAccountId.toStdString()); });
         connect(&coordinator, &AccountSyncCoordinator::calendarStateChanged, this,
                 [this](const QString& ownerAccountId)
                 {
