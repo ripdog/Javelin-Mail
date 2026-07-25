@@ -33,6 +33,7 @@
 #include "gui/shell/MessageCommandController.h"
 #include "gui/shell/MessageFileController.h"
 #include "gui/shell/MessageListTabController.h"
+#include "gui/shell/MessageListTabPresenter.h"
 #include "gui/shell/TabActivationPolicy.h"
 #include "gui/shell/TabBarPresenter.h"
 #include "gui/shell/TabPersistence.h"
@@ -1247,6 +1248,8 @@ namespace javelin::gui::shell
                 *m_messageEmptyState, *m_messageView, *m_searchServerButton, *m_firstPageButton,
                 *m_previousPageButton, *m_pageNumberSpinBox, *m_nextPageButton, *m_lastPageButton,
                 pageSize);
+        m_messageListTabPresenter = std::make_unique<MessageListTabPresenter>(
+            *m_messageListPanePresenter, *m_tabBarPresenter);
         updateEmptyStates();
         updateMessageListHeader();
     }
@@ -3266,100 +3269,13 @@ namespace javelin::gui::shell
 
     void MainWindow::updateEmptyStates()
     {
-        javelin::gui::messages::MessageListEmptyState state{
-            .itemCount = static_cast<std::size_t>(m_messageModel->rowCount()),
-            .refreshError = {},
-            .refreshInFlight = false,
-            .collection = javelin::gui::messages::MessageCollectionKind::Mailbox,
-        };
-        if (const auto* tab = activeTab())
-        {
-            std::visit(
-                [&state](const auto& content)
-                {
-                    if constexpr (std::is_same_v<std::decay_t<decltype(content)>, SearchTabState>)
-                    {
-                        state.refreshError = content.session->page().refreshError;
-                        state.refreshInFlight = content.session->page().refreshInFlight;
-                        state.collection =
-                            content.session->mode() == javelin::app::SearchMode::Local
-                                ? javelin::gui::messages::MessageCollectionKind::LocalSearch
-                                : javelin::gui::messages::MessageCollectionKind::OnlineSearch;
-                    }
-                    else if constexpr (std::is_same_v<std::decay_t<decltype(content)>,
-                                                      MailboxTabState>)
-                    {
-                        state.refreshError = content.session->page().refreshError;
-                        state.refreshInFlight = content.session->page().refreshInFlight;
-                    }
-                },
-                tab->content);
-        }
-        m_messageListPanePresenter->showEmptyState(state);
+        m_messageListTabPresenter->showEmptyState(
+            activeTab(), static_cast<std::size_t>(m_messageModel->rowCount()));
     }
 
     void MainWindow::updateMessageListHeader()
     {
-        const auto* tab = activeTab();
-        if (tab == nullptr)
-        {
-            m_messageListPanePresenter->showNoContext();
-            return;
-        }
-
-        if (const auto* composeTab = std::get_if<ComposeTabState>(&tab->content))
-        {
-            m_messageListPanePresenter->showContext(
-                {.title = composeTab->title, .context = QStringLiteral("Compose")});
-            return;
-        }
-
-        if (const auto* contactsTab = std::get_if<ContactsTabState>(&tab->content))
-        {
-            m_messageListPanePresenter->showContext(
-                {.title = contactsTab->title, .context = QStringLiteral("Contacts")});
-            return;
-        }
-
-        if (const auto* calendarTab = std::get_if<CalendarTabState>(&tab->content))
-        {
-            m_messageListPanePresenter->showContext(
-                {.title = calendarTab->title, .context = QStringLiteral("Calendar")});
-            return;
-        }
-
-        std::visit(
-            [this](const auto& content)
-            {
-                if constexpr (std::is_same_v<std::decay_t<decltype(content)>, SearchTabState>)
-                {
-                    const auto& page = content.session->page();
-                    m_messageListPanePresenter->showPage({
-                        .title = content.session->title(),
-                        .offset = page.offset,
-                        .position = page.position,
-                        .itemCount = page.items.size(),
-                        .returnedLimit = page.returnedLimit,
-                        .total = page.total,
-                        .search = true,
-                        .indexedSearch = content.session->mode() == javelin::app::SearchMode::Local,
-                        .canSearchServer = content.session->canPromoteToOnline(),
-                    });
-                }
-                else if constexpr (std::is_same_v<std::decay_t<decltype(content)>, MailboxTabState>)
-                {
-                    const auto& page = content.session->page();
-                    m_messageListPanePresenter->showPage({
-                        .title = m_tabBarPresenter->mailboxTitle(content),
-                        .offset = page.offset,
-                        .position = page.position,
-                        .itemCount = page.items.size(),
-                        .returnedLimit = page.returnedLimit,
-                        .total = page.total,
-                    });
-                }
-            },
-            tab->content);
+        m_messageListTabPresenter->showHeader(activeTab());
     }
 
     void MainWindow::updateMessageActions()

@@ -80,6 +80,7 @@ namespace javelin::gui::shell
     class MessageCommandController;
     class MessageFileController;
     class MessageListTabController;
+    class MessageListTabPresenter;
     class TabBarPresenter;
     struct PersistedMailboxTab;
     struct PersistedSearchTab;
@@ -285,6 +286,7 @@ namespace javelin::gui::shell
         TabBarPresenter* m_tabBarPresenter = nullptr;
         std::unique_ptr<javelin::gui::messages::MessageListPanePresenter>
             m_messageListPanePresenter;
+        std::unique_ptr<MessageListTabPresenter> m_messageListTabPresenter;
         QSplitter* m_mainSplitter = nullptr;
         QStackedWidget* m_contentStack = nullptr;
         QWidget* m_mailboxPane = nullptr;

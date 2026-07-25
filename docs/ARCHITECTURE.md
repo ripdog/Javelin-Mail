@@ -43,7 +43,9 @@ Message selection restoration is likewise split into deterministic workspace pol
 application: the policy decides surviving multi-selection, current-message fallback, and the
 nearest row after removal, while `MainWindow` only applies that plan to the active view.
 `MessageActionPolicy` decides command availability from tab context, selection size, Drafts
-membership, and read state; the window only gathers those facts and updates actions. Pure
+membership, and read state; the window only gathers those facts and updates actions.
+`MessageListPresentationPolicy` maps tab state into page headers and empty-state semantics, while
+`MessageListTabPresenter` adapts live sessions and applies that plan to the message-list pane. Pure
 `TabActivationPolicy` selects mailbox-pane visibility, message presentation behavior, and whether
 activation needs one remote refresh. Concrete widget switching remains in `MainWindow`, while
 message-list cache loads, page movement, sorting, and refresh calls go through

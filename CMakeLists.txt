@@ -189,6 +189,10 @@ set(JAVELIN_FORMAT_FILES
     src/gui/shell/MainWindow.h
     src/gui/shell/MessageActionPolicy.cpp
     src/gui/shell/MessageActionPolicy.h
+    src/gui/shell/MessageListPresentationPolicy.cpp
+    src/gui/shell/MessageListPresentationPolicy.h
+    src/gui/shell/MessageListTabPresenter.cpp
+    src/gui/shell/MessageListTabPresenter.h
     src/jmap/api/Error.cpp
     src/jmap/api/Error.h
     src/jmap/api/ContactsMethods.cpp
@@ -693,6 +697,10 @@ add_library(javelin_gui STATIC
     src/gui/shell/MainWindow.h
     src/gui/shell/MessageActionPolicy.cpp
     src/gui/shell/MessageActionPolicy.h
+    src/gui/shell/MessageListPresentationPolicy.cpp
+    src/gui/shell/MessageListPresentationPolicy.h
+    src/gui/shell/MessageListTabPresenter.cpp
+    src/gui/shell/MessageListTabPresenter.h
     src/gui/sieve/SieveEditorDialog.cpp
     src/gui/sieve/SieveEditorDialog.h
 )
