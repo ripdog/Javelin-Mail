@@ -250,13 +250,6 @@ namespace javelin::gui::shell
                               std::optional<std::string> threadId,
                               std::optional<std::string> emailId, bool scrollToSelection = true);
         [[nodiscard]] bool restoreActiveTabMessageSelection(std::optional<int> previousMessageRow);
-        [[nodiscard]] bool restoreSelectionAfterMessageRefresh(
-            std::optional<std::string> accountId, std::optional<std::string> mailboxId,
-            std::optional<std::string> threadId, std::optional<std::string> emailId,
-            const std::vector<std::string>& selectedEmailIds,
-            std::optional<int> previousMessageRow);
-        [[nodiscard]] QModelIndex restoreMessageSelection(std::optional<std::string> threadId,
-                                                          std::optional<std::string> emailId);
         void refreshMessageListPreservingSelection();
         void submitQueuedEmailMutations(std::string accountId);
         void refreshSelectionFromModels();

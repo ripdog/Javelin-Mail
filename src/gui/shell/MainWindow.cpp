@@ -22,6 +22,7 @@
 #include "gui/messages/MessageListDelegate.h"
 #include "gui/messages/MessageListModel.h"
 #include "gui/messages/MessageListPanePresenter.h"
+#include "gui/messages/MessageSelectionRestoration.h"
 #include "gui/messages/Pagination.h"
 #include "gui/messageview/MessageViewContainer.h"
 #include "gui/search/AdvancedSearchDialog.h"
@@ -42,7 +43,6 @@
 #include "jmap/calendar/CalendarService.h"
 #include "jmap/contacts/ContactIdentityLookup.h"
 #include "jmap/contacts/ContactService.h"
-#include "jmap/query/QueryDiff.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
 
 #include <QCoroTask>
@@ -195,6 +195,26 @@ namespace javelin::gui::shell
             }
 
             return currentIndex.row();
+        }
+
+        [[nodiscard]] std::vector<javelin::gui::messages::MessageRowIdentity>
+        messageRowIdentities(const javelin::gui::messages::MessageListModel& model)
+        {
+            std::vector<javelin::gui::messages::MessageRowIdentity> rows;
+            rows.reserve(static_cast<std::size_t>(model.rowCount()));
+            for (int row = 0; row < model.rowCount(); ++row)
+            {
+                const auto index = model.index(row, 0);
+                rows.push_back({
+                    .threadId = index.data(javelin::gui::messages::MessageListModel::ThreadIdRole)
+                                    .toString()
+                                    .toStdString(),
+                    .emailId = index.data(javelin::gui::messages::MessageListModel::EmailIdRole)
+                                   .toString()
+                                   .toStdString(),
+                });
+            }
+            return rows;
         }
 
         [[nodiscard]] bool indexIsUnread(const QModelIndex& index)
@@ -513,7 +533,16 @@ namespace javelin::gui::shell
         const auto mailboxId = route->mailboxId;
         const auto threadId = route->threadId;
         const auto emailId = route->emailId;
-        const QModelIndex index = restoreMessageSelection(threadId, emailId);
+        const auto plan = javelin::gui::messages::planMessageSelectionRestoration(
+            messageRowIdentities(*m_messageModel), {
+                                                       .threadId = threadId,
+                                                       .emailId = emailId,
+                                                       .selectedEmailIds = {},
+                                                       .previousRow = std::nullopt,
+                                                   });
+        const auto index = plan.currentRow.has_value()
+                               ? m_messageModel->index(static_cast<int>(*plan.currentRow), 0)
+                               : QModelIndex{};
         if (index.isValid())
         {
             m_messageView->setCurrentIndex(index);
@@ -3288,142 +3317,83 @@ namespace javelin::gui::shell
             }
         }
 
-        const QModelIndex selectedMessageIndex = restoreMessageSelection(threadId, emailId);
-        if (selectedMessageIndex.isValid())
-        {
-            m_messageView->setCurrentIndex(selectedMessageIndex);
-            if (scrollToSelection)
-            {
-                m_messageView->scrollTo(selectedMessageIndex);
-            }
-        }
+        const auto plan = javelin::gui::messages::planMessageSelectionRestoration(
+            messageRowIdentities(*m_messageModel), {
+                                                       .threadId = std::move(threadId),
+                                                       .emailId = std::move(emailId),
+                                                       .selectedEmailIds = {},
+                                                       .previousRow = std::nullopt,
+                                                   });
+        if (!plan.currentRow.has_value())
+            return;
+
+        const auto selectedMessageIndex =
+            m_messageModel->index(static_cast<int>(*plan.currentRow), 0);
+        if (!selectedMessageIndex.isValid())
+            return;
+
+        m_messageView->setCurrentIndex(selectedMessageIndex);
+        if (scrollToSelection)
+            m_messageView->scrollTo(selectedMessageIndex);
     }
 
     bool MainWindow::restoreActiveTabMessageSelection(const std::optional<int> previousMessageRow)
     {
         const auto* tab = activeTab();
         if (tab == nullptr)
-        {
             return false;
-        }
 
         const auto& selection = tabSelection(*tab);
-        return restoreSelectionAfterMessageRefresh(activeAccountId(), activeMailboxId(),
-                                                   selection.threadId, selection.emailId,
-                                                   selection.selectedEmailIds, previousMessageRow);
-    }
+        const auto plan = javelin::gui::messages::planMessageSelectionRestoration(
+            messageRowIdentities(*m_messageModel),
+            {
+                .threadId = selection.threadId,
+                .emailId = selection.emailId,
+                .selectedEmailIds = selection.selectedEmailIds,
+                .previousRow =
+                    previousMessageRow.has_value() && *previousMessageRow >= 0
+                        ? std::optional<std::size_t>{static_cast<std::size_t>(*previousMessageRow)}
+                        : std::nullopt,
+            });
 
-    bool MainWindow::restoreSelectionAfterMessageRefresh(
-        std::optional<std::string> accountId, std::optional<std::string> mailboxId,
-        std::optional<std::string> threadId, std::optional<std::string> emailId,
-        const std::vector<std::string>& selectedEmailIds,
-        const std::optional<int> previousMessageRow)
-    {
-        Q_UNUSED(accountId);
-        Q_UNUSED(mailboxId);
         auto* selectionModel = m_messageView->selectionModel();
-        if (selectionModel != nullptr && !selectedEmailIds.empty())
+        if (selectionModel != nullptr && !plan.selectedRows.empty())
         {
             QItemSelection restoredSelection;
-            QModelIndex currentSelectionIndex;
-            for (const auto& selectedEmailId : selectedEmailIds)
+            for (const auto row : plan.selectedRows)
             {
-                const QModelIndex index = findIndexByRole(
-                    *m_messageModel, javelin::gui::messages::MessageListModel::EmailIdRole,
-                    QString::fromStdString(selectedEmailId));
-                if (!index.isValid())
-                {
-                    continue;
-                }
-
-                restoredSelection.select(index, index);
-                if (emailId == std::optional<std::string>{selectedEmailId})
-                {
-                    currentSelectionIndex = index;
-                }
+                const auto index = m_messageModel->index(static_cast<int>(row), 0);
+                if (index.isValid())
+                    restoredSelection.select(index, index);
             }
+            selectionModel->select(restoredSelection,
+                                   QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+        }
 
-            if (!restoredSelection.isEmpty())
-            {
-                selectionModel->select(restoredSelection, QItemSelectionModel::ClearAndSelect |
+        if (!plan.currentRow.has_value())
+            return false;
+
+        const auto currentIndex = m_messageModel->index(static_cast<int>(*plan.currentRow), 0);
+        if (!currentIndex.isValid())
+            return false;
+
+        if (selectionModel != nullptr && !plan.selectedRows.empty())
+        {
+            selectionModel->setCurrentIndex(currentIndex, QItemSelectionModel::NoUpdate);
+        }
+        else if (selectionModel != nullptr && (plan.currentEmailChanged || plan.fallbackSelected))
+        {
+            selectionModel->setCurrentIndex(currentIndex, QItemSelectionModel::ClearAndSelect |
                                                               QItemSelectionModel::Rows);
-                if (!currentSelectionIndex.isValid())
-                {
-                    currentSelectionIndex = restoredSelection.indexes().constLast();
-                }
-                selectionModel->setCurrentIndex(currentSelectionIndex,
-                                                QItemSelectionModel::NoUpdate);
-                return false;
-            }
         }
-
-        const QModelIndex selectedMessageIndex = restoreMessageSelection(threadId, emailId);
-        if (selectedMessageIndex.isValid())
+        else
         {
-            const auto restoredEmailId =
-                selectedMessageIndex.data(javelin::gui::messages::MessageListModel::EmailIdRole)
-                    .toString()
-                    .toStdString();
-            const bool selectedDifferentEmail = emailId.has_value() && restoredEmailId != *emailId;
-            if (selectedDifferentEmail)
-            {
-                selectionModel->setCurrentIndex(selectedMessageIndex,
-                                                QItemSelectionModel::ClearAndSelect |
-                                                    QItemSelectionModel::Rows);
-            }
-            else
-            {
-                m_messageView->setCurrentIndex(selectedMessageIndex);
-            }
-            return selectedDifferentEmail;
-        }
-        if (!previousMessageRow.has_value())
-        {
-            return false;
+            m_messageView->setCurrentIndex(currentIndex);
         }
 
-        const auto fallbackRow = javelin::jmap::query::selectionFallbackIndexAfterRemoval(
-            static_cast<std::size_t>(*previousMessageRow),
-            static_cast<std::size_t>(m_messageModel->rowCount()));
-        if (!fallbackRow.has_value())
-        {
-            return false;
-        }
-
-        const QModelIndex fallbackIndex = m_messageModel->index(static_cast<int>(*fallbackRow), 0);
-        if (!fallbackIndex.isValid())
-        {
-            return false;
-        }
-
-        selectionModel->setCurrentIndex(fallbackIndex, QItemSelectionModel::ClearAndSelect |
-                                                           QItemSelectionModel::Rows);
-        m_messageView->scrollTo(fallbackIndex);
-        return true;
-    }
-
-    QModelIndex MainWindow::restoreMessageSelection(std::optional<std::string> threadId,
-                                                    std::optional<std::string> emailId)
-    {
-        if (emailId.has_value())
-        {
-            const QModelIndex selectedMessageIndex = findIndexByRole(
-                *m_messageModel, javelin::gui::messages::MessageListModel::EmailIdRole,
-                QString::fromStdString(*emailId));
-            if (selectedMessageIndex.isValid())
-            {
-                return selectedMessageIndex;
-            }
-        }
-
-        if (threadId.has_value())
-        {
-            return findIndexByRole(*m_messageModel,
-                                   javelin::gui::messages::MessageListModel::ThreadIdRole,
-                                   QString::fromStdString(*threadId));
-        }
-
-        return {};
+        if (plan.fallbackSelected)
+            m_messageView->scrollTo(currentIndex);
+        return plan.currentEmailChanged || plan.fallbackSelected;
     }
 
     void MainWindow::refreshSelectionFromModels()
