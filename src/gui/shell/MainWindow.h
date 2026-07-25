@@ -79,6 +79,7 @@ namespace javelin::gui::shell
     class ElidingLabel;
     class MessageCommandController;
     class MessageFileController;
+    class MessageListTabBindingPresenter;
     class MessageListTabController;
     class MessageListTabPresenter;
     class MessageNavigationController;
@@ -204,7 +205,6 @@ namespace javelin::gui::shell
                                      javelin::jmap::search::EmailSearchCriteria criteria,
                                      bool refreshRemote);
         void closeTab(int index);
-        void syncNavigationForActiveTab(bool showMailboxPane);
         void syncActiveTabSelectionFromViews();
         void loadActiveTabFromCache(bool forceReload = false, bool refreshRemote = true);
         void refreshActiveTabFromServer();
@@ -218,7 +218,6 @@ namespace javelin::gui::shell
         [[nodiscard]] std::optional<std::string> activeMailboxId() const;
         [[nodiscard]] const TabState* activeTab() const;
         [[nodiscard]] TabState* activeTab();
-        void applyActiveTabPageToModel();
         void applyActiveTabPagePreservingSelection(std::optional<int> previousMessageRow);
         void goToFirstPage();
         void goToLastPage();
@@ -282,6 +281,7 @@ namespace javelin::gui::shell
         javelin::app::MessageNavigationCoordinator& m_messageNavigationCoordinator;
         MessageCommandController* m_messageCommandController = nullptr;
         MessageFileController* m_messageFileController = nullptr;
+        std::unique_ptr<MessageListTabBindingPresenter> m_messageListTabBindingPresenter;
         MessageListTabController* m_messageListTabController = nullptr;
         std::unique_ptr<MessageNavigationController> m_messageNavigationController;
         TabBarPresenter* m_tabBarPresenter = nullptr;
@@ -353,7 +353,6 @@ namespace javelin::gui::shell
         bool m_refreshInFlight = false;
         std::uint64_t m_nextMessageContentRequestToken = 1;
         std::optional<MessageContentRequestState> m_messageContentRequestInFlight;
-        bool m_syncingNavigation = false;
         std::optional<int> m_activeTabIndex;
         std::vector<TabState> m_tabs;
     };

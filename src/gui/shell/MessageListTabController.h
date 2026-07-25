@@ -90,6 +90,9 @@ namespace javelin::gui::shell
         [[nodiscard]] bool refreshSearchAfterMutation(TabState& tab, std::string_view accountId);
         [[nodiscard]] bool pageStale(const TabState& tab) const;
         [[nodiscard]] bool pageRefreshInFlight(const TabState& tab) const;
+        [[nodiscard]] bool ownsSession(const TabState& tab,
+                                       const javelin::app::MessageListSession* session) const;
+        [[nodiscard]] bool promoteSearch(TabState& tab);
         [[nodiscard]] bool reveal(TabState& tab, std::string emailId);
         void releaseSession(TabState& tab);
 

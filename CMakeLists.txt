@@ -100,6 +100,8 @@ set(JAVELIN_FORMAT_FILES
     src/gui/mailboxes/MailboxIconUtils.h
     src/gui/mailboxes/MailboxPropertiesDialog.cpp
     src/gui/mailboxes/MailboxPropertiesDialog.h
+    src/gui/mailboxes/MailboxSelection.cpp
+    src/gui/mailboxes/MailboxSelection.h
     src/gui/mailboxes/MailboxSort.h
     src/gui/mailboxes/MailboxTreeDelegate.cpp
     src/gui/mailboxes/MailboxTreeDelegate.h
@@ -191,6 +193,8 @@ set(JAVELIN_FORMAT_FILES
     src/gui/shell/MessageActionPolicy.h
     src/gui/shell/MessageListPresentationPolicy.cpp
     src/gui/shell/MessageListPresentationPolicy.h
+    src/gui/shell/MessageListTabBindingPresenter.cpp
+    src/gui/shell/MessageListTabBindingPresenter.h
     src/gui/shell/MessageListTabPresenter.cpp
     src/gui/shell/MessageListTabPresenter.h
     src/gui/shell/MessageNavigationController.cpp
@@ -614,6 +618,8 @@ add_library(javelin_gui STATIC
     src/gui/mailboxes/MailboxIconUtils.h
     src/gui/mailboxes/MailboxPropertiesDialog.cpp
     src/gui/mailboxes/MailboxPropertiesDialog.h
+    src/gui/mailboxes/MailboxSelection.cpp
+    src/gui/mailboxes/MailboxSelection.h
     src/gui/mailboxes/MailboxSort.h
     src/gui/compose/ComposeTabWidget.cpp
     src/gui/compose/ComposeTabWidget.h
@@ -703,6 +709,8 @@ add_library(javelin_gui STATIC
     src/gui/shell/MessageActionPolicy.h
     src/gui/shell/MessageListPresentationPolicy.cpp
     src/gui/shell/MessageListPresentationPolicy.h
+    src/gui/shell/MessageListTabBindingPresenter.cpp
+    src/gui/shell/MessageListTabBindingPresenter.h
     src/gui/shell/MessageListTabPresenter.cpp
     src/gui/shell/MessageListTabPresenter.h
     src/gui/shell/MessageNavigationController.cpp

@@ -190,6 +190,23 @@ namespace javelin::gui::shell
         return session != nullptr && session->page().refreshInFlight;
     }
 
+    bool
+    MessageListTabController::ownsSession(const TabState& tab,
+                                          const javelin::app::MessageListSession* session) const
+    {
+        return session != nullptr && messageListSession(tab) == session;
+    }
+
+    bool MessageListTabController::promoteSearch(TabState& tab)
+    {
+        auto* search = std::get_if<SearchTabState>(&tab.content);
+        if (search == nullptr || search->session == nullptr)
+            return false;
+
+        search->session->promoteToOnline();
+        return true;
+    }
+
     bool MessageListTabController::reveal(TabState& tab, std::string emailId)
     {
         auto* mailbox = std::get_if<MailboxTabState>(&tab.content);

@@ -72,6 +72,7 @@ add_executable(javelin_jmap_tests
     jmap/TranslationCacheRepositoryTest.cpp
     gui/MonthCalendarWidgetTest.cpp
     gui/RecurrencePatternTest.cpp
+    gui/MailboxSelectionTest.cpp
     gui/MailboxSortTest.cpp
     gui/MessageActionPolicyTest.cpp
     gui/MessageActionSelectionTest.cpp
@@ -88,6 +89,7 @@ add_executable(javelin_jmap_tests
     gui/PlainTextLinkifierTest.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/calendar/MonthCalendarLayout.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/calendar/RecurrencePattern.cpp
+    ${PROJECT_SOURCE_DIR}/src/gui/mailboxes/MailboxSelection.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/messages/MessageActionSelection.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/messages/MessageSelectionRestoration.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/shell/MessageActionPolicy.cpp

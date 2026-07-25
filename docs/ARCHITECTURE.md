@@ -48,11 +48,13 @@ Qt indexes and widgets.
 `MessageActionPolicy` decides command availability from tab context, selection size, Drafts
 membership, and read state; the window only gathers those facts and updates actions.
 `MessageListPresentationPolicy` maps tab state into page headers and empty-state semantics, while
-`MessageListTabPresenter` adapts live sessions and applies that plan to the message-list pane. Pure
-`TabActivationPolicy` selects mailbox-pane visibility, message presentation behavior, and whether
-activation needs one remote refresh. Concrete widget switching remains in `MainWindow`, while
-message-list cache loads, page movement, sorting, and refresh calls go through
-`MessageListTabController`.
+`MessageListTabPresenter` adapts live sessions and applies that plan to the message-list pane.
+`MessageListTabBindingPresenter` binds the active mailbox/search page to the Qt model and keeps the
+mailbox tree and search field synchronized; recursive mailbox selection lives in a reusable mailbox
+adapter. Pure `TabActivationPolicy` selects mailbox-pane visibility, message presentation behavior,
+and whether activation needs one remote refresh. Concrete widget switching remains in
+`MainWindow`, while message-list cache loads, page movement, sorting, search promotion, and refresh
+calls go through `MessageListTabController`.
 
 The account synchronization service owns state-change consumption, debounce and single-flight
 refresh, mailbox interest, state tokens, cache reconciliation, retries, and post-commit events.

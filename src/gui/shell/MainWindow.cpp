@@ -16,6 +16,7 @@
 #include "gui/logging/LogViewerDialog.h"
 #include "gui/mailboxes/MailboxIconUtils.h"
 #include "gui/mailboxes/MailboxPropertiesDialog.h"
+#include "gui/mailboxes/MailboxSelection.h"
 #include "gui/mailboxes/MailboxTreeModel.h"
 #include "gui/mailboxes/MailboxTreeView.h"
 #include "gui/messages/MessageDragListView.h"
@@ -32,6 +33,7 @@
 #include "gui/shell/MessageActionPolicy.h"
 #include "gui/shell/MessageCommandController.h"
 #include "gui/shell/MessageFileController.h"
+#include "gui/shell/MessageListTabBindingPresenter.h"
 #include "gui/shell/MessageListTabController.h"
 #include "gui/shell/MessageListTabPresenter.h"
 #include "gui/shell/MessageNavigationController.h"
@@ -256,42 +258,7 @@ namespace javelin::gui::shell
             return {};
         }
 
-        [[nodiscard]] QModelIndex
-        findMailboxIndexForSelection(const QAbstractItemModel& model, const QString& accountId,
-                                     const std::optional<QString>& mailboxId,
-                                     const QModelIndex& parent = {})
-        {
-            const int rowCount = model.rowCount(parent);
-            for (int row = 0; row < rowCount; ++row)
-            {
-                const QModelIndex index = model.index(row, 0, parent);
-                if (!index.isValid())
-                {
-                    continue;
-                }
-
-                const QString indexAccountId =
-                    index.data(javelin::gui::mailboxes::MailboxTreeModel::AccountIdRole).toString();
-                const QString indexMailboxId =
-                    index.data(javelin::gui::mailboxes::MailboxTreeModel::MailboxIdRole).toString();
-                const bool accountMatches = indexAccountId == accountId;
-                const bool mailboxMatches =
-                    mailboxId.has_value() ? indexMailboxId == *mailboxId : indexMailboxId.isEmpty();
-                if (accountMatches && mailboxMatches)
-                {
-                    return index;
-                }
-
-                const QModelIndex childMatch =
-                    findMailboxIndexForSelection(model, accountId, mailboxId, index);
-                if (childMatch.isValid())
-                {
-                    return childMatch;
-                }
-            }
-
-            return {};
-        }
+        using javelin::gui::mailboxes::findMailboxIndexForSelection;
 
         [[nodiscard]] javelin::app::AccountConnectionSettings
         toAccountConnectionSettings(const javelin::gui::settings::ConnectionSettings& settings)
@@ -398,6 +365,8 @@ namespace javelin::gui::shell
         connect(m_messageFileController, &MessageFileController::userInterventionRequired, this,
                 &MainWindow::presentUserInterventionError);
         setupUi();
+        m_messageListTabBindingPresenter = std::make_unique<MessageListTabBindingPresenter>(
+            *m_mailboxModel, *m_mailboxView, *m_mailboxSearchEdit, *m_messageModel, *m_mailboxPane);
         m_messageListTabController =
             new MessageListTabController(m_queryService, m_mailService, pageSize, this, this);
         m_messageNavigationController = std::make_unique<MessageNavigationController>(
@@ -406,7 +375,7 @@ namespace javelin::gui::shell
                 [this](javelin::app::MessageListSession* session)
                 {
                     const auto* tab = activeTab();
-                    if (tab == nullptr || messageListSession(*tab) != session)
+                    if (tab == nullptr || !m_messageListTabController->ownsSession(*tab, session))
                         return;
 
                     applyActiveTabPagePreservingSelection(currentMessageRow(*m_messageView));
@@ -1205,11 +1174,6 @@ namespace javelin::gui::shell
         connect(m_tabBar, &QTabBar::currentChanged, this,
                 [this](const int index)
                 {
-                    if (m_syncingNavigation)
-                    {
-                        return;
-                    }
-
                     m_messageNavigationCoordinator.cancel();
                     activateTab(index, true);
                 });
@@ -1231,11 +1195,8 @@ namespace javelin::gui::shell
         connect(m_searchServerButton, &QToolButton::clicked, this,
                 [this]
                 {
-                    auto* tab = activeTab();
-                    auto* searchTab =
-                        tab == nullptr ? nullptr : std::get_if<SearchTabState>(&tab->content);
-                    if (searchTab != nullptr)
-                        searchTab->session->promoteToOnline();
+                    if (auto* tab = activeTab(); tab != nullptr)
+                        static_cast<void>(m_messageListTabController->promoteSearch(*tab));
                 });
         connect(m_mailboxSearchEdit, &QLineEdit::returnPressed, this,
                 [this] { executeSearch(m_mailboxSearchEdit->text()); });
@@ -1251,17 +1212,8 @@ namespace javelin::gui::shell
         connect(m_mailboxView->selectionModel(), &QItemSelectionModel::currentChanged, this,
                 [this](const QModelIndex& current, const QModelIndex&)
                 {
-                    if (m_syncingNavigation)
-                    {
-                        return;
-                    }
-
-                    if (!current.isValid())
-                    {
-                        return;
-                    }
-
-                    activateMailboxSelection(false);
+                    if (current.isValid())
+                        activateMailboxSelection(false);
                 });
         connect(m_mailboxView, &QTreeView::doubleClicked, this,
                 [this](const QModelIndex& index)
@@ -2279,7 +2231,7 @@ namespace javelin::gui::shell
             m_contentStack->setCurrentIndex(0);
         }
 
-        syncNavigationForActiveTab(initialPlan.showMailboxPane);
+        m_messageListTabBindingPresenter->syncNavigation(&tab, initialPlan.showMailboxPane);
         loadActiveTabFromCache(false, false);
         const auto loadedPlan = planTabActivation({
             .kind = tabKind(tab),
@@ -2351,88 +2303,13 @@ namespace javelin::gui::shell
         activateTab(*m_activeTabIndex, false);
     }
 
-    void MainWindow::syncNavigationForActiveTab(const bool showMailboxPane)
-    {
-        const auto* tab = activeTab();
-        if (m_mailboxPane != nullptr)
-            m_mailboxPane->setVisible(showMailboxPane);
-        if (tab == nullptr)
-            return;
-
-        m_syncingNavigation = true;
-        QSignalBlocker mailboxBlocker{m_mailboxView->selectionModel()};
-        QSignalBlocker searchBlocker{m_mailboxSearchEdit};
-
-        if (const auto* composeTab = std::get_if<ComposeTabState>(&tab->content))
-        {
-            Q_UNUSED(composeTab);
-            m_mailboxSearchEdit->clear();
-        }
-        else if (std::holds_alternative<ContactsTabState>(tab->content) ||
-                 std::holds_alternative<CalendarTabState>(tab->content))
-        {
-            m_mailboxSearchEdit->clear();
-        }
-        else if (const auto* mailboxTab = std::get_if<MailboxTabState>(&tab->content))
-        {
-            const auto mailboxIndex = findMailboxIndexForSelection(
-                *m_mailboxModel, QString::fromStdString(mailboxTab->session->accountId()),
-                std::optional<QString>{QString::fromStdString(mailboxTab->session->mailboxId())});
-            if (mailboxIndex.isValid())
-            {
-                m_mailboxView->setCurrentIndex(mailboxIndex);
-                m_mailboxView->scrollTo(mailboxIndex);
-            }
-            m_mailboxSearchEdit->clear();
-        }
-        else
-        {
-            const auto& searchTab = std::get<SearchTabState>(tab->content);
-            const auto accountIndex = findMailboxIndexForSelection(
-                *m_mailboxModel, QString::fromStdString(searchTab.session->accountId()),
-                std::nullopt);
-            if (accountIndex.isValid())
-            {
-                m_mailboxView->setCurrentIndex(accountIndex);
-                m_mailboxView->scrollTo(accountIndex);
-            }
-            m_mailboxSearchEdit->setText(QString::fromStdString(searchTab.session->query()));
-        }
-
-        m_syncingNavigation = false;
-    }
-
-    void MainWindow::applyActiveTabPageToModel()
-    {
-        const auto* tab = activeTab();
-        if (tab == nullptr)
-        {
-            m_messageModel->clear();
-            return;
-        }
-        if (const auto* mailboxTab = std::get_if<MailboxTabState>(&tab->content))
-        {
-            m_messageModel->setPage(mailboxTab->session->accountId(),
-                                    mailboxTab->session->mailboxId(),
-                                    mailboxTab->session->page().items);
-            return;
-        }
-        if (const auto* searchTab = std::get_if<SearchTabState>(&tab->content))
-        {
-            m_messageModel->setPage(searchTab->session->accountId(), std::nullopt,
-                                    searchTab->session->page().items);
-            return;
-        }
-        m_messageModel->clear();
-    }
-
     void
     MainWindow::applyActiveTabPagePreservingSelection(const std::optional<int> previousMessageRow)
     {
         bool autoSelectedFallback = false;
         {
             QSignalBlocker messageSelectionBlocker{m_messageView->selectionModel()};
-            applyActiveTabPageToModel();
+            m_messageListTabBindingPresenter->applyPage(activeTab());
             autoSelectedFallback = restoreActiveTabMessageSelection(previousMessageRow);
         }
         if (autoSelectedFallback)
@@ -2446,7 +2323,7 @@ namespace javelin::gui::shell
         auto* tab = activeTab();
         if (tab == nullptr)
         {
-            applyActiveTabPageToModel();
+            m_messageListTabBindingPresenter->applyPage(nullptr);
             refreshSelectionFromModels();
             return;
         }
