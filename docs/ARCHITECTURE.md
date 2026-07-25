@@ -32,8 +32,9 @@ Tab variants and shared selection state live in the shell-level `TabWorkspace` m
 inside the main window. Pure workspace policy validates the active index, protects the mail home
 tab, and selects the next active tab after closure. `TabBarPresenter` renders account-qualified
 titles, unread mailbox counts, icons, visibility, and close controls. Mailbox and search session
-creation, signal binding, reuse, stale propagation, and release belong to the narrow
-`MessageListTabController`; pure `MessageListTabPolicy` decides identity matches and stale targets.
+creation, signal binding, reuse, stale propagation, pagination, sorting, and release belong to the
+narrow `MessageListTabController`; pure `MessageListTabPolicy` decides identity matches and stale
+targets.
 `TabPersistence` converts runtime tabs into storage records and reconstructs cache-only
 mailbox/search restore plans. `MainWindow` still owns widget creation, active-tab changes, concrete
 widget restoration, and visible-shell side effects, but it does not calculate tab-bar state,
@@ -43,7 +44,8 @@ application: the policy decides surviving multi-selection, current-message fallb
 nearest row after removal, while `MainWindow` only applies that plan to the active view. Pure
 `TabActivationPolicy` selects mailbox-pane visibility, message presentation behavior, and whether
 activation needs one remote refresh. Concrete widget switching remains in `MainWindow`, while
-message-list cache loads and refresh calls go through `MessageListTabController`.
+message-list cache loads, page movement, sorting, and refresh calls go through
+`MessageListTabController`.
 
 The account synchronization service owns state-change consumption, debounce and single-flight
 refresh, mailbox interest, state tokens, cache reconciliation, retries, and post-commit events.

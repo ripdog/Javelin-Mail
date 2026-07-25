@@ -3000,24 +3000,7 @@ namespace javelin::gui::shell
         }
 
         m_emailListSort = std::move(sort);
-        for (auto& tabState : m_tabs)
-        {
-            std::visit(
-                [this](auto& content)
-                {
-                    using Content = std::decay_t<decltype(content)>;
-                    if constexpr (std::is_same_v<Content, SearchTabState>)
-                    {
-                        content.session->setSort(m_emailListSort);
-                    }
-                    else if constexpr (std::is_same_v<Content, MailboxTabState>)
-                    {
-                        content.session->setSort(m_emailListSort);
-                    }
-                },
-                tabState.content);
-        }
-
+        m_messageListTabController->setSort(m_tabs, m_emailListSort);
         saveEmailListSort(m_emailListSort);
 
         updateSortButton();
@@ -3032,28 +3015,10 @@ namespace javelin::gui::shell
     void MainWindow::goToPreviousPage()
     {
         auto* tab = activeTab();
-        if (tab == nullptr)
-        {
+        if (tab == nullptr || !m_messageListTabController->goToPreviousPage(*tab))
             return;
-        }
 
-        auto moveToPrevious = [](auto& content)
-        {
-            using Content = std::decay_t<decltype(content)>;
-            if constexpr (std::is_same_v<Content, SearchTabState> ||
-                          std::is_same_v<Content, MailboxTabState>)
-            {
-                content.selection = {};
-                return content.session->goToPreviousPage();
-            }
-            else
-                return false;
-        };
-        if (!std::visit(moveToPrevious, tab->content))
-        {
-            return;
-        }
-
+        tabSelection(*tab) = {};
         loadActiveTabFromCache();
     }
 
@@ -3066,88 +3031,33 @@ namespace javelin::gui::shell
     {
         const auto* tab = activeTab();
         if (tab == nullptr)
-        {
             return;
-        }
 
-        std::optional<std::size_t> lastPage;
-        std::visit(
-            [&lastPage](const auto& content)
-            {
-                using Content = std::decay_t<decltype(content)>;
-                if constexpr (std::is_same_v<Content, SearchTabState> ||
-                              std::is_same_v<Content, MailboxTabState>)
-                {
-                    const auto& page = content.session->page();
-                    if (page.total.has_value() && *page.total > 0)
-                    {
-                        const auto step =
-                            page.returnedLimit == 0 ? MainWindow::pageSize : page.returnedLimit;
-                        lastPage = javelin::gui::messages::pageCount(*page.total, step) - 1;
-                    }
-                }
-            },
-            tab->content);
+        const auto lastPage = m_messageListTabController->lastPageIndex(*tab);
         if (lastPage.has_value())
-        {
             goToPage(*lastPage);
-        }
     }
 
     void MainWindow::goToPage(const std::size_t pageIndex)
     {
         auto* tab = activeTab();
-        if (tab == nullptr)
-        {
-            return;
-        }
-
-        const auto moveToPage = [pageIndex](auto& content)
-        {
-            using Content = std::decay_t<decltype(content)>;
-            if constexpr (std::is_same_v<Content, SearchTabState> ||
-                          std::is_same_v<Content, MailboxTabState>)
-            {
-                content.selection = {};
-                return content.session->goToPage(pageIndex);
-            }
-            else
-                return false;
-        };
-        if (!std::visit(moveToPage, tab->content))
+        if (tab == nullptr || !m_messageListTabController->goToPage(*tab, pageIndex))
         {
             updateMessageListHeader();
             return;
         }
 
+        tabSelection(*tab) = {};
         loadActiveTabFromCache();
     }
 
     void MainWindow::goToNextPage()
     {
         auto* tab = activeTab();
-        if (tab == nullptr)
-        {
+        if (tab == nullptr || !m_messageListTabController->goToNextPage(*tab))
             return;
-        }
 
-        auto moveToNext = [](auto& content)
-        {
-            using Content = std::decay_t<decltype(content)>;
-            if constexpr (std::is_same_v<Content, SearchTabState> ||
-                          std::is_same_v<Content, MailboxTabState>)
-            {
-                content.selection = {};
-                return content.session->goToNextPage();
-            }
-            else
-                return false;
-        };
-        if (!std::visit(moveToNext, tab->content))
-        {
-            return;
-        }
-
+        tabSelection(*tab) = {};
         loadActiveTabFromCache();
     }
 
@@ -3193,12 +3103,9 @@ namespace javelin::gui::shell
 
     void MainWindow::refreshActiveSearchAfterMutation(const std::string_view accountId)
     {
-        auto* tab = activeTab();
-        auto* searchTab = tab == nullptr ? nullptr : std::get_if<SearchTabState>(&tab->content);
-        if (searchTab != nullptr && searchTab->session->accountId() == accountId)
-        {
-            searchTab->session->refreshAfterMutation();
-        }
+        if (auto* tab = activeTab(); tab != nullptr)
+            static_cast<void>(
+                m_messageListTabController->refreshSearchAfterMutation(*tab, accountId));
     }
 
     void MainWindow::restoreSelection(std::optional<std::string> accountId,

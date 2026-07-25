@@ -123,6 +123,61 @@ namespace javelin::gui::shell
         return true;
     }
 
+    bool MessageListTabController::goToPreviousPage(TabState& tab)
+    {
+        auto* session = messageListSession(tab);
+        return session != nullptr && session->goToPreviousPage();
+    }
+
+    bool MessageListTabController::goToNextPage(TabState& tab)
+    {
+        auto* session = messageListSession(tab);
+        return session != nullptr && session->goToNextPage();
+    }
+
+    bool MessageListTabController::goToPage(TabState& tab, const std::size_t pageIndex)
+    {
+        auto* session = messageListSession(tab);
+        return session != nullptr && session->goToPage(pageIndex);
+    }
+
+    std::optional<std::size_t> MessageListTabController::lastPageIndex(const TabState& tab) const
+    {
+        const auto* session = messageListSession(tab);
+        if (session == nullptr || !session->page().total.has_value() || *session->page().total == 0)
+        {
+            return std::nullopt;
+        }
+
+        const auto effectiveLimit =
+            session->page().returnedLimit == 0 ? m_pageSize : session->page().returnedLimit;
+        return javelin::app::messageListPageCount(*session->page().total, effectiveLimit) - 1;
+    }
+
+    void MessageListTabController::setSort(std::vector<TabState>& tabs,
+                                           const javelin::jmap::query::EmailListSort sort)
+    {
+        for (auto& tab : tabs)
+        {
+            if (auto* session = messageListSession(tab); session != nullptr)
+                session->setSort(sort);
+        }
+    }
+
+    bool MessageListTabController::refreshSearchAfterMutation(TabState& tab,
+                                                              const std::string_view accountId)
+    {
+        auto* search = std::get_if<SearchTabState>(&tab.content);
+        if (search == nullptr || search->session == nullptr ||
+            search->session->accountId() != accountId)
+        {
+            return false;
+        }
+
+        search->session->refreshAfterMutation();
+        return true;
+    }
+
     bool MessageListTabController::pageStale(const TabState& tab) const
     {
         const auto* session = messageListSession(tab);

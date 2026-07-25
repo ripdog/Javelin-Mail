@@ -2,6 +2,7 @@
 
 #include "jmap/OperationError.h"
 #include "jmap/cache/QueryService.h"
+#include "jmap/query/EmailListSort.h"
 
 #include <QObject>
 #include <QString>
@@ -70,6 +71,7 @@ namespace javelin::app
         virtual void loadCachedPage(bool forceReload = false) = 0;
         virtual void refresh() = 0;
         virtual void markStale() = 0;
+        virtual void setSort(javelin::jmap::query::EmailListSort sort) = 0;
         [[nodiscard]] virtual bool goToPage(std::size_t pageIndex) = 0;
         [[nodiscard]] virtual bool goToPreviousPage() = 0;
         [[nodiscard]] virtual bool goToNextPage() = 0;

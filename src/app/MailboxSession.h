@@ -36,7 +36,7 @@ namespace javelin::app
         void loadCachedPage(bool forceReload = false) override;
         void refresh() override;
         void markStale() override;
-        void setSort(javelin::jmap::query::EmailListSort sort);
+        void setSort(javelin::jmap::query::EmailListSort sort) override;
         void reveal(std::string emailId);
         [[nodiscard]] bool goToPage(std::size_t pageIndex) override;
         [[nodiscard]] bool goToPreviousPage() override;

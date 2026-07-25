@@ -57,7 +57,7 @@ namespace javelin::app
         void close();
         void refreshAfterMutation();
         void markStale() override;
-        void setSort(javelin::jmap::query::EmailListSort sort);
+        void setSort(javelin::jmap::query::EmailListSort sort) override;
         [[nodiscard]] bool goToPage(std::size_t pageIndex) override;
         [[nodiscard]] bool goToPreviousPage() override;
         [[nodiscard]] bool goToNextPage() override;
