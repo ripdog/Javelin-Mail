@@ -32,6 +32,7 @@
 #include "gui/shell/MainWindowStateStore.h"
 #include "gui/shell/MessageCommandController.h"
 #include "gui/shell/MessageFileController.h"
+#include "gui/shell/MessageListTabController.h"
 #include "gui/shell/TabBarPresenter.h"
 #include "gui/sieve/SieveEditorDialog.h"
 #include "jmap/cache/AccountRepository.h"
@@ -393,6 +394,22 @@ namespace javelin::gui::shell
         connect(m_messageFileController, &MessageFileController::userInterventionRequired, this,
                 &MainWindow::presentUserInterventionError);
         setupUi();
+        m_messageListTabController =
+            new MessageListTabController(m_queryService, m_mailService, pageSize, this, this);
+        connect(m_messageListTabController, &MessageListTabController::pageChanged, this,
+                [this](javelin::app::MessageListSession* session)
+                {
+                    const auto* tab = activeTab();
+                    if (tab == nullptr || messageListSession(*tab) != session)
+                        return;
+
+                    applyActiveTabPagePreservingSelection(currentMessageRow(*m_messageView));
+                    updateEmptyStates();
+                    updateMessageListHeader();
+                    resolveOpenEmailRoute();
+                });
+        connect(m_messageListTabController, &MessageListTabController::operationFailed, this,
+                [this](const javelin::jmap::OperationError& error) { presentError(error); });
         connect(&m_mailService, &javelin::app::MailApplicationService::sessionCapabilitiesChanged,
                 this, [this](const QString&) { reloadAccounts(); });
         createActions();
@@ -2173,28 +2190,16 @@ namespace javelin::gui::shell
                                               const QString title, std::optional<std::string> role,
                                               const bool refreshRemote)
     {
-        for (std::size_t index = 0; index < m_tabs.size(); ++index)
-        {
-            if (auto* mailboxTab = std::get_if<MailboxTabState>(&m_tabs[index].content);
-                mailboxTab != nullptr && mailboxTab->session->accountId() == accountId &&
-                mailboxTab->session->mailboxId() == mailboxId)
-            {
-                mailboxTab->session->updateMetadata(title, std::move(role));
-                m_activeTabIndex = static_cast<int>(index);
-                updateTabBar();
-                activateTab(*m_activeTabIndex, refreshRemote);
-                return;
-            }
-        }
-
-        auto* session = new javelin::app::MailboxSession(
-            std::move(accountId), std::move(mailboxId), title, std::move(role), m_emailListSort,
-            m_queryService, m_mailService, pageSize, std::nullopt, this);
-        connectMessageListSession(*session);
-        m_tabs.push_back(TabState{
-            .content = MailboxTabState{.session = session, .selection = {}},
-        });
-        m_activeTabIndex = static_cast<int>(m_tabs.size() - 1);
+        const auto result = m_messageListTabController->openOrCreateMailbox(
+            m_tabs, {
+                        .accountId = std::move(accountId),
+                        .mailboxId = std::move(mailboxId),
+                        .title = title,
+                        .role = std::move(role),
+                        .sort = m_emailListSort,
+                        .restored = std::nullopt,
+                    });
+        m_activeTabIndex = static_cast<int>(result.index);
         updateTabBar();
         activateTab(*m_activeTabIndex, refreshRemote);
     }
@@ -2204,38 +2209,38 @@ namespace javelin::gui::shell
                                               const std::optional<std::size_t> total,
                                               const bool refreshRemote)
     {
-        auto* session = new javelin::app::MailboxSession(
-            std::move(accountId), std::move(mailboxId), std::move(title), std::move(role),
-            m_emailListSort, m_queryService, m_mailService, pageSize,
-            javelin::app::RestoredMailboxState{
-                .page =
-                    javelin::app::MessageListPage{
-                        .offset = 0,
-                        .position = 0,
-                        .returnedLimit = pageSize,
-                        .total = total,
-                        .queryState = {},
-                        .anchor = std::nullopt,
-                        .items = {},
-                        .cacheLoaded = false,
-                        .refreshInFlight = false,
-                        .stale = false,
-                        .refreshError = {},
-                    },
-            },
-            this);
-        connectMessageListSession(*session);
+        auto tab = m_messageListTabController->createMailboxTab({
+            .accountId = std::move(accountId),
+            .mailboxId = std::move(mailboxId),
+            .title = std::move(title),
+            .role = std::move(role),
+            .sort = m_emailListSort,
+            .restored =
+                javelin::app::RestoredMailboxState{
+                    .page =
+                        javelin::app::MessageListPage{
+                            .offset = 0,
+                            .position = 0,
+                            .returnedLimit = pageSize,
+                            .total = total,
+                            .queryState = {},
+                            .anchor = std::nullopt,
+                            .items = {},
+                            .cacheLoaded = false,
+                            .refreshInFlight = false,
+                            .stale = false,
+                            .refreshError = {},
+                        },
+                },
+        });
         if (m_tabs.empty())
         {
-            m_tabs.push_back(TabState{
-                .content = MailboxTabState{.session = session, .selection = {}},
-            });
+            m_tabs.push_back(std::move(tab));
         }
         else
         {
-            if (auto* previous = std::get_if<MailboxTabState>(&m_tabs[0].content))
-                previous->session->deleteLater();
-            m_tabs[0].content = MailboxTabState{.session = session, .selection = {}};
+            m_messageListTabController->releaseSession(m_tabs[0]);
+            m_tabs[0] = std::move(tab);
         }
 
         m_activeTabIndex = 0;
@@ -2255,56 +2260,16 @@ namespace javelin::gui::shell
                                              javelin::jmap::search::EmailSearchCriteria criteria,
                                              const bool refreshRemote)
     {
-        const auto queryString = javelin::jmap::search::displayString(criteria);
-        for (std::size_t index = 0; index < m_tabs.size(); ++index)
-        {
-            if (auto* searchTab = std::get_if<SearchTabState>(&m_tabs[index].content);
-                searchTab != nullptr && searchTab->session->accountId() == accountId &&
-                searchTab->session->query() == queryString)
-            {
-                m_activeTabIndex = static_cast<int>(index);
-                updateTabBar();
-                activateTab(*m_activeTabIndex, refreshRemote);
-                return;
-            }
-        }
-
-        auto* session = new javelin::app::SearchSession(
-            std::move(accountId), std::move(criteria), m_emailListSort, m_queryService,
-            m_mailService, pageSize, std::nullopt, this);
-        connectSearchSession(*session);
-        m_tabs.push_back(TabState{.content = SearchTabState{.session = session, .selection = {}}});
-        m_activeTabIndex = static_cast<int>(m_tabs.size() - 1);
+        const auto result = m_messageListTabController->openOrCreateSearch(
+            m_tabs, {
+                        .accountId = std::move(accountId),
+                        .criteria = std::move(criteria),
+                        .sort = m_emailListSort,
+                        .restored = std::nullopt,
+                    });
+        m_activeTabIndex = static_cast<int>(result.index);
         updateTabBar();
         activateTab(*m_activeTabIndex, refreshRemote);
-    }
-
-    void MainWindow::connectMessageListSession(javelin::app::MessageListSession& session)
-    {
-        connect(&session, &javelin::app::MessageListSession::pageChanged, this,
-                [this, session = &session]
-                {
-                    const auto* tab = activeTab();
-                    if (tab == nullptr)
-                        return;
-                    const auto* activeSession = messageListSession(*tab);
-                    if (activeSession != session)
-                    {
-                        return;
-                    }
-
-                    applyActiveTabPagePreservingSelection(currentMessageRow(*m_messageView));
-                    updateEmptyStates();
-                    updateMessageListHeader();
-                    resolveOpenEmailRoute();
-                });
-        connect(&session, &javelin::app::MessageListSession::refreshFailed, this,
-                [this](const javelin::jmap::OperationError& error) { presentError(error); });
-    }
-
-    void MainWindow::connectSearchSession(javelin::app::SearchSession& session)
-    {
-        connectMessageListSession(session);
     }
 
     void MainWindow::activateTab(const int index, const bool refreshRemote)
@@ -2413,15 +2378,7 @@ namespace javelin::gui::shell
             }
         }
 
-        if (auto* mailboxTab =
-                std::get_if<MailboxTabState>(&m_tabs[static_cast<std::size_t>(index)].content))
-            mailboxTab->session->deleteLater();
-        if (auto* searchTab =
-                std::get_if<SearchTabState>(&m_tabs[static_cast<std::size_t>(index)].content))
-        {
-            searchTab->session->close();
-            searchTab->session->deleteLater();
-        }
+        m_messageListTabController->releaseSession(m_tabs[static_cast<std::size_t>(index)]);
         m_activeTabIndex = activeTabIndexAfterClose(m_tabs.size(), m_activeTabIndex, index);
         m_tabs.erase(m_tabs.begin() + index);
         if (!m_activeTabIndex.has_value())
@@ -2651,41 +2608,12 @@ namespace javelin::gui::shell
     MainWindow::markTabsStaleForAccount(const std::string_view accountId,
                                         const std::optional<std::string_view> refreshedMailboxId)
     {
-        for (auto& tab : m_tabs)
-        {
-            std::visit(
-                [accountId, refreshedMailboxId](auto& content)
-                {
-                    using Content = std::decay_t<decltype(content)>;
-                    if constexpr (std::is_same_v<Content, SearchTabState>)
-                    {
-                        if (content.session->accountId() == accountId)
-                            content.session->markStale();
-                    }
-                    else if constexpr (std::is_same_v<Content, MailboxTabState>)
-                    {
-                        if (content.session->accountId() == accountId &&
-                            (!refreshedMailboxId.has_value() ||
-                             content.session->mailboxId() != *refreshedMailboxId))
-                        {
-                            content.session->markStale();
-                        }
-                    }
-                },
-                tab.content);
-        }
+        m_messageListTabController->markTabsStaleForAccount(m_tabs, accountId, refreshedMailboxId);
     }
 
     void MainWindow::markSearchTabsStaleForAccount(const std::string_view accountId)
     {
-        for (auto& tab : m_tabs)
-        {
-            auto* searchTab = std::get_if<SearchTabState>(&tab.content);
-            if (searchTab != nullptr && searchTab->session->accountId() == accountId)
-            {
-                searchTab->session->markStale();
-            }
-        }
+        m_messageListTabController->markSearchTabsStaleForAccount(m_tabs, accountId);
     }
 
     void MainWindow::openMailboxSelectionInTab(const bool refreshRemote)
@@ -2702,27 +2630,18 @@ namespace javelin::gui::shell
             currentIndex.data(javelin::gui::mailboxes::MailboxTreeModel::MailboxNameRole)
                 .toString();
         const auto role = currentMailboxRole(*m_mailboxView);
-        for (std::size_t index = 1; index < m_tabs.size(); ++index)
-        {
-            if (auto* mailboxTab = std::get_if<MailboxTabState>(&m_tabs[index].content);
-                mailboxTab != nullptr && mailboxTab->session->accountId() == *accountId &&
-                mailboxTab->session->mailboxId() == *mailboxId)
-            {
-                m_activeTabIndex = static_cast<int>(index);
-                updateTabBar();
-                activateTab(*m_activeTabIndex, refreshRemote);
-                return;
-            }
-        }
-
-        auto* session = new javelin::app::MailboxSession(
-            *accountId, *mailboxId, title, role, m_emailListSort, m_queryService, m_mailService,
-            pageSize, std::nullopt, this);
-        connectMessageListSession(*session);
-        m_tabs.push_back(TabState{
-            .content = MailboxTabState{.session = session, .selection = {}},
-        });
-        m_activeTabIndex = static_cast<int>(m_tabs.size() - 1);
+        const auto result =
+            m_messageListTabController->openOrCreateMailbox(m_tabs,
+                                                            {
+                                                                .accountId = *accountId,
+                                                                .mailboxId = *mailboxId,
+                                                                .title = title,
+                                                                .role = role,
+                                                                .sort = m_emailListSort,
+                                                                .restored = std::nullopt,
+                                                            },
+                                                            1);
+        m_activeTabIndex = static_cast<int>(result.index);
         updateTabBar();
         activateTab(*m_activeTabIndex, refreshRemote);
     }
@@ -4331,60 +4250,53 @@ namespace javelin::gui::shell
 
     void MainWindow::restoreMailboxTab(const PersistedMailboxTab& tab)
     {
-        auto* session = new javelin::app::MailboxSession(
-            tab.common.accountId, tab.mailboxId,
-            tab.common.title.isEmpty() ? QString::fromStdString(tab.mailboxId) : tab.common.title,
-            tab.mailboxRole, m_emailListSort, m_queryService, m_mailService, pageSize,
-            javelin::app::RestoredMailboxState{
-                .page =
-                    javelin::app::MessageListPage{
-                        .offset = tab.offset,
-                        .position = tab.offset,
-                        .returnedLimit = pageSize,
-                        .total = std::nullopt,
-                        .queryState = {},
-                        .anchor = std::nullopt,
-                        .items = {},
-                        .cacheLoaded = false,
-                        .refreshInFlight = false,
-                        .stale = false,
-                        .refreshError = {},
-                    },
-            },
-            this);
-        connectMessageListSession(*session);
-        m_tabs.push_back(TabState{
-            .content =
-                MailboxTabState{
-                    .session = session,
-                    .selection =
-                        TabSelectionState{
-                            .threadId = tab.common.selection.threadId,
-                            .emailId = tab.common.selection.emailId,
-                            .selectedEmailIds = {},
+        auto restoredTab = m_messageListTabController->createMailboxTab({
+            .accountId = tab.common.accountId,
+            .mailboxId = tab.mailboxId,
+            .title = tab.common.title.isEmpty() ? QString::fromStdString(tab.mailboxId)
+                                                : tab.common.title,
+            .role = tab.mailboxRole,
+            .sort = m_emailListSort,
+            .restored =
+                javelin::app::RestoredMailboxState{
+                    .page =
+                        javelin::app::MessageListPage{
+                            .offset = tab.offset,
+                            .position = tab.offset,
+                            .returnedLimit = pageSize,
+                            .total = std::nullopt,
+                            .queryState = {},
+                            .anchor = std::nullopt,
+                            .items = {},
+                            .cacheLoaded = false,
+                            .refreshInFlight = false,
+                            .stale = false,
+                            .refreshError = {},
                         },
                 },
         });
+        tabSelection(restoredTab) = {
+            .threadId = tab.common.selection.threadId,
+            .emailId = tab.common.selection.emailId,
+            .selectedEmailIds = {},
+        };
+        m_tabs.push_back(std::move(restoredTab));
     }
 
     void MainWindow::restoreSearchTab(PersistedSearchTab tab)
     {
-        auto* session = new javelin::app::SearchSession(
-            tab.common.accountId, std::move(tab.search.criteria), m_emailListSort, m_queryService,
-            m_mailService, pageSize, std::move(tab.search.restored), this);
-        connectSearchSession(*session);
-        m_tabs.push_back(TabState{
-            .content =
-                SearchTabState{
-                    .session = session,
-                    .selection =
-                        TabSelectionState{
-                            .threadId = std::move(tab.common.selection.threadId),
-                            .emailId = std::move(tab.common.selection.emailId),
-                            .selectedEmailIds = {},
-                        },
-                },
+        auto restoredTab = m_messageListTabController->createSearchTab({
+            .accountId = tab.common.accountId,
+            .criteria = std::move(tab.search.criteria),
+            .sort = m_emailListSort,
+            .restored = std::move(tab.search.restored),
         });
+        tabSelection(restoredTab) = {
+            .threadId = std::move(tab.common.selection.threadId),
+            .emailId = std::move(tab.common.selection.emailId),
+            .selectedEmailIds = {},
+        };
+        m_tabs.push_back(std::move(restoredTab));
     }
 
     void MainWindow::restoreComposeTab(const PersistedComposeTab& tab)

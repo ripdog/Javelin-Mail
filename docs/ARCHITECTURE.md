@@ -31,8 +31,11 @@ active session page to the message model; it does not coordinate mailbox or sear
 Tab variants and shared selection state live in the shell-level `TabWorkspace` model rather than
 inside the main window. Pure workspace policy validates the active index, protects the mail home
 tab, and selects the next active tab after closure. `TabBarPresenter` renders account-qualified
-titles, unread mailbox counts, icons, visibility, and close controls. `MainWindow` still owns widget
-creation, activation side effects, and resource cleanup, but it does not calculate tab-bar state.
+titles, unread mailbox counts, icons, visibility, and close controls. Mailbox and search session
+creation, signal binding, reuse, stale propagation, and release belong to the narrow
+`MessageListTabController`; pure `MessageListTabPolicy` decides identity matches and stale targets.
+`MainWindow` still owns widget creation, active-tab changes, and visible-shell side effects, but it
+does not calculate tab-bar state or orchestrate message-list session lifetimes.
 Message selection restoration is likewise split into deterministic workspace policy and thin Qt
 application: the policy decides surviving multi-selection, current-message fallback, and the
 nearest row after removal, while `MainWindow` only applies that plan to the active view.

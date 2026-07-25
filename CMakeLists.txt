@@ -167,6 +167,10 @@ set(JAVELIN_FORMAT_FILES
     src/gui/shell/MessageFileController.h
     src/gui/shell/MessageCommandController.cpp
     src/gui/shell/MessageCommandController.h
+    src/gui/shell/MessageListTabController.cpp
+    src/gui/shell/MessageListTabController.h
+    src/gui/shell/MessageListTabPolicy.cpp
+    src/gui/shell/MessageListTabPolicy.h
     src/gui/shell/TabWorkspace.cpp
     src/gui/shell/TabWorkspacePolicy.cpp
     src/gui/shell/TabWorkspace.h
@@ -660,6 +664,10 @@ add_library(javelin_gui STATIC
     src/gui/shell/MessageFileController.h
     src/gui/shell/MessageCommandController.cpp
     src/gui/shell/MessageCommandController.h
+    src/gui/shell/MessageListTabController.cpp
+    src/gui/shell/MessageListTabController.h
+    src/gui/shell/MessageListTabPolicy.cpp
+    src/gui/shell/MessageListTabPolicy.h
     src/gui/shell/TabWorkspace.cpp
     src/gui/shell/TabWorkspacePolicy.cpp
     src/gui/shell/TabWorkspace.h

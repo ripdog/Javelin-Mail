@@ -79,6 +79,7 @@ namespace javelin::gui::shell
     class ElidingLabel;
     class MessageCommandController;
     class MessageFileController;
+    class MessageListTabController;
     class TabBarPresenter;
     struct PersistedMailboxTab;
     struct PersistedSearchTab;
@@ -206,8 +207,6 @@ namespace javelin::gui::shell
         void loadActiveTabFromCache(bool forceReload = false, bool refreshRemote = true);
         void refreshActiveTabFromServer();
         void refreshTabFromServer(std::size_t tabIndex);
-        void connectMessageListSession(javelin::app::MessageListSession& session);
-        void connectSearchSession(javelin::app::SearchSession& session);
         [[nodiscard]] bool activeTabIsMailbox() const;
         [[nodiscard]] bool activeTabIsSearch() const;
         [[nodiscard]] bool activeTabIsCompose() const;
@@ -282,6 +281,7 @@ namespace javelin::gui::shell
         javelin::app::MessageNavigationCoordinator& m_messageNavigationCoordinator;
         MessageCommandController* m_messageCommandController = nullptr;
         MessageFileController* m_messageFileController = nullptr;
+        MessageListTabController* m_messageListTabController = nullptr;
         TabBarPresenter* m_tabBarPresenter = nullptr;
         std::unique_ptr<javelin::gui::messages::MessageListPanePresenter>
             m_messageListPanePresenter;

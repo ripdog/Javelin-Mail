@@ -75,6 +75,7 @@ add_executable(javelin_jmap_tests
     gui/MailboxSortTest.cpp
     gui/MessageActionSelectionTest.cpp
     gui/MessageSelectionRestorationTest.cpp
+    gui/MessageListTabPolicyTest.cpp
     gui/TabWorkspaceTest.cpp
     gui/MainWindowStateStoreTest.cpp
     gui/MessageViewPresentationTest.cpp
@@ -84,6 +85,7 @@ add_executable(javelin_jmap_tests
     ${PROJECT_SOURCE_DIR}/src/gui/calendar/RecurrencePattern.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/messages/MessageActionSelection.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/messages/MessageSelectionRestoration.cpp
+    ${PROJECT_SOURCE_DIR}/src/gui/shell/MessageListTabPolicy.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/shell/TabWorkspacePolicy.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/messageview/PlainTextLinkifier.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/search/SearchSessionPersistence.cpp
