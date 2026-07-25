@@ -1,0 +1,46 @@
+#include "gui/settings/ConnectionSettingsAdapter.h"
+
+#include <catch2/catch_test_macros.hpp>
+
+#include <vector>
+
+using namespace javelin::gui::settings;
+
+TEST_CASE("connection settings adapt into application account settings")
+{
+    const ConnectionSettings settings{
+        .id = QStringLiteral("connection"),
+        .revision = 42,
+        .displayName = QStringLiteral("Personal"),
+        .sessionUrl = QStringLiteral("https://mail.example.test/.well-known/jmap"),
+        .loginEmail = QStringLiteral("ada@example.test"),
+        .apiKey = QStringLiteral("secret"),
+        .cachedAccountIds = {QStringLiteral("account")},
+    };
+
+    const auto actual = toAccountConnectionSettings(settings);
+
+    CHECK(actual.connectionId == "connection");
+    CHECK(actual.revision == 42);
+    CHECK(actual.sessionUrl == "https://mail.example.test/.well-known/jmap");
+    CHECK(actual.loginEmail == "ada@example.test");
+    CHECK(actual.apiKey == "secret");
+}
+
+TEST_CASE("bootstrap adaptation transfers configured mailbox selections")
+{
+    const ConnectionSettings settings{
+        .id = QStringLiteral("connection"),
+        .revision = 3,
+        .displayName = {},
+        .sessionUrl = QStringLiteral("https://mail.example.test/jmap"),
+        .loginEmail = QStringLiteral("ada@example.test"),
+        .apiKey = QStringLiteral("secret"),
+        .cachedAccountIds = {},
+    };
+    const auto actual =
+        toAccountBootstrapIntent(settings, std::vector<std::string>{"inbox", "archive"});
+
+    CHECK(actual.settings.connectionId == "connection");
+    CHECK((actual.mailboxIds == std::vector<std::string>{"inbox", "archive"}));
+}

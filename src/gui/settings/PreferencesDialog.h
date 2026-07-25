@@ -1,6 +1,7 @@
 #pragma once
 
 #include "app/TranslationService.h"
+#include "gui/settings/ConnectionSettings.h"
 
 #include <KConfigDialog>
 #include <QHash>
@@ -30,17 +31,6 @@ namespace javelin::jmap::cache
 
 namespace javelin::gui::settings
 {
-
-    struct ConnectionSettings
-    {
-        QString id;
-        std::uint64_t revision = 0;
-        QString displayName;
-        QString sessionUrl;
-        QString loginEmail;
-        QString apiKey;
-        QStringList cachedAccountIds;
-    };
 
     struct AttachmentSaveSettings
     {

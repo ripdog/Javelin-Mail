@@ -201,6 +201,11 @@ set(JAVELIN_FORMAT_FILES
     src/gui/shell/MessageNavigationController.h
     src/gui/shell/MessageNavigationPolicy.cpp
     src/gui/shell/MessageNavigationPolicy.h
+    src/gui/settings/ConnectionSettings.h
+    src/gui/settings/ConnectionSettingsAdapter.cpp
+    src/gui/settings/ConnectionSettingsAdapter.h
+    src/gui/shell/AccountRefreshController.cpp
+    src/gui/shell/AccountRefreshController.h
     src/gui/shell/MessageSelectionController.cpp
     src/gui/shell/MessageSelectionController.h
     src/jmap/api/Error.cpp
@@ -719,6 +724,11 @@ add_library(javelin_gui STATIC
     src/gui/shell/MessageNavigationController.h
     src/gui/shell/MessageNavigationPolicy.cpp
     src/gui/shell/MessageNavigationPolicy.h
+    src/gui/settings/ConnectionSettings.h
+    src/gui/settings/ConnectionSettingsAdapter.cpp
+    src/gui/settings/ConnectionSettingsAdapter.h
+    src/gui/shell/AccountRefreshController.cpp
+    src/gui/shell/AccountRefreshController.h
     src/gui/shell/MessageSelectionController.cpp
     src/gui/shell/MessageSelectionController.h
     src/gui/sieve/SieveEditorDialog.cpp

@@ -76,6 +76,7 @@ namespace javelin::gui::settings
 
 namespace javelin::gui::shell
 {
+    class AccountRefreshController;
     class ElidingLabel;
     class MessageCommandController;
     class MessageFileController;
@@ -228,7 +229,6 @@ namespace javelin::gui::shell
         void refreshActiveSearchAfterMutation(std::string_view accountId);
         void refreshFromServer();
         void refreshAccountFromServer(std::string accountId);
-        void refreshConnectionSettings(javelin::gui::settings::ConnectionSettings settings);
         [[nodiscard]] ToolbarContext toolbarContextForActiveTab() const;
         void updateToolbarForActiveTab();
         void refreshSelectedMessageContent(std::string accountId, std::string emailId);
@@ -270,6 +270,7 @@ namespace javelin::gui::shell
         javelin::app::ComposeService& m_composeService;
         javelin::app::MailApplicationService& m_mailService;
         javelin::app::MessageNavigationCoordinator& m_messageNavigationCoordinator;
+        AccountRefreshController* m_accountRefreshController = nullptr;
         MessageCommandController* m_messageCommandController = nullptr;
         MessageFileController* m_messageFileController = nullptr;
         std::unique_ptr<MessageListTabBindingPresenter> m_messageListTabBindingPresenter;
@@ -342,7 +343,6 @@ namespace javelin::gui::shell
         QAction* m_calendarListAction = nullptr;
         QAction* m_calendarRefreshAction = nullptr;
         javelin::jmap::query::EmailListSort m_emailListSort;
-        bool m_refreshInFlight = false;
         std::uint64_t m_nextMessageContentRequestToken = 1;
         std::optional<MessageContentRequestState> m_messageContentRequestInFlight;
         std::optional<int> m_activeTabIndex;

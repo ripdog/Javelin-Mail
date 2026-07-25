@@ -25,7 +25,9 @@
 #include "gui/messages/MessageListPanePresenter.h"
 #include "gui/messageview/MessageViewContainer.h"
 #include "gui/search/AdvancedSearchDialog.h"
+#include "gui/settings/ConnectionSettingsAdapter.h"
 #include "gui/settings/PreferencesDialog.h"
+#include "gui/shell/AccountRefreshController.h"
 #include "gui/shell/ElidingLabel.h"
 #include "gui/shell/LayeredStatusBar.h"
 #include "gui/shell/MainWindowStateStore.h"
@@ -171,18 +173,6 @@ namespace javelin::gui::shell
 
         using javelin::gui::mailboxes::findMailboxIndexForSelection;
 
-        [[nodiscard]] javelin::app::AccountConnectionSettings
-        toAccountConnectionSettings(const javelin::gui::settings::ConnectionSettings& settings)
-        {
-            return javelin::app::AccountConnectionSettings{
-                .connectionId = settings.id.toStdString(),
-                .revision = settings.revision,
-                .sessionUrl = settings.sessionUrl.toStdString(),
-                .loginEmail = settings.loginEmail.toStdString(),
-                .apiKey = settings.apiKey.toStdString(),
-            };
-        }
-
         [[nodiscard]] std::optional<javelin::jmap::cache::MailboxTreeItem>
         findMailboxByRole(javelin::jmap::cache::QueryService& queryService,
                           const std::string_view accountId, const std::string_view role)
@@ -276,6 +266,47 @@ namespace javelin::gui::shell
         connect(m_messageFileController, &MessageFileController::userInterventionRequired, this,
                 &MainWindow::presentUserInterventionError);
         setupUi();
+        m_accountRefreshController =
+            new AccountRefreshController(m_mailService, m_accountRepository, this);
+        connect(m_accountRefreshController, &AccountRefreshController::busyChanged, this,
+                [this](const bool busy)
+                {
+                    m_refreshAction->setEnabled(!busy);
+                    m_preferencesAction->setEnabled(!busy);
+                });
+        connect(m_accountRefreshController, &AccountRefreshController::statusMessage, this,
+                [this](const QString& message, const int durationMilliseconds)
+                {
+                    if (durationMilliseconds > 0)
+                        m_statusBar->showMessage(message, durationMilliseconds);
+                    else
+                        m_statusBar->showMessage(message);
+                });
+        connect(m_accountRefreshController, &AccountRefreshController::userInterventionRequired,
+                this, &MainWindow::presentUserInterventionError);
+        connect(m_accountRefreshController, &AccountRefreshController::operationFailed, this,
+                [this](const javelin::jmap::OperationError& error) { presentError(error); });
+        connect(m_accountRefreshController, &AccountRefreshController::accountRefreshed, this,
+                [this](const javelin::jmap::LiveRefreshSummary& summary)
+                {
+                    if (summary.selectedMailboxId.has_value())
+                        markTabsStaleForAccount(summary.accountId,
+                                                std::string_view{*summary.selectedMailboxId});
+                    else
+                        markTabsStaleForAccount(summary.accountId);
+                    reloadAccounts();
+                    refreshViewsFromCache();
+                    m_statusBar->showMessage(
+                        QStringLiteral("Synced %1 mailboxes and %2 messages for %3.")
+                            .arg(summary.mailboxCount)
+                            .arg(summary.emailCount)
+                            .arg(QString::fromStdString(summary.accountId)),
+                        10000);
+                    Q_EMIT accountSettingsChanged();
+                });
+        connect(m_accountRefreshController, &AccountRefreshController::contactsRefreshed, this,
+                [this](const javelin::jmap::contacts::ContactRefreshSummary&)
+                { reloadAccounts(); });
         m_messageListTabBindingPresenter = std::make_unique<MessageListTabBindingPresenter>(
             *m_mailboxModel, *m_mailboxView, *m_mailboxSearchEdit, *m_messageModel, *m_mailboxPane);
         m_messageSelectionController = std::make_unique<MessageSelectionController>(
@@ -2390,8 +2421,8 @@ namespace javelin::gui::shell
             return;
         }
 
-        auto task =
-            m_composeService.open(toAccountConnectionSettings(settings), std::move(request));
+        auto task = m_composeService.open(
+            javelin::gui::settings::toAccountConnectionSettings(settings), std::move(request));
         QCoro::connect(
             std::move(task), this,
             [this](std::variant<javelin::jmap::submission::DraftSnapshot,
@@ -3084,119 +3115,7 @@ namespace javelin::gui::shell
 
     void MainWindow::refreshAccountFromServer(std::string accountId)
     {
-        if (!m_mailService.requestAccountSynchronization(accountId))
-        {
-            refreshConnectionSettings(
-                javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
-                    QString::fromStdString(accountId)));
-            return;
-        }
-        m_statusBar->showMessage(QStringLiteral("Synchronizing account..."));
-    }
-
-    void MainWindow::refreshConnectionSettings(javelin::gui::settings::ConnectionSettings settings)
-    {
-        if (m_refreshInFlight)
-        {
-            return;
-        }
-
-        if (settings.loginEmail.isEmpty() || settings.apiKey.isEmpty())
-        {
-            presentUserInterventionError(
-                QStringLiteral("Set Session URL, Login Email, and API Key in Preferences first."));
-            return;
-        }
-
-        m_refreshInFlight = true;
-        m_refreshAction->setEnabled(false);
-        m_preferencesAction->setEnabled(false);
-        m_statusBar->showMessage(QStringLiteral("Refreshing mail from server..."));
-        qInfo().noquote() << "GUI refresh requested" << settings.loginEmail << settings.sessionUrl;
-
-        std::vector<std::string> mailboxIds;
-        for (const auto& accountId : std::as_const(settings.cachedAccountIds))
-        {
-            const auto syncedMailboxIds =
-                javelin::gui::settings::PreferencesDialog::syncedMailboxIds(accountId);
-            for (const auto& mailboxId : syncedMailboxIds)
-            {
-                mailboxIds.push_back(mailboxId.toStdString());
-            }
-        }
-        auto task = m_mailService.bootstrapAccount(javelin::app::AccountBootstrapIntent{
-            .settings = toAccountConnectionSettings(settings),
-            .mailboxIds = std::move(mailboxIds),
-        });
-        QCoro::connect(
-            std::move(task), this,
-            [this, settings](javelin::jmap::LiveRefreshResult result)
-            {
-                m_refreshInFlight = false;
-                m_refreshAction->setEnabled(true);
-                m_preferencesAction->setEnabled(true);
-
-                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
-                {
-                    qWarning().noquote() << "GUI refresh failed" << error->message;
-                    presentError(*error);
-                    return;
-                }
-
-                const auto& summary = std::get<javelin::jmap::LiveRefreshSummary>(result);
-                javelin::gui::settings::PreferencesDialog::saveResolvedSessionUrl(
-                    settings.id, QString::fromStdString(summary.resolvedSessionUrl));
-                const auto ownedAccounts = m_accountRepository.listOwnedBy(summary.accountId);
-                if (const auto* accounts =
-                        std::get_if<std::vector<javelin::jmap::cache::CachedAccount>>(
-                            &ownedAccounts))
-                {
-                    for (const auto& account : *accounts)
-                    {
-                        javelin::gui::settings::PreferencesDialog::associateCachedAccount(
-                            settings.id, QString::fromStdString(account.accountId));
-                    }
-                }
-                qInfo().noquote() << "GUI refresh succeeded"
-                                  << QString::fromStdString(summary.accountId)
-                                  << static_cast<qulonglong>(summary.mailboxCount)
-                                  << static_cast<qulonglong>(summary.emailCount);
-                if (summary.selectedMailboxId.has_value())
-                {
-                    markTabsStaleForAccount(summary.accountId,
-                                            std::string_view{*summary.selectedMailboxId});
-                }
-                else
-                {
-                    markTabsStaleForAccount(summary.accountId);
-                }
-                reloadAccounts();
-                refreshViewsFromCache();
-                m_statusBar->showMessage(
-                    QStringLiteral("Synced %1 mailboxes and %2 messages for %3.")
-                        .arg(summary.mailboxCount)
-                        .arg(summary.emailCount)
-                        .arg(QString::fromStdString(summary.accountId)),
-                    10000);
-                Q_EMIT accountSettingsChanged();
-                auto contactsTask = m_mailService.requestContacts(summary.accountId);
-                QCoro::connect(
-                    std::move(contactsTask), this,
-                    [this](javelin::jmap::contacts::ContactRefreshResult contactsResult)
-                    {
-                        if (const auto* error =
-                                std::get_if<javelin::jmap::OperationError>(&contactsResult))
-                        {
-                            qWarning().noquote() << "Contacts refresh failed" << error->message;
-                            return;
-                        }
-                        reloadAccounts();
-                        const auto& contacts =
-                            std::get<javelin::jmap::contacts::ContactRefreshSummary>(
-                                contactsResult);
-                        qInfo() << "Contacts cache refreshed" << contacts.contactCount;
-                    });
-            });
+        m_accountRefreshController->refreshAccount(std::move(accountId));
     }
 
     void MainWindow::refreshSelectedMessageContent(std::string accountId, std::string emailId)

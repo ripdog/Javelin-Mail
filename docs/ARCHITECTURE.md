@@ -22,6 +22,10 @@ Message-list commands are coordinated by the GUI-owned `MessageCommandController
 Qt selection rows into typed `MessageSelection` values, presents destination and confirmation UI,
 and invokes `MailApplicationService`. It reports cache invalidation and submission intents back to
 the window; `MainWindow` retains only active-tab context and tab/view refresh policy.
+`AccountRefreshController` owns configured-account synchronization fallback, bootstrap single-flight
+state, resolved-session persistence, cached-account association, and the follow-up contact refresh.
+Plain `ConnectionSettings` data and its application-intent conversion are independent of the KDE
+preferences dialog; the window only applies busy/status/error and visible-cache refresh effects.
 
 Mailbox and search tabs are backed by application-layer message-list sessions. These sessions own
 query-window cache reads, request generations, observation lifetimes, pagination, stale recovery,
