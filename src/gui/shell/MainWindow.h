@@ -81,6 +81,7 @@ namespace javelin::gui::shell
     class MessageFileController;
     class MessageListTabController;
     class MessageListTabPresenter;
+    class MessageNavigationController;
     class TabBarPresenter;
     struct PersistedMailboxTab;
     struct PersistedSearchTab;
@@ -234,7 +235,6 @@ namespace javelin::gui::shell
         void refreshSelectedMessageContent(std::string accountId, std::string emailId);
         void openEmailRoute(const javelin::app::OpenEmailRoute& route);
         void resolveOpenEmailRoute();
-        [[nodiscard]] const javelin::app::OpenEmailRoute* activeOpenEmailRoute() const;
         [[nodiscard]] std::vector<std::string> selectedEmailIds() const;
         [[nodiscard]] std::vector<javelin::jmap::cache::MessageListItem>
         selectedMessageSummaries() const;
@@ -283,6 +283,7 @@ namespace javelin::gui::shell
         MessageCommandController* m_messageCommandController = nullptr;
         MessageFileController* m_messageFileController = nullptr;
         MessageListTabController* m_messageListTabController = nullptr;
+        std::unique_ptr<MessageNavigationController> m_messageNavigationController;
         TabBarPresenter* m_tabBarPresenter = nullptr;
         std::unique_ptr<javelin::gui::messages::MessageListPanePresenter>
             m_messageListPanePresenter;
@@ -352,7 +353,6 @@ namespace javelin::gui::shell
         bool m_refreshInFlight = false;
         std::uint64_t m_nextMessageContentRequestToken = 1;
         std::optional<MessageContentRequestState> m_messageContentRequestInFlight;
-        std::optional<std::uint64_t> m_navigationContextRequested;
         bool m_syncingNavigation = false;
         std::optional<int> m_activeTabIndex;
         std::vector<TabState> m_tabs;

@@ -6,7 +6,7 @@
 namespace javelin::gui::messages
 {
     MessageSelectionRestorationPlan
-    planMessageSelectionRestoration(const std::vector<MessageRowIdentity>& rows,
+    planMessageSelectionRestoration(const std::span<const MessageRowIdentity> rows,
                                     const MessageSelectionRestorationRequest& request)
     {
         MessageSelectionRestorationPlan plan;

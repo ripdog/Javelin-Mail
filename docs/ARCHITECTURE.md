@@ -42,6 +42,9 @@ orchestrate message-list session lifetimes, or serialize message-list sessions.
 Message selection restoration is likewise split into deterministic workspace policy and thin Qt
 application: the policy decides surviving multi-selection, current-message fallback, and the
 nearest row after removal, while `MainWindow` only applies that plan to the active view.
+`MessageNavigationController` owns routed-message matching, one-shot mailbox reveal requests,
+refresh waiting, and route completion; pure navigation policy keeps those decisions independent of
+Qt indexes and widgets.
 `MessageActionPolicy` decides command availability from tab context, selection size, Drafts
 membership, and read state; the window only gathers those facts and updates actions.
 `MessageListPresentationPolicy` maps tab state into page headers and empty-state semantics, while

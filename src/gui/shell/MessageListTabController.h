@@ -89,6 +89,8 @@ namespace javelin::gui::shell
         void setSort(std::vector<TabState>& tabs, javelin::jmap::query::EmailListSort sort);
         [[nodiscard]] bool refreshSearchAfterMutation(TabState& tab, std::string_view accountId);
         [[nodiscard]] bool pageStale(const TabState& tab) const;
+        [[nodiscard]] bool pageRefreshInFlight(const TabState& tab) const;
+        [[nodiscard]] bool reveal(TabState& tab, std::string emailId);
         void releaseSession(TabState& tab);
 
       Q_SIGNALS:

@@ -184,6 +184,22 @@ namespace javelin::gui::shell
         return session != nullptr && session->page().stale;
     }
 
+    bool MessageListTabController::pageRefreshInFlight(const TabState& tab) const
+    {
+        const auto* session = messageListSession(tab);
+        return session != nullptr && session->page().refreshInFlight;
+    }
+
+    bool MessageListTabController::reveal(TabState& tab, std::string emailId)
+    {
+        auto* mailbox = std::get_if<MailboxTabState>(&tab.content);
+        if (mailbox == nullptr || mailbox->session == nullptr)
+            return false;
+
+        mailbox->session->reveal(std::move(emailId));
+        return true;
+    }
+
     void MessageListTabController::releaseSession(TabState& tab)
     {
         if (auto* mailbox = std::get_if<MailboxTabState>(&tab.content);

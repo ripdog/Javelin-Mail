@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -30,6 +31,6 @@ namespace javelin::gui::messages
     };
 
     [[nodiscard]] MessageSelectionRestorationPlan
-    planMessageSelectionRestoration(const std::vector<MessageRowIdentity>& rows,
+    planMessageSelectionRestoration(std::span<const MessageRowIdentity> rows,
                                     const MessageSelectionRestorationRequest& request);
 } // namespace javelin::gui::messages
