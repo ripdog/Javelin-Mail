@@ -192,12 +192,16 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
     };
     javelin::jmap::calendar::CalendarService service{connection, transport};
     std::size_t projectionNotifications = 0;
-    const auto result = QCoro::waitFor(
-        service.update({.sessionUrl = "https://example.test/.well-known/jmap",
-                        .loginEmail = "alice@example.test",
-                        .apiKey = "secret"},
-                       "a1", {.accountId = "a1", .event = event(), .ifInState = std::nullopt},
-                       [&projectionNotifications] { ++projectionNotifications; }));
+    const auto result =
+        QCoro::waitFor(service.update({.sessionUrl = "https://example.test/.well-known/jmap",
+                                       .loginEmail = "alice@example.test",
+                                       .apiKey = "secret"},
+                                      "a1",
+                                      {.accountId = "a1",
+                                       .event = event(),
+                                       .operationGroupId = std::nullopt,
+                                       .ifInState = std::nullopt},
+                                      [&projectionNotifications] { ++projectionNotifications; }));
 
     REQUIRE(std::holds_alternative<javelin::jmap::calendar::CommittedMutation>(result));
     CHECK(projectionNotifications == 2);
@@ -217,12 +221,16 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
     CHECK(std::get<std::vector<javelin::jmap::calendar::CalendarMutationRecord>>(records).empty());
 
     transport.request.reset();
-    const auto noOpUpdate = QCoro::waitFor(
-        service.update({.sessionUrl = "https://example.test/.well-known/jmap",
-                        .loginEmail = "alice@example.test",
-                        .apiKey = "secret"},
-                       "a1", {.accountId = "a1", .event = event(), .ifInState = std::nullopt},
-                       [&projectionNotifications] { ++projectionNotifications; }));
+    const auto noOpUpdate =
+        QCoro::waitFor(service.update({.sessionUrl = "https://example.test/.well-known/jmap",
+                                       .loginEmail = "alice@example.test",
+                                       .apiKey = "secret"},
+                                      "a1",
+                                      {.accountId = "a1",
+                                       .event = event(),
+                                       .operationGroupId = std::nullopt,
+                                       .ifInState = std::nullopt},
+                                      [&projectionNotifications] { ++projectionNotifications; }));
     REQUIRE(std::holds_alternative<javelin::jmap::calendar::CommittedMutation>(noOpUpdate));
     CHECK_FALSE(transport.request.has_value());
     CHECK(projectionNotifications == 2);
@@ -440,9 +448,11 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
 
     auto forbiddenEvent = event();
     forbiddenEvent.title = "Forbidden update";
-    const auto forbidden = QCoro::waitFor(service.update(
-        settings, "a1",
-        {.accountId = "a1", .event = std::move(forbiddenEvent), .ifInState = std::nullopt}));
+    const auto forbidden = QCoro::waitFor(service.update(settings, "a1",
+                                                         {.accountId = "a1",
+                                                          .event = std::move(forbiddenEvent),
+                                                          .operationGroupId = std::nullopt,
+                                                          .ifInState = std::nullopt}));
 
     REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(forbidden));
     CHECK(std::get<javelin::jmap::OperationError>(forbidden).code ==
@@ -459,8 +469,11 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
     scheduledEvent.id.clear();
     scheduledEvent.uid.clear();
 
-    const auto scheduling = QCoro::waitFor(service.create(
-        settings, "a1", {.accountId = "a1", .event = scheduledEvent, .ifInState = std::nullopt}));
+    const auto scheduling = QCoro::waitFor(service.create(settings, "a1",
+                                                          {.accountId = "a1",
+                                                           .event = scheduledEvent,
+                                                           .operationGroupId = std::nullopt,
+                                                           .ifInState = std::nullopt}));
 
     REQUIRE_FALSE(transport.requests.empty());
     REQUIRE(transport.requests.back().envelope.methodCalls.size() == 1);
@@ -499,8 +512,11 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
     uncertainEvent.title = "Uncertain";
     uncertainEvent.recurrenceRule = javelin::jmap::calendar::RecurrenceRule{};
     uncertainEvent.recurrenceRule->count = 3;
-    const auto uncertain = QCoro::waitFor(service.update(
-        settings, "a1", {.accountId = "a1", .event = uncertainEvent, .ifInState = std::nullopt}));
+    const auto uncertain = QCoro::waitFor(service.update(settings, "a1",
+                                                         {.accountId = "a1",
+                                                          .event = uncertainEvent,
+                                                          .operationGroupId = std::nullopt,
+                                                          .ifInState = std::nullopt}));
     REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(uncertain));
     const auto uncertainCached = calendars.findEvent("a1", "event-1");
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::calendar::CalendarEvent>>(
@@ -803,10 +819,10 @@ TEST_CASE("calendar refresh recovers a recurring base omitted by the bounded bas
     CHECK(window->occurrences.front().localStart.value == "2026-07-01T02:20:00");
     REQUIRE(transport.requests.size() == 5);
     REQUIRE(transport.requests[1].envelope.methodCalls.size() == 1);
-    CHECK(transport.requests[1].envelope.methodCalls.front().arguments.find(
-              R"("properties":[)") != std::string::npos);
-    CHECK(transport.requests[1].envelope.methodCalls.front().arguments.find(
-              R"("baseEventId")") != std::string::npos);
+    CHECK(transport.requests[1].envelope.methodCalls.front().arguments.find(R"("properties":[)") !=
+          std::string::npos);
+    CHECK(transport.requests[1].envelope.methodCalls.front().arguments.find(R"("baseEventId")") !=
+          std::string::npos);
     CHECK(transport.requests[3].envelope.methodCalls.front().arguments.find(
               R"("uid":"water-series-uid")") != std::string::npos);
     CHECK(transport.requests[3].envelope.methodCalls.front().arguments.find(R"("after")") ==

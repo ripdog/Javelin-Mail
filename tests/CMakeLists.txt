@@ -16,6 +16,9 @@ add_executable(javelin_jmap_tests
     ${PROJECT_SOURCE_DIR}/src/app/undo/DraftHistoryExecutor.cpp
     ${PROJECT_SOURCE_DIR}/src/app/undo/DraftHistoryExecutor.h
     ${PROJECT_SOURCE_DIR}/src/app/undo/DraftHistoryPort.h
+    ${PROJECT_SOURCE_DIR}/src/app/undo/CalendarHistoryExecutor.cpp
+    ${PROJECT_SOURCE_DIR}/src/app/undo/CalendarHistoryExecutor.h
+    ${PROJECT_SOURCE_DIR}/src/app/undo/CalendarHistoryPort.h
     ${PROJECT_SOURCE_DIR}/src/app/undo/MailHistoryExecutor.cpp
     ${PROJECT_SOURCE_DIR}/src/app/undo/MailHistoryExecutor.h
     ${PROJECT_SOURCE_DIR}/src/app/undo/MailHistoryPort.h
@@ -63,6 +66,7 @@ add_executable(javelin_jmap_tests
     app/ContactCommandPreparationTest.cpp
     app/HistoryRepositoryTest.cpp
     app/DraftHistoryExecutorTest.cpp
+    app/CalendarHistoryExecutorTest.cpp
     app/DeferredSendRepositoryTest.cpp
     app/MailHistoryExecutorTest.cpp
     app/SieveHistoryExecutorTest.cpp

@@ -267,6 +267,7 @@ namespace javelin::gui::shell
                 auto task = m_mailService.createCalendarEvent(selectedAccount->ownerAccountId,
                                                               {.accountId = event.accountId,
                                                                .event = std::move(event),
+                                                               .operationGroupId = std::nullopt,
                                                                .ifInState = std::nullopt});
                 QCoro::connect(
                     std::move(task), dialog,
@@ -430,10 +431,12 @@ namespace javelin::gui::shell
                                    }
                                    return ids;
                                }(),
+                               .operationGroupId = std::nullopt,
                                .ifInState = std::nullopt})
                         : m_mailService.updateCalendarEvent(account->ownerAccountId,
                                                             {.accountId = account->accountId,
                                                              .event = editedEvent,
+                                                             .operationGroupId = std::nullopt,
                                                              .ifInState = std::nullopt});
                 QCoro::connect(
                     std::move(task), dialog,

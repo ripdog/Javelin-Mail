@@ -91,6 +91,9 @@ set(JAVELIN_FORMAT_FILES
     src/app/undo/DraftHistoryExecutor.cpp
     src/app/undo/DraftHistoryExecutor.h
     src/app/undo/DraftHistoryPort.h
+    src/app/undo/CalendarHistoryExecutor.cpp
+    src/app/undo/CalendarHistoryExecutor.h
+    src/app/undo/CalendarHistoryPort.h
     src/app/undo/MailHistoryExecutor.cpp
     src/app/undo/MailHistoryExecutor.h
     src/app/undo/MailHistoryPort.h
@@ -905,6 +908,9 @@ add_library(javelin_application STATIC
     src/app/undo/DraftHistoryExecutor.cpp
     src/app/undo/DraftHistoryExecutor.h
     src/app/undo/DraftHistoryPort.h
+    src/app/undo/CalendarHistoryExecutor.cpp
+    src/app/undo/CalendarHistoryExecutor.h
+    src/app/undo/CalendarHistoryPort.h
     src/app/undo/MailHistoryExecutor.cpp
     src/app/undo/MailHistoryExecutor.h
     src/app/undo/MailHistoryPort.h

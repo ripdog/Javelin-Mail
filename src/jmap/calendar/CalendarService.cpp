@@ -129,26 +129,11 @@ namespace javelin::jmap::calendar
         const std::vector<std::string>& calendarEventReadProperties()
         {
             static const std::vector<std::string> properties{
-                "id",
-                "baseEventId",
-                "recurrenceId",
-                "uid",
-                "calendarIds",
-                "title",
-                "description",
-                "locations",
-                "start",
-                "duration",
-                "timeZone",
-                "showWithoutTime",
-                "isDraft",
-                "isOrigin",
-                "useDefaultAlerts",
-                "alerts",
-                "utcStart",
-                "utcEnd",
-                "recurrenceRule",
-                "recurrenceOverrides",
+                "id",           "baseEventId", "recurrenceId",     "uid",
+                "calendarIds",  "title",       "description",      "locations",
+                "start",        "duration",    "timeZone",         "showWithoutTime",
+                "isDraft",      "isOrigin",    "useDefaultAlerts", "alerts",
+                "utcStart",     "utcEnd",      "recurrenceRule",   "recurrenceOverrides",
                 "participants",
             };
             return properties;
@@ -288,7 +273,8 @@ namespace javelin::jmap::calendar
 
         [[nodiscard]] std::variant<PreparedCalendarMutations, OperationError>
         prepareCalendarMutations(cache::CalendarRepository& repository,
-                                 const api::CalendarEventSetRequest& request)
+                                 const api::CalendarEventSetRequest& request,
+                                 const std::optional<std::string>& operationGroupId)
         {
             PreparedCalendarMutations prepared;
             prepared.records.reserve(request.create.size() + request.update.size() +
@@ -307,7 +293,7 @@ namespace javelin::jmap::calendar
                                  QStringLiteral("Unable to serialize the calendar change."));
                 prepared.records.push_back({
                     .mutationId = mutationId,
-                    .operationGroupId = std::nullopt,
+                    .operationGroupId = operationGroupId,
                     .accountId = request.accountId,
                     .objectId = projected.id,
                     .creationId = creationId,
@@ -338,7 +324,7 @@ namespace javelin::jmap::calendar
                                  QStringLiteral("Unable to serialize the calendar change."));
                 prepared.records.push_back({
                     .mutationId = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString(),
-                    .operationGroupId = std::nullopt,
+                    .operationGroupId = operationGroupId,
                     .accountId = request.accountId,
                     .objectId = eventId,
                     .creationId = std::nullopt,
@@ -363,7 +349,7 @@ namespace javelin::jmap::calendar
                 const auto& base = std::get<std::optional<CalendarEvent>>(cached);
                 prepared.records.push_back({
                     .mutationId = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString(),
-                    .operationGroupId = std::nullopt,
+                    .operationGroupId = operationGroupId,
                     .accountId = request.accountId,
                     .objectId = eventId,
                     .creationId = std::nullopt,
@@ -659,6 +645,84 @@ namespace javelin::jmap::calendar
         if (const auto cacheError = repository.setCalendarVisible(accountId, calendarId, visible))
             return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
         return std::monostate{};
+    }
+
+    QCoro::Task<AuthoritativeCalendarEventResult>
+    CalendarService::getAuthoritativeEvent(LiveConnectionSettings settings,
+                                           std::string ownerAccountId, std::string accountId,
+                                           std::optional<std::string> eventId, std::string uid)
+    {
+        const auto sessionResult = loadSession(m_connection, ownerAccountId);
+        if (const auto* serviceError = std::get_if<OperationError>(&sessionResult))
+            co_return *serviceError;
+        const auto& session = std::get<api::Session>(sessionResult);
+        const auto account = session.accounts.find(accountId);
+        if (account == session.accounts.end() || !account->second.accountCapabilities.calendars)
+            co_return error(
+                OperationErrorCode::UnsupportedCapability,
+                QStringLiteral("This account does not support JMAP Calendars draft-26."));
+        api::MethodCaller caller{m_methodTransport};
+        std::vector<std::string> eventIds;
+        if (eventId.has_value())
+            eventIds.push_back(*eventId);
+        else
+        {
+            const auto query = api::calendarEventQuery({
+                .accountId = accountId,
+                .filter =
+                    {
+                        .inCalendar = std::nullopt,
+                        .after = std::nullopt,
+                        .before = std::nullopt,
+                        .text = std::nullopt,
+                        .uid = std::move(uid),
+                    },
+                .expandRecurrences = false,
+                .timeZone = {.value = "Etc/UTC"},
+                .position = 0,
+                .limit = 2,
+                .calculateTotal = true,
+            });
+            if (!query)
+                co_return error(OperationErrorCode::InvalidRequest,
+                                QStringLiteral("Unable to serialize the calendar history query."));
+            api::RequestBuilder builder;
+            builder.useCore().useCapability(std::string{api::calendarsCapabilityUri});
+            const auto handle = builder.call(*query, "calendar-history-query");
+            const auto result =
+                co_await caller.call(context(settings, session, accountId), builder);
+            const auto* envelope = std::get_if<api::ResponseEnvelope>(&result);
+            if (!envelope)
+                co_return callError(result);
+            const auto read = api::ResponseReader{*envelope}.require(handle);
+            if (const auto* readError = std::get_if<api::ResponseReaderError>(&read))
+                co_return responseError(*readError);
+            eventIds = std::get<api::CalendarEventQueryResponse>(read).ids;
+            if (eventIds.size() > 1)
+                co_return error(
+                    OperationErrorCode::Conflict,
+                    QStringLiteral("Multiple calendar events have the history event UID."));
+        }
+
+        const auto batchLimit =
+            session.capabilities.coreDetails && session.capabilities.coreDetails->maxObjectsInGet
+                ? static_cast<std::size_t>(*session.capabilities.coreDetails->maxObjectsInGet)
+                : std::numeric_limits<std::size_t>::max();
+        auto result = co_await getCalendarEventsBatched(
+            caller, settings, session, accountId, eventIds, TimeZoneId{.value = "Etc/UTC"},
+            batchLimit, "calendar-history-get", [] { return true; });
+        if (const auto* serviceError = std::get_if<OperationError>(&result))
+            co_return *serviceError;
+        if (std::holds_alternative<SupersededRefresh>(result))
+            co_return error(OperationErrorCode::Conflict,
+                            QStringLiteral("The calendar event read was superseded."));
+        auto response = std::get<api::CalendarEventGetResponse>(std::move(result));
+        co_return AuthoritativeCalendarEvent{
+            .state = std::move(response.state),
+            .event = response.list.empty()
+                         ? std::nullopt
+                         : std::optional<CalendarEvent>{std::move(response.list.front())},
+        };
     }
 
     QCoro::Task<CalendarMutationResult>
@@ -1576,8 +1640,7 @@ namespace javelin::jmap::calendar
             command.ifInState = std::get<std::string>(state);
         }
         if (command.event.uid.empty())
-            command.event.uid =
-                QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
+            command.event.uid = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
         const auto id = command.event.id.empty() ? std::string{"event"} : command.event.id;
         std::vector<std::string> calendarIds;
         for (const auto& [calendarId, present] : command.event.calendarIds)
@@ -1591,6 +1654,7 @@ namespace javelin::jmap::calendar
                                              .sendSchedulingMessages = true};
         co_return co_await mutate(std::move(settings), std::move(ownerAccountId),
                                   std::move(request), std::move(calendarIds),
+                                  std::move(command.operationGroupId),
                                   std::move(projectionCommitted));
     }
 
@@ -1631,6 +1695,7 @@ namespace javelin::jmap::calendar
             .sendSchedulingMessages = true};
         co_return co_await mutate(std::move(settings), std::move(ownerAccountId),
                                   std::move(request), std::move(calendarIds),
+                                  std::move(command.operationGroupId),
                                   std::move(projectionCommitted));
     }
 
@@ -1653,14 +1718,14 @@ namespace javelin::jmap::calendar
                                              .sendSchedulingMessages = true};
         co_return co_await mutate(std::move(settings), std::move(ownerAccountId),
                                   std::move(request), std::move(command.calendarIds),
+                                  std::move(command.operationGroupId),
                                   std::move(projectionCommitted));
     }
 
-    QCoro::Task<CalendarMutationResult>
-    CalendarService::mutate(LiveConnectionSettings settings, std::string ownerAccountId,
-                            api::CalendarEventSetRequest request,
-                            std::vector<std::string> calendarIds,
-                            std::function<void()> projectionCommitted)
+    QCoro::Task<CalendarMutationResult> CalendarService::mutate(
+        LiveConnectionSettings settings, std::string ownerAccountId,
+        api::CalendarEventSetRequest request, std::vector<std::string> calendarIds,
+        std::optional<std::string> operationGroupId, std::function<void()> projectionCommitted)
     {
         const auto sessionResult = loadSession(m_connection, ownerAccountId);
         if (const auto* serviceError = std::get_if<OperationError>(&sessionResult))
@@ -1682,7 +1747,7 @@ namespace javelin::jmap::calendar
         if (!method)
             co_return error(OperationErrorCode::InvalidRequest,
                             QStringLiteral("Unable to serialize the calendar change."));
-        const auto preparedResult = prepareCalendarMutations(repository, request);
+        const auto preparedResult = prepareCalendarMutations(repository, request, operationGroupId);
         if (const auto* operationError = std::get_if<OperationError>(&preparedResult))
             co_return *operationError;
         auto prepared = std::get<PreparedCalendarMutations>(preparedResult);

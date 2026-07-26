@@ -5,6 +5,7 @@
 #include "app/ContactApplicationPorts.h"
 #include "app/LongPollService.h"
 #include "app/MailboxSelectionMutation.h"
+#include "app/undo/CalendarHistoryPort.h"
 #include "app/undo/HistoryTypes.h"
 #include "app/undo/MailHistoryPort.h"
 #include "app/undo/SieveHistoryPort.h"
@@ -148,7 +149,8 @@ namespace javelin::app
                                          public AccountConnectionProvider,
                                          public ContactRefreshPort,
                                          public javelin::app::undo::MailHistoryPort,
-                                         public javelin::app::undo::SieveHistoryPort
+                                         public javelin::app::undo::SieveHistoryPort,
+                                         public javelin::app::undo::CalendarHistoryPort
     {
         Q_OBJECT
 
@@ -218,13 +220,22 @@ namespace javelin::app
                              javelin::jmap::calendar::TimeZoneId displayTimeZone);
         [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
         createCalendarEvent(std::string ownerAccountId,
-                            javelin::jmap::calendar::CreateEventCommand command);
+                            javelin::jmap::calendar::CreateEventCommand command,
+                            javelin::app::undo::CommandOrigin origin =
+                                javelin::app::undo::CommandOrigin::User) override;
         [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
         updateCalendarEvent(std::string ownerAccountId,
-                            javelin::jmap::calendar::UpdateEventCommand command);
+                            javelin::jmap::calendar::UpdateEventCommand command,
+                            javelin::app::undo::CommandOrigin origin =
+                                javelin::app::undo::CommandOrigin::User) override;
         [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
         deleteCalendarEvent(std::string ownerAccountId,
-                            javelin::jmap::calendar::DeleteEventCommand command);
+                            javelin::jmap::calendar::DeleteEventCommand command,
+                            javelin::app::undo::CommandOrigin origin =
+                                javelin::app::undo::CommandOrigin::User) override;
+        [[nodiscard]] QCoro::Task<javelin::jmap::calendar::AuthoritativeCalendarEventResult>
+        getAuthoritativeCalendarEvent(std::string ownerAccountId, std::string accountId,
+                                      std::optional<std::string> eventId, std::string uid) override;
         [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
         setDefaultCalendar(std::string ownerAccountId, std::string accountId,
                            std::string calendarId);

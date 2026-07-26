@@ -43,10 +43,17 @@ namespace javelin::jmap::calendar
         std::optional<std::string> createdId;
     };
 
+    struct AuthoritativeCalendarEvent
+    {
+        std::string state;
+        std::optional<CalendarEvent> event;
+    };
+
     struct CreateEventCommand
     {
         std::string accountId;
         CalendarEvent event;
+        std::optional<std::string> operationGroupId;
         std::optional<std::string> ifInState;
     };
 
@@ -54,6 +61,7 @@ namespace javelin::jmap::calendar
     {
         std::string accountId;
         CalendarEvent event;
+        std::optional<std::string> operationGroupId;
         std::optional<std::string> ifInState;
     };
 
@@ -62,6 +70,7 @@ namespace javelin::jmap::calendar
         std::string accountId;
         std::string eventId;
         std::vector<std::string> calendarIds;
+        std::optional<std::string> operationGroupId;
         std::optional<std::string> ifInState;
     };
 
@@ -72,6 +81,8 @@ namespace javelin::jmap::calendar
         std::variant<std::vector<cache::CalendarAccount>, OperationError>;
     using CalendarListResult = std::variant<std::vector<Calendar>, OperationError>;
     using CalendarPreferenceResult = std::variant<std::monostate, OperationError>;
+    using AuthoritativeCalendarEventResult =
+        std::variant<AuthoritativeCalendarEvent, OperationError>;
 
     class CalendarService
     {
@@ -86,6 +97,10 @@ namespace javelin::jmap::calendar
         [[nodiscard]] CalendarListResult calendars(std::string_view accountId) const;
         [[nodiscard]] CalendarPreferenceResult
         setCalendarVisible(std::string_view accountId, std::string_view calendarId, bool visible);
+        [[nodiscard]] QCoro::Task<AuthoritativeCalendarEventResult>
+        getAuthoritativeEvent(LiveConnectionSettings settings, std::string ownerAccountId,
+                              std::string accountId, std::optional<std::string> eventId,
+                              std::string uid);
         [[nodiscard]] QCoro::Task<CalendarMutationResult>
         setDefaultCalendar(LiveConnectionSettings settings, std::string ownerAccountId,
                            std::string accountId, std::string calendarId);
@@ -113,6 +128,7 @@ namespace javelin::jmap::calendar
         [[nodiscard]] QCoro::Task<CalendarMutationResult>
         mutate(LiveConnectionSettings settings, std::string ownerAccountId,
                api::CalendarEventSetRequest request, std::vector<std::string> calendarIds,
+               std::optional<std::string> operationGroupId,
                std::function<void()> projectionCommitted);
 
         cache::DatabaseConnection& m_connection;

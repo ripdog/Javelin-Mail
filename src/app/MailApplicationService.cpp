@@ -6,6 +6,8 @@
 #include "app/undo/UndoManager.h"
 
 #include "jmap/OperationError.h"
+#include "jmap/api/CalendarMethods.h"
+#include "jmap/cache/CalendarRepository.h"
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/MailboxWindowRepository.h"
 #include "jmap/cache/SessionRepository.h"
@@ -1553,9 +1555,28 @@ namespace javelin::app
                                 QStringLiteral("Synchronize calendar changes"), std::move(result));
     }
 
+    QCoro::Task<javelin::jmap::calendar::AuthoritativeCalendarEventResult>
+    MailApplicationService::getAuthoritativeCalendarEvent(std::string ownerAccountId,
+                                                          std::string accountId,
+                                                          std::optional<std::string> eventId,
+                                                          std::string uid)
+    {
+        const ForegroundWorkScope foreground{m_workScheduler};
+        const auto configuration = m_configurations.find(ownerAccountId);
+        if (configuration == m_configurations.end())
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
+                .message = QStringLiteral("Account synchronization is not configured."),
+            };
+        co_return co_await m_calendarService.getAuthoritativeEvent(
+            toLiveConnectionSettings(configuration->second.settings), std::move(ownerAccountId),
+            std::move(accountId), std::move(eventId), std::move(uid));
+    }
+
     QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
     MailApplicationService::createCalendarEvent(std::string ownerAccountId,
-                                                javelin::jmap::calendar::CreateEventCommand command)
+                                                javelin::jmap::calendar::CreateEventCommand command,
+                                                const javelin::app::undo::CommandOrigin origin)
     {
         const ForegroundWorkScope foreground{m_workScheduler};
         const auto configuration = m_configurations.find(ownerAccountId);
@@ -1563,6 +1584,38 @@ namespace javelin::app
             co_return javelin::jmap::OperationError{
                 .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = QStringLiteral("Account synchronization is not configured.")};
+        if (command.event.uid.empty())
+            command.event.uid = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
+        const auto afterDocument =
+            javelin::jmap::api::serializeCalendarEventDocument(command.event);
+        if (!afterDocument.has_value())
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::InvalidRequest,
+                .message = QStringLiteral("Unable to serialize the calendar event history."),
+            };
+        if (!command.operationGroupId.has_value())
+            command.operationGroupId =
+                QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
+        const auto calendar = std::ranges::find_if(command.event.calendarIds,
+                                                   [](const auto& value) { return value.second; });
+        auto preparedResult = m_undoManager.prepareNormal(
+            QStringLiteral("Create “%1”").arg(QString::fromStdString(command.event.title)),
+            javelin::app::undo::HistoryDomain::Calendar,
+            javelin::app::undo::CalendarEventHistory{
+                .connectionId = ownerAccountId,
+                .accountId = command.accountId,
+                .calendarId =
+                    calendar == command.event.calendarIds.end() ? std::string{} : calendar->first,
+                .currentEventId = std::nullopt,
+                .uid = command.event.uid,
+                .beforeDocumentJson = std::nullopt,
+                .afterDocumentJson = afterDocument,
+            },
+            QString::fromStdString(*command.operationGroupId), std::nullopt, origin);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&preparedResult))
+            co_return javelin::jmap::operationError(*error);
+        auto prepared =
+            std::get<std::optional<javelin::app::undo::HistoryEntry>>(std::move(preparedResult));
         const auto projectionCommitted = [this, ownerAccountId]
         {
             const auto range = m_visibleCalendarRanges.find(ownerAccountId);
@@ -1574,11 +1627,34 @@ namespace javelin::app
                                            .accountCount = 1,
                                            .eventCount = 0});
         };
+        auto result = co_await m_calendarService.create(
+            toLiveConnectionSettings(configuration->second.settings), ownerAccountId,
+            std::move(command), projectionCommitted);
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+        {
+            if (const auto historyError = retainUnknownOrDiscard(m_undoManager, prepared, *error))
+                co_return *historyError;
+        }
+        else if (prepared.has_value())
+        {
+            auto& history = std::get<javelin::app::undo::CalendarEventHistory>(prepared->payload);
+            history.currentEventId =
+                std::get<javelin::jmap::calendar::CommittedMutation>(result).createdId;
+            if (!history.currentEventId.has_value())
+            {
+                static_cast<void>(m_undoManager.discardNormal(prepared->entryId));
+                co_return javelin::jmap::OperationError{
+                    .code = javelin::jmap::OperationErrorCode::ProtocolViolation,
+                    .message = QStringLiteral("The created calendar event has no server ID."),
+                };
+            }
+            auto committed = m_undoManager.commitNormal(std::move(*prepared));
+            if (const auto* historyError =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&committed))
+                co_return javelin::jmap::operationError(*historyError);
+        }
         co_return observeResult(m_errorCoordinator, configuration->second.settings, ownerAccountId,
-                                QStringLiteral("Create calendar event"),
-                                co_await m_calendarService.create(
-                                    toLiveConnectionSettings(configuration->second.settings),
-                                    ownerAccountId, std::move(command), projectionCommitted));
+                                QStringLiteral("Create calendar event"), std::move(result));
     }
 
     QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
@@ -1611,7 +1687,8 @@ namespace javelin::app
 
     QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
     MailApplicationService::updateCalendarEvent(std::string ownerAccountId,
-                                                javelin::jmap::calendar::UpdateEventCommand command)
+                                                javelin::jmap::calendar::UpdateEventCommand command,
+                                                const javelin::app::undo::CommandOrigin origin)
     {
         const ForegroundWorkScope foreground{m_workScheduler};
         const auto configuration = m_configurations.find(ownerAccountId);
@@ -1619,6 +1696,54 @@ namespace javelin::app
             co_return javelin::jmap::OperationError{
                 .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = QStringLiteral("Account synchronization is not configured.")};
+        javelin::jmap::cache::CalendarRepository repository{m_databaseConnection};
+        const auto cached = repository.findEvent(command.accountId, command.event.id);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&cached))
+            co_return javelin::jmap::operationError(*error);
+        const auto& before =
+            std::get<std::optional<javelin::jmap::calendar::CalendarEvent>>(cached);
+        if (!before.has_value())
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::NotFound,
+                .message = QStringLiteral("The calendar event is no longer in the cache."),
+            };
+        if (*before == command.event)
+            co_return javelin::jmap::calendar::CommittedMutation{
+                .accountId = command.accountId,
+                .newState = command.ifInState.value_or(std::string{}),
+                .createdId = std::nullopt,
+            };
+        const auto beforeDocument = javelin::jmap::api::serializeCalendarEventDocument(*before);
+        const auto afterDocument =
+            javelin::jmap::api::serializeCalendarEventDocument(command.event);
+        if (!beforeDocument.has_value() || !afterDocument.has_value())
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::InvalidRequest,
+                .message = QStringLiteral("Unable to serialize the calendar event history."),
+            };
+        if (!command.operationGroupId.has_value())
+            command.operationGroupId =
+                QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
+        const auto calendar = std::ranges::find_if(command.event.calendarIds,
+                                                   [](const auto& value) { return value.second; });
+        auto preparedResult = m_undoManager.prepareNormal(
+            QStringLiteral("Edit “%1”").arg(QString::fromStdString(command.event.title)),
+            javelin::app::undo::HistoryDomain::Calendar,
+            javelin::app::undo::CalendarEventHistory{
+                .connectionId = ownerAccountId,
+                .accountId = command.accountId,
+                .calendarId =
+                    calendar == command.event.calendarIds.end() ? std::string{} : calendar->first,
+                .currentEventId = command.event.id,
+                .uid = command.event.uid,
+                .beforeDocumentJson = beforeDocument,
+                .afterDocumentJson = afterDocument,
+            },
+            QString::fromStdString(*command.operationGroupId), std::nullopt, origin);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&preparedResult))
+            co_return javelin::jmap::operationError(*error);
+        auto prepared =
+            std::get<std::optional<javelin::app::undo::HistoryEntry>>(std::move(preparedResult));
         const auto projectionCommitted = [this, ownerAccountId]
         {
             const auto range = m_visibleCalendarRanges.find(ownerAccountId);
@@ -1630,16 +1755,29 @@ namespace javelin::app
                                            .accountCount = 1,
                                            .eventCount = 0});
         };
+        auto result = co_await m_calendarService.update(
+            toLiveConnectionSettings(configuration->second.settings), ownerAccountId,
+            std::move(command), projectionCommitted);
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+        {
+            if (const auto historyError = retainUnknownOrDiscard(m_undoManager, prepared, *error))
+                co_return *historyError;
+        }
+        else if (prepared.has_value())
+        {
+            auto committed = m_undoManager.commitNormal(std::move(*prepared));
+            if (const auto* historyError =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&committed))
+                co_return javelin::jmap::operationError(*historyError);
+        }
         co_return observeResult(m_errorCoordinator, configuration->second.settings, ownerAccountId,
-                                QStringLiteral("Update calendar event"),
-                                co_await m_calendarService.update(
-                                    toLiveConnectionSettings(configuration->second.settings),
-                                    ownerAccountId, std::move(command), projectionCommitted));
+                                QStringLiteral("Update calendar event"), std::move(result));
     }
 
     QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
     MailApplicationService::deleteCalendarEvent(std::string ownerAccountId,
-                                                javelin::jmap::calendar::DeleteEventCommand command)
+                                                javelin::jmap::calendar::DeleteEventCommand command,
+                                                const javelin::app::undo::CommandOrigin origin)
     {
         const ForegroundWorkScope foreground{m_workScheduler};
         const auto configuration = m_configurations.find(ownerAccountId);
@@ -1647,6 +1785,46 @@ namespace javelin::app
             co_return javelin::jmap::OperationError{
                 .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = QStringLiteral("Account synchronization is not configured.")};
+        javelin::jmap::cache::CalendarRepository repository{m_databaseConnection};
+        const auto cached = repository.findEvent(command.accountId, command.eventId);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&cached))
+            co_return javelin::jmap::operationError(*error);
+        const auto& before =
+            std::get<std::optional<javelin::jmap::calendar::CalendarEvent>>(cached);
+        if (!before.has_value())
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::NotFound,
+                .message = QStringLiteral("The calendar event is no longer in the cache."),
+            };
+        const auto beforeDocument = javelin::jmap::api::serializeCalendarEventDocument(*before);
+        if (!beforeDocument.has_value())
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::InvalidRequest,
+                .message = QStringLiteral("Unable to serialize the calendar event history."),
+            };
+        if (!command.operationGroupId.has_value())
+            command.operationGroupId =
+                QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
+        const auto calendar = std::ranges::find_if(before->calendarIds,
+                                                   [](const auto& value) { return value.second; });
+        auto preparedResult = m_undoManager.prepareNormal(
+            QStringLiteral("Delete “%1”").arg(QString::fromStdString(before->title)),
+            javelin::app::undo::HistoryDomain::Calendar,
+            javelin::app::undo::CalendarEventHistory{
+                .connectionId = ownerAccountId,
+                .accountId = command.accountId,
+                .calendarId =
+                    calendar == before->calendarIds.end() ? std::string{} : calendar->first,
+                .currentEventId = command.eventId,
+                .uid = before->uid,
+                .beforeDocumentJson = beforeDocument,
+                .afterDocumentJson = std::nullopt,
+            },
+            QString::fromStdString(*command.operationGroupId), std::nullopt, origin);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&preparedResult))
+            co_return javelin::jmap::operationError(*error);
+        auto prepared =
+            std::get<std::optional<javelin::app::undo::HistoryEntry>>(std::move(preparedResult));
         const auto projectionCommitted = [this, ownerAccountId]
         {
             const auto range = m_visibleCalendarRanges.find(ownerAccountId);
@@ -1658,11 +1836,23 @@ namespace javelin::app
                                            .accountCount = 1,
                                            .eventCount = 0});
         };
+        auto result = co_await m_calendarService.remove(
+            toLiveConnectionSettings(configuration->second.settings), ownerAccountId,
+            std::move(command), projectionCommitted);
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+        {
+            if (const auto historyError = retainUnknownOrDiscard(m_undoManager, prepared, *error))
+                co_return *historyError;
+        }
+        else if (prepared.has_value())
+        {
+            auto committed = m_undoManager.commitNormal(std::move(*prepared));
+            if (const auto* historyError =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&committed))
+                co_return javelin::jmap::operationError(*historyError);
+        }
         co_return observeResult(m_errorCoordinator, configuration->second.settings, ownerAccountId,
-                                QStringLiteral("Delete calendar event"),
-                                co_await m_calendarService.remove(
-                                    toLiveConnectionSettings(configuration->second.settings),
-                                    ownerAccountId, std::move(command), projectionCommitted));
+                                QStringLiteral("Delete calendar event"), std::move(result));
     }
 
     QCoro::Task<javelin::jmap::sieve::SieveListResult>
