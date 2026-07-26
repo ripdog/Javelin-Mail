@@ -16,6 +16,7 @@
 #include "app/TranslationService.h"
 #include "app/WorkScheduler.h"
 #include "app/undo/CalendarHistoryExecutor.h"
+#include "app/undo/CalendarPreferenceExecutor.h"
 #include "app/undo/DraftHistoryExecutor.h"
 #include "app/undo/HistoryRepository.h"
 #include "app/undo/MailHistoryExecutor.h"
@@ -169,6 +170,10 @@ namespace javelin::app
             std::make_unique<javelin::app::undo::CalendarHistoryExecutor>(*m_mailService);
         m_undoManager->setExecutor(QStringLiteral("calendar_event"),
                                    m_calendarHistoryExecutor.get());
+        m_calendarPreferenceExecutor =
+            std::make_unique<javelin::app::undo::CalendarPreferenceExecutor>(*m_mailService);
+        m_undoManager->setExecutor(QStringLiteral("calendar_preference"),
+                                   m_calendarPreferenceExecutor.get());
         m_contactCommandService = std::make_unique<ContactCommandService>(
             *m_mailService, *m_contactService, *m_errorCoordinator, *m_workScheduler);
         QObject::connect(

@@ -135,6 +135,7 @@ namespace javelin::app::undo
 
     struct CalendarPreferenceHistory
     {
+        std::string connectionId;
         std::string accountId;
         std::string preferenceKind;
         std::string objectId;

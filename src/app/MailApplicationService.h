@@ -6,6 +6,7 @@
 #include "app/LongPollService.h"
 #include "app/MailboxSelectionMutation.h"
 #include "app/undo/CalendarHistoryPort.h"
+#include "app/undo/CalendarPreferencePort.h"
 #include "app/undo/HistoryTypes.h"
 #include "app/undo/MailHistoryPort.h"
 #include "app/undo/SieveHistoryPort.h"
@@ -150,7 +151,8 @@ namespace javelin::app
                                          public ContactRefreshPort,
                                          public javelin::app::undo::MailHistoryPort,
                                          public javelin::app::undo::SieveHistoryPort,
-                                         public javelin::app::undo::CalendarHistoryPort
+                                         public javelin::app::undo::CalendarHistoryPort,
+                                         public javelin::app::undo::CalendarPreferencePort
     {
         Q_OBJECT
 
@@ -237,8 +239,19 @@ namespace javelin::app
         getAuthoritativeCalendarEvent(std::string ownerAccountId, std::string accountId,
                                       std::optional<std::string> eventId, std::string uid) override;
         [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
-        setDefaultCalendar(std::string ownerAccountId, std::string accountId,
-                           std::string calendarId);
+        setDefaultCalendar(
+            std::string ownerAccountId, std::string accountId, std::string calendarId,
+            javelin::app::undo::CommandOrigin origin = javelin::app::undo::CommandOrigin::User);
+        [[nodiscard]] javelin::jmap::calendar::CalendarPreferenceResult setCalendarVisible(
+            std::string accountId, std::string calendarId, bool visible,
+            javelin::app::undo::CommandOrigin origin = javelin::app::undo::CommandOrigin::User);
+        [[nodiscard]] std::variant<std::optional<std::string>, javelin::jmap::OperationError>
+        currentCalendarPreference(
+            const javelin::app::undo::CalendarPreferenceHistory& history) const override;
+        [[nodiscard]] QCoro::Task<std::optional<javelin::jmap::OperationError>>
+        applyCalendarPreference(javelin::app::undo::CalendarPreferenceHistory history,
+                                std::optional<std::string> value,
+                                javelin::app::undo::CommandOrigin origin) override;
         [[nodiscard]] QCoro::Task<javelin::jmap::sieve::SieveListResult>
         requestSieveScripts(std::string ownerAccountId) override;
         [[nodiscard]] QCoro::Task<javelin::jmap::sieve::SieveContentResult>

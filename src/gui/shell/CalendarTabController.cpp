@@ -112,7 +112,7 @@ namespace javelin::gui::shell
                     const auto separator = displayId.indexOf(QLatin1Char('\n'));
                     if (separator <= 0 || separator == displayId.size() - 1)
                         return;
-                    const auto result = m_calendarService.setCalendarVisible(
+                    const auto result = m_mailService.setCalendarVisible(
                         displayId.first(separator).toStdString(),
                         displayId.sliced(separator + 1).toStdString(), visible);
                     if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))

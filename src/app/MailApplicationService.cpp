@@ -1657,9 +1657,124 @@ namespace javelin::app
                                 QStringLiteral("Create calendar event"), std::move(result));
     }
 
+    javelin::jmap::calendar::CalendarPreferenceResult
+    MailApplicationService::setCalendarVisible(std::string accountId, std::string calendarId,
+                                               const bool visible,
+                                               const javelin::app::undo::CommandOrigin origin)
+    {
+        const auto listed = m_calendarService.calendars(accountId);
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&listed))
+            return *error;
+        const auto& calendars = std::get<std::vector<javelin::jmap::calendar::Calendar>>(listed);
+        const auto calendar =
+            std::ranges::find(calendars, calendarId, &javelin::jmap::calendar::Calendar::id);
+        if (calendar == calendars.end())
+            return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::NotFound,
+                .message = QStringLiteral("The calendar is no longer available."),
+            };
+        if (calendar->isVisible == visible)
+            return std::monostate{};
+        auto preparedResult = m_undoManager.prepareNormal(
+            visible ? QStringLiteral("Show Calendar") : QStringLiteral("Hide Calendar"),
+            javelin::app::undo::HistoryDomain::LocalPreference,
+            javelin::app::undo::CalendarPreferenceHistory{
+                .connectionId = {},
+                .accountId = accountId,
+                .preferenceKind = "visibility",
+                .objectId = calendarId,
+                .beforeValue = calendar->isVisible ? "true" : "false",
+                .afterValue = visible ? "true" : "false",
+            },
+            std::nullopt, std::nullopt, origin);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&preparedResult))
+            return javelin::jmap::operationError(*error);
+        auto prepared =
+            std::get<std::optional<javelin::app::undo::HistoryEntry>>(std::move(preparedResult));
+        auto result = m_calendarService.setCalendarVisible(accountId, calendarId, visible);
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+        {
+            if (prepared.has_value())
+                static_cast<void>(m_undoManager.discardNormal(prepared->entryId));
+            return *error;
+        }
+        if (prepared.has_value())
+        {
+            auto committed = m_undoManager.commitNormal(std::move(*prepared));
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&committed))
+                return javelin::jmap::operationError(*error);
+        }
+        return std::monostate{};
+    }
+
+    std::variant<std::optional<std::string>, javelin::jmap::OperationError>
+    MailApplicationService::currentCalendarPreference(
+        const javelin::app::undo::CalendarPreferenceHistory& history) const
+    {
+        const auto listed = m_calendarService.calendars(history.accountId);
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&listed))
+            return *error;
+        const auto& calendars = std::get<std::vector<javelin::jmap::calendar::Calendar>>(listed);
+        if (history.preferenceKind == "default_calendar")
+        {
+            const auto current =
+                std::ranges::find(calendars, true, &javelin::jmap::calendar::Calendar::isDefault);
+            return current == calendars.end() ? std::optional<std::string>{std::nullopt}
+                                              : std::optional<std::string>{current->id};
+        }
+        if (history.preferenceKind == "visibility")
+        {
+            const auto calendar = std::ranges::find(calendars, history.objectId,
+                                                    &javelin::jmap::calendar::Calendar::id);
+            if (calendar == calendars.end())
+                return javelin::jmap::OperationError{
+                    .code = javelin::jmap::OperationErrorCode::NotFound,
+                    .message = QStringLiteral("The calendar is no longer available."),
+                };
+            return std::optional<std::string>{calendar->isVisible ? "true" : "false"};
+        }
+        return javelin::jmap::OperationError{
+            .code = javelin::jmap::OperationErrorCode::InvalidRequest,
+            .message = QStringLiteral("Unknown calendar preference history."),
+        };
+    }
+
+    QCoro::Task<std::optional<javelin::jmap::OperationError>>
+    MailApplicationService::applyCalendarPreference(
+        javelin::app::undo::CalendarPreferenceHistory history, std::optional<std::string> value,
+        const javelin::app::undo::CommandOrigin origin)
+    {
+        if (history.preferenceKind == "visibility")
+        {
+            if (!value.has_value() || (*value != "true" && *value != "false"))
+                co_return javelin::jmap::OperationError{
+                    .code = javelin::jmap::OperationErrorCode::InvalidRequest,
+                    .message = QStringLiteral("The calendar visibility history is invalid."),
+                };
+            auto result =
+                setCalendarVisible(history.accountId, history.objectId, *value == "true", origin);
+            if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                co_return *error;
+            co_return std::nullopt;
+        }
+        if (history.preferenceKind == "default_calendar" && value.has_value())
+        {
+            auto result = co_await setDefaultCalendar(history.connectionId, history.accountId,
+                                                      *value, origin);
+            if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                co_return *error;
+            co_return std::nullopt;
+        }
+        co_return javelin::jmap::OperationError{
+            .code = javelin::jmap::OperationErrorCode::InvalidRequest,
+            .message = QStringLiteral("The calendar preference history is invalid."),
+        };
+    }
+
     QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
     MailApplicationService::setDefaultCalendar(std::string ownerAccountId, std::string accountId,
-                                               std::string calendarId)
+                                               std::string calendarId,
+                                               const javelin::app::undo::CommandOrigin origin)
     {
         const ForegroundWorkScope foreground{m_workScheduler};
         const auto configuration = m_configurations.find(ownerAccountId);
@@ -1667,9 +1782,51 @@ namespace javelin::app
             co_return javelin::jmap::OperationError{
                 .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = QStringLiteral("Account synchronization is not configured.")};
+        const auto listed = m_calendarService.calendars(accountId);
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&listed))
+            co_return *error;
+        const auto& calendars = std::get<std::vector<javelin::jmap::calendar::Calendar>>(listed);
+        const auto current =
+            std::ranges::find(calendars, true, &javelin::jmap::calendar::Calendar::isDefault);
+        const std::optional<std::string> before =
+            current == calendars.end() ? std::nullopt : std::optional{current->id};
+        if (before == std::optional{calendarId})
+            co_return javelin::jmap::calendar::CommittedMutation{
+                .accountId = accountId,
+                .newState = {},
+                .createdId = std::nullopt,
+            };
+        auto preparedResult =
+            m_undoManager.prepareNormal(QStringLiteral("Change Default Calendar"),
+                                        javelin::app::undo::HistoryDomain::LocalPreference,
+                                        javelin::app::undo::CalendarPreferenceHistory{
+                                            .connectionId = ownerAccountId,
+                                            .accountId = accountId,
+                                            .preferenceKind = "default_calendar",
+                                            .objectId = "default",
+                                            .beforeValue = before,
+                                            .afterValue = calendarId,
+                                        },
+                                        std::nullopt, std::nullopt, origin);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&preparedResult))
+            co_return javelin::jmap::operationError(*error);
+        auto prepared =
+            std::get<std::optional<javelin::app::undo::HistoryEntry>>(std::move(preparedResult));
         auto result = co_await m_calendarService.setDefaultCalendar(
-            toLiveConnectionSettings(configuration->second.settings), ownerAccountId,
-            std::move(accountId), std::move(calendarId));
+            toLiveConnectionSettings(configuration->second.settings), ownerAccountId, accountId,
+            std::move(calendarId));
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+        {
+            if (const auto historyError = retainUnknownOrDiscard(m_undoManager, prepared, *error))
+                co_return *historyError;
+        }
+        else if (prepared.has_value())
+        {
+            auto committed = m_undoManager.commitNormal(std::move(*prepared));
+            if (const auto* historyError =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&committed))
+                co_return javelin::jmap::operationError(*historyError);
+        }
         if (std::holds_alternative<javelin::jmap::calendar::CommittedMutation>(result))
         {
             const auto range = m_visibleCalendarRanges.find(ownerAccountId);
