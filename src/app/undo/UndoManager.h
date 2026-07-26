@@ -5,6 +5,7 @@
 
 #include <QCoroTask>
 
+#include <QHash>
 #include <QObject>
 
 #include <array>
@@ -23,6 +24,7 @@ namespace javelin::app::undo
         explicit UndoManager(HistoryRepository& repository, QObject* parent = nullptr);
 
         void setExecutor(HistoryDomain domain, HistoryCommandExecutor* executor);
+        void setExecutor(const QString& commandKind, HistoryCommandExecutor* executor);
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError> load();
 
         [[nodiscard]] std::variant<std::optional<HistoryEntry>, javelin::jmap::cache::DatabaseError>
@@ -63,7 +65,7 @@ namespace javelin::app::undo
 
       private:
         [[nodiscard]] QCoro::Task<bool> executeTop(HistoryStack stack);
-        [[nodiscard]] HistoryCommandExecutor* executorFor(HistoryDomain domain) const;
+        [[nodiscard]] HistoryCommandExecutor* executorFor(const HistoryEntry& entry) const;
         [[nodiscard]] std::optional<HistoryEntry> top(HistoryStack stack) const;
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError> reload();
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
@@ -81,6 +83,7 @@ namespace javelin::app::undo
 
         HistoryRepository& m_repository;
         std::array<HistoryCommandExecutor*, 5> m_executors{};
+        QHash<QString, HistoryCommandExecutor*> m_commandExecutors;
         std::vector<HistoryEntry> m_entries;
         HistoryState m_state;
         bool m_executing = false;

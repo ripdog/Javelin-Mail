@@ -371,16 +371,14 @@ namespace javelin::jmap::sieve
             return std::get<std::vector<SieveScript>>(listed);
         }
 
-        [[nodiscard]] SieveMutationRecord mutationRecord(const std::string& accountId,
-                                                         std::string objectId,
-                                                         const SieveMutationKind kind,
-                                                         std::vector<SieveScript> baseScripts,
-                                                         std::vector<SieveScript> projectedScripts,
-                                                         std::optional<std::string> baseState)
+        [[nodiscard]] SieveMutationRecord mutationRecord(
+            const std::string& accountId, std::string objectId, const SieveMutationKind kind,
+            std::vector<SieveScript> baseScripts, std::vector<SieveScript> projectedScripts,
+            std::optional<std::string> baseState, std::optional<std::string> operationGroupId)
         {
             return {
                 .mutationId = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString(),
-                .operationGroupId = std::nullopt,
+                .operationGroupId = std::move(operationGroupId),
                 .accountId = accountId,
                 .objectId = std::move(objectId),
                 .kind = kind,
@@ -592,9 +590,10 @@ namespace javelin::jmap::sieve
                                         std::get<std::string>(uploaded));
     }
 
-    QCoro::Task<SieveSaveResult> SieveService::save(LiveConnectionSettings settings,
-                                                    std::string ownerAccountId, SieveScript script,
-                                                    QByteArray content) const
+    QCoro::Task<SieveSaveResult>
+    SieveService::save(LiveConnectionSettings settings, std::string ownerAccountId,
+                       SieveScript script, QByteArray content,
+                       std::optional<std::string> operationGroupId) const
     {
         auto contextResult = co_await resolveContext(m_resourceTransport, std::move(settings),
                                                      std::move(ownerAccountId));
@@ -641,11 +640,11 @@ namespace javelin::jmap::sieve
         const auto stateResult = repository.state(context.sieveAccountId);
         if (const auto* cacheError = std::get_if<cache::DatabaseError>(&stateResult))
             co_return operationError(*cacheError);
-        auto mutation =
-            mutationRecord(context.sieveAccountId, temporaryId,
-                           creating ? SieveMutationKind::Create : SieveMutationKind::Update,
-                           std::move(baseScripts), projectedScripts,
-                           std::get<std::optional<std::string>>(stateResult));
+        auto mutation = mutationRecord(
+            context.sieveAccountId, temporaryId,
+            creating ? SieveMutationKind::Create : SieveMutationKind::Update,
+            std::move(baseScripts), projectedScripts,
+            std::get<std::optional<std::string>>(stateResult), std::move(operationGroupId));
         SieveMutationJournal journal{m_connection, repository};
         if (const auto cacheError = journal.queue(mutation))
             co_return operationError(*cacheError);
@@ -802,9 +801,9 @@ namespace javelin::jmap::sieve
         co_return script;
     }
 
-    QCoro::Task<SieveDeleteResult> SieveService::remove(LiveConnectionSettings settings,
-                                                        std::string ownerAccountId,
-                                                        SieveScript script) const
+    QCoro::Task<SieveDeleteResult>
+    SieveService::remove(LiveConnectionSettings settings, std::string ownerAccountId,
+                         SieveScript script, std::optional<std::string> operationGroupId) const
     {
         if (script.id.empty())
             co_return std::monostate{};
@@ -829,7 +828,8 @@ namespace javelin::jmap::sieve
             co_return operationError(*cacheError);
         auto mutation = mutationRecord(context.sieveAccountId, script.id,
                                        SieveMutationKind::Destroy, baseScripts, projectedScripts,
-                                       std::get<std::optional<std::string>>(stateResult));
+                                       std::get<std::optional<std::string>>(stateResult),
+                                       std::move(operationGroupId));
         SieveMutationJournal journal{m_connection, repository};
         if (const auto cacheError = journal.queue(mutation))
             co_return operationError(*cacheError);
@@ -947,10 +947,10 @@ namespace javelin::jmap::sieve
         co_return std::monostate{};
     }
 
-    QCoro::Task<SieveActivationResult> SieveService::setActive(LiveConnectionSettings settings,
-                                                               std::string ownerAccountId,
-                                                               SieveScript script,
-                                                               const bool active) const
+    QCoro::Task<SieveActivationResult>
+    SieveService::setActive(LiveConnectionSettings settings, std::string ownerAccountId,
+                            SieveScript script, const bool active,
+                            std::optional<std::string> operationGroupId) const
     {
         if (script.id.empty())
             co_return error(OperationErrorCode::ProtocolViolation,
@@ -982,7 +982,8 @@ namespace javelin::jmap::sieve
             co_return operationError(*cacheError);
         auto mutation = mutationRecord(
             context.sieveAccountId, script.id, SieveMutationKind::Activate, std::move(baseScripts),
-            projectedScripts, std::get<std::optional<std::string>>(stateResult));
+            projectedScripts, std::get<std::optional<std::string>>(stateResult),
+            std::move(operationGroupId));
         SieveMutationJournal journal{m_connection, repository};
         if (const auto cacheError = journal.queue(mutation))
             co_return operationError(*cacheError);

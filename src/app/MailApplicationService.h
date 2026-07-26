@@ -5,7 +5,9 @@
 #include "app/ContactApplicationPorts.h"
 #include "app/LongPollService.h"
 #include "app/MailboxSelectionMutation.h"
+#include "app/undo/HistoryTypes.h"
 #include "app/undo/MailHistoryPort.h"
+#include "app/undo/SieveHistoryPort.h"
 #include "jmap/calendar/CalendarService.h"
 #include "jmap/query/EmailListSort.h"
 #include "jmap/search/EmailSearch.h"
@@ -145,7 +147,8 @@ namespace javelin::app
     class MailApplicationService final : public QObject,
                                          public AccountConnectionProvider,
                                          public ContactRefreshPort,
-                                         public javelin::app::undo::MailHistoryPort
+                                         public javelin::app::undo::MailHistoryPort,
+                                         public javelin::app::undo::SieveHistoryPort
     {
         Q_OBJECT
 
@@ -226,19 +229,26 @@ namespace javelin::app
         setDefaultCalendar(std::string ownerAccountId, std::string accountId,
                            std::string calendarId);
         [[nodiscard]] QCoro::Task<javelin::jmap::sieve::SieveListResult>
-        requestSieveScripts(std::string ownerAccountId);
+        requestSieveScripts(std::string ownerAccountId) override;
         [[nodiscard]] QCoro::Task<javelin::jmap::sieve::SieveContentResult>
-        requestSieveScript(std::string ownerAccountId, javelin::jmap::sieve::SieveScript script);
+        requestSieveScript(std::string ownerAccountId,
+                           javelin::jmap::sieve::SieveScript script) override;
         [[nodiscard]] QCoro::Task<javelin::jmap::sieve::SieveValidationResult>
         validateSieveScript(std::string ownerAccountId, QByteArray content);
         [[nodiscard]] QCoro::Task<javelin::jmap::sieve::SieveSaveResult>
         saveSieveScript(std::string ownerAccountId, javelin::jmap::sieve::SieveScript script,
-                        QByteArray content);
+                        QByteArray content,
+                        javelin::app::undo::CommandOrigin origin =
+                            javelin::app::undo::CommandOrigin::User) override;
         [[nodiscard]] QCoro::Task<javelin::jmap::sieve::SieveDeleteResult>
-        deleteSieveScript(std::string ownerAccountId, javelin::jmap::sieve::SieveScript script);
+        deleteSieveScript(std::string ownerAccountId, javelin::jmap::sieve::SieveScript script,
+                          javelin::app::undo::CommandOrigin origin =
+                              javelin::app::undo::CommandOrigin::User) override;
         [[nodiscard]] QCoro::Task<javelin::jmap::sieve::SieveActivationResult>
         setSieveScriptActive(std::string ownerAccountId, javelin::jmap::sieve::SieveScript script,
-                             bool active);
+                             bool active,
+                             javelin::app::undo::CommandOrigin origin =
+                                 javelin::app::undo::CommandOrigin::User) override;
       Q_SIGNALS:
         void accountStatusChanged(const QString& accountId,
                                   javelin::app::AccountSyncCoordinator::Status status);

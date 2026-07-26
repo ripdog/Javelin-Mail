@@ -85,6 +85,9 @@ set(JAVELIN_FORMAT_FILES
     src/app/undo/MailHistoryExecutor.cpp
     src/app/undo/MailHistoryExecutor.h
     src/app/undo/MailHistoryPort.h
+    src/app/undo/SieveHistoryExecutor.cpp
+    src/app/undo/SieveHistoryExecutor.h
+    src/app/undo/SieveHistoryPort.h
     src/app/undo/UndoManager.cpp
     src/app/undo/UndoManager.h
     src/app/MailIndexService.cpp
@@ -885,6 +888,9 @@ add_library(javelin_application STATIC
     src/app/undo/MailHistoryExecutor.cpp
     src/app/undo/MailHistoryExecutor.h
     src/app/undo/MailHistoryPort.h
+    src/app/undo/SieveHistoryExecutor.cpp
+    src/app/undo/SieveHistoryExecutor.h
+    src/app/undo/SieveHistoryPort.h
     src/app/undo/UndoManager.cpp
     src/app/undo/UndoManager.h
     src/app/InlineMessageSchemeHandler.cpp

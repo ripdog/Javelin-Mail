@@ -101,7 +101,8 @@ namespace javelin::app::undo
         std::optional<std::string> beforeContent;
         std::optional<std::string> afterName;
         std::optional<std::string> afterContent;
-        std::optional<std::string> previouslyActiveScriptId;
+        std::optional<std::string> activeScriptIdBefore;
+        std::optional<std::string> activeScriptIdAfter;
 
         auto operator<=>(const SieveHistory&) const = default;
     };

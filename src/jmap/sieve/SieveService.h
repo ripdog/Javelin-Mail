@@ -53,17 +53,15 @@ namespace javelin::jmap::sieve
         [[nodiscard]] QCoro::Task<SieveValidationResult> validate(LiveConnectionSettings settings,
                                                                   std::string ownerAccountId,
                                                                   QByteArray content) const;
-        [[nodiscard]] QCoro::Task<SieveSaveResult> save(LiveConnectionSettings settings,
-                                                        std::string ownerAccountId,
-                                                        SieveScript script,
-                                                        QByteArray content) const;
-        [[nodiscard]] QCoro::Task<SieveDeleteResult> remove(LiveConnectionSettings settings,
-                                                            std::string ownerAccountId,
-                                                            SieveScript script) const;
-        [[nodiscard]] QCoro::Task<SieveActivationResult> setActive(LiveConnectionSettings settings,
-                                                                   std::string ownerAccountId,
-                                                                   SieveScript script,
-                                                                   bool active) const;
+        [[nodiscard]] QCoro::Task<SieveSaveResult>
+        save(LiveConnectionSettings settings, std::string ownerAccountId, SieveScript script,
+             QByteArray content, std::optional<std::string> operationGroupId = std::nullopt) const;
+        [[nodiscard]] QCoro::Task<SieveDeleteResult>
+        remove(LiveConnectionSettings settings, std::string ownerAccountId, SieveScript script,
+               std::optional<std::string> operationGroupId = std::nullopt) const;
+        [[nodiscard]] QCoro::Task<SieveActivationResult>
+        setActive(LiveConnectionSettings settings, std::string ownerAccountId, SieveScript script,
+                  bool active, std::optional<std::string> operationGroupId = std::nullopt) const;
 
       private:
         cache::DatabaseConnection& m_connection;

@@ -120,6 +120,31 @@ namespace javelin::app
                 coordinator.reportSuccess(settings.connectionId);
             return result;
         }
+
+        [[nodiscard]] std::optional<javelin::jmap::OperationError>
+        retainUnknownOrDiscard(javelin::app::undo::UndoManager& manager,
+                               std::optional<javelin::app::undo::HistoryEntry>& prepared,
+                               const javelin::jmap::OperationError& operationError)
+        {
+            if (!prepared.has_value())
+                return std::nullopt;
+            if (!javelin::jmap::isTransientError(operationError) ||
+                javelin::jmap::isAuthenticationError(operationError))
+            {
+                if (const auto error = manager.discardNormal(prepared->entryId))
+                    return javelin::jmap::operationError(*error);
+                return std::nullopt;
+            }
+            auto committed = manager.commitNormal(std::move(*prepared));
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&committed))
+                return javelin::jmap::operationError(*error);
+            const auto& entry = std::get<javelin::app::undo::HistoryEntry>(committed);
+            if (const auto error = manager.setEntryStatus(
+                    entry.entryId, javelin::app::undo::HistoryEntryStatus::BlockedUnknown,
+                    operationError.message))
+                return javelin::jmap::operationError(*error);
+            return std::nullopt;
+        }
     } // namespace
 
     MailboxObservation::MailboxObservation(
@@ -1690,7 +1715,8 @@ namespace javelin::app
     }
 
     QCoro::Task<javelin::jmap::sieve::SieveSaveResult> MailApplicationService::saveSieveScript(
-        std::string ownerAccountId, javelin::jmap::sieve::SieveScript script, QByteArray content)
+        std::string ownerAccountId, javelin::jmap::sieve::SieveScript script, QByteArray content,
+        const javelin::app::undo::CommandOrigin origin)
     {
         const ForegroundWorkScope foreground{m_workScheduler};
         const auto configuration = m_configurations.find(ownerAccountId);
@@ -1698,16 +1724,79 @@ namespace javelin::app
             co_return javelin::jmap::OperationError{
                 .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = QStringLiteral("Account synchronization is not configured.")};
-        co_return observeResult(
+        const auto operationGroupId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        std::optional<javelin::app::undo::HistoryEntry> prepared;
+        if (origin == javelin::app::undo::CommandOrigin::User)
+        {
+            std::optional<std::string> beforeContent;
+            if (!script.id.empty())
+            {
+                auto loaded = co_await m_sieveService.load(
+                    toLiveConnectionSettings(configuration->second.settings), ownerAccountId,
+                    script);
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&loaded))
+                    co_return *error;
+                beforeContent = std::get<QByteArray>(loaded).toStdString();
+            }
+            javelin::app::undo::SieveHistory history{
+                .connectionId = configuration->second.settings.connectionId,
+                .accountId = ownerAccountId,
+                .currentScriptId = script.id.empty() ? std::nullopt : std::optional{script.id},
+                .previousScriptId = std::nullopt,
+                .beforeName = script.id.empty() ? std::nullopt : std::optional{script.name},
+                .beforeContent = std::move(beforeContent),
+                .afterName = script.name,
+                .afterContent = content.toStdString(),
+                .activeScriptIdBefore = script.isActive ? std::optional{script.id} : std::nullopt,
+                .activeScriptIdAfter = script.isActive ? std::optional{script.id} : std::nullopt,
+            };
+            auto preparedResult = m_undoManager.prepareNormal(
+                script.id.empty() ? QStringLiteral("Create Sieve Script “%1”")
+                                        .arg(QString::fromStdString(script.name))
+                                  : QStringLiteral("Edit Sieve Script “%1”")
+                                        .arg(QString::fromStdString(script.name)),
+                javelin::app::undo::HistoryDomain::Mail, std::move(history), operationGroupId,
+                std::nullopt, origin);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&preparedResult))
+                co_return javelin::jmap::operationError(*error);
+            prepared = std::get<std::optional<javelin::app::undo::HistoryEntry>>(
+                std::move(preparedResult));
+        }
+
+        auto result = observeResult(
             m_errorCoordinator, configuration->second.settings, ownerAccountId,
             QStringLiteral("Save Sieve script"),
             co_await m_sieveService.save(toLiveConnectionSettings(configuration->second.settings),
-                                         ownerAccountId, std::move(script), std::move(content)));
+                                         ownerAccountId, std::move(script), std::move(content),
+                                         operationGroupId.toStdString()));
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+        {
+            if (const auto historyError = retainUnknownOrDiscard(m_undoManager, prepared, *error))
+                co_return *historyError;
+            co_return *error;
+        }
+        if (prepared.has_value())
+        {
+            auto& history = std::get<javelin::app::undo::SieveHistory>(prepared->payload);
+            const auto& saved = std::get<javelin::jmap::sieve::SieveScript>(result);
+            history.currentScriptId = saved.id;
+            if (history.activeScriptIdBefore.has_value())
+            {
+                history.activeScriptIdBefore = saved.id;
+                history.activeScriptIdAfter = saved.id;
+            }
+            auto committed = m_undoManager.commitNormal(std::move(*prepared));
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&committed))
+                co_return javelin::jmap::operationError(*error);
+        }
+        co_return result;
     }
 
     QCoro::Task<javelin::jmap::sieve::SieveDeleteResult>
     MailApplicationService::deleteSieveScript(std::string ownerAccountId,
-                                              javelin::jmap::sieve::SieveScript script)
+                                              javelin::jmap::sieve::SieveScript script,
+                                              const javelin::app::undo::CommandOrigin origin)
     {
         const ForegroundWorkScope foreground{m_workScheduler};
         const auto configuration = m_configurations.find(ownerAccountId);
@@ -1715,17 +1804,64 @@ namespace javelin::app
             co_return javelin::jmap::OperationError{
                 .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = QStringLiteral("Account synchronization is not configured.")};
-        co_return observeResult(
-            m_errorCoordinator, configuration->second.settings, ownerAccountId,
-            QStringLiteral("Delete Sieve script"),
-            co_await m_sieveService.remove(toLiveConnectionSettings(configuration->second.settings),
-                                           ownerAccountId, std::move(script)));
+        const auto operationGroupId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        std::optional<javelin::app::undo::HistoryEntry> prepared;
+        if (origin == javelin::app::undo::CommandOrigin::User)
+        {
+            auto loaded = co_await m_sieveService.load(
+                toLiveConnectionSettings(configuration->second.settings), ownerAccountId, script);
+            if (const auto* error = std::get_if<javelin::jmap::OperationError>(&loaded))
+                co_return *error;
+            javelin::app::undo::SieveHistory history{
+                .connectionId = configuration->second.settings.connectionId,
+                .accountId = ownerAccountId,
+                .currentScriptId = script.id,
+                .previousScriptId = script.id,
+                .beforeName = script.name,
+                .beforeContent = std::get<QByteArray>(loaded).toStdString(),
+                .afterName = std::nullopt,
+                .afterContent = std::nullopt,
+                .activeScriptIdBefore = script.isActive ? std::optional{script.id} : std::nullopt,
+                .activeScriptIdAfter = std::nullopt,
+            };
+            auto preparedResult = m_undoManager.prepareNormal(
+                QStringLiteral("Delete Sieve Script “%1”").arg(QString::fromStdString(script.name)),
+                javelin::app::undo::HistoryDomain::Mail, std::move(history), operationGroupId,
+                std::nullopt, origin);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&preparedResult))
+                co_return javelin::jmap::operationError(*error);
+            prepared = std::get<std::optional<javelin::app::undo::HistoryEntry>>(
+                std::move(preparedResult));
+        }
+        auto result =
+            observeResult(m_errorCoordinator, configuration->second.settings, ownerAccountId,
+                          QStringLiteral("Delete Sieve script"),
+                          co_await m_sieveService.remove(
+                              toLiveConnectionSettings(configuration->second.settings),
+                              ownerAccountId, std::move(script), operationGroupId.toStdString()));
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+        {
+            if (const auto historyError = retainUnknownOrDiscard(m_undoManager, prepared, *error))
+                co_return *historyError;
+            co_return *error;
+        }
+        if (prepared.has_value())
+        {
+            auto& history = std::get<javelin::app::undo::SieveHistory>(prepared->payload);
+            history.currentScriptId = std::nullopt;
+            auto committed = m_undoManager.commitNormal(std::move(*prepared));
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&committed))
+                co_return javelin::jmap::operationError(*error);
+        }
+        co_return result;
     }
 
     QCoro::Task<javelin::jmap::sieve::SieveActivationResult>
     MailApplicationService::setSieveScriptActive(std::string ownerAccountId,
                                                  javelin::jmap::sieve::SieveScript script,
-                                                 const bool active)
+                                                 const bool active,
+                                                 const javelin::app::undo::CommandOrigin origin)
     {
         const ForegroundWorkScope foreground{m_workScheduler};
         const auto configuration = m_configurations.find(ownerAccountId);
@@ -1733,11 +1869,67 @@ namespace javelin::app
             co_return javelin::jmap::OperationError{
                 .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
                 .message = QStringLiteral("Account synchronization is not configured.")};
-        co_return observeResult(m_errorCoordinator, configuration->second.settings, ownerAccountId,
-                                QStringLiteral("Change active Sieve script"),
-                                co_await m_sieveService.setActive(
-                                    toLiveConnectionSettings(configuration->second.settings),
-                                    ownerAccountId, std::move(script), active));
+        const auto operationGroupId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        std::optional<javelin::app::undo::HistoryEntry> prepared;
+        if (origin == javelin::app::undo::CommandOrigin::User)
+        {
+            auto listed = co_await m_sieveService.list(
+                toLiveConnectionSettings(configuration->second.settings), ownerAccountId);
+            if (const auto* error = std::get_if<javelin::jmap::OperationError>(&listed))
+                co_return *error;
+            const auto& scripts = std::get<std::vector<javelin::jmap::sieve::SieveScript>>(listed);
+            const auto currentActive =
+                std::ranges::find(scripts, true, &javelin::jmap::sieve::SieveScript::isActive);
+            const std::optional<std::string> activeBefore =
+                currentActive == scripts.end() ? std::nullopt : std::optional{currentActive->id};
+            const std::optional<std::string> activeAfter =
+                active ? std::optional{script.id} : std::nullopt;
+            if (activeBefore == activeAfter)
+                co_return std::monostate{};
+            javelin::app::undo::SieveHistory history{
+                .connectionId = configuration->second.settings.connectionId,
+                .accountId = ownerAccountId,
+                .currentScriptId = script.id,
+                .previousScriptId = std::nullopt,
+                .beforeName = std::nullopt,
+                .beforeContent = std::nullopt,
+                .afterName = std::nullopt,
+                .afterContent = std::nullopt,
+                .activeScriptIdBefore = activeBefore,
+                .activeScriptIdAfter = activeAfter,
+            };
+            auto preparedResult = m_undoManager.prepareNormal(
+                active ? QStringLiteral("Activate Sieve Script “%1”")
+                             .arg(QString::fromStdString(script.name))
+                       : QStringLiteral("Deactivate Sieve Script “%1”")
+                             .arg(QString::fromStdString(script.name)),
+                javelin::app::undo::HistoryDomain::Mail, std::move(history), operationGroupId,
+                std::nullopt, origin);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&preparedResult))
+                co_return javelin::jmap::operationError(*error);
+            prepared = std::get<std::optional<javelin::app::undo::HistoryEntry>>(
+                std::move(preparedResult));
+        }
+        auto result = observeResult(m_errorCoordinator, configuration->second.settings,
+                                    ownerAccountId, QStringLiteral("Change active Sieve script"),
+                                    co_await m_sieveService.setActive(
+                                        toLiveConnectionSettings(configuration->second.settings),
+                                        ownerAccountId, std::move(script), active,
+                                        operationGroupId.toStdString()));
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+        {
+            if (const auto historyError = retainUnknownOrDiscard(m_undoManager, prepared, *error))
+                co_return *historyError;
+            co_return *error;
+        }
+        if (prepared.has_value())
+        {
+            auto committed = m_undoManager.commitNormal(std::move(*prepared));
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&committed))
+                co_return javelin::jmap::operationError(*error);
+        }
+        co_return result;
     }
 
     void MailApplicationService::connectCoordinator(const std::string& accountId,

@@ -50,6 +50,15 @@ namespace javelin::app::undo
         publishState();
     }
 
+    void UndoManager::setExecutor(const QString& commandKind, HistoryCommandExecutor* executor)
+    {
+        if (executor == nullptr)
+            m_commandExecutors.remove(commandKind);
+        else
+            m_commandExecutors.insert(commandKind, executor);
+        publishState();
+    }
+
     std::optional<javelin::jmap::cache::DatabaseError> UndoManager::load()
     {
         if (const auto error = reload())
@@ -209,7 +218,7 @@ namespace javelin::app::undo
             co_return false;
         }
 
-        auto* executor = executorFor(entry->domain);
+        auto* executor = executorFor(*entry);
         if (executor == nullptr)
         {
             HistoryExecutionResult result{
@@ -339,9 +348,12 @@ namespace javelin::app::undo
         return m_entries;
     }
 
-    HistoryCommandExecutor* UndoManager::executorFor(const HistoryDomain domain) const
+    HistoryCommandExecutor* UndoManager::executorFor(const HistoryEntry& entry) const
     {
-        return m_executors.at(domainIndex(domain));
+        const auto commandExecutor = m_commandExecutors.constFind(entry.commandKind);
+        if (commandExecutor != m_commandExecutors.cend())
+            return commandExecutor.value();
+        return m_executors.at(domainIndex(entry.domain));
     }
 
     std::optional<HistoryEntry> UndoManager::top(const HistoryStack stack) const
