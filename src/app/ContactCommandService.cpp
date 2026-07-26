@@ -56,6 +56,41 @@ namespace javelin::app
             };
         }
 
+        struct ResolvedHistoryConnection
+        {
+            std::string ownerAccountId;
+            AccountConnectionSettings settings;
+        };
+
+        [[nodiscard]] std::variant<ResolvedHistoryConnection, javelin::jmap::OperationError>
+        resolveHistoryConnection(const AccountConnectionProvider& connectionProvider,
+                                 javelin::jmap::cache::ContactRepository& contactRepository,
+                                 const std::string_view routingId, const std::string_view accountId)
+        {
+            if (auto settings = connectionProvider.connectionSettingsFor(routingId))
+                return ResolvedHistoryConnection{
+                    .ownerAccountId = std::string{routingId},
+                    .settings = std::move(*settings),
+                };
+
+            const auto accounts = contactRepository.listAccounts();
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&accounts))
+                return javelin::jmap::operationError(*error);
+            const auto& available =
+                std::get<std::vector<javelin::jmap::cache::ContactAccount>>(accounts);
+            const auto account = std::ranges::find(
+                available, accountId, &javelin::jmap::cache::ContactAccount::accountId);
+            if (account == available.end())
+                return missingConfiguration();
+            auto settings = connectionProvider.connectionSettingsFor(account->ownerAccountId);
+            if (!settings.has_value() || settings->connectionId != routingId)
+                return missingConfiguration();
+            return ResolvedHistoryConnection{
+                .ownerAccountId = account->ownerAccountId,
+                .settings = std::move(*settings),
+            };
+        }
+
         template <typename Result>
         [[nodiscard]] Result observeResult(ApplicationErrorCoordinator& coordinator,
                                            const AccountConnectionSettings& settings,
@@ -274,11 +309,13 @@ namespace javelin::app
     ContactCommandService::getAuthoritativeContacts(std::string ownerAccountId,
                                                     std::string accountId)
     {
-        const auto settings = m_connectionProvider.connectionSettingsFor(ownerAccountId);
-        if (!settings.has_value())
-            co_return missingConfiguration();
-        auto refreshed = co_await m_contactService.refreshAll(toLiveConnectionSettings(*settings),
-                                                              ownerAccountId);
+        auto resolved = resolveHistoryConnection(m_connectionProvider, m_contactRepository,
+                                                 ownerAccountId, accountId);
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&resolved))
+            co_return *error;
+        auto connection = std::get<ResolvedHistoryConnection>(std::move(resolved));
+        auto refreshed = co_await m_contactService.refreshAll(
+            toLiveConnectionSettings(connection.settings), connection.ownerAccountId);
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&refreshed))
             co_return *error;
         auto contacts = m_contactRepository.listContacts(accountId);
@@ -299,22 +336,27 @@ namespace javelin::app
         std::string ownerAccountId, javelin::jmap::api::ContactCardSetRequest request,
         const undo::CommandOrigin)
     {
-        const auto settings = m_connectionProvider.connectionSettingsFor(ownerAccountId);
-        if (!settings.has_value())
-            co_return missingConfiguration();
+        auto resolved = resolveHistoryConnection(m_connectionProvider, m_contactRepository,
+                                                 ownerAccountId, request.accountId);
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&resolved))
+            co_return *error;
+        auto connection = std::get<ResolvedHistoryConnection>(std::move(resolved));
         co_return co_await m_contactService.setContactCards(
-            toLiveConnectionSettings(*settings), std::move(ownerAccountId), std::move(request));
+            toLiveConnectionSettings(connection.settings), std::move(connection.ownerAccountId),
+            std::move(request));
     }
 
     QCoro::Task<undo::AuthoritativeAddressBooksResult>
     ContactCommandService::getAuthoritativeAddressBooks(std::string ownerAccountId,
                                                         std::string accountId)
     {
-        const auto settings = m_connectionProvider.connectionSettingsFor(ownerAccountId);
-        if (!settings.has_value())
-            co_return missingConfiguration();
-        auto refreshed = co_await m_contactService.refreshAll(toLiveConnectionSettings(*settings),
-                                                              ownerAccountId);
+        auto resolved = resolveHistoryConnection(m_connectionProvider, m_contactRepository,
+                                                 ownerAccountId, accountId);
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&resolved))
+            co_return *error;
+        auto connection = std::get<ResolvedHistoryConnection>(std::move(resolved));
+        auto refreshed = co_await m_contactService.refreshAll(
+            toLiveConnectionSettings(connection.settings), connection.ownerAccountId);
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&refreshed))
             co_return *error;
         auto books = m_contactRepository.listAddressBooks(accountId);
@@ -335,11 +377,14 @@ namespace javelin::app
         std::string ownerAccountId, javelin::jmap::api::AddressBookSetRequest request,
         const undo::CommandOrigin)
     {
-        const auto settings = m_connectionProvider.connectionSettingsFor(ownerAccountId);
-        if (!settings.has_value())
-            co_return missingConfiguration();
+        auto resolved = resolveHistoryConnection(m_connectionProvider, m_contactRepository,
+                                                 ownerAccountId, request.accountId);
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&resolved))
+            co_return *error;
+        auto connection = std::get<ResolvedHistoryConnection>(std::move(resolved));
         co_return co_await m_contactService.setAddressBooks(
-            toLiveConnectionSettings(*settings), std::move(ownerAccountId), std::move(request));
+            toLiveConnectionSettings(connection.settings), std::move(connection.ownerAccountId),
+            std::move(request));
     }
 
     QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
@@ -357,7 +402,7 @@ namespace javelin::app
         const auto defaultBook =
             std::ranges::find(books, true, &javelin::jmap::api::AddressBook::isDefault);
         undo::AddressBookHistory history{
-            .connectionId = settings->connectionId,
+            .connectionId = ownerAccountId,
             .accountId = request.accountId,
             .currentAddressBookId = std::nullopt,
             .beforeDocumentJson = std::nullopt,
@@ -498,7 +543,7 @@ namespace javelin::app
         if (!settings.has_value())
             co_return missingConfiguration();
         undo::ContactCardHistory history{
-            .connectionId = settings->connectionId,
+            .connectionId = ownerAccountId,
             .accountId = request.accountId,
             .items = {},
         };
@@ -619,7 +664,7 @@ namespace javelin::app
         if (!settings.has_value())
             co_return missingConfiguration();
         undo::ContactCardHistory history{
-            .connectionId = settings->connectionId,
+            .connectionId = ownerAccountId,
             .accountId = request.accountId,
             .items = {},
         };
