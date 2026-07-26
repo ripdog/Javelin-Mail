@@ -1095,6 +1095,13 @@ namespace javelin::gui::shell
                     refreshMessageListPreservingSelection();
                     refreshSelectionFromModels();
                 });
+        connect(m_messageCommandController, &MessageCommandController::emailMarkedRead, this,
+                [this](const QString& accountId, const QString& emailId)
+                {
+                    markSearchTabsStaleForAccount(accountId.toStdString());
+                    static_cast<void>(m_messageModel->setEmailRead(emailId.toStdString()));
+                    updateMessageActions();
+                });
         connect(m_messageCommandController, &MessageCommandController::emailMutationsSubmitted,
                 this,
                 [this](const EmailMutationSubmissionSummary& summary)
@@ -1113,10 +1120,6 @@ namespace javelin::gui::shell
                     }
                     if (summary.updatedEmailCount == 0)
                         return;
-
-                    refreshMessageListPreservingSelection();
-                    refreshSelectionFromModels();
-                    refreshActiveSearchAfterMutation(summary.accountId);
                 });
 
         connect(m_mailboxModel, &javelin::gui::mailboxes::MailboxTreeModel::emailsDropped, this,
@@ -1845,8 +1848,26 @@ namespace javelin::gui::shell
             .messagePageStale = m_messageListTabController->pageStale(tab),
             .remoteRefreshRequested = refreshRemote,
         });
-        if (loadedPlan.refreshRemote)
-            refreshTabFromServer(static_cast<std::size_t>(index));
+        if (loadedPlan.refreshRemote && (refreshRemote || index != 0))
+        {
+            QTimer::singleShot(
+                100, this,
+                [this, index, refreshRemote]
+                {
+                    if (m_activeTabIndex != std::optional<int>{index} || index < 0 ||
+                        static_cast<std::size_t>(index) >= m_tabs.size())
+                        return;
+                    const auto& currentTab = m_tabs[static_cast<std::size_t>(index)];
+                    const auto plan = planTabActivation({
+                        .kind = tabKind(currentTab),
+                        .homeTab = index == 0,
+                        .messagePageStale = m_messageListTabController->pageStale(currentTab),
+                        .remoteRefreshRequested = refreshRemote,
+                    });
+                    if (plan.refreshRemote)
+                        refreshTabFromServer(static_cast<std::size_t>(index));
+                });
+        }
 
         qCDebug(logGuiMailbox).noquote() << "activate tab" << index << "refreshRemote"
                                          << refreshRemote << "ms" << timer.elapsed();
@@ -1910,6 +1931,8 @@ namespace javelin::gui::shell
 
     void MainWindow::loadActiveTabFromCache(const bool forceReload, const bool refreshRemote)
     {
+        QElapsedTimer timer;
+        timer.start();
         auto* tab = activeTab();
         if (tab == nullptr)
         {
@@ -1934,7 +1957,15 @@ namespace javelin::gui::shell
             return;
         }
 
+        const auto cacheMilliseconds = timer.restart();
         applyActiveTabPagePreservingSelection(m_messageSelectionController->currentRow());
+        const auto applyMilliseconds = timer.elapsed();
+        if (cacheMilliseconds + applyMilliseconds >= 50)
+        {
+            qCWarning(logGuiMailbox).noquote()
+                << "slow cached tab activation cacheMs" << cacheMilliseconds << "applyMs"
+                << applyMilliseconds;
+        }
         if (refreshRemote &&
             (tabKind(*tab) == TabKind::Mailbox || m_messageListTabController->pageStale(*tab)))
         {
@@ -2326,13 +2357,6 @@ namespace javelin::gui::shell
         m_mailboxModel->refresh();
         m_mailboxView->expandAll();
         loadActiveTabFromCache(true);
-    }
-
-    void MainWindow::refreshActiveSearchAfterMutation(const std::string_view accountId)
-    {
-        if (auto* tab = activeTab(); tab != nullptr)
-            static_cast<void>(
-                m_messageListTabController->refreshSearchAfterMutation(*tab, accountId));
     }
 
     void MainWindow::refreshSelectionFromModels()

@@ -356,6 +356,56 @@ namespace javelin::jmap::cache
         if (windows.empty())
             return std::nullopt;
 
+        if (additions.empty() && removals.empty())
+        {
+            QSqlQuery advanceWindows{m_connection.database()};
+            advanceWindows.prepare(QStringLiteral(
+                "UPDATE mailbox_query_windows SET query_state=:new_state,total=:total,"
+                "is_valid=CASE WHEN returned_limit=requested_limit OR "
+                "(:total IS NOT NULL AND requested_offset+returned_limit>=:total) "
+                "THEN 1 ELSE 0 END,updated_at=CURRENT_TIMESTAMP WHERE account_id=:account AND "
+                "mailbox_id=:mailbox AND query_key=:query_key AND query_state=:old_state AND "
+                "is_valid=1 AND requested_offset<:covered_end"));
+            advanceWindows.bindValue(QStringLiteral(":new_state"),
+                                     QString::fromStdString(std::string{newQueryState}));
+            advanceWindows.bindValue(QStringLiteral(":total"),
+                                     total.has_value() ? QVariant{static_cast<qulonglong>(*total)}
+                                                       : QVariant{});
+            advanceWindows.bindValue(QStringLiteral(":account"),
+                                     QString::fromStdString(std::string{accountId}));
+            advanceWindows.bindValue(QStringLiteral(":mailbox"),
+                                     QString::fromStdString(std::string{mailboxId}));
+            advanceWindows.bindValue(QStringLiteral(":query_key"),
+                                     QString::fromStdString(std::string{queryKey}));
+            advanceWindows.bindValue(QStringLiteral(":old_state"),
+                                     QString::fromStdString(std::string{sinceQueryState}));
+            advanceWindows.bindValue(QStringLiteral(":covered_end"),
+                                     static_cast<qulonglong>(coveredEnd));
+            if (!advanceWindows.exec())
+                return queryError(QStringLiteral("Advance unchanged mailbox prefix"),
+                                  advanceWindows);
+
+            QSqlQuery invalidateSparse{m_connection.database()};
+            invalidateSparse.prepare(QStringLiteral(
+                "UPDATE mailbox_query_windows SET is_valid=0 WHERE account_id=:account AND "
+                "mailbox_id=:mailbox AND query_key=:query_key AND query_state=:old_state AND "
+                "requested_offset>=:covered_end"));
+            invalidateSparse.bindValue(QStringLiteral(":account"),
+                                       QString::fromStdString(std::string{accountId}));
+            invalidateSparse.bindValue(QStringLiteral(":mailbox"),
+                                       QString::fromStdString(std::string{mailboxId}));
+            invalidateSparse.bindValue(QStringLiteral(":query_key"),
+                                       QString::fromStdString(std::string{queryKey}));
+            invalidateSparse.bindValue(QStringLiteral(":old_state"),
+                                       QString::fromStdString(std::string{sinceQueryState}));
+            invalidateSparse.bindValue(QStringLiteral(":covered_end"),
+                                       static_cast<qulonglong>(coveredEnd));
+            if (!invalidateSparse.exec())
+                return queryError(QStringLiteral("Invalidate sparse mailbox windows"),
+                                  invalidateSparse);
+            return std::nullopt;
+        }
+
         QSqlQuery readItems{m_connection.database()};
         readItems.prepare(QStringLiteral(
             "SELECT i.email_id FROM mailbox_query_window_items i INNER JOIN "

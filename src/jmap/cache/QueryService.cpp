@@ -8,6 +8,8 @@
 
 #include <glaze/glaze.hpp>
 
+#include <QElapsedTimer>
+#include <QLoggingCategory>
 #include <QSqlError>
 #include <QSqlQuery>
 
@@ -15,6 +17,7 @@
 
 namespace javelin::jmap::cache
 {
+    Q_LOGGING_CATEGORY(logQueryPerformance, "jmap.cache.query")
 
     namespace
     {
@@ -774,9 +777,12 @@ namespace javelin::jmap::cache
         const std::size_t requestedOffset, const std::size_t requestedLimit,
         javelin::jmap::query::EmailListSort sort) const
     {
+        QElapsedTimer timer;
+        timer.start();
         MailboxWindowRepository repository{m_connection};
         const auto windowResult =
             repository.find(accountId, queryKey, requestedOffset, requestedLimit);
+        const auto windowMilliseconds = timer.restart();
         const auto* window = std::get_if<std::optional<MailboxWindowRecord>>(&windowResult);
         if (window == nullptr)
             return std::get<DatabaseError>(windowResult);
@@ -785,6 +791,15 @@ namespace javelin::jmap::cache
 
         const auto messagesResult = listMailboxWindowMessagesByEmailIds(
             accountId, (*window)->mailboxId, (*window)->emailIds, sort);
+        const auto messageMilliseconds = timer.elapsed();
+        if (windowMilliseconds + messageMilliseconds >= 50)
+        {
+            qCWarning(logQueryPerformance).noquote()
+                << "Slow mailbox window load" << QString::fromStdString(std::string{accountId})
+                << QString::fromStdString((*window)->mailboxId) << "windowMs" << windowMilliseconds
+                << "messagesMs" << messageMilliseconds << "items"
+                << static_cast<qulonglong>((*window)->emailIds.size());
+        }
         const auto* messages = std::get_if<std::vector<MessageListItem>>(&messagesResult);
         if (messages == nullptr)
             return std::get<DatabaseError>(messagesResult);

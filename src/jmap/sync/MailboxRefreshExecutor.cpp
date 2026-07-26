@@ -908,18 +908,6 @@ namespace javelin::jmap::sync
         const bool hasMailboxBaseline =
             queryPlan.kind == javelin::jmap::sync::SyncPlanKind::IncrementalChanges &&
             queryPlan.sinceState.has_value();
-        if (hasMailboxBaseline)
-        {
-            const auto previousIdsResult =
-                mailboxEmailIds(m_databaseConnection, accountId, mailboxId);
-            if (const auto* error = std::get_if<OperationError>(&previousIdsResult))
-            {
-                co_return *error;
-            }
-
-            previousMailboxEmailIds =
-                std::get<std::vector<std::string>>(std::move(previousIdsResult));
-        }
 
         if (!requireFullMaterialization &&
             queryPlan.kind == javelin::jmap::sync::SyncPlanKind::IncrementalChanges &&
@@ -1058,6 +1046,18 @@ namespace javelin::jmap::sync
                     .requiresNotificationScan = false,
                     .notificationCandidates = {},
                 };
+            }
+            if (hasMailboxBaseline)
+            {
+                const auto previousIdsResult =
+                    mailboxEmailIds(m_databaseConnection, accountId, mailboxId);
+                if (const auto* error = std::get_if<OperationError>(&previousIdsResult))
+                {
+                    co_return *error;
+                }
+
+                previousMailboxEmailIds =
+                    std::get<std::vector<std::string>>(std::move(previousIdsResult));
             }
             const auto currentFetchedMailboxEmailIds =
                 fetchedMailboxEmailIds(fetch.emails, mailboxId);

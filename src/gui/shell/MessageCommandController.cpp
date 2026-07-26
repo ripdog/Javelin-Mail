@@ -281,7 +281,7 @@ namespace javelin::gui::shell
     void MessageCommandController::markEmailRead(std::string accountId, std::string emailId)
     {
         qCInfo(logMessageCommands) << "mark read requested";
-        const auto result = m_mailService.queueMarkEmailRead(accountId, std::move(emailId));
+        const auto result = m_mailService.queueMarkEmailRead(accountId, emailId);
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
         {
             Q_EMIT operationFailed(*error);
@@ -292,7 +292,7 @@ namespace javelin::gui::shell
         if (summary.queuedEmailCount == 0)
             return;
         const auto account = QString::fromStdString(accountId);
-        Q_EMIT messageMetadataChanged(account);
+        Q_EMIT emailMarkedRead(account, QString::fromStdString(emailId));
         submitQueuedMutations(std::move(accountId),
                               summary.queuedMutations.front().patch.operationGroupId);
     }

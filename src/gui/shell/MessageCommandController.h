@@ -81,6 +81,7 @@ namespace javelin::gui::shell
         void operationFailed(javelin::jmap::OperationError error);
         void mailboxMembershipChanged(QString accountId);
         void messageMetadataChanged(QString accountId);
+        void emailMarkedRead(QString accountId, QString emailId);
         void emailMutationsSubmitted(const EmailMutationSubmissionSummary& summary);
 
       private:

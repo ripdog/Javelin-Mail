@@ -992,6 +992,16 @@ TEST_CASE("mailbox refresh executor reuses an account Email state refreshed by a
     REQUIRE(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(emailState).has_value());
     CHECK(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(emailState)->stateToken ==
           "email-state-2");
+
+    javelin::jmap::cache::MailboxWindowRepository windows{databaseContext.connection};
+    const auto windowResult = windows.find("account-1", mailboxQueryKey(), 0, 100);
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(
+        windowResult));
+    const auto& window =
+        std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(windowResult);
+    REQUIRE(window.has_value());
+    CHECK(window->queryState == "query-state-2");
+    CHECK(window->emailIds == std::vector<std::string>{"eml-1"});
 }
 
 TEST_CASE("mailbox refresh executor preserves change hints when delta falls back to full fetch",

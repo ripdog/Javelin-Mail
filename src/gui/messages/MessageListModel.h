@@ -63,6 +63,7 @@ namespace javelin::gui::messages
         [[nodiscard]] bool isThreadExpanded(std::string_view threadId) const;
         [[nodiscard]] std::optional<std::string>
         summaryEmailIdForThread(std::string_view threadId) const;
+        [[nodiscard]] bool setEmailRead(std::string_view emailId);
 
       private:
         struct ThreadEntry

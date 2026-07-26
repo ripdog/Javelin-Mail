@@ -219,7 +219,6 @@ namespace javelin::gui::shell
         void goToPreviousPage();
         void goToNextPage();
         void refreshViewsFromCache();
-        void refreshActiveSearchAfterMutation(std::string_view accountId);
         void refreshFromServer();
         void refreshAccountFromServer(std::string accountId);
         [[nodiscard]] ToolbarContext toolbarContextForActiveTab() const;

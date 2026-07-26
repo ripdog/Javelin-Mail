@@ -130,6 +130,7 @@ add_executable(javelin_jmap_tests
     gui/MessageSelectionRestorationTest.cpp
     gui/MessageListTabPolicyTest.cpp
     gui/MessageListTabPresenterTest.cpp
+    gui/MessageListModelTest.cpp
     gui/MessageNavigationPolicyTest.cpp
     gui/TabActivationPolicyTest.cpp
     gui/TabPersistenceTest.cpp
@@ -145,6 +146,7 @@ add_executable(javelin_jmap_tests
     ${PROJECT_SOURCE_DIR}/src/gui/shell/ComposeTabPolicy.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/mailboxes/MailboxSelection.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/messages/MessageActionSelection.cpp
+    ${PROJECT_SOURCE_DIR}/src/gui/messages/MessageListModel.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/messages/MessageSelectionRestoration.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/shell/MessageActionPolicy.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/shell/MessageContentPolicy.cpp
