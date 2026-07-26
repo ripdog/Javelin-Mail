@@ -9,6 +9,8 @@
 #include "jmap/cache/ContactRepository.h"
 #include "jmap/contacts/ContactService.h"
 
+#include <glaze/glaze.hpp>
+
 #include <algorithm>
 #include <ranges>
 #include <unordered_map>
@@ -167,39 +169,39 @@ namespace javelin::app
     ContactCommandService::createContactGroup(std::string ownerAccountId,
                                               CreateContactGroupCommand command)
     {
-        const ForegroundWorkScope foreground{m_workScheduler};
-        const auto settings = m_connectionProvider.connectionSettingsFor(ownerAccountId);
-        if (!settings.has_value())
-            co_return missingConfiguration();
-        co_return observeResult(m_errorCoordinator, *settings, ownerAccountId,
-                                QStringLiteral("Create contact group"),
-                                co_await m_contactService.createGroup(
-                                    toLiveConnectionSettings(*settings), ownerAccountId,
-                                    javelin::jmap::contacts::CreateContactGroupCommand{
-                                        .accountId = std::move(command.accountId),
-                                        .addressBookId = std::move(command.addressBookId),
-                                        .name = std::move(command.name),
-                                    }));
+        auto prepared =
+            m_contactService.prepareCreateGroup({.accountId = std::move(command.accountId),
+                                                 .addressBookId = std::move(command.addressBookId),
+                                                 .name = std::move(command.name)});
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&prepared))
+            co_return *error;
+        co_return co_await submitContactCards(
+            std::move(ownerAccountId),
+            std::get<javelin::jmap::api::ContactCardSetRequest>(std::move(prepared)),
+            QStringLiteral("Create contact group"));
     }
 
     QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
     ContactCommandService::setContactGroupMembership(std::string ownerAccountId,
                                                      SetContactGroupMembershipCommand command)
     {
-        const ForegroundWorkScope foreground{m_workScheduler};
-        const auto settings = m_connectionProvider.connectionSettingsFor(ownerAccountId);
-        if (!settings.has_value())
-            co_return missingConfiguration();
-        co_return observeResult(m_errorCoordinator, *settings, ownerAccountId,
-                                QStringLiteral("Change contact group membership"),
-                                co_await m_contactService.setGroupMembership(
-                                    toLiveConnectionSettings(*settings), ownerAccountId,
-                                    javelin::jmap::contacts::SetContactGroupMembershipCommand{
-                                        .accountId = std::move(command.accountId),
-                                        .groupId = std::move(command.groupId),
-                                        .memberUids = std::move(command.memberUids),
-                                        .included = command.included,
-                                    }));
+        auto prepared =
+            m_contactService.prepareGroupMembership({.accountId = std::move(command.accountId),
+                                                     .groupId = std::move(command.groupId),
+                                                     .memberUids = std::move(command.memberUids),
+                                                     .included = command.included});
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&prepared))
+            co_return *error;
+        auto request = std::get<javelin::jmap::api::ContactCardSetRequest>(std::move(prepared));
+        if (request.update.empty())
+            co_return javelin::jmap::contacts::ContactMutationSummary{
+                .accountId = std::move(request.accountId),
+                .newState = request.ifInState.value_or(std::string{}),
+                .createdId = std::nullopt,
+                .createdIds = {},
+            };
+        co_return co_await submitContactCards(std::move(ownerAccountId), std::move(request),
+                                              QStringLiteral("Change contact group membership"));
     }
 
     QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
@@ -357,7 +359,15 @@ namespace javelin::app
                     .code = javelin::jmap::OperationErrorCode::NotFound,
                     .message = QStringLiteral("The contact is no longer available."),
                 };
-            history.items.push_back(existingHistoryItem(*contact, document.json));
+            const auto after =
+                javelin::jmap::api::applyPatchObject(contact->document, document.json);
+            if (!std::holds_alternative<std::string>(after))
+                co_return javelin::jmap::OperationError{
+                    .code = javelin::jmap::OperationErrorCode::PreconditionFailed,
+                    .message = QStringLiteral("The contact update cannot be applied to its "
+                                              "current cached document."),
+                };
+            history.items.push_back(existingHistoryItem(*contact, std::get<std::string>(after)));
         }
         for (const auto& contactId : request.destroy)
         {
@@ -440,9 +450,106 @@ namespace javelin::app
         const auto settings = m_connectionProvider.connectionSettingsFor(ownerAccountId);
         if (!settings.has_value())
             co_return missingConfiguration();
-        co_return observeResult(
+        undo::ContactCardHistory history{
+            .connectionId = settings->connectionId,
+            .accountId = request.accountId,
+            .items = {},
+        };
+        std::unordered_map<std::string, std::size_t> creationItems;
+        for (const auto& [creationId, patch] : request.create)
+        {
+            auto sourceId = std::string{};
+            if (auto parsed = javelin::jmap::contacts::summarizeContact(
+                    request.fromAccountId,
+                    {.id = {}, .uid = {}, .kind = {}, .document = patch.json}))
+                sourceId = parsed->id;
+            if (sourceId.empty())
+            {
+                glz::generic value;
+                auto json = patch.json;
+                if (!glz::read_json(value, json) && value.is_object())
+                {
+                    const auto id = value.get_object().find("id");
+                    if (id != value.get_object().end() && id->second.is_string())
+                        sourceId = id->second.get_string();
+                }
+            }
+            auto source = m_contactRepository.findContact(request.fromAccountId, sourceId);
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&source))
+                co_return javelin::jmap::operationError(*error);
+            const auto& contact =
+                std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(source);
+            if (!contact.has_value())
+                co_return javelin::jmap::OperationError{
+                    .code = javelin::jmap::OperationErrorCode::NotFound,
+                    .message = QStringLiteral("The copied contact is no longer available."),
+                };
+            auto destination = javelin::jmap::api::applyPatchObject(contact->document, patch.json);
+            if (!std::holds_alternative<std::string>(destination))
+                co_return javelin::jmap::OperationError{
+                    .code = javelin::jmap::OperationErrorCode::PreconditionFailed,
+                    .message = QStringLiteral("The contact copy document is invalid."),
+                };
+            auto item = createdHistoryItem(request.accountId, std::get<std::string>(destination));
+            if (!item.has_value())
+                co_return javelin::jmap::OperationError{
+                    .code = javelin::jmap::OperationErrorCode::PreconditionFailed,
+                    .message =
+                        QStringLiteral("The copied contact cannot be represented in history."),
+                };
+            creationItems.emplace(creationId, history.items.size());
+            history.items.push_back(std::move(*item));
+        }
+        auto preparedResult = m_undoManager.prepareNormal(
+            operationDescription, undo::HistoryDomain::Contacts, history, std::nullopt);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&preparedResult))
+            co_return javelin::jmap::operationError(*error);
+        auto prepared = std::get<std::optional<undo::HistoryEntry>>(std::move(preparedResult));
+        auto result = observeResult(
             m_errorCoordinator, *settings, ownerAccountId, std::move(operationDescription),
             co_await m_contactService.copyContactCards(toLiveConnectionSettings(*settings),
                                                        ownerAccountId, std::move(request)));
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+        {
+            if (prepared.has_value())
+            {
+                if (javelin::jmap::isTransientError(*error) &&
+                    !javelin::jmap::isAuthenticationError(*error))
+                {
+                    auto committed = m_undoManager.commitNormal(std::move(*prepared));
+                    if (const auto* databaseError =
+                            std::get_if<javelin::jmap::cache::DatabaseError>(&committed))
+                        co_return javelin::jmap::operationError(*databaseError);
+                    const auto& entry = std::get<undo::HistoryEntry>(committed);
+                    if (const auto databaseError = m_undoManager.setEntryStatus(
+                            entry.entryId, undo::HistoryEntryStatus::BlockedUnknown,
+                            error->message))
+                        co_return javelin::jmap::operationError(*databaseError);
+                }
+                else if (const auto databaseError = m_undoManager.discardNormal(prepared->entryId))
+                    co_return javelin::jmap::operationError(*databaseError);
+            }
+            co_return *error;
+        }
+        if (prepared.has_value())
+        {
+            auto& committedHistory = std::get<undo::ContactCardHistory>(prepared->payload);
+            const auto& summary = std::get<javelin::jmap::contacts::ContactMutationSummary>(result);
+            for (const auto& mapping : summary.createdIds)
+                if (const auto found = creationItems.find(mapping.creationId);
+                    found != creationItems.end())
+                    committedHistory.items[found->second].currentCardId = mapping.serverId;
+            if (summary.createdIds.size() != creationItems.size())
+                co_return javelin::jmap::OperationError{
+                    .code = javelin::jmap::OperationErrorCode::ProtocolViolation,
+                    .message =
+                        QStringLiteral("The contact copy response omitted a created identity."),
+                };
+            auto committed = m_undoManager.commitNormal(std::move(*prepared));
+            if (const auto* databaseError =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&committed))
+                co_return javelin::jmap::operationError(*databaseError);
+        }
+        co_return result;
     }
 } // namespace javelin::app

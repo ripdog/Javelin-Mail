@@ -24,6 +24,9 @@ namespace javelin::jmap::cache
 
 namespace javelin::jmap::contacts
 {
+    using PreparedContactCardMutation =
+        std::variant<javelin::jmap::api::ContactCardSetRequest, javelin::jmap::OperationError>;
+
     struct CreateContactGroupCommand
     {
         std::string accountId;
@@ -55,6 +58,10 @@ namespace javelin::jmap::contacts
         [[nodiscard]] QCoro::Task<ContactMutationResult>
         setContactCards(javelin::jmap::LiveConnectionSettings settings, std::string ownerAccountId,
                         javelin::jmap::api::ContactCardSetRequest request);
+        [[nodiscard]] PreparedContactCardMutation
+        prepareCreateGroup(CreateContactGroupCommand command) const;
+        [[nodiscard]] PreparedContactCardMutation
+        prepareGroupMembership(SetContactGroupMembershipCommand command) const;
         [[nodiscard]] QCoro::Task<ContactMutationResult>
         createGroup(javelin::jmap::LiveConnectionSettings settings, std::string ownerAccountId,
                     CreateContactGroupCommand command);
