@@ -10,6 +10,9 @@ add_executable(javelin_jmap_tests
     ${PROJECT_SOURCE_DIR}/src/app/undo/HistorySerialization.h
     ${PROJECT_SOURCE_DIR}/src/app/undo/HistoryTypes.cpp
     ${PROJECT_SOURCE_DIR}/src/app/undo/HistoryTypes.h
+    ${PROJECT_SOURCE_DIR}/src/app/undo/HistoryCommandExecutor.h
+    ${PROJECT_SOURCE_DIR}/src/app/undo/UndoManager.cpp
+    ${PROJECT_SOURCE_DIR}/src/app/undo/UndoManager.h
     ${PROJECT_SOURCE_DIR}/src/app/MailboxSelectionMutation.cpp
     ${PROJECT_SOURCE_DIR}/src/app/MessageSelection.cpp
     ${PROJECT_SOURCE_DIR}/src/app/MailboxSyncCoverage.cpp
@@ -48,6 +51,7 @@ add_executable(javelin_jmap_tests
     app/ApplicationErrorCoordinatorTest.cpp
     app/ContactCommandPreparationTest.cpp
     app/HistoryRepositoryTest.cpp
+    app/UndoManagerTest.cpp
     app/MailboxSelectionMutationTest.cpp
     app/MailboxSyncCoverageTest.cpp
     app/MessageNavigationCoordinatorTest.cpp
