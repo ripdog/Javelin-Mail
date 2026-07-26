@@ -1,5 +1,6 @@
 #include "app/ApplicationErrorCoordinator.h"
 
+#include <QDebug>
 #include <QSettings>
 
 #include <algorithm>
@@ -15,6 +16,27 @@ namespace javelin::app
         {
             return QString::fromStdString(std::string{connectionId});
         }
+
+        void logFailure(const AccountConnectionSettings& settings, const std::string_view accountId,
+                        const QString& operation, const javelin::jmap::OperationError& error)
+        {
+            const auto code = javelin::jmap::toString(error.code);
+            auto warning = qWarning().noquote();
+            warning << operation << QStringLiteral("failed")
+                    << QStringLiteral("connection=") + connectionKey(settings.connectionId)
+                    << QStringLiteral("account=") + connectionKey(accountId)
+                    << QStringLiteral("code=") +
+                           QString::fromUtf8(code.data(), static_cast<qsizetype>(code.size()))
+                    << QStringLiteral("message=") + error.message;
+            if (error.httpStatus.has_value())
+                warning << QStringLiteral("httpStatus=") + QString::number(*error.httpStatus);
+            if (error.protocolType.has_value())
+                warning << QStringLiteral("protocolType=") +
+                               QString::fromStdString(*error.protocolType);
+            if (error.retryAfter.has_value())
+                warning << QStringLiteral("retryAfterSeconds=") +
+                               QString::number(error.retryAfter->count());
+        }
     } // namespace
 
     ApplicationErrorCoordinator::ApplicationErrorCoordinator(QObject* parent) : QObject(parent)
@@ -26,7 +48,11 @@ namespace javelin::app
                                                     QString operation,
                                                     const javelin::jmap::OperationError& error)
     {
-        if (javelin::jmap::isCancellation(error) || settings.connectionId.empty())
+        if (javelin::jmap::isCancellation(error))
+            return;
+
+        logFailure(settings, accountId, operation, error);
+        if (settings.connectionId.empty())
             return;
 
         const auto key = incidentKey(settings.connectionId, error.code);

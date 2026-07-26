@@ -2,9 +2,73 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <QMessageLogContext>
 #include <QSettings>
 #include <QTemporaryDir>
 #include <QUuid>
+#include <QtLogging>
+
+namespace
+{
+    QString capturedWarning;
+
+    void captureWarning(const QtMsgType type, const QMessageLogContext&, const QString& message)
+    {
+        if (type == QtWarningMsg)
+            capturedWarning = message;
+    }
+
+    class WarningCapture final
+    {
+      public:
+        WarningCapture() : m_previous(qInstallMessageHandler(captureWarning))
+        {
+            capturedWarning.clear();
+        }
+
+        ~WarningCapture()
+        {
+            qInstallMessageHandler(m_previous);
+        }
+
+        WarningCapture(const WarningCapture&) = delete;
+        WarningCapture& operator=(const WarningCapture&) = delete;
+
+      private:
+        QtMessageHandler m_previous;
+    };
+} // namespace
+
+TEST_CASE("application errors log all available diagnostic context")
+{
+    javelin::app::ApplicationErrorCoordinator coordinator;
+    const javelin::app::AccountConnectionSettings settings{
+        .connectionId = "connection-a",
+        .revision = 1,
+        .sessionUrl = "https://example.test/jmap",
+        .loginEmail = "user@example.test",
+        .apiKey = "secret",
+    };
+    const WarningCapture warningCapture;
+
+    coordinator.reportFailure(settings, "account-a", QStringLiteral("Save contact"),
+                              {
+                                  .code = javelin::jmap::OperationErrorCode::ServerUnavailable,
+                                  .message = QStringLiteral("diagnostic detail"),
+                                  .httpStatus = 503,
+                                  .retryAfter = std::chrono::seconds{17},
+                                  .protocolType = "serverUnavailable",
+                              });
+
+    CHECK(capturedWarning.contains(QStringLiteral("Save contact failed")));
+    CHECK(capturedWarning.contains(QStringLiteral("connection=connection-a")));
+    CHECK(capturedWarning.contains(QStringLiteral("account=account-a")));
+    CHECK(capturedWarning.contains(QStringLiteral("code=server_unavailable")));
+    CHECK(capturedWarning.contains(QStringLiteral("message=diagnostic detail")));
+    CHECK(capturedWarning.contains(QStringLiteral("httpStatus=503")));
+    CHECK(capturedWarning.contains(QStringLiteral("protocolType=serverUnavailable")));
+    CHECK(capturedWarning.contains(QStringLiteral("retryAfterSeconds=17")));
+}
 
 TEST_CASE("application errors are deduplicated and rearmed after recovery")
 {
