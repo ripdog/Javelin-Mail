@@ -112,6 +112,7 @@ namespace
             .accountId = "account-1",
             .lastState = "state-1",
             .types = {"Email", "Mailbox"},
+            .groupwareAccountIds = {},
         };
     }
 

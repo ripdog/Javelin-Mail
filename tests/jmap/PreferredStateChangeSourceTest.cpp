@@ -122,6 +122,7 @@ namespace
             .accountId = std::move(accountId),
             .lastState = "state-1",
             .types = {"Email", "Mailbox"},
+            .groupwareAccountIds = {},
         };
     }
 } // namespace
