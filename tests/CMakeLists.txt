@@ -11,6 +11,9 @@ add_executable(javelin_jmap_tests
     ${PROJECT_SOURCE_DIR}/src/app/undo/HistoryTypes.cpp
     ${PROJECT_SOURCE_DIR}/src/app/undo/HistoryTypes.h
     ${PROJECT_SOURCE_DIR}/src/app/undo/HistoryCommandExecutor.h
+    ${PROJECT_SOURCE_DIR}/src/app/undo/DraftHistoryExecutor.cpp
+    ${PROJECT_SOURCE_DIR}/src/app/undo/DraftHistoryExecutor.h
+    ${PROJECT_SOURCE_DIR}/src/app/undo/DraftHistoryPort.h
     ${PROJECT_SOURCE_DIR}/src/app/undo/MailHistoryExecutor.cpp
     ${PROJECT_SOURCE_DIR}/src/app/undo/MailHistoryExecutor.h
     ${PROJECT_SOURCE_DIR}/src/app/undo/MailHistoryPort.h
@@ -57,6 +60,7 @@ add_executable(javelin_jmap_tests
     app/ApplicationErrorCoordinatorTest.cpp
     app/ContactCommandPreparationTest.cpp
     app/HistoryRepositoryTest.cpp
+    app/DraftHistoryExecutorTest.cpp
     app/MailHistoryExecutorTest.cpp
     app/SieveHistoryExecutorTest.cpp
     app/UndoManagerTest.cpp

@@ -82,6 +82,9 @@ set(JAVELIN_FORMAT_FILES
     src/app/undo/HistoryTypes.cpp
     src/app/undo/HistoryTypes.h
     src/app/undo/HistoryCommandExecutor.h
+    src/app/undo/DraftHistoryExecutor.cpp
+    src/app/undo/DraftHistoryExecutor.h
+    src/app/undo/DraftHistoryPort.h
     src/app/undo/MailHistoryExecutor.cpp
     src/app/undo/MailHistoryExecutor.h
     src/app/undo/MailHistoryPort.h
@@ -391,6 +394,7 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/submission/ComposeService.cpp
     src/jmap/submission/ComposeService.h
     src/jmap/submission/ComposeTypes.h
+    src/jmap/submission/DraftSnapshotSerialization.h
     src/jmap/submission/DraftMutationJournal.cpp
     src/jmap/submission/DraftMutationJournal.h
     src/jmap/sieve/SieveService.cpp
@@ -612,6 +616,7 @@ add_library(javelin_jmap STATIC
     src/jmap/submission/ComposeService.cpp
     src/jmap/submission/ComposeService.h
     src/jmap/submission/ComposeTypes.h
+    src/jmap/submission/DraftSnapshotSerialization.h
     src/jmap/submission/DraftMutationJournal.cpp
     src/jmap/submission/DraftMutationJournal.h
     src/jmap/sieve/SieveService.cpp
@@ -885,6 +890,9 @@ add_library(javelin_application STATIC
     src/app/undo/HistoryTypes.cpp
     src/app/undo/HistoryTypes.h
     src/app/undo/HistoryCommandExecutor.h
+    src/app/undo/DraftHistoryExecutor.cpp
+    src/app/undo/DraftHistoryExecutor.h
+    src/app/undo/DraftHistoryPort.h
     src/app/undo/MailHistoryExecutor.cpp
     src/app/undo/MailHistoryExecutor.h
     src/app/undo/MailHistoryPort.h

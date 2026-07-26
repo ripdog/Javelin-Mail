@@ -68,6 +68,8 @@ namespace javelin::jmap::submission
         std::optional<std::string> referenceEmailId;
         std::optional<std::string> draftEmailId;
         std::vector<javelin::jmap::domain::EmailAddress> initialTo;
+        bool useExistingWorkingCopy = true;
+        std::optional<std::string> composeSessionId = std::nullopt;
     };
 
     struct DraftSaveSummary
@@ -75,6 +77,18 @@ namespace javelin::jmap::submission
         std::string composeSessionId;
         std::string accountId;
         std::string draftEmailId;
+        std::string operationGroupId;
+        std::string createMutationId;
+        std::optional<std::string> destroyMutationId;
+        DraftSnapshot savedSnapshot;
+    };
+
+    struct DraftDeleteSummary
+    {
+        std::string accountId;
+        std::string draftEmailId;
+        std::string operationGroupId;
+        std::string mutationId;
     };
 
     struct SendSummary

@@ -814,7 +814,7 @@ namespace javelin::jmap::submission
         }
 
         javelin::jmap::cache::ComposeSessionRepository composeRepository{m_connection};
-        if (request.draftEmailId.has_value())
+        if (request.draftEmailId.has_value() && request.useExistingWorkingCopy)
         {
             const auto composeSessionsResult = composeRepository.listByAccount(request.accountId);
             if (const auto* error =
@@ -850,7 +850,8 @@ namespace javelin::jmap::submission
         }
 
         DraftSnapshot snapshot{
-            .composeSessionId = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString(),
+            .composeSessionId = request.composeSessionId.value_or(
+                QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString()),
             .accountId = request.accountId,
             .draftEmailId = std::nullopt,
             .mode = request.mode,
@@ -1002,7 +1003,7 @@ namespace javelin::jmap::submission
 
     QCoro::Task<std::variant<DraftSaveSummary, javelin::jmap::OperationError>>
     ComposeService::saveDraft(javelin::jmap::LiveConnectionSettings settings,
-                              DraftSnapshot snapshot)
+                              DraftSnapshot snapshot, std::optional<std::string> operationGroupId)
     {
         if (const auto validationError = validateSettings(settings))
         {
@@ -1184,10 +1185,10 @@ namespace javelin::jmap::submission
                     .message = QStringLiteral("The draft being replaced is not cached."),
                 };
         }
-        const auto operationGroupId =
-            QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
-        const auto temporaryEmailId = std::string{"local-"} + operationGroupId;
-        const auto temporaryThreadId = std::string{"local-thread-"} + operationGroupId;
+        const auto resolvedOperationGroupId = operationGroupId.value_or(
+            QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString());
+        const auto temporaryEmailId = std::string{"local-"} + resolvedOperationGroupId;
+        const auto temporaryThreadId = std::string{"local-thread-"} + resolvedOperationGroupId;
         const auto projectedEmail = emailFromDraft(
             snapshot, *identityIt, draftsMailbox->id,
             {
@@ -1197,7 +1198,7 @@ namespace javelin::jmap::submission
                 .size = 0,
             });
         const DraftMutationGroup draftMutation{
-            .operationGroupId = operationGroupId,
+            .operationGroupId = resolvedOperationGroupId,
             .createMutationId = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString(),
             .destroyMutationId =
                 snapshot.draftEmailId.has_value()
@@ -1381,6 +1382,54 @@ namespace javelin::jmap::submission
             .composeSessionId = snapshot.composeSessionId,
             .accountId = snapshot.accountId,
             .draftEmailId = *snapshot.draftEmailId,
+            .operationGroupId = resolvedOperationGroupId,
+            .createMutationId = draftMutation.createMutationId,
+            .destroyMutationId = draftMutation.destroyMutationId,
+            .savedSnapshot = snapshot,
+        };
+    }
+
+    QCoro::Task<std::variant<DraftSnapshot, javelin::jmap::OperationError>>
+    ComposeService::loadAuthoritativeDraft(javelin::jmap::LiveConnectionSettings settings,
+                                           std::string accountId, std::string draftEmailId,
+                                           std::string composeSessionId)
+    {
+        co_return co_await open(std::move(settings),
+                                {
+                                    .accountId = std::move(accountId),
+                                    .mode = ComposeMode::EditDraft,
+                                    .referenceEmailId = std::nullopt,
+                                    .draftEmailId = std::move(draftEmailId),
+                                    .initialTo = {},
+                                    .useExistingWorkingCopy = false,
+                                    .composeSessionId = std::move(composeSessionId),
+                                });
+    }
+
+    QCoro::Task<std::variant<DraftDeleteSummary, javelin::jmap::OperationError>>
+    ComposeService::deleteDraft(javelin::jmap::LiveConnectionSettings settings,
+                                std::string accountId, std::string draftEmailId,
+                                std::string operationGroupId)
+    {
+        const auto queued = m_jmapCore.queueDestroyEmail(accountId, draftEmailId, operationGroupId);
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&queued))
+            co_return *error;
+        const auto& mutation = std::get<javelin::jmap::QueuedEmailMutation>(queued);
+        auto submitted = co_await m_jmapCore.submitPendingEmailMutations(
+            std::move(settings), accountId, operationGroupId);
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&submitted))
+            co_return *error;
+        const auto& summary = std::get<javelin::jmap::SubmittedEmailMutations>(submitted);
+        if (summary.updatedEmailCount != 1)
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::Conflict,
+                .message = QStringLiteral("The server rejected deleting the saved draft."),
+            };
+        co_return DraftDeleteSummary{
+            .accountId = std::move(accountId),
+            .draftEmailId = std::move(draftEmailId),
+            .operationGroupId = std::move(operationGroupId),
+            .mutationId = mutation.mutationId,
         };
     }
 

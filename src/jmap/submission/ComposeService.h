@@ -37,7 +37,15 @@ namespace javelin::jmap::submission
                                                javelin::jmap::OperationError>>
         loadSenderIdentities(javelin::jmap::LiveConnectionSettings settings, std::string accountId);
         [[nodiscard]] QCoro::Task<std::variant<DraftSaveSummary, javelin::jmap::OperationError>>
-        saveDraft(javelin::jmap::LiveConnectionSettings settings, DraftSnapshot snapshot);
+        saveDraft(javelin::jmap::LiveConnectionSettings settings, DraftSnapshot snapshot,
+                  std::optional<std::string> operationGroupId = std::nullopt);
+        [[nodiscard]] QCoro::Task<std::variant<DraftSnapshot, javelin::jmap::OperationError>>
+        loadAuthoritativeDraft(javelin::jmap::LiveConnectionSettings settings,
+                               std::string accountId, std::string draftEmailId,
+                               std::string composeSessionId);
+        [[nodiscard]] QCoro::Task<std::variant<DraftDeleteSummary, javelin::jmap::OperationError>>
+        deleteDraft(javelin::jmap::LiveConnectionSettings settings, std::string accountId,
+                    std::string draftEmailId, std::string operationGroupId);
         [[nodiscard]] QCoro::Task<std::variant<SendSummary, javelin::jmap::OperationError>>
         send(javelin::jmap::LiveConnectionSettings settings, DraftSnapshot snapshot);
         [[nodiscard]] std::variant<std::optional<DraftSnapshot>, javelin::jmap::OperationError>

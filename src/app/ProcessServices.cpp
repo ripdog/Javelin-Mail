@@ -13,6 +13,7 @@
 #include "app/MessageNavigationCoordinator.h"
 #include "app/TranslationService.h"
 #include "app/WorkScheduler.h"
+#include "app/undo/DraftHistoryExecutor.h"
 #include "app/undo/HistoryRepository.h"
 #include "app/undo/MailHistoryExecutor.h"
 #include "app/undo/SieveHistoryExecutor.h"
@@ -140,13 +141,17 @@ namespace javelin::app
         m_jmapComposeService = std::make_unique<javelin::jmap::submission::ComposeService>(
             m_databaseConnection, *m_transport, *m_methodTransport, *m_jmapCore);
         m_errorCoordinator = std::make_unique<ApplicationErrorCoordinator>();
-        m_composeService = std::make_unique<ComposeService>(*m_jmapComposeService,
-                                                            *m_errorCoordinator, *m_workScheduler);
         m_mailService = std::make_unique<MailApplicationService>(
             m_databaseConnection, *m_jmapCore, *m_methodTransport,
             *m_stateChangeNetworkAccessManager, *m_webSocketFailureCooldowns, *m_accountRepository,
             *m_queryService, *m_contactService, *m_calendarService, *m_sieveService,
             *m_errorCoordinator, *m_workScheduler, *m_undoManager);
+        m_composeService =
+            std::make_unique<ComposeService>(*m_jmapComposeService, *m_errorCoordinator,
+                                             *m_workScheduler, *m_mailService, *m_undoManager);
+        m_draftHistoryExecutor =
+            std::make_unique<javelin::app::undo::DraftHistoryExecutor>(*m_composeService);
+        m_undoManager->setExecutor(QStringLiteral("draft"), m_draftHistoryExecutor.get());
         m_mailHistoryExecutor =
             std::make_unique<javelin::app::undo::MailHistoryExecutor>(*m_mailService);
         m_undoManager->setExecutor(QStringLiteral("mail_patch"), m_mailHistoryExecutor.get());

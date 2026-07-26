@@ -1,4 +1,5 @@
 #include "jmap/cache/ComposeSessionRepository.h"
+#include "jmap/submission/DraftSnapshotSerialization.h"
 
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -304,6 +305,24 @@ namespace javelin::jmap::cache
 
     } // namespace
 
+} // namespace javelin::jmap::cache
+
+namespace javelin::jmap::submission
+{
+    QString serializeDraftSnapshot(const DraftSnapshot& snapshot)
+    {
+        return javelin::jmap::cache::serializeSnapshot(snapshot);
+    }
+
+    std::optional<DraftSnapshot> deserializeDraftSnapshot(const QString& json)
+    {
+        return javelin::jmap::cache::deserializeSnapshot(json);
+    }
+} // namespace javelin::jmap::submission
+
+namespace javelin::jmap::cache
+{
+
     ComposeSessionRepository::ComposeSessionRepository(DatabaseConnection& connection)
         : m_connection(connection)
     {
@@ -366,7 +385,8 @@ namespace javelin::jmap::cache
         query.bindValue(QStringLiteral(":editor_mode"),
                         QString::fromStdString(
                             std::string{javelin::jmap::submission::toString(snapshot.editorMode)}));
-        query.bindValue(QStringLiteral(":snapshot_json"), serializeSnapshot(snapshot));
+        query.bindValue(QStringLiteral(":snapshot_json"),
+                        javelin::jmap::submission::serializeDraftSnapshot(snapshot));
         if (!query.exec())
         {
             return makeQueryError(QStringLiteral("Upsert compose session"), query);
@@ -399,7 +419,7 @@ namespace javelin::jmap::cache
             return std::optional<javelin::jmap::submission::DraftSnapshot>{std::nullopt};
         }
 
-        return deserializeSnapshot(query.value(0).toString());
+        return javelin::jmap::submission::deserializeDraftSnapshot(query.value(0).toString());
     }
 
     std::variant<std::vector<javelin::jmap::submission::DraftSnapshot>, DatabaseError>
@@ -424,7 +444,8 @@ namespace javelin::jmap::cache
         std::vector<javelin::jmap::submission::DraftSnapshot> snapshots;
         while (query.next())
         {
-            if (const auto snapshot = deserializeSnapshot(query.value(0).toString()))
+            if (const auto snapshot =
+                    javelin::jmap::submission::deserializeDraftSnapshot(query.value(0).toString()))
             {
                 snapshots.push_back(*snapshot);
             }

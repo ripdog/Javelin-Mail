@@ -85,7 +85,7 @@ namespace javelin::app::undo
         std::string accountId;
         std::string composeSessionId;
         std::optional<std::string> currentDraftEmailId;
-        std::string beforeSnapshotJson;
+        std::optional<std::string> beforeSnapshotJson;
         std::string afterSnapshotJson;
 
         auto operator<=>(const DraftHistory&) const = default;
