@@ -497,6 +497,31 @@ TEST_CASE("mailbox thread queries exclude members moved to another mailbox", "[j
     CHECK(summaries.front().emailId == "eml-inbox");
     CHECK(summaries.front().threadMessageCount == 1);
 
+    const std::string queryKey = "mailbox:mbx-inbox|sort:receivedAt:desc|collapseThreads:true";
+    javelin::jmap::cache::MailboxWindowRepository windows{databaseContext.connection};
+    REQUIRE_FALSE(windows
+                      .replace({
+                          .accountId = "account-1",
+                          .mailboxId = "mbx-inbox",
+                          .queryKey = queryKey,
+                          .requestedOffset = 0,
+                          .requestedLimit = 100,
+                          .position = 0,
+                          .returnedLimit = 1,
+                          .total = 1,
+                          .queryState = "query-state-1",
+                          .emailIds = {"eml-inbox"},
+                      })
+                      .has_value());
+    const auto cachedWindow = queryService.loadMailboxWindow("account-1", queryKey, 0, 100, {});
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::MailboxWindowPage>>(
+        cachedWindow));
+    const auto& cachedPage =
+        std::get<std::optional<javelin::jmap::cache::MailboxWindowPage>>(cachedWindow);
+    REQUIRE(cachedPage.has_value());
+    REQUIRE(cachedPage->items.size() == 1);
+    CHECK(cachedPage->items.front().threadMessageCount == 1);
+
     const auto mailboxThread =
         queryService.listMailboxThreadMessages("account-1", "mbx-inbox", "thr-1");
     REQUIRE(

@@ -587,13 +587,16 @@ namespace javelin::jmap::cache
                 "),ranked_members AS ("
                 "  SELECT rt.window_position,e.email_id,"
                 "         ROW_NUMBER() OVER (PARTITION BY rt.window_position "
-                "           ORDER BY %2 %1,e.email_id %1) AS thread_rank "
+                "           ORDER BY %2 %1,e.email_id %1) AS thread_rank,"
+                "         COUNT(*) OVER (PARTITION BY rt.window_position) AS "
+                "mailbox_thread_message_count "
                 "  FROM requested_threads rt "
                 "  CROSS JOIN emails e INDEXED BY idx_emails_thread "
                 "    ON e.account_id=:account_id AND e.thread_id=rt.thread_id "
                 "  CROSS JOIN email_mailboxes em ON em.account_id=e.account_id "
                 "    AND em.email_id=e.email_id AND em.mailbox_id=:mailbox_id"
-                ") SELECT email_id FROM ranked_members WHERE thread_rank=1 "
+                ") SELECT email_id,mailbox_thread_message_count "
+                "FROM ranked_members WHERE thread_rank=1 "
                 "ORDER BY window_position")
                 .arg(orderDirection, sortKey));
         query.bindValue(QStringLiteral(":account_id"),
@@ -605,10 +608,30 @@ namespace javelin::jmap::cache
             return makeQueryError(QStringLiteral("Project mailbox-window membership"), query);
 
         std::vector<std::string> projectedIds;
+        std::vector<std::uint64_t> mailboxThreadMessageCounts;
         projectedIds.reserve(emailIds.size());
+        mailboxThreadMessageCounts.reserve(emailIds.size());
         while (query.next())
+        {
             projectedIds.push_back(query.value(0).toString().toStdString());
-        return listMessagesByEmailIds(accountId, projectedIds);
+            mailboxThreadMessageCounts.push_back(query.value(1).toULongLong());
+        }
+
+        auto messagesResult = listMessagesByEmailIds(accountId, projectedIds);
+        auto* messages = std::get_if<std::vector<MessageListItem>>(&messagesResult);
+        if (messages == nullptr)
+            return std::get<DatabaseError>(messagesResult);
+        if (messages->size() != mailboxThreadMessageCounts.size())
+        {
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message =
+                    QStringLiteral("Mailbox-window projection returned inconsistent row counts."),
+            };
+        }
+        for (std::size_t index = 0; index < messages->size(); ++index)
+            (*messages)[index].threadMessageCount = mailboxThreadMessageCounts[index];
+        return std::move(*messages);
     }
 
     std::variant<std::vector<MessageListItem>, DatabaseError>
