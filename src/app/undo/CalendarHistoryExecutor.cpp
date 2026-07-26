@@ -79,6 +79,14 @@ namespace javelin::app::undo
             right.id = currentId;
             left.baseEventId = std::nullopt;
             right.baseEventId = std::nullopt;
+            left.recurrenceId = std::nullopt;
+            right.recurrenceId = std::nullopt;
+            left.isOrigin = false;
+            right.isOrigin = false;
+            left.utcStart = std::nullopt;
+            right.utcStart = std::nullopt;
+            left.utcEnd = std::nullopt;
+            right.utcEnd = std::nullopt;
             return left == right;
         }
 

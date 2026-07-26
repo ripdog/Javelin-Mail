@@ -154,6 +154,25 @@ TEST_CASE("calendar create undo deletes and redo recreates with a remapped id",
           std::optional<std::string>{"event-1"});
 }
 
+TEST_CASE("calendar create undo ignores server-derived event fields",
+          "[app][undo][calendar-executor]")
+{
+    FakeCalendarHistoryPort port;
+    const auto created = event("event-original", "Appointment");
+    port.current = created;
+    port.current->isOrigin = true;
+    port.current->utcStart = UtcInstant{.value = "2026-07-31T21:00:00Z"};
+    port.current->utcEnd = UtcInstant{.value = "2026-07-31T22:00:00Z"};
+    CalendarHistoryExecutor executor{port};
+
+    const auto result = QCoro::waitFor(executor.execute(entry(std::nullopt, created, created.id),
+                                                        HistoryExecutionDirection::Undo));
+
+    CHECK(result.outcome == HistoryExecutionOutcome::Success);
+    CHECK_FALSE(port.current.has_value());
+    CHECK(port.mutations == 1);
+}
+
 TEST_CASE("calendar delete undo recreates the complete event", "[app][undo][calendar-executor]")
 {
     FakeCalendarHistoryPort port;
