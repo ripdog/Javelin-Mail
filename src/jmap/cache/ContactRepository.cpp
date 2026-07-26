@@ -73,100 +73,103 @@ namespace javelin::jmap::cache
             return std::nullopt;
         }
 
-        [[nodiscard]] std::optional<DatabaseError>
-        insertContact(QSqlDatabase& database,
-                      const javelin::jmap::contacts::ContactSummary& contact)
+        class ContactWriter final
         {
-            QSqlQuery card{database};
-            card.prepare(QStringLiteral(
-                "INSERT INTO contact_cards (account_id, contact_id, uid, kind, display_name, "
-                "organization, document_json) VALUES (:account, :id, :uid, :kind, :name, :org, "
-                ":document) ON CONFLICT(account_id, contact_id) DO UPDATE SET uid=excluded.uid, "
-                "kind=excluded.kind, display_name=excluded.display_name, "
-                "organization=excluded.organization, document_json=excluded.document_json"));
-            card.bindValue(QStringLiteral(":account"), QString::fromStdString(contact.accountId));
-            card.bindValue(QStringLiteral(":id"), QString::fromStdString(contact.id));
-            card.bindValue(QStringLiteral(":uid"), QString::fromStdString(contact.uid));
-            card.bindValue(QStringLiteral(":kind"), QString::fromStdString(contact.kind));
-            card.bindValue(QStringLiteral(":name"), QString::fromStdString(contact.displayName));
-            card.bindValue(QStringLiteral(":org"),
-                           contact.organization.has_value()
-                               ? QVariant{QString::fromStdString(*contact.organization)}
-                               : QVariant{});
-            card.bindValue(QStringLiteral(":document"), QString::fromStdString(contact.document));
-            if (!card.exec())
+          public:
+            explicit ContactWriter(QSqlDatabase& database)
+                : m_card(database), m_clearBooks(database), m_clearEmails(database),
+                  m_book(database), m_email(database)
             {
-                return queryError(QStringLiteral("Upsert contact card"), card);
+                m_card.prepare(QStringLiteral(
+                    "INSERT INTO contact_cards (account_id, contact_id, uid, kind, display_name, "
+                    "organization, document_json) VALUES (:account, :id, :uid, :kind, :name, :org, "
+                    ":document) ON CONFLICT(account_id, contact_id) DO UPDATE SET "
+                    "uid=excluded.uid, "
+                    "kind=excluded.kind, display_name=excluded.display_name, "
+                    "organization=excluded.organization, document_json=excluded.document_json"));
+                m_clearBooks.prepare(QStringLiteral("DELETE FROM contact_card_address_books WHERE "
+                                                    "account_id=:account AND contact_id=:id"));
+                m_clearEmails.prepare(
+                    QStringLiteral("DELETE FROM contact_emails WHERE account_id=:account "
+                                   "AND contact_id=:id"));
+                m_book.prepare(QStringLiteral("INSERT INTO contact_card_address_books "
+                                              "(account_id, contact_id, address_book_id) VALUES "
+                                              "(:account, :id, :book)"));
+                m_email.prepare(QStringLiteral(
+                    "INSERT INTO contact_emails (account_id, contact_id, "
+                    "entry_key, address, normalized_address, label, preference) "
+                    "VALUES (:account, :id, :key, :address, :normalized, :label, :pref)"));
             }
 
-            QSqlQuery clearBooks{database};
-            clearBooks.prepare(QStringLiteral("DELETE FROM contact_card_address_books WHERE "
-                                              "account_id=:account AND contact_id=:id"));
-            clearBooks.bindValue(QStringLiteral(":account"),
-                                 QString::fromStdString(contact.accountId));
-            clearBooks.bindValue(QStringLiteral(":id"), QString::fromStdString(contact.id));
-            if (!clearBooks.exec())
+            [[nodiscard]] std::optional<DatabaseError>
+            insert(const javelin::jmap::contacts::ContactSummary& contact)
             {
-                return queryError(QStringLiteral("Clear contact address books"), clearBooks);
-            }
-            QSqlQuery clearEmails{database};
-            clearEmails.prepare(
-                QStringLiteral("DELETE FROM contact_emails WHERE account_id=:account "
-                               "AND contact_id=:id"));
-            clearEmails.bindValue(QStringLiteral(":account"),
-                                  QString::fromStdString(contact.accountId));
-            clearEmails.bindValue(QStringLiteral(":id"), QString::fromStdString(contact.id));
-            if (!clearEmails.exec())
-            {
-                return queryError(QStringLiteral("Clear contact emails"), clearEmails);
-            }
+                const QString accountId = QString::fromStdString(contact.accountId);
+                const QString contactId = QString::fromStdString(contact.id);
+                m_card.bindValue(QStringLiteral(":account"), accountId);
+                m_card.bindValue(QStringLiteral(":id"), contactId);
+                m_card.bindValue(QStringLiteral(":uid"), QString::fromStdString(contact.uid));
+                m_card.bindValue(QStringLiteral(":kind"), QString::fromStdString(contact.kind));
+                m_card.bindValue(QStringLiteral(":name"),
+                                 QString::fromStdString(contact.displayName));
+                m_card.bindValue(QStringLiteral(":org"),
+                                 contact.organization.has_value()
+                                     ? QVariant{QString::fromStdString(*contact.organization)}
+                                     : QVariant{});
+                m_card.bindValue(QStringLiteral(":document"),
+                                 QString::fromStdString(contact.document));
+                if (!m_card.exec())
+                    return queryError(QStringLiteral("Upsert contact card"), m_card);
 
-            QSqlQuery book{database};
-            book.prepare(QStringLiteral("INSERT INTO contact_card_address_books "
-                                        "(account_id, contact_id, address_book_id) VALUES "
-                                        "(:account, :id, :book)"));
-            for (const auto& bookId : contact.addressBookIds)
-            {
-                book.bindValue(QStringLiteral(":account"),
-                               QString::fromStdString(contact.accountId));
-                book.bindValue(QStringLiteral(":id"), QString::fromStdString(contact.id));
-                book.bindValue(QStringLiteral(":book"), QString::fromStdString(bookId));
-                if (!book.exec())
+                m_clearBooks.bindValue(QStringLiteral(":account"), accountId);
+                m_clearBooks.bindValue(QStringLiteral(":id"), contactId);
+                if (!m_clearBooks.exec())
+                    return queryError(QStringLiteral("Clear contact address books"), m_clearBooks);
+                m_clearEmails.bindValue(QStringLiteral(":account"), accountId);
+                m_clearEmails.bindValue(QStringLiteral(":id"), contactId);
+                if (!m_clearEmails.exec())
+                    return queryError(QStringLiteral("Clear contact emails"), m_clearEmails);
+
+                for (const auto& bookId : contact.addressBookIds)
                 {
-                    return queryError(QStringLiteral("Insert contact address book"), book);
+                    m_book.bindValue(QStringLiteral(":account"), accountId);
+                    m_book.bindValue(QStringLiteral(":id"), contactId);
+                    m_book.bindValue(QStringLiteral(":book"), QString::fromStdString(bookId));
+                    if (!m_book.exec())
+                        return queryError(QStringLiteral("Insert contact address book"), m_book);
                 }
+
+                for (const auto& item : contact.emails)
+                {
+                    m_email.bindValue(QStringLiteral(":account"), accountId);
+                    m_email.bindValue(QStringLiteral(":id"), contactId);
+                    m_email.bindValue(QStringLiteral(":key"), QString::fromStdString(item.key));
+                    m_email.bindValue(QStringLiteral(":address"),
+                                      QString::fromStdString(item.address));
+                    m_email.bindValue(QStringLiteral(":normalized"),
+                                      QString::fromStdString(
+                                          javelin::jmap::contacts::normalizeEmail(item.address)));
+                    m_email.bindValue(QStringLiteral(":label"),
+                                      item.label.has_value()
+                                          ? QVariant{QString::fromStdString(*item.label)}
+                                          : QVariant{});
+                    m_email.bindValue(QStringLiteral(":pref"),
+                                      item.preference.has_value()
+                                          ? QVariant{static_cast<qulonglong>(*item.preference)}
+                                          : QVariant{});
+                    if (!m_email.exec())
+                        return queryError(QStringLiteral("Insert contact email"), m_email);
+                }
+                return std::nullopt;
             }
 
-            QSqlQuery email{database};
-            email.prepare(QStringLiteral(
-                "INSERT INTO contact_emails (account_id, contact_id, "
-                "entry_key, address, normalized_address, label, preference) "
-                "VALUES (:account, :id, :key, :address, :normalized, :label, :pref)"));
-            for (const auto& item : contact.emails)
-            {
-                email.bindValue(QStringLiteral(":account"),
-                                QString::fromStdString(contact.accountId));
-                email.bindValue(QStringLiteral(":id"), QString::fromStdString(contact.id));
-                email.bindValue(QStringLiteral(":key"), QString::fromStdString(item.key));
-                email.bindValue(QStringLiteral(":address"), QString::fromStdString(item.address));
-                email.bindValue(
-                    QStringLiteral(":normalized"),
-                    QString::fromStdString(javelin::jmap::contacts::normalizeEmail(item.address)));
-                email.bindValue(QStringLiteral(":label"),
-                                item.label.has_value()
-                                    ? QVariant{QString::fromStdString(*item.label)}
-                                    : QVariant{});
-                email.bindValue(QStringLiteral(":pref"),
-                                item.preference.has_value()
-                                    ? QVariant{static_cast<qulonglong>(*item.preference)}
-                                    : QVariant{});
-                if (!email.exec())
-                {
-                    return queryError(QStringLiteral("Insert contact email"), email);
-                }
-            }
-            return std::nullopt;
-        }
+          private:
+            QSqlQuery m_card;
+            QSqlQuery m_clearBooks;
+            QSqlQuery m_clearEmails;
+            QSqlQuery m_book;
+            QSqlQuery m_email;
+        };
 
         [[nodiscard]] std::optional<javelin::jmap::contacts::ContactSummary>
         readContact(QSqlQuery& query)
@@ -202,9 +205,10 @@ namespace javelin::jmap::cache
                     }
                 }
             }
+            ContactWriter writer{database};
             for (const auto& contact : contacts)
             {
-                if (const auto error = insertContact(database, contact))
+                if (const auto error = writer.insert(contact))
                 {
                     return error;
                 }
@@ -264,9 +268,10 @@ namespace javelin::jmap::cache
             if (const auto error = insertAddressBook(database, accountId, item, addressBookState))
                 return error;
         }
+        ContactWriter writer{database};
         for (const auto& contact : contacts)
         {
-            if (const auto error = insertContact(database, contact))
+            if (const auto error = writer.insert(contact))
                 return error;
         }
         QSqlQuery state{database};

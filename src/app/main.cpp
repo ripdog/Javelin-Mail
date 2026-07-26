@@ -33,7 +33,6 @@ namespace
         {
             m_timer.setTimerType(Qt::PreciseTimer);
             m_timer.setInterval(50);
-            m_last.start();
 
             connect(&m_timer, &QTimer::timeout, this,
                     [this]
@@ -45,7 +44,12 @@ namespace
                         }
                     });
 
-            m_timer.start();
+            QTimer::singleShot(0, this,
+                               [this]
+                               {
+                                   m_last.start();
+                                   m_timer.start();
+                               });
         }
 
       private:
@@ -118,7 +122,6 @@ int main(int argc, char* argv[])
     const bool profileUi = uiProfilingEnabled();
     ProfilingApplication application(argc, argv, profileUi);
     javelin::app::LogStore::install();
-    const auto stallProbe = profileUi ? std::make_unique<UiStallProbe>() : nullptr;
     application.setApplicationName(QStringLiteral("Javelin Mail"));
     application.setOrganizationName(QStringLiteral("Javelin Mail"));
 
@@ -135,5 +138,6 @@ int main(int argc, char* argv[])
     }
 
     javelin::app::ApplicationBootstrap bootstrap(application);
+    const auto stallProbe = profileUi ? std::make_unique<UiStallProbe>() : nullptr;
     return bootstrap.run();
 }

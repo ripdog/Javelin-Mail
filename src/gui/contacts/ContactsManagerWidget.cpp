@@ -522,7 +522,6 @@ namespace javelin::gui::contacts
                     if (currentAccountId() != std::optional<std::string>{accountId.toStdString()})
                         return;
                     reloadAddressBooks();
-                    reloadContacts();
                 });
         reloadAccounts();
     }
@@ -1397,10 +1396,11 @@ namespace javelin::gui::contacts
         const auto contacts = selectedContacts();
         if (contacts.size() > 1)
         {
-            QMenu menu{this};
+            auto* menu = new QMenu{this};
+            menu->setAttribute(Qt::WA_DeleteOnClose);
             const bool allStarred = std::ranges::all_of(contacts, [](const auto* selected)
                                                         { return selected->isImportant; });
-            auto* starred = menu.addAction(
+            auto* starred = menu->addAction(
                 javelin::gui::themedSvgIcon(
                     allStarred ? QStringLiteral(":/icons/thunderbird-icons/starred.svg")
                                : QStringLiteral(":/icons/thunderbird-icons/star.svg"),
@@ -1411,22 +1411,23 @@ namespace javelin::gui::contacts
             starred->setEnabled(!m_busy && canStarSelectedContacts());
             connect(starred, &QAction::triggered, this,
                     &ContactsManagerWidget::toggleContactStarred);
-            auto* addToGroup = menu.addMenu(QIcon::fromTheme(QStringLiteral("list-add")),
-                                            QStringLiteral("Add to Group"));
+            auto* addToGroup = menu->addMenu(QIcon::fromTheme(QStringLiteral("list-add")),
+                                             QStringLiteral("Add to Group"));
             populateAddToGroupMenu(*addToGroup);
-            auto* removeFromGroup = menu.addMenu(QIcon::fromTheme(QStringLiteral("list-remove")),
-                                                 QStringLiteral("Remove from Group"));
+            auto* removeFromGroup = menu->addMenu(QIcon::fromTheme(QStringLiteral("list-remove")),
+                                                  QStringLiteral("Remove from Group"));
             populateRemoveFromGroupMenu(*removeFromGroup);
-            menu.exec(m_contactList->viewport()->mapToGlobal(position));
+            menu->popup(m_contactList->viewport()->mapToGlobal(position));
             return;
         }
         const auto* contact = currentContact();
         if (contact == nullptr)
             return;
 
-        QMenu menu{this};
-        auto* compose = menu.addAction(QIcon::fromTheme(QStringLiteral("mail-message-new")),
-                                       QStringLiteral("Write Message"));
+        auto* menu = new QMenu{this};
+        menu->setAttribute(Qt::WA_DeleteOnClose);
+        auto* compose = menu->addAction(QIcon::fromTheme(QStringLiteral("mail-message-new")),
+                                        QStringLiteral("Write Message"));
         compose->setEnabled(!contact->emails.empty());
         connect(compose, &QAction::triggered, this,
                 [this]
@@ -1442,15 +1443,15 @@ namespace javelin::gui::contacts
         if (!contact->emails.empty())
         {
             const QString email = QString::fromStdString(contact->emails.front().address);
-            auto* copyEmail = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-copy")),
-                                             QStringLiteral("Copy Email Address"));
+            auto* copyEmail = menu->addAction(QIcon::fromTheme(QStringLiteral("edit-copy")),
+                                              QStringLiteral("Copy Email Address"));
             connect(copyEmail, &QAction::triggered, this,
                     [email] { QApplication::clipboard()->setText(email); });
         }
         if (!contact->emails.empty())
         {
-            auto* searchMenu = menu.addMenu(QIcon::fromTheme(QStringLiteral("edit-find")),
-                                            QStringLiteral("Find Mail From"));
+            auto* searchMenu = menu->addMenu(QIcon::fromTheme(QStringLiteral("edit-find")),
+                                             QStringLiteral("Find Mail From"));
             for (const auto& contactEmail : contact->emails)
             {
                 const QString email = QString::fromStdString(contactEmail.address);
@@ -1463,41 +1464,41 @@ namespace javelin::gui::contacts
                         });
             }
         }
-        auto* starred = menu.addAction(
+        auto* starred = menu->addAction(
             javelin::gui::themedSvgIcon(QStringLiteral(":/icons/thunderbird-icons/starred.svg"),
                                         m_contactList->palette().color(QPalette::Highlight)),
             contact->isImportant ? QStringLiteral("Remove from Starred")
                                  : QStringLiteral("Add to Starred"));
         starred->setEnabled(!m_busy && canEditContact());
         connect(starred, &QAction::triggered, this, &ContactsManagerWidget::toggleContactStarred);
-        auto* addToGroup = menu.addMenu(QIcon::fromTheme(QStringLiteral("list-add")),
-                                        QStringLiteral("Add to Group"));
+        auto* addToGroup = menu->addMenu(QIcon::fromTheme(QStringLiteral("list-add")),
+                                         QStringLiteral("Add to Group"));
         populateAddToGroupMenu(*addToGroup);
-        auto* removeFromGroup = menu.addMenu(QIcon::fromTheme(QStringLiteral("list-remove")),
-                                             QStringLiteral("Remove from Group"));
+        auto* removeFromGroup = menu->addMenu(QIcon::fromTheme(QStringLiteral("list-remove")),
+                                              QStringLiteral("Remove from Group"));
         populateRemoveFromGroupMenu(*removeFromGroup);
-        menu.addSeparator();
-        auto* edit = menu.addAction(QIcon::fromTheme(QStringLiteral("document-edit")),
-                                    QStringLiteral("Edit Contact"));
+        menu->addSeparator();
+        auto* edit = menu->addAction(QIcon::fromTheme(QStringLiteral("document-edit")),
+                                     QStringLiteral("Edit Contact"));
         edit->setEnabled(!m_busy && canEditContact());
         connect(edit, &QAction::triggered, this, &ContactsManagerWidget::beginEditContact);
-        auto* copy = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-copy")),
-                                    QStringLiteral("Copy Contact…"));
+        auto* copy = menu->addAction(QIcon::fromTheme(QStringLiteral("edit-copy")),
+                                     QStringLiteral("Copy Contact…"));
         connect(copy, &QAction::triggered, this, &ContactsManagerWidget::copyContact);
-        auto* exportAction = menu.addAction(QIcon::fromTheme(QStringLiteral("document-export")),
-                                            QStringLiteral("Export vCard…"));
+        auto* exportAction = menu->addAction(QIcon::fromTheme(QStringLiteral("document-export")),
+                                             QStringLiteral("Export vCard…"));
         connect(exportAction, &QAction::triggered, this, &ContactsManagerWidget::exportVCard);
-        auto* merge = menu.addAction(QIcon::fromTheme(QStringLiteral("merge")),
-                                     QStringLiteral("Find and Merge Duplicates…"));
+        auto* merge = menu->addAction(QIcon::fromTheme(QStringLiteral("merge")),
+                                      QStringLiteral("Find and Merge Duplicates…"));
         connect(merge, &QAction::triggered, this, &ContactsManagerWidget::findAndMergeDuplicates);
-        auto* remove = menu.addAction(QIcon::fromTheme(QStringLiteral("edit-delete")),
-                                      QStringLiteral("Delete Contact"));
+        auto* remove = menu->addAction(QIcon::fromTheme(QStringLiteral("edit-delete")),
+                                       QStringLiteral("Delete Contact"));
         connect(remove, &QAction::triggered, this, &ContactsManagerWidget::deleteContact);
         copy->setEnabled(!m_busy);
         exportAction->setEnabled(!m_busy);
         merge->setEnabled(!m_busy && canEditContact());
         remove->setEnabled(!m_busy && canDeleteContact());
-        menu.exec(m_contactList->viewport()->mapToGlobal(position));
+        menu->popup(m_contactList->viewport()->mapToGlobal(position));
     }
 
     void ContactsManagerWidget::populateAddToGroupMenu(QMenu& menu)
@@ -1700,7 +1701,6 @@ namespace javelin::gui::contacts
                                Q_EMIT statusMessageRequested(error->message, 10000);
                                return;
                            }
-                           requestRefresh();
                        });
     }
 
@@ -1914,9 +1914,7 @@ namespace javelin::gui::contacts
                                    std::get_if<javelin::jmap::OperationError>(&result))
                            {
                                Q_EMIT statusMessageRequested(error->message, 10000);
-                               return;
                            }
-                           requestRefresh();
                        });
     }
 
