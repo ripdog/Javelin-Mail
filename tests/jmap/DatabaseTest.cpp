@@ -11,6 +11,7 @@
 #include <QString>
 #include <QStringList>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <memory>
@@ -86,31 +87,10 @@ TEST_CASE("database connection creates the initial cache schema", "[jmap][cache]
         migrationsResult));
     const auto& migrations =
         std::get<std::vector<javelin::jmap::cache::AppliedMigration>>(migrationsResult);
-    REQUIRE(migrations.size() == 30);
-    CHECK(migrations.front().version == 1);
-    CHECK(migrations.front().name == QStringLiteral("initial_cache_schema"));
-    CHECK(migrations.at(1).version == 2);
-    CHECK(migrations.at(1).name == QStringLiteral("mailboxes_is_subscribed"));
-    CHECK(migrations.at(2).version == 3);
-    CHECK(migrations.at(2).name == QStringLiteral("session_and_account_metadata"));
-    CHECK(migrations.at(3).version == 4);
-    CHECK(migrations.at(3).name == QStringLiteral("compose_and_threading_metadata"));
-    CHECK(migrations.at(4).version == 5);
-    CHECK(migrations.at(4).name == QStringLiteral("raw_message_sources"));
-    CHECK(migrations.at(5).version == 8);
-    CHECK(migrations.at(5).name == QStringLiteral("account_session_ownership"));
-    CHECK(migrations.at(6).version == 9);
-    CHECK(migrations.at(6).name == QStringLiteral("ensure_raw_message_sources"));
-    CHECK(migrations.at(7).version == 10);
-    CHECK(migrations.at(7).name == QStringLiteral("translation_cache"));
-    CHECK(migrations.at(8).version == 11);
-    CHECK(migrations.at(8).name == QStringLiteral("contacts_capabilities"));
-    CHECK(migrations.at(10).version == 13);
-    CHECK(migrations.at(10).name == QStringLiteral("websocket_push_capability"));
-    CHECK(migrations.at(11).version == 14);
-    CHECK(migrations.at(11).name == QStringLiteral("search_windows"));
-    CHECK(migrations.back().version == 32);
-    CHECK(migrations.back().name == QStringLiteral("operation_history"));
+    const auto runner = javelin::jmap::cache::createDefaultMigrationRunner();
+    CHECK(std::ranges::equal(
+        migrations, runner.steps(), [](const auto& applied, const auto& configured)
+        { return applied.version == configured.version && applied.name == configured.name; }));
 
     QSqlQuery tableQuery{connection.database()};
     REQUIRE(tableQuery.exec(
@@ -125,7 +105,7 @@ TEST_CASE("database connection creates the initial cache schema", "[jmap][cache]
                        "'mailbox_query_window_items', 'sync_state', 'consistency_domains', "
                        "'mutation_journal', 'calendar_notification_state', "
                        "'calendar_default_alerts', 'operation_history', "
-                       "'operation_history_sequence') "
+                       "'operation_history_sequence', 'pending_sends') "
                        "ORDER BY name")));
 
     QStringList tableNames;
@@ -153,6 +133,7 @@ TEST_CASE("database connection creates the initial cache schema", "[jmap][cache]
                                     QStringLiteral("offline_mailbox_scopes"),
                                     QStringLiteral("operation_history"),
                                     QStringLiteral("operation_history_sequence"),
+                                    QStringLiteral("pending_sends"),
                                     QStringLiteral("raw_message_sources"),
                                     QStringLiteral("schema_migrations"),
                                     QStringLiteral("search_window_items"),
@@ -203,13 +184,11 @@ TEST_CASE("database migrations are repeatable when reopening an existing cache",
         migrationsResult));
     const auto& migrations =
         std::get<std::vector<javelin::jmap::cache::AppliedMigration>>(migrationsResult);
-    REQUIRE(migrations.size() == 30);
-    CHECK(migrations.front().version == 1);
-    CHECK(migrations.at(1).version == 2);
-    CHECK(migrations.at(2).version == 3);
-    CHECK(migrations.at(6).version == 9);
-    CHECK(migrations.back().version == 32);
-    CHECK(connection.schemaVersion() == 32);
+    const auto runner = javelin::jmap::cache::createDefaultMigrationRunner();
+    CHECK(std::ranges::equal(
+        migrations, runner.steps(), [](const auto& applied, const auto& configured)
+        { return applied.version == configured.version && applied.name == configured.name; }));
+    CHECK(connection.schemaVersion() == runner.latestVersion());
 }
 
 TEST_CASE("thread connection factory encodes owner tag and current thread in connection names",
