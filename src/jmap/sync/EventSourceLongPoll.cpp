@@ -239,7 +239,7 @@ namespace javelin::jmap::sync
             return url;
         }
 
-        [[nodiscard]] ParsedEvent parseStateEvent(const std::string_view accountId,
+        [[nodiscard]] ParsedEvent parseStateEvent(const StateChangeSubscription& subscription,
                                                   const std::string_view fallbackState,
                                                   const std::string_view eventName,
                                                   const std::string_view eventId,
@@ -327,8 +327,8 @@ namespace javelin::jmap::sync
                 };
             }
 
-            const auto accountIt = stateChange.changed.find(std::string{accountId});
-            if (accountIt == stateChange.changed.end())
+            auto changedStates = subscribedStateChanges(subscription, stateChange.changed);
+            if (changedStates.empty())
             {
                 return ParsedEvent{
                     .status = ParsedEventStatus::Ignored,
@@ -339,13 +339,11 @@ namespace javelin::jmap::sync
             }
 
             std::vector<std::string> changedTypes;
-            changedTypes.reserve(accountIt->second.size());
-            std::unordered_map<std::string, std::string> changedStates;
-            changedStates.reserve(accountIt->second.size());
-            for (const auto& [typeName, state] : accountIt->second)
+            changedTypes.reserve(changedStates.size());
+            for (const auto& [typeName, state] : changedStates)
             {
+                static_cast<void>(state);
                 changedTypes.push_back(typeName);
-                changedStates.emplace(typeName, state);
             }
 
             return ParsedEvent{
@@ -503,8 +501,8 @@ namespace javelin::jmap::sync
                 return std::nullopt;
             }
 
-            const auto parsed = parseStateEvent(subscription.accountId, subscription.lastState,
-                                                eventName, eventId, eventData);
+            const auto parsed = parseStateEvent(subscription, subscription.lastState, eventName,
+                                                eventId, eventData);
             if (parsed.pingInterval.has_value())
             {
                 const auto effectivePingInterval =

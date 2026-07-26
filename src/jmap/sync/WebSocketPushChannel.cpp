@@ -224,17 +224,16 @@ namespace javelin::jmap::sync
                 qCWarning(logWebSocket) << "invalid push message received";
                 continue;
             }
-            const auto account = change.changed.find(subscription.accountId);
-            if (account == change.changed.end())
-            {
+            auto changedStates = subscribedStateChanges(subscription, change.changed);
+            if (changedStates.empty())
                 continue;
-            }
             StateChangeEvent event;
             event.newState = change.pushState.value_or(summary.lastState);
-            for (const auto& [type, state] : account->second)
+            event.changedStates = std::move(changedStates);
+            for (const auto& [type, state] : event.changedStates)
             {
+                static_cast<void>(state);
                 event.changedTypes.push_back(type);
-                event.changedStates.emplace(type, state);
             }
             QStringList changedTypes;
             for (const auto& type : event.changedTypes)

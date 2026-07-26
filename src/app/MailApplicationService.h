@@ -254,6 +254,7 @@ namespace javelin::app
                                      MessageSelection selection, SelectedMessageMutation mutation);
         void connectCoordinator(const std::string& accountId, AccountSyncCoordinator& coordinator);
         void scheduleContactRefresh(std::string ownerAccountId);
+        void restoreContactRefreshJobs();
         void scheduleContactRefreshPump();
         void pumpContactRefreshes();
         [[nodiscard]] QCoro::Task<void> runContactRefresh(std::string ownerAccountId,

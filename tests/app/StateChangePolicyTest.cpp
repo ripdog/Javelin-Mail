@@ -28,3 +28,15 @@ TEST_CASE("contact state changes are routed away from mail refresh", "[app][sync
     CHECK(routed.mailStates == std::unordered_map<std::string, std::string>{
                                    {"Email", "mail-2"}, {"Mailbox", "boxes-2"}});
 }
+
+TEST_CASE("unfinished contact refresh jobs are restored after restart", "[app][sync]")
+{
+    CHECK(javelin::app::shouldRestoreContactRefresh(javelin::app::WorkStatus::Queued));
+    CHECK(javelin::app::shouldRestoreContactRefresh(javelin::app::WorkStatus::Paused));
+    CHECK(javelin::app::shouldRestoreContactRefresh(
+        javelin::app::WorkStatus::WaitingForNetwork));
+    CHECK(javelin::app::shouldRestoreContactRefresh(javelin::app::WorkStatus::WaitingForAuth));
+    CHECK_FALSE(javelin::app::shouldRestoreContactRefresh(javelin::app::WorkStatus::Running));
+    CHECK_FALSE(javelin::app::shouldRestoreContactRefresh(javelin::app::WorkStatus::Failed));
+    CHECK_FALSE(javelin::app::shouldRestoreContactRefresh(javelin::app::WorkStatus::Complete));
+}

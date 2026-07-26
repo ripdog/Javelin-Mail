@@ -1,5 +1,6 @@
 #include "app/MailApplicationService.h"
 #include "app/ApplicationErrorCoordinator.h"
+#include "app/StateChangePolicy.h"
 #include "app/WorkScheduler.h"
 
 #include "jmap/cache/EmailRepository.h"
@@ -208,6 +209,7 @@ namespace javelin::app
             if (!configuredConnectionIds.contains(connectionId))
                 m_errorCoordinator.forgetConnection(connectionId);
         }
+        restoreContactRefreshJobs();
         refreshConfiguredSessions();
     }
 
@@ -852,6 +854,25 @@ namespace javelin::app
                 m_workScheduler.update(jobId, WorkStatus::Queued, {}, QStringLiteral("{}")));
         }
         scheduleContactRefreshPump();
+    }
+
+    void MailApplicationService::restoreContactRefreshJobs()
+    {
+        const auto listed = m_workScheduler.list();
+        const auto* jobs = std::get_if<std::vector<WorkRecord>>(&listed);
+        if (jobs == nullptr)
+        {
+            qWarning() << "Could not restore queued contact refresh work";
+            return;
+        }
+        for (const auto& job : *jobs)
+        {
+            if (job.kind != WorkKind::ContactRefresh || !job.accountId.has_value() ||
+                !shouldRestoreContactRefresh(job.status) ||
+                !m_configurations.contains(*job.accountId))
+                continue;
+            scheduleContactRefresh(*job.accountId);
+        }
     }
 
     void MailApplicationService::scheduleContactRefreshPump()

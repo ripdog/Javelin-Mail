@@ -1,5 +1,7 @@
 #pragma once
 
+#include "app/WorkScheduler.h"
+
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -35,6 +37,12 @@ namespace javelin::app
             types.emplace_back("ContactCard");
         }
         return types;
+    }
+
+    [[nodiscard]] inline bool shouldRestoreContactRefresh(const WorkStatus status)
+    {
+        return status == WorkStatus::Queued || status == WorkStatus::Paused ||
+               status == WorkStatus::WaitingForNetwork || status == WorkStatus::WaitingForAuth;
     }
 
     [[nodiscard]] inline RoutedStateChanges

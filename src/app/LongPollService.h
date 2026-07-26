@@ -112,6 +112,7 @@ namespace javelin::app
             std::string apiUrl;
             std::string eventSourceUrl;
             std::optional<javelin::jmap::api::WebSocketCapability> websocket;
+            std::vector<std::string> groupwareAccountIds;
             bool calendarCapable = false;
             bool contactsCapable = false;
         };

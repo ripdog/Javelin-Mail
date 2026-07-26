@@ -123,6 +123,8 @@ namespace javelin::app
                     m_runContext->configuration.calendarCapable &&
                 updatedConfiguration->contactsCapable ==
                     m_runContext->configuration.contactsCapable &&
+                updatedConfiguration->groupwareAccountIds ==
+                    m_runContext->configuration.groupwareAccountIds &&
                 updatedConfiguration->websocket.has_value() ==
                     m_runContext->configuration.websocket.has_value() &&
                 (!updatedConfiguration->websocket.has_value() ||
@@ -278,12 +280,17 @@ namespace javelin::app
 
         bool calendarCapable = false;
         bool contactsCapable = false;
+        std::vector<std::string> groupwareAccountIds;
         for (const auto& [accountId, account] : session->value().accounts)
         {
-            Q_UNUSED(accountId);
-            calendarCapable = calendarCapable || account.accountCapabilities.calendars.has_value();
-            contactsCapable = contactsCapable || account.accountCapabilities.contacts.has_value();
+            const bool accountHasCalendar = account.accountCapabilities.calendars.has_value();
+            const bool accountHasContacts = account.accountCapabilities.contacts.has_value();
+            calendarCapable = calendarCapable || accountHasCalendar;
+            contactsCapable = contactsCapable || accountHasContacts;
+            if (accountHasCalendar || accountHasContacts)
+                groupwareAccountIds.push_back(accountId);
         }
+        std::ranges::sort(groupwareAccountIds);
 
         return RunConfiguration{
             .settings = *m_settings,
@@ -294,6 +301,7 @@ namespace javelin::app
             .apiUrl = session->value().apiUrl,
             .eventSourceUrl = session->value().eventSourceUrl.value_or(std::string{}),
             .websocket = session->value().capabilities.websocket,
+            .groupwareAccountIds = std::move(groupwareAccountIds),
             .calendarCapable = calendarCapable,
             .contactsCapable = contactsCapable,
         };
@@ -308,6 +316,7 @@ namespace javelin::app
             .accountId = runContext->configuration.accountId,
             .lastState = m_lastEventId,
             .types = std::move(types),
+            .groupwareAccountIds = runContext->configuration.groupwareAccountIds,
         };
 
         co_await runContext->worker->run(subscription, runContext->cancellation);
