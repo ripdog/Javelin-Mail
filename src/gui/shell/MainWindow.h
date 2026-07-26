@@ -46,6 +46,11 @@ namespace javelin::app
     class TranslationService;
     struct OpenEmailRoute;
 } // namespace javelin::app
+namespace javelin::app::undo
+{
+    class UndoManager;
+    struct HistoryFailure;
+} // namespace javelin::app::undo
 namespace javelin::jmap::contacts
 {
     class ContactIdentityLookup;
@@ -129,7 +134,7 @@ namespace javelin::gui::shell
             javelin::app::ContactCommandPort& contactCommandPort,
             javelin::app::MailApplicationService& mailService,
             javelin::app::MessageNavigationCoordinator& messageNavigationCoordinator,
-            QWidget* parent = nullptr);
+            javelin::app::undo::UndoManager& undoManager, QWidget* parent = nullptr);
         ~MainWindow() override;
         void openPreferencesForConnection(const QString& connectionId);
 
@@ -151,6 +156,10 @@ namespace javelin::gui::shell
         };
 
         void createActions();
+        void routeUndo();
+        void routeRedo();
+        void updateUndoRedoActions();
+        void presentHistoryFailure(const javelin::app::undo::HistoryFailure& failure);
         void presentError(const javelin::jmap::OperationError& error);
         void presentUserInterventionError(const QString& message);
         void setupUi();
@@ -248,6 +257,7 @@ namespace javelin::gui::shell
         javelin::app::ContactCommandPort& m_contactCommandPort;
         javelin::app::MailApplicationService& m_mailService;
         javelin::app::MessageNavigationCoordinator& m_messageNavigationCoordinator;
+        javelin::app::undo::UndoManager& m_undoManager;
         AccountRefreshController* m_accountRefreshController = nullptr;
         CalendarTabController* m_calendarTabController = nullptr;
         ContactsTabController* m_contactsTabController = nullptr;
@@ -285,6 +295,8 @@ namespace javelin::gui::shell
         QToolButton* m_lastPageButton = nullptr;
         QLabel* m_messageEmptyState = nullptr;
         LayeredStatusBar* m_statusBar = nullptr;
+        QAction* m_undoAction = nullptr;
+        QAction* m_redoAction = nullptr;
         QAction* m_refreshAction = nullptr;
         QAction* m_quitAction = nullptr;
         QAction* m_preferencesAction = nullptr;

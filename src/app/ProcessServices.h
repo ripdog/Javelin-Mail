@@ -34,6 +34,12 @@ namespace javelin::app
     class TranslationService;
 } // namespace javelin::app
 
+namespace javelin::app::undo
+{
+    class HistoryRepository;
+    class UndoManager;
+} // namespace javelin::app::undo
+
 namespace javelin::jmap::api
 {
     class HttpJmapMethodTransport;
@@ -99,10 +105,13 @@ namespace javelin::app
         [[nodiscard]] LocalMaintenanceService& localMaintenanceService();
         [[nodiscard]] FullMailSyncService& fullMailSyncService();
         [[nodiscard]] MailIndexService& mailIndexService();
+        [[nodiscard]] javelin::app::undo::UndoManager& undoManager();
 
       private:
         std::unique_ptr<javelin::jmap::JmapCore> m_jmapCore;
         javelin::jmap::cache::DatabaseConnection m_databaseConnection;
+        std::unique_ptr<javelin::app::undo::HistoryRepository> m_historyRepository;
+        std::unique_ptr<javelin::app::undo::UndoManager> m_undoManager;
         std::unique_ptr<QNetworkAccessManager> m_networkAccessManager;
         std::unique_ptr<QNetworkAccessManager> m_stateChangeNetworkAccessManager;
         std::unique_ptr<javelin::jmap::api::WebSocketFailureCooldowns> m_webSocketFailureCooldowns;

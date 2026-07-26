@@ -90,6 +90,7 @@ add_executable(javelin_jmap_tests
     gui/MonthCalendarWidgetTest.cpp
     gui/RecurrencePatternTest.cpp
     gui/ConnectionSettingsAdapterTest.cpp
+    gui/FocusedCommandRouterTest.cpp
     gui/ComposeTabPolicyTest.cpp
     gui/MailboxSelectionTest.cpp
     gui/MailboxSortTest.cpp
@@ -110,6 +111,7 @@ add_executable(javelin_jmap_tests
     ${PROJECT_SOURCE_DIR}/src/gui/calendar/MonthCalendarLayout.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/calendar/RecurrencePattern.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/settings/ConnectionSettingsAdapter.cpp
+    ${PROJECT_SOURCE_DIR}/src/gui/shell/FocusedCommandRouter.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/shell/ComposeTabPolicy.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/mailboxes/MailboxSelection.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/messages/MessageActionSelection.cpp
@@ -137,6 +139,7 @@ target_link_libraries(javelin_jmap_tests
         Catch2::Catch2WithMain
         QCoro6::Network
         Qt::Network
+        Qt::Widgets
         javelin_jmap
 )
 target_compile_definitions(javelin_jmap_tests

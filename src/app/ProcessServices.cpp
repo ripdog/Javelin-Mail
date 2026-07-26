@@ -13,6 +13,8 @@
 #include "app/MessageNavigationCoordinator.h"
 #include "app/TranslationService.h"
 #include "app/WorkScheduler.h"
+#include "app/undo/HistoryRepository.h"
+#include "app/undo/UndoManager.h"
 
 #include "jmap/JmapCore.h"
 #include "jmap/api/JmapMethodTransport.h"
@@ -79,6 +81,11 @@ namespace javelin::app
         {
             throw std::runtime_error(error->message.toStdString());
         }
+        m_historyRepository =
+            std::make_unique<javelin::app::undo::HistoryRepository>(m_databaseConnection);
+        m_undoManager = std::make_unique<javelin::app::undo::UndoManager>(*m_historyRepository);
+        if (const auto historyError = m_undoManager->load())
+            throw std::runtime_error(historyError->message.toStdString());
         m_networkAccessManager = std::make_unique<QNetworkAccessManager>();
         m_stateChangeNetworkAccessManager = std::make_unique<QNetworkAccessManager>();
         m_webSocketFailureCooldowns =
@@ -249,6 +256,11 @@ namespace javelin::app
     MailIndexService& ProcessServices::mailIndexService()
     {
         return *m_mailIndexService;
+    }
+
+    javelin::app::undo::UndoManager& ProcessServices::undoManager()
+    {
+        return *m_undoManager;
     }
 
 } // namespace javelin::app

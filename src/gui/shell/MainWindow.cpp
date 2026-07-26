@@ -7,6 +7,7 @@
 #include "app/MessageNavigationCoordinator.h"
 #include "app/SearchSession.h"
 #include "app/TranslationService.h"
+#include "app/undo/UndoManager.h"
 #include "gui/IconUtils.h"
 #include "gui/logging/LogViewerDialog.h"
 #include "gui/mailboxes/MailboxIconUtils.h"
@@ -27,6 +28,7 @@
 #include "gui/shell/ComposeTabPolicy.h"
 #include "gui/shell/ContactsTabController.h"
 #include "gui/shell/ElidingLabel.h"
+#include "gui/shell/FocusedCommandRouter.h"
 #include "gui/shell/LayeredStatusBar.h"
 #include "gui/shell/MainWindowStateStore.h"
 #include "gui/shell/MessageActionPolicy.h"
@@ -60,6 +62,7 @@
 
 #include <QAbstractButton>
 #include <QAction>
+#include <QApplication>
 #include <QCloseEvent>
 #include <QCoreApplication>
 #include <QDebug>
@@ -237,14 +240,14 @@ namespace javelin::gui::shell
                            javelin::app::ContactCommandPort& contactCommandPort,
                            javelin::app::MailApplicationService& mailService,
                            javelin::app::MessageNavigationCoordinator& messageNavigationCoordinator,
-                           QWidget* parent)
+                           javelin::app::undo::UndoManager& undoManager, QWidget* parent)
         : KXmlGuiWindow(parent), m_accountRepository(accountRepository),
           m_contactRepository(contactRepository), m_calendarService(calendarService),
           m_contactIdentityLookup(contactIdentityLookup), m_identityRepository(identityRepository),
           m_messageViewService(messageViewService), m_queryService(queryService),
           m_translationService(translationService), m_composeService(composeService),
           m_contactCommandPort(contactCommandPort), m_mailService(mailService),
-          m_messageNavigationCoordinator(messageNavigationCoordinator)
+          m_messageNavigationCoordinator(messageNavigationCoordinator), m_undoManager(undoManager)
     {
         m_statusBar = new LayeredStatusBar(this);
         setStatusBar(m_statusBar);
@@ -263,6 +266,30 @@ namespace javelin::gui::shell
         connect(m_messageFileController, &MessageFileController::userInterventionRequired, this,
                 &MainWindow::presentUserInterventionError);
         setupUi();
+        connect(&m_undoManager, &javelin::app::undo::UndoManager::historyStateChanged, this,
+                [this](const javelin::app::undo::HistoryState&) { updateUndoRedoActions(); });
+        connect(
+            &m_undoManager, &javelin::app::undo::UndoManager::executionCompleted, this,
+            [this](const QString& entryId, const javelin::app::undo::HistoryRefreshScope&)
+            {
+                refreshViewsFromCache();
+                const auto& entries = m_undoManager.entries();
+                const auto completed =
+                    std::ranges::find(entries, entryId, &javelin::app::undo::HistoryEntry::entryId);
+                if (completed == entries.end())
+                    return;
+                m_statusBar->showMessage((completed->stack == javelin::app::undo::HistoryStack::Redo
+                                              ? QStringLiteral("Undid ")
+                                              : QStringLiteral("Redid ")) +
+                                             completed->label + QStringLiteral("."),
+                                         5000);
+            });
+        connect(&m_undoManager, &javelin::app::undo::UndoManager::executionFailed, this,
+                &MainWindow::presentHistoryFailure);
+        connect(qApp, &QApplication::focusChanged, this,
+                [this](QWidget*, QWidget*) { updateUndoRedoActions(); });
+        qApp->installEventFilter(this);
+        updateUndoRedoActions();
         m_accountRefreshController =
             new AccountRefreshController(m_mailService, m_accountRepository, this);
         connect(m_accountRefreshController, &AccountRefreshController::busyChanged, this,
@@ -592,6 +619,18 @@ namespace javelin::gui::shell
         auto thunderbirdIcon = [iconColor](const QString& resourcePath)
         { return javelin::gui::themedSvgIcon(resourcePath, iconColor); };
 
+        m_undoAction = new QAction(QIcon::fromTheme(QStringLiteral("edit-undo")),
+                                   QStringLiteral("Undo"), this);
+        connect(m_undoAction, &QAction::triggered, this, &MainWindow::routeUndo);
+        actionCollection()->addAction(QStringLiteral("undo_operation"), m_undoAction);
+        actionCollection()->setDefaultShortcut(m_undoAction, QKeySequence::Undo);
+
+        m_redoAction = new QAction(QIcon::fromTheme(QStringLiteral("edit-redo")),
+                                   QStringLiteral("Redo"), this);
+        connect(m_redoAction, &QAction::triggered, this, &MainWindow::routeRedo);
+        actionCollection()->addAction(QStringLiteral("redo_operation"), m_redoAction);
+        actionCollection()->setDefaultShortcut(m_redoAction, QKeySequence::Redo);
+
         m_refreshAction = new QAction(
             thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/cloud-download.svg")),
             QStringLiteral("Refresh From Server"), this);
@@ -899,6 +938,77 @@ namespace javelin::gui::shell
                     dialog->show();
                 });
         actionCollection()->addAction(QStringLiteral("open_application_log"), logAction);
+    }
+
+    void MainWindow::routeUndo()
+    {
+        if (FocusedCommandRouter::invokeNativeCommand(QApplication::focusWidget(),
+                                                      EditHistoryDirection::Undo))
+        {
+            updateUndoRedoActions();
+            return;
+        }
+        auto task = m_undoManager.undo();
+        QCoro::connect(std::move(task), this, [](const bool) {});
+    }
+
+    void MainWindow::routeRedo()
+    {
+        if (FocusedCommandRouter::invokeNativeCommand(QApplication::focusWidget(),
+                                                      EditHistoryDirection::Redo))
+        {
+            updateUndoRedoActions();
+            return;
+        }
+        auto task = m_undoManager.redo();
+        QCoro::connect(std::move(task), this, [](const bool) {});
+    }
+
+    void MainWindow::updateUndoRedoActions()
+    {
+        if (m_undoAction == nullptr || m_redoAction == nullptr)
+            return;
+        auto* focus = QApplication::focusWidget();
+        const bool nativeUndo =
+            FocusedCommandRouter::isNativeCommandAvailable(focus, EditHistoryDirection::Undo);
+        const bool nativeRedo =
+            FocusedCommandRouter::isNativeCommandAvailable(focus, EditHistoryDirection::Redo);
+        const auto& state = m_undoManager.state();
+        m_undoAction->setText(nativeUndo ? QStringLiteral("Undo") : state.undoLabel);
+        m_redoAction->setText(nativeRedo ? QStringLiteral("Redo") : state.redoLabel);
+        m_undoAction->setEnabled(nativeUndo || state.canUndo);
+        m_redoAction->setEnabled(nativeRedo || state.canRedo);
+    }
+
+    void MainWindow::presentHistoryFailure(const javelin::app::undo::HistoryFailure& failure)
+    {
+        QString details;
+        for (const auto& objectFailure : failure.objectFailures)
+        {
+            if (!details.isEmpty())
+                details += QLatin1Char('\n');
+            details += objectFailure.objectId + QStringLiteral(": ") + objectFailure.summary;
+        }
+
+        QMessageBox messageBox{QMessageBox::Critical, failure.actionLabel, failure.summary,
+                               QMessageBox::Ok, this};
+        if (!details.isEmpty())
+            messageBox.setDetailedText(details);
+        QAbstractButton* removeButton = nullptr;
+        if (failure.mayRemoveFromHistory && !failure.acknowledgeAndRemove)
+        {
+            removeButton = messageBox.addButton(QStringLiteral("Remove from History"),
+                                                QMessageBox::DestructiveRole);
+        }
+        messageBox.exec();
+        if (failure.acknowledgeAndRemove)
+        {
+            static_cast<void>(m_undoManager.acknowledgeAndRemove(failure.entryId));
+        }
+        else if (removeButton != nullptr && messageBox.clickedButton() == removeButton)
+        {
+            static_cast<void>(m_undoManager.forget(failure.entryId));
+        }
     }
 
     void MainWindow::setupUi()
@@ -2332,6 +2442,13 @@ namespace javelin::gui::shell
 
     bool MainWindow::eventFilter(QObject* watched, QEvent* event)
     {
+        if (event->type() == QEvent::KeyRelease || event->type() == QEvent::InputMethod ||
+            event->type() == QEvent::FocusIn || event->type() == QEvent::FocusOut ||
+            event->type() == QEvent::MouseButtonRelease)
+        {
+            QTimer::singleShot(0, this, &MainWindow::updateUndoRedoActions);
+        }
+
         if (watched == m_messageView->viewport() && event->type() == QEvent::MouseButtonPress)
         {
             const auto* mouseEvent = static_cast<QMouseEvent*>(event);

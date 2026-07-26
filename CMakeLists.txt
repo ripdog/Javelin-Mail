@@ -179,6 +179,8 @@ set(JAVELIN_FORMAT_FILES
     src/gui/settings/PreferencesDialog.h
     src/gui/shell/ElidingLabel.cpp
     src/gui/shell/ElidingLabel.h
+    src/gui/shell/FocusedCommandRouter.cpp
+    src/gui/shell/FocusedCommandRouter.h
     src/gui/shell/MessageFileUtils.cpp
     src/gui/shell/MessageFileUtils.h
     src/gui/shell/MessageFileController.cpp
@@ -707,6 +709,8 @@ add_library(javelin_gui STATIC
     src/gui/settings/PreferencesDialog.h
     src/gui/shell/ElidingLabel.cpp
     src/gui/shell/ElidingLabel.h
+    src/gui/shell/FocusedCommandRouter.cpp
+    src/gui/shell/FocusedCommandRouter.h
     src/gui/shell/MessageFileUtils.cpp
     src/gui/shell/MessageFileUtils.h
     src/gui/shell/MessageFileController.cpp
