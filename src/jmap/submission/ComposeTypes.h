@@ -97,6 +97,12 @@ namespace javelin::jmap::submission
         std::string accountId;
         std::string draftEmailId;
         std::optional<std::string> submissionId;
+        bool scheduled = false;
+    };
+
+    struct PreparedSend
+    {
+        DraftSaveSummary draft;
     };
 
     [[nodiscard]] inline std::string_view toString(const ComposeMode mode)

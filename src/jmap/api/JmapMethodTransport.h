@@ -9,6 +9,7 @@
 #include <QString>
 
 #include <chrono>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -55,6 +56,7 @@ namespace javelin::jmap::api
         RequestEnvelope envelope;
         CancellationToken cancellation{};
         JmapTransportPolicy transportPolicy = JmapTransportPolicy::Preferred;
+        std::function<void()> dispatched;
     };
 
     namespace detail

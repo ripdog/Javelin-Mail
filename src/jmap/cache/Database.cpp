@@ -1535,6 +1535,38 @@ namespace javelin::jmap::cache
                                 "VALUES(1,1)"),
                         },
                 },
+                MigrationStep{
+                    .version = 33,
+                    .name = QStringLiteral("deferred_sends"),
+                    .statements =
+                        {
+                            QStringLiteral(
+                                "CREATE TABLE pending_sends ("
+                                "send_id TEXT PRIMARY KEY,"
+                                "history_entry_id TEXT NOT NULL UNIQUE,"
+                                "connection_id TEXT NOT NULL,"
+                                "account_id TEXT NOT NULL,"
+                                "compose_session_id TEXT NOT NULL,"
+                                "draft_email_id TEXT NOT NULL,"
+                                "subject TEXT,"
+                                "status TEXT NOT NULL CHECK(status IN "
+                                "('scheduled','waiting_for_network','waiting_for_auth',"
+                                "'dispatching','submitted','cancelled','failed','unknown')),"
+                                "due_at TEXT NOT NULL,"
+                                "dispatch_started_at TEXT,"
+                                "submission_id TEXT,"
+                                "last_error TEXT,"
+                                "created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+                                "updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+                                "FOREIGN KEY(history_entry_id) REFERENCES "
+                                "operation_history(entry_id) ON DELETE CASCADE"
+                                ") STRICT"),
+                            QStringLiteral("CREATE INDEX idx_pending_sends_status_due "
+                                           "ON pending_sends(status,due_at)"),
+                            QStringLiteral("CREATE INDEX idx_pending_sends_compose_session "
+                                           "ON pending_sends(compose_session_id)"),
+                        },
+                },
             },
         };
     }

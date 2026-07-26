@@ -34,6 +34,8 @@ namespace javelin::jmap::api
                         },
                     },
                 .body = {},
+                .cancellation = {},
+                .dispatched = {},
             };
         }
 

@@ -1444,7 +1444,10 @@ namespace javelin::gui::compose
                 const auto& summary = std::get<javelin::jmap::submission::SendSummary>(result);
                 m_snapshot.draftEmailId = summary.draftEmailId;
                 m_closeWithoutPrompt = true;
-                Q_EMIT statusMessageRequested(QStringLiteral("Message sent."), 7000);
+                Q_EMIT statusMessageRequested(summary.scheduled
+                                                  ? QStringLiteral("Message scheduled.")
+                                                  : QStringLiteral("Message sent."),
+                                              7000);
                 Q_EMIT closeRequested();
             });
     }

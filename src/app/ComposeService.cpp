@@ -1,6 +1,8 @@
 #include "app/ComposeService.h"
 #include "app/AccountConnectionProvider.h"
 #include "app/ApplicationErrorCoordinator.h"
+#include "app/ComposePreferences.h"
+#include "app/DeferredSendService.h"
 #include "app/WorkScheduler.h"
 #include "app/undo/UndoManager.h"
 
@@ -8,6 +10,9 @@
 #include "jmap/submission/DraftSnapshotSerialization.h"
 
 #include <QUuid>
+
+#include <algorithm>
+#include <chrono>
 
 namespace javelin::app
 {
@@ -45,9 +50,11 @@ namespace javelin::app
                                    ApplicationErrorCoordinator& errorCoordinator,
                                    WorkScheduler& workScheduler,
                                    AccountConnectionProvider& connectionProvider,
-                                   javelin::app::undo::UndoManager& undoManager)
+                                   javelin::app::undo::UndoManager& undoManager,
+                                   DeferredSendService& deferredSendService)
         : m_service(service), m_errorCoordinator(errorCoordinator), m_workScheduler(workScheduler),
-          m_connectionProvider(connectionProvider), m_undoManager(undoManager)
+          m_connectionProvider(connectionProvider), m_undoManager(undoManager),
+          m_deferredSendService(deferredSendService)
     {
     }
 
@@ -254,8 +261,18 @@ namespace javelin::app
     {
         const ForegroundWorkScope foreground{m_workScheduler};
         const auto accountId = snapshot.accountId;
-        auto result =
-            co_await m_service.send(toLiveConnectionSettings(settings), std::move(snapshot));
+        auto prepared =
+            co_await m_service.prepareSend(toLiveConnectionSettings(settings), std::move(snapshot));
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&prepared))
+        {
+            m_errorCoordinator.reportFailure(settings, accountId, QStringLiteral("Prepare message"),
+                                             *error);
+            co_return *error;
+        }
+        auto result = co_await m_deferredSendService.schedule(
+            settings.connectionId,
+            std::get<javelin::jmap::submission::PreparedSend>(std::move(prepared)),
+            std::chrono::seconds{ComposePreferences::undoSendDelaySeconds()});
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
             m_errorCoordinator.reportFailure(settings, accountId, QStringLiteral("Send message"),
                                              *error);
@@ -274,6 +291,20 @@ namespace javelin::app
     std::optional<javelin::jmap::OperationError>
     ComposeService::storeWorkingCopy(const javelin::jmap::submission::DraftSnapshot& snapshot)
     {
+        const auto staleSend = std::ranges::find_if(
+            m_undoManager.entries(),
+            [&](const javelin::app::undo::HistoryEntry& entry)
+            {
+                const auto* send =
+                    std::get_if<javelin::app::undo::DeferredSendHistory>(&entry.payload);
+                return entry.stack == javelin::app::undo::HistoryStack::Redo && send != nullptr &&
+                       send->composeSessionId == snapshot.composeSessionId;
+            });
+        if (staleSend != m_undoManager.entries().end())
+        {
+            if (const auto error = m_undoManager.forgetAndClearRedo(staleSend->entryId))
+                return javelin::jmap::operationError(*error);
+        }
         return m_service.storeWorkingCopy(snapshot);
     }
 

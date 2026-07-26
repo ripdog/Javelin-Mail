@@ -2387,6 +2387,8 @@ namespace javelin::jmap::contacts
                              QByteArray{"Bearer "} + QByteArray::fromStdString(settings.apiKey)},
                         {.name = "Content-Type", .value = QByteArray::fromStdString(mediaType)}},
             .body = std::move(payload),
+            .cancellation = {},
+            .dispatched = {},
         });
         if (const auto* transportError = std::get_if<javelin::jmap::api::TransportError>(&result))
         {
@@ -2432,6 +2434,7 @@ namespace javelin::jmap::contacts
                              QByteArray{"Bearer "} + QByteArray::fromStdString(settings.apiKey)}},
             .body = {},
             .cancellation = {},
+            .dispatched = {},
         });
         if (const auto* transportError = std::get_if<javelin::jmap::api::TransportError>(&result))
             co_return error(QString::fromStdString(transportError->message));

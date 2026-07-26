@@ -147,6 +147,8 @@ namespace javelin::jmap
                         },
                     },
                 .body = {},
+                .cancellation = {},
+                .dispatched = {},
             };
         }
 

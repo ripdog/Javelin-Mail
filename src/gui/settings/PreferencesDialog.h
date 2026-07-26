@@ -16,6 +16,7 @@ class QListWidget;
 class QPushButton;
 class QRadioButton;
 class QComboBox;
+class QSpinBox;
 
 namespace javelin::gui::mailboxes
 {
@@ -98,6 +99,7 @@ namespace javelin::gui::settings
         QStringList m_autoTranslateSenders;
         QStringList m_autoTranslateDomains;
         AttachmentSaveSettings m_attachmentSaveSettings;
+        int m_undoSendDelaySeconds = 10;
         bool m_hasPendingChanges = false;
         int m_currentRow = -1;
         QListWidget* m_accountList = nullptr;
@@ -118,6 +120,7 @@ namespace javelin::gui::settings
         QRadioButton* m_saveAttachmentDirectoryRadio = nullptr;
         QLineEdit* m_attachmentDirectoryEdit = nullptr;
         QPushButton* m_attachmentDirectoryButton = nullptr;
+        QSpinBox* m_undoSendDelaySpinBox = nullptr;
         QComboBox* m_mailboxSyncAccount = nullptr;
         javelin::gui::mailboxes::MailboxTreeView* m_mailboxSyncList = nullptr;
         javelin::gui::mailboxes::MailboxTreeView* m_mailboxNotificationList = nullptr;

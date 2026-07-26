@@ -4,6 +4,7 @@
 
 #include <QSqlError>
 #include <QSqlQuery>
+#include <QTimeZone>
 #include <QVariant>
 
 #include <utility>
@@ -42,6 +43,20 @@ namespace javelin::app::undo
             const auto parsed = QDateTime::fromString(value.toString(), Qt::ISODateWithMs);
             if (!parsed.isValid())
                 return std::nullopt;
+            return parsed.toUTC();
+        }
+
+        [[nodiscard]] QDateTime decodeStoredDateTime(const QVariant& value)
+        {
+            auto parsed = QDateTime::fromString(value.toString(), Qt::ISODateWithMs);
+            if (!parsed.isValid())
+                parsed = QDateTime::fromString(value.toString(), Qt::ISODate);
+            if (!parsed.isValid())
+            {
+                parsed =
+                    QDateTime::fromString(value.toString(), QStringLiteral("yyyy-MM-dd HH:mm:ss"));
+                parsed.setTimeZone(QTimeZone::UTC);
+            }
             return parsed.toUTC();
         }
 
@@ -98,8 +113,8 @@ namespace javelin::app::undo
                 .failureJson = query.value(12).isNull()
                                    ? std::nullopt
                                    : std::optional<QString>{query.value(12).toString()},
-                .createdAt = QDateTime::fromString(query.value(13).toString(), Qt::ISODateWithMs),
-                .updatedAt = QDateTime::fromString(query.value(14).toString(), Qt::ISODateWithMs),
+                .createdAt = decodeStoredDateTime(query.value(13)),
+                .updatedAt = decodeStoredDateTime(query.value(14)),
             };
             return entry;
         }
@@ -400,6 +415,25 @@ namespace javelin::app::undo
         if (!query.exec())
             return queryError(QStringLiteral("Remove operation history entry"), query);
         return std::nullopt;
+    }
+
+    std::optional<javelin::jmap::cache::DatabaseError>
+    HistoryRepository::removeAndClearRedo(const QString& entryId)
+    {
+        auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+            m_connection, QStringLiteral("Remove branched history entry"));
+        if (const auto* error =
+                std::get_if<javelin::jmap::cache::DatabaseError>(&transactionResult))
+            return *error;
+        auto transaction =
+            std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "DELETE FROM operation_history WHERE entry_id=:entry_id OR stack='redo'"));
+        query.bindValue(QStringLiteral(":entry_id"), entryId);
+        if (!query.exec())
+            return queryError(QStringLiteral("Remove history entry and Redo branch"), query);
+        return transaction.commit();
     }
 
     std::optional<javelin::jmap::cache::DatabaseError> HistoryRepository::clearRedo()

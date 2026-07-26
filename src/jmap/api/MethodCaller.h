@@ -9,6 +9,7 @@
 
 #include <QCoroTask>
 
+#include <functional>
 #include <variant>
 
 namespace javelin::jmap::api
@@ -35,10 +36,10 @@ namespace javelin::jmap::api
 
         [[nodiscard]] QCoro::Task<MethodCallerResult>
         call(ApiRequestContext requestContext, RequestEnvelope request,
-             CancellationToken cancellation = {}) const;
+             CancellationToken cancellation = {}, std::function<void()> dispatched = {}) const;
         [[nodiscard]] QCoro::Task<MethodCallerResult>
         call(ApiRequestContext requestContext, RequestBuilder request,
-             CancellationToken cancellation = {}) const;
+             CancellationToken cancellation = {}, std::function<void()> dispatched = {}) const;
 
       private:
         JmapMethodTransport& m_transport;

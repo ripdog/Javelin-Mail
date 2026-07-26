@@ -338,6 +338,19 @@ namespace javelin::app::undo
         return reload();
     }
 
+    std::optional<javelin::jmap::cache::DatabaseError>
+    UndoManager::forgetAndClearRedo(const QString& entryId)
+    {
+        if (m_executing)
+            return javelin::jmap::cache::DatabaseError{
+                .code = javelin::jmap::cache::DatabaseErrorCode::QueryFailed,
+                .message = QStringLiteral("Cannot branch history while an operation is executing"),
+            };
+        if (const auto error = m_repository.removeAndClearRedo(entryId))
+            return error;
+        return reload();
+    }
+
     const HistoryState& UndoManager::state() const
     {
         return m_state;

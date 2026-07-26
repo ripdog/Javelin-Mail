@@ -479,6 +479,8 @@ namespace javelin::jmap::api
                     co_return finish(networkError("Failed to queue JMAP WebSocket request"), false,
                                      false);
                 }
+                if (request.dispatched)
+                    request.dispatched();
 
                 while (
                     elapsed.elapsed() <
@@ -761,6 +763,7 @@ namespace javelin::jmap::api
                 },
             .body = QByteArray::fromStdString(*body),
             .cancellation = std::move(request.cancellation),
+            .dispatched = std::move(request.dispatched),
         });
         if (const auto* error = std::get_if<TransportError>(&result))
         {

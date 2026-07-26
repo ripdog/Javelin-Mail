@@ -73,6 +73,7 @@ namespace javelin::app
                                                                     .activationToken = {},
                                                                     .connectionId = {},
                                                                     .calendarNotificationKey = {},
+                                                                    .sendId = {},
                                                                     .opensSettings = false,
                                                                 });
     }
@@ -115,6 +116,7 @@ namespace javelin::app
                                                            .activationToken = {},
                                                            .connectionId = connectionId,
                                                            .calendarNotificationKey = {},
+                                                           .sendId = {},
                                                            .opensSettings = opensSettings});
     }
 
@@ -150,7 +152,54 @@ namespace javelin::app
                                                                     .activationToken = {},
                                                                     .connectionId = {},
                                                                     .calendarNotificationKey = key,
+                                                                    .sendId = {},
                                                                     .opensSettings = false});
+    }
+
+    void DesktopNotificationController::notifyUndoableSend(const QString& sendId,
+                                                           const QString& title,
+                                                           const QString& message,
+                                                           const int timeoutMs)
+    {
+        closeUndoableSendNotification(sendId);
+        QDBusInterface notifications{
+            QString::fromLatin1(notificationsService), QString::fromLatin1(notificationsPath),
+            QString::fromLatin1(notificationsInterface), QDBusConnection::sessionBus()};
+        if (!notifications.isValid())
+            return;
+        const QStringList actions = {QStringLiteral("undo-send"), QStringLiteral("Undo Send")};
+        const QDBusReply<uint> reply{
+            notifications.call(QStringLiteral("Notify"), QStringLiteral("Javelin Mail"),
+                               static_cast<uint>(0), QStringLiteral("mail-send"), title, message,
+                               actions, notificationHints(urgencyNormal), timeoutMs)};
+        if (!reply.isValid())
+            return;
+        const auto notificationId = reply.value();
+        m_sendNotificationIds.insert(sendId, notificationId);
+        m_trackedNotifications.insert_or_assign(notificationId,
+                                                TrackedNotification{.accountId = {},
+                                                                    .mailboxId = {},
+                                                                    .threadId = {},
+                                                                    .emailId = {},
+                                                                    .activationToken = {},
+                                                                    .connectionId = {},
+                                                                    .calendarNotificationKey = {},
+                                                                    .sendId = sendId,
+                                                                    .opensSettings = false});
+    }
+
+    void DesktopNotificationController::closeUndoableSendNotification(const QString& sendId)
+    {
+        const auto found = m_sendNotificationIds.find(sendId);
+        if (found == m_sendNotificationIds.end())
+            return;
+        QDBusInterface notifications{
+            QString::fromLatin1(notificationsService), QString::fromLatin1(notificationsPath),
+            QString::fromLatin1(notificationsInterface), QDBusConnection::sessionBus()};
+        if (notifications.isValid())
+            static_cast<void>(
+                notifications.call(QStringLiteral("CloseNotification"), found.value()));
+        untrackNotification(found.value());
     }
 
     void DesktopNotificationController::onActionInvoked(const uint notificationId,
@@ -167,6 +216,13 @@ namespace javelin::app
             if (actionKey == QStringLiteral("dismiss") || actionKey == QStringLiteral("snooze"))
                 Q_EMIT calendarNotificationAction(it->second.calendarNotificationKey,
                                                   actionKey == QStringLiteral("snooze"));
+            untrackNotification(notificationId);
+            return;
+        }
+        if (!it->second.sendId.isEmpty())
+        {
+            if (actionKey == QStringLiteral("undo-send"))
+                Q_EMIT undoSendRequested(it->second.sendId);
             untrackNotification(notificationId);
             return;
         }
@@ -228,6 +284,9 @@ namespace javelin::app
 
     void DesktopNotificationController::untrackNotification(const uint notificationId)
     {
+        const auto found = m_trackedNotifications.find(notificationId);
+        if (found != m_trackedNotifications.end() && !found->second.sendId.isEmpty())
+            m_sendNotificationIds.remove(found->second.sendId);
         m_trackedNotifications.erase(notificationId);
     }
 

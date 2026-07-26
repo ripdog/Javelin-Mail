@@ -137,6 +137,8 @@ namespace javelin::gui::shell
             javelin::app::undo::UndoManager& undoManager, QWidget* parent = nullptr);
         ~MainWindow() override;
         void openPreferencesForConnection(const QString& connectionId);
+        void restoreDraft(const QString& accountId, const QString& draftEmailId,
+                          const QString& composeSessionId);
 
       Q_SIGNALS:
         void accountSettingsChanged();

@@ -534,6 +534,8 @@ namespace javelin::jmap::submission
                         },
                     },
                 .body = body,
+                .cancellation = {},
+                .dispatched = {},
             });
             if (const auto* error =
                     std::get_if<javelin::jmap::api::TransportError>(&transportResult))
@@ -1436,12 +1438,30 @@ namespace javelin::jmap::submission
     QCoro::Task<std::variant<SendSummary, javelin::jmap::OperationError>>
     ComposeService::send(javelin::jmap::LiveConnectionSettings settings, DraftSnapshot snapshot)
     {
+        auto prepared = co_await prepareSend(settings, std::move(snapshot));
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&prepared))
+            co_return *error;
+        co_return co_await submitPreparedSend(std::move(settings),
+                                              std::get<PreparedSend>(std::move(prepared)));
+    }
+
+    QCoro::Task<std::variant<PreparedSend, javelin::jmap::OperationError>>
+    ComposeService::prepareSend(javelin::jmap::LiveConnectionSettings settings,
+                                DraftSnapshot snapshot)
+    {
         const auto draftSaveResult = co_await saveDraft(settings, std::move(snapshot));
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&draftSaveResult))
-        {
             co_return *error;
-        }
-        const auto& draftSummary = std::get<DraftSaveSummary>(draftSaveResult);
+        co_return PreparedSend{
+            .draft = std::get<DraftSaveSummary>(std::move(draftSaveResult)),
+        };
+    }
+
+    QCoro::Task<std::variant<SendSummary, javelin::jmap::OperationError>>
+    ComposeService::submitPreparedSend(javelin::jmap::LiveConnectionSettings settings,
+                                       PreparedSend prepared, std::function<void()> dispatched)
+    {
+        const auto& draftSummary = prepared.draft;
 
         const auto sessionResult = loadCachedSession(m_connection, draftSummary.accountId);
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&sessionResult))
@@ -1624,7 +1644,8 @@ namespace javelin::jmap::submission
 
         const auto handle = builder.call(*request, "send-message");
         const auto result = co_await methodCaller.call(
-            buildApiRequestContext(settings, draftSummary.accountId, session), builder);
+            buildApiRequestContext(settings, draftSummary.accountId, session), builder, {},
+            std::move(dispatched));
         if (const auto* error = std::get_if<javelin::jmap::api::TransportError>(&result))
         {
             if (const auto transitionError =

@@ -5,6 +5,7 @@
 
 #include <QCoroTask>
 
+#include <functional>
 #include <optional>
 #include <variant>
 
@@ -48,6 +49,11 @@ namespace javelin::jmap::submission
                     std::string draftEmailId, std::string operationGroupId);
         [[nodiscard]] QCoro::Task<std::variant<SendSummary, javelin::jmap::OperationError>>
         send(javelin::jmap::LiveConnectionSettings settings, DraftSnapshot snapshot);
+        [[nodiscard]] QCoro::Task<std::variant<PreparedSend, javelin::jmap::OperationError>>
+        prepareSend(javelin::jmap::LiveConnectionSettings settings, DraftSnapshot snapshot);
+        [[nodiscard]] QCoro::Task<std::variant<SendSummary, javelin::jmap::OperationError>>
+        submitPreparedSend(javelin::jmap::LiveConnectionSettings settings, PreparedSend prepared,
+                           std::function<void()> dispatched = {});
         [[nodiscard]] std::variant<std::optional<DraftSnapshot>, javelin::jmap::OperationError>
         loadWorkingCopy(std::string_view composeSessionId) const;
         [[nodiscard]] std::optional<javelin::jmap::OperationError>

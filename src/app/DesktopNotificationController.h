@@ -3,6 +3,7 @@
 #include <QObject>
 
 #include <QByteArray>
+#include <QHash>
 #include <QString>
 #include <QVariantMap>
 
@@ -25,6 +26,9 @@ namespace javelin::app
         void notifyError(const QString& connectionId, const QString& title, const QString& message,
                          bool persistent, bool opensSettings);
         void notifyCalendarEvent(const QString& key, const QString& title, const QString& message);
+        void notifyUndoableSend(const QString& sendId, const QString& title, const QString& message,
+                                int timeoutMs);
+        void closeUndoableSendNotification(const QString& sendId);
 
       Q_SIGNALS:
         void notificationActivated(const QString& accountId, const QString& mailboxId,
@@ -33,6 +37,7 @@ namespace javelin::app
         void errorNotificationActivated(const QString& connectionId,
                                         const QString& activationToken);
         void calendarNotificationAction(const QString& key, bool snooze);
+        void undoSendRequested(const QString& sendId);
 
       private Q_SLOTS:
         void onActionInvoked(uint notificationId, const QString& actionKey);
@@ -49,6 +54,7 @@ namespace javelin::app
             QString activationToken;
             QString connectionId;
             QString calendarNotificationKey;
+            QString sendId;
             bool opensSettings = false;
         };
 
@@ -57,6 +63,7 @@ namespace javelin::app
         void untrackNotification(uint notificationId);
 
         std::unordered_map<uint, TrackedNotification> m_trackedNotifications;
+        QHash<QString, uint> m_sendNotificationIds;
     };
 
 } // namespace javelin::app

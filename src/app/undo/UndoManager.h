@@ -51,6 +51,8 @@ namespace javelin::app::undo
         acknowledgeAndRemove(const QString& entryId);
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
         forget(const QString& entryId);
+        [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
+        forgetAndClearRedo(const QString& entryId);
 
         [[nodiscard]] const HistoryState& state() const;
         [[nodiscard]] const std::vector<HistoryEntry>& entries() const;

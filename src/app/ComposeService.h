@@ -28,6 +28,7 @@ namespace javelin::app
 {
     class ApplicationErrorCoordinator;
     class AccountConnectionProvider;
+    class DeferredSendService;
     class WorkScheduler;
     namespace undo
     {
@@ -40,7 +41,8 @@ namespace javelin::app
         ComposeService(javelin::jmap::submission::ComposeService& service,
                        ApplicationErrorCoordinator& errorCoordinator, WorkScheduler& workScheduler,
                        AccountConnectionProvider& connectionProvider,
-                       javelin::app::undo::UndoManager& undoManager);
+                       javelin::app::undo::UndoManager& undoManager,
+                       DeferredSendService& deferredSendService);
 
         [[nodiscard]] QCoro::Task<
             std::variant<javelin::jmap::submission::DraftSnapshot, javelin::jmap::OperationError>>
@@ -83,6 +85,7 @@ namespace javelin::app
         WorkScheduler& m_workScheduler;
         AccountConnectionProvider& m_connectionProvider;
         javelin::app::undo::UndoManager& m_undoManager;
+        DeferredSendService& m_deferredSendService;
         std::unordered_map<std::string, javelin::jmap::submission::DraftSnapshot>
             m_lastSavedSnapshots;
     };

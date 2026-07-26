@@ -1,6 +1,8 @@
 add_executable(javelin_jmap_tests
     ${PROJECT_SOURCE_DIR}/src/app/ApplicationErrorCoordinator.cpp
     ${PROJECT_SOURCE_DIR}/src/app/ApplicationErrorCoordinator.h
+    ${PROJECT_SOURCE_DIR}/src/app/DeferredSendRepository.cpp
+    ${PROJECT_SOURCE_DIR}/src/app/DeferredSendRepository.h
     ${PROJECT_SOURCE_DIR}/src/app/ContactCommandPreparation.cpp
     ${PROJECT_SOURCE_DIR}/src/app/ContactCommandPreparation.h
     ${PROJECT_SOURCE_DIR}/src/app/ContactCommands.h
@@ -61,6 +63,7 @@ add_executable(javelin_jmap_tests
     app/ContactCommandPreparationTest.cpp
     app/HistoryRepositoryTest.cpp
     app/DraftHistoryExecutorTest.cpp
+    app/DeferredSendRepositoryTest.cpp
     app/MailHistoryExecutorTest.cpp
     app/SieveHistoryExecutorTest.cpp
     app/UndoManagerTest.cpp

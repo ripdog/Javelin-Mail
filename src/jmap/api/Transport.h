@@ -11,6 +11,7 @@
 #include <QPair>
 #include <QUrl>
 
+#include <functional>
 #include <variant>
 
 namespace javelin::jmap::api
@@ -35,6 +36,7 @@ namespace javelin::jmap::api
         QList<HttpHeader> headers;
         QByteArray body;
         CancellationToken cancellation{};
+        std::function<void()> dispatched;
     };
 
     struct HttpResponse

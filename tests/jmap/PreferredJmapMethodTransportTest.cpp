@@ -109,6 +109,8 @@ namespace
             .accessToken = "access-token",
             .envelope = requestEnvelope(),
             .cancellation = {},
+            .transportPolicy = javelin::jmap::api::JmapTransportPolicy::Preferred,
+            .dispatched = {},
         };
     }
 } // namespace
@@ -189,6 +191,7 @@ TEST_CASE("JMAP request diagnostics resolve methods and human-readable mailbox n
             },
         .cancellation = {},
         .transportPolicy = javelin::jmap::api::JmapTransportPolicy::Preferred,
+        .dispatched = {},
     };
 
     const auto context =

@@ -3,6 +3,7 @@
 #include "app/AddressSuggestionStore.h"
 #include "app/ApplicationErrorCoordinator.h"
 #include "app/CalendarNotificationService.h"
+#include "app/DeferredSendService.h"
 #include "app/DesktopNotificationController.h"
 #include "app/FullMailSyncService.h"
 #include "app/LocalMaintenanceService.h"
@@ -176,6 +177,7 @@ namespace javelin::app
 
         reloadAccountSynchronizationSettings();
         setupSystemTray();
+        m_processServices->deferredSendService().start();
         createMainWindow();
 
         return m_application.exec();
@@ -368,6 +370,42 @@ namespace javelin::app
                              restoreMainWindow(activationToken);
                              if (m_mainWindow != nullptr)
                                  m_mainWindow->openPreferencesForConnection(connectionId);
+                         });
+        QObject::connect(
+            &m_processServices->deferredSendService(), &DeferredSendService::undoableSendScheduled,
+            m_notificationController.get(), &DesktopNotificationController::notifyUndoableSend);
+        QObject::connect(
+            &m_processServices->deferredSendService(), &DeferredSendService::undoableSendWaiting,
+            m_notificationController.get(),
+            [this](const QString& sendId, const QString& title, const QString& message)
+            { m_notificationController->notifyUndoableSend(sendId, title, message, 0); });
+        QObject::connect(&m_processServices->deferredSendService(),
+                         &DeferredSendService::undoableSendClosed, m_notificationController.get(),
+                         &DesktopNotificationController::closeUndoableSendNotification);
+        QObject::connect(m_notificationController.get(),
+                         &DesktopNotificationController::undoSendRequested, &m_application,
+                         [this](const QString& sendId)
+                         {
+                             static_cast<void>(
+                                 m_processServices->deferredSendService().cancelTargeted(sendId));
+                         });
+        QObject::connect(&m_processServices->deferredSendService(),
+                         &DeferredSendService::draftRestoreRequested, &m_application,
+                         [this](const QString& accountId, const QString& draftEmailId,
+                                const QString& composeSessionId)
+                         {
+                             restoreMainWindow({});
+                             if (m_mainWindow != nullptr)
+                                 m_mainWindow->restoreDraft(accountId, draftEmailId,
+                                                            composeSessionId);
+                         });
+        QObject::connect(&m_processServices->deferredSendService(),
+                         &DeferredSendService::sendFailed, m_notificationController.get(),
+                         [this](const QString&, const QString& message)
+                         {
+                             m_notificationController->notifyError(
+                                 {}, QStringLiteral("Unable to send message"), message, true,
+                                 false);
                          });
 
         QObject::connect(m_trayIcon.get(), &QSystemTrayIcon::activated,

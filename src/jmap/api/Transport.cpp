@@ -169,6 +169,8 @@ namespace javelin::jmap::api
             reply = m_networkAccessManager.post(networkRequest, request.body);
             break;
         }
+        if (request.dispatched)
+            request.dispatched();
 
         const auto cancellationRegistration = request.cancellation.registerCallback(
             [reply = QPointer<QNetworkReply>{reply}]()

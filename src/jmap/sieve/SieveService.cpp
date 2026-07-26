@@ -322,6 +322,8 @@ namespace javelin::jmap::sieve
                             {.name = "Accept", .value = "application/json"},
                             {.name = "Content-Type", .value = "application/sieve"}},
                 .body = std::move(content),
+                .cancellation = {},
+                .dispatched = {},
             });
             if (const auto* transportError = std::get_if<api::TransportError>(&result))
                 co_return operationError(*transportError);
@@ -568,6 +570,8 @@ namespace javelin::jmap::sieve
                                   QByteArray::fromStdString(context.credentials.token.accessToken)},
                         {.name = "Accept", .value = "application/sieve"}},
             .body = {},
+            .cancellation = {},
+            .dispatched = {},
         });
         if (const auto* transportError = std::get_if<api::TransportError>(&result))
             co_return operationError(*transportError);

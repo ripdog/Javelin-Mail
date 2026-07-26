@@ -33,6 +33,8 @@ namespace
         QCoro::Task<javelin::jmap::api::TransportResult>
         send(javelin::jmap::api::HttpRequest request) override
         {
+            if (request.dispatched)
+                request.dispatched();
             requests.push_back(std::move(request));
             REQUIRE_FALSE(results.empty());
             auto result = std::move(results.front());
@@ -228,30 +230,38 @@ TEST_CASE("compose sending uses the account selected with the From identity",
     javelin::jmap::JmapCore core{connection, transport, methodTransport};
     javelin::jmap::submission::ComposeService service{connection, transport, methodTransport, core};
 
-    const auto result = QCoro::waitFor(service.send(
-        {
-            .sessionUrl = "https://account-2.example.test/.well-known/jmap",
-            .loginEmail = "shared-login@example.test",
-            .apiKey = "account-2-secret",
-        },
-        javelin::jmap::submission::DraftSnapshot{
-            .composeSessionId = "compose-2",
-            .accountId = "account-2",
-            .draftEmailId = std::nullopt,
-            .mode = javelin::jmap::submission::ComposeMode::NewMessage,
-            .editorMode = javelin::jmap::submission::BodyEditorMode::RichText,
-            .identityId = "identity-2",
-            .to = {{.name = std::nullopt, .email = "recipient@example.test"}},
-            .cc = {},
-            .bcc = {},
-            .subject = "Multiple account test",
-            .plainTextBody = "Body",
-            .htmlBody = "<p>Body</p>",
-            .threading = {},
-            .attachments = {},
-        }));
+    const javelin::jmap::LiveConnectionSettings liveSettings{
+        .sessionUrl = "https://account-2.example.test/.well-known/jmap",
+        .loginEmail = "shared-login@example.test",
+        .apiKey = "account-2-secret",
+    };
+    auto preparedResult = QCoro::waitFor(service.prepareSend(
+        liveSettings, javelin::jmap::submission::DraftSnapshot{
+                          .composeSessionId = "compose-2",
+                          .accountId = "account-2",
+                          .draftEmailId = std::nullopt,
+                          .mode = javelin::jmap::submission::ComposeMode::NewMessage,
+                          .editorMode = javelin::jmap::submission::BodyEditorMode::RichText,
+                          .identityId = "identity-2",
+                          .to = {{.name = std::nullopt, .email = "recipient@example.test"}},
+                          .cc = {},
+                          .bcc = {},
+                          .subject = "Multiple account test",
+                          .plainTextBody = "Body",
+                          .htmlBody = "<p>Body</p>",
+                          .threading = {},
+                          .attachments = {},
+                      }));
+    REQUIRE(std::holds_alternative<javelin::jmap::submission::PreparedSend>(preparedResult));
+    CHECK(transport.requests.size() == 1);
+
+    bool submissionDispatched = false;
+    const auto result = QCoro::waitFor(service.submitPreparedSend(
+        liveSettings, std::get<javelin::jmap::submission::PreparedSend>(std::move(preparedResult)),
+        [&submissionDispatched] { submissionDispatched = true; }));
 
     REQUIRE(std::holds_alternative<javelin::jmap::submission::SendSummary>(result));
+    CHECK(submissionDispatched);
     const auto& summary = std::get<javelin::jmap::submission::SendSummary>(result);
     CHECK(summary.accountId == "account-2");
     CHECK(summary.submissionId == std::optional<std::string>{"submission-2"});

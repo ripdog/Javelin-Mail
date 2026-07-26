@@ -5,6 +5,8 @@
 #include "app/CalendarNotificationService.h"
 #include "app/ComposeService.h"
 #include "app/ContactCommandService.h"
+#include "app/DeferredSendRepository.h"
+#include "app/DeferredSendService.h"
 #include "app/FullMailSyncService.h"
 #include "app/InlineMessageSchemeHandler.h"
 #include "app/LocalMaintenanceService.h"
@@ -87,6 +89,7 @@ namespace javelin::app
         m_historyRepository =
             std::make_unique<javelin::app::undo::HistoryRepository>(m_databaseConnection);
         m_undoManager = std::make_unique<javelin::app::undo::UndoManager>(*m_historyRepository);
+        m_deferredSendRepository = std::make_unique<DeferredSendRepository>(m_databaseConnection);
         if (const auto historyError = m_undoManager->load())
             throw std::runtime_error(historyError->message.toStdString());
         m_networkAccessManager = std::make_unique<QNetworkAccessManager>();
@@ -146,9 +149,12 @@ namespace javelin::app
             *m_stateChangeNetworkAccessManager, *m_webSocketFailureCooldowns, *m_accountRepository,
             *m_queryService, *m_contactService, *m_calendarService, *m_sieveService,
             *m_errorCoordinator, *m_workScheduler, *m_undoManager);
-        m_composeService =
-            std::make_unique<ComposeService>(*m_jmapComposeService, *m_errorCoordinator,
-                                             *m_workScheduler, *m_mailService, *m_undoManager);
+        m_deferredSendService = std::make_unique<DeferredSendService>(
+            *m_deferredSendRepository, *m_jmapComposeService, *m_mailService, *m_undoManager);
+        m_undoManager->setExecutor(QStringLiteral("deferred_send"), m_deferredSendService.get());
+        m_composeService = std::make_unique<ComposeService>(
+            *m_jmapComposeService, *m_errorCoordinator, *m_workScheduler, *m_mailService,
+            *m_undoManager, *m_deferredSendService);
         m_draftHistoryExecutor =
             std::make_unique<javelin::app::undo::DraftHistoryExecutor>(*m_composeService);
         m_undoManager->setExecutor(QStringLiteral("draft"), m_draftHistoryExecutor.get());
@@ -224,6 +230,11 @@ namespace javelin::app
     ComposeService& ProcessServices::composeService()
     {
         return *m_composeService;
+    }
+
+    DeferredSendService& ProcessServices::deferredSendService()
+    {
+        return *m_deferredSendService;
     }
 
     ContactCommandPort& ProcessServices::contactCommandPort()

@@ -1,5 +1,6 @@
 #include "gui/settings/PreferencesDialog.h"
 
+#include "app/ComposePreferences.h"
 #include "gui/mailboxes/MailboxTreeModel.h"
 #include "gui/mailboxes/MailboxTreeView.h"
 #include "jmap/cache/AccountRepository.h"
@@ -20,6 +21,7 @@
 #include <QRadioButton>
 #include <QSettings>
 #include <QSignalBlocker>
+#include <QSpinBox>
 #include <QSplitter>
 #include <QUuid>
 #include <QVBoxLayout>
@@ -155,7 +157,8 @@ namespace javelin::gui::settings
           m_translationSettings(javelin::app::TranslationService::loadSettings()),
           m_autoTranslateSenders(m_translationSettings.autoTranslateSenders),
           m_autoTranslateDomains(m_translationSettings.autoTranslateDomains),
-          m_attachmentSaveSettings(loadAttachmentSaveSettings())
+          m_attachmentSaveSettings(loadAttachmentSaveSettings()),
+          m_undoSendDelaySeconds(javelin::app::ComposePreferences::undoSendDelaySeconds())
     {
         setWindowTitle(QStringLiteral("Preferences"));
         resize(760, 420);
@@ -351,6 +354,16 @@ namespace javelin::gui::settings
         addPage(attachmentsPage, QStringLiteral("Attachments"), QStringLiteral("mail-attachment"),
                 QString{}, false);
 
+        auto* composingPage = new QWidget(this);
+        auto* composingLayout = new QFormLayout(composingPage);
+        m_undoSendDelaySpinBox = new QSpinBox(composingPage);
+        m_undoSendDelaySpinBox->setRange(1, 120);
+        m_undoSendDelaySpinBox->setSuffix(QStringLiteral(" seconds"));
+        m_undoSendDelaySpinBox->setValue(m_undoSendDelaySeconds);
+        composingLayout->addRow(QStringLiteral("Undo send window:"), m_undoSendDelaySpinBox);
+        addPage(composingPage, QStringLiteral("Composing"), QStringLiteral("mail-send"), QString{},
+                false);
+
         connect(addButton, &QPushButton::clicked, this, &PreferencesDialog::addAccount);
         connect(m_removeButton, &QPushButton::clicked, this,
                 &PreferencesDialog::removeCurrentAccount);
@@ -424,6 +437,12 @@ namespace javelin::gui::settings
                 });
         connect(m_attachmentDirectoryButton, &QPushButton::clicked, this,
                 &PreferencesDialog::selectAttachmentDirectory);
+        connect(m_undoSendDelaySpinBox, &QSpinBox::valueChanged, this,
+                [this](const int seconds)
+                {
+                    m_undoSendDelaySeconds = seconds;
+                    noteUnsavedChanges();
+                });
         connect(m_mailboxSyncAccount, &QComboBox::currentIndexChanged, this,
                 [this]
                 {
@@ -768,6 +787,7 @@ namespace javelin::gui::settings
         m_translationSettings.autoTranslateDomains = m_autoTranslateDomains;
         javelin::app::TranslationService::saveSettings(m_translationSettings);
         saveAttachmentSaveSettings(m_attachmentSaveSettings);
+        javelin::app::ComposePreferences::setUndoSendDelaySeconds(m_undoSendDelaySeconds);
         storeMailboxSyncSelection();
         QSettings mailboxSettings;
         mailboxSettings.beginGroup(QLatin1StringView{mailboxSyncGroup});

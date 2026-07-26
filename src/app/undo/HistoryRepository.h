@@ -32,6 +32,8 @@ namespace javelin::app::undo
         update(const HistoryEntry& entry);
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
         remove(const QString& entryId);
+        [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
+        removeAndClearRedo(const QString& entryId);
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError> clearRedo();
 
       private:

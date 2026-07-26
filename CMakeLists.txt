@@ -69,6 +69,12 @@ set(JAVELIN_FORMAT_FILES
     src/app/AddressSuggestionStore.h
     src/app/ComposeService.cpp
     src/app/ComposeService.h
+    src/app/ComposePreferences.cpp
+    src/app/ComposePreferences.h
+    src/app/DeferredSendRepository.cpp
+    src/app/DeferredSendRepository.h
+    src/app/DeferredSendService.cpp
+    src/app/DeferredSendService.h
     src/app/ApplicationBootstrap.cpp
     src/app/ApplicationBootstrap.h
     src/app/DesktopNotificationController.cpp
@@ -874,6 +880,12 @@ add_library(javelin_application STATIC
     src/app/ContactApplicationPorts.h
     src/app/ComposeService.cpp
     src/app/ComposeService.h
+    src/app/ComposePreferences.cpp
+    src/app/ComposePreferences.h
+    src/app/DeferredSendRepository.cpp
+    src/app/DeferredSendRepository.h
+    src/app/DeferredSendService.cpp
+    src/app/DeferredSendService.h
     src/app/ContactCommandPreparation.cpp
     src/app/ContactCommandPreparation.h
     src/app/ContactCommands.h

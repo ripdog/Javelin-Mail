@@ -18,7 +18,8 @@ namespace javelin::jmap::api
 
     QCoro::Task<MethodCallerResult> MethodCaller::call(ApiRequestContext requestContext,
                                                        RequestEnvelope request,
-                                                       CancellationToken cancellation) const
+                                                       CancellationToken cancellation,
+                                                       std::function<void()> dispatched) const
     {
         if (cancellation.isCancellationRequested())
         {
@@ -47,6 +48,7 @@ namespace javelin::jmap::api
             .envelope = std::move(request),
             .cancellation = std::move(cancellation),
             .transportPolicy = requestContext.transportPolicy,
+            .dispatched = std::move(dispatched),
         });
         if (std::holds_alternative<TransportError>(transportResult))
         {
@@ -67,9 +69,11 @@ namespace javelin::jmap::api
 
     QCoro::Task<MethodCallerResult> MethodCaller::call(ApiRequestContext requestContext,
                                                        RequestBuilder request,
-                                                       CancellationToken cancellation) const
+                                                       CancellationToken cancellation,
+                                                       std::function<void()> dispatched) const
     {
-        co_return co_await call(requestContext, request.build(), std::move(cancellation));
+        co_return co_await call(requestContext, request.build(), std::move(cancellation),
+                                std::move(dispatched));
     }
 
 } // namespace javelin::jmap::api

@@ -2048,6 +2048,20 @@ namespace javelin::gui::shell
         m_composeTabController->open(std::move(request));
     }
 
+    void MainWindow::restoreDraft(const QString& accountId, const QString& draftEmailId,
+                                  const QString& composeSessionId)
+    {
+        openComposeForRequest({
+            .accountId = accountId.toStdString(),
+            .mode = javelin::jmap::submission::ComposeMode::EditDraft,
+            .referenceEmailId = std::nullopt,
+            .draftEmailId = draftEmailId.toStdString(),
+            .initialTo = {},
+            .useExistingWorkingCopy = true,
+            .composeSessionId = composeSessionId.toStdString(),
+        });
+    }
+
     bool MainWindow::closeComposeTab(const int index)
     {
         const auto input = m_composeTabController->closeInput(index);

@@ -25,6 +25,8 @@ namespace javelin::app
     class LocalMaintenanceService;
     class ApplicationErrorCoordinator;
     class ComposeService;
+    class DeferredSendRepository;
+    class DeferredSendService;
     class ContactCommandPort;
     class ContactCommandService;
     class CalendarNotificationService;
@@ -99,6 +101,7 @@ namespace javelin::app
         [[nodiscard]] javelin::jmap::cache::QueryService& queryService();
         [[nodiscard]] TranslationService& translationService();
         [[nodiscard]] ComposeService& composeService();
+        [[nodiscard]] DeferredSendService& deferredSendService();
         [[nodiscard]] ContactCommandPort& contactCommandPort();
         [[nodiscard]] MailApplicationService& mailService();
         [[nodiscard]] MessageNavigationCoordinator& messageNavigationCoordinator();
@@ -115,6 +118,7 @@ namespace javelin::app
         javelin::jmap::cache::DatabaseConnection m_databaseConnection;
         std::unique_ptr<javelin::app::undo::HistoryRepository> m_historyRepository;
         std::unique_ptr<javelin::app::undo::UndoManager> m_undoManager;
+        std::unique_ptr<DeferredSendRepository> m_deferredSendRepository;
         std::unique_ptr<QNetworkAccessManager> m_networkAccessManager;
         std::unique_ptr<QNetworkAccessManager> m_stateChangeNetworkAccessManager;
         std::unique_ptr<javelin::jmap::api::WebSocketFailureCooldowns> m_webSocketFailureCooldowns;
@@ -137,6 +141,7 @@ namespace javelin::app
         std::unique_ptr<javelin::jmap::cache::SubmissionRepository> m_submissionRepository;
         std::unique_ptr<javelin::jmap::submission::ComposeService> m_jmapComposeService;
         std::unique_ptr<ComposeService> m_composeService;
+        std::unique_ptr<DeferredSendService> m_deferredSendService;
         std::unique_ptr<ApplicationErrorCoordinator> m_errorCoordinator;
         std::unique_ptr<MailApplicationService> m_mailService;
         std::unique_ptr<javelin::app::undo::MailHistoryExecutor> m_mailHistoryExecutor;
