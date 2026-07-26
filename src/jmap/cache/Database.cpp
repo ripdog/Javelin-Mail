@@ -1496,6 +1496,45 @@ namespace javelin::jmap::cache
                                            "INTEGER NOT NULL DEFAULT 1 CHECK(is_valid IN (0,1))"),
                         },
                 },
+                MigrationStep{
+                    .version = 32,
+                    .name = QStringLiteral("operation_history"),
+                    .statements =
+                        {
+                            QStringLiteral(
+                                "CREATE TABLE operation_history ("
+                                "entry_id TEXT PRIMARY KEY,"
+                                "stack TEXT NOT NULL CHECK(stack IN ('undo','redo')),"
+                                "stack_order INTEGER NOT NULL,"
+                                "domain TEXT NOT NULL,"
+                                "command_kind TEXT NOT NULL,"
+                                "label TEXT NOT NULL,"
+                                "payload_version INTEGER NOT NULL,"
+                                "payload_json TEXT NOT NULL,"
+                                "status TEXT NOT NULL CHECK(status IN "
+                                "('preparing','executing_forward','ready','executing_undo',"
+                                "'executing_redo','blocked_unknown','blocked_partial',"
+                                "'impossible','expired')),"
+                                "operation_group_id TEXT,"
+                                "expires_at TEXT,"
+                                "explanation TEXT,"
+                                "failure_json TEXT,"
+                                "created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+                                "updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP"
+                                ") STRICT"),
+                            QStringLiteral("CREATE UNIQUE INDEX idx_operation_history_stack_order "
+                                           "ON operation_history(stack,stack_order)"),
+                            QStringLiteral("CREATE INDEX idx_operation_history_operation_group "
+                                           "ON operation_history(operation_group_id)"),
+                            QStringLiteral("CREATE TABLE operation_history_sequence ("
+                                           "singleton INTEGER PRIMARY KEY CHECK(singleton=1),"
+                                           "next_value INTEGER NOT NULL"
+                                           ") STRICT"),
+                            QStringLiteral(
+                                "INSERT INTO operation_history_sequence(singleton,next_value) "
+                                "VALUES(1,1)"),
+                        },
+                },
             },
         };
     }

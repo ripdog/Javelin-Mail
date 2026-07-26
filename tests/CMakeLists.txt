@@ -4,6 +4,12 @@ add_executable(javelin_jmap_tests
     ${PROJECT_SOURCE_DIR}/src/app/ContactCommandPreparation.cpp
     ${PROJECT_SOURCE_DIR}/src/app/ContactCommandPreparation.h
     ${PROJECT_SOURCE_DIR}/src/app/ContactCommands.h
+    ${PROJECT_SOURCE_DIR}/src/app/undo/HistoryRepository.cpp
+    ${PROJECT_SOURCE_DIR}/src/app/undo/HistoryRepository.h
+    ${PROJECT_SOURCE_DIR}/src/app/undo/HistorySerialization.cpp
+    ${PROJECT_SOURCE_DIR}/src/app/undo/HistorySerialization.h
+    ${PROJECT_SOURCE_DIR}/src/app/undo/HistoryTypes.cpp
+    ${PROJECT_SOURCE_DIR}/src/app/undo/HistoryTypes.h
     ${PROJECT_SOURCE_DIR}/src/app/MailboxSelectionMutation.cpp
     ${PROJECT_SOURCE_DIR}/src/app/MessageSelection.cpp
     ${PROJECT_SOURCE_DIR}/src/app/MailboxSyncCoverage.cpp
@@ -41,6 +47,7 @@ add_executable(javelin_jmap_tests
     jmap/LongPollWorkerTest.cpp
     app/ApplicationErrorCoordinatorTest.cpp
     app/ContactCommandPreparationTest.cpp
+    app/HistoryRepositoryTest.cpp
     app/MailboxSelectionMutationTest.cpp
     app/MailboxSyncCoverageTest.cpp
     app/MessageNavigationCoordinatorTest.cpp

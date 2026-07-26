@@ -75,6 +75,12 @@ set(JAVELIN_FORMAT_FILES
     src/app/DesktopNotificationController.h
     src/app/FullMailSyncService.cpp
     src/app/FullMailSyncService.h
+    src/app/undo/HistoryRepository.cpp
+    src/app/undo/HistoryRepository.h
+    src/app/undo/HistorySerialization.cpp
+    src/app/undo/HistorySerialization.h
+    src/app/undo/HistoryTypes.cpp
+    src/app/undo/HistoryTypes.h
     src/app/MailIndexService.cpp
     src/app/MailIndexService.h
     src/app/LocalMaintenanceService.cpp
@@ -859,6 +865,12 @@ add_library(javelin_application STATIC
     src/app/DesktopNotificationController.h
     src/app/FullMailSyncService.cpp
     src/app/FullMailSyncService.h
+    src/app/undo/HistoryRepository.cpp
+    src/app/undo/HistoryRepository.h
+    src/app/undo/HistorySerialization.cpp
+    src/app/undo/HistorySerialization.h
+    src/app/undo/HistoryTypes.cpp
+    src/app/undo/HistoryTypes.h
     src/app/InlineMessageSchemeHandler.cpp
     src/app/InlineMessageSchemeHandler.h
     src/app/LocalMaintenanceService.cpp
