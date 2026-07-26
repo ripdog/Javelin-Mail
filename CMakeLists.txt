@@ -625,10 +625,6 @@ javelin_enable_static_analysis(javelin_jmap)
 javelin_enable_sanitizers(javelin_jmap)
 
 add_library(javelin_gui STATIC
-    src/app/AddressSuggestionStore.cpp
-    src/app/AddressSuggestionStore.h
-    src/app/LogStore.cpp
-    src/app/LogStore.h
     src/gui/IconUtils.cpp
     src/gui/IconUtils.h
     src/gui/logging/LogViewerDialog.cpp
@@ -687,11 +683,6 @@ add_library(javelin_gui STATIC
     src/gui/messageview/PlainTextLinkifier.h
     src/gui/search/AdvancedSearchDialog.cpp
     src/gui/search/AdvancedSearchDialog.h
-    src/app/SearchSession.cpp
-    src/app/SearchSession.h
-    src/app/MessageListSession.h
-    src/app/MailboxSession.cpp
-    src/app/MailboxSession.h
     src/gui/search/SearchSessionPersistence.cpp
     src/gui/search/SearchSessionPersistence.h
     src/gui/settings/PreferencesDialog.cpp
@@ -757,6 +748,8 @@ add_library(javelin_gui STATIC
     src/gui/shell/MessageSelectionController.h
     src/gui/sieve/SieveEditorDialog.cpp
     src/gui/sieve/SieveEditorDialog.h
+    src/gui/tasks/TaskCenterDialog.cpp
+    src/gui/tasks/TaskCenterDialog.h
 )
 
 file(GLOB_RECURSE javelin_gui_boundary_sources CONFIGURE_DEPENDS
@@ -791,7 +784,7 @@ target_link_libraries(javelin_gui
         KF6::TextEditor
     PRIVATE
         Qt::Concurrent
-        javelin_jmap
+        javelin_application
 )
 javelin_set_project_warnings(javelin_gui)
 javelin_enable_static_analysis(javelin_gui)
@@ -814,53 +807,82 @@ add_library(javelin_calendar_gui STATIC
 target_include_directories(javelin_calendar_gui PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
 )
-target_link_libraries(javelin_calendar_gui PUBLIC Qt::Widgets PRIVATE javelin_jmap)
+target_link_libraries(javelin_calendar_gui PUBLIC Qt::Widgets PRIVATE javelin_application)
 javelin_set_project_warnings(javelin_calendar_gui)
 javelin_enable_static_analysis(javelin_calendar_gui)
 javelin_enable_sanitizers(javelin_calendar_gui)
 target_compile_options(javelin_calendar_gui PRIVATE -fexceptions)
 
-add_library(javelin_app STATIC
+add_library(javelin_application STATIC
     src/app/AccountConnectionSettings.h
+    src/app/AddressSuggestionStore.cpp
+    src/app/AddressSuggestionStore.h
     src/app/ApplicationErrorCoordinator.cpp
     src/app/ApplicationErrorCoordinator.h
     src/app/CalendarNotificationService.cpp
     src/app/CalendarNotificationService.h
     src/app/ComposeService.cpp
     src/app/ComposeService.h
-    src/app/ApplicationBootstrap.cpp
-    src/app/ApplicationBootstrap.h
     src/app/DesktopNotificationController.cpp
     src/app/DesktopNotificationController.h
     src/app/FullMailSyncService.cpp
     src/app/FullMailSyncService.h
-    src/app/MailIndexService.cpp
-    src/app/MailIndexService.h
-    src/app/LocalMaintenanceService.cpp
-    src/app/LocalMaintenanceService.h
     src/app/InlineMessageSchemeHandler.cpp
     src/app/InlineMessageSchemeHandler.h
+    src/app/LocalMaintenanceService.cpp
+    src/app/LocalMaintenanceService.h
+    src/app/LogStore.cpp
+    src/app/LogStore.h
     src/app/LongPollService.cpp
     src/app/LongPollService.h
     src/app/MailApplicationService.cpp
     src/app/MailApplicationService.h
     src/app/MailboxSelectionMutation.cpp
     src/app/MailboxSelectionMutation.h
-    src/app/MessageSelection.cpp
-    src/app/MessageSelection.h
+    src/app/MailboxSession.cpp
+    src/app/MailboxSession.h
     src/app/MailboxSyncCoverage.cpp
     src/app/MailboxSyncCoverage.h
+    src/app/MailIndexService.cpp
+    src/app/MailIndexService.h
+    src/app/MessageListSession.h
     src/app/MessageNavigationCoordinator.cpp
     src/app/MessageNavigationCoordinator.h
-    src/app/WebEngineSetup.h
+    src/app/MessageSelection.cpp
+    src/app/MessageSelection.h
     src/app/ProcessServices.cpp
     src/app/ProcessServices.h
+    src/app/SearchSession.cpp
+    src/app/SearchSession.h
     src/app/TranslationService.cpp
     src/app/TranslationService.h
     src/app/WorkScheduler.cpp
     src/app/WorkScheduler.h
-    src/gui/tasks/TaskCenterDialog.cpp
-    src/gui/tasks/TaskCenterDialog.h
+)
+target_include_directories(javelin_application PUBLIC
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
+)
+target_link_libraries(javelin_application
+    PUBLIC
+        Qt::Core
+        Qt::WebEngineCore
+        javelin_jmap
+    PRIVATE
+        QCoro6::Network
+        Qt::Concurrent
+        Qt::DBus
+        Qt::Network
+)
+javelin_set_project_warnings(javelin_application)
+javelin_enable_static_analysis(javelin_application)
+javelin_enable_sanitizers(javelin_application)
+# QCoro and ProcessServices use exceptions internally
+target_compile_options(javelin_application PRIVATE -fexceptions)
+
+add_library(javelin_app STATIC
+    src/app/ApplicationBootstrap.cpp
+    src/app/ApplicationBootstrap.h
+    src/app/WebEngineSetup.h
 )
 qt_add_resources(javelin_app "javelin_icons"
     PREFIX "/icons"
@@ -902,17 +924,13 @@ target_include_directories(javelin_app PUBLIC
 target_link_libraries(javelin_app
     PUBLIC
         Qt::Core
-        Qt::DBus
         Qt::Widgets
         Qt::WebEngineCore
         Qt::Svg
         KF6::CoreAddons
     PRIVATE
-        QCoro6::Network
-        Qt::Concurrent
-        Qt::Network
+        javelin_application
         javelin_gui
-        javelin_jmap
 )
 javelin_set_project_warnings(javelin_app)
 javelin_enable_static_analysis(javelin_app)
