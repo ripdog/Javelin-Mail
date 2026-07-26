@@ -49,17 +49,10 @@ namespace javelin::jmap::cache
         }
 
         std::optional<DatabaseError>
-        insertAddresses(QSqlDatabase& database, std::string_view accountId,
-                        std::string_view emailId, std::string_view fieldName,
+        insertAddresses(QSqlQuery& query, std::string_view accountId, std::string_view emailId,
+                        std::string_view fieldName,
                         const std::vector<javelin::jmap::domain::EmailAddress>& addresses)
         {
-            QSqlQuery query{database};
-            query.prepare(QStringLiteral(
-                "INSERT INTO email_addresses ("
-                "account_id, email_id, field_name, position, display_name, address"
-                ") VALUES ("
-                ":account_id, :email_id, :field_name, :position, :display_name, :address)"));
-
             int position = 0;
             for (const auto& address : addresses)
             {
@@ -84,6 +77,20 @@ namespace javelin::jmap::cache
             }
 
             return std::nullopt;
+        }
+
+        std::optional<DatabaseError>
+        insertAddresses(QSqlDatabase& database, const std::string_view accountId,
+                        const std::string_view emailId, const std::string_view fieldName,
+                        const std::vector<javelin::jmap::domain::EmailAddress>& addresses)
+        {
+            QSqlQuery query{database};
+            query.prepare(QStringLiteral(
+                "INSERT INTO email_addresses ("
+                "account_id, email_id, field_name, position, display_name, address"
+                ") VALUES ("
+                ":account_id, :email_id, :field_name, :position, :display_name, :address)"));
+            return insertAddresses(query, accountId, emailId, fieldName, addresses);
         }
 
         [[nodiscard]] std::vector<javelin::jmap::domain::EmailAddress>
@@ -209,13 +216,43 @@ namespace javelin::jmap::cache
                 QStringLiteral("INSERT INTO email_keywords (account_id, email_id, keyword) "
                                "VALUES (:account_id, :email_id, :keyword)"));
 
+            QSqlQuery previousMailboxQuery{database};
+            previousMailboxQuery.prepare(QStringLiteral(
+                "SELECT mailbox_id FROM email_mailboxes WHERE account_id=:account_id AND "
+                "email_id=:email_id"));
+            const std::array childTables{
+                QStringLiteral("email_addresses"),
+                QStringLiteral("email_keywords"),
+                QStringLiteral("email_mailboxes"),
+            };
+            std::array<QSqlQuery, childTables.size()> deleteChildQueries{
+                QSqlQuery{database},
+                QSqlQuery{database},
+                QSqlQuery{database},
+            };
+            for (std::size_t index = 0; index < childTables.size(); ++index)
+            {
+                deleteChildQueries[index].prepare(
+                    QStringLiteral(
+                        "DELETE FROM %1 WHERE account_id = :account_id AND email_id = :email_id")
+                        .arg(childTables[index]));
+            }
+            QSqlQuery projectionQuery{database};
+            projectionQuery.prepare(QStringLiteral(
+                "INSERT INTO mail_vault_projection_jobs(account_id,email_id,mailbox_id,"
+                "content_hash,operation) SELECT :account_id,:email_id,:mailbox_id,"
+                "r.content_hash,:operation FROM mail_vault_email_refs r WHERE "
+                "r.account_id=:account_id AND r.email_id=:email_id"));
+            QSqlQuery addressQuery{database};
+            addressQuery.prepare(QStringLiteral(
+                "INSERT INTO email_addresses ("
+                "account_id, email_id, field_name, position, display_name, address"
+                ") VALUES ("
+                ":account_id, :email_id, :field_name, :position, :display_name, :address)"));
+
             for (const auto& email : emails)
             {
                 std::unordered_set<std::string> previousMailboxIds;
-                QSqlQuery previousMailboxQuery{database};
-                previousMailboxQuery.prepare(QStringLiteral(
-                    "SELECT mailbox_id FROM email_mailboxes WHERE account_id=:account_id AND "
-                    "email_id=:email_id"));
                 previousMailboxQuery.bindValue(QStringLiteral(":account_id"),
                                                QString::fromStdString(std::string{accountId}));
                 previousMailboxQuery.bindValue(QStringLiteral(":email_id"),
@@ -230,10 +267,19 @@ namespace javelin::jmap::cache
                     previousMailboxIds.insert(
                         previousMailboxQuery.value(0).toString().toStdString());
                 }
+                previousMailboxQuery.finish();
 
-                if (const auto error = deleteEmailSummaryChildren(database, accountId, email.id))
+                for (auto& deleteQuery : deleteChildQueries)
                 {
-                    return error;
+                    deleteQuery.bindValue(QStringLiteral(":account_id"),
+                                          QString::fromStdString(std::string{accountId}));
+                    deleteQuery.bindValue(QStringLiteral(":email_id"),
+                                          QString::fromStdString(email.id));
+                    if (!deleteQuery.exec())
+                    {
+                        return makeQueryError(QStringLiteral("Delete email child rows"),
+                                              deleteQuery);
+                    }
                 }
 
                 emailQuery.bindValue(QStringLiteral(":account_id"),
@@ -286,12 +332,6 @@ namespace javelin::jmap::cache
 
                 const std::unordered_set<std::string> nextMailboxIds(email.mailboxIds.begin(),
                                                                      email.mailboxIds.end());
-                QSqlQuery projectionQuery{database};
-                projectionQuery.prepare(QStringLiteral(
-                    "INSERT INTO mail_vault_projection_jobs(account_id,email_id,mailbox_id,"
-                    "content_hash,operation) SELECT :account_id,:email_id,:mailbox_id,"
-                    "r.content_hash,:operation FROM mail_vault_email_refs r WHERE "
-                    "r.account_id=:account_id AND r.email_id=:email_id"));
                 const auto queueProjection =
                     [&](const std::string& mailboxId,
                         const QString& operation) -> std::optional<DatabaseError>
@@ -352,8 +392,8 @@ namespace javelin::jmap::cache
                 };
                 for (const auto& [fieldName, addresses] : addressFields)
                 {
-                    if (const auto error =
-                            insertAddresses(database, accountId, email.id, fieldName, *addresses))
+                    if (const auto error = insertAddresses(addressQuery, accountId, email.id,
+                                                           fieldName, *addresses))
                     {
                         return error;
                     }

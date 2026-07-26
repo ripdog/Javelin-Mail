@@ -235,6 +235,16 @@ namespace
         return updated;
     }
 
+    [[nodiscard]] std::string sharedMailboxEmailFixture()
+    {
+        auto updated = javelin::tests::loadFixture("jmap/entities/email.json");
+        const auto mailboxPosition = updated.find("\"mbx-archive\": false");
+        REQUIRE(mailboxPosition != std::string::npos);
+        updated.replace(mailboxPosition, std::string{"\"mbx-archive\": false"}.size(),
+                        "\"mbx-archive\": true");
+        return updated;
+    }
+
     [[nodiscard]] javelin::jmap::domain::Email loadEmailFixture()
     {
         const auto parsed = javelin::jmap::domain::parseEmail(
@@ -1495,4 +1505,113 @@ TEST_CASE("mailbox refresh executor full fallback preserves unrelated account ca
         std::get<std::optional<javelin::jmap::domain::Thread>>(archivedThreadResult).has_value());
     CHECK(std::get<std::optional<javelin::jmap::domain::Thread>>(archivedThreadResult)->emailIds ==
           std::vector<std::string>{"eml-archive"});
+}
+
+TEST_CASE("mailbox refresh executor preserves windows when shared membership is unchanged",
+          "[jmap][sync][refresh]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+
+    auto sharedEmail = loadEmailFixture();
+    sharedEmail.mailboxIds = {"mbx-inbox", "mbx-archive"};
+    javelin::jmap::cache::EmailRepository emailRepository{databaseContext.connection};
+    REQUIRE_FALSE(emailRepository.replaceAll("account-1", {sharedEmail}).has_value());
+    javelin::jmap::cache::ThreadRepository threadRepository{databaseContext.connection};
+    REQUIRE_FALSE(threadRepository
+                      .replaceAll("account-1", {javelin::jmap::domain::Thread{
+                                                   .id = sharedEmail.threadId,
+                                                   .emailIds = {sharedEmail.id},
+                                               }})
+                      .has_value());
+
+    const auto archiveQueryKey = javelin::jmap::sync::mailboxQueryKey({
+        .mailboxId = "mbx-archive",
+        .sortProperty = "receivedAt",
+        .isAscending = false,
+        .collapseThreads = true,
+    });
+    javelin::jmap::cache::MailboxWindowRepository windows{databaseContext.connection};
+    REQUIRE_FALSE(windows
+                      .replace({
+                          .accountId = "account-1",
+                          .mailboxId = "mbx-archive",
+                          .queryKey = archiveQueryKey,
+                          .requestedOffset = 0,
+                          .requestedLimit = 100,
+                          .position = 0,
+                          .returnedLimit = 1,
+                          .total = 1,
+                          .queryState = "archive-query-state-1",
+                          .isAuthoritative = true,
+                          .emailIds = {sharedEmail.id},
+                      })
+                      .has_value());
+
+    const auto sharedFixture = sharedMailboxEmailFixture();
+    FakeTransport transport;
+    transport.queuedResults
+        .push_back(javelin::jmap::api::
+                       HttpResponse{
+                           .statusCode = 200,
+                           .body =
+                               QByteArray::fromStdString(
+                                   serializeResponseEnvelope(
+                                       {
+                                           .methodResponses =
+                                               {
+                                                   javelin::jmap::api::MethodInvocation{
+                                                       .name = "Email/query",
+                                                       .arguments =
+                                                           R"({"accountId":"account-1","queryState":"query-state-2","canCalculateChanges":true,"position":0,"ids":["eml-1"],"total":1})",
+                                                       .callId = "mailbox-query",
+                                                   },
+                                                   javelin::
+                                                       jmap::api::MethodInvocation{
+                                                           .name = "Email/get",
+                                                           .arguments =
+                                                               emailGetArguments("email-state-2",
+                                                                                 sharedFixture),
+                                                           .callId = "thread-ids-get",
+                                                       },
+                                                   javelin::
+                                                       jmap::
+                                                           api::MethodInvocation{
+                                                               .name = "Thread/get",
+                                                               .arguments =
+                                                                   R"({"accountId":"account-1","state":"thread-state-2","list":[{"id":"thr-123","emailIds":["eml-1"]}],"notFound":[]})",
+                                                               .callId = "threads-get",
+                                                           },
+                                                   javelin::
+                                                       jmap::
+                                                           api::MethodInvocation{
+                                                               .name = "Email/get",
+                                                               .arguments =
+                                                                   emailGetArguments(
+                                                                       "email-state-2", sharedFixture),
+                                                               .callId = "mailbox-emails-get",
+                                                           },
+                                               },
+                                           .createdIds = std::nullopt,
+                                           .sessionState = "session-state-2",
+                                       })),
+                       });
+
+    javelin::jmap::api::MethodCaller methodCaller{transport};
+    javelin::jmap::sync::MailboxRefreshExecutor executor{databaseContext.connection, methodCaller,
+                                                         makeRequestContext()};
+    const auto result =
+        QCoro::waitFor(executor.refreshCollapsedMailbox("account-1", "mbx-inbox", {}, true));
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailboxRefreshSummary>(result));
+
+    const auto archiveWindowResult = windows.find("account-1", archiveQueryKey, 0, 100);
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(
+        archiveWindowResult));
+    const auto& archiveWindow =
+        std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(archiveWindowResult);
+    REQUIRE(archiveWindow.has_value());
+    CHECK(archiveWindow->isAuthoritative);
 }

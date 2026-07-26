@@ -151,20 +151,18 @@ namespace javelin::jmap::sync
         }
 
         [[nodiscard]] std::variant<std::vector<std::string>, OperationError>
-        affectedMailboxIds(javelin::jmap::cache::DatabaseConnection& databaseConnection,
-                           const std::string_view accountId,
-                           const std::vector<javelin::jmap::domain::Email>& emails)
+        changedMailboxIds(javelin::jmap::cache::DatabaseConnection& databaseConnection,
+                          const std::string_view accountId,
+                          const std::vector<javelin::jmap::domain::Email>& emails)
         {
             std::vector<std::string> mailboxIds;
+            QSqlQuery previous{databaseConnection.database()};
+            previous.prepare(QStringLiteral(
+                "SELECT mailbox_id FROM email_mailboxes WHERE account_id=:account_id "
+                "AND email_id=:email_id"));
             for (const auto& email : emails)
             {
-                mailboxIds.insert(mailboxIds.end(), email.mailboxIds.begin(),
-                                  email.mailboxIds.end());
-
-                QSqlQuery previous{databaseConnection.database()};
-                previous.prepare(QStringLiteral(
-                    "SELECT mailbox_id FROM email_mailboxes WHERE account_id=:account_id "
-                    "AND email_id=:email_id"));
+                std::unordered_set<std::string> previousMailboxIds;
                 previous.bindValue(QStringLiteral(":account_id"),
                                    QString::fromStdString(std::string{accountId}));
                 previous.bindValue(QStringLiteral(":email_id"), QString::fromStdString(email.id));
@@ -177,7 +175,21 @@ namespace javelin::jmap::sync
                     });
                 }
                 while (previous.next())
-                    mailboxIds.push_back(previous.value(0).toString().toStdString());
+                    previousMailboxIds.insert(previous.value(0).toString().toStdString());
+                previous.finish();
+
+                const std::unordered_set<std::string> nextMailboxIds(email.mailboxIds.begin(),
+                                                                     email.mailboxIds.end());
+                for (const auto& mailboxId : previousMailboxIds)
+                {
+                    if (!nextMailboxIds.contains(mailboxId))
+                        mailboxIds.push_back(mailboxId);
+                }
+                for (const auto& mailboxId : nextMailboxIds)
+                {
+                    if (!previousMailboxIds.contains(mailboxId))
+                        mailboxIds.push_back(mailboxId);
+                }
             }
             return deduplicatedIds(std::move(mailboxIds));
         }
@@ -1000,7 +1012,7 @@ namespace javelin::jmap::sync
             destroyedEmailIds = incremental.destroyedEmailIds;
             requiresNotificationScan = incremental.requiresNotificationScan;
             const auto affectedMailboxIdsResult =
-                affectedMailboxIds(m_databaseConnection, accountId, incremental.updatedEmails);
+                changedMailboxIds(m_databaseConnection, accountId, incremental.updatedEmails);
             if (const auto* error = std::get_if<OperationError>(&affectedMailboxIdsResult))
                 co_return *error;
             const auto& affectedMailboxes =
@@ -1106,7 +1118,9 @@ namespace javelin::jmap::sync
                     .notificationCandidates = {},
                 };
             }
-            if (hasMailboxBaseline)
+            const bool fetchedCompleteMailbox =
+                fetch.total.has_value() && *fetch.total == fetch.representativeCount;
+            if (hasMailboxBaseline && fetchedCompleteMailbox)
             {
                 const auto previousIdsResult =
                     mailboxEmailIds(m_databaseConnection, accountId, mailboxId);
@@ -1128,7 +1142,7 @@ namespace javelin::jmap::sync
             }
 
             const auto affectedMailboxIdsResult =
-                affectedMailboxIds(m_databaseConnection, accountId, fetch.emails);
+                changedMailboxIds(m_databaseConnection, accountId, fetch.emails);
             if (const auto* error = std::get_if<OperationError>(&affectedMailboxIdsResult))
                 co_return *error;
             auto emailTransactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
@@ -1184,8 +1198,6 @@ namespace javelin::jmap::sync
                 QStringLiteral("Cached %1 threaded conversations for the selected mailbox.")
                     .arg(representativeCount));
 
-            const bool fetchedCompleteMailbox =
-                fetch.total.has_value() && *fetch.total == fetch.representativeCount;
             if (previousMailboxEmailIds.has_value() && fetchedCompleteMailbox)
             {
                 std::unordered_set<std::string> previousIdsSet(previousMailboxEmailIds->begin(),
