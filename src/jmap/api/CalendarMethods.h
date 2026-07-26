@@ -181,6 +181,8 @@ namespace javelin::jmap::api
     parseCalendarEventSetResponse(std::string_view json);
     [[nodiscard]] std::optional<std::string>
     serializeCalendarEventDocument(const calendar::CalendarEvent& event);
+    [[nodiscard]] bool calendarEventWritablePropertiesEqual(const calendar::CalendarEvent& left,
+                                                            const calendar::CalendarEvent& right);
     [[nodiscard]] ParsedEnvelope<calendar::CalendarEvent>
     parseCalendarEventDocument(std::string_view accountId, std::string_view json);
 

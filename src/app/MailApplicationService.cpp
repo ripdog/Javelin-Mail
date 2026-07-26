@@ -1638,8 +1638,9 @@ namespace javelin::app
         else if (prepared.has_value())
         {
             auto& history = std::get<javelin::app::undo::CalendarEventHistory>(prepared->payload);
-            history.currentEventId =
-                std::get<javelin::jmap::calendar::CommittedMutation>(result).createdId;
+            const auto& committedMutation =
+                std::get<javelin::jmap::calendar::CommittedMutation>(result);
+            history.currentEventId = committedMutation.createdId;
             if (!history.currentEventId.has_value())
             {
                 static_cast<void>(m_undoManager.discardNormal(prepared->entryId));
@@ -1647,6 +1648,21 @@ namespace javelin::app
                     .code = javelin::jmap::OperationErrorCode::ProtocolViolation,
                     .message = QStringLiteral("The created calendar event has no server ID."),
                 };
+            }
+            auto authoritative = co_await m_calendarService.getAuthoritativeEvent(
+                toLiveConnectionSettings(configuration->second.settings), ownerAccountId,
+                history.accountId, history.currentEventId, history.uid);
+            if (const auto* accepted =
+                    std::get_if<javelin::jmap::calendar::AuthoritativeCalendarEvent>(
+                        &authoritative);
+                accepted != nullptr && accepted->event.has_value() &&
+                (committedMutation.newState.empty() ||
+                 accepted->state == committedMutation.newState))
+            {
+                const auto acceptedDocument =
+                    javelin::jmap::api::serializeCalendarEventDocument(*accepted->event);
+                if (acceptedDocument.has_value())
+                    history.afterDocumentJson = acceptedDocument;
             }
             auto committed = m_undoManager.commitNormal(std::move(*prepared));
             if (const auto* historyError =

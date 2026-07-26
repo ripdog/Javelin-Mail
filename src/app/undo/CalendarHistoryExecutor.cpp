@@ -71,25 +71,6 @@ namespace javelin::app::undo
             return parsed.value;
         }
 
-        [[nodiscard]] bool sameEvent(javelin::jmap::calendar::CalendarEvent left,
-                                     javelin::jmap::calendar::CalendarEvent right,
-                                     const std::string& currentId)
-        {
-            left.id = currentId;
-            right.id = currentId;
-            left.baseEventId = std::nullopt;
-            right.baseEventId = std::nullopt;
-            left.recurrenceId = std::nullopt;
-            right.recurrenceId = std::nullopt;
-            left.isOrigin = false;
-            right.isOrigin = false;
-            left.utcStart = std::nullopt;
-            right.utcStart = std::nullopt;
-            left.utcEnd = std::nullopt;
-            right.utcEnd = std::nullopt;
-            return left == right;
-        }
-
         [[nodiscard]] std::vector<std::string>
         calendarIds(const javelin::jmap::calendar::CalendarEvent& event)
         {
@@ -141,7 +122,8 @@ namespace javelin::app::undo
             if (!authoritative.event.has_value() || !history->currentEventId.has_value())
                 co_return conflict(
                     QStringLiteral("The calendar event is no longer available on the server."));
-            if (!sameEvent(*authoritative.event, *expected, *history->currentEventId))
+            if (!javelin::jmap::api::calendarEventWritablePropertiesEqual(*authoritative.event,
+                                                                          *expected))
                 co_return conflict(QStringLiteral("The calendar event changed on another client."));
         }
         else if (authoritative.event.has_value())

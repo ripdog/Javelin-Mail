@@ -214,6 +214,8 @@ namespace javelin::jmap::api::detail
         std::optional<RawRecurrenceRule> recurrenceRule;
         std::unordered_map<std::string, RawOverride> recurrenceOverrides;
         std::unordered_map<std::string, RawParticipant> participants;
+
+        bool operator==(const RawEventWrite&) const = default;
     };
 
     struct RawEventPatch
@@ -1145,6 +1147,12 @@ namespace javelin::jmap::api
     std::optional<std::string> serializeCalendarEventDocument(const calendar::CalendarEvent& value)
     {
         return serialize(rawEvent(value));
+    }
+
+    bool calendarEventWritablePropertiesEqual(const calendar::CalendarEvent& left,
+                                              const calendar::CalendarEvent& right)
+    {
+        return rawEventWrite(left) == rawEventWrite(right);
     }
 
     ParsedEnvelope<calendar::CalendarEvent>

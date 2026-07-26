@@ -2,6 +2,30 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+TEST_CASE("calendar writable comparison ignores server-derived fields", "[jmap][calendar]")
+{
+    javelin::jmap::calendar::CalendarEvent submitted;
+    submitted.accountId = "a1";
+    submitted.uid = "uid-1";
+    submitted.calendarIds = {{"calendar-1", true}};
+    submitted.title = "Appointment";
+    submitted.start = {.value = "2026-08-01T09:00:00"};
+    submitted.duration = {.value = "PT1H"};
+    submitted.timeZone = javelin::jmap::calendar::TimeZoneId{.value = "Pacific/Auckland"};
+
+    auto accepted = submitted;
+    accepted.id = "event-1";
+    accepted.baseEventId = "server-base";
+    accepted.recurrenceId = javelin::jmap::calendar::LocalDateTime{.value = "2026-08-01T09:00:00"};
+    accepted.isOrigin = true;
+    accepted.utcStart = javelin::jmap::calendar::UtcInstant{.value = "2026-07-31T21:00:00Z"};
+    accepted.utcEnd = javelin::jmap::calendar::UtcInstant{.value = "2026-07-31T22:00:00Z"};
+
+    CHECK(javelin::jmap::api::calendarEventWritablePropertiesEqual(submitted, accepted));
+    accepted.title = "Changed elsewhere";
+    CHECK_FALSE(javelin::jmap::api::calendarEventWritablePropertiesEqual(submitted, accepted));
+}
+
 TEST_CASE("calendar query serializes the bounded draft-26 recurrence shape", "[jmap][calendar]")
 {
     const auto request = javelin::jmap::api::calendarEventQuery(
