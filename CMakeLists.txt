@@ -97,6 +97,9 @@ set(JAVELIN_FORMAT_FILES
     src/app/undo/CalendarPreferenceExecutor.cpp
     src/app/undo/CalendarPreferenceExecutor.h
     src/app/undo/CalendarPreferencePort.h
+    src/app/undo/ContactHistoryExecutor.cpp
+    src/app/undo/ContactHistoryExecutor.h
+    src/app/undo/ContactHistoryPort.h
     src/app/undo/MailHistoryExecutor.cpp
     src/app/undo/MailHistoryExecutor.h
     src/app/undo/MailHistoryPort.h
@@ -917,6 +920,9 @@ add_library(javelin_application STATIC
     src/app/undo/CalendarPreferenceExecutor.cpp
     src/app/undo/CalendarPreferenceExecutor.h
     src/app/undo/CalendarPreferencePort.h
+    src/app/undo/ContactHistoryExecutor.cpp
+    src/app/undo/ContactHistoryExecutor.h
+    src/app/undo/ContactHistoryPort.h
     src/app/undo/MailHistoryExecutor.cpp
     src/app/undo/MailHistoryExecutor.h
     src/app/undo/MailHistoryPort.h

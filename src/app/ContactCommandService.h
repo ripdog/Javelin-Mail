@@ -1,6 +1,7 @@
 #pragma once
 
 #include "app/ContactApplicationPorts.h"
+#include "app/undo/ContactHistoryPort.h"
 
 #include <QByteArray>
 #include <QString>
@@ -12,19 +13,29 @@ namespace javelin::jmap::contacts
     class ContactService;
 }
 
+namespace javelin::jmap::cache
+{
+    class ContactRepository;
+}
+
 namespace javelin::app
 {
     class AccountConnectionProvider;
     class ApplicationErrorCoordinator;
     class WorkScheduler;
+    namespace undo
+    {
+        class UndoManager;
+    }
 
-    class ContactCommandService final : public ContactCommandPort
+    class ContactCommandService final : public ContactCommandPort, public undo::ContactHistoryPort
     {
       public:
         ContactCommandService(AccountConnectionProvider& connectionProvider,
                               javelin::jmap::contacts::ContactService& contactService,
+                              javelin::jmap::cache::ContactRepository& contactRepository,
                               ApplicationErrorCoordinator& errorCoordinator,
-                              WorkScheduler& workScheduler);
+                              WorkScheduler& workScheduler, undo::UndoManager& undoManager);
 
         [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
         mutateAddressBook(std::string ownerAccountId, AddressBookCommand command) override;
@@ -51,6 +62,12 @@ namespace javelin::app
         [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactDownloadResult>
         downloadContactMedia(std::string ownerAccountId, std::string accountId, std::string blobId,
                              std::string mediaType) override;
+        [[nodiscard]] QCoro::Task<undo::AuthoritativeContactsResult>
+        getAuthoritativeContacts(std::string ownerAccountId, std::string accountId) override;
+        [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
+        applyContactCardsFromHistory(std::string ownerAccountId,
+                                     javelin::jmap::api::ContactCardSetRequest request,
+                                     undo::CommandOrigin origin) override;
 
       private:
         [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
@@ -67,7 +84,9 @@ namespace javelin::app
 
         AccountConnectionProvider& m_connectionProvider;
         javelin::jmap::contacts::ContactService& m_contactService;
+        javelin::jmap::cache::ContactRepository& m_contactRepository;
         ApplicationErrorCoordinator& m_errorCoordinator;
         WorkScheduler& m_workScheduler;
+        undo::UndoManager& m_undoManager;
     };
 } // namespace javelin::app

@@ -17,6 +17,7 @@
 #include "app/WorkScheduler.h"
 #include "app/undo/CalendarHistoryExecutor.h"
 #include "app/undo/CalendarPreferenceExecutor.h"
+#include "app/undo/ContactHistoryExecutor.h"
 #include "app/undo/DraftHistoryExecutor.h"
 #include "app/undo/HistoryRepository.h"
 #include "app/undo/MailHistoryExecutor.h"
@@ -175,7 +176,11 @@ namespace javelin::app
         m_undoManager->setExecutor(QStringLiteral("calendar_preference"),
                                    m_calendarPreferenceExecutor.get());
         m_contactCommandService = std::make_unique<ContactCommandService>(
-            *m_mailService, *m_contactService, *m_errorCoordinator, *m_workScheduler);
+            *m_mailService, *m_contactService, *m_contactRepository, *m_errorCoordinator,
+            *m_workScheduler, *m_undoManager);
+        m_contactHistoryExecutor =
+            std::make_unique<javelin::app::undo::ContactHistoryExecutor>(*m_contactCommandService);
+        m_undoManager->setExecutor(QStringLiteral("contact_card"), m_contactHistoryExecutor.get());
         QObject::connect(
             m_fullMailSyncService.get(), &FullMailSyncService::mailboxWindowCommitted,
             m_mailService.get(),

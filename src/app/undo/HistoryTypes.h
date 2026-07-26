@@ -145,15 +145,22 @@ namespace javelin::app::undo
         auto operator<=>(const CalendarPreferenceHistory&) const = default;
     };
 
-    struct ContactCardHistory
+    struct ContactCardItemHistory
     {
-        std::string connectionId;
-        std::string accountId;
         std::string addressBookId;
         std::optional<std::string> currentCardId;
         std::string uid;
         std::optional<std::string> beforeDocumentJson;
         std::optional<std::string> afterDocumentJson;
+
+        auto operator<=>(const ContactCardItemHistory&) const = default;
+    };
+
+    struct ContactCardHistory
+    {
+        std::string connectionId;
+        std::string accountId;
+        std::vector<ContactCardItemHistory> items;
 
         auto operator<=>(const ContactCardHistory&) const = default;
     };
@@ -165,14 +172,14 @@ namespace javelin::app::undo
         std::optional<std::string> currentAddressBookId;
         std::optional<std::string> beforeDocumentJson;
         std::optional<std::string> afterDocumentJson;
-        std::vector<ContactCardHistory> affectedCards;
+        std::vector<ContactCardItemHistory> affectedCards;
 
         auto operator<=>(const AddressBookHistory&) const = default;
     };
 
     struct ContactGroupHistory
     {
-        ContactCardHistory group;
+        ContactCardItemHistory group;
         std::vector<std::string> beforeMemberUids;
         std::vector<std::string> afterMemberUids;
 

@@ -1,5 +1,7 @@
 #include "jmap/cache/ContactRepository.h"
+
 #include "jmap/api/Session.h"
+#include "jmap/cache/SyncStateRepository.h"
 
 #include <glaze/glaze.hpp>
 
@@ -508,6 +510,19 @@ namespace javelin::jmap::cache
         if (!query.next() || query.value(0).isNull())
             return std::optional<std::string>{};
         return std::optional<std::string>{query.value(0).toString().toStdString()};
+    }
+
+    std::variant<std::optional<std::string>, DatabaseError>
+    ContactRepository::contactState(const std::string_view accountId) const
+    {
+        SyncStateRepository states{m_connection};
+        auto found = states.find(
+            {.accountId = std::string{accountId}, .objectType = "ContactCard", .queryKey = {}});
+        if (const auto* error = std::get_if<DatabaseError>(&found))
+            return *error;
+        const auto& record = std::get<std::optional<SyncStateRecord>>(found);
+        return record.has_value() ? std::optional{record->stateToken}
+                                  : std::optional<std::string>{};
     }
 
     std::variant<std::vector<ContactAccount>, DatabaseError>
