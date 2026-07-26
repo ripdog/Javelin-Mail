@@ -349,12 +349,13 @@ namespace javelin::jmap::contacts
         }
         auto& object = value.get_object();
         object.erase("id");
-        if (creating && (!object.contains("uid") || !object.contains("kind") ||
-                         !object.contains("addressBookIds")))
+        if (creating && (!object.contains("uid") || !object.contains("addressBookIds")))
         {
             return std::string_view{
-                "New contacts require uid, kind, and at least one addressBookIds entry."};
+                "New contacts require uid and at least one addressBookIds entry."};
         }
+        if (creating && !object.contains("kind"))
+            object.emplace("kind", "individual");
         std::string result;
         if (glz::write_json(value, result))
         {

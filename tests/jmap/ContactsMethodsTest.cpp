@@ -99,6 +99,16 @@ TEST_CASE("contact document editing removes immutable ids and retains extensions
     CHECK(json.find("server-id") == std::string::npos);
     CHECK(json.find("x-extension") != std::string::npos);
 
+    const auto defaultKind = javelin::jmap::contacts::prepareContactDocument(
+        R"({"@type":"Card","id":"server-id","version":"1.0","uid":"u1","updated":"2026-07-27T03:40:33Z","addressBookIds":{"b1":true},"name":{"full":"Alice"}})",
+        true);
+    REQUIRE(std::holds_alternative<std::string>(defaultKind));
+    const auto& recreatedJson = std::get<std::string>(defaultKind);
+    CHECK(recreatedJson.find("server-id") == std::string::npos);
+    CHECK(recreatedJson.find(R"("kind":"individual")") != std::string::npos);
+    CHECK(recreatedJson.find(R"("version":"1.0")") != std::string::npos);
+    CHECK(recreatedJson.find(R"("updated":"2026-07-27T03:40:33Z")") != std::string::npos);
+
     const auto photo = javelin::jmap::contacts::setContactPhoto(json, "blob-1", "image/png");
     REQUIRE(std::holds_alternative<std::string>(photo));
     CHECK(std::get<std::string>(photo).find("blob-1") != std::string::npos);

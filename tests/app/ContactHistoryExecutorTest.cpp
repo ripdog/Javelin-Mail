@@ -186,3 +186,29 @@ TEST_CASE("contact delete undo recreates the complete document", "[app][undo][co
     REQUIRE(port.contacts.size() == 1);
     CHECK(port.contacts.front().uid == "uid-1");
 }
+
+TEST_CASE("contact delete undo recreates a server document with default kind",
+          "[app][undo][contact-executor]")
+{
+    FakeContactHistoryPort port;
+    const std::string before =
+        R"({"@type":"Card","id":"old-1","version":"1.0","uid":"uid-1","updated":"2026-07-27T03:40:33Z","addressBookIds":{"book-1":true},"name":{"full":"Deleted"}})";
+    ContactHistoryExecutor executor{port};
+
+    const auto result = QCoro::waitFor(executor.execute(entry({{
+                                                            .addressBookId = "book-1",
+                                                            .currentCardId = "old-1",
+                                                            .uid = "uid-1",
+                                                            .beforeDocumentJson = before,
+                                                            .afterDocumentJson = std::nullopt,
+                                                        }}),
+                                                        HistoryExecutionDirection::Undo));
+
+    CHECK(result.outcome == HistoryExecutionOutcome::Success);
+    REQUIRE(port.contacts.size() == 1);
+    CHECK(port.contacts.front().uid == "uid-1");
+    CHECK(port.contacts.front().kind == "individual");
+    CHECK(port.contacts.front().document.find(R"("version":"1.0")") != std::string::npos);
+    CHECK(port.contacts.front().document.find(R"("updated":"2026-07-27T03:40:33Z")") !=
+          std::string::npos);
+}
