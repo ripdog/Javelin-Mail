@@ -1109,6 +1109,7 @@ namespace javelin::jmap::submission
 
         javelin::jmap::api::EmailSetRequest request{
             .accountId = snapshot.accountId,
+            .ifInState = std::nullopt,
             .create =
                 {
                     {"draft",
@@ -1302,6 +1303,7 @@ namespace javelin::jmap::submission
         {
             const auto destroyRequest = javelin::jmap::api::emailSet({
                 .accountId = snapshot.accountId,
+                .ifInState = std::nullopt,
                 .create = {},
                 .update = {},
                 .destroy = {*draftMutation.replacedEmailId},

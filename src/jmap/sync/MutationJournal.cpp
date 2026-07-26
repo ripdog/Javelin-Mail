@@ -203,6 +203,42 @@ namespace javelin::jmap::sync
     }
 
     std::variant<std::vector<MutationRecord>, javelin::jmap::cache::DatabaseError>
+    MutationJournalRepository::listForOperationGroup(const ConsistencyDomain& domain,
+                                                     const std::string_view operationGroupId) const
+    {
+        if (const auto error = m_connection.validate())
+            return *error;
+
+        QSqlQuery query{m_connection.database()};
+        query.prepare(
+            QStringLiteral("SELECT %1 FROM mutation_journal WHERE account_id=:account_id "
+                           "AND data_type=:data_type AND operation_group_id=:operation_group_id "
+                           "ORDER BY created_at,mutation_id")
+                .arg(selectColumns()));
+        query.bindValue(QStringLiteral(":account_id"), QString::fromStdString(domain.accountId));
+        query.bindValue(QStringLiteral(":data_type"), QString::fromStdString(domain.dataType));
+        query.bindValue(QStringLiteral(":operation_group_id"),
+                        QString::fromStdString(std::string{operationGroupId}));
+        if (!query.exec())
+            return queryError(QStringLiteral("Read mutation journal operation group"), query);
+
+        std::vector<MutationRecord> records;
+        while (query.next())
+        {
+            const auto record = recordFromQuery(query);
+            if (!record.has_value())
+            {
+                return javelin::jmap::cache::DatabaseError{
+                    .code = javelin::jmap::cache::DatabaseErrorCode::QueryFailed,
+                    .message = QStringLiteral("Mutation journal record has an invalid status."),
+                };
+            }
+            records.push_back(*record);
+        }
+        return records;
+    }
+
+    std::variant<std::vector<MutationRecord>, javelin::jmap::cache::DatabaseError>
     MutationJournalRepository::listByStatus(const ConsistencyDomain& domain,
                                             const MutationStatus status,
                                             const std::size_t limit) const

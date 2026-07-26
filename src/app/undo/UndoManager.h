@@ -34,6 +34,11 @@ namespace javelin::app::undo
         commitNormal(HistoryEntry entry);
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
         discardNormal(const QString& entryId);
+        [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
+        replaceEntry(HistoryEntry entry);
+        [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
+        setEntryStatus(const QString& entryId, HistoryEntryStatus status,
+                       std::optional<QString> failure = std::nullopt);
         [[nodiscard]] std::variant<HistoryEntry, javelin::jmap::cache::DatabaseError>
         recordImpossible(QString label, HistoryDomain domain, QString explanation,
                          std::optional<QString> operationGroupId = std::nullopt);

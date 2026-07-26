@@ -2,7 +2,10 @@
 #include "app/ApplicationErrorCoordinator.h"
 #include "app/StateChangePolicy.h"
 #include "app/WorkScheduler.h"
+#include "app/undo/HistoryTypes.h"
+#include "app/undo/UndoManager.h"
 
+#include "jmap/OperationError.h"
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/MailboxWindowRepository.h"
 #include "jmap/cache/SessionRepository.h"
@@ -13,6 +16,7 @@
 
 #include <QDebug>
 #include <QTimer>
+#include <QUuid>
 #include <algorithm>
 #include <chrono>
 #include <limits>
@@ -54,6 +58,50 @@ namespace javelin::app
         }
 
         constexpr auto contactRefreshRetryDelay = std::chrono::seconds{30};
+
+        [[nodiscard]] javelin::app::undo::ExactMailPatch
+        historyPatch(const javelin::jmap::EmailMailboxMutation& mutation)
+        {
+            return {
+                .addMailboxIds = mutation.addMailboxIds,
+                .removeMailboxIds = mutation.removeMailboxIds,
+                .addKeywords = mutation.addKeywords,
+                .removeKeywords = mutation.removeKeywords,
+            };
+        }
+
+        [[nodiscard]] javelin::app::undo::ExactMailPatch
+        inverseHistoryPatch(const javelin::jmap::EmailMailboxMutation& mutation)
+        {
+            return {
+                .addMailboxIds = mutation.removeMailboxIds,
+                .removeMailboxIds = mutation.addMailboxIds,
+                .addKeywords = mutation.removeKeywords,
+                .removeKeywords = mutation.addKeywords,
+            };
+        }
+
+        [[nodiscard]] javelin::app::undo::MailPatchItemHistory
+        historyItem(const std::string_view accountId, const javelin::jmap::domain::Email& email,
+                    const javelin::jmap::EmailMailboxMutation& mutation)
+        {
+            return {
+                .accountId = std::string{accountId},
+                .emailId = email.id,
+                .subject = email.subject,
+                .forward = historyPatch(mutation),
+                .inverse = inverseHistoryPatch(mutation),
+                .expectedBefore = historyPatch(mutation),
+                .expectedAfter = inverseHistoryPatch(mutation),
+                .mutationId = std::nullopt,
+            };
+        }
+
+        [[nodiscard]] QString messageCountLabel(const QString& verb, const std::size_t count)
+        {
+            return count == 1 ? verb + QStringLiteral(" Message")
+                              : verb + QStringLiteral(" %1 Messages").arg(count);
+        }
 
         [[nodiscard]] std::string contactRefreshJobId(const std::string_view ownerAccountId)
         {
@@ -131,13 +179,14 @@ namespace javelin::app
         javelin::jmap::calendar::CalendarService& calendarService,
         javelin::jmap::sieve::SieveService& sieveService,
         ApplicationErrorCoordinator& errorCoordinator, WorkScheduler& workScheduler,
-        QObject* parent)
+        javelin::app::undo::UndoManager& undoManager, QObject* parent)
         : QObject(parent), m_databaseConnection(databaseConnection), m_jmapCore(jmapCore),
           m_methodTransport(methodTransport), m_networkAccessManager(networkAccessManager),
           m_transportCooldowns(cooldowns), m_accountRepository(accountRepository),
           m_queryService(queryService), m_contactService(contactService),
           m_calendarService(calendarService), m_sieveService(sieveService),
-          m_errorCoordinator(errorCoordinator), m_workScheduler(workScheduler)
+          m_errorCoordinator(errorCoordinator), m_workScheduler(workScheduler),
+          m_undoManager(undoManager)
     {
         connect(&m_workScheduler, &WorkScheduler::jobsChanged, this,
                 [this]() { scheduleContactRefreshPump(); });
@@ -666,20 +715,111 @@ namespace javelin::app
 
         auto plan = std::get<PlannedMailboxSelectionMutation>(std::move(planResult));
         const auto queuedEmailCount = plan.mutations.size();
-        for (auto& mutation : plan.mutations)
+        if (queuedEmailCount == 0)
         {
+            return QueuedMailboxSelectionMutation{
+                .accountId = std::move(intent.accountId),
+                .queuedEmailCount = 0,
+                .skippedEmailCount = plan.skippedEmailCount,
+                .queuedMutations = {},
+                .historyEntryId = std::nullopt,
+            };
+        }
+
+        const auto& mailboxes =
+            std::get<std::vector<javelin::jmap::cache::MailboxTreeItem>>(mailboxesResult);
+        const auto destination =
+            intent.destinationMailboxId.has_value()
+                ? std::ranges::find(mailboxes, *intent.destinationMailboxId,
+                                    &javelin::jmap::cache::MailboxTreeItem::id)
+                : std::ranges::find(mailboxes, std::optional<std::string>{"archive"},
+                                    &javelin::jmap::cache::MailboxTreeItem::role);
+        QString label;
+        if (intent.operation == MailboxSelectionOperation::Archive)
+        {
+            label = messageCountLabel(QStringLiteral("Archive"), queuedEmailCount);
+        }
+        else
+        {
+            const bool deleting = destination != mailboxes.end() &&
+                                  destination->role == std::optional<std::string>{"trash"} &&
+                                  intent.operation == MailboxSelectionOperation::Move;
+            if (deleting)
+            {
+                label = messageCountLabel(QStringLiteral("Delete"), queuedEmailCount);
+            }
+            else
+            {
+                const auto verb = intent.operation == MailboxSelectionOperation::Move
+                                      ? QStringLiteral("Move")
+                                      : QStringLiteral("Copy");
+                label = messageCountLabel(verb, queuedEmailCount);
+                if (destination != mailboxes.end())
+                    label += QStringLiteral(" to ") + QString::fromStdString(destination->name);
+            }
+        }
+
+        const auto operationGroupId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        javelin::app::undo::MailPatchHistory history;
+        history.items.reserve(plan.mutations.size());
+        for (const auto& mutation : plan.mutations)
+        {
+            const auto email =
+                std::ranges::find(emails, mutation.emailId, &javelin::jmap::domain::Email::id);
+            if (email == emails.end())
+            {
+                return javelin::jmap::OperationError{
+                    .code = javelin::jmap::OperationErrorCode::LocalStorageFailure,
+                    .message = QStringLiteral("A planned email mutation lost its cache snapshot."),
+                };
+            }
+            history.items.push_back(historyItem(intent.accountId, *email, mutation));
+        }
+
+        auto preparedResult = m_undoManager.prepareNormal(
+            label, javelin::app::undo::HistoryDomain::Mail, history, operationGroupId);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&preparedResult))
+            return javelin::jmap::operationError(*error);
+        auto prepared =
+            std::get<std::optional<javelin::app::undo::HistoryEntry>>(std::move(preparedResult));
+        if (!prepared.has_value())
+        {
+            return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::LocalStorageFailure,
+                .message = QStringLiteral("Failed to reserve operation history."),
+            };
+        }
+
+        std::vector<javelin::jmap::QueuedEmailMutation> queuedMutations;
+        queuedMutations.reserve(plan.mutations.size());
+        for (std::size_t index = 0; index < plan.mutations.size(); ++index)
+        {
+            auto mutation = plan.mutations[index];
+            mutation.operationGroupId = operationGroupId.toStdString();
             const auto result =
                 m_jmapCore.queueEmailMailboxMutation(intent.accountId, std::move(mutation));
             if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
             {
+                static_cast<void>(m_undoManager.discardNormal(prepared->entryId));
                 return *error;
             }
+            auto queued = std::get<javelin::jmap::QueuedEmailMutation>(result);
+            std::get<javelin::app::undo::MailPatchHistory>(prepared->payload)
+                .items[index]
+                .mutationId = queued.mutationId;
+            queuedMutations.push_back(std::move(queued));
         }
 
+        auto committedResult = m_undoManager.commitNormal(std::move(*prepared));
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&committedResult))
+            return javelin::jmap::operationError(*error);
+        const auto& committed = std::get<javelin::app::undo::HistoryEntry>(committedResult);
         return QueuedMailboxSelectionMutation{
             .accountId = std::move(intent.accountId),
             .queuedEmailCount = queuedEmailCount,
             .skippedEmailCount = plan.skippedEmailCount,
+            .queuedMutations = std::move(queuedMutations),
+            .historyEntryId = committed.entryId,
         };
     }
 
@@ -714,38 +854,274 @@ namespace javelin::app
         }
 
         auto emailIds = std::get<std::vector<std::string>>(std::move(emailIdsResult));
+        javelin::jmap::cache::EmailRepository emails{m_databaseConnection};
+        std::vector<javelin::jmap::domain::Email> selectedEmails;
         for (const auto& emailId : emailIds)
         {
-            const auto result = mutation == SelectedMessageMutation::Destroy
-                                    ? m_jmapCore.queueDestroyEmail(accountId, emailId)
-                                    : m_jmapCore.queueMarkEmailUnread(accountId, emailId);
+            const auto found = emails.find(accountId, emailId);
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&found))
+                return javelin::jmap::operationError(*error);
+            const auto& email = std::get<std::optional<javelin::jmap::domain::Email>>(found);
+            if (!email.has_value())
+            {
+                return javelin::jmap::OperationError{
+                    .code = javelin::jmap::OperationErrorCode::NotFound,
+                    .message = QStringLiteral("A selected message is not cached locally."),
+                };
+            }
+            if (mutation == SelectedMessageMutation::MarkUnread &&
+                !std::ranges::contains(email->keywords, std::string{"$seen"}))
+            {
+                continue;
+            }
+            selectedEmails.push_back(*email);
+        }
+        if (selectedEmails.empty())
+        {
+            return QueuedMessageSelectionMutation{
+                .accountId = std::move(accountId),
+                .queuedEmailCount = 0,
+                .queuedMutations = {},
+                .historyEntryId = std::nullopt,
+            };
+        }
+
+        const auto operationGroupId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        std::optional<javelin::app::undo::HistoryEntry> prepared;
+        if (mutation == SelectedMessageMutation::MarkUnread)
+        {
+            javelin::app::undo::MailPatchHistory history;
+            for (const auto& email : selectedEmails)
+            {
+                history.items.push_back(
+                    historyItem(accountId, email,
+                                {
+                                    .emailId = email.id,
+                                    .addMailboxIds = {},
+                                    .removeMailboxIds = {},
+                                    .addKeywords = {},
+                                    .removeKeywords = {"$seen"},
+                                    .operationGroupId = operationGroupId.toStdString(),
+                                    .ifInState = std::nullopt,
+                                }));
+            }
+            auto preparedResult = m_undoManager.prepareNormal(
+                messageCountLabel(QStringLiteral("Mark"), selectedEmails.size()) +
+                    QStringLiteral(" Unread"),
+                javelin::app::undo::HistoryDomain::Mail, std::move(history), operationGroupId);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&preparedResult))
+                return javelin::jmap::operationError(*error);
+            prepared = std::get<std::optional<javelin::app::undo::HistoryEntry>>(
+                std::move(preparedResult));
+        }
+
+        std::vector<javelin::jmap::QueuedEmailMutation> queuedMutations;
+        queuedMutations.reserve(selectedEmails.size());
+        for (std::size_t index = 0; index < selectedEmails.size(); ++index)
+        {
+            const auto& email = selectedEmails[index];
+            const auto result =
+                mutation == SelectedMessageMutation::Destroy
+                    ? m_jmapCore.queueDestroyEmail(accountId, email.id,
+                                                   operationGroupId.toStdString())
+                    : m_jmapCore.queueEmailMailboxMutation(
+                          accountId, {
+                                         .emailId = email.id,
+                                         .addMailboxIds = {},
+                                         .removeMailboxIds = {},
+                                         .addKeywords = {},
+                                         .removeKeywords = {"$seen"},
+                                         .operationGroupId = operationGroupId.toStdString(),
+                                         .ifInState = std::nullopt,
+                                     });
             if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
             {
+                if (prepared.has_value())
+                    static_cast<void>(m_undoManager.discardNormal(prepared->entryId));
                 return *error;
             }
+            auto queued = std::get<javelin::jmap::QueuedEmailMutation>(result);
+            if (prepared.has_value())
+            {
+                std::get<javelin::app::undo::MailPatchHistory>(prepared->payload)
+                    .items[index]
+                    .mutationId = queued.mutationId;
+            }
+            queuedMutations.push_back(std::move(queued));
+        }
+
+        std::optional<QString> historyEntryId;
+        if (mutation == SelectedMessageMutation::Destroy)
+        {
+            const auto count = selectedEmails.size();
+            const auto explanation =
+                count == 1
+                    ? QStringLiteral("Unable to undo permanently deleting this message.")
+                    : QStringLiteral("Unable to undo permanently deleting %1 messages.").arg(count);
+            auto impossible = m_undoManager.recordImpossible(
+                messageCountLabel(QStringLiteral("Permanently Delete"), count),
+                javelin::app::undo::HistoryDomain::Mail, explanation, operationGroupId);
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&impossible))
+                return javelin::jmap::operationError(*error);
+            historyEntryId = std::get<javelin::app::undo::HistoryEntry>(impossible).entryId;
+        }
+        else if (prepared.has_value())
+        {
+            auto committed = m_undoManager.commitNormal(std::move(*prepared));
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&committed))
+                return javelin::jmap::operationError(*error);
+            historyEntryId = std::get<javelin::app::undo::HistoryEntry>(committed).entryId;
         }
 
         return QueuedMessageSelectionMutation{
             .accountId = std::move(accountId),
-            .queuedEmailCount = emailIds.size(),
+            .queuedEmailCount = selectedEmails.size(),
+            .queuedMutations = std::move(queuedMutations),
+            .historyEntryId = std::move(historyEntryId),
+        };
+    }
+
+    QueuedMessageSelectionMutationResult
+    MailApplicationService::queueMarkEmailRead(std::string accountId, std::string emailId)
+    {
+        javelin::jmap::cache::EmailRepository emails{m_databaseConnection};
+        const auto found = emails.find(accountId, emailId);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&found))
+            return javelin::jmap::operationError(*error);
+        const auto& email = std::get<std::optional<javelin::jmap::domain::Email>>(found);
+        if (!email.has_value())
+            return javelin::jmap::OperationError{.code =
+                                                     javelin::jmap::OperationErrorCode::NotFound,
+                                                 .message = QStringLiteral("Message not found.")};
+        if (std::ranges::contains(email->keywords, std::string{"$seen"}))
+        {
+            return QueuedMessageSelectionMutation{
+                .accountId = std::move(accountId),
+                .queuedEmailCount = 0,
+                .queuedMutations = {},
+                .historyEntryId = std::nullopt,
+            };
+        }
+
+        const auto operationGroupId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        javelin::jmap::EmailMailboxMutation mutation{
+            .emailId = emailId,
+            .addMailboxIds = {},
+            .removeMailboxIds = {},
+            .addKeywords = {"$seen"},
+            .removeKeywords = {},
+            .operationGroupId = operationGroupId.toStdString(),
+            .ifInState = std::nullopt,
+        };
+        javelin::app::undo::MailPatchHistory history{
+            .items = {historyItem(accountId, *email, mutation)}};
+        auto preparedResult = m_undoManager.prepareNormal(QStringLiteral("Mark Message Read"),
+                                                          javelin::app::undo::HistoryDomain::Mail,
+                                                          std::move(history), operationGroupId);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&preparedResult))
+            return javelin::jmap::operationError(*error);
+        auto prepared =
+            std::get<std::optional<javelin::app::undo::HistoryEntry>>(std::move(preparedResult));
+        auto queuedResult = m_jmapCore.queueEmailMailboxMutation(accountId, std::move(mutation));
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&queuedResult))
+        {
+            if (prepared.has_value())
+                static_cast<void>(m_undoManager.discardNormal(prepared->entryId));
+            return *error;
+        }
+        auto queued = std::get<javelin::jmap::QueuedEmailMutation>(std::move(queuedResult));
+        std::get<javelin::app::undo::MailPatchHistory>(prepared->payload).items.front().mutationId =
+            queued.mutationId;
+        auto committed = m_undoManager.commitNormal(std::move(*prepared));
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&committed))
+            return javelin::jmap::operationError(*error);
+        return QueuedMessageSelectionMutation{
+            .accountId = std::move(accountId),
+            .queuedEmailCount = 1,
+            .queuedMutations = {std::move(queued)},
+            .historyEntryId = std::get<javelin::app::undo::HistoryEntry>(committed).entryId,
+        };
+    }
+
+    QueuedMessageSelectionMutationResult
+    MailApplicationService::queueSetEmailFlagged(std::string accountId, std::string emailId,
+                                                 const bool flagged)
+    {
+        javelin::jmap::cache::EmailRepository emails{m_databaseConnection};
+        const auto found = emails.find(accountId, emailId);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&found))
+            return javelin::jmap::operationError(*error);
+        const auto& email = std::get<std::optional<javelin::jmap::domain::Email>>(found);
+        if (!email.has_value())
+            return javelin::jmap::OperationError{.code =
+                                                     javelin::jmap::OperationErrorCode::NotFound,
+                                                 .message = QStringLiteral("Message not found.")};
+        const bool currentlyFlagged =
+            std::ranges::contains(email->keywords, std::string{"$flagged"});
+        if (currentlyFlagged == flagged)
+        {
+            return QueuedMessageSelectionMutation{
+                .accountId = std::move(accountId),
+                .queuedEmailCount = 0,
+                .queuedMutations = {},
+                .historyEntryId = std::nullopt,
+            };
+        }
+
+        const auto operationGroupId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        javelin::jmap::EmailMailboxMutation mutation{
+            .emailId = emailId,
+            .addMailboxIds = {},
+            .removeMailboxIds = {},
+            .addKeywords =
+                flagged ? std::vector<std::string>{"$flagged"} : std::vector<std::string>{},
+            .removeKeywords =
+                flagged ? std::vector<std::string>{} : std::vector<std::string>{"$flagged"},
+            .operationGroupId = operationGroupId.toStdString(),
+            .ifInState = std::nullopt,
+        };
+        javelin::app::undo::MailPatchHistory history{
+            .items = {historyItem(accountId, *email, mutation)}};
+        auto preparedResult = m_undoManager.prepareNormal(
+            flagged ? QStringLiteral("Add Star to Message")
+                    : QStringLiteral("Remove Star from Message"),
+            javelin::app::undo::HistoryDomain::Mail, std::move(history), operationGroupId);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&preparedResult))
+            return javelin::jmap::operationError(*error);
+        auto prepared =
+            std::get<std::optional<javelin::app::undo::HistoryEntry>>(std::move(preparedResult));
+        auto queuedResult = m_jmapCore.queueEmailMailboxMutation(accountId, std::move(mutation));
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&queuedResult))
+        {
+            if (prepared.has_value())
+                static_cast<void>(m_undoManager.discardNormal(prepared->entryId));
+            return *error;
+        }
+        auto queued = std::get<javelin::jmap::QueuedEmailMutation>(std::move(queuedResult));
+        std::get<javelin::app::undo::MailPatchHistory>(prepared->payload).items.front().mutationId =
+            queued.mutationId;
+        auto committed = m_undoManager.commitNormal(std::move(*prepared));
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&committed))
+            return javelin::jmap::operationError(*error);
+        return QueuedMessageSelectionMutation{
+            .accountId = std::move(accountId),
+            .queuedEmailCount = 1,
+            .queuedMutations = {std::move(queued)},
+            .historyEntryId = std::get<javelin::app::undo::HistoryEntry>(committed).entryId,
         };
     }
 
     javelin::jmap::QueuedEmailMutationResult
-    MailApplicationService::queueMarkEmailRead(std::string accountId, std::string emailId)
+    MailApplicationService::queueExactEmailMutation(std::string accountId,
+                                                    javelin::jmap::EmailMailboxMutation mutation)
     {
-        return m_jmapCore.queueMarkEmailRead(std::move(accountId), std::move(emailId));
-    }
-
-    javelin::jmap::QueuedEmailMutationResult
-    MailApplicationService::queueSetEmailFlagged(std::string accountId, std::string emailId,
-                                                 const bool flagged)
-    {
-        return m_jmapCore.queueSetEmailFlagged(std::move(accountId), std::move(emailId), flagged);
+        return m_jmapCore.queueEmailMailboxMutation(std::move(accountId), std::move(mutation));
     }
 
     QCoro::Task<javelin::jmap::SubmittedEmailMutationsResult>
-    MailApplicationService::submitPendingEmailMutations(std::string accountId)
+    MailApplicationService::submitPendingEmailMutations(std::string accountId,
+                                                        std::optional<std::string> operationGroupId)
     {
         const ForegroundWorkScope foreground{m_workScheduler};
         const auto configuration = m_configurations.find(accountId);
@@ -753,11 +1129,82 @@ namespace javelin::app
             co_return javelin::jmap::OperationError{
                 .message = QStringLiteral("Account synchronization is not configured."),
             };
-        co_return observeResult(
-            m_errorCoordinator, configuration->second.settings, accountId,
-            QStringLiteral("Submit pending mail changes"),
-            co_await m_jmapCore.submitPendingEmailMutations(
-                toLiveConnectionSettings(configuration->second.settings), accountId));
+        auto result = co_await m_jmapCore.submitPendingEmailMutations(
+            toLiveConnectionSettings(configuration->second.settings), accountId, operationGroupId);
+
+        if (operationGroupId.has_value())
+        {
+            const auto historyEntry = std::ranges::find_if(
+                m_undoManager.entries(),
+                [&](const javelin::app::undo::HistoryEntry& entry)
+                {
+                    return entry.operationGroupId.has_value() &&
+                           entry.operationGroupId->toStdString() == *operationGroupId;
+                });
+            if (historyEntry != m_undoManager.entries().end())
+            {
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                {
+                    using enum javelin::jmap::OperationErrorCode;
+                    if (error->code == NetworkUnavailable || error->code == Timeout ||
+                        error->code == HttpFailure || error->code == ProtocolViolation)
+                    {
+                        static_cast<void>(m_undoManager.setEntryStatus(
+                            historyEntry->entryId,
+                            javelin::app::undo::HistoryEntryStatus::BlockedUnknown,
+                            error->message));
+                    }
+                }
+                else
+                {
+                    const auto& submitted =
+                        std::get<javelin::jmap::SubmittedEmailMutations>(result);
+                    if (auto* history = std::get_if<javelin::app::undo::MailPatchHistory>(
+                            &historyEntry->payload))
+                    {
+                        std::unordered_set<std::string> accepted;
+                        for (const auto& item : submitted.items)
+                        {
+                            if (item.accepted)
+                                accepted.insert(item.emailId);
+                        }
+                        auto updatedEntry = *historyEntry;
+                        auto& updatedHistory =
+                            std::get<javelin::app::undo::MailPatchHistory>(updatedEntry.payload);
+                        std::erase_if(updatedHistory.items, [&](const auto& item)
+                                      { return !accepted.contains(item.emailId); });
+                        if (updatedHistory.items.empty())
+                            static_cast<void>(m_undoManager.forget(updatedEntry.entryId));
+                        else if (updatedHistory.items.size() != history->items.size())
+                            static_cast<void>(m_undoManager.replaceEntry(std::move(updatedEntry)));
+                    }
+                    else if (std::holds_alternative<javelin::app::undo::ImpossibleHistory>(
+                                 historyEntry->payload) &&
+                             submitted.updatedEmailCount == 0)
+                    {
+                        static_cast<void>(m_undoManager.forget(historyEntry->entryId));
+                    }
+                }
+            }
+        }
+
+        co_return observeResult(m_errorCoordinator, configuration->second.settings, accountId,
+                                QStringLiteral("Submit pending mail changes"), std::move(result));
+    }
+
+    QCoro::Task<javelin::jmap::AuthoritativeEmailsResult>
+    MailApplicationService::getAuthoritativeEmails(std::string accountId,
+                                                   std::vector<std::string> emailIds)
+    {
+        const auto configuration = m_configurations.find(accountId);
+        if (configuration == m_configurations.end())
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::InvalidRequest,
+                .message = QStringLiteral("Account synchronization is not configured."),
+            };
+        co_return co_await m_jmapCore.getAuthoritativeEmails(
+            toLiveConnectionSettings(configuration->second.settings), std::move(accountId),
+            std::move(emailIds));
     }
 
     QCoro::Task<javelin::jmap::MessageContentRefreshResult>

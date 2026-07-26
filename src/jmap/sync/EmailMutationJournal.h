@@ -55,6 +55,9 @@ namespace javelin::jmap::sync
         listForEmail(std::string_view accountId, std::string_view emailId) const;
         [[nodiscard]]
         std::variant<std::vector<EmailMutationRecord>, javelin::jmap::cache::DatabaseError>
+        listForOperationGroup(std::string_view accountId, std::string_view operationGroupId) const;
+        [[nodiscard]]
+        std::variant<std::vector<EmailMutationRecord>, javelin::jmap::cache::DatabaseError>
         listByStatus(std::string_view accountId, MutationStatus status, std::size_t limit) const;
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
         transition(std::string_view mutationId, MutationStatus status,

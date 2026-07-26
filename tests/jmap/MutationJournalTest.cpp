@@ -234,6 +234,19 @@ TEST_CASE("generic mutation journal scopes lifecycle records by data type", "[jm
     CHECK(records.front().mutationId == "contact-1");
     CHECK(records.front().operationGroupId == std::optional<std::string>{"group-1"});
     CHECK(records.front().baseState == std::optional<std::string>{"state-1"});
+
+    const auto grouped = repository.listForOperationGroup(
+        {.accountId = "account-1", .dataType = "ContactCard"}, "group-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::MutationRecord>>(grouped));
+    const auto& groupedRecords =
+        std::get<std::vector<javelin::jmap::sync::MutationRecord>>(grouped);
+    REQUIRE(groupedRecords.size() == 1);
+    CHECK(groupedRecords.front().mutationId == "contact-1");
+
+    const auto wrongDomain = repository.listForOperationGroup(
+        {.accountId = "account-1", .dataType = "CalendarEvent"}, "group-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::MutationRecord>>(wrongDomain));
+    CHECK(std::get<std::vector<javelin::jmap::sync::MutationRecord>>(wrongDomain).empty());
 }
 
 TEST_CASE("generic mutation journal preserves ambiguous outcomes across recovery", "[jmap][sync]")

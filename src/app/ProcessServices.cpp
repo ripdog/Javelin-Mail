@@ -14,6 +14,7 @@
 #include "app/TranslationService.h"
 #include "app/WorkScheduler.h"
 #include "app/undo/HistoryRepository.h"
+#include "app/undo/MailHistoryExecutor.h"
 #include "app/undo/UndoManager.h"
 
 #include "jmap/JmapCore.h"
@@ -144,7 +145,11 @@ namespace javelin::app
             m_databaseConnection, *m_jmapCore, *m_methodTransport,
             *m_stateChangeNetworkAccessManager, *m_webSocketFailureCooldowns, *m_accountRepository,
             *m_queryService, *m_contactService, *m_calendarService, *m_sieveService,
-            *m_errorCoordinator, *m_workScheduler);
+            *m_errorCoordinator, *m_workScheduler, *m_undoManager);
+        m_mailHistoryExecutor =
+            std::make_unique<javelin::app::undo::MailHistoryExecutor>(*m_mailService);
+        m_undoManager->setExecutor(javelin::app::undo::HistoryDomain::Mail,
+                                   m_mailHistoryExecutor.get());
         m_contactCommandService = std::make_unique<ContactCommandService>(
             *m_mailService, *m_contactService, *m_errorCoordinator, *m_workScheduler);
         QObject::connect(

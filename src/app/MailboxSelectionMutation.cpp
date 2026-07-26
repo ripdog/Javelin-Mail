@@ -189,6 +189,12 @@ namespace javelin::app
                 .addMailboxIds = needsDestination ? std::vector<std::string>{destination->id}
                                                   : std::vector<std::string>{},
                 .removeMailboxIds = std::move(removeMailboxIds),
+                .addKeywords = {},
+                .removeKeywords = {},
+                .operationGroupId = std::nullopt,
+                .ifInState = std::nullopt,
+                .authoritativeMailboxIds = std::nullopt,
+                .authoritativeKeywords = std::nullopt,
             });
         }
 

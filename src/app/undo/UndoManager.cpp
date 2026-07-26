@@ -115,6 +115,31 @@ namespace javelin::app::undo
         return reload();
     }
 
+    std::optional<javelin::jmap::cache::DatabaseError> UndoManager::replaceEntry(HistoryEntry entry)
+    {
+        if (const auto error = m_repository.update(entry))
+            return error;
+        return reload();
+    }
+
+    std::optional<javelin::jmap::cache::DatabaseError>
+    UndoManager::setEntryStatus(const QString& entryId, const HistoryEntryStatus status,
+                                std::optional<QString> failure)
+    {
+        const auto found = std::ranges::find(m_entries, entryId, &HistoryEntry::entryId);
+        if (found == m_entries.end())
+        {
+            return javelin::jmap::cache::DatabaseError{
+                .code = javelin::jmap::cache::DatabaseErrorCode::QueryFailed,
+                .message = QStringLiteral("Operation history entry does not exist."),
+            };
+        }
+        auto entry = *found;
+        entry.status = status;
+        entry.failureJson = std::move(failure);
+        return replaceEntry(std::move(entry));
+    }
+
     std::variant<HistoryEntry, javelin::jmap::cache::DatabaseError>
     UndoManager::recordImpossible(QString label, const HistoryDomain domain, QString explanation,
                                   std::optional<QString> operationGroupId)

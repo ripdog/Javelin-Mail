@@ -37,6 +37,7 @@ namespace javelin::app
 namespace javelin::app::undo
 {
     class HistoryRepository;
+    class MailHistoryExecutor;
     class UndoManager;
 } // namespace javelin::app::undo
 
@@ -136,6 +137,7 @@ namespace javelin::app
         std::unique_ptr<ComposeService> m_composeService;
         std::unique_ptr<ApplicationErrorCoordinator> m_errorCoordinator;
         std::unique_ptr<MailApplicationService> m_mailService;
+        std::unique_ptr<javelin::app::undo::MailHistoryExecutor> m_mailHistoryExecutor;
         std::unique_ptr<ContactCommandService> m_contactCommandService;
         std::unique_ptr<MessageNavigationCoordinator> m_messageNavigationCoordinator;
         std::unique_ptr<CalendarNotificationService> m_calendarNotificationService;

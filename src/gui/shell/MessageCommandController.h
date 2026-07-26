@@ -90,7 +90,8 @@ namespace javelin::gui::shell
                          javelin::app::MessageSelection selection);
         void queueDestroy(std::string accountId, std::optional<std::string> sourceMailboxId,
                           javelin::app::MessageSelection selection);
-        void submitQueuedMutations(std::string accountId);
+        void submitQueuedMutations(std::string accountId,
+                                   std::optional<std::string> operationGroupId);
         [[nodiscard]] bool confirmPermanentDelete(std::size_t selectionItemCount) const;
 
         javelin::app::MailApplicationService& m_mailService;

@@ -194,6 +194,7 @@ namespace
     struct RawEmailSetRequest
     {
         std::string accountId;
+        std::optional<std::string> ifInState;
         std::optional<std::unordered_map<std::string, RawEmailSetCreate>> create;
         std::unordered_map<std::string,
                            std::unordered_map<std::string, javelin::jmap::api::EmailPatchValue>>
@@ -476,8 +477,9 @@ template <> struct glz::meta<RawEmailSetRequest>
 {
     using T = RawEmailSetRequest;
 
-    static constexpr auto value = glz::object("accountId", &T::accountId, "create", &T::create,
-                                              "update", &T::update, "destroy", &T::destroy);
+    static constexpr auto value =
+        glz::object("accountId", &T::accountId, "ifInState", &T::ifInState, "create", &T::create,
+                    "update", &T::update, "destroy", &T::destroy);
 };
 
 template <> struct glz::meta<RawEmailSetResponse>
@@ -903,6 +905,7 @@ namespace javelin::jmap::api
 
         return serializeMethod(RawEmailSetRequest{
             .accountId = request.accountId,
+            .ifInState = request.ifInState,
             .create = std::move(rawCreate),
             .update = std::move(rawUpdates),
             .destroy = request.destroy.empty()

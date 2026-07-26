@@ -82,6 +82,9 @@ set(JAVELIN_FORMAT_FILES
     src/app/undo/HistoryTypes.cpp
     src/app/undo/HistoryTypes.h
     src/app/undo/HistoryCommandExecutor.h
+    src/app/undo/MailHistoryExecutor.cpp
+    src/app/undo/MailHistoryExecutor.h
+    src/app/undo/MailHistoryPort.h
     src/app/undo/UndoManager.cpp
     src/app/undo/UndoManager.h
     src/app/MailIndexService.cpp
@@ -879,6 +882,9 @@ add_library(javelin_application STATIC
     src/app/undo/HistoryTypes.cpp
     src/app/undo/HistoryTypes.h
     src/app/undo/HistoryCommandExecutor.h
+    src/app/undo/MailHistoryExecutor.cpp
+    src/app/undo/MailHistoryExecutor.h
+    src/app/undo/MailHistoryPort.h
     src/app/undo/UndoManager.cpp
     src/app/undo/UndoManager.h
     src/app/InlineMessageSchemeHandler.cpp

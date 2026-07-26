@@ -5,6 +5,7 @@
 #include "app/ContactApplicationPorts.h"
 #include "app/LongPollService.h"
 #include "app/MailboxSelectionMutation.h"
+#include "app/undo/MailHistoryPort.h"
 #include "jmap/calendar/CalendarService.h"
 #include "jmap/query/EmailListSort.h"
 #include "jmap/search/EmailSearch.h"
@@ -26,6 +27,11 @@
 namespace javelin::jmap::contacts
 {
     class ContactService;
+}
+
+namespace javelin::app::undo
+{
+    class UndoManager;
 }
 
 namespace javelin::app
@@ -118,6 +124,8 @@ namespace javelin::app
         std::string accountId;
         std::size_t queuedEmailCount = 0;
         std::size_t skippedEmailCount = 0;
+        std::vector<javelin::jmap::QueuedEmailMutation> queuedMutations;
+        std::optional<QString> historyEntryId;
     };
 
     using QueuedMailboxSelectionMutationResult =
@@ -127,6 +135,8 @@ namespace javelin::app
     {
         std::string accountId;
         std::size_t queuedEmailCount = 0;
+        std::vector<javelin::jmap::QueuedEmailMutation> queuedMutations;
+        std::optional<QString> historyEntryId;
     };
 
     using QueuedMessageSelectionMutationResult =
@@ -134,7 +144,8 @@ namespace javelin::app
 
     class MailApplicationService final : public QObject,
                                          public AccountConnectionProvider,
-                                         public ContactRefreshPort
+                                         public ContactRefreshPort,
+                                         public javelin::app::undo::MailHistoryPort
     {
         Q_OBJECT
 
@@ -150,7 +161,9 @@ namespace javelin::app
                                javelin::jmap::calendar::CalendarService& calendarService,
                                javelin::jmap::sieve::SieveService& sieveService,
                                ApplicationErrorCoordinator& errorCoordinator,
-                               WorkScheduler& workScheduler, QObject* parent = nullptr);
+                               WorkScheduler& workScheduler,
+                               javelin::app::undo::UndoManager& undoManager,
+                               QObject* parent = nullptr);
 
         void applySettings(std::vector<AccountSyncConfiguration> configurations);
         [[nodiscard]] std::optional<AccountConnectionSettings>
@@ -173,12 +186,19 @@ namespace javelin::app
         [[nodiscard]] QueuedMessageSelectionMutationResult
         queueMarkMessagesUnread(std::string accountId, std::optional<std::string> sourceMailboxId,
                                 MessageSelection selection);
-        [[nodiscard]] javelin::jmap::QueuedEmailMutationResult
-        queueMarkEmailRead(std::string accountId, std::string emailId);
-        [[nodiscard]] javelin::jmap::QueuedEmailMutationResult
+        [[nodiscard]] QueuedMessageSelectionMutationResult queueMarkEmailRead(std::string accountId,
+                                                                              std::string emailId);
+        [[nodiscard]] QueuedMessageSelectionMutationResult
         queueSetEmailFlagged(std::string accountId, std::string emailId, bool flagged);
+        [[nodiscard]] javelin::jmap::QueuedEmailMutationResult
+        queueExactEmailMutation(std::string accountId,
+                                javelin::jmap::EmailMailboxMutation mutation) override;
         [[nodiscard]] QCoro::Task<javelin::jmap::SubmittedEmailMutationsResult>
-        submitPendingEmailMutations(std::string accountId);
+        submitPendingEmailMutations(
+            std::string accountId,
+            std::optional<std::string> operationGroupId = std::nullopt) override;
+        [[nodiscard]] QCoro::Task<javelin::jmap::AuthoritativeEmailsResult>
+        getAuthoritativeEmails(std::string accountId, std::vector<std::string> emailIds) override;
         [[nodiscard]] QCoro::Task<javelin::jmap::MessageContentRefreshResult>
         requestMessageContent(std::string accountId, std::string emailId);
         [[nodiscard]] QCoro::Task<javelin::jmap::AttachmentDownloadResult>
@@ -271,6 +291,7 @@ namespace javelin::app
         javelin::jmap::sieve::SieveService& m_sieveService;
         ApplicationErrorCoordinator& m_errorCoordinator;
         WorkScheduler& m_workScheduler;
+        javelin::app::undo::UndoManager& m_undoManager;
         struct VisibleCalendarRange
         {
             javelin::jmap::calendar::VisibleInterval interval;

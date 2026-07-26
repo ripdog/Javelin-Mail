@@ -130,19 +130,39 @@ namespace javelin::jmap
         std::string mutationId;
         std::string accountId;
         std::string emailId;
+        EmailMailboxMutation patch;
     };
 
     using QueuedEmailMutationResult = std::variant<QueuedEmailMutation, OperationError>;
 
     struct SubmittedEmailMutations
     {
+        struct Item
+        {
+            std::string emailId;
+            std::vector<std::string> mutationIds;
+            bool accepted = false;
+            std::optional<std::string> error;
+        };
+
         std::string accountId;
         std::size_t attemptedEmailCount = 0;
         std::size_t updatedEmailCount = 0;
         std::size_t failedEmailCount = 0;
+        std::vector<Item> items;
     };
 
     using SubmittedEmailMutationsResult = std::variant<SubmittedEmailMutations, OperationError>;
+
+    struct AuthoritativeEmails
+    {
+        std::string accountId;
+        std::string state;
+        std::vector<javelin::jmap::domain::Email> emails;
+        std::vector<std::string> notFound;
+    };
+
+    using AuthoritativeEmailsResult = std::variant<AuthoritativeEmails, OperationError>;
 
     struct AttachmentDownload
     {
@@ -240,8 +260,9 @@ namespace javelin::jmap
                                                                  std::string emailId,
                                                                  std::string sourceMailboxId,
                                                                  std::string trashMailboxId);
-        [[nodiscard]] QueuedEmailMutationResult queueDestroyEmail(std::string accountId,
-                                                                  std::string emailId);
+        [[nodiscard]] QueuedEmailMutationResult
+        queueDestroyEmail(std::string accountId, std::string emailId,
+                          std::optional<std::string> operationGroupId = std::nullopt);
         [[nodiscard]] QueuedEmailMutationResult queueMarkEmailRead(std::string accountId,
                                                                    std::string emailId);
         [[nodiscard]] QueuedEmailMutationResult queueMarkEmailUnread(std::string accountId,
@@ -250,7 +271,11 @@ namespace javelin::jmap
         queueSetEmailFlagged(std::string accountId, std::string emailId, bool flagged);
         [[nodiscard]] QCoro::Task<SubmittedEmailMutationsResult>
         submitPendingEmailMutations(LiveConnectionSettings settings, std::string accountId,
+                                    std::optional<std::string> operationGroupId = std::nullopt,
                                     std::size_t limit = 25);
+        [[nodiscard]] QCoro::Task<AuthoritativeEmailsResult>
+        getAuthoritativeEmails(LiveConnectionSettings settings, std::string accountId,
+                               std::vector<std::string> emailIds);
 
       private:
         struct Impl;

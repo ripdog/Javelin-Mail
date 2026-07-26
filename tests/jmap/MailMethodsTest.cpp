@@ -366,6 +366,7 @@ TEST_CASE("email set requests serialize typed mailbox and keyword updates", "[jm
 {
     const auto json = javelin::jmap::api::serializeEmailSetRequest({
         .accountId = "u1",
+        .ifInState = "state-before-history",
         .create = {},
         .update =
             {
@@ -378,6 +379,7 @@ TEST_CASE("email set requests serialize typed mailbox and keyword updates", "[jm
     });
 
     REQUIRE(json.has_value());
+    CHECK(json->find(R"("ifInState":"state-before-history")") != std::string::npos);
     CHECK(json->find(R"("mailboxIds/mbx-archive":true)") != std::string::npos);
     CHECK(json->find(R"("keywords/$seen":true)") != std::string::npos);
     CHECK(json->find(R"("mailboxIds":{)") == std::string::npos);
@@ -389,6 +391,7 @@ TEST_CASE("email set requests serialize nullable mailbox and keyword patch remov
 {
     const auto json = javelin::jmap::api::serializeEmailSetRequest({
         .accountId = "u1",
+        .ifInState = std::nullopt,
         .create = {},
         .update =
             {

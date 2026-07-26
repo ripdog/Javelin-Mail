@@ -790,8 +790,28 @@ TEST_CASE("JmapCore queues exact mailbox patches as mutations", "[jmap][core][mu
                          .emailId = "eml-1",
                          .addMailboxIds = {"mbx-archive"},
                          .removeMailboxIds = {"mbx-inbox", "mbx-projects"},
+                         .addKeywords = {},
+                         .removeKeywords = {},
+                         .operationGroupId = "history-group-1",
+                         .ifInState = "email-state-1",
+                         .authoritativeMailboxIds = std::nullopt,
+                         .authoritativeKeywords = std::nullopt,
                      });
     REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(moveResult));
+    const auto& queued = std::get<javelin::jmap::QueuedEmailMutation>(moveResult);
+    CHECK(queued.patch.addMailboxIds == std::vector<std::string>{"mbx-archive"});
+    CHECK(queued.patch.removeMailboxIds == std::vector<std::string>{"mbx-inbox", "mbx-projects"});
+    CHECK(queued.patch.operationGroupId == std::optional<std::string>{"history-group-1"});
+    CHECK(queued.patch.ifInState == std::optional<std::string>{"email-state-1"});
+
+    javelin::jmap::sync::EmailMutationJournal journal{databaseContext.connection};
+    const auto grouped = journal.listForOperationGroup("account-1", "history-group-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::EmailMutationRecord>>(grouped));
+    const auto& groupedRecords =
+        std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(grouped);
+    REQUIRE(groupedRecords.size() == 1);
+    CHECK(groupedRecords.front().mutationId == queued.mutationId);
+    CHECK(groupedRecords.front().baseState == std::optional<std::string>{"email-state-1"});
 
     const auto movedEmailResult = emailRepository.find("account-1", "eml-1");
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(movedEmailResult));

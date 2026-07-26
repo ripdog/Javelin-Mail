@@ -50,6 +50,9 @@ namespace javelin::jmap::sync
         [[nodiscard]] std::variant<std::vector<MutationRecord>, javelin::jmap::cache::DatabaseError>
         listForObject(const ConsistencyDomain& domain, std::string_view objectId) const;
         [[nodiscard]] std::variant<std::vector<MutationRecord>, javelin::jmap::cache::DatabaseError>
+        listForOperationGroup(const ConsistencyDomain& domain,
+                              std::string_view operationGroupId) const;
+        [[nodiscard]] std::variant<std::vector<MutationRecord>, javelin::jmap::cache::DatabaseError>
         listByStatus(const ConsistencyDomain& domain, MutationStatus status,
                      std::size_t limit) const;
         [[nodiscard]] std::variant<std::vector<MutationRecord>, javelin::jmap::cache::DatabaseError>

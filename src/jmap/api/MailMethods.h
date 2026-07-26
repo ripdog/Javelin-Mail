@@ -244,6 +244,7 @@ namespace javelin::jmap::api
     struct EmailSetRequest
     {
         std::string accountId;
+        std::optional<std::string> ifInState;
         std::unordered_map<std::string, EmailSetCreate> create;
         std::unordered_map<std::string, EmailSetUpdate> update;
         std::vector<std::string> destroy;
