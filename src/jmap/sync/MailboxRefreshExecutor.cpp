@@ -4,7 +4,6 @@
 #include "jmap/api/ResponseReader.h"
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/MailboxWindowRepository.h"
-#include "jmap/cache/QueryService.h"
 #include "jmap/cache/SyncStateRepository.h"
 #include "jmap/cache/ThreadRepository.h"
 #include "jmap/sync/ConsistencyDomain.h"
@@ -149,6 +148,56 @@ namespace javelin::jmap::sync
             }
 
             return std::get<std::vector<std::string>>(result);
+        }
+
+        [[nodiscard]] std::variant<std::vector<std::string>, OperationError>
+        affectedMailboxIds(javelin::jmap::cache::DatabaseConnection& databaseConnection,
+                           const std::string_view accountId,
+                           const std::vector<javelin::jmap::domain::Email>& emails)
+        {
+            std::vector<std::string> mailboxIds;
+            for (const auto& email : emails)
+            {
+                mailboxIds.insert(mailboxIds.end(), email.mailboxIds.begin(),
+                                  email.mailboxIds.end());
+
+                QSqlQuery previous{databaseConnection.database()};
+                previous.prepare(QStringLiteral(
+                    "SELECT mailbox_id FROM email_mailboxes WHERE account_id=:account_id "
+                    "AND email_id=:email_id"));
+                previous.bindValue(QStringLiteral(":account_id"),
+                                   QString::fromStdString(std::string{accountId}));
+                previous.bindValue(QStringLiteral(":email_id"), QString::fromStdString(email.id));
+                if (!previous.exec())
+                {
+                    return javelin::jmap::operationError(javelin::jmap::cache::DatabaseError{
+                        .code = javelin::jmap::cache::DatabaseErrorCode::QueryFailed,
+                        .message = QStringLiteral("Read affected email mailboxes: ") +
+                                   previous.lastError().text(),
+                    });
+                }
+                while (previous.next())
+                    mailboxIds.push_back(previous.value(0).toString().toStdString());
+            }
+            return deduplicatedIds(std::move(mailboxIds));
+        }
+
+        [[nodiscard]] std::optional<OperationError>
+        invalidateOtherMailboxWindows(javelin::jmap::cache::DatabaseTransaction& transaction,
+                                      javelin::jmap::cache::DatabaseConnection& databaseConnection,
+                                      const std::string_view accountId,
+                                      const std::string_view refreshedMailboxId,
+                                      const std::vector<std::string>& affectedMailboxIds)
+        {
+            javelin::jmap::cache::MailboxWindowRepository windows{databaseConnection};
+            for (const auto& mailboxId : affectedMailboxIds)
+            {
+                if (mailboxId == refreshedMailboxId)
+                    continue;
+                if (const auto error = windows.invalidateMailbox(transaction, accountId, mailboxId))
+                    return javelin::jmap::operationError(*error);
+            }
+            return std::nullopt;
         }
 
         [[nodiscard]] std::vector<javelin::jmap::sync::EmailMutationRecord>
@@ -950,6 +999,12 @@ namespace javelin::jmap::sync
             removedEmailIds = incremental.removedEmailIds;
             destroyedEmailIds = incremental.destroyedEmailIds;
             requiresNotificationScan = incremental.requiresNotificationScan;
+            const auto affectedMailboxIdsResult =
+                affectedMailboxIds(m_databaseConnection, accountId, incremental.updatedEmails);
+            if (const auto* error = std::get_if<OperationError>(&affectedMailboxIdsResult))
+                co_return *error;
+            const auto& affectedMailboxes =
+                std::get<std::vector<std::string>>(affectedMailboxIdsResult);
             if (!destroyedEmailIds.empty() || !incremental.updatedEmails.empty() ||
                 !incremental.requiresFullFetch)
             {
@@ -971,6 +1026,10 @@ namespace javelin::jmap::sync
                     if (const auto error = emailRepository.upsertMany(transaction, accountId,
                                                                       incremental.updatedEmails))
                         co_return javelin::jmap::operationError(*error);
+                    if (const auto error =
+                            invalidateOtherMailboxWindows(transaction, m_databaseConnection,
+                                                          accountId, mailboxId, affectedMailboxes))
+                        co_return *error;
                 }
                 if (!incremental.requiresFullFetch)
                 {
@@ -1068,10 +1127,28 @@ namespace javelin::jmap::sync
                 co_return javelin::jmap::operationError(*error);
             }
 
-            if (const auto error = emailRepository.upsertMany(accountId, fetch.emails))
+            const auto affectedMailboxIdsResult =
+                affectedMailboxIds(m_databaseConnection, accountId, fetch.emails);
+            if (const auto* error = std::get_if<OperationError>(&affectedMailboxIdsResult))
+                co_return *error;
+            auto emailTransactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+                m_databaseConnection, QStringLiteral("Materialize mailbox thread emails"));
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&emailTransactionResult))
+                co_return javelin::jmap::operationError(*error);
+            auto emailTransaction = std::get<javelin::jmap::cache::DatabaseTransaction>(
+                std::move(emailTransactionResult));
+            if (const auto error =
+                    emailRepository.upsertMany(emailTransaction, accountId, fetch.emails))
             {
                 co_return javelin::jmap::operationError(*error);
             }
+            if (const auto error = invalidateOtherMailboxWindows(
+                    emailTransaction, m_databaseConnection, accountId, mailboxId,
+                    std::get<std::vector<std::string>>(affectedMailboxIdsResult)))
+                co_return *error;
+            if (const auto error = emailTransaction.commit())
+                co_return javelin::jmap::operationError(*error);
 
             std::vector<std::string> fetchedEmailIds;
             fetchedEmailIds.reserve(fetch.emails.size());

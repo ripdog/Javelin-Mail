@@ -225,6 +225,16 @@ namespace
         return updated;
     }
 
+    [[nodiscard]] std::string relatedMailboxEmailFixture()
+    {
+        auto updated = newRepresentativeEmailFixture();
+        const auto mailboxPosition = updated.find("\"mbx-archive\": false");
+        REQUIRE(mailboxPosition != std::string::npos);
+        updated.replace(mailboxPosition, std::string{"\"mbx-archive\": false"}.size(),
+                        "\"mbx-archive\": true");
+        return updated;
+    }
+
     [[nodiscard]] javelin::jmap::domain::Email loadEmailFixture()
     {
         const auto parsed = javelin::jmap::domain::parseEmail(
@@ -1342,6 +1352,28 @@ TEST_CASE("mailbox refresh executor full fallback preserves unrelated account ca
                               "email-state-1")
                       .has_value());
     seedCanonicalWindow(databaseContext.connection, {"eml-1"});
+    const auto archiveQueryKey = javelin::jmap::sync::mailboxQueryKey({
+        .mailboxId = "mbx-archive",
+        .sortProperty = "receivedAt",
+        .isAscending = false,
+        .collapseThreads = true,
+    });
+    javelin::jmap::cache::MailboxWindowRepository windows{databaseContext.connection};
+    REQUIRE_FALSE(windows
+                      .replace({
+                          .accountId = "account-1",
+                          .mailboxId = "mbx-archive",
+                          .queryKey = archiveQueryKey,
+                          .requestedOffset = 0,
+                          .requestedLimit = 100,
+                          .position = 0,
+                          .returnedLimit = 1,
+                          .total = 1,
+                          .queryState = "archive-query-state-1",
+                          .isAuthoritative = true,
+                          .emailIds = {"eml-archive"},
+                      })
+                      .has_value());
 
     FakeTransport transport;
     transport.queuedResults
@@ -1410,7 +1442,7 @@ TEST_CASE("mailbox refresh executor full fallback preserves unrelated account ca
                                                                .name = "Email/get",
                                                                .arguments =
                                                                    emailGetArguments(
-                                                                       "email-state-2", {newRepresentativeEmailFixture()}),
+                                                                       "email-state-2", {relatedMailboxEmailFixture()}),
                                                                .callId = "mailbox-emails-get",
                                                            },
                                                },
@@ -1431,6 +1463,14 @@ TEST_CASE("mailbox refresh executor full fallback preserves unrelated account ca
     CHECK(summary.insertedEmailIds == std::vector<std::string>{"eml-2"});
     CHECK(summary.removedEmailIds == std::vector<std::string>{"eml-1"});
     CHECK(summary.requiresNotificationScan);
+
+    const auto archiveWindowResult = windows.find("account-1", archiveQueryKey, 0, 100);
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(
+        archiveWindowResult));
+    const auto& archiveWindow =
+        std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(archiveWindowResult);
+    REQUIRE(archiveWindow.has_value());
+    CHECK_FALSE(archiveWindow->isAuthoritative);
 
     javelin::jmap::cache::QueryService queryService{databaseContext.connection};
     const auto inboxListResult = queryService.listMailboxMessages("account-1", "mbx-inbox", 100);

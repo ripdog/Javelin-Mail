@@ -116,8 +116,13 @@ values; they do not acquire Email pagination semantics.
 
 Mail notification discovery writes a persistent pending outbox before publication. Entries become
 delivered only after the desktop-notification signal is emitted, making a process failure in that
-gap retryable instead of silently losing the notification. Calendar reminder acknowledgement and
-snooze state remains in its separate calendar notification repository.
+gap retryable instead of silently losing the notification. Discovery is limited to threads present
+in an authoritative mailbox query window; raw Email mailbox membership alone cannot produce a
+notification for a message the mailbox view cannot render. Because a collapsed thread fetch may
+materialize related Emails from other mailboxes, those other mailbox windows are invalidated in the
+same transaction as the Email upsert and must be rematerialized before notification discovery.
+Calendar reminder acknowledgement and snooze state remains in its separate calendar notification
+repository.
 
 `JmapMethodTransport` is the request/response boundary for typed JMAP envelopes.
 `PreferredJmapMethodTransport` uses the RFC 8887 capability advertised by the cached Session to

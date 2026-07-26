@@ -41,12 +41,24 @@ namespace javelin::jmap::cache
 
         QSqlQuery emails{database};
         emails.prepare(QStringLiteral(
-            "SELECT e.email_id, e.thread_id, e.subject, e.received_at, "
+            "WITH visible_threads AS MATERIALIZED ("
+            "SELECT DISTINCT representative.thread_id FROM mailbox_query_windows w "
+            "JOIN mailbox_query_window_items i ON i.account_id=w.account_id "
+            "AND i.query_key=w.query_key AND i.requested_offset=w.requested_offset "
+            "AND i.requested_limit=w.requested_limit "
+            "JOIN emails representative ON representative.account_id=i.account_id "
+            "AND representative.email_id=i.email_id "
+            "WHERE w.account_id=:account_id AND w.mailbox_id=:mailbox_id AND w.is_valid=1"
+            ") SELECT e.email_id, e.thread_id, e.subject, e.received_at, "
             "EXISTS(SELECT 1 FROM email_keywords k WHERE k.account_id = e.account_id "
             "AND k.email_id = e.email_id AND k.keyword = '$seen') "
-            "FROM emails e JOIN email_mailboxes m ON m.account_id = e.account_id "
-            "AND m.email_id = e.email_id WHERE e.account_id = :account_id "
-            "AND m.mailbox_id = :mailbox_id ORDER BY e.received_at, e.email_id"));
+            "FROM visible_threads v CROSS JOIN emails e INDEXED BY idx_emails_thread "
+            "ON e.account_id=:account_id AND e.thread_id=v.thread_id "
+            "JOIN email_mailboxes m ON m.account_id=e.account_id AND m.email_id=e.email_id "
+            "AND m.mailbox_id=:mailbox_id "
+            "WHERE NOT EXISTS(SELECT 1 FROM observed_notification_emails o "
+            "WHERE o.account_id=e.account_id AND o.email_id=e.email_id) "
+            "ORDER BY e.received_at,e.email_id"));
         emails.bindValue(QStringLiteral(":account_id"),
                          QString::fromStdString(std::string{accountId}));
         emails.bindValue(QStringLiteral(":mailbox_id"),

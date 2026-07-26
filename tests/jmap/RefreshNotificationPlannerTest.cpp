@@ -1,6 +1,7 @@
 #include "jmap/sync/RefreshNotificationPlanner.h"
 #include "FixtureReader.h"
 #include "jmap/cache/EmailRepository.h"
+#include "jmap/cache/MailboxWindowRepository.h"
 #include "jmap/cache/NotificationRepository.h"
 #include "jmap/domain/MailEntityParsers.h"
 #include "jmap/sync/MailboxRefreshExecutor.h"
@@ -199,6 +200,28 @@ TEST_CASE("notification outbox persists pending mail until delivery", "[jmap][ca
     REQUIRE_FALSE(emails.replaceAll("account-1", {unread, seen}).has_value());
 
     javelin::jmap::cache::NotificationRepository notifications{databaseContext.connection};
+    const auto hidden = notifications.enqueueUnreadMailboxEmails("account-1", "mbx-inbox");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(
+        hidden));
+    CHECK(std::get<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(hidden).empty());
+
+    javelin::jmap::cache::MailboxWindowRepository windows{databaseContext.connection};
+    REQUIRE_FALSE(windows
+                      .replace({
+                          .accountId = "account-1",
+                          .mailboxId = "mbx-inbox",
+                          .queryKey = "mailbox:mbx-inbox|sort:receivedAt:desc|collapseThreads:true",
+                          .requestedOffset = 0,
+                          .requestedLimit = 100,
+                          .position = 0,
+                          .returnedLimit = 2,
+                          .total = 2,
+                          .queryState = "query-state-1",
+                          .isAuthoritative = true,
+                          .emailIds = {"eml-unread", "eml-seen"},
+                      })
+                      .has_value());
+
     const auto first = notifications.enqueueUnreadMailboxEmails("account-1", "mbx-inbox");
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(
         first));
