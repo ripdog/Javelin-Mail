@@ -5,6 +5,8 @@
 #include "jmap/language/LanguageDetection.h"
 #include "jmap/render/HtmlMessageDocumentBuilder.h"
 
+#include <QFuture>
+
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -52,13 +54,17 @@ namespace javelin::jmap::cache
         std::vector<MessageAttachment> attachments;
     };
 
+    using MessageViewResult = std::variant<std::optional<MessageViewSnapshot>, DatabaseError>;
+
     class MessageViewService
     {
       public:
         explicit MessageViewService(DatabaseConnection& connection);
 
-        [[nodiscard]] std::variant<std::optional<MessageViewSnapshot>, DatabaseError>
-        load(std::string_view accountId, std::string_view emailId) const;
+        [[nodiscard]] MessageViewResult load(std::string_view accountId,
+                                             std::string_view emailId) const;
+        [[nodiscard]] QFuture<MessageViewResult> loadAsync(std::string accountId,
+                                                           std::string emailId) const;
 
       private:
         DatabaseConnection& m_connection;

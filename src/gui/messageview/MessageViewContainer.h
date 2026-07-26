@@ -53,10 +53,8 @@ namespace javelin::gui::messageview
                                   std::optional<std::string> mailboxId,
                                   std::vector<javelin::jmap::cache::MessageListItem> messages);
         void refresh(javelin::jmap::cache::MessageViewService& messageViewService);
-        void setLoadingState(bool loading);
         void setErrorState(const QString& errorMessage);
         void translationSettingsChanged();
-        [[nodiscard]] bool hasReadableBody() const;
 
       Q_SIGNALS:
         void saveAttachmentRequested(QString accountId, QString emailId, QString partId);
@@ -65,6 +63,7 @@ namespace javelin::gui::messageview
         void viewSourceRequested();
         void messageActivated(QString emailId);
         void hoveredLinkChanged(QString url);
+        void contentRequired(QString accountId, QString emailId);
 
       private:
         enum class ActiveView
@@ -76,6 +75,8 @@ namespace javelin::gui::messageview
         };
 
         void setActiveView(ActiveView view);
+        void startSnapshotLoad(javelin::jmap::cache::MessageViewService& messageViewService,
+                               bool requestContentIfMissing);
         void updatePresentation(bool reloadBody = true);
         void updateSenderRemoteContentPermit();
         void updateRemoteContentButton();
@@ -145,6 +146,7 @@ namespace javelin::gui::messageview
         bool m_attachmentsCollapsed = false;
         bool m_translationInProgress = false;
         std::uint64_t m_translationRequestToken = 0;
+        std::uint64_t m_snapshotLoadToken = 0;
         bool m_messageTranslated = false;
         QString m_originalPlainText;
         QString m_translationError;

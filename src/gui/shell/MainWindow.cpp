@@ -418,6 +418,14 @@ namespace javelin::gui::shell
         m_messageNavigationController = std::make_unique<MessageNavigationController>(
             m_messageNavigationCoordinator, *m_messageListTabController);
         m_messageContentController = new MessageContentController(m_mailService, this);
+        connect(m_messageViewContainer,
+                &javelin::gui::messageview::MessageViewContainer::contentRequired,
+                m_messageContentController,
+                [this](const QString& accountId, const QString& emailId)
+                {
+                    m_messageContentController->request(accountId.toStdString(),
+                                                        emailId.toStdString());
+                });
         connect(m_messageContentController, &MessageContentController::contentUnavailable, this,
                 [this](const javelin::jmap::MessageContentUnavailable& unavailable)
                 {
@@ -606,11 +614,6 @@ namespace javelin::gui::shell
 
         m_messageViewContainer->setSelection(m_messageViewService, route.accountId, route.mailboxId,
                                              route.emailId);
-        if (!m_messageViewContainer->hasReadableBody())
-        {
-            m_messageViewContainer->setLoadingState(true);
-            m_messageContentController->request(route.accountId, route.emailId);
-        }
     }
 
     void MainWindow::createActions()
@@ -1437,11 +1440,6 @@ namespace javelin::gui::shell
         updateMessageActions();
         if (!emailId.isEmpty())
         {
-            if (!m_messageViewContainer->hasReadableBody())
-            {
-                m_messageViewContainer->setLoadingState(true);
-            }
-            m_messageContentController->request(*accountId, emailId.toStdString());
             if (isUnread)
             {
                 m_messageCommandController->markEmailRead(*accountId, emailId.toStdString());
@@ -2369,11 +2367,6 @@ namespace javelin::gui::shell
                 updateEmptyStates();
                 updateMessageListHeader();
                 updateMessageActions();
-                if (!m_messageViewContainer->hasReadableBody())
-                {
-                    m_messageViewContainer->setLoadingState(true);
-                    m_messageContentController->request(route->accountId, route->emailId);
-                }
                 return;
             }
         }
@@ -2382,13 +2375,6 @@ namespace javelin::gui::shell
         updateEmptyStates();
         updateMessageListHeader();
         updateMessageActions();
-
-        if (accountId.has_value() && emailId.has_value() &&
-            !m_messageViewContainer->hasReadableBody())
-        {
-            m_messageViewContainer->setLoadingState(true);
-            m_messageContentController->request(*accountId, *emailId);
-        }
     }
 
     void MainWindow::updateEmptyStates()

@@ -5,6 +5,8 @@
 #include "jmap/cache/RawMessageSourceRepository.h"
 #include "jmap/render/HtmlMessageDocumentBuilder.h"
 
+#include <QtConcurrentRun>
+
 namespace javelin::jmap::cache
 {
     MessageViewService::MessageViewService(DatabaseConnection& connection)
@@ -12,8 +14,8 @@ namespace javelin::jmap::cache
     {
     }
 
-    std::variant<std::optional<MessageViewSnapshot>, DatabaseError>
-    MessageViewService::load(const std::string_view accountId, const std::string_view emailId) const
+    MessageViewResult MessageViewService::load(const std::string_view accountId,
+                                               const std::string_view emailId) const
     {
         EmailRepository emailRepository{m_connection};
         RawMessageSourceRepository sourceRepository{m_connection};
@@ -71,6 +73,24 @@ namespace javelin::jmap::cache
         }
 
         return std::optional<MessageViewSnapshot>{std::move(snapshot)};
+    }
+
+    QFuture<MessageViewResult> MessageViewService::loadAsync(std::string accountId,
+                                                             std::string emailId) const
+    {
+        const QString databasePath = m_connection.database().databaseName();
+        return QtConcurrent::run(
+            [databasePath, accountId = std::move(accountId), emailId = std::move(emailId)]() mutable
+            {
+                ThreadConnectionFactory factory{
+                    {.connectionNamePrefix = QStringLiteral("message-view"),
+                     .databasePath = databasePath}};
+                auto opened = factory.openForCurrentThread(accountId);
+                if (const auto* error = std::get_if<DatabaseError>(&opened))
+                    return MessageViewResult{*error};
+                auto connection = std::get<DatabaseConnection>(std::move(opened));
+                return MessageViewService{connection}.load(accountId, emailId);
+            });
     }
 
 } // namespace javelin::jmap::cache

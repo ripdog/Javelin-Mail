@@ -825,21 +825,13 @@ namespace javelin::gui::messageview
         m_translationWasAutomatic = false;
         m_languageDetectionStarted = false;
         m_htmlDocumentLoaded = false;
+        ++m_snapshotLoadToken;
         m_loading = m_emailId.has_value();
         m_errorMessage.clear();
 
         m_snapshot = std::nullopt;
-        if (m_accountId.has_value() && m_emailId.has_value())
-        {
-            const auto result = messageViewService.load(*m_accountId, *m_emailId);
-            if (const auto* snapshot =
-                    std::get_if<std::optional<javelin::jmap::cache::MessageViewSnapshot>>(&result))
-            {
-                m_snapshot = *snapshot;
-            }
-        }
-
         updatePresentation();
+        startSnapshotLoad(messageViewService, true);
     }
 
     void MessageViewContainer::setMultipleSelection(
@@ -860,6 +852,7 @@ namespace javelin::gui::messageview
         m_translationWasAutomatic = false;
         m_languageDetectionStarted = false;
         m_htmlDocumentLoaded = false;
+        ++m_snapshotLoadToken;
         m_loading = false;
         m_errorMessage.clear();
         m_snapshot = std::nullopt;
@@ -868,7 +861,6 @@ namespace javelin::gui::messageview
 
     void MessageViewContainer::refresh(javelin::jmap::cache::MessageViewService& messageViewService)
     {
-        const auto previousRenderedBody = renderedBodyKey(m_snapshot);
         m_errorMessage.clear();
         ++m_translationRequestToken;
         m_translationInProgress = false;
@@ -878,18 +870,66 @@ namespace javelin::gui::messageview
         m_autoTranslateAttempted = false;
         m_translationWasAutomatic = false;
         m_languageDetectionStarted = false;
-        m_snapshot = std::nullopt;
-        if (m_accountId.has_value() && m_emailId.has_value())
-        {
-            const auto result = messageViewService.load(*m_accountId, *m_emailId);
-            if (const auto* snapshot =
-                    std::get_if<std::optional<javelin::jmap::cache::MessageViewSnapshot>>(&result))
-            {
-                m_snapshot = *snapshot;
-            }
-        }
+        m_loading = m_emailId.has_value();
+        updatePresentation(false);
+        startSnapshotLoad(messageViewService, false);
+    }
 
-        updatePresentation(previousRenderedBody != renderedBodyKey(m_snapshot));
+    void MessageViewContainer::startSnapshotLoad(
+        javelin::jmap::cache::MessageViewService& messageViewService,
+        const bool requestContentIfMissing)
+    {
+        if (!m_accountId.has_value() || !m_emailId.has_value())
+            return;
+
+        const auto accountId = *m_accountId;
+        const auto emailId = *m_emailId;
+        const auto token = ++m_snapshotLoadToken;
+        auto* watcher = new QFutureWatcher<javelin::jmap::cache::MessageViewResult>{this};
+        connect(
+            watcher, &QFutureWatcher<javelin::jmap::cache::MessageViewResult>::finished, this,
+            [this, watcher, accountId, emailId, token, requestContentIfMissing]
+            {
+                auto result = watcher->result();
+                watcher->deleteLater();
+                if (token != m_snapshotLoadToken || m_accountId != accountId ||
+                    m_emailId != emailId)
+                    return;
+
+                if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
+                {
+                    m_loading = false;
+                    m_errorMessage = error->message;
+                    updatePresentation();
+                    return;
+                }
+
+                auto snapshot = std::get<std::optional<javelin::jmap::cache::MessageViewSnapshot>>(
+                    std::move(result));
+                if (!snapshot.has_value())
+                {
+                    if (requestContentIfMissing)
+                    {
+                        Q_EMIT contentRequired(QString::fromStdString(accountId),
+                                               QString::fromStdString(emailId));
+                    }
+                    else
+                    {
+                        m_loading = false;
+                        m_errorMessage =
+                            QStringLiteral("The cached message content could not be loaded.");
+                        updatePresentation();
+                    }
+                    return;
+                }
+
+                const auto previousRenderedBody = renderedBodyKey(m_snapshot);
+                m_snapshot = std::move(snapshot);
+                m_loading = false;
+                m_errorMessage.clear();
+                updatePresentation(previousRenderedBody != renderedBodyKey(m_snapshot));
+            });
+        watcher->setFuture(messageViewService.loadAsync(accountId, emailId));
     }
 
     void MessageViewContainer::setActiveView(const ActiveView view)
@@ -916,27 +956,11 @@ namespace javelin::gui::messageview
         }
     }
 
-    void MessageViewContainer::setLoadingState(const bool loading)
-    {
-        m_loading = loading;
-        if (loading)
-        {
-            m_errorMessage.clear();
-        }
-        updatePresentation();
-    }
-
     void MessageViewContainer::setErrorState(const QString& errorMessage)
     {
         m_loading = false;
         m_errorMessage = errorMessage;
         updatePresentation();
-    }
-
-    bool MessageViewContainer::hasReadableBody() const
-    {
-        return m_snapshot.has_value() &&
-               (m_snapshot->htmlBody.has_value() || m_snapshot->plainTextBody.has_value());
     }
 
     void MessageViewContainer::updateSenderRemoteContentPermit()

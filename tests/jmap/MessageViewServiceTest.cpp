@@ -260,3 +260,28 @@ TEST_CASE("message view service returns no value for missing emails", "[jmap][ca
     CHECK_FALSE(
         std::get<std::optional<javelin::jmap::cache::MessageViewSnapshot>>(result).has_value());
 }
+
+TEST_CASE("message view service loads snapshots on a worker connection",
+          "[jmap][cache][message-view]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    seedEmail(databaseContext.connection);
+    seedMessageContent(databaseContext.connection);
+
+    javelin::jmap::cache::MessageViewService service{databaseContext.connection};
+    auto future = service.loadAsync("account-1", "eml-1");
+    future.waitForFinished();
+    const auto result = future.result();
+
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::cache::MessageViewSnapshot>>(result));
+    const auto& snapshot =
+        std::get<std::optional<javelin::jmap::cache::MessageViewSnapshot>>(result);
+    REQUIRE(snapshot.has_value());
+    CHECK(snapshot->email.subject == std::optional<std::string>{"Quarterly update"});
+    REQUIRE(snapshot->htmlRenderDocument.has_value());
+}
