@@ -16,8 +16,9 @@ class QWidget;
 
 namespace javelin::app
 {
-    class MailApplicationService;
-}
+    class ContactCommandPort;
+    class ContactRefreshPort;
+} // namespace javelin::app
 
 namespace javelin::jmap::cache
 {
@@ -69,7 +70,8 @@ namespace javelin::gui::shell
 
       public:
         ContactsTabController(javelin::jmap::cache::ContactRepository& contactRepository,
-                              javelin::app::MailApplicationService& mailService,
+                              javelin::app::ContactRefreshPort& refreshPort,
+                              javelin::app::ContactCommandPort& commandPort,
                               QStackedWidget& contentStack, std::vector<TabState>& tabs,
                               QObject* parent = nullptr);
 
@@ -98,7 +100,8 @@ namespace javelin::gui::shell
         widgetForTab(const TabState* tab) const;
 
         javelin::jmap::cache::ContactRepository& m_contactRepository;
-        javelin::app::MailApplicationService& m_mailService;
+        javelin::app::ContactRefreshPort& m_refreshPort;
+        javelin::app::ContactCommandPort& m_commandPort;
         QStackedWidget& m_contentStack;
         std::vector<TabState>& m_tabs;
     };

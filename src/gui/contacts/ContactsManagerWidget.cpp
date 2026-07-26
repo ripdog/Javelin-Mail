@@ -4,7 +4,7 @@
 #include "gui/IconUtils.h"
 #include "gui/settings/PreferencesDialog.h"
 #include "jmap/contacts/ContactInterchange.h"
-#include "jmap/contacts/ContactService.h"
+#include "jmap/contacts/ContactResults.h"
 
 #include <QCoroTask>
 
@@ -510,9 +510,10 @@ namespace javelin::gui::contacts
 
     ContactsManagerWidget::ContactsManagerWidget(
         javelin::jmap::cache::ContactRepository& repository,
-        javelin::app::MailApplicationService& service, std::string ownerAccountId, QWidget* parent)
-        : QWidget(parent), m_repository(repository), m_service(service),
-          m_ownerAccountId(std::move(ownerAccountId))
+        javelin::app::ContactRefreshPort& refreshPort,
+        javelin::app::ContactCommandPort& commandPort, std::string ownerAccountId, QWidget* parent)
+        : QWidget(parent), m_repository(repository), m_refreshPort(refreshPort),
+          m_commandPort(commandPort), m_ownerAccountId(std::move(ownerAccountId))
     {
         setupUi();
         connect(&m_repository, &javelin::jmap::cache::ContactRepository::contactsChanged, this,
@@ -1626,7 +1627,7 @@ namespace javelin::gui::contacts
         if (!accountId.has_value())
             return;
         setBusy(true);
-        auto task = m_service.createContactGroup(
+        auto task = m_commandPort.createContactGroup(
             m_ownerAccountId,
             {.accountId = *accountId, .addressBookId = target->id, .name = name.toStdString()});
         QCoro::connect(std::move(task), this,
@@ -1652,11 +1653,11 @@ namespace javelin::gui::contacts
         if (group == m_groups.end() || !groupIsWritable(*group))
             return;
         setBusy(true);
-        auto task = m_service.setContactGroupMembership(m_ownerAccountId,
-                                                        {.accountId = group->accountId,
-                                                         .groupId = std::move(groupId),
-                                                         .memberUids = std::move(memberUids),
-                                                         .included = included});
+        auto task = m_commandPort.setContactGroupMembership(m_ownerAccountId,
+                                                            {.accountId = group->accountId,
+                                                             .groupId = std::move(groupId),
+                                                             .memberUids = std::move(memberUids),
+                                                             .included = included});
         QCoro::connect(std::move(task), this,
                        [this](javelin::jmap::contacts::ContactMutationResult result)
                        {
@@ -1679,24 +1680,16 @@ namespace javelin::gui::contacts
             return;
         const bool starred = !std::ranges::all_of(contacts, [](const auto* contact)
                                                   { return contact->isImportant; });
-        javelin::jmap::api::ContactCardSetRequest request;
-        request.accountId = *accountId;
+        javelin::app::SetContactsStarredCommand command{
+            .accountId = *accountId,
+            .contacts = {},
+            .starred = starred,
+        };
+        command.contacts.reserve(contacts.size());
         for (const auto* contact : contacts)
-        {
-            const auto document =
-                javelin::jmap::contacts::setContactStarred(contact->document, starred);
-            if (const auto* message = std::get_if<std::string_view>(&document))
-            {
-                QMessageBox::warning(
-                    this, QStringLiteral("Star Contacts"),
-                    QString::fromUtf8(message->data(), static_cast<qsizetype>(message->size())));
-                return;
-            }
-            request.update.emplace(contact->id, javelin::jmap::api::ContactDocument{
-                                                    .json = std::get<std::string>(document)});
-        }
+            command.contacts.push_back({.id = contact->id, .document = contact->document});
         setBusy(true);
-        auto task = m_service.setContactCards(m_ownerAccountId, std::move(request));
+        auto task = m_commandPort.setContactsStarred(m_ownerAccountId, std::move(command));
         QCoro::connect(std::move(task), this,
                        [this](javelin::jmap::contacts::ContactMutationResult result)
                        {
@@ -1898,28 +1891,21 @@ namespace javelin::gui::contacts
                     editor.members.push_back(item->data(Qt::UserRole).toString().toStdString());
             }
         }
-        const auto prepared = javelin::jmap::contacts::applyContactEditorData(editor, m_creating);
-        if (const auto* message = std::get_if<std::string_view>(&prepared))
+        std::optional<std::string> contactId;
+        if (!m_creating)
         {
-            QMessageBox::warning(
-                this, QStringLiteral("Invalid Contact"),
-                QString::fromUtf8(message->data(), static_cast<qsizetype>(message->size())));
-            return;
+            const auto* contact = currentContact();
+            if (contact == nullptr)
+                return;
+            contactId = contact->id;
         }
-        javelin::jmap::api::ContactCardSetRequest request;
-        request.accountId = *accountId;
-        if (m_creating)
-        {
-            request.create.emplace("new-contact", javelin::jmap::api::ContactDocument{
-                                                      .json = std::get<std::string>(prepared)});
-        }
-        else if (const auto* contact = currentContact())
-        {
-            request.update.emplace(contact->id, javelin::jmap::api::ContactDocument{
-                                                    .json = std::get<std::string>(prepared)});
-        }
+        javelin::app::SaveContactCommand command{
+            .accountId = *accountId,
+            .contactId = std::move(contactId),
+            .contact = std::move(editor),
+        };
         setBusy(true);
-        auto task = m_service.setContactCards(m_ownerAccountId, std::move(request));
+        auto task = m_commandPort.saveContact(m_ownerAccountId, std::move(command));
         QCoro::connect(std::move(task), this,
                        [this](javelin::jmap::contacts::ContactMutationResult result)
                        {
@@ -1963,8 +1949,8 @@ namespace javelin::gui::contacts
             return;
         }
         setBusy(true);
-        auto task = m_service.uploadContactMedia(m_ownerAccountId, *accountId, payload,
-                                                 mimeType.name().toStdString());
+        auto task = m_commandPort.uploadContactMedia(m_ownerAccountId, *accountId, payload,
+                                                     mimeType.name().toStdString());
         QCoro::connect(
             std::move(task), this,
             [this, payload](javelin::jmap::contacts::ContactUploadResult result)
@@ -2058,9 +2044,9 @@ namespace javelin::gui::contacts
         if (!accountId.has_value())
             return;
         const std::string contactId = contact.id;
-        auto task =
-            m_service.downloadContactMedia(m_ownerAccountId, *accountId, *photo->blobId,
-                                           photo->mediaType.value_or("application/octet-stream"));
+        auto task = m_commandPort.downloadContactMedia(
+            m_ownerAccountId, *accountId, *photo->blobId,
+            photo->mediaType.value_or("application/octet-stream"));
         QCoro::connect(
             std::move(task), this,
             [this, contactId, show](javelin::jmap::contacts::ContactDownloadResult result)
@@ -2086,11 +2072,12 @@ namespace javelin::gui::contacts
                 QStringLiteral("Delete %1?").arg(QString::fromStdString(contact->displayName))) !=
                 QMessageBox::Yes)
             return;
-        javelin::jmap::api::ContactCardSetRequest request;
-        request.accountId = *accountId;
-        request.destroy.push_back(contact->id);
+        javelin::app::DeleteContactsCommand command{
+            .accountId = *accountId,
+            .contactIds = {contact->id},
+        };
         setBusy(true);
-        auto task = m_service.setContactCards(m_ownerAccountId, std::move(request));
+        auto task = m_commandPort.deleteContacts(m_ownerAccountId, std::move(command));
         QCoro::connect(std::move(task), this,
                        [this](javelin::jmap::contacts::ContactMutationResult result)
                        {
@@ -2162,18 +2149,14 @@ namespace javelin::gui::contacts
             return;
         const auto& book = destination.books[static_cast<std::size_t>(bookIndex)];
 
-        javelin::jmap::api::ContactCardCopyRequest request;
-        request.fromAccountId = *sourceAccountId;
-        request.accountId = destination.account.accountId;
-        request.create.emplace(
-            "copy-contact",
-            javelin::jmap::api::ContactDocument{
-                .json =
-                    QStringLiteral("{\"id\":\"%1\",\"addressBookIds\":{\"%2\":true}}")
-                        .arg(QString::fromStdString(contact->id), QString::fromStdString(book.id))
-                        .toStdString()});
+        javelin::app::CopyContactCommand command{
+            .sourceAccountId = *sourceAccountId,
+            .destinationAccountId = destination.account.accountId,
+            .contactId = contact->id,
+            .destinationAddressBookId = book.id,
+        };
         setBusy(true);
-        auto task = m_service.copyContactCards(m_ownerAccountId, std::move(request));
+        auto task = m_commandPort.copyContact(m_ownerAccountId, std::move(command));
         QCoro::connect(std::move(task), this,
                        [this](javelin::jmap::contacts::ContactMutationResult result)
                        {
@@ -2297,34 +2280,14 @@ namespace javelin::gui::contacts
             for (const auto& contact : *values)
                 knownUids.insert(contact.uid);
         }
-        javelin::jmap::api::ContactCardSetRequest request;
-        request.accountId = *accountId;
-        for (std::size_t index = 0; index < contacts->size(); ++index)
-        {
-            const auto& importedContact = (*contacts)[index];
-            if (!importedContact.uid.empty() && !knownUids.insert(importedContact.uid).second)
-            {
-                QMessageBox::warning(this, QStringLiteral("Import vCard"),
-                                     QStringLiteral("A contact with UID %1 already exists.")
-                                         .arg(QString::fromStdString(importedContact.uid)));
-                return;
-            }
-            const auto document = javelin::jmap::contacts::importedContactDocument(
-                importedContact, target->id,
-                QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString());
-            if (const auto* message = std::get_if<std::string_view>(&document))
-            {
-                QMessageBox::warning(
-                    this, QStringLiteral("Import vCard"),
-                    QString::fromUtf8(message->data(), static_cast<qsizetype>(message->size())));
-                return;
-            }
-            request.create.emplace(
-                "import-" + std::to_string(index + 1),
-                javelin::jmap::api::ContactDocument{.json = std::get<std::string>(document)});
-        }
+        javelin::app::ImportContactsCommand command{
+            .accountId = *accountId,
+            .addressBookId = target->id,
+            .contacts = std::move(*contacts),
+            .knownUids = std::move(knownUids),
+        };
         setBusy(true);
-        auto task = m_service.setContactCards(m_ownerAccountId, std::move(request));
+        auto task = m_commandPort.importContacts(m_ownerAccountId, std::move(command));
         QCoro::connect(std::move(task), this,
                        [this](javelin::jmap::contacts::ContactMutationResult result)
                        {
@@ -2436,29 +2399,20 @@ namespace javelin::gui::contacts
                     .arg(primaryName)) != QMessageBox::Yes)
             return;
         const auto* primary = candidates[static_cast<std::size_t>(primaryIndex)];
-        std::string mergedDocument = primary->document;
-        javelin::jmap::api::ContactCardSetRequest request;
-        request.accountId = *accountId;
+        javelin::app::MergeContactsCommand command{
+            .accountId = *accountId,
+            .primary = {.id = primary->id, .document = primary->document},
+            .duplicates = {},
+        };
+        command.duplicates.reserve(candidates.size() - 1);
         for (const auto* candidate : candidates)
         {
-            if (candidate == primary)
-                continue;
-            const auto merged =
-                javelin::jmap::contacts::mergeContactDocuments(mergedDocument, candidate->document);
-            if (const auto* message = std::get_if<std::string_view>(&merged))
-            {
-                QMessageBox::warning(
-                    this, QStringLiteral("Merge Duplicate Contacts"),
-                    QString::fromUtf8(message->data(), static_cast<qsizetype>(message->size())));
-                return;
-            }
-            mergedDocument = std::get<std::string>(merged);
-            request.destroy.push_back(candidate->id);
+            if (candidate != primary)
+                command.duplicates.push_back(
+                    {.id = candidate->id, .document = candidate->document});
         }
-        request.update.emplace(primary->id,
-                               javelin::jmap::api::ContactDocument{.json = mergedDocument});
         setBusy(true);
-        auto task = m_service.setContactCards(m_ownerAccountId, std::move(request));
+        auto task = m_commandPort.mergeContacts(m_ownerAccountId, std::move(command));
         QCoro::connect(std::move(task), this,
                        [this](javelin::jmap::contacts::ContactMutationResult result)
                        {
@@ -2477,7 +2431,7 @@ namespace javelin::gui::contacts
             return;
         setBusy(true);
         Q_EMIT statusMessageRequested(QStringLiteral("Refreshing contacts…"), 5000);
-        auto task = m_service.requestContacts(m_ownerAccountId);
+        auto task = m_refreshPort.requestContacts(m_ownerAccountId);
         QCoro::connect(std::move(task), this,
                        [this](javelin::jmap::contacts::ContactRefreshResult result)
                        {
@@ -2510,11 +2464,12 @@ namespace javelin::gui::contacts
         AddressBookDialog dialog{book, this};
         if (dialog.exec() != QDialog::Accepted)
             return;
-        javelin::jmap::api::AddressBookSetRequest request;
-        request.accountId = std::move(accountId);
-        request.create.emplace("new-address-book",
-                               javelin::jmap::api::addressBookCreateDocument(dialog.value()));
-        applyAddressBookSet(std::move(request), QStringLiteral("Creating address book…"));
+        applyAddressBookMutation(
+            javelin::app::CreateAddressBookCommand{
+                .accountId = std::move(accountId),
+                .addressBook = dialog.value(),
+            },
+            QStringLiteral("Creating address book…"));
     }
 
     void ContactsManagerWidget::editAddressBook(std::string accountId,
@@ -2527,11 +2482,12 @@ namespace javelin::gui::contacts
         AddressBookDialog dialog{book, this};
         if (dialog.exec() != QDialog::Accepted)
             return;
-        javelin::jmap::api::AddressBookSetRequest request;
-        request.accountId = std::move(accountId);
-        request.update.emplace(book.id,
-                               javelin::jmap::api::addressBookUpdateDocument(dialog.value()));
-        applyAddressBookSet(std::move(request), QStringLiteral("Updating address book…"));
+        applyAddressBookMutation(
+            javelin::app::UpdateAddressBookCommand{
+                .accountId = std::move(accountId),
+                .addressBook = dialog.value(),
+            },
+            QStringLiteral("Updating address book…"));
     }
 
     void ContactsManagerWidget::deleteAddressBook(std::string accountId,
@@ -2548,11 +2504,13 @@ namespace javelin::gui::contacts
                 .arg(QString::fromStdString(book.name)));
         if (answer != QMessageBox::Yes)
             return;
-        javelin::jmap::api::AddressBookSetRequest request;
-        request.accountId = std::move(accountId);
-        request.destroy.push_back(book.id);
-        request.onDestroyRemoveContents = true;
-        applyAddressBookSet(std::move(request), QStringLiteral("Deleting address book…"));
+        applyAddressBookMutation(
+            javelin::app::DeleteAddressBookCommand{
+                .accountId = std::move(accountId),
+                .addressBookId = book.id,
+                .removeContents = true,
+            },
+            QStringLiteral("Deleting address book…"));
     }
 
     void ContactsManagerWidget::setDefaultAddressBook(std::string accountId,
@@ -2562,10 +2520,12 @@ namespace javelin::gui::contacts
                                                &javelin::jmap::cache::ContactAccount::accountId);
         if (account == m_accounts.end() || account->isReadOnly || !book.myRights.mayWrite)
             return;
-        javelin::jmap::api::AddressBookSetRequest request;
-        request.accountId = std::move(accountId);
-        request.onSuccessSetIsDefault = book.id;
-        applyAddressBookSet(std::move(request), QStringLiteral("Changing default address book…"));
+        applyAddressBookMutation(
+            javelin::app::SetDefaultAddressBookCommand{
+                .accountId = std::move(accountId),
+                .addressBookId = book.id,
+            },
+            QStringLiteral("Changing default address book…"));
     }
 
     void ContactsManagerWidget::toggleAddressBookSubscription(std::string accountId,
@@ -2577,10 +2537,12 @@ namespace javelin::gui::contacts
             return;
         auto changed = book;
         changed.isSubscribed = !changed.isSubscribed;
-        javelin::jmap::api::AddressBookSetRequest request;
-        request.accountId = std::move(accountId);
-        request.update.emplace(book.id, javelin::jmap::api::addressBookUpdateDocument(changed));
-        applyAddressBookSet(std::move(request), QStringLiteral("Updating subscription…"));
+        applyAddressBookMutation(
+            javelin::app::UpdateAddressBookCommand{
+                .accountId = std::move(accountId),
+                .addressBook = std::move(changed),
+            },
+            QStringLiteral("Updating subscription…"));
     }
 
     void ContactsManagerWidget::editAddressBookSharing(std::string accountId,
@@ -2600,19 +2562,20 @@ namespace javelin::gui::contacts
             return;
         auto changed = book;
         changed.shareWith = dialog.sharing();
-        javelin::jmap::api::AddressBookSetRequest request;
-        request.accountId = std::move(accountId);
-        request.update.emplace(book.id, javelin::jmap::api::addressBookUpdateDocument(changed));
-        applyAddressBookSet(std::move(request), QStringLiteral("Updating address book sharing…"));
+        applyAddressBookMutation(
+            javelin::app::UpdateAddressBookCommand{
+                .accountId = std::move(accountId),
+                .addressBook = std::move(changed),
+            },
+            QStringLiteral("Updating address book sharing…"));
     }
 
-    void
-    ContactsManagerWidget::applyAddressBookSet(javelin::jmap::api::AddressBookSetRequest request,
-                                               QString progressMessage)
+    void ContactsManagerWidget::applyAddressBookMutation(javelin::app::AddressBookCommand command,
+                                                         QString progressMessage)
     {
         setBusy(true);
         Q_EMIT statusMessageRequested(progressMessage, 5000);
-        auto task = m_service.setAddressBooks(m_ownerAccountId, std::move(request));
+        auto task = m_commandPort.mutateAddressBook(m_ownerAccountId, std::move(command));
         QCoro::connect(std::move(task), this,
                        [this](javelin::jmap::contacts::ContactMutationResult result)
                        {

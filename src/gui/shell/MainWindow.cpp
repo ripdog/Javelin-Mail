@@ -50,7 +50,7 @@
 #include "jmap/cache/QueryService.h"
 #include "jmap/calendar/CalendarService.h"
 #include "jmap/contacts/ContactIdentityLookup.h"
-#include "jmap/contacts/ContactService.h"
+#include "jmap/contacts/ContactResults.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
 
 #include <QCoroTask>
@@ -234,6 +234,7 @@ namespace javelin::gui::shell
                            javelin::jmap::cache::QueryService& queryService,
                            javelin::app::TranslationService& translationService,
                            javelin::app::ComposeService& composeService,
+                           javelin::app::ContactCommandPort& contactCommandPort,
                            javelin::app::MailApplicationService& mailService,
                            javelin::app::MessageNavigationCoordinator& messageNavigationCoordinator,
                            QWidget* parent)
@@ -242,7 +243,8 @@ namespace javelin::gui::shell
           m_contactIdentityLookup(contactIdentityLookup), m_identityRepository(identityRepository),
           m_messageViewService(messageViewService), m_queryService(queryService),
           m_translationService(translationService), m_composeService(composeService),
-          m_mailService(mailService), m_messageNavigationCoordinator(messageNavigationCoordinator)
+          m_contactCommandPort(contactCommandPort), m_mailService(mailService),
+          m_messageNavigationCoordinator(messageNavigationCoordinator)
     {
         m_statusBar = new LayeredStatusBar(this);
         setStatusBar(m_statusBar);
@@ -316,8 +318,9 @@ namespace javelin::gui::shell
                 { m_statusBar->showMessage(message, durationMilliseconds); });
         connect(m_calendarTabController, &CalendarTabController::operationFailed, this,
                 [this](const javelin::jmap::OperationError& error) { presentError(error); });
-        m_contactsTabController = new ContactsTabController(m_contactRepository, m_mailService,
-                                                            *m_contentStack, m_tabs, this);
+        m_contactsTabController =
+            new ContactsTabController(m_contactRepository, m_mailService, m_contactCommandPort,
+                                      *m_contentStack, m_tabs, this);
         connect(m_contactsTabController, &ContactsTabController::tabReady, this,
                 [this](const int index)
                 {

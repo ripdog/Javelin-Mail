@@ -38,6 +38,7 @@ namespace javelin::jmap
 namespace javelin::app
 {
     class ComposeService;
+    class ContactCommandPort;
     class MailboxSession;
     class MessageListSession;
     class MessageNavigationCoordinator;
@@ -125,6 +126,7 @@ namespace javelin::gui::shell
             javelin::jmap::cache::QueryService& queryService,
             javelin::app::TranslationService& translationService,
             javelin::app::ComposeService& composeService,
+            javelin::app::ContactCommandPort& contactCommandPort,
             javelin::app::MailApplicationService& mailService,
             javelin::app::MessageNavigationCoordinator& messageNavigationCoordinator,
             QWidget* parent = nullptr);
@@ -243,6 +245,7 @@ namespace javelin::gui::shell
         javelin::jmap::cache::QueryService& m_queryService;
         javelin::app::TranslationService& m_translationService;
         javelin::app::ComposeService& m_composeService;
+        javelin::app::ContactCommandPort& m_contactCommandPort;
         javelin::app::MailApplicationService& m_mailService;
         javelin::app::MessageNavigationCoordinator& m_messageNavigationCoordinator;
         AccountRefreshController* m_accountRefreshController = nullptr;

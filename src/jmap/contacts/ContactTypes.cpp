@@ -363,6 +363,24 @@ namespace javelin::jmap::contacts
         return result;
     }
 
+    std::variant<std::string, std::string_view> copyContactDocument(std::string contactId,
+                                                                    std::string addressBookId)
+    {
+        if (contactId.empty() || addressBookId.empty())
+            return std::string_view{"Copying a contact requires source and destination ids."};
+
+        glz::generic value;
+        value["id"] = std::move(contactId);
+        auto& addressBookIds = value["addressBookIds"];
+        addressBookIds.data = glz::generic::object_t{};
+        addressBookIds[std::move(addressBookId)] = true;
+
+        std::string result;
+        if (glz::write_json(value, result))
+            return std::string_view{"Unable to serialize the copied contact."};
+        return result;
+    }
+
     std::variant<std::string, std::string_view>
     setContactPhoto(const std::string_view json, std::string blobId, std::string mediaType)
     {

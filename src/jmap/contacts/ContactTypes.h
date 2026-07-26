@@ -81,6 +81,8 @@ namespace javelin::jmap::contacts
     [[nodiscard]] std::variant<std::string, std::string_view>
     prepareContactDocument(std::string_view json, bool creating);
     [[nodiscard]] std::variant<std::string, std::string_view>
+    copyContactDocument(std::string contactId, std::string addressBookId);
+    [[nodiscard]] std::variant<std::string, std::string_view>
     setContactPhoto(std::string_view json, std::string blobId, std::string mediaType);
     [[nodiscard]] std::optional<ContactPhoto> contactPhoto(std::string_view json);
     [[nodiscard]] std::variant<std::string, std::string_view>

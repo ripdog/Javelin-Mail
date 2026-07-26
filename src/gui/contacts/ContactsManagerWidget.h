@@ -1,6 +1,6 @@
 #pragma once
 
-#include "app/MailApplicationService.h"
+#include "app/ContactApplicationPorts.h"
 #include "gui/contacts/ContactsViewState.h"
 #include "jmap/api/ContactsMethods.h"
 #include "jmap/cache/ContactRepository.h"
@@ -34,7 +34,8 @@ namespace javelin::gui::contacts
 
       public:
         ContactsManagerWidget(javelin::jmap::cache::ContactRepository& repository,
-                              javelin::app::MailApplicationService& service,
+                              javelin::app::ContactRefreshPort& refreshPort,
+                              javelin::app::ContactCommandPort& commandPort,
                               std::string ownerAccountId, QWidget* parent = nullptr);
 
         [[nodiscard]] bool operationInFlight() const;
@@ -97,8 +98,8 @@ namespace javelin::gui::contacts
         void toggleAddressBookSubscription(std::string accountId,
                                            javelin::jmap::api::AddressBook book);
         void editAddressBookSharing(std::string accountId, javelin::jmap::api::AddressBook book);
-        void applyAddressBookSet(javelin::jmap::api::AddressBookSetRequest request,
-                                 QString progressMessage);
+        void applyAddressBookMutation(javelin::app::AddressBookCommand command,
+                                      QString progressMessage);
         void setBusy(bool busy);
         [[nodiscard]] std::optional<std::string> currentAccountId() const;
         [[nodiscard]] std::optional<std::string> currentAddressBookId() const;
@@ -112,7 +113,8 @@ namespace javelin::gui::contacts
         void populateContactCards(const javelin::jmap::contacts::ContactSummary& contact);
 
         javelin::jmap::cache::ContactRepository& m_repository;
-        javelin::app::MailApplicationService& m_service;
+        javelin::app::ContactRefreshPort& m_refreshPort;
+        javelin::app::ContactCommandPort& m_commandPort;
         std::string m_ownerAccountId;
         std::vector<javelin::jmap::cache::ContactAccount> m_accounts;
         std::vector<javelin::jmap::api::AddressBook> m_addressBooks;

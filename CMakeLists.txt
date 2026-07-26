@@ -53,11 +53,18 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/sync/StateChangeSource.h
     src/jmap/sync/MailboxInterestRegistry.cpp
     src/jmap/sync/MailboxInterestRegistry.h
+    src/app/AccountConnectionProvider.h
     src/app/AccountConnectionSettings.h
     src/app/ApplicationErrorCoordinator.cpp
     src/app/ApplicationErrorCoordinator.h
     src/app/CalendarNotificationService.cpp
     src/app/CalendarNotificationService.h
+    src/app/ContactApplicationPorts.h
+    src/app/ContactCommandPreparation.cpp
+    src/app/ContactCommandPreparation.h
+    src/app/ContactCommands.h
+    src/app/ContactCommandService.cpp
+    src/app/ContactCommandService.h
     src/app/AddressSuggestionStore.cpp
     src/app/AddressSuggestionStore.h
     src/app/ComposeService.cpp
@@ -301,6 +308,7 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/contacts/ContactTypes.h
     src/jmap/contacts/ContactInterchange.cpp
     src/jmap/contacts/ContactInterchange.h
+    src/jmap/contacts/ContactResults.h
     src/jmap/contacts/ContactService.cpp
     src/jmap/contacts/ContactService.h
     src/jmap/contacts/ContactIdentityLookup.cpp
@@ -478,6 +486,7 @@ add_library(javelin_jmap STATIC
     src/jmap/contacts/ContactTypes.h
     src/jmap/contacts/ContactInterchange.cpp
     src/jmap/contacts/ContactInterchange.h
+    src/jmap/contacts/ContactResults.h
     src/jmap/contacts/ContactService.cpp
     src/jmap/contacts/ContactService.h
     src/jmap/contacts/ContactIdentityLookup.cpp
@@ -759,16 +768,32 @@ file(GLOB_RECURSE javelin_gui_boundary_sources CONFIGURE_DEPENDS
 foreach(gui_source IN LISTS javelin_gui_boundary_sources)
     file(READ "${gui_source}" gui_source_contents)
     if(gui_source_contents MATCHES "#include \"jmap/api/(Transport|MethodEnvelope)\\.h\"" OR
+       gui_source_contents MATCHES "#include \"jmap/contacts/ContactService\\.h\"" OR
        gui_source_contents MATCHES "#include \"jmap/sync/(MailboxRefreshExecutor|MailboxStateRefreshExecutor)\\.h\"" OR
        gui_source_contents MATCHES "AccountSyncConfiguration" OR
        gui_source_contents MATCHES "javelin::jmap::MailboxPage(Result|Summary)" OR
        gui_source_contents MATCHES "javelin::jmap::MessageSearch(Result|Summary)" OR
        gui_source_contents MATCHES "javelin::jmap::LiveConnectionSettings" OR
+       gui_source_contents MATCHES "javelin::jmap::api::((AddressBook|ContactCard)(Set|Copy)Request|ContactDocument)" OR
        gui_source_contents MATCHES "javelin::jmap::submission::ComposeService" OR
        gui_source_contents MATCHES "javelin::app::LongPoll(Service|Coordinator|AccountConfiguration)")
         message(FATAL_ERROR "GUI boundary violation in ${gui_source}")
     endif()
 endforeach()
+
+set(javelin_contacts_gui_sources
+    src/gui/contacts/ContactsManagerWidget.cpp
+    src/gui/contacts/ContactsManagerWidget.h
+    src/gui/shell/ContactsTabController.cpp
+    src/gui/shell/ContactsTabController.h
+)
+foreach(contacts_gui_source IN LISTS javelin_contacts_gui_sources)
+    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/${contacts_gui_source}" contacts_gui_source_contents)
+    if(contacts_gui_source_contents MATCHES "javelin::app::(ContactCommandService|MailApplicationService)")
+        message(FATAL_ERROR "Contacts GUI must depend on application ports: ${contacts_gui_source}")
+    endif()
+endforeach()
+
 target_include_directories(javelin_gui PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
 )
@@ -814,6 +839,7 @@ javelin_enable_sanitizers(javelin_calendar_gui)
 target_compile_options(javelin_calendar_gui PRIVATE -fexceptions)
 
 add_library(javelin_application STATIC
+    src/app/AccountConnectionProvider.h
     src/app/AccountConnectionSettings.h
     src/app/AddressSuggestionStore.cpp
     src/app/AddressSuggestionStore.h
@@ -821,8 +847,14 @@ add_library(javelin_application STATIC
     src/app/ApplicationErrorCoordinator.h
     src/app/CalendarNotificationService.cpp
     src/app/CalendarNotificationService.h
+    src/app/ContactApplicationPorts.h
     src/app/ComposeService.cpp
     src/app/ComposeService.h
+    src/app/ContactCommandPreparation.cpp
+    src/app/ContactCommandPreparation.h
+    src/app/ContactCommands.h
+    src/app/ContactCommandService.cpp
+    src/app/ContactCommandService.h
     src/app/DesktopNotificationController.cpp
     src/app/DesktopNotificationController.h
     src/app/FullMailSyncService.cpp

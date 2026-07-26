@@ -1,6 +1,9 @@
 add_executable(javelin_jmap_tests
     ${PROJECT_SOURCE_DIR}/src/app/ApplicationErrorCoordinator.cpp
     ${PROJECT_SOURCE_DIR}/src/app/ApplicationErrorCoordinator.h
+    ${PROJECT_SOURCE_DIR}/src/app/ContactCommandPreparation.cpp
+    ${PROJECT_SOURCE_DIR}/src/app/ContactCommandPreparation.h
+    ${PROJECT_SOURCE_DIR}/src/app/ContactCommands.h
     ${PROJECT_SOURCE_DIR}/src/app/MailboxSelectionMutation.cpp
     ${PROJECT_SOURCE_DIR}/src/app/MessageSelection.cpp
     ${PROJECT_SOURCE_DIR}/src/app/MailboxSyncCoverage.cpp
@@ -37,6 +40,7 @@ add_executable(javelin_jmap_tests
     jmap/LongPollMailboxObserverTest.cpp
     jmap/LongPollWorkerTest.cpp
     app/ApplicationErrorCoordinatorTest.cpp
+    app/ContactCommandPreparationTest.cpp
     app/MailboxSelectionMutationTest.cpp
     app/MailboxSyncCoverageTest.cpp
     app/MessageNavigationCoordinatorTest.cpp

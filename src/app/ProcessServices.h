@@ -25,6 +25,8 @@ namespace javelin::app
     class LocalMaintenanceService;
     class ApplicationErrorCoordinator;
     class ComposeService;
+    class ContactCommandPort;
+    class ContactCommandService;
     class CalendarNotificationService;
     class MessageNavigationCoordinator;
     class InlineMessageSchemeHandler;
@@ -88,6 +90,7 @@ namespace javelin::app
         [[nodiscard]] javelin::jmap::cache::QueryService& queryService();
         [[nodiscard]] TranslationService& translationService();
         [[nodiscard]] ComposeService& composeService();
+        [[nodiscard]] ContactCommandPort& contactCommandPort();
         [[nodiscard]] MailApplicationService& mailService();
         [[nodiscard]] MessageNavigationCoordinator& messageNavigationCoordinator();
         [[nodiscard]] ApplicationErrorCoordinator& errorCoordinator();
@@ -124,6 +127,7 @@ namespace javelin::app
         std::unique_ptr<ComposeService> m_composeService;
         std::unique_ptr<ApplicationErrorCoordinator> m_errorCoordinator;
         std::unique_ptr<MailApplicationService> m_mailService;
+        std::unique_ptr<ContactCommandService> m_contactCommandService;
         std::unique_ptr<MessageNavigationCoordinator> m_messageNavigationCoordinator;
         std::unique_ptr<CalendarNotificationService> m_calendarNotificationService;
         std::unique_ptr<WorkScheduler> m_workScheduler;

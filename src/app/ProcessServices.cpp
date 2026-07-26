@@ -4,6 +4,7 @@
 #include "app/ApplicationErrorCoordinator.h"
 #include "app/CalendarNotificationService.h"
 #include "app/ComposeService.h"
+#include "app/ContactCommandService.h"
 #include "app/FullMailSyncService.h"
 #include "app/InlineMessageSchemeHandler.h"
 #include "app/LocalMaintenanceService.h"
@@ -137,6 +138,8 @@ namespace javelin::app
             *m_stateChangeNetworkAccessManager, *m_webSocketFailureCooldowns, *m_accountRepository,
             *m_queryService, *m_contactService, *m_calendarService, *m_sieveService,
             *m_errorCoordinator, *m_workScheduler);
+        m_contactCommandService = std::make_unique<ContactCommandService>(
+            *m_mailService, *m_contactService, *m_errorCoordinator, *m_workScheduler);
         QObject::connect(
             m_fullMailSyncService.get(), &FullMailSyncService::mailboxWindowCommitted,
             m_mailService.get(),
@@ -201,6 +204,11 @@ namespace javelin::app
     ComposeService& ProcessServices::composeService()
     {
         return *m_composeService;
+    }
+
+    ContactCommandPort& ProcessServices::contactCommandPort()
+    {
+        return *m_contactCommandService;
     }
 
     MailApplicationService& ProcessServices::mailService()

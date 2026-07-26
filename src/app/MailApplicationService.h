@@ -1,10 +1,11 @@
 #pragma once
 
+#include "app/AccountConnectionProvider.h"
 #include "app/AccountConnectionSettings.h"
+#include "app/ContactApplicationPorts.h"
 #include "app/LongPollService.h"
 #include "app/MailboxSelectionMutation.h"
 #include "jmap/calendar/CalendarService.h"
-#include "jmap/contacts/ContactService.h"
 #include "jmap/query/EmailListSort.h"
 #include "jmap/search/EmailSearch.h"
 #include "jmap/sieve/SieveService.h"
@@ -21,6 +22,11 @@
 #include <unordered_set>
 #include <variant>
 #include <vector>
+
+namespace javelin::jmap::contacts
+{
+    class ContactService;
+}
 
 namespace javelin::app
 {
@@ -126,7 +132,9 @@ namespace javelin::app
     using QueuedMessageSelectionMutationResult =
         std::variant<QueuedMessageSelectionMutation, javelin::jmap::OperationError>;
 
-    class MailApplicationService final : public QObject
+    class MailApplicationService final : public QObject,
+                                         public AccountConnectionProvider,
+                                         public ContactRefreshPort
     {
         Q_OBJECT
 
@@ -145,6 +153,8 @@ namespace javelin::app
                                WorkScheduler& workScheduler, QObject* parent = nullptr);
 
         void applySettings(std::vector<AccountSyncConfiguration> configurations);
+        [[nodiscard]] std::optional<AccountConnectionSettings>
+        connectionSettingsFor(std::string_view ownerAccountId) const override;
         [[nodiscard]] MailboxObservation observeMailbox(std::string accountId,
                                                         std::string mailboxId);
         [[nodiscard]] bool requestAccountSynchronization(std::string_view accountId);
@@ -178,7 +188,7 @@ namespace javelin::app
         [[nodiscard]] QCoro::Task<javelin::jmap::LiveRefreshResult>
         bootstrapAccount(AccountBootstrapIntent intent);
         [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactRefreshResult>
-        requestContacts(std::string accountId);
+        requestContacts(std::string accountId) override;
         [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarRefreshResult>
         requestCalendarRange(std::string ownerAccountId,
                              javelin::jmap::calendar::VisibleInterval interval,
@@ -209,25 +219,6 @@ namespace javelin::app
         [[nodiscard]] QCoro::Task<javelin::jmap::sieve::SieveActivationResult>
         setSieveScriptActive(std::string ownerAccountId, javelin::jmap::sieve::SieveScript script,
                              bool active);
-        [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
-        setAddressBooks(std::string accountId, javelin::jmap::api::AddressBookSetRequest request);
-        [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
-        setContactCards(std::string accountId, javelin::jmap::api::ContactCardSetRequest request);
-        [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
-        createContactGroup(std::string ownerAccountId,
-                           javelin::jmap::contacts::CreateContactGroupCommand command);
-        [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
-        setContactGroupMembership(
-            std::string ownerAccountId,
-            javelin::jmap::contacts::SetContactGroupMembershipCommand command);
-        [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
-        copyContactCards(std::string accountId, javelin::jmap::api::ContactCardCopyRequest request);
-        [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactUploadResult>
-        uploadContactMedia(std::string ownerAccountId, std::string accountId, QByteArray payload,
-                           std::string mediaType);
-        [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactDownloadResult>
-        downloadContactMedia(std::string ownerAccountId, std::string accountId, std::string blobId,
-                             std::string mediaType);
       Q_SIGNALS:
         void accountStatusChanged(const QString& accountId,
                                   javelin::app::AccountSyncCoordinator::Status status);

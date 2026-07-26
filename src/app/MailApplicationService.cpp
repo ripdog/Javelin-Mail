@@ -6,6 +6,7 @@
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/MailboxWindowRepository.h"
 #include "jmap/cache/SessionRepository.h"
+#include "jmap/contacts/ContactService.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
 
 #include <QCoroTask>
@@ -211,6 +212,15 @@ namespace javelin::app
         }
         restoreContactRefreshJobs();
         refreshConfiguredSessions();
+    }
+
+    std::optional<AccountConnectionSettings>
+    MailApplicationService::connectionSettingsFor(const std::string_view ownerAccountId) const
+    {
+        const auto configuration = m_configurations.find(std::string{ownerAccountId});
+        return configuration != m_configurations.end()
+                   ? std::optional{configuration->second.settings}
+                   : std::nullopt;
     }
 
     void MailApplicationService::refreshConfiguredSessions()
@@ -1281,135 +1291,6 @@ namespace javelin::app
                                 co_await m_sieveService.setActive(
                                     toLiveConnectionSettings(configuration->second.settings),
                                     ownerAccountId, std::move(script), active));
-    }
-
-    QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
-    MailApplicationService::setAddressBooks(std::string accountId,
-                                            javelin::jmap::api::AddressBookSetRequest request)
-    {
-        const ForegroundWorkScope foreground{m_workScheduler};
-        const auto configuration = m_configurations.find(accountId);
-        if (configuration == m_configurations.end())
-            co_return javelin::jmap::OperationError{
-                .code = javelin::jmap::OperationErrorCode::PreconditionFailed,
-                .message = QStringLiteral("Account synchronization is not configured."),
-            };
-        co_return observeResult(m_errorCoordinator, configuration->second.settings, accountId,
-                                QStringLiteral("Change address books"),
-                                co_await m_contactService.setAddressBooks(
-                                    toLiveConnectionSettings(configuration->second.settings),
-                                    accountId, std::move(request)));
-    }
-
-    QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
-    MailApplicationService::setContactCards(std::string accountId,
-                                            javelin::jmap::api::ContactCardSetRequest request)
-    {
-        const ForegroundWorkScope foreground{m_workScheduler};
-        const auto configuration = m_configurations.find(accountId);
-        if (configuration == m_configurations.end())
-            co_return javelin::jmap::OperationError{
-                .code = javelin::jmap::OperationErrorCode::PreconditionFailed,
-                .message = QStringLiteral("Account synchronization is not configured."),
-            };
-        co_return observeResult(m_errorCoordinator, configuration->second.settings, accountId,
-                                QStringLiteral("Change contacts"),
-                                co_await m_contactService.setContactCards(
-                                    toLiveConnectionSettings(configuration->second.settings),
-                                    accountId, std::move(request)));
-    }
-
-    QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
-    MailApplicationService::createContactGroup(
-        std::string ownerAccountId, javelin::jmap::contacts::CreateContactGroupCommand command)
-    {
-        const ForegroundWorkScope foreground{m_workScheduler};
-        const auto configuration = m_configurations.find(ownerAccountId);
-        if (configuration == m_configurations.end())
-            co_return javelin::jmap::OperationError{
-                .code = javelin::jmap::OperationErrorCode::PreconditionFailed,
-                .message = QStringLiteral("Account synchronization is not configured."),
-            };
-        co_return observeResult(m_errorCoordinator, configuration->second.settings, ownerAccountId,
-                                QStringLiteral("Create contact group"),
-                                co_await m_contactService.createGroup(
-                                    toLiveConnectionSettings(configuration->second.settings),
-                                    ownerAccountId, std::move(command)));
-    }
-
-    QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
-    MailApplicationService::setContactGroupMembership(
-        std::string ownerAccountId,
-        javelin::jmap::contacts::SetContactGroupMembershipCommand command)
-    {
-        const ForegroundWorkScope foreground{m_workScheduler};
-        const auto configuration = m_configurations.find(ownerAccountId);
-        if (configuration == m_configurations.end())
-            co_return javelin::jmap::OperationError{
-                .code = javelin::jmap::OperationErrorCode::PreconditionFailed,
-                .message = QStringLiteral("Account synchronization is not configured."),
-            };
-        co_return observeResult(m_errorCoordinator, configuration->second.settings, ownerAccountId,
-                                QStringLiteral("Change contact group membership"),
-                                co_await m_contactService.setGroupMembership(
-                                    toLiveConnectionSettings(configuration->second.settings),
-                                    ownerAccountId, std::move(command)));
-    }
-
-    QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
-    MailApplicationService::copyContactCards(std::string accountId,
-                                             javelin::jmap::api::ContactCardCopyRequest request)
-    {
-        const ForegroundWorkScope foreground{m_workScheduler};
-        const auto configuration = m_configurations.find(accountId);
-        if (configuration == m_configurations.end())
-            co_return javelin::jmap::OperationError{
-                .code = javelin::jmap::OperationErrorCode::PreconditionFailed,
-                .message = QStringLiteral("Account synchronization is not configured."),
-            };
-        co_return observeResult(m_errorCoordinator, configuration->second.settings, accountId,
-                                QStringLiteral("Copy contacts"),
-                                co_await m_contactService.copyContactCards(
-                                    toLiveConnectionSettings(configuration->second.settings),
-                                    accountId, std::move(request)));
-    }
-
-    QCoro::Task<javelin::jmap::contacts::ContactUploadResult>
-    MailApplicationService::uploadContactMedia(std::string ownerAccountId, std::string accountId,
-                                               QByteArray payload, std::string mediaType)
-    {
-        const ForegroundWorkScope foreground{m_workScheduler};
-        const auto configuration = m_configurations.find(ownerAccountId);
-        if (configuration == m_configurations.end())
-            co_return javelin::jmap::OperationError{
-                .code = javelin::jmap::OperationErrorCode::PreconditionFailed,
-                .message = QStringLiteral("Account synchronization is not configured."),
-            };
-        co_return observeResult(m_errorCoordinator, configuration->second.settings, ownerAccountId,
-                                QStringLiteral("Upload contact media"),
-                                co_await m_contactService.uploadMedia(
-                                    toLiveConnectionSettings(configuration->second.settings),
-                                    ownerAccountId, std::move(accountId), std::move(payload),
-                                    std::move(mediaType)));
-    }
-
-    QCoro::Task<javelin::jmap::contacts::ContactDownloadResult>
-    MailApplicationService::downloadContactMedia(std::string ownerAccountId, std::string accountId,
-                                                 std::string blobId, std::string mediaType)
-    {
-        const ForegroundWorkScope foreground{m_workScheduler};
-        const auto configuration = m_configurations.find(ownerAccountId);
-        if (configuration == m_configurations.end())
-            co_return javelin::jmap::OperationError{
-                .code = javelin::jmap::OperationErrorCode::PreconditionFailed,
-                .message = QStringLiteral("Account synchronization is not configured."),
-            };
-        co_return observeResult(m_errorCoordinator, configuration->second.settings, ownerAccountId,
-                                QStringLiteral("Download contact media"),
-                                co_await m_contactService.downloadMedia(
-                                    toLiveConnectionSettings(configuration->second.settings),
-                                    ownerAccountId, std::move(accountId), std::move(blobId),
-                                    std::move(mediaType)));
     }
 
     void MailApplicationService::connectCoordinator(const std::string& accountId,

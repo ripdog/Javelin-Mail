@@ -2,15 +2,14 @@
 
 #include "jmap/JmapCore.h"
 #include "jmap/api/ContactsMethods.h"
+#include "jmap/contacts/ContactResults.h"
 
 #include <QCoroTask>
 
 #include <QByteArray>
 
-#include <cstddef>
-#include <optional>
 #include <string>
-#include <variant>
+#include <vector>
 
 namespace javelin::jmap::api
 {
@@ -25,34 +24,6 @@ namespace javelin::jmap::cache
 
 namespace javelin::jmap::contacts
 {
-    struct ContactRefreshSummary
-    {
-        std::size_t accountCount = 0;
-        std::size_t addressBookCount = 0;
-        std::size_t contactCount = 0;
-    };
-
-    struct ContactMutationSummary
-    {
-        std::string accountId;
-        std::string newState;
-        std::optional<std::string> createdId;
-    };
-
-    struct UploadedContactMedia
-    {
-        std::string accountId;
-        std::string blobId;
-        std::string mediaType;
-        std::uint64_t size = 0;
-    };
-
-    struct DownloadedContactMedia
-    {
-        QByteArray data;
-        std::string mediaType;
-    };
-
     struct CreateContactGroupCommand
     {
         std::string accountId;
@@ -67,13 +38,6 @@ namespace javelin::jmap::contacts
         std::vector<std::string> memberUids;
         bool included = true;
     };
-
-    using ContactRefreshResult = std::variant<ContactRefreshSummary, javelin::jmap::OperationError>;
-    using ContactMutationResult =
-        std::variant<ContactMutationSummary, javelin::jmap::OperationError>;
-    using ContactUploadResult = std::variant<UploadedContactMedia, javelin::jmap::OperationError>;
-    using ContactDownloadResult =
-        std::variant<DownloadedContactMedia, javelin::jmap::OperationError>;
 
     class ContactService
     {

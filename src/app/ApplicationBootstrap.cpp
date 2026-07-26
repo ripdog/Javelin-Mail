@@ -216,8 +216,8 @@ namespace javelin::app
             m_processServices->calendarService(), m_processServices->contactIdentityLookup(),
             m_processServices->identityRepository(), m_processServices->messageViewService(),
             m_processServices->queryService(), m_processServices->translationService(),
-            m_processServices->composeService(), m_processServices->mailService(),
-            m_processServices->messageNavigationCoordinator());
+            m_processServices->composeService(), m_processServices->contactCommandPort(),
+            m_processServices->mailService(), m_processServices->messageNavigationCoordinator());
 
         m_mainWindow->setAttribute(Qt::WA_DeleteOnClose);
         auto* taskButton = new QToolButton(m_mainWindow);

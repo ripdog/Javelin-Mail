@@ -3,7 +3,7 @@
 #include "gui/settings/ConnectionSettings.h"
 #include "jmap/JmapCore.h"
 #include "jmap/OperationError.h"
-#include "jmap/contacts/ContactService.h"
+#include "jmap/contacts/ContactResults.h"
 
 #include <QObject>
 #include <QString>
