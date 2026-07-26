@@ -291,7 +291,7 @@ TEST_CASE("successful ContactCard sets advance only the ContactCard consistency 
         .statusCode = 200,
         .body =
             QByteArray{
-                R"({"methodResponses":[["ContactCard/set",{"accountId":"a1","oldState":"c1","newState":"c2","created":{},"updated":{"card-1":{"updated":"2026-07-17T00:00:00Z"}},"destroyed":[],"notCreated":{},"notUpdated":{},"notDestroyed":{}},"contacts-set"]],"sessionState":"s2"})"},
+                R"({"methodResponses":[["ContactCard/set",{"accountId":"a1","oldState":"c1","newState":"c2","created":{},"updated":{"card-1":null},"destroyed":[],"notCreated":{},"notUpdated":{},"notDestroyed":{}},"contacts-set"]],"sessionState":"s2"})"},
     });
     javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
     javelin::jmap::cache::ContactRepository contacts{connection};

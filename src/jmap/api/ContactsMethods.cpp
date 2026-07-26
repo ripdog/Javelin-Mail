@@ -233,6 +233,25 @@ namespace javelin::jmap::api
             }
             return result;
         }
+
+        [[nodiscard]] std::unordered_map<std::string, std::optional<ContactDocument>>
+        optionalDocuments(const std::unordered_map<std::string, glz::generic>& raw)
+        {
+            std::unordered_map<std::string, std::optional<ContactDocument>> result;
+            result.reserve(raw.size());
+            for (const auto& [id, value] : raw)
+            {
+                if (value.holds<glz::generic::null_t>())
+                {
+                    result.emplace(id, std::nullopt);
+                    continue;
+                }
+                std::string json;
+                if (!glz::write_json(value, json))
+                    result.emplace(id, ContactDocument{.json = std::move(json)});
+            }
+            return result;
+        }
     } // namespace
 
     std::optional<std::string>
@@ -364,7 +383,7 @@ namespace javelin::jmap::api
                                    .oldState = raw.value->oldState.value_or(std::string{}),
                                    .newState = raw.value->newState,
                                    .created = documents(raw.value->created),
-                                   .updated = documents(raw.value->updated),
+                                   .updated = optionalDocuments(raw.value->updated),
                                    .destroyed = raw.value->destroyed,
                                    .notCreated = documents(raw.value->notCreated),
                                    .notUpdated = documents(raw.value->notUpdated),

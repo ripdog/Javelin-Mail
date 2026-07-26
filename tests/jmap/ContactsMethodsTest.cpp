@@ -78,12 +78,16 @@ TEST_CASE("contacts set and copy embed JSContact documents", "[jmap][contacts][p
     CHECK(copyJson->find(R"("destroyFromIfInState":"source-state")") != std::string::npos);
 }
 
-TEST_CASE("contacts set responses preserve patches and errors", "[jmap][contacts][protocol]")
+TEST_CASE("contacts set responses preserve values, null updates, and errors",
+          "[jmap][contacts][protocol]")
 {
     const auto response = javelin::jmap::api::parseContactsSetResponse(
-        R"({"accountId":"a0x9","oldState":"1","newState":"2","created":{"c1":{"id":"card-1"}},"updated":{"card-2":{"updated":"2026-07-10T00:00:00Z"}},"destroyed":["card-3"],"notCreated":{},"notUpdated":{},"notDestroyed":{"book-1":{"type":"addressBookHasContents","description":"Not empty"}}})");
+        R"({"accountId":"a0x9","oldState":"1","newState":"2","created":{"c1":{"id":"card-1"}},"updated":{"card-2":{"updated":"2026-07-10T00:00:00Z"},"card-3":null},"destroyed":["card-4"],"notCreated":{},"notUpdated":{},"notDestroyed":{"book-1":{"type":"addressBookHasContents","description":"Not empty"}}})");
     REQUIRE(response.ok());
     CHECK(response.value->created.at("c1").json.find("card-1") != std::string::npos);
+    REQUIRE(response.value->updated.at("card-2").has_value());
+    CHECK(response.value->updated.at("card-2")->json.find("2026-07-10") != std::string::npos);
+    CHECK_FALSE(response.value->updated.at("card-3").has_value());
     CHECK(response.value->notDestroyed.at("book-1").json.find("addressBookHasContents") !=
           std::string::npos);
 }

@@ -1131,10 +1131,10 @@ namespace javelin::jmap::contacts
                         continue;
                     }
                     acceptedRecords.push_back(&record);
-                    if (!record.projectedDocument.has_value())
+                    if (!record.projectedDocument.has_value() || !updated->second.has_value())
                         continue;
                     const auto transformed = javelin::jmap::api::applyPatchObject(
-                        *record.projectedDocument, updated->second.json);
+                        *record.projectedDocument, updated->second->json);
                     const auto* document = std::get_if<std::string>(&transformed);
                     if (document == nullptr)
                         return error(
@@ -1322,12 +1322,12 @@ namespace javelin::jmap::contacts
                         continue;
                     }
                     acceptedRecords.push_back(&record);
-                    if (!record.projectedDocument.has_value())
+                    if (!record.projectedDocument.has_value() || !updated->second.has_value())
                     {
                         continue;
                     }
                     const auto transformed = javelin::jmap::api::applyPatchObject(
-                        *record.projectedDocument, updated->second.json);
+                        *record.projectedDocument, updated->second->json);
                     const auto* document = std::get_if<std::string>(&transformed);
                     if (document == nullptr)
                     {

@@ -136,7 +136,7 @@ namespace javelin::jmap::api
         std::string oldState;
         std::string newState;
         std::unordered_map<std::string, ContactDocument> created;
-        std::unordered_map<std::string, ContactDocument> updated;
+        std::unordered_map<std::string, std::optional<ContactDocument>> updated;
         std::vector<std::string> destroyed;
         std::unordered_map<std::string, ContactDocument> notCreated;
         std::unordered_map<std::string, ContactDocument> notUpdated;
