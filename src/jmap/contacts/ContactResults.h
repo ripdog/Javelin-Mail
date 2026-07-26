@@ -9,9 +9,18 @@
 #include <optional>
 #include <string>
 #include <variant>
+#include <vector>
 
 namespace javelin::jmap::contacts
 {
+    struct CreatedContactMapping
+    {
+        std::string creationId;
+        std::string serverId;
+
+        auto operator<=>(const CreatedContactMapping&) const = default;
+    };
+
     struct ContactRefreshSummary
     {
         std::size_t accountCount = 0;
@@ -24,6 +33,7 @@ namespace javelin::jmap::contacts
         std::string accountId;
         std::string newState;
         std::optional<std::string> createdId;
+        std::vector<CreatedContactMapping> createdIds;
     };
 
     struct UploadedContactMedia

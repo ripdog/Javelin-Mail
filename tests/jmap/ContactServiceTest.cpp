@@ -554,6 +554,9 @@ TEST_CASE("AddressBook mutations project, reconcile rejection, and preserve unce
     REQUIRE(std::holds_alternative<javelin::jmap::contacts::ContactMutationSummary>(created));
     CHECK(std::get<javelin::jmap::contacts::ContactMutationSummary>(created).createdId ==
           std::optional<std::string>{"book-2"});
+    CHECK(std::get<javelin::jmap::contacts::ContactMutationSummary>(created).createdIds ==
+          std::vector<javelin::jmap::contacts::CreatedContactMapping>{
+              {.creationId = "create-1", .serverId = "book-2"}});
     books = contacts.listAddressBooks("a1");
     const auto& createdBooks = std::get<std::vector<javelin::jmap::api::AddressBook>>(books);
     CHECK(std::ranges::none_of(createdBooks,
@@ -919,6 +922,9 @@ TEST_CASE("accepted ContactCard creation replaces its temporary projection",
     REQUIRE(std::holds_alternative<javelin::jmap::contacts::ContactMutationSummary>(result));
     CHECK(std::get<javelin::jmap::contacts::ContactMutationSummary>(result).createdId ==
           std::optional<std::string>{"card-2"});
+    CHECK(std::get<javelin::jmap::contacts::ContactMutationSummary>(result).createdIds ==
+          std::vector<javelin::jmap::contacts::CreatedContactMapping>{
+              {.creationId = "create-1", .serverId = "card-2"}});
 
     const auto accepted = contacts.listContacts("a1");
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::contacts::ContactSummary>>(accepted));

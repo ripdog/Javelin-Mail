@@ -443,6 +443,19 @@ namespace javelin::jmap::contacts
             return createdObjectId(result.created.begin()->second);
         }
 
+        [[nodiscard]] std::vector<CreatedContactMapping>
+        createdIds(const javelin::jmap::api::SetResult& result)
+        {
+            std::vector<CreatedContactMapping> mappings;
+            mappings.reserve(result.created.size());
+            for (const auto& [creationId, document] : result.created)
+                if (auto serverId = createdObjectId(document))
+                    mappings.push_back(
+                        {.creationId = creationId, .serverId = std::move(*serverId)});
+            std::ranges::sort(mappings, {}, &CreatedContactMapping::creationId);
+            return mappings;
+        }
+
         struct PreparedAddressBookMutations
         {
             std::vector<AddressBookMutationRecord> records;
@@ -1017,7 +1030,8 @@ namespace javelin::jmap::contacts
             }
             return ContactMutationSummary{.accountId = result.accountId,
                                           .newState = result.newState,
-                                          .createdId = createdId(result)};
+                                          .createdId = createdId(result),
+                                          .createdIds = createdIds(result)};
         }
 
         [[nodiscard]] ContactMutationResult
@@ -1207,6 +1221,7 @@ namespace javelin::jmap::contacts
                 .accountId = result.accountId,
                 .newState = result.newState,
                 .createdId = createdId(result),
+                .createdIds = createdIds(result),
             };
         }
 
@@ -1429,6 +1444,7 @@ namespace javelin::jmap::contacts
                 .accountId = result.accountId,
                 .newState = result.newState,
                 .createdId = createdId(result),
+                .createdIds = createdIds(result),
             };
         }
 
@@ -1653,6 +1669,7 @@ namespace javelin::jmap::contacts
                 .accountId = responseValue.copied.accountId,
                 .newState = responseValue.copied.newState,
                 .createdId = createdId(responseValue.copied),
+                .createdIds = createdIds(responseValue.copied),
             };
         }
 
@@ -2272,6 +2289,7 @@ namespace javelin::jmap::contacts
                 .accountId = std::move(command.accountId),
                 .newState = stateToken.value_or(std::string{}),
                 .createdId = std::nullopt,
+                .createdIds = {},
             };
         const auto patch = contactGroupMembershipPatch(std::span<const std::string>{changedMembers},
                                                        command.included);
