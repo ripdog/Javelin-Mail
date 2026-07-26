@@ -1,6 +1,7 @@
 #pragma once
 
 #include "app/ContactApplicationPorts.h"
+#include "app/undo/AddressBookHistoryPort.h"
 #include "app/undo/ContactHistoryPort.h"
 
 #include <QByteArray>
@@ -28,7 +29,9 @@ namespace javelin::app
         class UndoManager;
     }
 
-    class ContactCommandService final : public ContactCommandPort, public undo::ContactHistoryPort
+    class ContactCommandService final : public ContactCommandPort,
+                                        public undo::ContactHistoryPort,
+                                        public undo::AddressBookHistoryPort
     {
       public:
         ContactCommandService(AccountConnectionProvider& connectionProvider,
@@ -67,6 +70,12 @@ namespace javelin::app
         [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
         applyContactCardsFromHistory(std::string ownerAccountId,
                                      javelin::jmap::api::ContactCardSetRequest request,
+                                     undo::CommandOrigin origin) override;
+        [[nodiscard]] QCoro::Task<undo::AuthoritativeAddressBooksResult>
+        getAuthoritativeAddressBooks(std::string ownerAccountId, std::string accountId) override;
+        [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
+        applyAddressBooksFromHistory(std::string ownerAccountId,
+                                     javelin::jmap::api::AddressBookSetRequest request,
                                      undo::CommandOrigin origin) override;
 
       private:

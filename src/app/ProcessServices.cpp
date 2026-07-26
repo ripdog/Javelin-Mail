@@ -15,6 +15,7 @@
 #include "app/MessageNavigationCoordinator.h"
 #include "app/TranslationService.h"
 #include "app/WorkScheduler.h"
+#include "app/undo/AddressBookHistoryExecutor.h"
 #include "app/undo/CalendarHistoryExecutor.h"
 #include "app/undo/CalendarPreferenceExecutor.h"
 #include "app/undo/ContactHistoryExecutor.h"
@@ -181,6 +182,11 @@ namespace javelin::app
         m_contactHistoryExecutor =
             std::make_unique<javelin::app::undo::ContactHistoryExecutor>(*m_contactCommandService);
         m_undoManager->setExecutor(QStringLiteral("contact_card"), m_contactHistoryExecutor.get());
+        m_addressBookHistoryExecutor =
+            std::make_unique<javelin::app::undo::AddressBookHistoryExecutor>(
+                *m_contactCommandService, *m_contactCommandService);
+        m_undoManager->setExecutor(QStringLiteral("address_book"),
+                                   m_addressBookHistoryExecutor.get());
         QObject::connect(
             m_fullMailSyncService.get(), &FullMailSyncService::mailboxWindowCommitted,
             m_mailService.get(),

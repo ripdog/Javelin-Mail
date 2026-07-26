@@ -22,6 +22,9 @@ add_executable(javelin_jmap_tests
     ${PROJECT_SOURCE_DIR}/src/app/undo/CalendarPreferenceExecutor.cpp
     ${PROJECT_SOURCE_DIR}/src/app/undo/CalendarPreferenceExecutor.h
     ${PROJECT_SOURCE_DIR}/src/app/undo/CalendarPreferencePort.h
+    ${PROJECT_SOURCE_DIR}/src/app/undo/AddressBookHistoryExecutor.cpp
+    ${PROJECT_SOURCE_DIR}/src/app/undo/AddressBookHistoryExecutor.h
+    ${PROJECT_SOURCE_DIR}/src/app/undo/AddressBookHistoryPort.h
     ${PROJECT_SOURCE_DIR}/src/app/undo/ContactHistoryExecutor.cpp
     ${PROJECT_SOURCE_DIR}/src/app/undo/ContactHistoryExecutor.h
     ${PROJECT_SOURCE_DIR}/src/app/undo/ContactHistoryPort.h

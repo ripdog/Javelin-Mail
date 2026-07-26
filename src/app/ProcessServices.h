@@ -38,6 +38,7 @@ namespace javelin::app
 
 namespace javelin::app::undo
 {
+    class AddressBookHistoryExecutor;
     class HistoryRepository;
     class DraftHistoryExecutor;
     class CalendarHistoryExecutor;
@@ -154,6 +155,8 @@ namespace javelin::app
         std::unique_ptr<javelin::app::undo::CalendarPreferenceExecutor>
             m_calendarPreferenceExecutor;
         std::unique_ptr<javelin::app::undo::ContactHistoryExecutor> m_contactHistoryExecutor;
+        std::unique_ptr<javelin::app::undo::AddressBookHistoryExecutor>
+            m_addressBookHistoryExecutor;
         std::unique_ptr<ContactCommandService> m_contactCommandService;
         std::unique_ptr<MessageNavigationCoordinator> m_messageNavigationCoordinator;
         std::unique_ptr<CalendarNotificationService> m_calendarNotificationService;

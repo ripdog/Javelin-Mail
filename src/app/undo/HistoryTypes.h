@@ -172,6 +172,8 @@ namespace javelin::app::undo
         std::optional<std::string> currentAddressBookId;
         std::optional<std::string> beforeDocumentJson;
         std::optional<std::string> afterDocumentJson;
+        std::optional<std::string> beforeDefaultAddressBookId;
+        std::optional<std::string> afterDefaultAddressBookId;
         std::vector<ContactCardItemHistory> affectedCards;
 
         auto operator<=>(const AddressBookHistory&) const = default;

@@ -306,6 +306,42 @@ namespace javelin::app
             toLiveConnectionSettings(*settings), std::move(ownerAccountId), std::move(request));
     }
 
+    QCoro::Task<undo::AuthoritativeAddressBooksResult>
+    ContactCommandService::getAuthoritativeAddressBooks(std::string ownerAccountId,
+                                                        std::string accountId)
+    {
+        const auto settings = m_connectionProvider.connectionSettingsFor(ownerAccountId);
+        if (!settings.has_value())
+            co_return missingConfiguration();
+        auto refreshed = co_await m_contactService.refreshAll(toLiveConnectionSettings(*settings),
+                                                              ownerAccountId);
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&refreshed))
+            co_return *error;
+        auto books = m_contactRepository.listAddressBooks(accountId);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&books))
+            co_return javelin::jmap::operationError(*error);
+        auto state = m_contactRepository.addressBookState(accountId);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&state))
+            co_return javelin::jmap::operationError(*error);
+        co_return undo::AuthoritativeAddressBooks{
+            .state = std::get<std::optional<std::string>>(state).value_or(std::string{}),
+            .addressBooks =
+                std::get<std::vector<javelin::jmap::api::AddressBook>>(std::move(books)),
+        };
+    }
+
+    QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
+    ContactCommandService::applyAddressBooksFromHistory(
+        std::string ownerAccountId, javelin::jmap::api::AddressBookSetRequest request,
+        const undo::CommandOrigin)
+    {
+        const auto settings = m_connectionProvider.connectionSettingsFor(ownerAccountId);
+        if (!settings.has_value())
+            co_return missingConfiguration();
+        co_return co_await m_contactService.setAddressBooks(
+            toLiveConnectionSettings(*settings), std::move(ownerAccountId), std::move(request));
+    }
+
     QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
     ContactCommandService::submitAddressBooks(std::string ownerAccountId,
                                               javelin::jmap::api::AddressBookSetRequest request)
@@ -314,10 +350,142 @@ namespace javelin::app
         const auto settings = m_connectionProvider.connectionSettingsFor(ownerAccountId);
         if (!settings.has_value())
             co_return missingConfiguration();
-        co_return observeResult(
+        auto listed = m_contactRepository.listAddressBooks(request.accountId);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&listed))
+            co_return javelin::jmap::operationError(*error);
+        const auto& books = std::get<std::vector<javelin::jmap::api::AddressBook>>(listed);
+        const auto defaultBook =
+            std::ranges::find(books, true, &javelin::jmap::api::AddressBook::isDefault);
+        undo::AddressBookHistory history{
+            .connectionId = settings->connectionId,
+            .accountId = request.accountId,
+            .currentAddressBookId = std::nullopt,
+            .beforeDocumentJson = std::nullopt,
+            .afterDocumentJson = std::nullopt,
+            .beforeDefaultAddressBookId =
+                defaultBook == books.end() ? std::nullopt : std::optional{defaultBook->id},
+            .afterDefaultAddressBookId =
+                request.onSuccessSetIsDefault.has_value()
+                    ? request.onSuccessSetIsDefault
+                    : (defaultBook == books.end() ? std::nullopt : std::optional{defaultBook->id}),
+            .affectedCards = {},
+        };
+        std::optional<std::string> creationId;
+        if (!request.create.empty())
+        {
+            const auto& [id, document] = *request.create.begin();
+            creationId = id;
+            history.afterDocumentJson = document.json;
+        }
+        else if (!request.update.empty())
+        {
+            const auto& [id, document] = *request.update.begin();
+            const auto found = std::ranges::find(books, id, &javelin::jmap::api::AddressBook::id);
+            if (found == books.end())
+                co_return javelin::jmap::OperationError{
+                    .code = javelin::jmap::OperationErrorCode::NotFound,
+                    .message = QStringLiteral("The address book is no longer available."),
+                };
+            history.currentAddressBookId = id;
+            history.beforeDocumentJson = javelin::jmap::api::serializeAddressBookDocument(*found);
+            const auto after =
+                javelin::jmap::api::applyPatchObject(*history.beforeDocumentJson, document.json);
+            if (!std::holds_alternative<std::string>(after))
+                co_return javelin::jmap::OperationError{
+                    .code = javelin::jmap::OperationErrorCode::PreconditionFailed,
+                    .message = QStringLiteral("The address-book update is invalid."),
+                };
+            history.afterDocumentJson = std::get<std::string>(after);
+        }
+        else if (!request.destroy.empty())
+        {
+            const auto& id = request.destroy.front();
+            const auto found = std::ranges::find(books, id, &javelin::jmap::api::AddressBook::id);
+            if (found == books.end())
+                co_return javelin::jmap::OperationError{
+                    .code = javelin::jmap::OperationErrorCode::NotFound,
+                    .message = QStringLiteral("The address book is no longer available."),
+                };
+            history.currentAddressBookId = id;
+            history.beforeDocumentJson = javelin::jmap::api::serializeAddressBookDocument(*found);
+            if (request.onDestroyRemoveContents)
+            {
+                auto contacts = m_contactRepository.listContacts(request.accountId, id);
+                if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&contacts))
+                    co_return javelin::jmap::operationError(*error);
+                for (const auto& contact :
+                     std::get<std::vector<javelin::jmap::contacts::ContactSummary>>(contacts))
+                    history.affectedCards.push_back(existingHistoryItem(contact, std::nullopt));
+            }
+        }
+        else if (request.onSuccessSetIsDefault.has_value())
+        {
+            const auto found = std::ranges::find(books, *request.onSuccessSetIsDefault,
+                                                 &javelin::jmap::api::AddressBook::id);
+            if (found == books.end())
+                co_return javelin::jmap::OperationError{
+                    .code = javelin::jmap::OperationErrorCode::NotFound,
+                    .message = QStringLiteral("The address book is no longer available."),
+                };
+            history.currentAddressBookId = found->id;
+            history.beforeDocumentJson = javelin::jmap::api::serializeAddressBookDocument(*found);
+            history.afterDocumentJson = history.beforeDocumentJson;
+        }
+        auto preparedResult =
+            m_undoManager.prepareNormal(QStringLiteral("Change Address Books"),
+                                        undo::HistoryDomain::Contacts, history, std::nullopt);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&preparedResult))
+            co_return javelin::jmap::operationError(*error);
+        auto prepared = std::get<std::optional<undo::HistoryEntry>>(std::move(preparedResult));
+        auto result = observeResult(
             m_errorCoordinator, *settings, ownerAccountId, QStringLiteral("Change address books"),
             co_await m_contactService.setAddressBooks(toLiveConnectionSettings(*settings),
                                                       ownerAccountId, std::move(request)));
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+        {
+            if (prepared.has_value())
+            {
+                if (javelin::jmap::isTransientError(*error) &&
+                    !javelin::jmap::isAuthenticationError(*error))
+                {
+                    auto committed = m_undoManager.commitNormal(std::move(*prepared));
+                    if (const auto* databaseError =
+                            std::get_if<javelin::jmap::cache::DatabaseError>(&committed))
+                        co_return javelin::jmap::operationError(*databaseError);
+                    const auto& entry = std::get<undo::HistoryEntry>(committed);
+                    if (const auto databaseError = m_undoManager.setEntryStatus(
+                            entry.entryId, undo::HistoryEntryStatus::BlockedUnknown,
+                            error->message))
+                        co_return javelin::jmap::operationError(*databaseError);
+                }
+                else
+                    static_cast<void>(m_undoManager.discardNormal(prepared->entryId));
+            }
+            co_return *error;
+        }
+        if (prepared.has_value())
+        {
+            auto& committedHistory = std::get<undo::AddressBookHistory>(prepared->payload);
+            const auto& summary = std::get<javelin::jmap::contacts::ContactMutationSummary>(result);
+            if (creationId.has_value())
+            {
+                const auto mapping =
+                    std::ranges::find(summary.createdIds, *creationId,
+                                      &javelin::jmap::contacts::CreatedContactMapping::creationId);
+                if (mapping == summary.createdIds.end())
+                    co_return javelin::jmap::OperationError{
+                        .code = javelin::jmap::OperationErrorCode::ProtocolViolation,
+                        .message =
+                            QStringLiteral("The address-book response omitted its created id."),
+                    };
+                committedHistory.currentAddressBookId = mapping->serverId;
+            }
+            auto committed = m_undoManager.commitNormal(std::move(*prepared));
+            if (const auto* databaseError =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&committed))
+                co_return javelin::jmap::operationError(*databaseError);
+        }
+        co_return result;
     }
 
     QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
