@@ -1,4 +1,5 @@
 #include "app/ContactCommandPreparation.h"
+#include "jmap/api/PatchObject.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -91,6 +92,30 @@ TEST_CASE("contact save commands prepare protocol requests outside the GUI", "[a
     });
     REQUIRE(std::holds_alternative<javelin::jmap::api::ContactCardSetRequest>(update));
     CHECK(std::get<javelin::jmap::api::ContactCardSetRequest>(update).update.contains("contact-1"));
+}
+
+TEST_CASE("clearing a contact field prepares an explicit removal patch", "[app][contacts]")
+{
+    auto contact = editableContact();
+    contact.document =
+        R"({"id":"contact-1","uid":"contact-uid","kind":"individual","addressBookIds":{"book-1":true},"name":{"full":"Alice Example"},"emails":{"test":{"address":"old@example.test","label":"Test"}}})";
+    contact.emails.clear();
+    auto prepared = javelin::app::prepareSaveContact({
+        .accountId = "contacts-account",
+        .contactId = "contact-1",
+        .contact = std::move(contact),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::api::ContactCardSetRequest>(prepared));
+    const auto& patch =
+        std::get<javelin::jmap::api::ContactCardSetRequest>(prepared).update.at("contact-1").json;
+    CHECK(patch.find("emails") != std::string::npos);
+    CHECK(patch.find("null") != std::string::npos);
+
+    const auto projected = javelin::jmap::api::applyPatchObject(
+        R"({"@type":"Card","version":"1.0","uid":"contact-uid","kind":"individual","addressBookIds":{"book-1":true},"name":{"full":"Alice Example"},"emails":{"test":{"address":"old@example.test","label":"Test"}}})",
+        patch);
+    REQUIRE(std::holds_alternative<std::string>(projected));
+    CHECK(std::get<std::string>(projected).find(R"("emails")") == std::string::npos);
 }
 
 TEST_CASE("contact commands validate documents before protocol submission", "[app][contacts]")

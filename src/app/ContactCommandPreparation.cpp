@@ -1,5 +1,6 @@
 #include "app/ContactCommandPreparation.h"
 
+#include "jmap/api/PatchObject.h"
 #include "jmap/contacts/ContactInterchange.h"
 
 #include <QUuid>
@@ -98,9 +99,22 @@ namespace javelin::app
         }
         else
         {
-            request.update.emplace(
-                std::move(*command.contactId),
-                javelin::jmap::api::ContactDocument{.json = std::get<std::string>(document)});
+            const auto before =
+                javelin::jmap::contacts::prepareContactDocument(command.contact.document, false);
+            const auto after = javelin::jmap::contacts::prepareContactDocument(
+                std::get<std::string>(document), false);
+            if (!std::holds_alternative<std::string>(before) ||
+                !std::holds_alternative<std::string>(after))
+                return invalidContactCommand(
+                    "The contact update cannot be represented as a JMAP patch.");
+            auto patch = javelin::jmap::api::makePatchObject(std::get<std::string>(before),
+                                                             std::get<std::string>(after));
+            if (!std::holds_alternative<std::string>(patch))
+                return invalidContactCommand(
+                    "The contact update cannot be represented as a JMAP patch.");
+            request.update.emplace(std::move(*command.contactId),
+                                   javelin::jmap::api::ContactDocument{
+                                       .json = std::get<std::string>(std::move(patch))});
         }
         return request;
     }

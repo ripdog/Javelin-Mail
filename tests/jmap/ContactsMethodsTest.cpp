@@ -227,6 +227,36 @@ TEST_CASE("new contact editor documents include the supplied uid", "[jmap][conta
     CHECK(std::get<std::string>(created).find(R"("uid":"fixture-uid")") != std::string::npos);
 }
 
+TEST_CASE("clearing structured contact fields removes their map entries",
+          "[jmap][contacts][document]")
+{
+    const std::string document =
+        R"({"id":"c1","uid":"contact-uid","kind":"individual","addressBookIds":{"b1":true},"name":{"full":"Fixture"},"emails":{"work":{"address":"old@example.test"}},"phones":{"mobile":{"number":"123"}},"addresses":{"home":{"full":"1 Test Street"}}})";
+    const auto parsed = javelin::jmap::contacts::contactEditorData(document);
+    REQUIRE(std::holds_alternative<javelin::jmap::contacts::ContactEditorData>(parsed));
+    auto fields = std::get<javelin::jmap::contacts::ContactEditorData>(parsed);
+    REQUIRE(fields.emails.size() == 1);
+    REQUIRE(fields.phones.size() == 1);
+    REQUIRE(fields.addresses.size() == 1);
+    fields.emails.front().value.clear();
+    fields.phones.front().value.clear();
+    fields.addresses.front().value.clear();
+
+    const auto edited = javelin::jmap::contacts::applyContactEditorData(fields, false);
+    REQUIRE(std::holds_alternative<std::string>(edited));
+    const auto& editedJson = std::get<std::string>(edited);
+    CHECK(editedJson.find(R"("emails")") == std::string::npos);
+    CHECK(editedJson.find(R"("phones")") == std::string::npos);
+    CHECK(editedJson.find(R"("addresses")") == std::string::npos);
+
+    const auto patch = javelin::jmap::api::makePatchObject(document, editedJson);
+    REQUIRE(std::holds_alternative<std::string>(patch));
+    const auto projected =
+        javelin::jmap::api::applyPatchObject(document, std::get<std::string>(patch));
+    REQUIRE(std::holds_alternative<std::string>(projected));
+    CHECK(std::get<std::string>(projected) == editedJson);
+}
+
 TEST_CASE("contact group documents and membership patches preserve RFC paths",
           "[jmap][contacts][groups]")
 {

@@ -165,6 +165,8 @@ namespace javelin::jmap::contacts
             std::size_t generatedIndex = 1;
             for (const auto& field : fields)
             {
+                if (field.value.empty())
+                    continue;
                 std::string key = field.key;
                 while (key.empty() || retainedKeys.contains(key))
                     key = "javelin-" + std::to_string(generatedIndex++);
