@@ -9,6 +9,10 @@
 
 #include <QCoroTask>
 
+#include <KTextEditor/Document>
+#include <KTextEditor/Editor>
+#include <KTextEditor/View>
+
 #include <QAction>
 #include <QApplication>
 #include <QComboBox>
@@ -28,7 +32,6 @@
 #include <QLineEdit>
 #include <QMimeData>
 #include <QMimeDatabase>
-#include <QPlainTextEdit>
 #include <QRadioButton>
 #include <QRegularExpression>
 #include <QScrollArea>
@@ -546,7 +549,7 @@ namespace javelin::gui::compose
                     refreshPreview();
                     scheduleWorkingCopySave();
                 });
-        connect(m_htmlSourceEdit, &QPlainTextEdit::textChanged, this,
+        connect(m_htmlSourceDocument, &KTextEditor::Document::textChanged, this,
                 [this]
                 {
                     if (m_syncingUi ||
@@ -612,7 +615,7 @@ namespace javelin::gui::compose
     {
         const auto subject = m_subjectEdit->text().trimmed();
         const auto richPlain = m_richTextEdit->toPlainText().trimmed();
-        const auto rawHtml = m_htmlSourceEdit->toPlainText().trimmed();
+        const auto rawHtml = m_htmlSourceDocument->text().trimmed();
         return subject.isEmpty() && m_toEdit->text().trimmed().isEmpty() &&
                m_ccEdit->text().trimmed().isEmpty() && m_bccEdit->text().trimmed().isEmpty() &&
                richPlain.isEmpty() && rawHtml.isEmpty() && m_snapshot.attachments.empty();
@@ -695,7 +698,7 @@ namespace javelin::gui::compose
             "#composeTab { background: #1d2026; }"
             "#composeHeader { background: #232833; border: 1px solid #333c4b; border-radius: 14px; "
             "}"
-            "QLineEdit, QComboBox, QPlainTextEdit, QTextEdit {"
+            "QLineEdit, QComboBox, QTextEdit {"
             "  background: #161a20; color: #eef2f7; border: 1px solid #394354; border-radius: 8px;"
             "}"
             "QLineEdit, QComboBox { padding: 6px 8px; }"
@@ -782,14 +785,15 @@ namespace javelin::gui::compose
         m_richTextEdit->setAcceptDrops(false);
         m_richTextEdit->setAcceptRichText(true);
         m_richTextEdit->document()->setDocumentMargin(14);
-        m_htmlSourceEdit = new QPlainTextEdit(m_editorTabs);
-        m_htmlSourceEdit->setAcceptDrops(false);
-        m_htmlSourceEdit->setLineWrapMode(QPlainTextEdit::NoWrap);
+        m_htmlSourceDocument = KTextEditor::Editor::instance()->createDocument(this);
+        m_htmlSourceDocument->setHighlightingMode(QStringLiteral("HTML"));
+        m_htmlSourceView = m_htmlSourceDocument->createView(m_editorTabs);
+        m_htmlSourceView->setAcceptDrops(false);
         m_previewView = new javelin::gui::messageview::HtmlMessageView(m_editorTabs);
         m_previewView->setAcceptDrops(false);
         m_previewView->setRemoteContentEnabled(false);
         m_editorTabs->addTab(m_richTextEdit, QStringLiteral("Compose"));
-        m_editorTabs->addTab(m_htmlSourceEdit, QStringLiteral("HTML"));
+        m_editorTabs->addTab(m_htmlSourceView, QStringLiteral("HTML"));
         m_editorTabs->addTab(m_previewView, QStringLiteral("Preview"));
         rootLayout->addWidget(m_editorTabs, 1);
 
@@ -990,7 +994,7 @@ namespace javelin::gui::compose
         const QSignalBlocker bccBlocker{m_bccEdit};
         const QSignalBlocker subjectBlocker{m_subjectEdit};
         const QSignalBlocker richBlocker{m_richTextEdit};
-        const QSignalBlocker htmlBlocker{m_htmlSourceEdit};
+        const QSignalBlocker htmlBlocker{m_htmlSourceDocument};
         const QSignalBlocker tabBlocker{m_editorTabs};
 
         int identityIndex = -1;
@@ -1017,7 +1021,7 @@ namespace javelin::gui::compose
                                    ? QString::fromStdString(*m_snapshot.subject)
                                    : QString{});
         m_richTextEdit->setHtml(QString::fromStdString(m_snapshot.htmlBody));
-        m_htmlSourceEdit->setPlainText(QString::fromStdString(m_snapshot.htmlBody));
+        m_htmlSourceDocument->setText(QString::fromStdString(m_snapshot.htmlBody));
         m_editorTabs->setCurrentIndex(m_snapshot.editorMode ==
                                               javelin::jmap::submission::BodyEditorMode::RawHtml
                                           ? htmlSourceTabIndex
@@ -1055,7 +1059,7 @@ namespace javelin::gui::compose
     {
         const auto html =
             m_snapshot.editorMode == javelin::jmap::submission::BodyEditorMode::RawHtml
-                ? m_htmlSourceEdit->toPlainText()
+                ? m_htmlSourceDocument->text()
                 : m_richTextEdit->document()->toHtml();
         m_previewView->setDocumentHtml(html.toStdString());
     }
@@ -1087,7 +1091,7 @@ namespace javelin::gui::compose
 
         if (m_snapshot.editorMode == javelin::jmap::submission::BodyEditorMode::RawHtml)
         {
-            const auto html = m_htmlSourceEdit->toPlainText();
+            const auto html = m_htmlSourceDocument->text();
             m_snapshot.htmlBody = html.toStdString();
             m_snapshot.plainTextBody = plainTextFromHtml(html);
         }
@@ -1104,15 +1108,15 @@ namespace javelin::gui::compose
     {
         m_syncingUi = true;
         const QSignalBlocker richBlocker{m_richTextEdit};
-        m_richTextEdit->setHtml(m_htmlSourceEdit->toPlainText());
+        m_richTextEdit->setHtml(m_htmlSourceDocument->text());
         m_syncingUi = false;
     }
 
     void ComposeTabWidget::syncHtmlSourceFromRichText()
     {
         m_syncingUi = true;
-        const QSignalBlocker htmlBlocker{m_htmlSourceEdit};
-        m_htmlSourceEdit->setPlainText(m_richTextEdit->document()->toHtml());
+        const QSignalBlocker htmlBlocker{m_htmlSourceDocument};
+        m_htmlSourceDocument->setText(m_richTextEdit->document()->toHtml());
         m_syncingUi = false;
     }
 
@@ -1145,7 +1149,7 @@ namespace javelin::gui::compose
         m_bccEdit->setEnabled(!busy);
         m_subjectEdit->setEnabled(!busy);
         m_richTextEdit->setEnabled(!busy);
-        m_htmlSourceEdit->setEnabled(!busy);
+        m_htmlSourceView->setEnabled(!busy);
         m_editorTabs->setEnabled(!busy);
         m_formatToolbar->setEnabled(!busy && m_editorTabs->currentIndex() == richEditorTabIndex);
         populateAttachments();
@@ -1277,12 +1281,12 @@ namespace javelin::gui::compose
             QStringLiteral("cid:%1").arg(QString::fromStdString(*attachment.contentId));
         if (m_snapshot.editorMode == javelin::jmap::submission::BodyEditorMode::RawHtml)
         {
-            auto html = m_htmlSourceEdit->toPlainText();
+            auto html = m_htmlSourceDocument->text();
             if (!html.contains(cidUrl))
             {
                 html.append(QStringLiteral("<p><img src=\"%1\" alt=\"%2\"></p>")
                                 .arg(cidUrl, attachmentDisplayName(attachment).toHtmlEscaped()));
-                m_htmlSourceEdit->setPlainText(html);
+                m_htmlSourceDocument->setText(html);
             }
             return;
         }
@@ -1321,9 +1325,9 @@ namespace javelin::gui::compose
 
         if (m_snapshot.editorMode == javelin::jmap::submission::BodyEditorMode::RawHtml)
         {
-            auto html = m_htmlSourceEdit->toPlainText();
+            auto html = m_htmlSourceDocument->text();
             html.remove(imageTagPattern);
-            m_htmlSourceEdit->setPlainText(html);
+            m_htmlSourceDocument->setText(html);
             return;
         }
 

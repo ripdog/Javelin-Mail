@@ -17,12 +17,17 @@ class QDropEvent;
 class QHBoxLayout;
 class QLabel;
 class QLineEdit;
-class QPlainTextEdit;
 class QScrollArea;
 class QTabWidget;
 class QTextEdit;
 class QTimer;
 class QToolBar;
+
+namespace KTextEditor
+{
+    class Document;
+    class View;
+} // namespace KTextEditor
 
 namespace javelin::gui::messageview
 {
@@ -137,7 +142,8 @@ namespace javelin::gui::compose
         QLineEdit* m_subjectEdit = nullptr;
         QToolBar* m_formatToolbar = nullptr;
         QTextEdit* m_richTextEdit = nullptr;
-        QPlainTextEdit* m_htmlSourceEdit = nullptr;
+        KTextEditor::Document* m_htmlSourceDocument = nullptr;
+        KTextEditor::View* m_htmlSourceView = nullptr;
         javelin::gui::messageview::HtmlMessageView* m_previewView = nullptr;
         QTabWidget* m_editorTabs = nullptr;
         QScrollArea* m_attachmentScrollArea = nullptr;
