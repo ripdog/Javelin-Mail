@@ -353,13 +353,22 @@ namespace javelin::jmap::contacts
             object.emplace("@type", "Card");
         if (!object.contains("version"))
             object.emplace("version", "1.0");
+        if (!object.contains("kind"))
+            object.emplace("kind", "individual");
+        if (object.contains("titles") && object.at("titles").is_object())
+        {
+            for (auto& entry : object.at("titles").get_object())
+            {
+                auto& title = entry.second;
+                if (title.is_object() && !title.contains("kind"))
+                    title.get_object().emplace("kind", "title");
+            }
+        }
         if (creating && (!object.contains("uid") || !object.contains("addressBookIds")))
         {
             return std::string_view{
                 "New contacts require uid and at least one addressBookIds entry."};
         }
-        if (creating && !object.contains("kind"))
-            object.emplace("kind", "individual");
         std::string result;
         if (glz::write_json(value, result))
         {

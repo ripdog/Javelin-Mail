@@ -193,6 +193,34 @@ TEST_CASE("contact create undo accepts server-added JSContact metadata",
     CHECK(port.mutations == 1);
 }
 
+TEST_CASE("contact edit undo accepts a server-defaulted title kind",
+          "[app][undo][contact-executor]")
+{
+    FakeContactHistoryPort port;
+    const auto before = document("card-1", "uid-1", "Before");
+    const std::string after =
+        R"({"id":"card-1","uid":"uid-1","kind":"individual","addressBookIds":{"book-1":true},"name":{"full":"After"},"organizations":{"javelin-1":{"name":"Example"}},"titles":{"javelin-1":{"name":"Engineer"}}})";
+    auto current = contact("card-1", "uid-1", "After");
+    current.document =
+        R"({"@type":"Card","version":"1.0","id":"card-1","uid":"uid-1","kind":"individual","addressBookIds":{"book-1":true},"name":{"full":"After"},"organizations":{"javelin-1":{"name":"Example"}},"titles":{"javelin-1":{"name":"Engineer","kind":"title"}}})";
+    port.contacts = {std::move(current)};
+    ContactHistoryExecutor executor{port};
+
+    const auto result = QCoro::waitFor(executor.execute(entry({{
+                                                            .addressBookId = "book-1",
+                                                            .currentCardId = "card-1",
+                                                            .uid = "uid-1",
+                                                            .beforeDocumentJson = before,
+                                                            .afterDocumentJson = after,
+                                                        }}),
+                                                        HistoryExecutionDirection::Undo));
+
+    CHECK(result.outcome == HistoryExecutionOutcome::Success);
+    REQUIRE(port.contacts.size() == 1);
+    CHECK(port.contacts.front().document.find("Before") != std::string::npos);
+    CHECK(port.mutations == 1);
+}
+
 TEST_CASE("contact delete undo recreates the complete document", "[app][undo][contact-executor]")
 {
     FakeContactHistoryPort port;
