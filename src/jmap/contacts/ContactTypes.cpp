@@ -342,13 +342,17 @@ namespace javelin::jmap::contacts
                                                                        const bool creating)
     {
         std::string buffer{json};
-        glz::generic value;
+        glz::generic_sorted value;
         if (glz::read_json(value, buffer) || !value.is_object())
         {
             return std::string_view{"The contact document must be a valid JSON object."};
         }
         auto& object = value.get_object();
         object.erase("id");
+        if (!object.contains("@type"))
+            object.emplace("@type", "Card");
+        if (!object.contains("version"))
+            object.emplace("version", "1.0");
         if (creating && (!object.contains("uid") || !object.contains("addressBookIds")))
         {
             return std::string_view{

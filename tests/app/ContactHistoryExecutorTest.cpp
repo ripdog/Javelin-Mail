@@ -167,6 +167,32 @@ TEST_CASE("contact import undo deletes and redo recreates every card with remapp
     CHECK(updated.items[0].currentCardId != updated.items[1].currentCardId);
 }
 
+TEST_CASE("contact create undo accepts server-added JSContact metadata",
+          "[app][undo][contact-executor]")
+{
+    FakeContactHistoryPort port;
+    const std::string submitted =
+        R"({"uid":"uid-1","kind":"individual","addressBookIds":{"book-1":true},"name":{"full":"Created"}})";
+    auto current = contact("server-1", "uid-1", "Created");
+    current.document =
+        R"({"@type":"Card","name":{"full":"Created"},"uid":"uid-1","version":"1.0","kind":"individual","id":"server-1","addressBookIds":{"book-1":true}})";
+    port.contacts = {std::move(current)};
+    ContactHistoryExecutor executor{port};
+
+    const auto result = QCoro::waitFor(executor.execute(entry({{
+                                                            .addressBookId = "book-1",
+                                                            .currentCardId = "server-1",
+                                                            .uid = "uid-1",
+                                                            .beforeDocumentJson = std::nullopt,
+                                                            .afterDocumentJson = submitted,
+                                                        }}),
+                                                        HistoryExecutionDirection::Undo));
+
+    CHECK(result.outcome == HistoryExecutionOutcome::Success);
+    CHECK(port.contacts.empty());
+    CHECK(port.mutations == 1);
+}
+
 TEST_CASE("contact delete undo recreates the complete document", "[app][undo][contact-executor]")
 {
     FakeContactHistoryPort port;
