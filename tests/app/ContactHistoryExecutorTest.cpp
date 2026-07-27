@@ -1,5 +1,7 @@
 #include "app/undo/ContactHistoryExecutor.h"
 
+#include "jmap/api/PatchObject.h"
+
 #include <QCoroTask>
 
 #include <catch2/catch_test_macros.hpp>
@@ -66,7 +68,9 @@ namespace
             {
                 const auto found = std::ranges::find(contacts, id, &ContactSummary::id);
                 REQUIRE(found != contacts.end());
-                found->document = value.json;
+                auto projected = javelin::jmap::api::applyPatchObject(found->document, value.json);
+                REQUIRE(std::holds_alternative<std::string>(projected));
+                found->document = std::get<std::string>(std::move(projected));
             }
             for (const auto& [creationId, value] : request.create)
             {
@@ -218,6 +222,8 @@ TEST_CASE("contact edit undo accepts a server-defaulted title kind",
     CHECK(result.outcome == HistoryExecutionOutcome::Success);
     REQUIRE(port.contacts.size() == 1);
     CHECK(port.contacts.front().document.find("Before") != std::string::npos);
+    CHECK(port.contacts.front().document.find("organizations") == std::string::npos);
+    CHECK(port.contacts.front().document.find("titles") == std::string::npos);
     CHECK(port.mutations == 1);
 }
 

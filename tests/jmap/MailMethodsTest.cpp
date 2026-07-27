@@ -433,6 +433,26 @@ TEST_CASE("PatchObject projection applies escaped paths and null removals", "[jm
           R"({"name":"new","nested":{"a":2},"items":[1,2],"team/ops":{"~key":"new"}})");
 }
 
+TEST_CASE("PatchObject diff emits nested changes and explicit removals", "[jmap][method][patch]")
+{
+    const auto patch = javelin::jmap::api::makePatchObject(
+        R"({"name":{"full":"After"},"organizations":{"javelin-1":{"name":"Example"}},"titles":{"javelin-1":{"name":"Engineer","kind":"title"}}})",
+        R"({"name":{"full":"Before"}})");
+    REQUIRE(std::holds_alternative<std::string>(patch));
+    const auto& json = std::get<std::string>(patch);
+    CHECK(json.find(R"("name/full":"Before")") != std::string::npos);
+    CHECK(json.find(R"("organizations":null)") != std::string::npos);
+    CHECK(json.find(R"("titles":null)") != std::string::npos);
+
+    const auto restored = javelin::jmap::api::applyPatchObject(
+        R"({"name":{"full":"After"},"organizations":{"javelin-1":{"name":"Example"}},"titles":{"javelin-1":{"name":"Engineer","kind":"title"}}})",
+        json);
+    REQUIRE(std::holds_alternative<std::string>(restored));
+    CHECK(std::get<std::string>(restored).find("Before") != std::string::npos);
+    CHECK(std::get<std::string>(restored).find("organizations") == std::string::npos);
+    CHECK(std::get<std::string>(restored).find("titles") == std::string::npos);
+}
+
 TEST_CASE("PatchObject projection rejects paths forbidden by RFC 8620", "[jmap][method][patch]")
 {
     const auto missing =

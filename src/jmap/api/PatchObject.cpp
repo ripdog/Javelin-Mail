@@ -92,6 +92,60 @@ namespace javelin::jmap::api
                    std::equal(prefix.cbegin(), prefix.cend(), path.cbegin());
         }
 
+        [[nodiscard]] std::string encodedPath(const std::vector<std::string>& segments)
+        {
+            std::string path;
+            for (const auto& segment : segments)
+            {
+                if (!path.empty())
+                    path.push_back('/');
+                path += escapeSegment(segment);
+            }
+            return path;
+        }
+
+        [[nodiscard]] bool equalJson(const glz::generic_sorted& left,
+                                     const glz::generic_sorted& right)
+        {
+            std::string leftJson;
+            std::string rightJson;
+            return !glz::write_json(left, leftJson) && !glz::write_json(right, rightJson) &&
+                   leftJson == rightJson;
+        }
+
+        void appendPatch(const glz::generic_sorted::object_t& current,
+                         const glz::generic_sorted::object_t& desired,
+                         std::vector<std::string>& path, glz::generic_sorted& patch)
+        {
+            for (const auto& [key, currentValue] : current)
+            {
+                path.push_back(key);
+                const auto desiredValue = desired.find(key);
+                if (desiredValue == desired.end())
+                {
+                    patch[encodedPath(path)] = nullptr;
+                }
+                else if (currentValue.is_object() && desiredValue->second.is_object())
+                {
+                    appendPatch(currentValue.get_object(), desiredValue->second.get_object(), path,
+                                patch);
+                }
+                else if (!equalJson(currentValue, desiredValue->second))
+                {
+                    patch[encodedPath(path)] = desiredValue->second;
+                }
+                path.pop_back();
+            }
+            for (const auto& [key, desiredValue] : desired)
+            {
+                if (current.contains(key))
+                    continue;
+                path.push_back(key);
+                patch[encodedPath(path)] = desiredValue;
+                path.pop_back();
+            }
+        }
+
     } // namespace
 
     std::string patchPath(const std::span<const std::string_view> segments)
@@ -112,6 +166,29 @@ namespace javelin::jmap::api
     {
         const std::array segments{property, mapKey};
         return patchPath(segments);
+    }
+
+    std::variant<std::string, PatchObjectError> makePatchObject(const std::string_view objectJson,
+                                                                const std::string_view desiredJson)
+    {
+        glz::generic_sorted object;
+        glz::generic_sorted desired;
+        if (glz::read_json(object, objectJson) || glz::read_json(desired, desiredJson))
+            return PatchObjectError{.code = PatchObjectErrorCode::InvalidJson, .path = {}};
+        const auto* objectValues = object.get_if<glz::generic_sorted::object_t>();
+        const auto* desiredValues = desired.get_if<glz::generic_sorted::object_t>();
+        if (objectValues == nullptr || desiredValues == nullptr)
+            return PatchObjectError{.code = PatchObjectErrorCode::RootNotObject, .path = {}};
+
+        glz::generic_sorted patch;
+        patch.data = glz::generic_sorted::object_t{};
+        std::vector<std::string> path;
+        appendPatch(*objectValues, *desiredValues, path, patch);
+
+        std::string result;
+        if (glz::write_json(patch, result))
+            return PatchObjectError{.code = PatchObjectErrorCode::InvalidJson, .path = {}};
+        return result;
     }
 
     std::variant<std::string, PatchObjectError> applyPatchObject(const std::string_view objectJson,

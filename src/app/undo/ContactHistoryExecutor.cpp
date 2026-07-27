@@ -1,5 +1,7 @@
 #include "app/undo/ContactHistoryExecutor.h"
 
+#include "jmap/api/PatchObject.h"
+
 #include <algorithm>
 #include <ranges>
 #include <unordered_map>
@@ -158,8 +160,20 @@ namespace javelin::app::undo
             }
             if (current != nullptr)
             {
+                const auto currentDocument =
+                    normalized(std::optional<std::string>{current->document});
+                if (!currentDocument.has_value())
+                    co_return conflict(QStringLiteral("The current contact document is invalid."));
+                auto patch = javelin::jmap::api::makePatchObject(*currentDocument, *desired);
+                if (const auto* error = std::get_if<javelin::jmap::api::PatchObjectError>(&patch))
+                {
+                    static_cast<void>(error);
+                    co_return conflict(
+                        QStringLiteral("The contact history update cannot be represented."));
+                }
                 request.update.emplace(current->id,
-                                       javelin::jmap::api::ContactDocument{.json = *desired});
+                                       javelin::jmap::api::ContactDocument{
+                                           .json = std::get<std::string>(std::move(patch))});
                 continue;
             }
 
