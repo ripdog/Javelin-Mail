@@ -1069,6 +1069,14 @@ target_compile_options(jmap-query PRIVATE -fexceptions)
 javelin_set_project_warnings(jmap-query)
 javelin_enable_sanitizers(jmap-query)
 
+qt_add_executable(javelin-undo-live-check
+    src/tools/UndoRedoLiveCheck.cpp
+)
+target_link_libraries(javelin-undo-live-check PRIVATE javelin_application Qt::Widgets)
+target_compile_options(javelin-undo-live-check PRIVATE -fexceptions)
+javelin_set_project_warnings(javelin-undo-live-check)
+javelin_enable_sanitizers(javelin-undo-live-check)
+
 # KDEInstallDirs can leave KDE_INSTALL_KXMLGUIDIR empty in some local/dev
 # configurations; default to the documented DATAROOTDIR/kxmlgui5 location.
 if(NOT KDE_INSTALL_KXMLGUIDIR)

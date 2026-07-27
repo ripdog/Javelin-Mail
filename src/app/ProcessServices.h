@@ -87,7 +87,7 @@ namespace javelin::app
     class ProcessServices
     {
       public:
-        ProcessServices();
+        explicit ProcessServices(bool installInlineMessageSchemeHandler = true);
         ~ProcessServices();
 
         ProcessServices(const ProcessServices&) = delete;

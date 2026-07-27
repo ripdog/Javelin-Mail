@@ -67,7 +67,7 @@ namespace javelin::app
 
     } // namespace
 
-    ProcessServices::ProcessServices()
+    ProcessServices::ProcessServices(const bool installInlineMessageSchemeHandler)
     {
         auto databaseResult = javelin::jmap::cache::DatabaseConnection::open({
             .connectionName = QStringLiteral("javelin-gui-main"),
@@ -106,11 +106,14 @@ namespace javelin::app
             std::make_unique<javelin::jmap::api::HttpJmapMethodTransport>(*m_transport);
         m_methodTransport = std::make_unique<javelin::jmap::api::PreferredJmapMethodTransport>(
             m_databaseConnection, *m_httpMethodTransport, *m_webSocketFailureCooldowns);
-        m_inlineMessageSchemeHandler =
-            std::make_unique<InlineMessageSchemeHandler>(m_databaseConnection);
-        QWebEngineProfile::defaultProfile()->installUrlSchemeHandler(
-            javelin::jmap::render::inlineMessageUrlScheme().toUtf8(),
-            m_inlineMessageSchemeHandler.get());
+        if (installInlineMessageSchemeHandler)
+        {
+            m_inlineMessageSchemeHandler =
+                std::make_unique<InlineMessageSchemeHandler>(m_databaseConnection);
+            QWebEngineProfile::defaultProfile()->installUrlSchemeHandler(
+                javelin::jmap::render::inlineMessageUrlScheme().toUtf8(),
+                m_inlineMessageSchemeHandler.get());
+        }
         m_jmapCore = std::make_unique<javelin::jmap::JmapCore>(m_databaseConnection, *m_transport,
                                                                *m_methodTransport);
         m_mailIndexService =
