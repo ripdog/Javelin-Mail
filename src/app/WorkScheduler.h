@@ -82,6 +82,7 @@ namespace javelin::app
         WorkPriority priority = WorkPriority::Maintenance;
         QString title;
         QString checkpointJson = QStringLiteral("{}");
+        bool restartCompleted = false;
     };
 
     class WorkScheduler final : public QObject

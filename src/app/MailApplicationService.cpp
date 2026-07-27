@@ -1301,6 +1301,7 @@ namespace javelin::app
                 .priority = WorkPriority::Freshness,
                 .title = QStringLiteral("Refresh contacts"),
                 .checkpointJson = QStringLiteral("{}"),
+                .restartCompleted = true,
             }))
         {
             qWarning().noquote() << "Could not queue contact refresh" << error->message;

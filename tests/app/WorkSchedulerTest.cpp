@@ -163,3 +163,51 @@ TEST_CASE("work scheduler observes a quiet period after startup and foreground w
     scheduler.endForegroundWork();
     CHECK_FALSE(scheduler.mayStartBackgroundNetwork());
 }
+
+TEST_CASE("work scheduler atomically restarts completed refresh work", "[app][work-scheduler]")
+{
+    if (QCoreApplication::instance() == nullptr)
+    {
+        static int argc = 1;
+        static char name[] = "work-scheduler-completed-refresh-test";
+        static char* argv[]{name, nullptr};
+        static const auto application = std::make_unique<QCoreApplication>(argc, argv);
+        Q_UNUSED(application);
+    }
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("work-scheduler-completed-refresh-test"),
+        .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    javelin::app::WorkScheduler scheduler{connection, nullptr, std::chrono::milliseconds{0}};
+    const javelin::app::WorkSpec spec{
+        .jobId = "contact-refresh:a1",
+        .parentJobId = std::nullopt,
+        .accountId = "a1",
+        .kind = javelin::app::WorkKind::ContactRefresh,
+        .priority = javelin::app::WorkPriority::Freshness,
+        .title = QStringLiteral("Refresh contacts"),
+        .checkpointJson = QStringLiteral("{}"),
+        .restartCompleted = true,
+    };
+    REQUIRE_FALSE(scheduler.ensure(spec).has_value());
+    REQUIRE_FALSE(scheduler
+                      .update(spec.jobId, javelin::app::WorkStatus::Complete,
+                              {.completedUnits = 10,
+                               .totalUnits = 10,
+                               .completedBytes = 0,
+                               .totalBytes = std::nullopt,
+                               .detail = QStringLiteral("Complete")},
+                              QStringLiteral("{}"))
+                      .has_value());
+
+    REQUIRE_FALSE(scheduler.ensure(spec).has_value());
+    const auto restarted = scheduler.find(spec.jobId);
+    REQUIRE(std::holds_alternative<std::optional<javelin::app::WorkRecord>>(restarted));
+    REQUIRE(std::get<std::optional<javelin::app::WorkRecord>>(restarted).has_value());
+    CHECK(std::get<std::optional<javelin::app::WorkRecord>>(restarted)->status ==
+          javelin::app::WorkStatus::Queued);
+}

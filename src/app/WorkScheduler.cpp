@@ -129,9 +129,11 @@ namespace javelin::app
             "checkpoint_json) VALUES(:id,:parent,:account,:kind,:priority,'queued',:title,"
             ":checkpoint) ON CONFLICT(job_id) DO UPDATE SET title=excluded.title,priority=excluded."
             "priority,account_id=excluded.account_id,parent_job_id=excluded.parent_job_id,"
-            "status=CASE WHEN background_jobs.status='failed' AND "
+            "status=CASE WHEN (background_jobs.status='failed' OR "
+            "(:restart_completed=1 AND background_jobs.status='complete')) AND "
             "background_jobs.pause_requested=0 THEN 'queued' ELSE background_jobs.status END,"
-            "error_text=CASE WHEN background_jobs.status='failed' AND "
+            "error_text=CASE WHEN (background_jobs.status='failed' OR "
+            "(:restart_completed=1 AND background_jobs.status='complete')) AND "
             "background_jobs.pause_requested=0 THEN NULL ELSE background_jobs.error_text END,"
             "updated_at=CURRENT_TIMESTAMP"));
         query.bindValue(QStringLiteral(":id"), QString::fromStdString(spec.jobId));
@@ -146,6 +148,7 @@ namespace javelin::app
         query.bindValue(QStringLiteral(":priority"), static_cast<int>(spec.priority));
         query.bindValue(QStringLiteral(":title"), spec.title);
         query.bindValue(QStringLiteral(":checkpoint"), spec.checkpointJson);
+        query.bindValue(QStringLiteral(":restart_completed"), spec.restartCompleted ? 1 : 0);
         if (!query.exec())
             return queryError(QStringLiteral("Create background job"), query);
         Q_EMIT jobsChanged();
