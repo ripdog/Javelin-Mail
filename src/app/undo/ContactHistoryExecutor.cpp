@@ -203,6 +203,27 @@ namespace javelin::app::undo
         if (summary.createdIds.size() != creationItems.size())
             co_return conflict(
                 QStringLiteral("The recreated contacts have incomplete server identities."));
+
+        // Servers may add or canonicalize Card properties. Persist the authoritative
+        // representation of the side we just applied so the next undo/redo compares
+        // against server state instead of the pre-submit document.
+        auto refreshed =
+            co_await m_contacts.getAuthoritativeContacts(history->connectionId, history->accountId);
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&refreshed))
+            co_return failure(*error);
+        const auto& currentContacts = std::get<AuthoritativeContacts>(refreshed);
+        for (auto& item : history->items)
+        {
+            auto& appliedDocument = undo ? item.beforeDocumentJson : item.afterDocumentJson;
+            if (!appliedDocument.has_value())
+                continue;
+            const auto* current = findCurrent(currentContacts, item);
+            if (current == nullptr)
+                co_return conflict(
+                    QStringLiteral("A contact was not visible after applying this operation."));
+            item.currentCardId = current->id;
+            appliedDocument = current->document;
+        }
         co_return success(*history);
     }
 } // namespace javelin::app::undo

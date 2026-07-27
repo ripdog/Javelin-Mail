@@ -96,6 +96,8 @@ namespace javelin::app::undo
                 QStringLiteral("The calendar operation requires authoritative reconciliation."));
 
         const bool undo = direction == HistoryExecutionDirection::Undo;
+        const auto operationGroupId = entry.operationGroupId.transform(
+            [](const QString& value) { return value.toStdString(); });
         const auto expected =
             parseEvent(*history, undo ? history->afterDocumentJson : history->beforeDocumentJson);
         auto desired =
@@ -141,9 +143,7 @@ namespace javelin::app::undo
                     .accountId = history->accountId,
                     .eventId = *history->currentEventId,
                     .calendarIds = calendarIds(*expected),
-                    .operationGroupId = entry.operationGroupId
-                                            ? std::optional{entry.operationGroupId->toStdString()}
-                                            : std::nullopt,
+                    .operationGroupId = operationGroupId,
                     .ifInState = authoritative.state,
                 },
                 origin);
@@ -162,9 +162,7 @@ namespace javelin::app::undo
                 {
                     .accountId = history->accountId,
                     .event = std::move(*desired),
-                    .operationGroupId = entry.operationGroupId
-                                            ? std::optional{entry.operationGroupId->toStdString()}
-                                            : std::nullopt,
+                    .operationGroupId = operationGroupId,
                     .ifInState = authoritative.state,
                 },
                 origin);
@@ -179,9 +177,7 @@ namespace javelin::app::undo
                 {
                     .accountId = history->accountId,
                     .event = std::move(*desired),
-                    .operationGroupId = entry.operationGroupId
-                                            ? std::optional{entry.operationGroupId->toStdString()}
-                                            : std::nullopt,
+                    .operationGroupId = operationGroupId,
                     .ifInState = authoritative.state.empty() ? std::nullopt
                                                              : std::optional{authoritative.state},
                 },
@@ -194,6 +190,24 @@ namespace javelin::app::undo
                     QStringLiteral("The recreated calendar event has no server identity."));
             history->currentEventId = summary.createdId;
         }
+        auto refreshed = co_await m_calendarService.getAuthoritativeCalendarEvent(
+            history->connectionId, history->accountId, history->currentEventId, history->uid);
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&refreshed))
+            co_return failure(*error);
+        const auto& accepted =
+            std::get<javelin::jmap::calendar::AuthoritativeCalendarEvent>(refreshed);
+        if (!accepted.event.has_value())
+            co_return conflict(
+                QStringLiteral("The calendar event was not visible after applying the operation."));
+        const auto acceptedDocument =
+            javelin::jmap::api::serializeCalendarEventDocument(*accepted.event);
+        if (!acceptedDocument.has_value())
+            co_return conflict(
+                QStringLiteral("The accepted calendar event could not be serialized."));
+        if (undo)
+            history->beforeDocumentJson = *acceptedDocument;
+        else
+            history->afterDocumentJson = *acceptedDocument;
         co_return success(*history);
     }
 } // namespace javelin::app::undo

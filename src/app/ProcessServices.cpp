@@ -211,6 +211,11 @@ namespace javelin::app
         return *m_accountRepository;
     }
 
+    javelin::jmap::cache::DatabaseConnection& ProcessServices::databaseConnection()
+    {
+        return m_databaseConnection;
+    }
+
     javelin::jmap::cache::ContactRepository& ProcessServices::contactRepository()
     {
         return *m_contactRepository;

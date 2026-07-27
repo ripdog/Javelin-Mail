@@ -1070,6 +1070,8 @@ javelin_set_project_warnings(jmap-query)
 javelin_enable_sanitizers(jmap-query)
 
 qt_add_executable(javelin-undo-live-check
+    src/tools/UndoRedoAutonomousSuite.cpp
+    src/tools/UndoRedoAutonomousSuite.h
     src/tools/UndoRedoLiveCheck.cpp
 )
 target_link_libraries(javelin-undo-live-check PRIVATE javelin_application Qt::Widgets)

@@ -8,6 +8,22 @@ Close Javelin Mail before running the checker. Each check temporarily changes th
 object, immediately applies the inverse operation, and repeats the cycle so both final-state
 preconditions are verified. The starting server state is restored when both legs succeed.
 
+Run autonomous, uniquely tagged fixtures against a specific configured connection:
+
+```sh
+out/build/debug/bin/javelin-undo-live-check \
+  --autonomous \
+  --connection CONNECTION_ID \
+  --execute-live-mutations
+```
+
+The autonomous suite currently covers contact and contact-group create/edit/delete, group
+membership, address-book create/edit/delete, calendar-event create/edit/delete, and draft
+create/edit. Every action is applied through the production history executor and optimistic
+mutation service. After each leg the suite verifies that no mutation-journal record belonging to
+the fixture remains active, reads authoritative server state, and finally deletes any object in
+the reserved `Javelin undo lab` fixture namespace.
+
 List available history samples and missing command-kind coverage:
 
 ```sh

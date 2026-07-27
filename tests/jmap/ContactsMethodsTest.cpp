@@ -205,6 +205,28 @@ TEST_CASE("structured contact fields and unresolved group members survive editin
     CHECK(json.find("known-uid") == std::string::npos);
 }
 
+TEST_CASE("new contact editor documents include the supplied uid", "[jmap][contacts][document]")
+{
+    const javelin::jmap::contacts::ContactEditorData contact{
+        .uid = "fixture-uid",
+        .kind = "individual",
+        .fullName = "Fixture Contact",
+        .organization = {},
+        .title = {},
+        .emails = {},
+        .phones = {},
+        .addresses = {},
+        .members = {},
+        .birthday = {},
+        .notes = {},
+        .addressBookIds = {"book-1"},
+        .document = "{}",
+    };
+    const auto created = javelin::jmap::contacts::applyContactEditorData(contact, true);
+    REQUIRE(std::holds_alternative<std::string>(created));
+    CHECK(std::get<std::string>(created).find(R"("uid":"fixture-uid")") != std::string::npos);
+}
+
 TEST_CASE("contact group documents and membership patches preserve RFC paths",
           "[jmap][contacts][groups]")
 {

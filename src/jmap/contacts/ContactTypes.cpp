@@ -645,6 +645,12 @@ namespace javelin::jmap::contacts
             return std::string_view{"The advanced contact document is not valid JSON."};
 
         value.get_object().erase("id");
+        if (creating)
+        {
+            if (data.uid.empty())
+                return std::string_view{"New contacts require a uid."};
+            value["uid"] = data.uid;
+        }
         value["kind"] = data.kind.empty() ? std::string{"individual"} : data.kind;
         auto& name = value["name"];
         if (!name.is_object())
@@ -743,8 +749,6 @@ namespace javelin::jmap::contacts
                 return std::string_view{"Birthday must be YYYY, YYYY-MM, YYYY-MM-DD, or --MM-DD."};
             birthday["date"] = std::move(date);
         }
-        if (creating && !value.contains("uid"))
-            return std::string_view{"New contacts require a uid."};
         std::string result;
         if (glz::write_json(value, result))
             return std::string_view{"Unable to serialize the contact."};

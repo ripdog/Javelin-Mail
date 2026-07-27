@@ -153,6 +153,18 @@ namespace javelin::app::undo
             co_return failure(*error);
         const auto& summary = std::get<javelin::jmap::submission::DraftSaveSummary>(saved);
         history->currentDraftEmailId = summary.draftEmailId;
+        auto refreshed = co_await m_composeService.loadAuthoritativeDraft(
+            history->accountId, summary.draftEmailId, history->composeSessionId);
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&refreshed))
+            co_return failure(*error);
+        const auto canonical =
+            javelin::jmap::submission::serializeDraftSnapshot(
+                std::get<javelin::jmap::submission::DraftSnapshot>(std::move(refreshed)))
+                .toStdString();
+        if (undo)
+            history->beforeSnapshotJson = canonical;
+        else
+            history->afterSnapshotJson = canonical;
         co_return success(*history);
     }
 

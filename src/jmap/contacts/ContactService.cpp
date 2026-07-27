@@ -1787,13 +1787,11 @@ namespace javelin::jmap::contacts
                                                            &ContactSummary::uid);
                     if (matched != serverContactsSnapshot.end())
                     {
-                        const auto expected = canonicalContactDocument(projected->document, true);
-                        const auto actual = canonicalContactDocument(matched->document, true);
-                        if (expected.has_value() && expected == actual)
-                        {
-                            projected = *matched;
-                            confirmed = true;
-                        }
+                        // Card UIDs are supplied by the client and immutable. They safely
+                        // correlate a create whose response was lost even when the server
+                        // canonicalizes or adds Card properties.
+                        projected = *matched;
+                        confirmed = true;
                     }
                 }
                 else if (server != serverContactsSnapshot.end())
@@ -1806,6 +1804,9 @@ namespace javelin::jmap::contacts
                     result.acceptedContacts.push_back(&mutation);
                 std::erase_if(result.contacts, [&mutation](const ContactSummary& contact)
                               { return contact.id == mutation.objectId; });
+                if (mutation.kind == ContactMutationKind::Create)
+                    std::erase_if(result.contacts, [&projected](const ContactSummary& contact)
+                                  { return contact.uid == projected->uid; });
                 result.contacts.push_back(std::move(*projected));
             }
             return result;

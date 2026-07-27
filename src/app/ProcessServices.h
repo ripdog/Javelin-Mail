@@ -96,6 +96,7 @@ namespace javelin::app
         ProcessServices& operator=(ProcessServices&&) = delete;
 
         [[nodiscard]] javelin::jmap::cache::AccountRepository& accountRepository();
+        [[nodiscard]] javelin::jmap::cache::DatabaseConnection& databaseConnection();
         [[nodiscard]] javelin::jmap::cache::ContactRepository& contactRepository();
         [[nodiscard]] javelin::jmap::contacts::ContactService& contactService();
         [[nodiscard]] javelin::jmap::calendar::CalendarService& calendarService();

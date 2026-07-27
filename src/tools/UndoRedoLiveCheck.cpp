@@ -13,6 +13,7 @@
 #include "app/undo/MailHistoryExecutor.h"
 #include "app/undo/SieveHistoryExecutor.h"
 #include "app/undo/UndoManager.h"
+#include "tools/UndoRedoAutonomousSuite.h"
 
 #include <QCoroSignal>
 #include <QCoroTask>
@@ -337,6 +338,12 @@ int main(int argc, char* argv[])
     parser.addOption(
         {QStringLiteral("all"),
          QStringLiteral("Check the newest ready sample of every supported command kind.")});
+    parser.addOption(
+        {QStringLiteral("autonomous"),
+         QStringLiteral("Create isolated fixtures and exercise the autonomous live suite.")});
+    parser.addOption({QStringLiteral("connection"),
+                      QStringLiteral("Connection id for autonomous fixtures."),
+                      QStringLiteral("id")});
     parser.addOption({QStringLiteral("cycles"),
                       QStringLiteral("Round-trip cycles per entry (default 2)."),
                       QStringLiteral("count"), QStringLiteral("2")});
@@ -358,6 +365,35 @@ int main(int argc, char* argv[])
 
         javelin::app::ProcessServices services{false};
         services.mailService().applySettings(syncConfigurations(connections));
+        const bool autonomous = parser.isSet(QStringLiteral("autonomous"));
+        if (autonomous)
+        {
+            if (!parser.isSet(QStringLiteral("execute-live-mutations")))
+                throw std::runtime_error(
+                    "Refusing to mutate the live server without --execute-live-mutations");
+            const auto requestedConnection = parser.value(QStringLiteral("connection"));
+            const auto selectedConnection = std::ranges::find_if(
+                connections,
+                [&requestedConnection](const ConfiguredConnection& connection)
+                {
+                    return requestedConnection.isEmpty() ||
+                           connection.settings.connectionId == requestedConnection.toStdString();
+                });
+            if (selectedConnection == connections.end())
+                throw std::runtime_error("No configured connection matches --connection");
+            int exitCode = 1;
+            auto task = [&]() -> QCoro::Task<void>
+            {
+                exitCode = co_await javelin::tools::runUndoRedoAutonomousSuite(
+                    services, {
+                                  .connectionId = selectedConnection->settings.connectionId,
+                                  .accountIds = selectedConnection->accountIds,
+                              });
+            }();
+            QCoro::connect(std::move(task), &application, &QCoreApplication::quit);
+            static_cast<void>(application.exec());
+            return exitCode;
+        }
         const auto& entries = services.undoManager().entries();
         const auto entryId = parser.value(QStringLiteral("entry"));
         const auto commandKind = parser.value(QStringLiteral("kind"));

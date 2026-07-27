@@ -61,12 +61,12 @@ namespace javelin::jmap::api::detail
         std::string accountId;
         std::optional<std::string> oldState;
         std::string newState;
-        std::unordered_map<std::string, glz::generic> created;
-        std::unordered_map<std::string, glz::generic> updated;
-        std::vector<std::string> destroyed;
-        std::unordered_map<std::string, glz::generic> notCreated;
-        std::unordered_map<std::string, glz::generic> notUpdated;
-        std::unordered_map<std::string, glz::generic> notDestroyed;
+        std::optional<std::unordered_map<std::string, glz::generic>> created;
+        std::optional<std::unordered_map<std::string, glz::generic>> updated;
+        std::optional<std::vector<std::string>> destroyed;
+        std::optional<std::unordered_map<std::string, glz::generic>> notCreated;
+        std::optional<std::unordered_map<std::string, glz::generic>> notUpdated;
+        std::optional<std::unordered_map<std::string, glz::generic>> notDestroyed;
     };
 } // namespace javelin::jmap::api::detail
 
@@ -382,12 +382,18 @@ namespace javelin::jmap::api
         return {.value = SetResult{.accountId = raw.value->accountId,
                                    .oldState = raw.value->oldState.value_or(std::string{}),
                                    .newState = raw.value->newState,
-                                   .created = documents(raw.value->created),
-                                   .updated = optionalDocuments(raw.value->updated),
-                                   .destroyed = raw.value->destroyed,
-                                   .notCreated = documents(raw.value->notCreated),
-                                   .notUpdated = documents(raw.value->notUpdated),
-                                   .notDestroyed = documents(raw.value->notDestroyed)},
+                                   .created = documents(raw.value->created.value_or(
+                                       std::unordered_map<std::string, glz::generic>{})),
+                                   .updated = optionalDocuments(raw.value->updated.value_or(
+                                       std::unordered_map<std::string, glz::generic>{})),
+                                   .destroyed =
+                                       raw.value->destroyed.value_or(std::vector<std::string>{}),
+                                   .notCreated = documents(raw.value->notCreated.value_or(
+                                       std::unordered_map<std::string, glz::generic>{})),
+                                   .notUpdated = documents(raw.value->notUpdated.value_or(
+                                       std::unordered_map<std::string, glz::generic>{})),
+                                   .notDestroyed = documents(raw.value->notDestroyed.value_or(
+                                       std::unordered_map<std::string, glz::generic>{}))},
                 .error = std::nullopt};
     }
 } // namespace javelin::jmap::api
