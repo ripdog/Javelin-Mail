@@ -138,6 +138,11 @@ transport outcome, stale refresh rebasing, and crash/retry safety.
 ## Testing Expectations
 
 - Unit-test the internal JMAP library with Catch2.
+- Before configuring, building, or running tests, create `/tmp/javelin-mail-xdg-runtime` with
+  permissions `0700` and run the command with
+  `XDG_RUNTIME_DIR=/tmp/javelin-mail-xdg-runtime`. Catch2 test discovery starts Qt and otherwise
+  fails when the inherited runtime directory is unavailable. Treat this setup as part of the test
+  harness, not as a build or test failure worth reporting.
 - Prefer deterministic tests over network-dependent tests.
 - Protocol parsing, state transitions, cache reconciliation, query windows, and notification flows should all be testable from canned data.
 - Regressions around sync state, cache eviction, and background notification behavior require tests.
