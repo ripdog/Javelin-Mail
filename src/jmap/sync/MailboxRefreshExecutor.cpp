@@ -748,8 +748,22 @@ namespace javelin::jmap::sync
             }
 
             auto existingIds = std::get<std::vector<std::string>>(existingIdsResult);
+            std::vector<std::string> queryAddedIds;
+            queryAddedIds.reserve(queryChanges.added.size());
             for (const auto& added : queryChanges.added)
-                existingIds.push_back(added.id);
+                queryAddedIds.push_back(added.id);
+            const auto cachedAddedIdsResult = emailRepository.existingIds(accountId, queryAddedIds);
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&cachedAddedIdsResult))
+            {
+                co_return javelin::jmap::operationError(*error);
+            }
+            const auto& cachedAddedIds = std::get<std::vector<std::string>>(cachedAddedIdsResult);
+            for (const auto& addedId : queryAddedIds)
+            {
+                if (std::ranges::find(cachedAddedIds, addedId) == cachedAddedIds.end())
+                    existingIds.push_back(addedId);
+            }
             existingIds = deduplicatedIds(std::move(existingIds));
 
             if (existingIds.empty())

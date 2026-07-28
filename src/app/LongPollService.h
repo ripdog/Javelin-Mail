@@ -132,10 +132,12 @@ namespace javelin::app
         [[nodiscard]] bool hasValidSettings() const;
         [[nodiscard]] std::optional<RunConfiguration> resolveConfiguration() const;
         [[nodiscard]] QCoro::Task<void> runLoop(std::shared_ptr<RunContext> runContext);
-        [[nodiscard]] QCoro::Task<void> refreshWatchedMailbox(bool refreshEmailMailboxes);
+        [[nodiscard]] QCoro::Task<void> refreshWatchedMailbox(bool refreshMailboxState,
+                                                              bool refreshEmailState,
+                                                              bool refreshAllMailboxes);
         [[nodiscard]] QCoro::Task<void>
-        refreshWatchedMailboxOnce(std::shared_ptr<RunContext> runContext,
-                                  bool refreshEmailMailboxes);
+        refreshWatchedMailboxOnce(std::shared_ptr<RunContext> runContext, bool refreshMailboxState,
+                                  bool refreshEmailState, bool refreshAllMailboxes);
         [[nodiscard]] QCoro::Task<bool>
         refreshMailboxStateOnce(std::shared_ptr<RunContext> runContext);
         void handleResumeWatchdogTimeout();
@@ -150,7 +152,6 @@ namespace javelin::app
         [[nodiscard]] bool pendingStateChangeAlreadyApplied(std::string_view type,
                                                             std::string_view state) const;
         [[nodiscard]] bool pendingStateChangesAlreadyApplied() const;
-        [[nodiscard]] bool watchedMailboxCoverageIsAuthoritative() const;
         void restartForCatchUp();
         void restart();
         void setStatus(Status status);
@@ -182,7 +183,9 @@ namespace javelin::app
         bool m_shouldCatchUpRefreshOnReconnect = false;
         bool m_refreshInFlight = false;
         bool m_refreshAgainRequested = false;
+        bool m_refreshMailboxAgainRequested = false;
         bool m_refreshEmailAgainRequested = false;
+        bool m_refreshAllMailboxesAgainRequested = false;
         bool m_forceEmailRefreshRequested = false;
         QTimer m_refreshDebounceTimer;
         QTimer m_resumeWatchdogTimer;

@@ -69,8 +69,14 @@ Locally projected windows retain their server-ordered IDs as a scaffold. Mailbox
 from effective SQLite membership, including locally decidable removals, additions, thread
 representatives, metadata, and totals. Online search keeps definite removals and metadata changes;
 unknown membership remains conservative. Neither kind may derive authoritative positions.
-Navigation, explicit refresh, or a genuinely newer push replaces the scaffold. Successful
-mutations do not automatically refresh active mailbox or search tabs.
+Navigation, explicit refresh, or a server change proven to affect that query replaces the
+scaffold. A different account Email state alone is not proof that every query changed. Background
+sync first applies one account-wide `Email/changes` delta and compares fetched objects with their
+confirmed cached versions. Normal mailbox queries depend on mailbox membership, thread identity,
+and received time, so read/flag keyword-only changes update their rows without `Email/query` or
+`Email/queryChanges`. Membership, creation, destruction, or ordering changes reconcile only the
+old and new affected mailbox windows. Successful mutations do not automatically refresh active
+mailbox or search tabs.
 
 Totals are authoritative conversation counts for `collapseThreads: true`. Partial cached counts
 are diagnostic values only and must not replace query totals. Expanded thread members and retained

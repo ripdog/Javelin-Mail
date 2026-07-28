@@ -89,6 +89,7 @@ add_executable(javelin_jmap_tests
     app/TranslationServiceTest.cpp
     app/WorkSchedulerTest.cpp
     jmap/MailMethodsTest.cpp
+    jmap/MailDeltaRefreshExecutorTest.cpp
     jmap/MailboxRepositoryTest.cpp
     jmap/MailboxRefreshExecutorTest.cpp
     jmap/MailboxQueryDescriptorTest.cpp

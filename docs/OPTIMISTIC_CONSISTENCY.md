@@ -201,6 +201,13 @@ must rebase active Email projections after writing confirmed server objects and 
 cache change. A specialized page loader is not permission to bypass the mutation journal or expose
 a raw server snapshot to the GUI.
 
+Unmatched mail push is reconciled account-wide before any query is refreshed. One sequential JMAP
+envelope obtains `Mailbox/changes`, `Email/changes`, and result-referenced `/get` materialization.
+The confirmed pre-change and fetched Email documents determine which cached queries can actually
+have changed. Keyword-only updates therefore commit object metadata and Mailbox counts without
+querying unrelated mailboxes. State tokens are opaque: equality suppresses a push, while a
+different token is resolved through `/changes`; tokens are never ordered lexically.
+
 ## Extension Checklist
 
 Every new stateful JMAP mutation must:

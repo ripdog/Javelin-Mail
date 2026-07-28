@@ -259,18 +259,34 @@ namespace javelin::jmap::cache
             return std::nullopt;
         }
 
-        const DatabaseWriteScope writeScope{m_connection};
-        QSqlDatabase& database = m_connection.database();
-        if (!database.transaction())
+        auto transactionResult =
+            DatabaseTransaction::begin(m_connection, QStringLiteral("Delete mailboxes"));
+        if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
+            return *error;
+        auto transaction = std::get<DatabaseTransaction>(std::move(transactionResult));
+        if (const auto error = removeMany(transaction, accountId, mailboxIds))
+            return error;
+        return transaction.commit();
+    }
+
+    std::optional<DatabaseError>
+    MailboxRepository::removeMany(DatabaseTransaction& transaction,
+                                  const std::string_view accountId,
+                                  const std::span<const std::string> mailboxIds)
+    {
+        if (const auto error = m_connection.validate())
+            return error;
+        if (!transaction.isActive() || &transaction.connection() != &m_connection)
         {
             return DatabaseError{
                 .code = DatabaseErrorCode::QueryFailed,
-                .message = QStringLiteral("Begin mailbox delete transaction: ") +
-                           database.lastError().text(),
+                .message = QStringLiteral("Mailbox removal requires a matching transaction"),
             };
         }
+        if (mailboxIds.empty())
+            return std::nullopt;
 
-        QSqlQuery query{database};
+        QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
             "DELETE FROM mailboxes WHERE account_id = :account_id AND mailbox_id = :mailbox_id"));
         for (const auto& mailboxId : mailboxIds)
@@ -279,22 +295,8 @@ namespace javelin::jmap::cache
                             QString::fromStdString(std::string{accountId}));
             query.bindValue(QStringLiteral(":mailbox_id"), QString::fromStdString(mailboxId));
             if (!query.exec())
-            {
-                database.rollback();
                 return makeQueryError(QStringLiteral("Delete mailbox"), query);
-            }
         }
-
-        if (!database.commit())
-        {
-            database.rollback();
-            return DatabaseError{
-                .code = DatabaseErrorCode::QueryFailed,
-                .message = QStringLiteral("Commit mailbox delete transaction: ") +
-                           database.lastError().text(),
-            };
-        }
-
         return std::nullopt;
     }
 

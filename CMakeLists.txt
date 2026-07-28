@@ -374,6 +374,8 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/sync/WebSocketPushChannel.h
     src/jmap/sync/ConsistencyDomain.cpp
     src/jmap/sync/ConsistencyDomain.h
+    src/jmap/sync/MailDeltaRefreshExecutor.cpp
+    src/jmap/sync/MailDeltaRefreshExecutor.h
     src/jmap/sync/MailboxRefreshExecutor.cpp
     src/jmap/sync/MailboxRefreshExecutor.h
     src/jmap/sync/MailboxStateRefreshExecutor.cpp
@@ -597,6 +599,8 @@ add_library(javelin_jmap STATIC
     src/jmap/sync/WebSocketPushChannel.h
     src/jmap/sync/ConsistencyDomain.cpp
     src/jmap/sync/ConsistencyDomain.h
+    src/jmap/sync/MailDeltaRefreshExecutor.cpp
+    src/jmap/sync/MailDeltaRefreshExecutor.h
     src/jmap/sync/MailboxRefreshExecutor.cpp
     src/jmap/sync/MailboxRefreshExecutor.h
     src/jmap/sync/MailboxStateRefreshExecutor.cpp
