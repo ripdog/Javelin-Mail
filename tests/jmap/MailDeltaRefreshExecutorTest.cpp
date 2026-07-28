@@ -6,6 +6,7 @@
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/MailboxRepository.h"
 #include "jmap/cache/MailboxWindowRepository.h"
+#include "jmap/cache/QueryService.h"
 #include "jmap/cache/SyncStateRepository.h"
 #include "jmap/sync/EmailMutationJournal.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
@@ -256,6 +257,35 @@ namespace
                           .has_value());
     }
 
+    [[nodiscard]] std::string
+    seedMailboxWindow(javelin::jmap::cache::DatabaseConnection& connection,
+                      const std::string& mailboxId)
+    {
+        const auto queryKey = javelin::jmap::sync::mailboxQueryKey({
+            .mailboxId = mailboxId,
+            .sortProperty = "receivedAt",
+            .isAscending = false,
+            .collapseThreads = true,
+        });
+        javelin::jmap::cache::MailboxWindowRepository windows{connection};
+        REQUIRE_FALSE(windows
+                          .replace({
+                              .accountId = "account-1",
+                              .mailboxId = mailboxId,
+                              .queryKey = queryKey,
+                              .requestedOffset = 0,
+                              .requestedLimit = 100,
+                              .position = 0,
+                              .returnedLimit = 1,
+                              .total = 1,
+                              .queryState = mailboxId + "-query-state",
+                              .coverage = javelin::jmap::cache::QueryWindowCoverage::Server,
+                              .emailIds = {"email-1"},
+                          })
+                          .has_value());
+        return queryKey;
+    }
+
 } // namespace
 
 TEST_CASE("account mail delta applies an external seen change without invalidating mailbox queries",
@@ -266,28 +296,8 @@ TEST_CASE("account mail delta applies an external seen change without invalidati
     auto database = makeDatabaseContext();
     seedAccount(database.connection);
     seedMail(database.connection);
-    const auto archiveQueryKey = javelin::jmap::sync::mailboxQueryKey({
-        .mailboxId = "archive",
-        .sortProperty = "receivedAt",
-        .isAscending = false,
-        .collapseThreads = true,
-    });
+    const auto archiveQueryKey = seedMailboxWindow(database.connection, "archive");
     javelin::jmap::cache::MailboxWindowRepository windows{database.connection};
-    REQUIRE_FALSE(windows
-                      .replace({
-                          .accountId = "account-1",
-                          .mailboxId = "archive",
-                          .queryKey = archiveQueryKey,
-                          .requestedOffset = 0,
-                          .requestedLimit = 100,
-                          .position = 0,
-                          .returnedLimit = 1,
-                          .total = 1,
-                          .queryState = "archive-query-state",
-                          .coverage = javelin::jmap::cache::QueryWindowCoverage::LocallyProjected,
-                          .emailIds = {"email-1"},
-                      })
-                      .has_value());
     auto projectionResult = javelin::jmap::cache::DatabaseTransaction::begin(
         database.connection, QStringLiteral("Project archive test window"));
     REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(projectionResult));
@@ -344,12 +354,11 @@ TEST_CASE("account mail delta targets only old and new mailboxes for an external
     auto database = makeDatabaseContext();
     seedAccount(database.connection);
     seedMail(database.connection);
-
-    javelin::jmap::cache::EmailRepository emails{database.connection};
-    REQUIRE_FALSE(emails.upsertMany("account-1", {email({"inbox"}, {})}).has_value());
+    const auto inboxQueryKey = seedMailboxWindow(database.connection, "inbox");
+    const auto archiveQueryKey = seedMailboxWindow(database.connection, "archive");
 
     FakeTransport transport;
-    transport.queuedResults.push_back(deltaResponse("archive", false));
+    transport.queuedResults.push_back(deltaResponse("inbox", false));
     javelin::jmap::api::MethodCaller caller{transport};
     javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
                                                            requestContext()};
@@ -360,6 +369,37 @@ TEST_CASE("account mail delta targets only old and new mailboxes for an external
     const auto& summary = std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(result);
     CHECK(summary.queryAffectedMailboxIds == std::vector<std::string>{"archive", "inbox"});
     REQUIRE(transport.requests.size() == 1);
+
+    javelin::jmap::cache::MailboxWindowRepository windows{database.connection};
+    for (const auto& queryKey : {archiveQueryKey, inboxQueryKey})
+    {
+        const auto windowResult = windows.find("account-1", queryKey, 0, 100);
+        REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(
+            windowResult));
+        const auto& window =
+            std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(windowResult);
+        REQUIRE(window.has_value());
+        CHECK(window->coverage == javelin::jmap::cache::QueryWindowCoverage::LocallyProjected);
+    }
+
+    javelin::jmap::cache::QueryService queries{database.connection};
+    const auto inboxPageResult = queries.loadMailboxWindow("account-1", inboxQueryKey, 0, 100, {});
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::MailboxWindowPage>>(
+        inboxPageResult));
+    const auto& inboxPage =
+        std::get<std::optional<javelin::jmap::cache::MailboxWindowPage>>(inboxPageResult);
+    REQUIRE(inboxPage.has_value());
+    REQUIRE(inboxPage->items.size() == 1);
+    CHECK(inboxPage->items.front().emailId == "email-1");
+
+    const auto archivePageResult =
+        queries.loadMailboxWindow("account-1", archiveQueryKey, 0, 100, {});
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::MailboxWindowPage>>(
+        archivePageResult));
+    const auto& archivePage =
+        std::get<std::optional<javelin::jmap::cache::MailboxWindowPage>>(archivePageResult);
+    REQUIRE(archivePage.has_value());
+    CHECK(archivePage->items.empty());
 }
 
 TEST_CASE("account mail delta rebases retained accepted overlays over an external unread change",

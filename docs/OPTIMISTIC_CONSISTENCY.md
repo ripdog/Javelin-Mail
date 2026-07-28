@@ -207,6 +207,10 @@ The confirmed pre-change and fetched Email documents determine which cached quer
 have changed. Keyword-only updates therefore commit object metadata and Mailbox counts without
 querying unrelated mailboxes. State tokens are opaque: equality suppresses a push, while a
 different token is resolved through `/changes`; tokens are never ordered lexically.
+When an external Email delta changes locally known mailbox membership, the same cache transaction
+marks only the source and destination windows locally projected. Open views rebuild from effective
+SQLite immediately; authoritative query positions are reconciled later rather than forcing a
+post-push full query.
 
 ## Extension Checklist
 

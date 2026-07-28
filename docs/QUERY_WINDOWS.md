@@ -74,9 +74,11 @@ scaffold. A different account Email state alone is not proof that every query ch
 sync first applies one account-wide `Email/changes` delta and compares fetched objects with their
 confirmed cached versions. Normal mailbox queries depend on mailbox membership, thread identity,
 and received time, so read/flag keyword-only changes update their rows without `Email/query` or
-`Email/queryChanges`. Membership, creation, destruction, or ordering changes reconcile only the
-old and new affected mailbox windows. Successful mutations do not automatically refresh active
-mailbox or search tabs.
+`Email/queryChanges`. A locally decidable external membership change marks only its old and new
+mailbox windows locally projected and immediately rebuilds open views from effective SQLite.
+Pagination, navigation, or explicit refresh may later reconcile their preserved server scaffolds
+with `Email/queryChanges`; it does not force a full query directly after the push. Successful
+mutations do not automatically refresh active mailbox or search tabs.
 
 Totals are authoritative conversation counts for `collapseThreads: true`. Partial cached counts
 are diagnostic values only and must not replace query totals. Expanded thread members and retained

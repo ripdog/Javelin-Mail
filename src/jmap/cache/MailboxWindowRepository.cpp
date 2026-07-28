@@ -313,9 +313,19 @@ namespace javelin::jmap::cache
             };
         }
         QSqlQuery query{m_connection.database()};
-        query.prepare(QStringLiteral(
-            "UPDATE mailbox_query_windows SET coverage=:coverage WHERE account_id=:account_id "
-            "AND mailbox_id=:mailbox_id"));
+        if (coverage == QueryWindowCoverage::LocallyProjected)
+        {
+            query.prepare(QStringLiteral(
+                "UPDATE mailbox_query_windows SET coverage=CASE WHEN coverage='stale' THEN "
+                "'stale' ELSE :coverage END WHERE account_id=:account_id "
+                "AND mailbox_id=:mailbox_id"));
+        }
+        else
+        {
+            query.prepare(QStringLiteral(
+                "UPDATE mailbox_query_windows SET coverage=:coverage WHERE account_id=:account_id "
+                "AND mailbox_id=:mailbox_id"));
+        }
         query.bindValue(QStringLiteral(":coverage"), coverageValue(coverage));
         query.bindValue(QStringLiteral(":account_id"),
                         QString::fromStdString(std::string{accountId}));

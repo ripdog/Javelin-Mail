@@ -4,6 +4,7 @@
 #include "jmap/api/ResponseReader.h"
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/MailboxRepository.h"
+#include "jmap/cache/MailboxWindowRepository.h"
 #include "jmap/cache/SearchWindowRepository.h"
 #include "jmap/cache/SyncStateRepository.h"
 #include "jmap/sync/ConsistencyDomain.h"
@@ -393,6 +394,14 @@ namespace javelin::jmap::sync
         }
         if (parsed.emailChanges.has_value())
         {
+            javelin::jmap::cache::MailboxWindowRepository mailboxWindows{m_databaseConnection};
+            for (const auto& mailboxId : summary.queryAffectedMailboxIds)
+            {
+                if (const auto error = mailboxWindows.invalidateMailbox(
+                        transaction.cacheTransaction(), accountId, mailboxId,
+                        javelin::jmap::cache::QueryWindowCoverage::LocallyProjected))
+                    co_return operationError(*error);
+            }
             if (const auto error =
                     emails.upsertMany(transaction.cacheTransaction(), accountId, parsed.emails))
                 co_return operationError(*error);
