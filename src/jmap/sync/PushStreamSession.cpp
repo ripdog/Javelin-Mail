@@ -1,6 +1,11 @@
 #include "jmap/sync/PushStreamSession.h"
 
+#include <QLoggingCategory>
+#include <QStringList>
+
 #include <utility>
+
+Q_LOGGING_CATEGORY(logPushStream, "jmap.push")
 
 namespace javelin::jmap::sync
 {
@@ -33,6 +38,20 @@ namespace javelin::jmap::sync
         auto event = std::get<StateChangeEvent>(std::move(message));
         m_subscription.lastState = event.newState;
         m_summary.lastState = event.newState;
+        QStringList changedDomains;
+        for (const auto& [accountId, states] : event.changedStates)
+        {
+            for (const auto& [type, state] : states)
+            {
+                static_cast<void>(state);
+                changedDomains.append(QStringLiteral("%1:%2").arg(QString::fromStdString(accountId),
+                                                                  QString::fromStdString(type)));
+            }
+        }
+        changedDomains.sort();
+        if (!changedDomains.isEmpty())
+            qCInfo(logPushStream).noquote()
+                << "state change" << changedDomains.join(QLatin1Char(','));
         if (!event.notifyConsumer)
             co_return PushStreamIgnored{};
 

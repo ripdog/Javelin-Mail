@@ -489,11 +489,17 @@ namespace javelin::app
             QSqlQuery addMembership{m_connection.database()};
             addMembership.prepare(QStringLiteral(
                 "INSERT INTO offline_mailbox_membership(account_id,mailbox_id,email_id,generation,"
-                "position) SELECT s.account_id,s.mailbox_id,em.email_id,s.generation,0 FROM "
-                "offline_mailbox_scopes s INNER JOIN email_mailboxes em ON "
-                "em.account_id=s.account_id AND em.mailbox_id=s.mailbox_id WHERE "
-                "s.account_id=:account AND s.mailbox_id=:mailbox AND s.status='complete' "
-                "ON CONFLICT(account_id,mailbox_id,generation,email_id) DO NOTHING"));
+                "position) SELECT s.account_id,s.mailbox_id,em.email_id,s.generation,"
+                "COALESCE((SELECT MAX(existing.position)+1 FROM offline_mailbox_membership "
+                "existing WHERE existing.account_id=s.account_id AND "
+                "existing.mailbox_id=s.mailbox_id AND existing.generation=s.generation),0)+"
+                "ROW_NUMBER() OVER (ORDER BY em.email_id)-1 FROM offline_mailbox_scopes s INNER "
+                "JOIN email_mailboxes em ON em.account_id=s.account_id AND "
+                "em.mailbox_id=s.mailbox_id WHERE s.account_id=:account AND "
+                "s.mailbox_id=:mailbox AND s.status='complete' AND NOT EXISTS(SELECT 1 FROM "
+                "offline_mailbox_membership existing WHERE existing.account_id=s.account_id AND "
+                "existing.mailbox_id=s.mailbox_id AND existing.generation=s.generation AND "
+                "existing.email_id=em.email_id)"));
             addMembership.bindValue(QStringLiteral(":account"),
                                     QString::fromStdString(scope.accountId));
             addMembership.bindValue(QStringLiteral(":mailbox"),
