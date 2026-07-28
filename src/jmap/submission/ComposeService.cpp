@@ -120,6 +120,7 @@ namespace javelin::jmap::submission
             return javelin::jmap::api::ApiRequestContext{
                 .credentials = buildCredentials(settings, std::move(accountId)),
                 .apiUrl = session.apiUrl,
+                .requestLimits = javelin::jmap::api::coreRequestLimits(session),
             };
         }
 

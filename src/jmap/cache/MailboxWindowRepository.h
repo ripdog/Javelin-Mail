@@ -25,6 +25,7 @@ namespace javelin::jmap::cache
         std::optional<std::size_t> total;
         std::string queryState;
         QueryWindowCoverage coverage = QueryWindowCoverage::Server;
+        QueryWindowMaterialization materialization = QueryWindowMaterialization::Complete;
         std::vector<std::string> emailIds;
     };
 

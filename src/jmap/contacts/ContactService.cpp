@@ -95,6 +95,7 @@ namespace javelin::jmap::contacts
         {
             std::vector<ContactSummary> contacts;
             std::vector<std::string> notFound;
+            bool stateAdvanced = false;
         };
 
         using ContactGetBatchResult = std::variant<ContactGetBatch, javelin::jmap::OperationError>;
@@ -179,7 +180,8 @@ namespace javelin::jmap::contacts
                 const javelin::jmap::api::Session& session, std::string accountId)
         {
             return {.credentials = credentials(settings, std::move(accountId)),
-                    .apiUrl = session.apiUrl};
+                    .apiUrl = session.apiUrl,
+                    .requestLimits = javelin::jmap::api::coreRequestLimits(session)};
         }
 
         [[nodiscard]] std::optional<javelin::jmap::api::MethodInvocation>
@@ -257,7 +259,7 @@ namespace javelin::jmap::contacts
         fetchContactCards(javelin::jmap::api::JmapMethodTransport& methodTransport,
                           const javelin::jmap::LiveConnectionSettings& settings,
                           const javelin::jmap::api::Session& session, const std::string& accountId,
-                          const std::vector<std::string>& ids)
+                          const std::vector<std::string>& ids, const std::string_view expectedState)
         {
             ContactGetBatch result;
             const std::uint64_t advertisedLimit =
@@ -288,18 +290,42 @@ namespace javelin::jmap::contacts
                     co_return javelin::jmap::operationError(methodFailure->error);
                 const auto parsed = javelin::jmap::api::parseContactCardGetResponse(
                     std::get<javelin::jmap::api::MethodInvocation>(callResult).arguments);
-                if (!parsed.ok())
+                if (!parsed.ok() || parsed.value->accountId != accountId)
                     co_return error(QStringLiteral("Unable to parse ContactCard/get response."));
+                result.stateAdvanced = result.stateAdvanced || parsed.value->state != expectedState;
+                std::unordered_set<std::string> requested(batchIds.begin(), batchIds.end());
+                std::unordered_set<std::string> accounted;
                 for (const auto& card : parsed.value->list)
                 {
+                    if (!requested.contains(card.id) || !accounted.insert(card.id).second)
+                    {
+                        co_return error(
+                            QStringLiteral("ContactCard/get returned an unexpected duplicate ID."),
+                            javelin::jmap::OperationErrorCode::ProtocolViolation);
+                    }
                     auto contact = summarizeContact(accountId, card);
                     if (!contact.has_value())
                         co_return error(
                             QStringLiteral("The server returned an invalid ContactCard."));
                     result.contacts.push_back(std::move(*contact));
                 }
-                result.notFound.insert(result.notFound.end(), parsed.value->notFound.begin(),
-                                       parsed.value->notFound.end());
+                for (const auto& id : parsed.value->notFound)
+                {
+                    if (!requested.contains(id) || !accounted.insert(id).second)
+                    {
+                        co_return error(
+                            QStringLiteral(
+                                "ContactCard/get returned an unexpected duplicate notFound ID."),
+                            javelin::jmap::OperationErrorCode::ProtocolViolation);
+                    }
+                    result.notFound.push_back(id);
+                }
+                if (accounted.size() != requested.size())
+                {
+                    co_return error(
+                        QStringLiteral("ContactCard/get omitted requested materialization IDs."),
+                        javelin::jmap::OperationErrorCode::ProtocolViolation);
+                }
             }
             co_return result;
         }
@@ -390,8 +416,9 @@ namespace javelin::jmap::contacts
                 };
                 collectChanged(changes.value->created);
                 collectChanged(changes.value->updated);
-                auto fetched = co_await fetchContactCards(methodTransport, settings, session,
-                                                          accountId, changedIds);
+                auto fetched =
+                    co_await fetchContactCards(methodTransport, settings, session, accountId,
+                                               changedIds, changes.value->newState);
                 if (const auto* fetchError = std::get_if<javelin::jmap::OperationError>(&fetched))
                     co_return *fetchError;
                 auto batch = std::get<ContactGetBatch>(std::move(fetched));
@@ -408,7 +435,7 @@ namespace javelin::jmap::contacts
                     co_return error(cacheError->message);
 
                 state = changes.value->newState;
-                hasMoreChanges = changes.value->hasMoreChanges;
+                hasMoreChanges = changes.value->hasMoreChanges || batch.stateAdvanced;
             } while (hasMoreChanges);
 
             const auto cachedContacts = repository.listContacts(accountId);

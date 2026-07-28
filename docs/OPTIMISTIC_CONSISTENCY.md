@@ -208,9 +208,15 @@ have changed. Keyword-only updates therefore commit object metadata and Mailbox 
 querying unrelated mailboxes. State tokens are opaque: equality suppresses a push, while a
 different token is resolved through `/changes`; tokens are never ordered lexically.
 When an external Email delta changes locally known mailbox membership, the same cache transaction
-marks only the source and destination windows locally projected. Open views rebuild from effective
-SQLite immediately; authoritative query positions are reconciled later rather than forcing a
-post-push full query.
+marks only the source and destination windows stale and partially materialized. The changed Email
+and Mailbox objects remain immediately usable, while affected visible queries are reconciled
+directly. `/changes` does not provide an authoritative insertion position, so treating this case as
+a complete local query projection would risk silently omitting or misordering an item.
+
+Core request limits are mandatory session data. Every request envelope is checked against
+`maxCallsInRequest` and `maxSizeRequest` before dispatch, and typed materializers use negotiated
+object limits when choosing change pages and `/get` batches. A response may advance a domain state
+only after its requested IDs are accounted for exactly by returned objects or `notFound`.
 
 ## Extension Checklist
 

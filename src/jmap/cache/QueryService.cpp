@@ -783,6 +783,7 @@ namespace javelin::jmap::cache
             .total = (*window)->total,
             .queryState = (*window)->queryState,
             .coverage = (*window)->coverage,
+            .materialization = (*window)->materialization,
             .items = *messages,
         }};
     }
@@ -831,6 +832,7 @@ namespace javelin::jmap::cache
                 .total = *total,
                 .queryState = (*window)->queryState,
                 .coverage = QueryWindowCoverage::LocallyProjected,
+                .materialization = (*window)->materialization,
                 .items = *projected,
             }};
         }
@@ -858,6 +860,7 @@ namespace javelin::jmap::cache
             .total = (*window)->total,
             .queryState = (*window)->queryState,
             .coverage = (*window)->coverage,
+            .materialization = (*window)->materialization,
             .items = *messages,
         }};
     }

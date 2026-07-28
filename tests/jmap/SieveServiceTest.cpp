@@ -71,7 +71,7 @@ namespace
     [[nodiscard]] QByteArray sessionResponse()
     {
         return QByteArray{
-            R"({"username":"alice@example.test","apiUrl":"https://example.test/jmap","downloadUrl":"https://example.test/download/{accountId}/{blobId}/{name}?accept={type}","uploadUrl":"https://example.test/upload/{accountId}","state":"s1","capabilities":{"urn:ietf:params:jmap:core":{},"urn:ietf:params:jmap:sieve":{}},"accounts":{"sieve-account":{"name":"Personal","isPersonal":true,"isReadOnly":false,"accountCapabilities":{"urn:ietf:params:jmap:sieve":{}}}},"primaryAccounts":{"urn:ietf:params:jmap:sieve":"sieve-account"}})"};
+            R"({"username":"alice@example.test","apiUrl":"https://example.test/jmap","downloadUrl":"https://example.test/download/{accountId}/{blobId}/{name}?accept={type}","uploadUrl":"https://example.test/upload/{accountId}","state":"s1","capabilities":{"urn:ietf:params:jmap:core":{"maxSizeRequest":1000000,"maxConcurrentRequests":8,"maxCallsInRequest":16,"maxObjectsInGet":500,"maxObjectsInSet":500},"urn:ietf:params:jmap:sieve":{}},"accounts":{"sieve-account":{"name":"Personal","isPersonal":true,"isReadOnly":false,"accountCapabilities":{"urn:ietf:params:jmap:sieve":{}}}},"primaryAccounts":{"urn:ietf:params:jmap:sieve":"sieve-account"}})"};
     }
 
     [[nodiscard]] javelin::jmap::LiveConnectionSettings settings()

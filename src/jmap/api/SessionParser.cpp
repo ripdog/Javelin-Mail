@@ -38,9 +38,9 @@ template <> struct glz::meta<javelin::jmap::api::CoreCapability>
 
     static constexpr auto value = glz::object(
         "maxSizeUpload", &T::maxSizeUpload, "maxConcurrentUpload", &T::maxConcurrentUpload,
-        "maxConcurrentRequests", &T::maxConcurrentRequests, "maxCallsInRequest",
-        &T::maxCallsInRequest, "maxObjectsInGet", &T::maxObjectsInGet, "maxObjectsInSet",
-        &T::maxObjectsInSet, "collationAlgorithms", &T::collationAlgorithms);
+        "maxSizeRequest", &T::maxSizeRequest, "maxConcurrentRequests", &T::maxConcurrentRequests,
+        "maxCallsInRequest", &T::maxCallsInRequest, "maxObjectsInGet", &T::maxObjectsInGet,
+        "maxObjectsInSet", &T::maxObjectsInSet, "collationAlgorithms", &T::collationAlgorithms);
 };
 
 template <> struct glz::meta<javelin::jmap::api::ContactsCapability>

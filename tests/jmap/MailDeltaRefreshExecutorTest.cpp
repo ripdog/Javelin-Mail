@@ -117,6 +117,7 @@ namespace
                         },
                 },
             .apiUrl = "https://example.com/api",
+            .requestLimits = std::nullopt,
         };
     }
 
@@ -343,6 +344,7 @@ TEST_CASE("account mail delta applies an external seen change without invalidati
         std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(windowResult);
     REQUIRE(window.has_value());
     CHECK(window->coverage == javelin::jmap::cache::QueryWindowCoverage::LocallyProjected);
+    CHECK(window->materialization == javelin::jmap::cache::QueryWindowMaterialization::Complete);
     CHECK(window->queryState == "archive-query-state");
 }
 
@@ -379,7 +381,8 @@ TEST_CASE("account mail delta targets only old and new mailboxes for an external
         const auto& window =
             std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(windowResult);
         REQUIRE(window.has_value());
-        CHECK(window->coverage == javelin::jmap::cache::QueryWindowCoverage::LocallyProjected);
+        CHECK(window->coverage == javelin::jmap::cache::QueryWindowCoverage::Stale);
+        CHECK(window->materialization == javelin::jmap::cache::QueryWindowMaterialization::Partial);
     }
 
     javelin::jmap::cache::QueryService queries{database.connection};

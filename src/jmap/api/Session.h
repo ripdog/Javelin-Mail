@@ -28,11 +28,21 @@ namespace javelin::jmap::api
     {
         std::optional<std::uint64_t> maxSizeUpload;
         std::optional<std::uint64_t> maxConcurrentUpload;
+        std::optional<std::uint64_t> maxSizeRequest;
         std::optional<std::uint64_t> maxConcurrentRequests;
         std::optional<std::uint64_t> maxCallsInRequest;
         std::optional<std::uint64_t> maxObjectsInGet;
         std::optional<std::uint64_t> maxObjectsInSet;
         std::vector<std::string> collationAlgorithms;
+    };
+
+    struct CoreRequestLimits
+    {
+        std::uint64_t maxSizeRequest = 0;
+        std::uint64_t maxConcurrentRequests = 0;
+        std::uint64_t maxCallsInRequest = 0;
+        std::uint64_t maxObjectsInGet = 0;
+        std::uint64_t maxObjectsInSet = 0;
     };
 
     struct SessionCapabilities
@@ -106,6 +116,7 @@ namespace javelin::jmap::api
     enum class CapabilityError
     {
         MissingCoreCapability,
+        InvalidCoreCapability,
         MissingMailCapability,
         MissingSubmissionCapability,
         MissingPrimaryMailAccount,
@@ -137,6 +148,7 @@ namespace javelin::jmap::api
 
     [[nodiscard]] CapabilityValidationResult
     validateSessionCapabilities(const Session& session, const RequiredCapabilities& required);
+    [[nodiscard]] std::optional<CoreRequestLimits> coreRequestLimits(const Session& session);
 
     [[nodiscard]] std::string_view toString(CapabilityError error);
 

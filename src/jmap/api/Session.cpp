@@ -28,6 +28,11 @@ namespace javelin::jmap::api
         CapabilityValidationResult result;
         appendIfMissing(result.errors, session.capabilities.core,
                         CapabilityError::MissingCoreCapability);
+        if (session.capabilities.core)
+        {
+            appendIfMissing(result.errors, coreRequestLimits(session).has_value(),
+                            CapabilityError::InvalidCoreCapability);
+        }
 
         if (required.mail)
         {
@@ -118,12 +123,34 @@ namespace javelin::jmap::api
         return result;
     }
 
+    std::optional<CoreRequestLimits> coreRequestLimits(const Session& session)
+    {
+        const auto& core = session.capabilities.coreDetails;
+        if (!core || !core->maxSizeRequest || !core->maxConcurrentRequests ||
+            !core->maxCallsInRequest || !core->maxObjectsInGet || !core->maxObjectsInSet ||
+            *core->maxSizeRequest == 0 || *core->maxConcurrentRequests == 0 ||
+            *core->maxCallsInRequest == 0 || *core->maxObjectsInGet == 0 ||
+            *core->maxObjectsInSet == 0)
+        {
+            return std::nullopt;
+        }
+        return CoreRequestLimits{
+            .maxSizeRequest = *core->maxSizeRequest,
+            .maxConcurrentRequests = *core->maxConcurrentRequests,
+            .maxCallsInRequest = *core->maxCallsInRequest,
+            .maxObjectsInGet = *core->maxObjectsInGet,
+            .maxObjectsInSet = *core->maxObjectsInSet,
+        };
+    }
+
     std::string_view toString(const CapabilityError error)
     {
         switch (error)
         {
         case CapabilityError::MissingCoreCapability:
             return "missing_core_capability";
+        case CapabilityError::InvalidCoreCapability:
+            return "invalid_core_capability";
         case CapabilityError::MissingMailCapability:
             return "missing_mail_capability";
         case CapabilityError::MissingSubmissionCapability:

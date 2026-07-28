@@ -687,6 +687,7 @@ namespace javelin::jmap
             return javelin::jmap::api::ApiRequestContext{
                 .credentials = buildAccountCredentials(settings, std::move(accountId)),
                 .apiUrl = session.apiUrl,
+                .requestLimits = javelin::jmap::api::coreRequestLimits(session),
             };
         }
 

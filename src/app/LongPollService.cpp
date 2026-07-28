@@ -302,6 +302,14 @@ namespace javelin::app
         }
         std::ranges::sort(groupwareAccountIds);
 
+        const auto requestLimits = javelin::jmap::api::coreRequestLimits(session->value());
+        if (!requestLimits.has_value())
+        {
+            qWarning() << "Account sync configuration unavailable because the cached session has "
+                          "invalid JMAP Core request limits";
+            return std::nullopt;
+        }
+
         return RunConfiguration{
             .settings = *m_settings,
             .accountId = m_accountId,
@@ -309,6 +317,7 @@ namespace javelin::app
             .notificationMailboxIds = {notificationMailboxIds.begin(),
                                        notificationMailboxIds.end()},
             .apiUrl = session->value().apiUrl,
+            .requestLimits = *requestLimits,
             .eventSourceUrl = session->value().eventSourceUrl.value_or(std::string{}),
             .websocket = session->value().capabilities.websocket,
             .groupwareAccountIds = std::move(groupwareAccountIds),
@@ -405,6 +414,7 @@ namespace javelin::app
                         },
                 },
             .apiUrl = runContext->configuration.apiUrl,
+            .requestLimits = runContext->configuration.requestLimits,
         };
 
         bool mailboxStateChanged = false;
@@ -605,6 +615,7 @@ namespace javelin::app
                         },
                 },
             .apiUrl = runContext->configuration.apiUrl,
+            .requestLimits = runContext->configuration.requestLimits,
         };
 
         javelin::jmap::sync::MailboxStateRefreshExecutor executor{m_databaseConnection,

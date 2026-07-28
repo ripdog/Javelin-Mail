@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <optional>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 namespace javelin::jmap::sieve::detail
@@ -267,7 +268,9 @@ namespace javelin::jmap::sieve
 
         [[nodiscard]] api::ApiRequestContext apiContext(const detail::ResolvedContext& context)
         {
-            return {.credentials = context.credentials, .apiUrl = context.session.apiUrl};
+            return {.credentials = context.credentials,
+                    .apiUrl = context.session.apiUrl,
+                    .requestLimits = api::coreRequestLimits(context.session)};
         }
 
         [[nodiscard]] QCoro::Task<std::variant<api::ResponseEnvelope, OperationError>>
@@ -494,6 +497,15 @@ namespace javelin::jmap::sieve
         if (const auto* parseError = std::get_if<OperationError>(&parsed))
             co_return *parseError;
         const auto& responseValue = std::get<detail::GetResponse>(parsed);
+        std::unordered_set<std::string> scriptIds;
+        if (responseValue.accountId != context.sieveAccountId ||
+            std::ranges::any_of(responseValue.list, [&scriptIds](const SieveScript& script)
+                                { return !scriptIds.insert(script.id).second; }) ||
+            !responseValue.notFound.empty())
+        {
+            co_return error(OperationErrorCode::ProtocolViolation,
+                            QStringLiteral("The server returned an invalid script snapshot."));
+        }
         const auto isCurrent = consistency.isCurrent(fence);
         if (const auto* cacheError = std::get_if<cache::DatabaseError>(&isCurrent))
             co_return operationError(*cacheError);

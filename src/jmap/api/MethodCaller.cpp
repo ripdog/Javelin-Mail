@@ -21,6 +21,32 @@ namespace javelin::jmap::api
                                                        CancellationToken cancellation,
                                                        std::function<void()> dispatched) const
     {
+        if (requestContext.requestLimits.has_value())
+        {
+            const auto& limits = *requestContext.requestLimits;
+            if (request.methodCalls.size() > limits.maxCallsInRequest)
+            {
+                co_return ProtocolError{
+                    .code = ProtocolErrorCode::InvalidRequest,
+                    .message = "JMAP request exceeds the negotiated maxCallsInRequest limit",
+                };
+            }
+            const auto encoded = serializeRequestEnvelope(request);
+            if (!encoded.has_value())
+            {
+                co_return ProtocolError{
+                    .code = ProtocolErrorCode::InvalidRequest,
+                    .message = "JMAP request could not be encoded",
+                };
+            }
+            if (encoded->size() > limits.maxSizeRequest)
+            {
+                co_return ProtocolError{
+                    .code = ProtocolErrorCode::InvalidRequest,
+                    .message = "JMAP request exceeds the negotiated maxSizeRequest limit",
+                };
+            }
+        }
         if (cancellation.isCancellationRequested())
         {
             co_return TransportError{

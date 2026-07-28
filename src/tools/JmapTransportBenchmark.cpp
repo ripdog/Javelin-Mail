@@ -114,7 +114,8 @@ namespace
                                                                   .refreshToken = std::nullopt,
                                                                   .expiry = std::nullopt}},
                                         .apiUrl = session->value().apiUrl,
-                                        .transportPolicy = policy};
+                                        .transportPolicy = policy,
+                                        .requestLimits = std::nullopt};
         MethodCaller caller{transport};
         Measurements measurements;
         QElapsedTimer total;

@@ -1606,6 +1606,26 @@ namespace javelin::jmap::cache
                                            ") STRICT"),
                         },
                 },
+                MigrationStep{
+                    .version = 36,
+                    .name = QStringLiteral("query_window_materialization"),
+                    .statements =
+                        {
+                            QStringLiteral(
+                                "ALTER TABLE mailbox_query_windows ADD COLUMN materialization "
+                                "TEXT NOT NULL DEFAULT 'complete' CHECK(materialization IN "
+                                "('complete','partial'))"),
+                            QStringLiteral(
+                                "UPDATE mailbox_query_windows SET materialization='partial' "
+                                "WHERE coverage!='server'"),
+                            QStringLiteral(
+                                "ALTER TABLE search_windows ADD COLUMN materialization TEXT NOT "
+                                "NULL DEFAULT 'complete' CHECK(materialization IN "
+                                "('complete','partial'))"),
+                            QStringLiteral("UPDATE search_windows SET materialization='partial' "
+                                           "WHERE coverage!='server'"),
+                        },
+                },
             },
         };
     }

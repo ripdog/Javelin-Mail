@@ -112,6 +112,7 @@ namespace javelin::app
             std::vector<std::pair<std::string, std::string>> mailboxes;
             std::unordered_set<std::string> notificationMailboxIds;
             std::string apiUrl;
+            javelin::jmap::api::CoreRequestLimits requestLimits;
             std::string eventSourceUrl;
             std::optional<javelin::jmap::api::WebSocketCapability> websocket;
             std::vector<std::string> groupwareAccountIds;

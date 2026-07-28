@@ -18,6 +18,7 @@ namespace javelin::jmap::cache
         {
             std::optional<std::uint64_t> maxSizeUpload;
             std::optional<std::uint64_t> maxConcurrentUpload;
+            std::optional<std::uint64_t> maxSizeRequest;
             std::optional<std::uint64_t> maxConcurrentRequests;
             std::optional<std::uint64_t> maxCallsInRequest;
             std::optional<std::uint64_t> maxObjectsInGet;
@@ -51,9 +52,9 @@ template <> struct glz::meta<javelin::jmap::cache::detail::RawCoreCapability>
 
     static constexpr auto value = glz::object(
         "maxSizeUpload", &T::maxSizeUpload, "maxConcurrentUpload", &T::maxConcurrentUpload,
-        "maxConcurrentRequests", &T::maxConcurrentRequests, "maxCallsInRequest",
-        &T::maxCallsInRequest, "maxObjectsInGet", &T::maxObjectsInGet, "maxObjectsInSet",
-        &T::maxObjectsInSet, "collationAlgorithms", &T::collationAlgorithms);
+        "maxSizeRequest", &T::maxSizeRequest, "maxConcurrentRequests", &T::maxConcurrentRequests,
+        "maxCallsInRequest", &T::maxCallsInRequest, "maxObjectsInGet", &T::maxObjectsInGet,
+        "maxObjectsInSet", &T::maxObjectsInSet, "collationAlgorithms", &T::collationAlgorithms);
 };
 
 template <> struct glz::meta<javelin::jmap::cache::detail::RawContactsCapability>
@@ -98,6 +99,7 @@ namespace javelin::jmap::cache
             detail::RawCoreCapability raw{
                 .maxSizeUpload = capability->maxSizeUpload,
                 .maxConcurrentUpload = capability->maxConcurrentUpload,
+                .maxSizeRequest = capability->maxSizeRequest,
                 .maxConcurrentRequests = capability->maxConcurrentRequests,
                 .maxCallsInRequest = capability->maxCallsInRequest,
                 .maxObjectsInGet = capability->maxObjectsInGet,
@@ -135,6 +137,7 @@ namespace javelin::jmap::cache
             return javelin::jmap::api::CoreCapability{
                 .maxSizeUpload = raw.maxSizeUpload,
                 .maxConcurrentUpload = raw.maxConcurrentUpload,
+                .maxSizeRequest = raw.maxSizeRequest,
                 .maxConcurrentRequests = raw.maxConcurrentRequests,
                 .maxCallsInRequest = raw.maxCallsInRequest,
                 .maxObjectsInGet = raw.maxObjectsInGet,

@@ -134,6 +134,7 @@ namespace
                         },
                 },
             .apiUrl = "https://mail.example.com/jmap/api",
+            .requestLimits = std::nullopt,
         };
     }
 

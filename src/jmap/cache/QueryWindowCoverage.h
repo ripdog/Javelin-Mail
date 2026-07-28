@@ -10,14 +10,25 @@ namespace javelin::jmap::cache
         Stale,
     };
 
-    [[nodiscard]] constexpr bool isDisplayCurrent(const QueryWindowCoverage coverage)
+    enum class QueryWindowMaterialization
     {
-        return coverage != QueryWindowCoverage::Stale;
+        Complete,
+        Partial,
+    };
+
+    [[nodiscard]] constexpr bool isDisplayCurrent(const QueryWindowCoverage coverage,
+                                                  const QueryWindowMaterialization materialization)
+    {
+        return coverage != QueryWindowCoverage::Stale &&
+               materialization == QueryWindowMaterialization::Complete;
     }
 
-    [[nodiscard]] constexpr bool isPaginationAuthoritative(const QueryWindowCoverage coverage)
+    [[nodiscard]] constexpr bool
+    isPaginationAuthoritative(const QueryWindowCoverage coverage,
+                              const QueryWindowMaterialization materialization)
     {
-        return coverage == QueryWindowCoverage::Server;
+        return coverage == QueryWindowCoverage::Server &&
+               materialization == QueryWindowMaterialization::Complete;
     }
 
 } // namespace javelin::jmap::cache

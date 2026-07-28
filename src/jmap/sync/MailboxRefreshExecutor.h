@@ -3,6 +3,7 @@
 #include "jmap/OperationError.h"
 #include "jmap/api/MethodCaller.h"
 #include "jmap/cache/Database.h"
+#include "jmap/sync/MutationJournal.h"
 #include "jmap/sync/RefreshNotificationTypes.h"
 
 #include <QCoroTask>
@@ -37,6 +38,11 @@ namespace javelin::jmap::sync
 
     [[nodiscard]] std::optional<OperationError>
     rebaseActiveEmailProjections(javelin::jmap::cache::DatabaseConnection& databaseConnection,
+                                 std::string_view accountId, std::vector<std::string> emailIds,
+                                 std::string_view serverState);
+    [[nodiscard]] std::optional<OperationError>
+    rebaseActiveEmailProjections(MutationProjectionTransaction& transaction,
+                                 javelin::jmap::cache::DatabaseConnection& databaseConnection,
                                  std::string_view accountId, std::vector<std::string> emailIds,
                                  std::string_view serverState);
 

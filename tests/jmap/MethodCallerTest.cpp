@@ -126,6 +126,7 @@ namespace
                         },
                 },
             .apiUrl = "https://mail.example.com/jmap/api",
+            .requestLimits = std::nullopt,
         };
     }
 
@@ -176,6 +177,36 @@ TEST_CASE("method caller is independent of HTTP transport", "[jmap][method][tran
     CHECK(transport.request->apiUrl == "https://mail.example.com/jmap/api");
     CHECK(transport.request->accessToken == "access-token");
     CHECK(transport.request->envelope.methodCalls.size() == 2);
+}
+
+TEST_CASE("method caller rejects envelopes above negotiated method and byte limits",
+          "[jmap][method][transport][limits]")
+{
+    ensureApplication();
+    FakeJmapMethodTransport transport;
+    javelin::jmap::api::MethodCaller caller{transport};
+
+    auto context = makeRequestContext();
+    context.requestLimits = javelin::jmap::api::CoreRequestLimits{
+        .maxSizeRequest = 1'000'000,
+        .maxConcurrentRequests = 1,
+        .maxCallsInRequest = 1,
+        .maxObjectsInGet = 100,
+        .maxObjectsInSet = 100,
+    };
+    auto result = QCoro::waitFor(caller.call(context, loadRequestEnvelope()));
+    REQUIRE(std::holds_alternative<javelin::jmap::api::ProtocolError>(result));
+    CHECK(std::get<javelin::jmap::api::ProtocolError>(result).code ==
+          javelin::jmap::api::ProtocolErrorCode::InvalidRequest);
+    CHECK_FALSE(transport.request.has_value());
+
+    context.requestLimits->maxCallsInRequest = 100;
+    context.requestLimits->maxSizeRequest = 1;
+    result = QCoro::waitFor(caller.call(context, loadRequestEnvelope()));
+    REQUIRE(std::holds_alternative<javelin::jmap::api::ProtocolError>(result));
+    CHECK(std::get<javelin::jmap::api::ProtocolError>(result).code ==
+          javelin::jmap::api::ProtocolErrorCode::InvalidRequest);
+    CHECK_FALSE(transport.request.has_value());
 }
 
 TEST_CASE("method caller posts a typed request envelope and parses the response",

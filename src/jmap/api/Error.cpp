@@ -64,6 +64,8 @@ namespace javelin::jmap::api
     {
         switch (code)
         {
+        case ProtocolErrorCode::InvalidRequest:
+            return "invalid_request";
         case ProtocolErrorCode::InvalidResponse:
             return "invalid_response";
         case ProtocolErrorCode::CapabilityNegotiationFailed:

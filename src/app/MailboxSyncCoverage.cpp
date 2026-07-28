@@ -30,7 +30,8 @@ namespace javelin::app
             }
             const auto& window =
                 std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(result);
-            if (!window.has_value() || !javelin::jmap::cache::isDisplayCurrent(window->coverage))
+            if (!window.has_value() ||
+                !javelin::jmap::cache::isDisplayCurrent(window->coverage, window->materialization))
             {
                 return false;
             }

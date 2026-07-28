@@ -46,6 +46,12 @@ namespace javelin::jmap::cache
                 return QueryWindowCoverage::LocallyProjected;
             return QueryWindowCoverage::Stale;
         }
+
+        [[nodiscard]] QueryWindowMaterialization materializationFromValue(const QString& value)
+        {
+            return value == QStringLiteral("complete") ? QueryWindowMaterialization::Complete
+                                                       : QueryWindowMaterialization::Partial;
+        }
     } // namespace
 
     SearchWindowRepository::SearchWindowRepository(DatabaseConnection& connection)
@@ -89,11 +95,13 @@ namespace javelin::jmap::cache
         replaceWindow.prepare(QStringLiteral(
             "INSERT INTO search_windows "
             "(account_id, query_key, window_offset, window_limit, position, returned_limit, total, "
-            "query_state, coverage, updated_at) VALUES (:account_id, :query_key, :offset, :limit, "
-            ":position, :returned_limit, :total, :query_state, 'server', CURRENT_TIMESTAMP) "
+            "query_state, coverage, materialization, updated_at) VALUES (:account_id, :query_key, "
+            ":offset, :limit, :position, :returned_limit, :total, :query_state, 'server', "
+            "'complete', CURRENT_TIMESTAMP) "
             "ON CONFLICT(account_id, query_key, window_offset, window_limit) DO UPDATE SET "
             "position = excluded.position, returned_limit = excluded.returned_limit, "
             "total = excluded.total, query_state = excluded.query_state, coverage = 'server', "
+            "materialization = 'complete', "
             "updated_at = CURRENT_TIMESTAMP"));
         bindWindowKey(replaceWindow, window.accountId, window.queryKey, window.offset,
                       window.limit);
@@ -188,7 +196,8 @@ namespace javelin::jmap::cache
 
         QSqlQuery windowQuery{m_connection.database()};
         windowQuery.prepare(
-            QStringLiteral("SELECT position, returned_limit, total, query_state, coverage FROM "
+            QStringLiteral("SELECT position, returned_limit, total, query_state, coverage, "
+                           "materialization FROM "
                            "search_windows WHERE "
                            "account_id = :account_id AND query_key = "
                            ":query_key AND window_offset = :offset AND window_limit = :limit"));
@@ -215,6 +224,7 @@ namespace javelin::jmap::cache
                                windowQuery.value(2).toULongLong())},
             .queryState = windowQuery.value(3).toString().toStdString(),
             .coverage = coverageFromValue(windowQuery.value(4).toString()),
+            .materialization = materializationFromValue(windowQuery.value(5).toString()),
             .emailIds = {},
         };
 
@@ -249,8 +259,9 @@ namespace javelin::jmap::cache
             };
         }
         QSqlQuery query{m_connection.database()};
-        query.prepare(QStringLiteral(
-            "UPDATE search_windows SET coverage='stale' WHERE account_id=:account_id"));
+        query.prepare(
+            QStringLiteral("UPDATE search_windows SET coverage='stale',materialization='partial' "
+                           "WHERE account_id=:account_id"));
         query.bindValue(QStringLiteral(":account_id"),
                         QString::fromStdString(std::string{accountId}));
         if (!query.exec())
@@ -271,8 +282,9 @@ namespace javelin::jmap::cache
             };
         }
         QSqlQuery query{m_connection.database()};
-        query.prepare(QStringLiteral("UPDATE search_windows SET coverage='locally_projected' "
-                                     "WHERE account_id=:account_id"));
+        query.prepare(QStringLiteral(
+            "UPDATE search_windows SET coverage='locally_projected',materialization='partial' "
+            "WHERE account_id=:account_id"));
         query.bindValue(QStringLiteral(":account_id"),
                         QString::fromStdString(std::string{accountId}));
         if (!query.exec())

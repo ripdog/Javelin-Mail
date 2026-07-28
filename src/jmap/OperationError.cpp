@@ -131,7 +131,9 @@ namespace javelin::jmap
     OperationError operationError(const api::ProtocolError& error)
     {
         return {
-            .code = error.code == api::ProtocolErrorCode::UnsupportedFeature ||
+            .code = error.code == api::ProtocolErrorCode::InvalidRequest
+                        ? OperationErrorCode::InvalidRequest
+                    : error.code == api::ProtocolErrorCode::UnsupportedFeature ||
                             error.code == api::ProtocolErrorCode::CapabilityNegotiationFailed
                         ? OperationErrorCode::UnsupportedCapability
                         : OperationErrorCode::ProtocolViolation,

@@ -5,6 +5,7 @@
 #include "jmap/api/JmapMethodTransport.h"
 #include "jmap/api/MethodEnvelope.h"
 #include "jmap/api/RequestBuilder.h"
+#include "jmap/api/Session.h"
 #include "jmap/auth/Auth.h"
 
 #include <QCoroTask>
@@ -22,6 +23,7 @@ namespace javelin::jmap::api
         javelin::jmap::auth::AccountCredentials credentials;
         std::string apiUrl;
         JmapTransportPolicy transportPolicy = JmapTransportPolicy::Preferred;
+        std::optional<CoreRequestLimits> requestLimits;
     };
 
     using MethodCallerResult =

@@ -211,6 +211,7 @@ int main(int argc, char* argv[])
                                       .expiry = std::nullopt}},
             .apiUrl = session->value().apiUrl,
             .transportPolicy = javelin::jmap::api::JmapTransportPolicy::Preferred,
+            .requestLimits = javelin::jmap::api::coreRequestLimits(session->value()),
         };
         int exitCode = 1;
         auto task = [&]() -> QCoro::Task<void>

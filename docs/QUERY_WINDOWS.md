@@ -24,11 +24,13 @@ deletes only that session's windows. Application shutdown does not delete them b
 tabs reuse the same session identity.
 
 Every watched mailbox has a canonical window: offset 0, limit 100, `receivedAt` descending, and
-`collapseThreads: true`. Window coverage is typed: `server` is display-current and authoritative
-for positional pagination, `locallyProjected` is display-current but not authoritative for
-positions, and `stale` is neither. Background synchronization materializes a missing or stale
-canonical window. A post-commit cache change names the window so an open view reloads effective
-SQLite state.
+`collapseThreads: true`. Window validity has two independent axes. Provenance is `server`,
+`locallyProjected`, or `stale`; materialization is `complete` or `partial`. Display requires a
+complete non-stale materialization. Positional pagination additionally requires server provenance.
+This prevents a locally complete mutation projection from being mistaken for a server position,
+and prevents a partially materialized server response from being shown merely because it carries a
+new query state. Background synchronization materializes a missing, partial, or stale canonical
+window. A post-commit cache change names the window so an open view reloads effective SQLite state.
 
 An Email or EmailQuery state token is not evidence that this ordered coverage exists. Push-state
 deduplication may skip a background refresh when the state tokens are current and every configured
@@ -50,6 +52,10 @@ the requested page before its query executes.
 For a complete offline mailbox, the same controls resolve missing windows directly from effective
 SQLite membership for every supported sort order. The canonical mailbox query state versions these
 locally generated windows so a cached arbitrary page is reused only while it remains current.
+Offline enumeration stages one generation against fixed Email and query state tokens. If either
+token changes between pages, the staging generation is abandoned and restarted; mixed generations
+are never promoted. Push catch-up compares a completed generation with the current stored tokens
+and queues reconciliation even when every raw message source is already present.
 
 Notification navigation is not pagination. If its Email is absent from the current window, the
 application requests an anchored window with `anchorOffset: 0`, persists the server-returned
@@ -75,10 +81,16 @@ sync first applies one account-wide `Email/changes` delta and compares fetched o
 confirmed cached versions. Normal mailbox queries depend on mailbox membership, thread identity,
 and received time, so read/flag keyword-only changes update their rows without `Email/query` or
 `Email/queryChanges`. A locally decidable external membership change marks only its old and new
-mailbox windows locally projected and immediately rebuilds open views from effective SQLite.
-Pagination, navigation, or explicit refresh may later reconcile their preserved server scaffolds
-with `Email/queryChanges`; it does not force a full query directly after the push. Successful
-mutations do not automatically refresh active mailbox or search tabs.
+mailbox windows stale and partial. The object and mailbox counts still commit immediately, but an
+open affected view performs targeted query reconciliation because an external insertion's exact
+position is not proven by `Email/changes` and `Email/get`. Unaffected mailboxes are never scanned.
+Successful local mutations do not automatically refresh active mailbox or search tabs.
+
+Every `/changes` materialization must account for each requested ID exactly once in either the
+corresponding `/get` list or `notFound`. A `notFound` ID is a late tombstone and is removed locally.
+If `/get.state` differs from `/changes.newState`, the fetched objects are committed but the client
+immediately continues `/changes` from the committed token. Duplicate, missing, unexpected, or
+wrong-account materialization is not published as complete.
 
 Totals are authoritative conversation counts for `collapseThreads: true`. Partial cached counts
 are diagnostic values only and must not replace query totals. Expanded thread members and retained

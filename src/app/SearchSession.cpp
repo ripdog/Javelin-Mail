@@ -145,7 +145,7 @@ namespace javelin::app
         const auto* page =
             std::get_if<std::optional<javelin::jmap::cache::SearchWindowPage>>(&result);
         if (page == nullptr || !page->has_value() ||
-            !javelin::jmap::cache::isDisplayCurrent((*page)->coverage) ||
+            !javelin::jmap::cache::isDisplayCurrent((*page)->coverage, (*page)->materialization) ||
             (!m_page.queryState.empty() && (*page)->queryState != m_page.queryState))
         {
             m_page.cacheLoaded = false;
@@ -310,7 +310,8 @@ namespace javelin::app
         if (const auto* page =
                 std::get_if<std::optional<javelin::jmap::cache::SearchWindowPage>>(&cached);
             page != nullptr && page->has_value() &&
-            javelin::jmap::cache::isPaginationAuthoritative((*page)->coverage) &&
+            javelin::jmap::cache::isPaginationAuthoritative((*page)->coverage,
+                                                            (*page)->materialization) &&
             (*page)->queryState == queryState)
         {
             const auto next = (*page)->position + (*page)->items.size();

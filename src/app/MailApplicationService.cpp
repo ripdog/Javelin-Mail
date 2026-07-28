@@ -495,7 +495,8 @@ namespace javelin::app
                     std::get_if<std::optional<javelin::jmap::cache::MailboxWindowPage>>(
                         &cachedResult);
                 cached != nullptr && cached->has_value() &&
-                javelin::jmap::cache::isPaginationAuthoritative((*cached)->coverage) &&
+                javelin::jmap::cache::isPaginationAuthoritative((*cached)->coverage,
+                                                                (*cached)->materialization) &&
                 (!offlineState.has_value() || (*cached)->queryState == *offlineState))
             {
                 co_return MailboxWindowSummary{
@@ -526,7 +527,8 @@ namespace javelin::app
                     std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(
                         cachedResult);
                 if (cached.has_value() &&
-                    javelin::jmap::cache::isPaginationAuthoritative(cached->coverage) &&
+                    javelin::jmap::cache::isPaginationAuthoritative(cached->coverage,
+                                                                    cached->materialization) &&
                     cached->queryState == state)
                 {
                     co_return MailboxWindowSummary{

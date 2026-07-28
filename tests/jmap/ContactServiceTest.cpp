@@ -69,6 +69,7 @@ namespace
         value.capabilities.coreDetails = javelin::jmap::api::CoreCapability{
             .maxSizeUpload = std::nullopt,
             .maxConcurrentUpload = std::nullopt,
+            .maxSizeRequest = std::nullopt,
             .maxConcurrentRequests = std::nullopt,
             .maxCallsInRequest = std::nullopt,
             .maxObjectsInGet = 1,

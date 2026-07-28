@@ -107,7 +107,8 @@ namespace javelin::jmap::calendar
                                     .token = {.accessToken = settings.apiKey,
                                               .refreshToken = std::nullopt,
                                               .expiry = std::nullopt}},
-                    .apiUrl = session.apiUrl};
+                    .apiUrl = session.apiUrl,
+                    .requestLimits = api::coreRequestLimits(session)};
         }
 
         OperationError callError(const api::MethodCallerResult& result)
@@ -1391,10 +1392,13 @@ namespace javelin::jmap::calendar
                 break;
             }
 
+            const auto maxChanges = session.capabilities.coreDetails
+                                        ? session.capabilities.coreDetails->maxObjectsInGet
+                                        : std::nullopt;
             const auto calendarRequest = api::calendarChanges(
-                {.accountId = accountId, .sinceState = *calendarState, .maxChanges = std::nullopt});
+                {.accountId = accountId, .sinceState = *calendarState, .maxChanges = maxChanges});
             const auto eventRequest = api::calendarEventChanges(
-                {.accountId = accountId, .sinceState = *eventState, .maxChanges = std::nullopt});
+                {.accountId = accountId, .sinceState = *eventState, .maxChanges = maxChanges});
             if (!calendarRequest || !eventRequest)
                 co_return error(OperationErrorCode::InvalidRequest,
                                 QStringLiteral("Unable to serialize calendar changes."));
@@ -1482,7 +1486,25 @@ namespace javelin::jmap::calendar
                 if (const auto* readError = std::get_if<api::ResponseReaderError>(&getRead))
                     co_return responseError(*readError);
                 auto getResponse = std::get<api::CalendarEventGetResponse>(getRead);
-                if (!getResponse.notFound.empty() ||
+                std::unordered_set<std::string> expectedIds(changedIds.begin(), changedIds.end());
+                std::unordered_set<std::string> materializedIds;
+                const bool invalidMaterialization =
+                    getResponse.accountId != accountId ||
+                    getResponse.state != eventChanges.newState ||
+                    std::ranges::any_of(getResponse.list,
+                                        [&expectedIds, &materializedIds](const CalendarEvent& event)
+                                        {
+                                            return !expectedIds.contains(event.id) ||
+                                                   !materializedIds.insert(event.id).second;
+                                        }) ||
+                    materializedIds.size() + getResponse.notFound.size() != expectedIds.size() ||
+                    std::ranges::any_of(getResponse.notFound,
+                                        [&expectedIds, &materializedIds](const std::string& id)
+                                        {
+                                            return !expectedIds.contains(id) ||
+                                                   !materializedIds.insert(id).second;
+                                        });
+                if (invalidMaterialization || !getResponse.notFound.empty() ||
                     std::ranges::any_of(getResponse.list, [](const auto& event)
                                         { return event.recurrenceRule.has_value(); }))
                 {

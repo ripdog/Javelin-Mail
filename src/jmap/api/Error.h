@@ -44,6 +44,7 @@ namespace javelin::jmap::api
 
     enum class ProtocolErrorCode
     {
+        InvalidRequest,
         InvalidResponse,
         CapabilityNegotiationFailed,
         UnsupportedFeature,

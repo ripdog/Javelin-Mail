@@ -26,7 +26,7 @@ TEST_CASE("session capability validation succeeds when required capabilities are
 TEST_CASE("session parser ignores unknown server fields", "[jmap]")
 {
     const auto result = javelin::jmap::api::parseSession(
-        R"({"username":"alice@example.com","apiUrl":"https://mail.example.com/jmap/api","downloadUrl":"https://mail.example.com/jmap/download/{accountId}/{blobId}/{name}?type={type}","uploadUrl":"https://mail.example.com/jmap/upload/{accountId}","eventSourceUrl":"https://mail.example.com/jmap/event/","state":"session-state-1","capabilities":{"urn:ietf:params:jmap:core":{"maxConcurrentRequests":8,"maxCallsInRequest":16,"maxObjectsInGet":500},"urn:ietf:params:jmap:mail":{"maxMailboxesPerEmail":1000}},"accounts":{"u1":{"name":"Personal","isPersonal":true,"isReadOnly":false,"accountCapabilities":{"urn:ietf:params:jmap:mail":{}},"unexpectedAccountField":true}},"primaryAccounts":{"urn:ietf:params:jmap:mail":"u1"},"unexpectedTopLevelField":"ignored"})",
+        R"({"username":"alice@example.com","apiUrl":"https://mail.example.com/jmap/api","downloadUrl":"https://mail.example.com/jmap/download/{accountId}/{blobId}/{name}?type={type}","uploadUrl":"https://mail.example.com/jmap/upload/{accountId}","eventSourceUrl":"https://mail.example.com/jmap/event/","state":"session-state-1","capabilities":{"urn:ietf:params:jmap:core":{"maxSizeRequest":1000000,"maxConcurrentRequests":8,"maxCallsInRequest":16,"maxObjectsInGet":500,"maxObjectsInSet":500},"urn:ietf:params:jmap:mail":{"maxMailboxesPerEmail":1000}},"accounts":{"u1":{"name":"Personal","isPersonal":true,"isReadOnly":false,"accountCapabilities":{"urn:ietf:params:jmap:mail":{}},"unexpectedAccountField":true}},"primaryAccounts":{"urn:ietf:params:jmap:mail":"u1"},"unexpectedTopLevelField":"ignored"})",
         javelin::jmap::api::RequiredCapabilities{.mail = true, .submission = false});
 
     REQUIRE(result.ok());
@@ -39,7 +39,7 @@ TEST_CASE("session parser ignores unknown server fields", "[jmap]")
 TEST_CASE("session parser exposes websocket push capability", "[jmap]")
 {
     const auto result = javelin::jmap::api::parseSession(
-        R"({"username":"alice@example.com","apiUrl":"https://mail.example.com/jmap/api","downloadUrl":"https://mail.example.com/download/{accountId}/{blobId}/{name}","uploadUrl":"https://mail.example.com/upload/{accountId}","eventSourceUrl":"https://mail.example.com/events","state":"s1","capabilities":{"urn:ietf:params:jmap:core":{},"urn:ietf:params:jmap:mail":{},"urn:ietf:params:jmap:websocket":{"url":"wss://mail.example.com/jmap/ws","supportsPush":true}},"accounts":{"u1":{"name":"Personal","isPersonal":true,"isReadOnly":false,"accountCapabilities":{"urn:ietf:params:jmap:mail":{}}}},"primaryAccounts":{"urn:ietf:params:jmap:mail":"u1"}})",
+        R"({"username":"alice@example.com","apiUrl":"https://mail.example.com/jmap/api","downloadUrl":"https://mail.example.com/download/{accountId}/{blobId}/{name}","uploadUrl":"https://mail.example.com/upload/{accountId}","eventSourceUrl":"https://mail.example.com/events","state":"s1","capabilities":{"urn:ietf:params:jmap:core":{"maxSizeRequest":1000000,"maxConcurrentRequests":8,"maxCallsInRequest":16,"maxObjectsInGet":500,"maxObjectsInSet":500},"urn:ietf:params:jmap:mail":{},"urn:ietf:params:jmap:websocket":{"url":"wss://mail.example.com/jmap/ws","supportsPush":true}},"accounts":{"u1":{"name":"Personal","isPersonal":true,"isReadOnly":false,"accountCapabilities":{"urn:ietf:params:jmap:mail":{}}}},"primaryAccounts":{"urn:ietf:params:jmap:mail":"u1"}})",
         javelin::jmap::api::RequiredCapabilities{.mail = true});
 
     REQUIRE(result.ok());
@@ -48,10 +48,23 @@ TEST_CASE("session parser exposes websocket push capability", "[jmap]")
     CHECK(result.session->capabilities.websocket->supportsPush);
 }
 
+TEST_CASE("session parser rejects incomplete mandatory core request limits", "[jmap][session]")
+{
+    const auto result = javelin::jmap::api::parseSession(
+        R"({"username":"alice@example.com","apiUrl":"https://mail.example.com/jmap/api","downloadUrl":"https://mail.example.com/download/{accountId}/{blobId}/{name}","uploadUrl":"https://mail.example.com/upload/{accountId}","state":"s1","capabilities":{"urn:ietf:params:jmap:core":{"maxCallsInRequest":16}},"accounts":{"u1":{"name":"Personal","isPersonal":true,"isReadOnly":false,"accountCapabilities":{}}},"primaryAccounts":{}})",
+        {});
+
+    REQUIRE_FALSE(result.ok());
+    REQUIRE(result.error.has_value());
+    CHECK_THAT(result.error->capabilityErrors,
+               Catch::Matchers::VectorContains(
+                   javelin::jmap::api::CapabilityError::InvalidCoreCapability));
+}
+
 TEST_CASE("session parser exposes contacts capability metadata", "[jmap][contacts]")
 {
     const auto result = javelin::jmap::api::parseSession(
-        R"({"username":"alice@example.com","apiUrl":"https://example.test/jmap","downloadUrl":"https://example.test/download/{accountId}/{blobId}/{name}","uploadUrl":"https://example.test/upload/{accountId}","state":"1","capabilities":{"urn:ietf:params:jmap:core":{},"urn:ietf:params:jmap:mail":{},"urn:ietf:params:jmap:contacts":{}},"accounts":{"u1":{"name":"Personal","isPersonal":true,"isReadOnly":false,"accountCapabilities":{"urn:ietf:params:jmap:mail":{},"urn:ietf:params:jmap:contacts":{"maxAddressBooksPerCard":4,"mayCreateAddressBook":true}}}},"primaryAccounts":{"urn:ietf:params:jmap:mail":"u1","urn:ietf:params:jmap:contacts":"u1"}})",
+        R"({"username":"alice@example.com","apiUrl":"https://example.test/jmap","downloadUrl":"https://example.test/download/{accountId}/{blobId}/{name}","uploadUrl":"https://example.test/upload/{accountId}","state":"1","capabilities":{"urn:ietf:params:jmap:core":{"maxSizeRequest":1000000,"maxConcurrentRequests":8,"maxCallsInRequest":16,"maxObjectsInGet":500,"maxObjectsInSet":500},"urn:ietf:params:jmap:mail":{},"urn:ietf:params:jmap:contacts":{}},"accounts":{"u1":{"name":"Personal","isPersonal":true,"isReadOnly":false,"accountCapabilities":{"urn:ietf:params:jmap:mail":{},"urn:ietf:params:jmap:contacts":{"maxAddressBooksPerCard":4,"mayCreateAddressBook":true}}}},"primaryAccounts":{"urn:ietf:params:jmap:mail":"u1","urn:ietf:params:jmap:contacts":"u1"}})",
         {.mail = true});
 
     REQUIRE(result.ok());
@@ -67,7 +80,7 @@ TEST_CASE("session parser exposes contacts capability metadata", "[jmap][contact
 TEST_CASE("session parser exposes strict draft-26 calendar capability metadata", "[jmap][calendar]")
 {
     const auto result = javelin::jmap::api::parseSession(
-        R"({"username":"alice@example.test","apiUrl":"https://example.test/jmap","downloadUrl":"https://example.test/download/{accountId}/{blobId}/{name}","uploadUrl":"https://example.test/upload/{accountId}","state":"1","capabilities":{"urn:ietf:params:jmap:core":{},"urn:ietf:params:jmap:calendars":{}},"accounts":{"a1":{"name":"Calendar","isPersonal":true,"isReadOnly":false,"accountCapabilities":{"urn:ietf:params:jmap:calendars":{"maxCalendarsPerEvent":4,"minDateTime":"1900-01-01T00:00:00Z","maxDateTime":"2100-01-01T00:00:00Z","maxExpandedQueryDuration":"P1Y","maxParticipantsPerEvent":100,"mayCreateCalendar":false}}}},"primaryAccounts":{"urn:ietf:params:jmap:calendars":"a1"}})",
+        R"({"username":"alice@example.test","apiUrl":"https://example.test/jmap","downloadUrl":"https://example.test/download/{accountId}/{blobId}/{name}","uploadUrl":"https://example.test/upload/{accountId}","state":"1","capabilities":{"urn:ietf:params:jmap:core":{"maxSizeRequest":1000000,"maxConcurrentRequests":8,"maxCallsInRequest":16,"maxObjectsInGet":500,"maxObjectsInSet":500},"urn:ietf:params:jmap:calendars":{}},"accounts":{"a1":{"name":"Calendar","isPersonal":true,"isReadOnly":false,"accountCapabilities":{"urn:ietf:params:jmap:calendars":{"maxCalendarsPerEvent":4,"minDateTime":"1900-01-01T00:00:00Z","maxDateTime":"2100-01-01T00:00:00Z","maxExpandedQueryDuration":"P1Y","maxParticipantsPerEvent":100,"mayCreateCalendar":false}}}},"primaryAccounts":{"urn:ietf:params:jmap:calendars":"a1"}})",
         {.calendars = true});
 
     REQUIRE(result.ok());
@@ -83,7 +96,7 @@ TEST_CASE("session parser accepts the Stalwart draft-26 calendar capability shap
           "[jmap][calendar][stalwart]")
 {
     const auto result = javelin::jmap::api::parseSession(
-        R"({"username":"calendar@example.test","apiUrl":"https://mail.example.test/jmap/","downloadUrl":"https://mail.example.test/jmap/download/{accountId}/{blobId}/{name}","uploadUrl":"https://mail.example.test/jmap/upload/{accountId}","state":"session-1","capabilities":{"urn:ietf:params:jmap:core":{},"urn:ietf:params:jmap:calendars":{}},"accounts":{"c":{"name":"calendar@example.test","isPersonal":true,"isReadOnly":false,"accountCapabilities":{"urn:ietf:params:jmap:calendars":{"minDateTime":"0001-01-01T00:00:00Z","maxDateTime":"65534-12-31T23:59:59Z","maxExpandedQueryDuration":"P52W1D","maxParticipantsPerEvent":20,"mayCreateCalendar":true}}}},"primaryAccounts":{"urn:ietf:params:jmap:calendars":"c"}})",
+        R"({"username":"calendar@example.test","apiUrl":"https://mail.example.test/jmap/","downloadUrl":"https://mail.example.test/jmap/download/{accountId}/{blobId}/{name}","uploadUrl":"https://mail.example.test/jmap/upload/{accountId}","state":"session-1","capabilities":{"urn:ietf:params:jmap:core":{"maxSizeRequest":1000000,"maxConcurrentRequests":8,"maxCallsInRequest":16,"maxObjectsInGet":500,"maxObjectsInSet":500},"urn:ietf:params:jmap:calendars":{}},"accounts":{"c":{"name":"calendar@example.test","isPersonal":true,"isReadOnly":false,"accountCapabilities":{"urn:ietf:params:jmap:calendars":{"minDateTime":"0001-01-01T00:00:00Z","maxDateTime":"65534-12-31T23:59:59Z","maxExpandedQueryDuration":"P52W1D","maxParticipantsPerEvent":20,"mayCreateCalendar":true}}}},"primaryAccounts":{"urn:ietf:params:jmap:calendars":"c"}})",
         {.calendars = true});
 
     REQUIRE(result.ok());
@@ -99,7 +112,7 @@ TEST_CASE("session parser rejects malformed required calendar account capability
           "[jmap][calendar]")
 {
     const auto result = javelin::jmap::api::parseSession(
-        R"({"username":"alice@example.test","apiUrl":"https://example.test/jmap","downloadUrl":"https://example.test/download/{accountId}/{blobId}/{name}","uploadUrl":"https://example.test/upload/{accountId}","state":"1","capabilities":{"urn:ietf:params:jmap:core":{},"urn:ietf:params:jmap:calendars":{}},"accounts":{"a1":{"name":"Calendar","isPersonal":true,"isReadOnly":false,"accountCapabilities":{"urn:ietf:params:jmap:calendars":{"maxExpandedQueryDuration":"P1Y","mayCreateCalendar":false}}}},"primaryAccounts":{"urn:ietf:params:jmap:calendars":"a1"}})",
+        R"({"username":"alice@example.test","apiUrl":"https://example.test/jmap","downloadUrl":"https://example.test/download/{accountId}/{blobId}/{name}","uploadUrl":"https://example.test/upload/{accountId}","state":"1","capabilities":{"urn:ietf:params:jmap:core":{"maxSizeRequest":1000000,"maxConcurrentRequests":8,"maxCallsInRequest":16,"maxObjectsInGet":500,"maxObjectsInSet":500},"urn:ietf:params:jmap:calendars":{}},"accounts":{"a1":{"name":"Calendar","isPersonal":true,"isReadOnly":false,"accountCapabilities":{"urn:ietf:params:jmap:calendars":{"maxExpandedQueryDuration":"P1Y","mayCreateCalendar":false}}}},"primaryAccounts":{"urn:ietf:params:jmap:calendars":"a1"}})",
         {.calendars = true});
 
     REQUIRE_FALSE(result.ok());
