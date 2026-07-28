@@ -61,13 +61,10 @@ namespace javelin::jmap::cache
         query.prepare(QStringLiteral(
             "SELECT o.account_id,o.occurrence_id,o.event_id,o.start_utc,o.end_utc,e.title,"
             "e.document_json FROM calendar_occurrences o JOIN calendar_events e ON "
-            "e.account_id=o.account_id AND e.event_id=o.event_id WHERE o.start_utc IS NOT NULL "
-            "AND o.start_utc<=:future AND o.start_utc>=:past AND EXISTS (SELECT 1 FROM "
+            "e.account_id=o.account_id AND e.event_id=o.event_id WHERE EXISTS (SELECT 1 FROM "
             "calendar_event_calendars ec JOIN calendars c ON c.account_id=ec.account_id AND "
             "c.calendar_id=ec.calendar_id WHERE ec.account_id=o.account_id AND "
             "ec.event_id=o.event_id AND c.is_subscribed=1) ORDER BY o.start_utc"));
-        query.bindValue(QStringLiteral(":future"), now.addYears(1).toString(Qt::ISODateWithMs));
-        query.bindValue(QStringLiteral(":past"), now.addDays(-2).toString(Qt::ISODateWithMs));
         if (!query.exec())
         {
             database.rollback();
@@ -102,7 +99,7 @@ namespace javelin::jmap::cache
             auto effectiveAlerts = parsed.value->alerts;
             if (parsed.value->useDefaultAlerts)
             {
-                effectiveAlerts.clear();
+                std::unordered_map<std::string, calendar::Alert> defaultAlerts;
                 QSqlQuery defaults{database};
                 defaults.prepare(QStringLiteral(
                     "SELECT d.alert_id,d.action,d.trigger_kind,d.relative_to,d.offset,"
@@ -150,8 +147,10 @@ namespace javelin::jmap::cache
                     if (const auto overridden = parsed.value->alerts.find(alertId);
                         overridden != parsed.value->alerts.end() && overridden->second.acknowledged)
                         alert.acknowledged = overridden->second.acknowledged;
-                    effectiveAlerts.emplace(alertId, std::move(alert));
+                    defaultAlerts.emplace(alertId, std::move(alert));
                 }
+                if (!defaultAlerts.empty())
+                    effectiveAlerts = std::move(defaultAlerts);
             }
             for (const auto& [alertId, alert] : effectiveAlerts)
             {
@@ -172,7 +171,11 @@ namespace javelin::jmap::cache
                 if (alert.acknowledged && instant(alert.acknowledged->value) >= trigger)
                     continue;
 
-                const std::string key = accountId + ":" + occurrenceId + ":" + alertId;
+                const std::string key =
+                    accountId + ":" +
+                    (alert.triggerKind == calendar::AlertTriggerKind::Absolute ? eventId
+                                                                               : occurrenceId) +
+                    ":" + alertId + ":" + std::to_string(trigger.toMSecsSinceEpoch());
                 state.bindValue(QStringLiteral(":key"), QString::fromStdString(key));
                 if (!state.exec())
                 {

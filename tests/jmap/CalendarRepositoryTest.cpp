@@ -469,8 +469,7 @@ TEST_CASE("calendar reminders are claimed once and can be snoozed or dismissed",
               notifications.claimDue(now.addSecs(600)))
               .empty());
 
-    remindedEvent.useDefaultAlerts = true;
-    remindedEvent.alerts.clear();
+    remindedEvent.alerts.at("alert-1").offset = javelin::jmap::calendar::Duration{.value = "-PT5M"};
     REQUIRE_FALSE(calendars
                       .reconcileWindow({.accountId = "a1",
                                         .start = {.value = "2026-07-01T00:00:00"},
@@ -478,6 +477,22 @@ TEST_CASE("calendar reminders are claimed once and can be snoozed or dismissed",
                                         .displayTimeZone = {.value = "Etc/UTC"},
                                         .queryState = "q2",
                                         .eventState = "e2",
+                                        .events = {remindedEvent},
+                                        .occurrences = {remindedOccurrence}})
+                      .has_value());
+    CHECK(std::get<std::vector<javelin::jmap::cache::CalendarNotificationCandidate>>(
+              notifications.claimDue(now.addSecs(600)))
+              .size() == 1);
+
+    remindedEvent.useDefaultAlerts = true;
+    remindedEvent.alerts.clear();
+    REQUIRE_FALSE(calendars
+                      .reconcileWindow({.accountId = "a1",
+                                        .start = {.value = "2026-07-01T00:00:00"},
+                                        .end = {.value = "2026-08-01T00:00:00"},
+                                        .displayTimeZone = {.value = "Etc/UTC"},
+                                        .queryState = "q3",
+                                        .eventState = "e3",
                                         .events = {remindedEvent},
                                         .occurrences = {remindedOccurrence}})
                       .has_value());
@@ -489,4 +504,112 @@ TEST_CASE("calendar reminders are claimed once and can be snoozed or dismissed",
         std::get<std::vector<javelin::jmap::cache::CalendarNotificationCandidate>>(defaultReminder)
             .front()
             .alertId == "default-alert");
+}
+
+TEST_CASE("calendar reminders use their actual trigger rather than occurrence start bounds",
+          "[jmap][calendar][notification]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open(
+        {.connectionName = QStringLiteral("calendar-notification-trigger-time"),
+         .databasePath = directory.filePath(QStringLiteral("cache.sqlite3"))});
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    REQUIRE(QSqlQuery{connection.database()}.exec(QStringLiteral(
+        "INSERT INTO accounts (account_id,email_address,session_url,is_primary) VALUES "
+        "('a1','alice@example.test','https://example.test/jmap',1)")));
+
+    javelin::jmap::cache::CalendarRepository calendars{connection};
+    const javelin::jmap::calendar::Calendar calendar{
+        .accountId = "a1",
+        .id = "work",
+        .name = "Work",
+        .description = std::nullopt,
+        .color = std::nullopt,
+        .sortOrder = 0,
+        .isSubscribed = true,
+        .isVisible = true,
+        .isDefault = true,
+        .timeZone = javelin::jmap::calendar::TimeZoneId{.value = "Etc/UTC"},
+        .defaultAlertsWithTime = {},
+        .defaultAlertsWithoutTime = {},
+        .myRights = {.mayReadFreeBusy = true, .mayReadItems = true}};
+    REQUIRE_FALSE(calendars.replaceCalendars("a1", "c1", {calendar}).has_value());
+
+    auto longEvent = event("long-event", "2026-07-14T10:00:00");
+    longEvent.timeZone = javelin::jmap::calendar::TimeZoneId{.value = "Etc/UTC"};
+    longEvent.duration = {.value = "P4D"};
+    longEvent.alerts.emplace("before-end",
+                             javelin::jmap::calendar::Alert{
+                                 .id = "before-end",
+                                 .action = "display",
+                                 .triggerKind = javelin::jmap::calendar::AlertTriggerKind::Offset,
+                                 .relativeTo = "end",
+                                 .offset = javelin::jmap::calendar::Duration{.value = "-PT10M"},
+                                 .when = std::nullopt,
+                                 .acknowledged = std::nullopt});
+    auto longOccurrence = occurrence("long-event", "2026-07-14T10:00:00");
+    longOccurrence.localEnd = {.value = "2026-07-18T10:00:00"};
+    longOccurrence.utcStart = javelin::jmap::calendar::UtcInstant{.value = "2026-07-14T10:00:00Z"};
+    longOccurrence.utcEnd = javelin::jmap::calendar::UtcInstant{.value = "2026-07-18T10:00:00Z"};
+
+    auto absoluteEvent = event("future-event", "2028-07-18T10:00:00");
+    absoluteEvent.timeZone = javelin::jmap::calendar::TimeZoneId{.value = "Etc/UTC"};
+    absoluteEvent.useDefaultAlerts = true;
+    absoluteEvent.alerts.emplace(
+        "absolute",
+        javelin::jmap::calendar::Alert{
+            .id = "absolute",
+            .action = "display",
+            .triggerKind = javelin::jmap::calendar::AlertTriggerKind::Absolute,
+            .relativeTo = "start",
+            .offset = std::nullopt,
+            .when = javelin::jmap::calendar::UtcInstant{.value = "2026-07-18T09:50:00Z"},
+            .acknowledged = std::nullopt});
+    auto firstFutureOccurrence = occurrence("future-event", "2028-07-18T10:00:00");
+    firstFutureOccurrence.id = "future-event:first";
+    firstFutureOccurrence.utcStart =
+        javelin::jmap::calendar::UtcInstant{.value = "2028-07-18T10:00:00Z"};
+    firstFutureOccurrence.utcEnd =
+        javelin::jmap::calendar::UtcInstant{.value = "2028-07-18T11:00:00Z"};
+    auto secondFutureOccurrence = firstFutureOccurrence;
+    secondFutureOccurrence.id = "future-event:second";
+    secondFutureOccurrence.localStart = {.value = "2028-07-19T10:00:00"};
+    secondFutureOccurrence.localEnd = {.value = "2028-07-19T11:00:00"};
+    secondFutureOccurrence.utcStart =
+        javelin::jmap::calendar::UtcInstant{.value = "2028-07-19T10:00:00Z"};
+    secondFutureOccurrence.utcEnd =
+        javelin::jmap::calendar::UtcInstant{.value = "2028-07-19T11:00:00Z"};
+
+    REQUIRE_FALSE(calendars
+                      .reconcileWindow({.accountId = "a1",
+                                        .start = {.value = "2026-01-01T00:00:00"},
+                                        .end = {.value = "2029-01-01T00:00:00"},
+                                        .displayTimeZone = {.value = "Etc/UTC"},
+                                        .queryState = "q1",
+                                        .eventState = "e1",
+                                        .events = {longEvent, absoluteEvent},
+                                        .occurrences = {longOccurrence, firstFutureOccurrence,
+                                                        secondFutureOccurrence}})
+                      .has_value());
+
+    javelin::jmap::cache::CalendarNotificationRepository notifications{connection};
+    const auto trigger = QDateTime::fromString(QStringLiteral("2026-07-18T09:50:00Z"), Qt::ISODate);
+    CHECK(std::get<std::vector<javelin::jmap::cache::CalendarNotificationCandidate>>(
+              notifications.claimDue(trigger.addSecs(-1)))
+              .empty());
+    const auto due = notifications.claimDue(trigger);
+    REQUIRE(
+        std::holds_alternative<std::vector<javelin::jmap::cache::CalendarNotificationCandidate>>(
+            due));
+    const auto& candidates =
+        std::get<std::vector<javelin::jmap::cache::CalendarNotificationCandidate>>(due);
+    REQUIRE(candidates.size() == 2);
+    CHECK(std::ranges::count(candidates, std::string{"before-end"},
+                             &javelin::jmap::cache::CalendarNotificationCandidate::alertId) == 1);
+    CHECK(std::ranges::count(candidates, std::string{"absolute"},
+                             &javelin::jmap::cache::CalendarNotificationCandidate::alertId) == 1);
 }
