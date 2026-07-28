@@ -23,6 +23,7 @@ namespace javelin::jmap::submission
     {
         RichText,
         RawHtml,
+        PlainText,
     };
 
     struct DraftAttachment
@@ -158,6 +159,8 @@ namespace javelin::jmap::submission
             return "rich_text";
         case BodyEditorMode::RawHtml:
             return "raw_html";
+        case BodyEditorMode::PlainText:
+            return "plain_text";
         }
 
         return "rich_text";
@@ -173,6 +176,10 @@ namespace javelin::jmap::submission
         if (value == "raw_html")
         {
             return BodyEditorMode::RawHtml;
+        }
+        if (value == "plain_text")
+        {
+            return BodyEditorMode::PlainText;
         }
 
         return std::nullopt;
