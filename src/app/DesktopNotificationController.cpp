@@ -137,8 +137,8 @@ namespace javelin::app
                                      QStringLiteral("snooze"), QStringLiteral("Snooze 5 min")};
         const QDBusReply<uint> reply{
             notifications.call(QStringLiteral("Notify"), QStringLiteral("Javelin Mail"),
-                               static_cast<uint>(0), QStringLiteral("javelinmail"), title, message,
-                               actions, notificationHints(urgencyNormal, false), 0)};
+                               static_cast<uint>(0), QStringLiteral("x-office-calendar"), title,
+                               message, actions, notificationHints(urgencyNormal, false), 0)};
         if (!reply.isValid())
         {
             qWarning().noquote() << "Failed to send calendar notification"
