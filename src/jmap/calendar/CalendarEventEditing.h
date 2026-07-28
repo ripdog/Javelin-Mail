@@ -20,4 +20,6 @@ namespace javelin::jmap::calendar
                                                     const CalendarEvent& editedOccurrence);
     [[nodiscard]] CalendarEvent excludeOccurrence(const CalendarEvent& baseEvent,
                                                   const LocalDateTime& recurrenceId);
+    [[nodiscard]] CalendarEvent acknowledgeAlert(CalendarEvent event, Alert alert,
+                                                 UtcInstant acknowledgedAt);
 } // namespace javelin::jmap::calendar

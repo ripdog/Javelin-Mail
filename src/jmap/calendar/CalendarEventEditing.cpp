@@ -175,4 +175,12 @@ namespace javelin::jmap::calendar
         result.recurrenceOverrides[recurrenceId.value].excluded = true;
         return result;
     }
+
+    CalendarEvent acknowledgeAlert(CalendarEvent event, Alert alert,
+                                   const UtcInstant acknowledgedAt)
+    {
+        alert.acknowledged = acknowledgedAt;
+        event.alerts.insert_or_assign(alert.id, std::move(alert));
+        return event;
+    }
 } // namespace javelin::jmap::calendar

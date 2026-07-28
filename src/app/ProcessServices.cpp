@@ -201,7 +201,10 @@ namespace javelin::app
             });
         m_messageNavigationCoordinator = std::make_unique<MessageNavigationCoordinator>();
         m_calendarNotificationService =
-            std::make_unique<CalendarNotificationService>(m_databaseConnection);
+            std::make_unique<CalendarNotificationService>(m_databaseConnection, *m_mailService);
+        QObject::connect(m_mailService.get(), &MailApplicationService::calendarCacheCommitted,
+                         m_calendarNotificationService.get(), [this](const CalendarCacheChange&)
+                         { m_calendarNotificationService->requestScan(); });
     }
 
     ProcessServices::~ProcessServices() = default;

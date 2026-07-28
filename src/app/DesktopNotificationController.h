@@ -59,7 +59,8 @@ namespace javelin::app
         };
 
         bool connectSignal(const char* signalName, const char* slotName);
-        [[nodiscard]] QVariantMap notificationHints(int urgency) const;
+        [[nodiscard]] QVariantMap notificationHints(int urgency,
+                                                    bool activatesApplication = true) const;
         void untrackNotification(uint notificationId);
 
         std::unordered_map<uint, TrackedNotification> m_trackedNotifications;

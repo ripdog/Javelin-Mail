@@ -152,3 +152,27 @@ TEST_CASE("occurrence edits only override properties that differ from the series
     CHECK_FALSE(occurrence.duration.has_value());
     CHECK(occurrence.title == std::optional<std::string>{"Special meeting"});
 }
+
+TEST_CASE("acknowledging a calendar alert materializes it on the base event")
+{
+    javelin::jmap::calendar::CalendarEvent event;
+    event.id = "event-1";
+    event.useDefaultAlerts = true;
+    const javelin::jmap::calendar::Alert defaultAlert{
+        .id = "default-10m",
+        .action = "display",
+        .triggerKind = javelin::jmap::calendar::AlertTriggerKind::Offset,
+        .relativeTo = "start",
+        .offset = javelin::jmap::calendar::Duration{.value = "-PT10M"},
+        .when = std::nullopt,
+        .acknowledged = std::nullopt};
+
+    const auto acknowledged = javelin::jmap::calendar::acknowledgeAlert(
+        event, defaultAlert, {.value = "2026-07-28T04:05:06.000Z"});
+
+    REQUIRE(acknowledged.alerts.contains("default-10m"));
+    const auto& alert = acknowledged.alerts.at("default-10m");
+    CHECK(alert.offset == javelin::jmap::calendar::Duration{.value = "-PT10M"});
+    CHECK(alert.acknowledged ==
+          javelin::jmap::calendar::UtcInstant{.value = "2026-07-28T04:05:06.000Z"});
+}

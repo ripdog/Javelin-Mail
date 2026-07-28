@@ -48,6 +48,7 @@ namespace javelin::jmap::cache
     std::variant<std::vector<CalendarNotificationCandidate>, DatabaseError>
     CalendarNotificationRepository::claimDue(const QDateTime& now)
     {
+        m_nextTrigger = std::nullopt;
         if (const auto error = m_connection.validate())
             return *error;
         const DatabaseWriteScope writeScope{m_connection};
@@ -60,8 +61,9 @@ namespace javelin::jmap::cache
         QSqlQuery query{database};
         query.prepare(QStringLiteral(
             "SELECT o.account_id,o.occurrence_id,o.event_id,o.start_utc,o.end_utc,e.title,"
-            "e.document_json FROM calendar_occurrences o JOIN calendar_events e ON "
-            "e.account_id=o.account_id AND e.event_id=o.event_id WHERE EXISTS (SELECT 1 FROM "
+            "e.document_json,a.owner_account_id FROM calendar_occurrences o JOIN calendar_events "
+            "e ON e.account_id=o.account_id AND e.event_id=o.event_id JOIN accounts a ON "
+            "a.account_id=o.account_id WHERE EXISTS (SELECT 1 FROM "
             "calendar_event_calendars ec JOIN calendars c ON c.account_id=ec.account_id AND "
             "c.calendar_id=ec.calendar_id WHERE ec.account_id=o.account_id AND "
             "ec.event_id=o.event_id AND c.is_subscribed=1) ORDER BY o.start_utc"));
@@ -166,10 +168,16 @@ namespace javelin::jmap::cache
                         continue;
                     trigger = (alert.relativeTo == "end" ? endsAt : startsAt).addSecs(*offset);
                 }
-                if (!trigger.isValid() || trigger < oldestTrigger || trigger > now)
+                if (!trigger.isValid() || trigger < oldestTrigger)
                     continue;
                 if (alert.acknowledged && instant(alert.acknowledged->value) >= trigger)
                     continue;
+                if (trigger > now)
+                {
+                    if (!m_nextTrigger || trigger < *m_nextTrigger)
+                        m_nextTrigger = trigger;
+                    continue;
+                }
 
                 const std::string key =
                     accountId + ":" +
@@ -200,12 +208,14 @@ namespace javelin::jmap::cache
                     return queryError(QStringLiteral("Claim calendar notification"), claim);
                 }
                 candidates.push_back({.key = key,
+                                      .ownerAccountId = query.value(7).toString().toStdString(),
                                       .accountId = accountId,
                                       .eventId = eventId,
                                       .occurrenceId = occurrenceId,
                                       .alertId = alertId,
                                       .title = query.value(5).toString().toStdString(),
-                                      .startsAt = startsAt});
+                                      .startsAt = startsAt,
+                                      .alert = alert});
             }
         }
         if (!database.commit())
@@ -213,6 +223,11 @@ namespace javelin::jmap::cache
                                  .message = QStringLiteral("Commit calendar notification scan: ") +
                                             database.lastError().text()};
         return candidates;
+    }
+
+    std::optional<QDateTime> CalendarNotificationRepository::nextTrigger() const
+    {
+        return m_nextTrigger;
     }
 
     std::optional<DatabaseError> CalendarNotificationRepository::dismiss(const std::string_view key)

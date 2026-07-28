@@ -22,6 +22,7 @@ namespace javelin::app
         constexpr auto defaultTimeoutMs = -1;
         constexpr auto urgencyNormal = 1;
         constexpr auto urgencyCritical = 2;
+        constexpr auto dismissedByUserReason = 2U;
     } // namespace
 
     DesktopNotificationController::DesktopNotificationController(QObject* parent) : QObject(parent)
@@ -136,8 +137,8 @@ namespace javelin::app
                                      QStringLiteral("snooze"), QStringLiteral("Snooze 5 min")};
         const QDBusReply<uint> reply{
             notifications.call(QStringLiteral("Notify"), QStringLiteral("Javelin Mail"),
-                               static_cast<uint>(0), QStringLiteral("appointment-soon"), title,
-                               message, actions, notificationHints(urgencyNormal), 0)};
+                               static_cast<uint>(0), QStringLiteral("javelinmail"), title, message,
+                               actions, notificationHints(urgencyNormal, false), 0)};
         if (!reply.isValid())
         {
             qWarning().noquote() << "Failed to send calendar notification"
@@ -255,7 +256,10 @@ namespace javelin::app
     void DesktopNotificationController::onNotificationClosed(const uint notificationId,
                                                              const uint reason)
     {
-        static_cast<void>(reason);
+        const auto found = m_trackedNotifications.find(notificationId);
+        if (found != m_trackedNotifications.end() &&
+            !found->second.calendarNotificationKey.isEmpty() && reason == dismissedByUserReason)
+            Q_EMIT calendarNotificationAction(found->second.calendarNotificationKey, false);
         untrackNotification(notificationId);
     }
 
@@ -272,10 +276,13 @@ namespace javelin::app
         return connected;
     }
 
-    QVariantMap DesktopNotificationController::notificationHints(const int urgency) const
+    QVariantMap
+    DesktopNotificationController::notificationHints(const int urgency,
+                                                     const bool activatesApplication) const
     {
         QVariantMap hints;
-        hints.insert(QStringLiteral("desktop-entry"), QString::fromLatin1(desktopEntryName));
+        if (activatesApplication)
+            hints.insert(QStringLiteral("desktop-entry"), QString::fromLatin1(desktopEntryName));
         hints.insert(QStringLiteral("urgency"), urgency);
         hints.insert(QStringLiteral("sender-pid"),
                      static_cast<qlonglong>(QCoreApplication::applicationPid()));
