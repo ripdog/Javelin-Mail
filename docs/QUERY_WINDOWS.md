@@ -52,10 +52,13 @@ the requested page before its query executes.
 For a complete offline mailbox, the same controls resolve missing windows directly from effective
 SQLite membership for every supported sort order. The canonical mailbox query state versions these
 locally generated windows so a cached arbitrary page is reused only while it remains current.
-Offline enumeration stages one generation against fixed Email and query state tokens. If either
-token changes between pages, the staging generation is abandoned and restarted; mixed generations
-are never promoted. Push catch-up compares a completed generation with the current stored tokens
-and queues reconciliation even when every raw message source is already present.
+Offline enumeration stages one generation against a fixed mailbox query state. If that query state
+changes between pages, the staging generation is abandoned and restarted; mixed membership
+generations are never promoted. The account-wide Email state may legitimately advance because of
+an unrelated mailbox or a keyword update while a large mailbox is being paged. Those object changes
+are reconciled through `Email/changes`; they do not restart enumeration. Push catch-up updates a
+completed generation's membership from the committed `email_mailboxes` delta and queues only raw
+sources whose current blob is absent.
 
 Notification navigation is not pagination. If its Email is absent from the current window, the
 application requests an anchored window with `anchorOffset: 0`, persists the server-returned

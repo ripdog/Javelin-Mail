@@ -9,6 +9,7 @@
 #include "jmap/cache/MailboxWindowRepository.h"
 #include "jmap/cache/QueryService.h"
 #include "jmap/cache/RawMessageSourceRepository.h"
+#include "jmap/cache/SessionRepository.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
 #include "jmap/sync/MailboxRefreshExecutor.h"
 
@@ -20,6 +21,7 @@
 #include <QElapsedTimer>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLoggingCategory>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QStorageInfo>
@@ -31,8 +33,13 @@
 
 namespace javelin::app
 {
+    Q_LOGGING_CATEGORY(logFullMailSync, "jmap.sync.full-mailbox")
+
     namespace
     {
+        constexpr std::size_t canonicalWindowSize = 100;
+        constexpr std::size_t maximumFullMailboxPageSize = 500;
+
         [[nodiscard]] std::string jobId(const std::string_view accountId,
                                         const std::string_view mailboxId)
         {
@@ -101,7 +108,7 @@ namespace javelin::app
 
             QSqlQuery baseline{database};
             baseline.prepare(QStringLiteral(
-                "SELECT query_state,email_state FROM offline_mailbox_scopes WHERE "
+                "SELECT query_state FROM offline_mailbox_scopes WHERE "
                 "account_id=:account AND mailbox_id=:mailbox AND generation=:generation"));
             baseline.bindValue(QStringLiteral(":account"), QString::fromStdString(accountId));
             baseline.bindValue(QStringLiteral(":mailbox"), QString::fromStdString(mailboxId));
@@ -112,10 +119,8 @@ namespace javelin::app
                         ? QStringLiteral("Offline mailbox generation disappeared.")
                         : baseline.lastError().text()};
             const auto storedQueryState = baseline.value(0).toString().toStdString();
-            const auto storedEmailState = baseline.value(1).toString().toStdString();
             baseline.finish();
-            if ((!storedQueryState.empty() && storedQueryState != queryState) ||
-                (!storedEmailState.empty() && storedEmailState != emailState))
+            if (!storedQueryState.empty() && storedQueryState != queryState)
             {
                 FullMailboxPageCommit result;
                 result.restartRequired = true;
@@ -254,7 +259,6 @@ namespace javelin::app
             if (!coverage->has_value() || (*coverage)->representativeCount == 0)
                 return {};
 
-            constexpr std::size_t windowSize = 100;
             QSqlQuery canonicalState{database};
             canonicalState.prepare(
                 QStringLiteral("SELECT state_token FROM sync_state WHERE account_id=:account AND "
@@ -288,13 +292,14 @@ namespace javelin::app
                 firstOffset = lastWindow.value(0).toULongLong();
             lastWindow.finish();
             const auto lastOffset =
-                ((*coverage)->representativeCount - 1) / windowSize * windowSize;
+                ((*coverage)->representativeCount - 1) / canonicalWindowSize * canonicalWindowSize;
             javelin::jmap::cache::MailboxWindowRepository windows{connection};
             FullMailboxPageCommit result{(*coverage)->representativeCount};
-            for (std::size_t offset = firstOffset; offset <= lastOffset; offset += windowSize)
+            for (std::size_t offset = firstOffset; offset <= lastOffset;
+                 offset += canonicalWindowSize)
             {
                 const auto itemsResult = queries.listOfflineMailboxMessages(
-                    accountId, mailboxId, generation, windowSize, offset);
+                    accountId, mailboxId, generation, canonicalWindowSize, offset);
                 const auto* items =
                     std::get_if<std::vector<javelin::jmap::cache::MessageListItem>>(&itemsResult);
                 if (items == nullptr)
@@ -309,9 +314,9 @@ namespace javelin::app
                         .mailboxId = mailboxId,
                         .queryKey = queryKey,
                         .requestedOffset = offset,
-                        .requestedLimit = windowSize,
+                        .requestedLimit = canonicalWindowSize,
                         .position = offset,
-                        .returnedLimit = windowSize,
+                        .returnedLimit = canonicalWindowSize,
                         .total = std::nullopt,
                         .queryState = progressiveState,
                         .coverage = javelin::jmap::cache::QueryWindowCoverage::Server,
@@ -321,6 +326,22 @@ namespace javelin::app
                 result.windowOffsets.push_back(offset);
             }
             return result;
+        }
+
+        [[nodiscard]] std::size_t
+        fullMailboxPageSize(javelin::jmap::cache::DatabaseConnection& connection,
+                            const std::string_view accountId)
+        {
+            javelin::jmap::cache::SessionRepository sessions{connection};
+            const auto loaded = sessions.load(accountId);
+            const auto* session = std::get_if<std::optional<javelin::jmap::api::Session>>(&loaded);
+            if (session == nullptr || !session->has_value())
+                return canonicalWindowSize;
+            const auto limits = javelin::jmap::api::coreRequestLimits(**session);
+            if (!limits.has_value())
+                return canonicalWindowSize;
+            return std::clamp<std::size_t>(static_cast<std::size_t>(limits->maxObjectsInGet), 1,
+                                           maximumFullMailboxPageSize);
         }
 
         [[nodiscard]] QString
@@ -465,6 +486,61 @@ namespace javelin::app
         {
             if (scope.accountId != accountId)
                 continue;
+            QSqlQuery addMembership{m_connection.database()};
+            addMembership.prepare(QStringLiteral(
+                "INSERT INTO offline_mailbox_membership(account_id,mailbox_id,email_id,generation,"
+                "position) SELECT s.account_id,s.mailbox_id,em.email_id,s.generation,0 FROM "
+                "offline_mailbox_scopes s INNER JOIN email_mailboxes em ON "
+                "em.account_id=s.account_id AND em.mailbox_id=s.mailbox_id WHERE "
+                "s.account_id=:account AND s.mailbox_id=:mailbox AND s.status='complete' "
+                "ON CONFLICT(account_id,mailbox_id,generation,email_id) DO NOTHING"));
+            addMembership.bindValue(QStringLiteral(":account"),
+                                    QString::fromStdString(scope.accountId));
+            addMembership.bindValue(QStringLiteral(":mailbox"),
+                                    QString::fromStdString(scope.mailboxId));
+            if (!addMembership.exec())
+            {
+                logDatabaseFailure(QStringLiteral("Extend offline mailbox membership"),
+                                   addMembership);
+                continue;
+            }
+            QSqlQuery removeMembership{m_connection.database()};
+            removeMembership.prepare(QStringLiteral(
+                "DELETE FROM offline_mailbox_membership AS om WHERE om.account_id=:account AND "
+                "om.mailbox_id=:mailbox AND om.generation=(SELECT generation FROM "
+                "offline_mailbox_scopes WHERE account_id=:account AND mailbox_id=:mailbox AND "
+                "status='complete') AND NOT EXISTS(SELECT 1 FROM email_mailboxes em WHERE "
+                "em.account_id=om.account_id AND em.mailbox_id=om.mailbox_id AND "
+                "em.email_id=om.email_id)"));
+            removeMembership.bindValue(QStringLiteral(":account"),
+                                       QString::fromStdString(scope.accountId));
+            removeMembership.bindValue(QStringLiteral(":mailbox"),
+                                       QString::fromStdString(scope.mailboxId));
+            if (!removeMembership.exec())
+            {
+                logDatabaseFailure(QStringLiteral("Prune offline mailbox membership"),
+                                   removeMembership);
+                continue;
+            }
+            QSqlQuery advanceScope{m_connection.database()};
+            advanceScope.prepare(QStringLiteral(
+                "UPDATE offline_mailbox_scopes SET email_state=COALESCE((SELECT state_token FROM "
+                "sync_state WHERE account_id=:account AND object_type='Email' AND query_key=''),"
+                "email_state),expected_total=(SELECT COUNT(*) FROM email_mailboxes WHERE "
+                "account_id=:account AND mailbox_id=:mailbox),completed_total=(SELECT COUNT(*) "
+                "FROM email_mailboxes WHERE account_id=:account AND mailbox_id=:mailbox),"
+                "updated_at=CURRENT_TIMESTAMP WHERE account_id=:account AND mailbox_id=:mailbox "
+                "AND status='complete'"));
+            advanceScope.bindValue(QStringLiteral(":account"),
+                                   QString::fromStdString(scope.accountId));
+            advanceScope.bindValue(QStringLiteral(":mailbox"),
+                                   QString::fromStdString(scope.mailboxId));
+            if (!advanceScope.exec())
+            {
+                logDatabaseFailure(QStringLiteral("Advance offline mailbox baseline"),
+                                   advanceScope);
+                continue;
+            }
             QSqlQuery retain{m_connection.database()};
             retain.prepare(QStringLiteral(
                 "UPDATE mail_vault_email_refs SET retention='full_sync' WHERE "
@@ -487,51 +563,8 @@ namespace javelin::app
                 continue;
             const bool hasMissingSource = missing.value(0).toBool();
             missing.finish();
-
-            const auto canonicalQueryKey = javelin::jmap::sync::mailboxQueryKey({
-                .mailboxId = scope.mailboxId,
-                .sortProperty = "receivedAt",
-                .isAscending = false,
-                .collapseThreads = true,
-            });
-            QSqlQuery current{m_connection.database()};
-            current.prepare(QStringLiteral(
-                "SELECT EXISTS(SELECT 1 FROM offline_mailbox_scopes s LEFT JOIN sync_state q "
-                "ON q.account_id=s.account_id AND q.object_type='EmailQuery' AND "
-                "q.query_key=:query_key LEFT JOIN sync_state e ON e.account_id=s.account_id AND "
-                "e.object_type='Email' AND e.query_key='' WHERE s.account_id=:account AND "
-                "s.mailbox_id=:mailbox AND s.status='complete' AND "
-                "(q.state_token IS NULL OR e.state_token IS NULL OR "
-                "q.state_token<>s.query_state OR e.state_token<>s.email_state))"));
-            current.bindValue(QStringLiteral(":query_key"),
-                              QString::fromStdString(canonicalQueryKey));
-            current.bindValue(QStringLiteral(":account"), QString::fromStdString(scope.accountId));
-            current.bindValue(QStringLiteral(":mailbox"), QString::fromStdString(scope.mailboxId));
-            if (!current.exec() || !current.next())
+            if (!hasMissingSource)
                 continue;
-            const bool baselineIsStale = current.value(0).toBool();
-            current.finish();
-            if (!hasMissingSource && !baselineIsStale)
-                continue;
-            if (baselineIsStale)
-            {
-                QSqlQuery reconcile{m_connection.database()};
-                reconcile.prepare(QStringLiteral(
-                    "UPDATE offline_mailbox_scopes SET status='pending',completed_generation=NULL,"
-                    "anchor_email_id=NULL,query_state=NULL,email_state=NULL,expected_total=NULL,"
-                    "completed_total=0,updated_at=CURRENT_TIMESTAMP WHERE account_id=:account AND "
-                    "mailbox_id=:mailbox"));
-                reconcile.bindValue(QStringLiteral(":account"),
-                                    QString::fromStdString(scope.accountId));
-                reconcile.bindValue(QStringLiteral(":mailbox"),
-                                    QString::fromStdString(scope.mailboxId));
-                if (!reconcile.exec())
-                {
-                    logDatabaseFailure(QStringLiteral("Queue offline mailbox reconciliation"),
-                                       reconcile);
-                    continue;
-                }
-            }
             QSqlQuery query{m_connection.database()};
             query.prepare(QStringLiteral(
                 "UPDATE background_jobs SET status='queued',updated_at=CURRENT_TIMESTAMP WHERE "
@@ -682,6 +715,7 @@ namespace javelin::app
             std::size_t position = 0;
             std::optional<std::size_t> total;
             std::optional<std::string> anchor;
+            const auto pageSize = fullMailboxPageSize(m_connection, scope.accountId);
             if (resumeEnumeration)
             {
                 QSqlQuery resume{m_connection.database()};
@@ -713,7 +747,12 @@ namespace javelin::app
                     static_cast<void>(m_scheduler.pause(scope.jobId));
                     co_return;
                 }
-                constexpr std::size_t pageSize = 100;
+                qCDebug(logFullMailSync).noquote()
+                    << "materialize page" << QString::fromStdString(scope.accountId)
+                    << QString::fromStdString(scope.mailboxId) << "offset"
+                    << static_cast<qulonglong>(position) << "limit"
+                    << static_cast<qulonglong>(pageSize) << "expected"
+                    << (total.has_value() ? QString::number(*total) : QStringLiteral("unknown"));
                 auto pageResult = co_await m_core.materializeFullMailboxPage(
                     liveSettings(*accountSettings), scope.accountId, scope.mailboxId, position,
                     pageSize, anchor);
@@ -740,10 +779,12 @@ namespace javelin::app
                     co_return;
                 }
                 auto page = std::get<javelin::jmap::FullMailboxPage>(std::move(pageResult));
+                const auto pagePosition = page.position;
+                const auto pageCount = page.emailIds.size();
                 auto commitFuture =
                     QtConcurrent::run(commitFullMailboxPage, m_connection.database().databaseName(),
                                       scope.accountId, scope.mailboxId, scope.jobId, generation,
-                                      position, page.emailIds, std::move(page.emails),
+                                      pagePosition, page.emailIds, std::move(page.emails),
                                       page.queryState, std::move(page.emailState), page.total);
                 const auto commit = co_await qCoro(commitFuture).takeResult();
                 if (commit.restartRequired)
@@ -785,21 +826,22 @@ namespace javelin::app
                 for (const auto offset : commit.windowOffsets)
                     Q_EMIT mailboxWindowCommitted(QString::fromStdString(scope.accountId),
                                                   QString::fromStdString(scope.mailboxId), offset,
-                                                  pageSize);
-                if (position == 0)
+                                                  canonicalWindowSize);
+                if (pagePosition == 0)
                 {
                     if (!page.emailIds.empty())
                         anchor = page.emailIds.front();
                 }
                 total = page.total;
-                position += page.emailIds.size();
+                position = pagePosition + pageCount;
                 progress.completedUnits = position;
                 progress.totalUnits = total;
                 progress.detail = QStringLiteral("Reading mailbox contents");
                 static_cast<void>(m_scheduler.update(
                     scope.jobId, WorkStatus::Running, progress,
                     checkpoint(QStringLiteral("enumerating"), position, generation)));
-                if (page.emailIds.size() < pageSize)
+                if (pageCount == 0 || (total.has_value() && position >= *total) ||
+                    (!total.has_value() && pageCount < pageSize))
                     break;
             }
             const auto coverageResult =
