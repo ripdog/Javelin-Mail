@@ -1,6 +1,7 @@
 #pragma once
 
 #include "jmap/cache/Database.h"
+#include "jmap/cache/QueryWindowCoverage.h"
 #include "jmap/domain/MailEntities.h"
 #include "jmap/query/EmailListSort.h"
 
@@ -54,7 +55,7 @@ namespace javelin::jmap::cache
         std::size_t returnedLimit = 0;
         std::optional<std::size_t> total;
         std::string queryState;
-        bool isAuthoritative = true;
+        QueryWindowCoverage coverage = QueryWindowCoverage::Server;
         std::vector<MessageListItem> items;
     };
 
@@ -66,7 +67,7 @@ namespace javelin::jmap::cache
         std::size_t returnedLimit = 0;
         std::optional<std::size_t> total;
         std::string queryState;
-        bool isAuthoritative = true;
+        QueryWindowCoverage coverage = QueryWindowCoverage::Server;
         std::vector<MessageListItem> items;
     };
 

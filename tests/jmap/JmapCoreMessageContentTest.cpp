@@ -578,7 +578,7 @@ TEST_CASE("JmapCore queues archive and delete mailbox moves as mutations",
         std::get_if<std::optional<javelin::jmap::cache::MailboxWindowPage>>(&optimisticInbox);
     REQUIRE(inboxPage != nullptr);
     REQUIRE(inboxPage->has_value());
-    CHECK_FALSE((*inboxPage)->isAuthoritative);
+    CHECK((*inboxPage)->coverage == javelin::jmap::cache::QueryWindowCoverage::LocallyProjected);
     CHECK((*inboxPage)->items.empty());
     const auto optimisticArchive =
         queryService.listMailboxMessages("account-1", "mbx-archive", 100);
@@ -827,14 +827,14 @@ TEST_CASE("JmapCore queues exact mailbox patches as mutations", "[jmap][core][mu
             std::get_if<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(&window);
         REQUIRE(cached != nullptr);
         REQUIRE(cached->has_value());
-        CHECK_FALSE((*cached)->isAuthoritative);
+        CHECK((*cached)->coverage == javelin::jmap::cache::QueryWindowCoverage::LocallyProjected);
     }
     const auto searchWindow = searchWindows.find("account-1", "search-key", 0, 100);
     const auto* cachedSearch =
         std::get_if<std::optional<javelin::jmap::cache::SearchWindowRecord>>(&searchWindow);
     REQUIRE(cachedSearch != nullptr);
     REQUIRE(cachedSearch->has_value());
-    CHECK_FALSE((*cachedSearch)->isAuthoritative);
+    CHECK((*cachedSearch)->coverage == javelin::jmap::cache::QueryWindowCoverage::LocallyProjected);
 }
 
 TEST_CASE("JmapCore queues read keyword mutations as mutations", "[jmap][core][mutation-journal]")
@@ -910,7 +910,7 @@ TEST_CASE("JmapCore queues read keyword mutations as mutations", "[jmap][core][m
         std::get_if<std::optional<javelin::jmap::cache::SearchWindowPage>>(&searchPageResult);
     REQUIRE(searchPage != nullptr);
     REQUIRE(searchPage->has_value());
-    CHECK_FALSE((*searchPage)->isAuthoritative);
+    CHECK((*searchPage)->coverage == javelin::jmap::cache::QueryWindowCoverage::LocallyProjected);
     REQUIRE((*searchPage)->items.size() == 1);
     CHECK_FALSE((*searchPage)->items.front().isUnread);
 

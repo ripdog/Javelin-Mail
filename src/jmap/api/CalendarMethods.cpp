@@ -95,10 +95,18 @@ namespace javelin::jmap::api::detail
         std::optional<std::uint64_t> limit;
     };
 
+    struct RawResultReference
+    {
+        std::string resultOf;
+        std::string name;
+        std::string path;
+    };
+
     struct RawEventGetRequest
     {
         std::string accountId;
         std::optional<std::vector<std::string>> ids;
+        std::optional<RawResultReference> idsReference;
         std::optional<std::vector<std::string>> properties;
         std::optional<std::string> recurrenceOverridesBefore;
         std::optional<std::string> recurrenceOverridesAfter;
@@ -327,10 +335,12 @@ JAVELIN_GLZ_META(RawQueryRequest, "accountId", &T::accountId, "filter", &T::filt
 JAVELIN_GLZ_META(RawQueryResponse, "accountId", &T::accountId, "queryState", &T::queryState,
                  "canCalculateChanges", &T::canCalculateChanges, "position", &T::position, "ids",
                  &T::ids, "total", &T::total, "limit", &T::limit);
-JAVELIN_GLZ_META(RawEventGetRequest, "accountId", &T::accountId, "ids", &T::ids, "properties",
-                 &T::properties, "recurrenceOverridesBefore", &T::recurrenceOverridesBefore,
-                 "recurrenceOverridesAfter", &T::recurrenceOverridesAfter, "reduceParticipants",
-                 &T::reduceParticipants, "timeZone", &T::timeZone);
+JAVELIN_GLZ_META(RawResultReference, "resultOf", &T::resultOf, "name", &T::name, "path", &T::path);
+JAVELIN_GLZ_META(RawEventGetRequest, "accountId", &T::accountId, "ids", &T::ids, "#ids",
+                 &T::idsReference, "properties", &T::properties, "recurrenceOverridesBefore",
+                 &T::recurrenceOverridesBefore, "recurrenceOverridesAfter",
+                 &T::recurrenceOverridesAfter, "reduceParticipants", &T::reduceParticipants,
+                 "timeZone", &T::timeZone);
 JAVELIN_GLZ_META(RawRecurrenceDay, "@type", &T::type, "day", &T::day, "nthOfPeriod",
                  &T::nthOfPeriod);
 JAVELIN_GLZ_META(RawRecurrenceRule, "@type", &T::type, "frequency", &T::frequency, "interval",
@@ -940,6 +950,12 @@ namespace javelin::jmap::api
         const auto arguments = serialize(detail::RawEventGetRequest{
             .accountId = request.accountId,
             .ids = request.ids,
+            .idsReference = request.idsReference ? std::optional{detail::RawResultReference{
+                                                       .resultOf = request.idsReference->resultOf,
+                                                       .name = request.idsReference->name,
+                                                       .path = request.idsReference->path,
+                                                   }}
+                                                 : std::nullopt,
             .properties = request.properties,
             .recurrenceOverridesBefore =
                 request.recurrenceOverridesBefore

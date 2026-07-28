@@ -234,6 +234,7 @@ namespace javelin::app
                 .newState = request.ifInState.value_or(std::string{}),
                 .createdId = std::nullopt,
                 .createdIds = {},
+                .receipt = {},
             };
         co_return co_await submitContactCards(std::move(ownerAccountId), std::move(request),
                                               QStringLiteral("Change contact group membership"));
@@ -331,6 +332,22 @@ namespace javelin::app
         };
     }
 
+    undo::AuthoritativeContactsResult
+    ContactCommandService::getEffectiveContacts(const std::string_view accountId)
+    {
+        auto contacts = m_contactRepository.listContacts(accountId);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&contacts))
+            return javelin::jmap::operationError(*error);
+        auto state = m_contactRepository.contactState(accountId);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&state))
+            return javelin::jmap::operationError(*error);
+        return undo::AuthoritativeContacts{
+            .state = std::get<std::optional<std::string>>(state).value_or(std::string{}),
+            .contacts =
+                std::get<std::vector<javelin::jmap::contacts::ContactSummary>>(std::move(contacts)),
+        };
+    }
+
     QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
     ContactCommandService::applyContactCardsFromHistory(
         std::string ownerAccountId, javelin::jmap::api::ContactCardSetRequest request,
@@ -366,6 +383,22 @@ namespace javelin::app
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&state))
             co_return javelin::jmap::operationError(*error);
         co_return undo::AuthoritativeAddressBooks{
+            .state = std::get<std::optional<std::string>>(state).value_or(std::string{}),
+            .addressBooks =
+                std::get<std::vector<javelin::jmap::api::AddressBook>>(std::move(books)),
+        };
+    }
+
+    undo::AuthoritativeAddressBooksResult
+    ContactCommandService::getEffectiveAddressBooks(const std::string_view accountId)
+    {
+        auto books = m_contactRepository.listAddressBooks(accountId);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&books))
+            return javelin::jmap::operationError(*error);
+        auto state = m_contactRepository.addressBookState(accountId);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&state))
+            return javelin::jmap::operationError(*error);
+        return undo::AuthoritativeAddressBooks{
             .state = std::get<std::optional<std::string>>(state).value_or(std::string{}),
             .addressBooks =
                 std::get<std::vector<javelin::jmap::api::AddressBook>>(std::move(books)),

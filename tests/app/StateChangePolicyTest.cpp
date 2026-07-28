@@ -15,26 +15,28 @@ TEST_CASE("state-change subscriptions include supported groupware data types", "
 
 TEST_CASE("contact state changes are routed away from mail refresh", "[app][sync]")
 {
-    auto routed = javelin::app::routeStateChanges({
-        {"Email", "mail-2"},
-        {"Mailbox", "boxes-2"},
-        {"CalendarEvent", "calendar-2"},
-        {"AddressBook", "books-2"},
-        {"ContactCard", "contacts-2"},
-    });
+    auto routed = javelin::app::routeStateChanges(
+        {
+            {"mail-account",
+             {{"Email", "mail-2"}, {"Mailbox", "boxes-2"}, {"CalendarEvent", "calendar-2"}}},
+            {"contacts-account", {{"AddressBook", "books-2"}, {"ContactCard", "contacts-2"}}},
+        },
+        "mail-account");
 
-    CHECK(routed.calendarChanged);
-    CHECK(routed.contactsChanged);
     CHECK(routed.mailStates == std::unordered_map<std::string, std::string>{
                                    {"Email", "mail-2"}, {"Mailbox", "boxes-2"}});
+    CHECK(routed.calendarStates == javelin::jmap::sync::AccountTypeStateMap{
+                                       {"mail-account", {{"CalendarEvent", "calendar-2"}}}});
+    CHECK(routed.contactStates ==
+          javelin::jmap::sync::AccountTypeStateMap{
+              {"contacts-account", {{"AddressBook", "books-2"}, {"ContactCard", "contacts-2"}}}});
 }
 
 TEST_CASE("unfinished contact refresh jobs are restored after restart", "[app][sync]")
 {
     CHECK(javelin::app::shouldRestoreContactRefresh(javelin::app::WorkStatus::Queued));
     CHECK(javelin::app::shouldRestoreContactRefresh(javelin::app::WorkStatus::Paused));
-    CHECK(javelin::app::shouldRestoreContactRefresh(
-        javelin::app::WorkStatus::WaitingForNetwork));
+    CHECK(javelin::app::shouldRestoreContactRefresh(javelin::app::WorkStatus::WaitingForNetwork));
     CHECK(javelin::app::shouldRestoreContactRefresh(javelin::app::WorkStatus::WaitingForAuth));
     CHECK_FALSE(javelin::app::shouldRestoreContactRefresh(javelin::app::WorkStatus::Running));
     CHECK_FALSE(javelin::app::shouldRestoreContactRefresh(javelin::app::WorkStatus::Failed));

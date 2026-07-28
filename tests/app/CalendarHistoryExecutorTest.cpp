@@ -19,6 +19,16 @@ namespace
         int nextId = 1;
         int mutations = 0;
 
+        AuthoritativeCalendarEventResult
+        getEffectiveCalendarEvent(std::string_view,
+                                  const std::optional<std::string>& eventId) override
+        {
+            std::optional<CalendarEvent> found;
+            if (current.has_value() && eventId.has_value() && current->id == *eventId)
+                found = current;
+            return AuthoritativeCalendarEvent{.state = state, .event = std::move(found)};
+        }
+
         QCoro::Task<AuthoritativeCalendarEventResult>
         getAuthoritativeCalendarEvent(std::string, std::string, std::optional<std::string> eventId,
                                       std::string uid) override
@@ -41,6 +51,7 @@ namespace
                 .accountId = command.accountId,
                 .newState = state,
                 .createdId = command.event.id,
+                .receipt = {},
             };
         }
 
@@ -54,6 +65,7 @@ namespace
                 .accountId = command.accountId,
                 .newState = state,
                 .createdId = std::nullopt,
+                .receipt = {},
             };
         }
 
@@ -67,6 +79,7 @@ namespace
                 .accountId = command.accountId,
                 .newState = state,
                 .createdId = std::nullopt,
+                .receipt = {},
             };
         }
     };

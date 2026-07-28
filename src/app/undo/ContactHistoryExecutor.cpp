@@ -107,8 +107,7 @@ namespace javelin::app::undo
             co_return conflict(QStringLiteral("The contact history payload is empty."));
 
         const bool undo = direction == HistoryExecutionDirection::Undo;
-        auto loaded =
-            co_await m_contacts.getAuthoritativeContacts(history->connectionId, history->accountId);
+        auto loaded = m_contacts.getEffectiveContacts(history->accountId);
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&loaded))
             co_return failure(*error);
         const auto& authoritative = std::get<AuthoritativeContacts>(loaded);
@@ -207,8 +206,7 @@ namespace javelin::app::undo
         // Servers may add or canonicalize Card properties. Persist the authoritative
         // representation of the side we just applied so the next undo/redo compares
         // against server state instead of the pre-submit document.
-        auto refreshed =
-            co_await m_contacts.getAuthoritativeContacts(history->connectionId, history->accountId);
+        auto refreshed = m_contacts.getEffectiveContacts(history->accountId);
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&refreshed))
             co_return failure(*error);
         const auto& currentContacts = std::get<AuthoritativeContacts>(refreshed);

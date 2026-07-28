@@ -693,7 +693,7 @@ TEST_CASE("query service distinguishes a stale mailbox window from an empty page
         std::get_if<std::optional<javelin::jmap::cache::MailboxWindowPage>>(&staleResult);
     REQUIRE(stale != nullptr);
     REQUIRE(stale->has_value());
-    CHECK_FALSE((*stale)->isAuthoritative);
+    CHECK((*stale)->coverage == javelin::jmap::cache::QueryWindowCoverage::Stale);
 
     REQUIRE_FALSE(windows
                       .replace({
@@ -715,7 +715,7 @@ TEST_CASE("query service distinguishes a stale mailbox window from an empty page
         std::get_if<std::optional<javelin::jmap::cache::MailboxWindowPage>>(&emptyResult);
     REQUIRE(empty != nullptr);
     REQUIRE(empty->has_value());
-    CHECK((*empty)->isAuthoritative);
+    CHECK((*empty)->coverage == javelin::jmap::cache::QueryWindowCoverage::Server);
     CHECK((*empty)->items.empty());
     CHECK((*empty)->total == std::optional<std::size_t>{0});
 }
@@ -795,9 +795,9 @@ TEST_CASE("mailbox query changes rebase every contiguous cached page",
         std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(shiftedSecondResult);
     REQUIRE(shiftedFirst.has_value());
     REQUIRE(shiftedSecond.has_value());
-    CHECK(shiftedFirst->isAuthoritative);
+    CHECK(shiftedFirst->coverage == javelin::jmap::cache::QueryWindowCoverage::Server);
     CHECK(shiftedFirst->emailIds == std::vector<std::string>{"a", "c"});
-    CHECK_FALSE(shiftedSecond->isAuthoritative);
+    CHECK(shiftedSecond->coverage == javelin::jmap::cache::QueryWindowCoverage::Stale);
     CHECK(shiftedSecond->emailIds == std::vector<std::string>{"d"});
 }
 
@@ -856,7 +856,7 @@ TEST_CASE("offline mailboxes retain every materialized query window",
     const auto& deep =
         std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(deepResult);
     REQUIRE(deep.has_value());
-    CHECK_FALSE(deep->isAuthoritative);
+    CHECK(deep->coverage == javelin::jmap::cache::QueryWindowCoverage::Stale);
     CHECK(deep->emailIds == std::vector<std::string>{"id-12"});
 }
 
@@ -985,7 +985,7 @@ TEST_CASE("same-state mailbox pages inherit authoritative query totals",
     const auto& stale =
         std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(staleResult);
     REQUIRE(stale.has_value());
-    CHECK_FALSE(stale->isAuthoritative);
+    CHECK(stale->coverage == javelin::jmap::cache::QueryWindowCoverage::Stale);
 }
 
 TEST_CASE("query service SQL plans use the intended cache indexes", "[jmap][cache][query]")

@@ -3,6 +3,7 @@
 #include "jmap/JmapCore.h"
 #include "jmap/api/CalendarMethods.h"
 #include "jmap/cache/CalendarRepository.h"
+#include "jmap/sync/MutationCommitReceipt.h"
 
 #include <QCoroTask>
 
@@ -41,6 +42,7 @@ namespace javelin::jmap::calendar
         std::string accountId;
         std::string newState;
         std::optional<std::string> createdId;
+        javelin::jmap::sync::MutationCommitReceipt receipt;
     };
 
     struct AuthoritativeCalendarEvent
@@ -49,12 +51,19 @@ namespace javelin::jmap::calendar
         std::optional<CalendarEvent> event;
     };
 
+    struct CalendarRangeMaterialization
+    {
+        VisibleInterval interval;
+        TimeZoneId displayTimeZone;
+    };
+
     struct CreateEventCommand
     {
         std::string accountId;
         CalendarEvent event;
         std::optional<std::string> operationGroupId;
         std::optional<std::string> ifInState;
+        std::optional<CalendarRangeMaterialization> materialization;
     };
 
     struct UpdateEventCommand
@@ -63,6 +72,7 @@ namespace javelin::jmap::calendar
         CalendarEvent event;
         std::optional<std::string> operationGroupId;
         std::optional<std::string> ifInState;
+        std::optional<CalendarRangeMaterialization> materialization;
     };
 
     struct DeleteEventCommand
@@ -129,6 +139,7 @@ namespace javelin::jmap::calendar
         mutate(LiveConnectionSettings settings, std::string ownerAccountId,
                api::CalendarEventSetRequest request, std::vector<std::string> calendarIds,
                std::optional<std::string> operationGroupId,
+               std::optional<CalendarRangeMaterialization> materialization,
                std::function<void()> projectionCommitted);
 
         cache::DatabaseConnection& m_connection;

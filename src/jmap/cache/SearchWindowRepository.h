@@ -1,6 +1,7 @@
 #pragma once
 
 #include "jmap/cache/Database.h"
+#include "jmap/cache/QueryWindowCoverage.h"
 
 #include <cstddef>
 #include <optional>
@@ -22,7 +23,7 @@ namespace javelin::jmap::cache
         std::size_t returnedLimit = 0;
         std::optional<std::size_t> total;
         std::string queryState;
-        bool isAuthoritative = true;
+        QueryWindowCoverage coverage = QueryWindowCoverage::Server;
         std::vector<std::string> emailIds;
     };
 
@@ -38,6 +39,8 @@ namespace javelin::jmap::cache
                                               std::size_t offset, std::size_t limit) const;
         [[nodiscard]] std::optional<DatabaseError>
         invalidateAccount(DatabaseTransaction& transaction, std::string_view accountId);
+        [[nodiscard]] std::optional<DatabaseError> projectAccount(DatabaseTransaction& transaction,
+                                                                  std::string_view accountId);
         [[nodiscard]] std::optional<DatabaseError> eraseQuery(std::string_view accountId,
                                                               std::string_view queryKey);
 

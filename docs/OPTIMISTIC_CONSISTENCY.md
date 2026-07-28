@@ -71,6 +71,33 @@ record remains unknown and the same logical command is blocked from being submit
 On startup, persisted `in_flight` records become `unknown`; a process restart cannot prove that the
 server did not apply them.
 
+## One-Request Acceptance
+
+In the normal case, a user mutation is settled by its single JMAP API envelope. The typed adapter
+returns a `MutationCommitReceipt` containing each affected account/data-type state transition,
+accepted and rejected object IDs, affected cache views, and whether requested materialization was
+incomplete. The response transaction advances exact state tokens and folds server-created IDs or
+transformed documents into the projection. Success does not schedule a follow-up `/changes`,
+`/query`, or `/get`.
+
+Dependent reads required to materialize the result are method calls in the same sequential
+envelope. Mail membership/count mutations use `Email/set` followed by `Mailbox/get`. Recurring
+event mutations use `CalendarEvent/set`, an expanded range query, and a result-referenced get. A
+successful set remains accepted if dependent materialization is incomplete.
+
+Extra API requests are reserved for ambiguity, `stateMismatch`, partial rejection, protocol
+pagination or method/object limits, and genuinely newer server state.
+
+## Push Coordination
+
+Push changes remain an `accountId -> dataType -> state` map through transport and routing. A pushed
+state is held while that account/data-type has an in-flight mutation. Once the response commits, an
+equal state is discarded; only a newer advertised state starts the typed incremental refresh.
+Calendar and contact accounts are never flattened into the primary mail account.
+
+Refresh and materialization work is serialized per account/data-type. Repeated pushes coalesce,
+and a matching push cannot supersede materialization already carried in the mutation envelope.
+
 ## Refresh Fencing
 
 A refresh captures the current domain generation before network I/O. Immediately before its cache
@@ -150,9 +177,9 @@ Uploads, downloads, Sieve validation, identity reads, and other procedural calls
 persistent JMAP object state and therefore do not create optimistic records.
 
 Calendar recurrence expansion remains server-owned. While a recurring CalendarEvent mutation is
-active, the cache uses one local anchor occurrence for the projected series and suppresses stale
-expanded server occurrences. A confirming refresh replaces that anchor with authoritative expanded
-instances.
+active, the cache uses one local anchor occurrence and suppresses stale expanded occurrences. The
+normal mutation envelope queries and gets the visible expansion after the set, replacing that
+anchor without a second API request.
 
 ## Required Invariants
 
@@ -166,8 +193,8 @@ instances.
 
 Ordered Email query membership follows the additional invariants in
 [`QUERY_WINDOWS.md`](QUERY_WINDOWS.md). A mailbox or search mutation invalidates affected query
-windows inside the same projection transaction; cached object counts are never treated as proof of
-ordered query coverage.
+windows to locally projected coverage inside the same projection transaction; cached object counts
+are never treated as proof of authoritative ordered pagination.
 
 All Email materialization paths, including explicit pagination and notification-anchored queries,
 must rebase active Email projections after writing confirmed server objects and before publishing a

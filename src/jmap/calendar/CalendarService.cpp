@@ -164,6 +164,7 @@ namespace javelin::jmap::calendar
                 const auto request =
                     api::calendarEventGet({.accountId = accountId,
                                            .ids = std::move(batch),
+                                           .idsReference = std::nullopt,
                                            .properties = calendarEventReadProperties(),
                                            .recurrenceOverridesBefore = std::nullopt,
                                            .recurrenceOverridesAfter = std::nullopt,
@@ -597,6 +598,42 @@ namespace javelin::jmap::calendar
                 .newState = response.newState,
                 .createdId =
                     response.created.empty() ? std::nullopt : response.created.begin()->second.id,
+                .receipt =
+                    {
+                        .domains =
+                            {
+                                {
+                                    .accountId = response.accountId,
+                                    .dataType = "CalendarEvent",
+                                    .oldState = response.oldState,
+                                    .newState = response.newState,
+                                },
+                            },
+                        .acceptedObjectIds =
+                            [&]
+                        {
+                            std::vector<std::string> ids;
+                            ids.reserve(response.updated.size() + response.destroyed.size() +
+                                        response.created.size());
+                            for (const auto& [id, updated] : response.updated)
+                            {
+                                static_cast<void>(updated);
+                                ids.push_back(id);
+                            }
+                            ids.insert(ids.end(), response.destroyed.begin(),
+                                       response.destroyed.end());
+                            for (const auto& [creationId, created] : response.created)
+                            {
+                                static_cast<void>(creationId);
+                                if (created.id.has_value())
+                                    ids.push_back(*created.id);
+                            }
+                            return ids;
+                        }(),
+                        .rejectedObjectIds = {},
+                        .affectedCacheViews = {"calendar"},
+                        .incompleteMaterialization = false,
+                    },
             };
         }
     } // namespace
@@ -758,13 +795,6 @@ namespace javelin::jmap::calendar
         if (!state.has_value())
             co_return error(OperationErrorCode::InvalidRequest,
                             QStringLiteral("Refresh calendars before changing the default."));
-        if (selected->isDefault)
-            co_return CommittedMutation{
-                .accountId = std::move(accountId),
-                .newState = *state,
-                .createdId = std::nullopt,
-            };
-
         sync::MutationJournalRepository journal{m_connection};
         const sync::ConsistencyDomain domain{.accountId = accountId, .dataType = "Calendar"};
         const auto active = journal.listActive(domain);
@@ -773,6 +803,14 @@ namespace javelin::jmap::calendar
         if (!std::get<std::vector<sync::MutationRecord>>(active).empty())
             co_return error(OperationErrorCode::Conflict,
                             QStringLiteral("A default-calendar change is already unresolved."));
+        if (selected->isDefault)
+            co_return CommittedMutation{
+                .accountId = std::move(accountId),
+                .newState = *state,
+                .createdId = std::nullopt,
+                .receipt = {},
+            };
+
         const auto method = api::calendarSet(
             {.accountId = accountId, .ifInState = state, .onSuccessSetIsDefault = calendarId});
         if (!method)
@@ -791,6 +829,13 @@ namespace javelin::jmap::calendar
             .acceptedState = std::nullopt,
             .errorJson = std::nullopt,
         };
+        std::unordered_map<std::string, bool> baseDefaults;
+        std::unordered_map<std::string, bool> projectedDefaults;
+        for (const auto& calendar : available)
+        {
+            baseDefaults.emplace(calendar.id, calendar.isDefault);
+            projectedDefaults.emplace(calendar.id, calendar.id == calendarId);
+        }
         auto queueResult = sync::MutationProjectionTransaction::begin(
             m_connection, QStringLiteral("Queue default Calendar mutation"));
         if (const auto* cacheError = std::get_if<cache::DatabaseError>(&queueResult))
@@ -800,6 +845,9 @@ namespace javelin::jmap::calendar
             co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
         const std::array domains{domain};
         if (const auto cacheError = queue.advance(domains))
+            co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+        if (const auto cacheError = repository.applyCalendarDefaults(
+                queue.cacheTransaction(), accountId, *state, projectedDefaults))
             co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
         if (const auto cacheError = queue.commit())
             co_return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
@@ -816,6 +864,12 @@ namespace javelin::jmap::calendar
             if (const auto cacheError =
                     transaction.transition(mutation.mutationId, status, acceptedState))
                 return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+            if (status == sync::MutationStatus::Rejected)
+            {
+                if (const auto cacheError = repository.applyCalendarDefaults(
+                        transaction.cacheTransaction(), accountId, *state, baseDefaults))
+                    return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
+            }
             if (const auto cacheError = transaction.commit())
                 return error(OperationErrorCode::LocalStorageFailure, cacheError->message);
             return std::nullopt;
@@ -836,7 +890,7 @@ namespace javelin::jmap::calendar
             co_return callError(result);
         }
         const auto read = api::ResponseReader{*envelope}.require(handle);
-        std::unordered_map<std::string, bool> defaults;
+        auto defaults = projectedDefaults;
         std::string acceptedState;
         bool accepted = false;
         if (const auto* readError = std::get_if<api::ResponseReaderError>(&read))
@@ -936,6 +990,7 @@ namespace javelin::jmap::calendar
             .accountId = std::move(accountId),
             .newState = std::move(acceptedState),
             .createdId = std::nullopt,
+            .receipt = {},
         };
     }
 
@@ -1082,6 +1137,7 @@ namespace javelin::jmap::calendar
                 const auto getRequest =
                     api::calendarEventGet({.accountId = accountId,
                                            .ids = changedIds,
+                                           .idsReference = std::nullopt,
                                            .properties = calendarEventReadProperties(),
                                            .recurrenceOverridesBefore = std::nullopt,
                                            .recurrenceOverridesAfter = std::nullopt,
@@ -1652,10 +1708,10 @@ namespace javelin::jmap::calendar
                                              .update = {},
                                              .destroy = {},
                                              .sendSchedulingMessages = true};
-        co_return co_await mutate(std::move(settings), std::move(ownerAccountId),
-                                  std::move(request), std::move(calendarIds),
-                                  std::move(command.operationGroupId),
-                                  std::move(projectionCommitted));
+        co_return co_await mutate(
+            std::move(settings), std::move(ownerAccountId), std::move(request),
+            std::move(calendarIds), std::move(command.operationGroupId),
+            std::move(command.materialization), std::move(projectionCommitted));
     }
 
     QCoro::Task<CalendarMutationResult>
@@ -1685,7 +1741,8 @@ namespace javelin::jmap::calendar
         if (*previous == command.event)
             co_return CommittedMutation{.accountId = std::move(command.accountId),
                                         .newState = *command.ifInState,
-                                        .createdId = std::nullopt};
+                                        .createdId = std::nullopt,
+                                        .receipt = {}};
         api::CalendarEventSetRequest request{
             .accountId = command.accountId,
             .ifInState = command.ifInState,
@@ -1693,10 +1750,10 @@ namespace javelin::jmap::calendar
             .update = {{eventId, {.previous = *previous, .event = std::move(command.event)}}},
             .destroy = {},
             .sendSchedulingMessages = true};
-        co_return co_await mutate(std::move(settings), std::move(ownerAccountId),
-                                  std::move(request), std::move(calendarIds),
-                                  std::move(command.operationGroupId),
-                                  std::move(projectionCommitted));
+        co_return co_await mutate(
+            std::move(settings), std::move(ownerAccountId), std::move(request),
+            std::move(calendarIds), std::move(command.operationGroupId),
+            std::move(command.materialization), std::move(projectionCommitted));
     }
 
     QCoro::Task<CalendarMutationResult>
@@ -1718,14 +1775,17 @@ namespace javelin::jmap::calendar
                                              .sendSchedulingMessages = true};
         co_return co_await mutate(std::move(settings), std::move(ownerAccountId),
                                   std::move(request), std::move(command.calendarIds),
-                                  std::move(command.operationGroupId),
+                                  std::move(command.operationGroupId), std::nullopt,
                                   std::move(projectionCommitted));
     }
 
-    QCoro::Task<CalendarMutationResult> CalendarService::mutate(
-        LiveConnectionSettings settings, std::string ownerAccountId,
-        api::CalendarEventSetRequest request, std::vector<std::string> calendarIds,
-        std::optional<std::string> operationGroupId, std::function<void()> projectionCommitted)
+    QCoro::Task<CalendarMutationResult>
+    CalendarService::mutate(LiveConnectionSettings settings, std::string ownerAccountId,
+                            api::CalendarEventSetRequest request,
+                            std::vector<std::string> calendarIds,
+                            std::optional<std::string> operationGroupId,
+                            std::optional<CalendarRangeMaterialization> materialization,
+                            std::function<void()> projectionCommitted)
     {
         const auto sessionResult = loadSession(m_connection, ownerAccountId);
         if (const auto* serviceError = std::get_if<OperationError>(&sessionResult))
@@ -1767,6 +1827,45 @@ namespace javelin::jmap::calendar
         api::RequestBuilder builder;
         builder.useCore().useCapability(std::string{api::calendarsCapabilityUri});
         const auto handle = builder.call(*method, "calendar-event-set");
+        std::optional<api::CallHandle<api::CalendarEventQueryResponse>> queryHandle;
+        std::optional<api::CallHandle<api::CalendarEventGetResponse>> getHandle;
+        if (materialization.has_value())
+        {
+            const auto query = api::calendarEventQuery({
+                .accountId = request.accountId,
+                .filter =
+                    {
+                        .inCalendar = std::nullopt,
+                        .after = materialization->interval.start,
+                        .before = materialization->interval.end,
+                        .text = std::nullopt,
+                        .uid = std::nullopt,
+                    },
+                .expandRecurrences = true,
+                .timeZone = materialization->displayTimeZone,
+                .position = 0,
+                .limit = std::nullopt,
+                .calculateTotal = true,
+            });
+            if (!query)
+                co_return error(OperationErrorCode::InvalidRequest,
+                                QStringLiteral("Unable to serialize recurrence materialization."));
+            queryHandle = builder.call(*query, "calendar-event-materialization-query");
+            const auto get = api::calendarEventGet({
+                .accountId = request.accountId,
+                .ids = std::nullopt,
+                .idsReference = api::resultReference(*queryHandle, "/ids"),
+                .properties = std::nullopt,
+                .recurrenceOverridesBefore = std::nullopt,
+                .recurrenceOverridesAfter = std::nullopt,
+                .reduceParticipants = false,
+                .timeZone = materialization->displayTimeZone,
+            });
+            if (!get)
+                co_return error(OperationErrorCode::InvalidRequest,
+                                QStringLiteral("Unable to serialize expanded event retrieval."));
+            getHandle = builder.call(*get, "calendar-event-materialization-get");
+        }
         api::MethodCaller caller{m_methodTransport};
         const auto result =
             co_await caller.call(context(settings, session, request.accountId), builder);
@@ -1787,6 +1886,21 @@ namespace javelin::jmap::calendar
             co_return responseError(*readError);
         }
         const auto& response = std::get<api::CalendarEventSetResponse>(read);
+        std::optional<api::CalendarEventQueryResponse> materializedQuery;
+        std::optional<api::CalendarEventGetResponse> materializedEvents;
+        if (queryHandle.has_value() && getHandle.has_value())
+        {
+            const api::ResponseReader reader{*envelope};
+            const auto queryRead = reader.require(*queryHandle);
+            const auto getRead = reader.require(*getHandle);
+            if (const auto* queryResponse =
+                    std::get_if<api::CalendarEventQueryResponse>(&queryRead);
+                queryResponse != nullptr)
+                materializedQuery = *queryResponse;
+            if (const auto* getResponse = std::get_if<api::CalendarEventGetResponse>(&getRead);
+                getResponse != nullptr)
+                materializedEvents = *getResponse;
+        }
         const auto* setError = !response.notCreated.empty()   ? &response.notCreated.begin()->second
                                : !response.notUpdated.empty() ? &response.notUpdated.begin()->second
                                : !response.notDestroyed.empty()
@@ -1824,6 +1938,60 @@ namespace javelin::jmap::calendar
                 journal.transition(prepared.records, javelin::jmap::sync::MutationStatus::Unknown));
             co_return *operationError;
         }
+        bool materializationComplete = !materialization.has_value();
+        if (materialization.has_value() && materializedQuery.has_value() &&
+            materializedEvents.has_value() &&
+            materializedQuery->ids.size() ==
+                materializedQuery->total.value_or(materializedQuery->ids.size()) &&
+            materializedEvents->notFound.empty())
+        {
+            auto cached = repository.loadWindow(request.accountId, materialization->interval.start,
+                                                materialization->interval.end,
+                                                materialization->displayTimeZone);
+            auto* window = std::get_if<std::optional<cache::CalendarWindow>>(&cached);
+            if (window != nullptr && window->has_value())
+            {
+                std::unordered_map<std::string, std::string> eventIdByUid;
+                for (const auto& event : (*window)->events)
+                    eventIdByUid.insert_or_assign(event.uid, event.id);
+                std::vector<Occurrence> occurrences;
+                occurrences.reserve(materializedEvents->list.size());
+                for (const auto& expanded : materializedEvents->list)
+                {
+                    auto eventId = expanded.baseEventId;
+                    if (!eventId.has_value())
+                    {
+                        const auto base = eventIdByUid.find(expanded.uid);
+                        if (base != eventIdByUid.end())
+                            eventId = base->second;
+                    }
+                    if (!eventId.has_value())
+                        continue;
+                    occurrences.push_back({
+                        .accountId = request.accountId,
+                        .id = expanded.id,
+                        .eventId = *eventId,
+                        .recurrenceId = expanded.recurrenceId,
+                        .localStart = expanded.start,
+                        .localEnd = localEnd(expanded),
+                        .utcStart = expanded.utcStart,
+                        .utcEnd = expanded.utcEnd,
+                        .allDay = expanded.showWithoutTime,
+                    });
+                }
+                (*window)->queryState = materializedQuery->queryState;
+                (*window)->eventState = response.newState;
+                (*window)->occurrences = std::move(occurrences);
+                if (const auto cacheError = repository.reconcileWindow(**window))
+                    qCWarning(logCalendarService).noquote()
+                        << "Accepted calendar edit needs later range materialization"
+                        << cacheError->message;
+                else
+                    materializationComplete = true;
+            }
+        }
+        std::get<CommittedMutation>(accepted).receipt.incompleteMaterialization =
+            !materializationComplete;
         if (projectionCommitted)
             projectionCommitted();
         static_cast<void>(beginRefresh(ownerAccountId));

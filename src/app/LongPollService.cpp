@@ -11,6 +11,7 @@
 #include "jmap/cache/SyncStateRepository.h"
 #include "jmap/sync/MailboxRefreshExecutor.h"
 #include "jmap/sync/MailboxStateRefreshExecutor.h"
+#include "jmap/sync/MutationJournal.h"
 #include "jmap/sync/PreferredStateChangeSource.h"
 
 #include <QCoroTimer>
@@ -175,6 +176,8 @@ namespace javelin::app
         }
 
         m_pendingStateChanges.clear();
+        m_pendingCalendarStateChanges.clear();
+        m_pendingContactStateChanges.clear();
         m_refreshDebounceTimer.stop();
         m_refreshInFlight = false;
         m_refreshAgainRequested = false;
@@ -204,14 +207,19 @@ namespace javelin::app
     AccountSyncCoordinator::onStateChange(javelin::jmap::sync::StateChangeEvent event)
     {
         m_lastEventId = event.newState;
-        auto routed = routeStateChanges(std::move(event.changedStates));
+        auto routed = routeStateChanges(std::move(event.changedStates), m_accountId);
         for (auto& [type, state] : routed.mailStates)
             m_pendingStateChanges.insert_or_assign(std::move(type), std::move(state));
-        if (routed.calendarChanged)
-            Q_EMIT calendarStateChanged(QString::fromStdString(m_accountId));
-        if (routed.contactsChanged)
-            Q_EMIT contactStateChanged(QString::fromStdString(m_accountId));
-        if (!m_pendingStateChanges.empty())
+        const auto merge = [](auto& destination, auto source)
+        {
+            for (auto& [accountId, states] : source)
+                for (auto& [type, state] : states)
+                    destination[accountId].insert_or_assign(std::move(type), std::move(state));
+        };
+        merge(m_pendingCalendarStateChanges, std::move(routed.calendarStates));
+        merge(m_pendingContactStateChanges, std::move(routed.contactStates));
+        if (!m_pendingStateChanges.empty() || !m_pendingCalendarStateChanges.empty() ||
+            !m_pendingContactStateChanges.empty())
             scheduleDebouncedRefresh();
         co_return;
     }
@@ -583,6 +591,10 @@ namespace javelin::app
 
     void AccountSyncCoordinator::scheduleCatchUpRefresh()
     {
+        processGroupwareStateChanges();
+        if (m_pendingStateChanges.empty() && !m_forceEmailRefreshRequested)
+            return;
+
         const bool coverageIsAuthoritative = watchedMailboxCoverageIsAuthoritative();
         if (!m_pendingStateChanges.empty())
         {
@@ -612,16 +624,66 @@ namespace javelin::app
         QCoro::connect(std::move(task), this, []() {});
     }
 
+    bool AccountSyncCoordinator::stateChangeAlreadyApplied(const std::string_view accountId,
+                                                           const std::string_view type,
+                                                           const std::string_view state) const
+    {
+        javelin::jmap::cache::SyncStateRepository states{m_databaseConnection};
+        const auto cached = states.find(
+            {.accountId = std::string{accountId}, .objectType = std::string{type}, .queryKey = {}});
+        const auto* record =
+            std::get_if<std::optional<javelin::jmap::cache::SyncStateRecord>>(&cached);
+        return record != nullptr && record->has_value() && record->value().stateToken == state;
+    }
+
+    bool AccountSyncCoordinator::domainHasActiveMutation(const std::string_view accountId,
+                                                         const std::string_view type) const
+    {
+        javelin::jmap::sync::MutationJournalRepository journal{m_databaseConnection};
+        const auto active = journal.listActive(
+            {.accountId = std::string{accountId}, .dataType = std::string{type}});
+        const auto* records =
+            std::get_if<std::vector<javelin::jmap::sync::MutationRecord>>(&active);
+        return records == nullptr || !records->empty();
+    }
+
+    void AccountSyncCoordinator::processGroupwareStateChanges()
+    {
+        const auto process = [this](auto& pending, auto emitReady)
+        {
+            javelin::jmap::sync::AccountTypeStateMap deferred;
+            javelin::jmap::sync::AccountTypeStateMap ready;
+            for (auto& [accountId, states] : pending)
+            {
+                for (auto& [type, state] : states)
+                {
+                    if (domainHasActiveMutation(accountId, type))
+                    {
+                        deferred[accountId].insert_or_assign(type, state);
+                        continue;
+                    }
+                    if (!stateChangeAlreadyApplied(accountId, type, state))
+                        ready[accountId].insert_or_assign(type, state);
+                }
+            }
+            pending = std::move(deferred);
+            if (!ready.empty())
+                emitReady(ready);
+        };
+        const auto ownerAccountId = QString::fromStdString(m_accountId);
+        process(m_pendingCalendarStateChanges, [this, &ownerAccountId](const auto& states)
+                { Q_EMIT calendarStateChanged(ownerAccountId, states); });
+        process(m_pendingContactStateChanges, [this, &ownerAccountId](const auto& states)
+                { Q_EMIT contactStateChanged(ownerAccountId, states); });
+        if (!m_pendingCalendarStateChanges.empty() || !m_pendingContactStateChanges.empty())
+            m_refreshDebounceTimer.start();
+    }
+
     bool
     AccountSyncCoordinator::pendingStateChangeAlreadyApplied(const std::string_view type,
                                                              const std::string_view state) const
     {
-        javelin::jmap::cache::SyncStateRepository states{m_databaseConnection};
-        const auto cached = states.find(
-            {.accountId = m_accountId, .objectType = std::string{type}, .queryKey = {}});
-        const auto* record =
-            std::get_if<std::optional<javelin::jmap::cache::SyncStateRecord>>(&cached);
-        return record != nullptr && record->has_value() && record->value().stateToken == state;
+        return stateChangeAlreadyApplied(m_accountId, type, state);
     }
 
     bool AccountSyncCoordinator::pendingStateChangesAlreadyApplied() const

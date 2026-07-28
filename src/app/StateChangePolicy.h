@@ -1,6 +1,7 @@
 #pragma once
 
 #include "app/WorkScheduler.h"
+#include "jmap/sync/StateChangeSource.h"
 
 #include <string>
 #include <unordered_map>
@@ -18,8 +19,8 @@ namespace javelin::app
     struct RoutedStateChanges
     {
         std::unordered_map<std::string, std::string> mailStates;
-        bool calendarChanged = false;
-        bool contactsChanged = false;
+        javelin::jmap::sync::AccountTypeStateMap calendarStates;
+        javelin::jmap::sync::AccountTypeStateMap contactStates;
     };
 
     [[nodiscard]] inline std::vector<std::string>
@@ -46,22 +47,29 @@ namespace javelin::app
     }
 
     [[nodiscard]] inline RoutedStateChanges
-    routeStateChanges(std::unordered_map<std::string, std::string> changedStates)
+    routeStateChanges(javelin::jmap::sync::AccountTypeStateMap changedStates,
+                      const std::string_view primaryAccountId)
     {
         RoutedStateChanges routed;
-        for (auto& [type, state] : changedStates)
+        for (auto& [accountId, states] : changedStates)
         {
-            if (type == "Calendar" || type == "CalendarEvent")
+            for (auto& [type, state] : states)
             {
-                routed.calendarChanged = true;
-                continue;
+                if (type == "Calendar" || type == "CalendarEvent")
+                {
+                    routed.calendarStates[accountId].insert_or_assign(std::move(type),
+                                                                      std::move(state));
+                    continue;
+                }
+                if (type == "AddressBook" || type == "ContactCard")
+                {
+                    routed.contactStates[accountId].insert_or_assign(std::move(type),
+                                                                     std::move(state));
+                    continue;
+                }
+                if (accountId == primaryAccountId)
+                    routed.mailStates.insert_or_assign(std::move(type), std::move(state));
             }
-            if (type == "AddressBook" || type == "ContactCard")
-            {
-                routed.contactsChanged = true;
-                continue;
-            }
-            routed.mailStates.insert_or_assign(std::move(type), std::move(state));
         }
         return routed;
     }

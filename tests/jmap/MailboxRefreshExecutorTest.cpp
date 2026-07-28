@@ -167,7 +167,7 @@ namespace
                               .returnedLimit = 100,
                               .total = emailIds.size(),
                               .queryState = "query-state-1",
-                              .isAuthoritative = true,
+                              .coverage = javelin::jmap::cache::QueryWindowCoverage::Server,
                               .emailIds = std::move(emailIds),
                           })
                           .has_value());
@@ -385,7 +385,7 @@ TEST_CASE("mailbox refresh executor bootstraps a collapsed mailbox into the cach
     const auto& window =
         std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(windowResult);
     REQUIRE(window.has_value());
-    CHECK(window->isAuthoritative);
+    CHECK(window->coverage == javelin::jmap::cache::QueryWindowCoverage::Server);
     CHECK(window->queryState == "query-state-1");
     CHECK(window->emailIds == std::vector<std::string>{"eml-1"});
 }
@@ -1380,7 +1380,7 @@ TEST_CASE("mailbox refresh executor full fallback preserves unrelated account ca
                           .returnedLimit = 1,
                           .total = 1,
                           .queryState = "archive-query-state-1",
-                          .isAuthoritative = true,
+                          .coverage = javelin::jmap::cache::QueryWindowCoverage::Server,
                           .emailIds = {"eml-archive"},
                       })
                       .has_value());
@@ -1480,7 +1480,7 @@ TEST_CASE("mailbox refresh executor full fallback preserves unrelated account ca
     const auto& archiveWindow =
         std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(archiveWindowResult);
     REQUIRE(archiveWindow.has_value());
-    CHECK_FALSE(archiveWindow->isAuthoritative);
+    CHECK(archiveWindow->coverage == javelin::jmap::cache::QueryWindowCoverage::Stale);
 
     javelin::jmap::cache::QueryService queryService{databaseContext.connection};
     const auto inboxListResult = queryService.listMailboxMessages("account-1", "mbx-inbox", 100);
@@ -1546,7 +1546,7 @@ TEST_CASE("mailbox refresh executor preserves windows when shared membership is 
                           .returnedLimit = 1,
                           .total = 1,
                           .queryState = "archive-query-state-1",
-                          .isAuthoritative = true,
+                          .coverage = javelin::jmap::cache::QueryWindowCoverage::Server,
                           .emailIds = {sharedEmail.id},
                       })
                       .has_value());
@@ -1613,5 +1613,5 @@ TEST_CASE("mailbox refresh executor preserves windows when shared membership is 
     const auto& archiveWindow =
         std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(archiveWindowResult);
     REQUIRE(archiveWindow.has_value());
-    CHECK(archiveWindow->isAuthoritative);
+    CHECK(archiveWindow->coverage == javelin::jmap::cache::QueryWindowCoverage::Server);
 }

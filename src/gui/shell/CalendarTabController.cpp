@@ -264,27 +264,54 @@ namespace javelin::gui::shell
                     dialog->show();
                     return;
                 }
+                const bool requiresRecurrenceMaterialization =
+                    event.recurrenceRule.has_value() || !event.recurrenceOverrides.empty();
+                const auto materialization =
+                    requiresRecurrenceMaterialization
+                        ? std::optional{javelin::jmap::calendar::CalendarRangeMaterialization{
+                              .interval =
+                                  {
+                                      .start =
+                                          {
+                                              .value = widget->visibleStart()
+                                                           .toString(Qt::ISODate)
+                                                           .toStdString() +
+                                                       "T00:00:00",
+                                          },
+                                      .end =
+                                          {
+                                              .value = widget->visibleEnd()
+                                                           .toString(Qt::ISODate)
+                                                           .toStdString() +
+                                                       "T00:00:00",
+                                          },
+                                  },
+                              .displayTimeZone =
+                                  {
+                                      .value = QTimeZone::systemTimeZoneId().toStdString(),
+                                  },
+                          }}
+                        : std::nullopt;
                 auto task = m_mailService.createCalendarEvent(selectedAccount->ownerAccountId,
                                                               {.accountId = event.accountId,
                                                                .event = std::move(event),
                                                                .operationGroupId = std::nullopt,
-                                                               .ifInState = std::nullopt});
-                QCoro::connect(
-                    std::move(task), dialog,
-                    [dialog, widget,
-                     refreshVisible](javelin::jmap::calendar::CalendarMutationResult result)
-                    {
-                        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
-                        {
-                            qCWarning(logCalendarOperations).noquote()
-                                << "calendar event creation failed" << error->message;
-                            dialog->showMutationError(error->message);
-                            dialog->show();
-                            return;
-                        }
-                        dialog->deleteLater();
-                        refreshVisible(widget->visibleStart(), widget->visibleEnd());
-                    });
+                                                               .ifInState = std::nullopt,
+                                                               .materialization = materialization});
+                QCoro::connect(std::move(task), dialog,
+                               [dialog](javelin::jmap::calendar::CalendarMutationResult result)
+                               {
+                                   if (const auto* error =
+                                           std::get_if<javelin::jmap::OperationError>(&result))
+                                   {
+                                       qCWarning(logCalendarOperations).noquote()
+                                           << "calendar event creation failed" << error->message;
+                                       dialog->showMutationError(error->message);
+                                       dialog->show();
+                                       return;
+                                   }
+                                   dialog->deleteLater();
+                               });
             });
         connect(
             widget, &javelin::gui::calendar::MonthCalendarWidget::eventActivated, widget,
@@ -413,6 +440,12 @@ namespace javelin::gui::shell
                             : javelin::jmap::calendar::applyOccurrenceEdit(
                                   baseEvent, selectedRecurrence, editedEvent);
                 }
+                const bool deletingWholeEvent =
+                    dialogResult == javelin::gui::calendar::EventDialog::DeleteRequested &&
+                    !occurrenceEdit;
+                const bool requiresRecurrenceMaterialization =
+                    !deletingWholeEvent && (editedEvent.recurrenceRule.has_value() ||
+                                            !editedEvent.recurrenceOverrides.empty());
                 auto task =
                     dialogResult == javelin::gui::calendar::EventDialog::DeleteRequested &&
                             !occurrenceEdit
@@ -433,27 +466,34 @@ namespace javelin::gui::shell
                                }(),
                                .operationGroupId = std::nullopt,
                                .ifInState = std::nullopt})
-                        : m_mailService.updateCalendarEvent(account->ownerAccountId,
-                                                            {.accountId = account->accountId,
-                                                             .event = editedEvent,
-                                                             .operationGroupId = std::nullopt,
-                                                             .ifInState = std::nullopt});
-                QCoro::connect(
-                    std::move(task), dialog,
-                    [dialog, widget,
-                     refreshVisible](javelin::jmap::calendar::CalendarMutationResult result)
-                    {
-                        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
-                        {
-                            qCWarning(logCalendarOperations).noquote()
-                                << "calendar event mutation failed" << error->message;
-                            dialog->showMutationError(error->message);
-                            dialog->show();
-                            return;
-                        }
-                        dialog->deleteLater();
-                        refreshVisible(widget->visibleStart(), widget->visibleEnd());
-                    });
+                        : m_mailService.updateCalendarEvent(
+                              account->ownerAccountId,
+                              {.accountId = account->accountId,
+                               .event = editedEvent,
+                               .operationGroupId = std::nullopt,
+                               .ifInState = std::nullopt,
+                               .materialization =
+                                   requiresRecurrenceMaterialization
+                                       ? std::optional{javelin::jmap::calendar::
+                                                           CalendarRangeMaterialization{
+                                                               .interval = interval,
+                                                               .displayTimeZone = timeZone,
+                                                           }}
+                                       : std::nullopt});
+                QCoro::connect(std::move(task), dialog,
+                               [dialog](javelin::jmap::calendar::CalendarMutationResult result)
+                               {
+                                   if (const auto* error =
+                                           std::get_if<javelin::jmap::OperationError>(&result))
+                                   {
+                                       qCWarning(logCalendarOperations).noquote()
+                                           << "calendar event mutation failed" << error->message;
+                                       dialog->showMutationError(error->message);
+                                       dialog->show();
+                                       return;
+                                   }
+                                   dialog->deleteLater();
+                               });
             });
         refreshVisible(widget->visibleStart(), widget->visibleEnd());
         m_contentStack.addWidget(widget);

@@ -290,7 +290,7 @@ namespace javelin::app
                         .returnedLimit = windowSize,
                         .total = std::nullopt,
                         .queryState = progressiveState,
-                        .isAuthoritative = true,
+                        .coverage = javelin::jmap::cache::QueryWindowCoverage::Server,
                         .emailIds = std::move(representativeIds),
                     }))
                     return FullMailboxPageCommit{error->message};

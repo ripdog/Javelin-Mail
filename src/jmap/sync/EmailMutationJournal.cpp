@@ -226,13 +226,14 @@ namespace javelin::jmap::sync
         javelin::jmap::cache::MailboxWindowRepository windows{m_connection};
         for (const auto& mailboxId : affectedMailboxIds)
         {
-            if (const auto error = windows.invalidateMailbox(transaction.cacheTransaction(),
-                                                             record.accountId, mailboxId))
+            if (const auto error = windows.invalidateMailbox(
+                    transaction.cacheTransaction(), record.accountId, mailboxId,
+                    javelin::jmap::cache::QueryWindowCoverage::LocallyProjected))
                 return error;
         }
         javelin::jmap::cache::SearchWindowRepository searchWindows{m_connection};
         if (const auto error =
-                searchWindows.invalidateAccount(transaction.cacheTransaction(), record.accountId))
+                searchWindows.projectAccount(transaction.cacheTransaction(), record.accountId))
             return error;
         return transaction.commit();
     }

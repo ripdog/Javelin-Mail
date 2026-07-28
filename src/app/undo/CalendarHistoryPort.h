@@ -10,6 +10,9 @@ namespace javelin::app::undo
       public:
         virtual ~CalendarHistoryPort() = default;
 
+        [[nodiscard]] virtual javelin::jmap::calendar::AuthoritativeCalendarEventResult
+        getEffectiveCalendarEvent(std::string_view accountId,
+                                  const std::optional<std::string>& eventId) = 0;
         [[nodiscard]] virtual QCoro::Task<javelin::jmap::calendar::AuthoritativeCalendarEventResult>
         getAuthoritativeCalendarEvent(std::string ownerAccountId, std::string accountId,
                                       std::optional<std::string> eventId, std::string uid) = 0;

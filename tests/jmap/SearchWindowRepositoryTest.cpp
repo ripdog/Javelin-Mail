@@ -95,7 +95,7 @@ TEST_CASE("search window repository replaces ordered query results", "[jmap][cac
     CHECK((*first)->returnedLimit == 100);
     CHECK((*first)->total == std::optional<std::size_t>{3});
     CHECK((*first)->queryState == "state-1");
-    CHECK((*first)->isAuthoritative);
+    CHECK((*first)->coverage == javelin::jmap::cache::QueryWindowCoverage::Server);
     CHECK((*first)->emailIds == std::vector<std::string>{"email-2", "email-1", "email-3"});
 
     REQUIRE_FALSE(repository
@@ -182,7 +182,7 @@ TEST_CASE("search window invalidation retains every page as a stale identity win
             std::get_if<std::optional<javelin::jmap::cache::SearchWindowRecord>>(&result);
         REQUIRE(window != nullptr);
         REQUIRE(window->has_value());
-        CHECK_FALSE((*window)->isAuthoritative);
+        CHECK((*window)->coverage == javelin::jmap::cache::QueryWindowCoverage::Stale);
         CHECK((*window)->offset == offset);
         CHECK((*window)->emailIds == std::vector<std::string>{"email-1"});
     }
@@ -306,6 +306,6 @@ TEST_CASE("mailbox windows preserve exact sparse server positions and invalidate
         std::get_if<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(&invalidated);
     REQUIRE(stale != nullptr);
     REQUIRE(stale->has_value());
-    CHECK_FALSE((*stale)->isAuthoritative);
+    CHECK((*stale)->coverage == javelin::jmap::cache::QueryWindowCoverage::Stale);
     CHECK((*stale)->emailIds == std::vector<std::string>{"email-201", "email-202"});
 }

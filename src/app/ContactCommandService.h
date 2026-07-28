@@ -67,12 +67,16 @@ namespace javelin::app
                              std::string mediaType) override;
         [[nodiscard]] QCoro::Task<undo::AuthoritativeContactsResult>
         getAuthoritativeContacts(std::string ownerAccountId, std::string accountId) override;
+        [[nodiscard]] undo::AuthoritativeContactsResult
+        getEffectiveContacts(std::string_view accountId) override;
         [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
         applyContactCardsFromHistory(std::string ownerAccountId,
                                      javelin::jmap::api::ContactCardSetRequest request,
                                      undo::CommandOrigin origin) override;
         [[nodiscard]] QCoro::Task<undo::AuthoritativeAddressBooksResult>
         getAuthoritativeAddressBooks(std::string ownerAccountId, std::string accountId) override;
+        [[nodiscard]] undo::AuthoritativeAddressBooksResult
+        getEffectiveAddressBooks(std::string_view accountId) override;
         [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
         applyAddressBooksFromHistory(std::string ownerAccountId,
                                      javelin::jmap::api::AddressBookSetRequest request,

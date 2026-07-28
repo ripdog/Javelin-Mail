@@ -31,6 +31,9 @@ namespace javelin::jmap::cache
 
         [[nodiscard]] std::optional<DatabaseError> upsert(const SyncStateKey& key,
                                                           std::string_view stateToken);
+        [[nodiscard]] std::optional<DatabaseError> upsert(DatabaseTransaction& transaction,
+                                                          const SyncStateKey& key,
+                                                          std::string_view stateToken);
         [[nodiscard]] std::variant<bool, DatabaseError>
         advanceIfCurrent(DatabaseTransaction& transaction, const SyncStateKey& key,
                          std::string_view expectedState, std::string_view newState);

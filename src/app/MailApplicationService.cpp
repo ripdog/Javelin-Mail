@@ -11,6 +11,7 @@
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/MailboxWindowRepository.h"
 #include "jmap/cache/SessionRepository.h"
+#include "jmap/cache/SyncStateRepository.h"
 #include "jmap/contacts/ContactService.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
 
@@ -493,7 +494,8 @@ namespace javelin::app
             if (const auto* cached =
                     std::get_if<std::optional<javelin::jmap::cache::MailboxWindowPage>>(
                         &cachedResult);
-                cached != nullptr && cached->has_value() && (*cached)->isAuthoritative &&
+                cached != nullptr && cached->has_value() &&
+                javelin::jmap::cache::isPaginationAuthoritative((*cached)->coverage) &&
                 (!offlineState.has_value() || (*cached)->queryState == *offlineState))
             {
                 co_return MailboxWindowSummary{
@@ -523,7 +525,9 @@ namespace javelin::app
                 const auto& cached =
                     std::get<std::optional<javelin::jmap::cache::MailboxWindowRecord>>(
                         cachedResult);
-                if (cached.has_value() && cached->isAuthoritative && cached->queryState == state)
+                if (cached.has_value() &&
+                    javelin::jmap::cache::isPaginationAuthoritative(cached->coverage) &&
+                    cached->queryState == state)
                 {
                     co_return MailboxWindowSummary{
                         .accountId = std::move(intent.accountId),
@@ -561,7 +565,7 @@ namespace javelin::app
                         .returnedLimit = intent.limit,
                         .total = *total,
                         .queryState = state,
-                        .isAuthoritative = true,
+                        .coverage = javelin::jmap::cache::QueryWindowCoverage::Server,
                         .emailIds = std::move(emailIds),
                     }))
                 {
@@ -1234,6 +1238,44 @@ namespace javelin::app
             std::move(emailIds));
     }
 
+    javelin::jmap::AuthoritativeEmailsResult
+    MailApplicationService::getEffectiveEmails(const std::string_view accountId,
+                                               const std::span<const std::string> emailIds)
+    {
+        javelin::jmap::cache::EmailRepository emails{m_databaseConnection};
+        javelin::jmap::cache::SyncStateRepository states{m_databaseConnection};
+        const auto stateResult = states.find(
+            {.accountId = std::string{accountId}, .objectType = "Email", .queryKey = {}});
+        const auto* state =
+            std::get_if<std::optional<javelin::jmap::cache::SyncStateRecord>>(&stateResult);
+        if (state == nullptr)
+            return javelin::jmap::operationError(
+                std::get<javelin::jmap::cache::DatabaseError>(stateResult));
+        if (!state->has_value())
+            return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::InvalidRequest,
+                .message = QStringLiteral("Email state is not available offline."),
+            };
+        std::vector<javelin::jmap::domain::Email> result;
+        result.reserve(emailIds.size());
+        for (const auto& emailId : emailIds)
+        {
+            const auto found = emails.find(accountId, emailId);
+            const auto* email = std::get_if<std::optional<javelin::jmap::domain::Email>>(&found);
+            if (email == nullptr)
+                return javelin::jmap::operationError(
+                    std::get<javelin::jmap::cache::DatabaseError>(found));
+            if (email->has_value())
+                result.push_back(**email);
+        }
+        return javelin::jmap::AuthoritativeEmails{
+            .accountId = std::string{accountId},
+            .state = state->value().stateToken,
+            .emails = std::move(result),
+            .notFound = {},
+        };
+    }
+
     QCoro::Task<javelin::jmap::MessageContentRefreshResult>
     MailApplicationService::requestMessageContent(std::string accountId, std::string emailId)
     {
@@ -1574,6 +1616,38 @@ namespace javelin::app
             std::move(accountId), std::move(eventId), std::move(uid));
     }
 
+    javelin::jmap::calendar::AuthoritativeCalendarEventResult
+    MailApplicationService::getEffectiveCalendarEvent(const std::string_view accountId,
+                                                      const std::optional<std::string>& eventId)
+    {
+        javelin::jmap::cache::CalendarRepository repository{m_databaseConnection};
+        const auto stateResult = repository.stateToken(accountId, "CalendarEvent");
+        const auto* state = std::get_if<std::optional<std::string>>(&stateResult);
+        if (state == nullptr)
+            return javelin::jmap::operationError(
+                std::get<javelin::jmap::cache::DatabaseError>(stateResult));
+        if (!state->has_value())
+            return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::InvalidRequest,
+                .message = QStringLiteral("Calendar event state is not available offline."),
+            };
+        std::optional<javelin::jmap::calendar::CalendarEvent> event;
+        if (eventId.has_value())
+        {
+            const auto found = repository.findEvent(accountId, *eventId);
+            const auto* cached =
+                std::get_if<std::optional<javelin::jmap::calendar::CalendarEvent>>(&found);
+            if (cached == nullptr)
+                return javelin::jmap::operationError(
+                    std::get<javelin::jmap::cache::DatabaseError>(found));
+            event = *cached;
+        }
+        return javelin::jmap::calendar::AuthoritativeCalendarEvent{
+            .state = **state,
+            .event = std::move(event),
+        };
+    }
+
     QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
     MailApplicationService::createCalendarEvent(std::string ownerAccountId,
                                                 javelin::jmap::calendar::CreateEventCommand command,
@@ -1812,6 +1886,7 @@ namespace javelin::app
                 .accountId = accountId,
                 .newState = {},
                 .createdId = std::nullopt,
+                .receipt = {},
             };
         auto preparedResult =
             m_undoManager.prepareNormal(QStringLiteral("Change Default Calendar"),
@@ -1886,6 +1961,7 @@ namespace javelin::app
                 .accountId = command.accountId,
                 .newState = command.ifInState.value_or(std::string{}),
                 .createdId = std::nullopt,
+                .receipt = {},
             };
         const auto beforeDocument = javelin::jmap::api::serializeCalendarEventDocument(*before);
         const auto afterDocument =
@@ -2305,11 +2381,15 @@ namespace javelin::app
         connect(&coordinator, &AccountSyncCoordinator::cacheCommitted, this,
                 &MailApplicationService::cacheCommitted);
         connect(&coordinator, &AccountSyncCoordinator::contactStateChanged, this,
-                [this](const QString& ownerAccountId)
-                { scheduleContactRefresh(ownerAccountId.toStdString()); });
-        connect(&coordinator, &AccountSyncCoordinator::calendarStateChanged, this,
-                [this](const QString& ownerAccountId)
+                [this](const QString& ownerAccountId, const auto& changedStates)
                 {
+                    static_cast<void>(changedStates);
+                    scheduleContactRefresh(ownerAccountId.toStdString());
+                });
+        connect(&coordinator, &AccountSyncCoordinator::calendarStateChanged, this,
+                [this](const QString& ownerAccountId, const auto& changedStates)
+                {
+                    static_cast<void>(changedStates);
                     const auto owner = ownerAccountId.toStdString();
                     const auto range = m_visibleCalendarRanges.find(owner);
                     if (range == m_visibleCalendarRanges.end())

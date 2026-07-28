@@ -18,8 +18,7 @@ TEST_CASE("WebSocket push enable uses the requested data types", "[jmap][push][w
     CHECK(encoded->find(R"("pushState":"push-state-1")") != std::string::npos);
 }
 
-TEST_CASE("state-change routing includes groupware changes from secondary accounts",
-          "[jmap][push]")
+TEST_CASE("state-change routing includes groupware changes from secondary accounts", "[jmap][push]")
 {
     const javelin::jmap::sync::StateChangeSubscription subscription{
         .accountId = "mail-account",
@@ -34,7 +33,7 @@ TEST_CASE("state-change routing includes groupware changes from secondary accoun
     };
 
     CHECK(javelin::jmap::sync::subscribedStateChanges(subscription, changed) ==
-          javelin::jmap::sync::TypeStateMap{{"Email", "mail-2"},
-                                            {"Mailbox", "boxes-2"},
-                                            {"ContactCard", "contacts-2"}});
+          javelin::jmap::sync::AccountTypeStateMap{
+              {"mail-account", {{"Email", "mail-2"}, {"Mailbox", "boxes-2"}}},
+              {"contacts-account", {{"ContactCard", "contacts-2"}}}});
 }

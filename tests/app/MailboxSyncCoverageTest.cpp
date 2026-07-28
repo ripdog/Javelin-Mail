@@ -78,7 +78,7 @@ namespace
                               .returnedLimit = 100,
                               .total = 0,
                               .queryState = "query-state",
-                              .isAuthoritative = true,
+                              .coverage = javelin::jmap::cache::QueryWindowCoverage::Server,
                               .emailIds = {},
                           })
                           .has_value());

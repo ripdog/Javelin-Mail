@@ -1567,6 +1567,30 @@ namespace javelin::jmap::cache
                                            "ON pending_sends(compose_session_id)"),
                         },
                 },
+                MigrationStep{
+                    .version = 34,
+                    .name = QStringLiteral("typed_query_window_coverage"),
+                    .statements =
+                        {
+                            QStringLiteral(
+                                "ALTER TABLE mailbox_query_windows ADD COLUMN coverage TEXT NOT "
+                                "NULL DEFAULT 'server' CHECK(coverage IN "
+                                "('server','locally_projected','stale'))"),
+                            QStringLiteral(
+                                "UPDATE mailbox_query_windows SET coverage=CASE is_valid WHEN 1 "
+                                "THEN 'server' ELSE 'stale' END"),
+                            QStringLiteral(
+                                "ALTER TABLE mailbox_query_windows DROP COLUMN is_valid"),
+                            QStringLiteral(
+                                "ALTER TABLE search_windows ADD COLUMN coverage TEXT NOT NULL "
+                                "DEFAULT 'server' CHECK(coverage IN "
+                                "('server','locally_projected','stale'))"),
+                            QStringLiteral(
+                                "UPDATE search_windows SET coverage=CASE is_valid WHEN 1 THEN "
+                                "'server' ELSE 'stale' END"),
+                            QStringLiteral("ALTER TABLE search_windows DROP COLUMN is_valid"),
+                        },
+                },
             },
         };
     }

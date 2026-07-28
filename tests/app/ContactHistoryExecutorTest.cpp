@@ -45,6 +45,11 @@ namespace
         int mutations = 0;
         int nextId = 1;
 
+        AuthoritativeContactsResult getEffectiveContacts(std::string_view) override
+        {
+            return AuthoritativeContacts{.state = state, .contacts = contacts};
+        }
+
         QCoro::Task<AuthoritativeContactsResult> getAuthoritativeContacts(std::string,
                                                                           std::string) override
         {
@@ -61,6 +66,7 @@ namespace
                 .newState = "state-next",
                 .createdId = std::nullopt,
                 .createdIds = {},
+                .receipt = {},
             };
             for (const auto& id : request.destroy)
                 std::erase_if(contacts, [&](const auto& value) { return value.id == id; });

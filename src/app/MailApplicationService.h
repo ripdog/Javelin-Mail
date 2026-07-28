@@ -206,6 +206,9 @@ namespace javelin::app
             std::optional<std::string> operationGroupId = std::nullopt) override;
         [[nodiscard]] QCoro::Task<javelin::jmap::AuthoritativeEmailsResult>
         getAuthoritativeEmails(std::string accountId, std::vector<std::string> emailIds) override;
+        [[nodiscard]] javelin::jmap::AuthoritativeEmailsResult
+        getEffectiveEmails(std::string_view accountId,
+                           std::span<const std::string> emailIds) override;
         [[nodiscard]] QCoro::Task<javelin::jmap::MessageContentRefreshResult>
         requestMessageContent(std::string accountId, std::string emailId);
         [[nodiscard]] QCoro::Task<javelin::jmap::AttachmentDownloadResult>
@@ -238,6 +241,9 @@ namespace javelin::app
         [[nodiscard]] QCoro::Task<javelin::jmap::calendar::AuthoritativeCalendarEventResult>
         getAuthoritativeCalendarEvent(std::string ownerAccountId, std::string accountId,
                                       std::optional<std::string> eventId, std::string uid) override;
+        [[nodiscard]] javelin::jmap::calendar::AuthoritativeCalendarEventResult
+        getEffectiveCalendarEvent(std::string_view accountId,
+                                  const std::optional<std::string>& eventId) override;
         [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
         setDefaultCalendar(
             std::string ownerAccountId, std::string accountId, std::string calendarId,

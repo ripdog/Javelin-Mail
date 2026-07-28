@@ -127,8 +127,7 @@ namespace javelin::app::undo
                       history->currentAddressBookId);
         auto desired = parseBook(undo ? history->beforeDocumentJson : history->afterDocumentJson,
                                  history->currentAddressBookId);
-        auto loaded = co_await m_addressBooks.getAuthoritativeAddressBooks(history->connectionId,
-                                                                           history->accountId);
+        auto loaded = m_addressBooks.getEffectiveAddressBooks(history->accountId);
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&loaded))
             co_return failure(*error);
         const auto& authoritative = std::get<AuthoritativeAddressBooks>(loaded);

@@ -5,6 +5,7 @@
 #include "jmap/cache/QueryService.h"
 #include "jmap/query/EmailListSort.h"
 #include "jmap/search/EmailSearch.h"
+#include "jmap/sync/MutationCommitReceipt.h"
 
 #include <QCoroTask>
 
@@ -150,6 +151,7 @@ namespace javelin::jmap
         std::size_t updatedEmailCount = 0;
         std::size_t failedEmailCount = 0;
         std::vector<Item> items;
+        javelin::jmap::sync::MutationCommitReceipt receipt;
     };
 
     using SubmittedEmailMutationsResult = std::variant<SubmittedEmailMutations, OperationError>;

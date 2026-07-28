@@ -999,6 +999,41 @@ namespace javelin::jmap::contacts
             return !result.created.empty() || !result.updated.empty() || !result.destroyed.empty();
         }
 
+        [[nodiscard]] javelin::jmap::sync::MutationCommitReceipt
+        contactReceipt(const javelin::jmap::api::SetResult& result, const std::string_view dataType)
+        {
+            javelin::jmap::sync::MutationCommitReceipt receipt{
+                .domains =
+                    {
+                        {
+                            .accountId = result.accountId,
+                            .dataType = std::string{dataType},
+                            .oldState = result.oldState,
+                            .newState = result.newState,
+                        },
+                    },
+                .acceptedObjectIds = result.destroyed,
+                .rejectedObjectIds = {},
+                .affectedCacheViews = {"contacts"},
+                .incompleteMaterialization = false,
+            };
+            for (const auto& [id, document] : result.updated)
+            {
+                static_cast<void>(document);
+                receipt.acceptedObjectIds.push_back(id);
+            }
+            for (const auto& mapping : createdIds(result))
+                receipt.acceptedObjectIds.push_back(mapping.serverId);
+            for (const auto& failures :
+                 {&result.notCreated, &result.notUpdated, &result.notDestroyed})
+                for (const auto& [id, document] : *failures)
+                {
+                    static_cast<void>(document);
+                    receipt.rejectedObjectIds.push_back(id);
+                }
+            return receipt;
+        }
+
         [[nodiscard]] ContactMutationResult
         commitSetResult(javelin::jmap::cache::DatabaseConnection& connection,
                         const javelin::jmap::api::SetResult& result,
@@ -1031,7 +1066,9 @@ namespace javelin::jmap::contacts
             return ContactMutationSummary{.accountId = result.accountId,
                                           .newState = result.newState,
                                           .createdId = createdId(result),
-                                          .createdIds = createdIds(result)};
+                                          .createdIds = createdIds(result),
+                                          .receipt =
+                                              contactReceipt(result, domains.front().dataType)};
         }
 
         [[nodiscard]] ContactMutationResult
@@ -1222,6 +1259,7 @@ namespace javelin::jmap::contacts
                 .newState = result.newState,
                 .createdId = createdId(result),
                 .createdIds = createdIds(result),
+                .receipt = contactReceipt(result, "AddressBook"),
             };
         }
 
@@ -1445,6 +1483,7 @@ namespace javelin::jmap::contacts
                 .newState = result.newState,
                 .createdId = createdId(result),
                 .createdIds = createdIds(result),
+                .receipt = contactReceipt(result, "ContactCard"),
             };
         }
 
@@ -1665,11 +1704,29 @@ namespace javelin::jmap::contacts
             if (hasRejected)
                 return error(QStringLiteral("The server rejected part of the contact copy."),
                              javelin::jmap::OperationErrorCode::Conflict);
+            auto receipt = contactReceipt(responseValue.copied, "ContactCard");
+            if (responseValue.destroyedOriginals.has_value())
+            {
+                auto sourceReceipt =
+                    contactReceipt(*responseValue.destroyedOriginals, "ContactCard");
+                receipt.domains.insert(receipt.domains.end(),
+                                       std::make_move_iterator(sourceReceipt.domains.begin()),
+                                       std::make_move_iterator(sourceReceipt.domains.end()));
+                receipt.acceptedObjectIds.insert(
+                    receipt.acceptedObjectIds.end(),
+                    std::make_move_iterator(sourceReceipt.acceptedObjectIds.begin()),
+                    std::make_move_iterator(sourceReceipt.acceptedObjectIds.end()));
+                receipt.rejectedObjectIds.insert(
+                    receipt.rejectedObjectIds.end(),
+                    std::make_move_iterator(sourceReceipt.rejectedObjectIds.begin()),
+                    std::make_move_iterator(sourceReceipt.rejectedObjectIds.end()));
+            }
             return ContactMutationSummary{
                 .accountId = responseValue.copied.accountId,
                 .newState = responseValue.copied.newState,
                 .createdId = createdId(responseValue.copied),
                 .createdIds = createdIds(responseValue.copied),
+                .receipt = std::move(receipt),
             };
         }
 
@@ -2335,6 +2392,7 @@ namespace javelin::jmap::contacts
                 .newState = request.ifInState.value_or(std::string{}),
                 .createdId = std::nullopt,
                 .createdIds = {},
+                .receipt = {},
             };
         co_return co_await setContactCards(std::move(settings), std::move(ownerAccountId),
                                            std::move(request));

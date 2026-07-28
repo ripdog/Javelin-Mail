@@ -112,8 +112,8 @@ namespace javelin::app::undo
             .state = {},
             .event = std::nullopt,
         };
-        auto loaded = co_await m_calendarService.getAuthoritativeCalendarEvent(
-            history->connectionId, history->accountId, history->currentEventId, history->uid);
+        auto loaded = m_calendarService.getEffectiveCalendarEvent(history->accountId,
+                                                                  history->currentEventId);
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&loaded))
             co_return failure(*error);
         authoritative =
@@ -154,9 +154,11 @@ namespace javelin::app::undo
         }
 
         desired->accountId = history->accountId;
+        auto acceptedEvent = *desired;
         if (authoritative.event.has_value())
         {
             desired->id = *history->currentEventId;
+            acceptedEvent.id = *history->currentEventId;
             auto updated = co_await m_calendarService.updateCalendarEvent(
                 history->connectionId,
                 {
@@ -164,6 +166,7 @@ namespace javelin::app::undo
                     .event = std::move(*desired),
                     .operationGroupId = operationGroupId,
                     .ifInState = authoritative.state,
+                    .materialization = std::nullopt,
                 },
                 origin);
             if (const auto* error = std::get_if<javelin::jmap::OperationError>(&updated))
@@ -180,6 +183,7 @@ namespace javelin::app::undo
                     .operationGroupId = operationGroupId,
                     .ifInState = authoritative.state.empty() ? std::nullopt
                                                              : std::optional{authoritative.state},
+                    .materialization = std::nullopt,
                 },
                 origin);
             if (const auto* error = std::get_if<javelin::jmap::OperationError>(&created))
@@ -189,18 +193,10 @@ namespace javelin::app::undo
                 co_return conflict(
                     QStringLiteral("The recreated calendar event has no server identity."));
             history->currentEventId = summary.createdId;
+            acceptedEvent.id = *summary.createdId;
         }
-        auto refreshed = co_await m_calendarService.getAuthoritativeCalendarEvent(
-            history->connectionId, history->accountId, history->currentEventId, history->uid);
-        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&refreshed))
-            co_return failure(*error);
-        const auto& accepted =
-            std::get<javelin::jmap::calendar::AuthoritativeCalendarEvent>(refreshed);
-        if (!accepted.event.has_value())
-            co_return conflict(
-                QStringLiteral("The calendar event was not visible after applying the operation."));
         const auto acceptedDocument =
-            javelin::jmap::api::serializeCalendarEventDocument(*accepted.event);
+            javelin::jmap::api::serializeCalendarEventDocument(acceptedEvent);
         if (!acceptedDocument.has_value())
             co_return conflict(
                 QStringLiteral("The accepted calendar event could not be serialized."));

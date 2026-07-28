@@ -1638,8 +1638,6 @@ namespace javelin::gui::contacts
                            if (const auto* error =
                                    std::get_if<javelin::jmap::OperationError>(&result))
                                Q_EMIT statusMessageRequested(error->message, 10000);
-                           else
-                               requestRefresh();
                        });
     }
 
@@ -1666,8 +1664,6 @@ namespace javelin::gui::contacts
                            if (const auto* error =
                                    std::get_if<javelin::jmap::OperationError>(&result))
                                Q_EMIT statusMessageRequested(error->message, 10000);
-                           else
-                               requestRefresh();
                        });
     }
 
@@ -2083,8 +2079,6 @@ namespace javelin::gui::contacts
                            if (const auto* error =
                                    std::get_if<javelin::jmap::OperationError>(&result))
                                Q_EMIT statusMessageRequested(error->message, 10000);
-                           else
-                               requestRefresh();
                        });
     }
 
@@ -2162,8 +2156,6 @@ namespace javelin::gui::contacts
                            if (const auto* error =
                                    std::get_if<javelin::jmap::OperationError>(&result))
                                Q_EMIT statusMessageRequested(error->message, 10000);
-                           else
-                               requestRefresh();
                        });
     }
 
@@ -2293,8 +2285,6 @@ namespace javelin::gui::contacts
                            if (const auto* error =
                                    std::get_if<javelin::jmap::OperationError>(&result))
                                Q_EMIT statusMessageRequested(error->message, 10000);
-                           else
-                               requestRefresh();
                        });
     }
 
@@ -2418,8 +2408,6 @@ namespace javelin::gui::contacts
                            if (const auto* error =
                                    std::get_if<javelin::jmap::OperationError>(&result))
                                Q_EMIT statusMessageRequested(error->message, 10000);
-                           else
-                               requestRefresh();
                        });
     }
 
@@ -2584,7 +2572,6 @@ namespace javelin::gui::contacts
                                Q_EMIT statusMessageRequested(error->message, 10000);
                                return;
                            }
-                           requestRefresh();
                        });
     }
 

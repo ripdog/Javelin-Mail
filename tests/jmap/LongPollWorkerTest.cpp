@@ -143,7 +143,7 @@ TEST_CASE("state-change worker resumes from the latest state and stops on cancel
         javelin::jmap::sync::StateChangeEvent{
             .newState = "state-2",
             .changedTypes = {"Mailbox", "Email"},
-            .changedStates = {{"Mailbox", "m2"}, {"Email", "e2"}},
+            .changedStates = {{"account-1", {{"Mailbox", "m2"}, {"Email", "e2"}}}},
         },
         javelin::jmap::sync::StateChangeEvent{
             .newState = "state-3",
@@ -166,7 +166,7 @@ TEST_CASE("state-change worker resumes from the latest state and stops on cancel
     CHECK(summary.transientFailures == 0);
     CHECK(summary.cancelled);
     REQUIRE(consumer.updates.size() == 2);
-    CHECK(consumer.updates.front().changedStates.at("Email") == "e2");
+    CHECK(consumer.updates.front().changedStates.at("account-1").at("Email") == "e2");
     REQUIRE(source.subscriptions.size() == 1);
     CHECK(source.subscriptions.front().lastState == "state-1");
 }

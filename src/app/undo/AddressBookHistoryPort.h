@@ -18,6 +18,8 @@ namespace javelin::app::undo
       public:
         virtual ~AddressBookHistoryPort() = default;
 
+        [[nodiscard]] virtual AuthoritativeAddressBooksResult
+        getEffectiveAddressBooks(std::string_view accountId) = 0;
         [[nodiscard]] virtual QCoro::Task<AuthoritativeAddressBooksResult>
         getAuthoritativeAddressBooks(std::string ownerAccountId, std::string accountId) = 0;
         [[nodiscard]] virtual QCoro::Task<javelin::jmap::contacts::ContactMutationResult>

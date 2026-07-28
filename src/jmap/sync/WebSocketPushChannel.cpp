@@ -16,6 +16,7 @@
 
 #include <glaze/glaze.hpp>
 
+#include <algorithm>
 #include <deque>
 #include <unordered_map>
 
@@ -230,10 +231,15 @@ namespace javelin::jmap::sync
             StateChangeEvent event;
             event.newState = change.pushState.value_or(summary.lastState);
             event.changedStates = std::move(changedStates);
-            for (const auto& [type, state] : event.changedStates)
+            for (const auto& [accountId, states] : event.changedStates)
             {
-                static_cast<void>(state);
-                event.changedTypes.push_back(type);
+                static_cast<void>(accountId);
+                for (const auto& [type, state] : states)
+                {
+                    static_cast<void>(state);
+                    if (std::ranges::find(event.changedTypes, type) == event.changedTypes.end())
+                        event.changedTypes.push_back(type);
+                }
             }
             QStringList changedTypes;
             for (const auto& type : event.changedTypes)

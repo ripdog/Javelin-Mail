@@ -58,6 +58,7 @@ namespace javelin::jmap::api
     {
         std::string accountId;
         std::optional<std::vector<std::string>> ids;
+        std::optional<GetRequest::ResultReference> idsReference;
         std::optional<std::vector<std::string>> properties;
         std::optional<calendar::UtcInstant> recurrenceOverridesBefore;
         std::optional<calendar::UtcInstant> recurrenceOverridesAfter;

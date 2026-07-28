@@ -26,6 +26,8 @@ namespace javelin::app::undo
       public:
         virtual ~ContactHistoryPort() = default;
 
+        [[nodiscard]] virtual AuthoritativeContactsResult
+        getEffectiveContacts(std::string_view accountId) = 0;
         [[nodiscard]] virtual QCoro::Task<AuthoritativeContactsResult>
         getAuthoritativeContacts(std::string ownerAccountId, std::string accountId) = 0;
         [[nodiscard]] virtual QCoro::Task<javelin::jmap::contacts::ContactMutationResult>

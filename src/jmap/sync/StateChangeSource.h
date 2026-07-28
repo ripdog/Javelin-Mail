@@ -31,13 +31,13 @@ namespace javelin::jmap::sync
                type == "ContactCard";
     }
 
-    [[nodiscard]] inline TypeStateMap
+    [[nodiscard]] inline AccountTypeStateMap
     subscribedStateChanges(const StateChangeSubscription& subscription,
                            const AccountTypeStateMap& changed)
     {
-        TypeStateMap result;
+        AccountTypeStateMap result;
         if (const auto primary = changed.find(subscription.accountId); primary != changed.end())
-            result = primary->second;
+            result.emplace(primary->first, primary->second);
 
         for (const auto& accountId : subscription.groupwareAccountIds)
         {
@@ -46,9 +46,12 @@ namespace javelin::jmap::sync
             const auto account = changed.find(accountId);
             if (account == changed.end())
                 continue;
+            TypeStateMap groupware;
             for (const auto& [type, state] : account->second)
                 if (isGroupwareStateType(type))
-                    result.insert_or_assign(type, state);
+                    groupware.insert_or_assign(type, state);
+            if (!groupware.empty())
+                result.insert_or_assign(accountId, std::move(groupware));
         }
         return result;
     }
@@ -57,7 +60,7 @@ namespace javelin::jmap::sync
     {
         std::string newState;
         std::vector<std::string> changedTypes;
-        std::unordered_map<std::string, std::string> changedStates;
+        AccountTypeStateMap changedStates;
         bool notifyConsumer = true;
     };
 

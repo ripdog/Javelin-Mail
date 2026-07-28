@@ -6,7 +6,9 @@
 #include <QCoroTask>
 
 #include <optional>
+#include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace javelin::app::undo
@@ -17,6 +19,8 @@ namespace javelin::app::undo
       public:
         virtual ~MailHistoryPort() = default;
 
+        [[nodiscard]] virtual javelin::jmap::AuthoritativeEmailsResult
+        getEffectiveEmails(std::string_view accountId, std::span<const std::string> emailIds) = 0;
         [[nodiscard]] virtual QCoro::Task<javelin::jmap::AuthoritativeEmailsResult>
         getAuthoritativeEmails(std::string accountId, std::vector<std::string> emailIds) = 0;
         [[nodiscard]] virtual javelin::jmap::QueuedEmailMutationResult

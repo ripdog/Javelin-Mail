@@ -32,6 +32,29 @@ namespace javelin::jmap::cache
             query.bindValue(QStringLiteral(":requested_limit"),
                             static_cast<qulonglong>(requestedLimit));
         }
+
+        [[nodiscard]] QString coverageValue(const QueryWindowCoverage coverage)
+        {
+            switch (coverage)
+            {
+            case QueryWindowCoverage::Server:
+                return QStringLiteral("server");
+            case QueryWindowCoverage::LocallyProjected:
+                return QStringLiteral("locally_projected");
+            case QueryWindowCoverage::Stale:
+                return QStringLiteral("stale");
+            }
+            Q_UNREACHABLE();
+        }
+
+        [[nodiscard]] QueryWindowCoverage coverageFromValue(const QString& value)
+        {
+            if (value == QStringLiteral("server"))
+                return QueryWindowCoverage::Server;
+            if (value == QStringLiteral("locally_projected"))
+                return QueryWindowCoverage::LocallyProjected;
+            return QueryWindowCoverage::Stale;
+        }
     } // namespace
 
     MailboxWindowRepository::MailboxWindowRepository(DatabaseConnection& connection)
@@ -58,7 +81,7 @@ namespace javelin::jmap::cache
             knownTotal.prepare(QStringLiteral(
                 "SELECT total FROM mailbox_query_windows WHERE account_id=:account_id AND "
                 "mailbox_id=:mailbox_id AND query_key=:query_key AND query_state=:query_state "
-                "AND is_valid=1 AND total IS NOT NULL ORDER BY requested_offset LIMIT 1"));
+                "AND coverage='server' AND total IS NOT NULL ORDER BY requested_offset LIMIT 1"));
             knownTotal.bindValue(QStringLiteral(":account_id"),
                                  QString::fromStdString(window.accountId));
             knownTotal.bindValue(QStringLiteral(":mailbox_id"),
@@ -102,7 +125,7 @@ namespace javelin::jmap::cache
                 "%1 mailbox_query_windows %2 WHERE account_id=:account_id AND "
                 "mailbox_id=:mailbox_id AND query_key=:query_key AND query_state<>:query_state")
                 .arg(retainAllWindows ? QStringLiteral("UPDATE") : QStringLiteral("DELETE FROM"),
-                     retainAllWindows ? QStringLiteral("SET is_valid=0") : QString{}));
+                     retainAllWindows ? QStringLiteral("SET coverage='stale'") : QString{}));
         staleWindows.bindValue(QStringLiteral(":account_id"),
                                QString::fromStdString(window.accountId));
         staleWindows.bindValue(QStringLiteral(":mailbox_id"),
@@ -123,13 +146,13 @@ namespace javelin::jmap::cache
         replaceWindow.prepare(QStringLiteral(
             "INSERT INTO mailbox_query_windows "
             "(account_id,mailbox_id,query_key,requested_offset,requested_limit,position,"
-            "returned_limit,total,query_state,is_valid,updated_at) VALUES "
+            "returned_limit,total,query_state,coverage,updated_at) VALUES "
             "(:account_id,:mailbox_id,:query_key,:requested_offset,:requested_limit,:position,"
-            ":returned_limit,:total,:query_state,1,CURRENT_TIMESTAMP) "
+            ":returned_limit,:total,:query_state,'server',CURRENT_TIMESTAMP) "
             "ON CONFLICT(account_id,query_key,requested_offset,requested_limit) DO UPDATE SET "
             "mailbox_id=excluded.mailbox_id,position=excluded.position,"
             "returned_limit=excluded.returned_limit,total=excluded.total,"
-            "query_state=excluded.query_state,is_valid=1,updated_at=CURRENT_TIMESTAMP"));
+            "query_state=excluded.query_state,coverage='server',updated_at=CURRENT_TIMESTAMP"));
         bindKey(replaceWindow, window.accountId, window.queryKey, window.requestedOffset,
                 window.requestedLimit);
         replaceWindow.bindValue(QStringLiteral(":mailbox_id"),
@@ -222,7 +245,7 @@ namespace javelin::jmap::cache
 
         QSqlQuery windowQuery{m_connection.database()};
         windowQuery.prepare(QStringLiteral(
-            "SELECT mailbox_id,position,returned_limit,total,query_state,is_valid FROM "
+            "SELECT mailbox_id,position,returned_limit,total,query_state,coverage FROM "
             "mailbox_query_windows WHERE account_id=:account_id AND query_key=:query_key AND "
             "requested_offset=:requested_offset AND requested_limit=:requested_limit"));
         bindKey(windowQuery, accountId, queryKey, requestedOffset, requestedLimit);
@@ -244,7 +267,7 @@ namespace javelin::jmap::cache
                          : std::optional<std::size_t>{static_cast<std::size_t>(
                                windowQuery.value(3).toULongLong())},
             .queryState = windowQuery.value(4).toString().toStdString(),
-            .isAuthoritative = windowQuery.value(5).toInt() != 0,
+            .coverage = coverageFromValue(windowQuery.value(5).toString()),
             .emailIds = {},
         };
 
@@ -277,10 +300,9 @@ namespace javelin::jmap::cache
         return transaction.commit();
     }
 
-    std::optional<DatabaseError>
-    MailboxWindowRepository::invalidateMailbox(DatabaseTransaction& transaction,
-                                               const std::string_view accountId,
-                                               const std::string_view mailboxId)
+    std::optional<DatabaseError> MailboxWindowRepository::invalidateMailbox(
+        DatabaseTransaction& transaction, const std::string_view accountId,
+        const std::string_view mailboxId, const QueryWindowCoverage coverage)
     {
         if (!transaction.isActive() || &transaction.connection() != &m_connection)
         {
@@ -292,8 +314,9 @@ namespace javelin::jmap::cache
         }
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
-            "UPDATE mailbox_query_windows SET is_valid=0 WHERE account_id=:account_id "
+            "UPDATE mailbox_query_windows SET coverage=:coverage WHERE account_id=:account_id "
             "AND mailbox_id=:mailbox_id"));
+        query.bindValue(QStringLiteral(":coverage"), coverageValue(coverage));
         query.bindValue(QStringLiteral(":account_id"),
                         QString::fromStdString(std::string{accountId}));
         query.bindValue(QStringLiteral(":mailbox_id"),
@@ -328,7 +351,7 @@ namespace javelin::jmap::cache
         readWindows.prepare(QStringLiteral(
             "SELECT requested_offset,requested_limit FROM mailbox_query_windows WHERE "
             "account_id=:account AND mailbox_id=:mailbox AND query_key=:query_key AND "
-            "query_state=:query_state AND is_valid=1 ORDER BY requested_offset"));
+            "query_state=:query_state AND coverage='server' ORDER BY requested_offset"));
         readWindows.bindValue(QStringLiteral(":account"),
                               QString::fromStdString(std::string{accountId}));
         readWindows.bindValue(QStringLiteral(":mailbox"),
@@ -361,11 +384,12 @@ namespace javelin::jmap::cache
             QSqlQuery advanceWindows{m_connection.database()};
             advanceWindows.prepare(QStringLiteral(
                 "UPDATE mailbox_query_windows SET query_state=:new_state,total=:total,"
-                "is_valid=CASE WHEN returned_limit=requested_limit OR "
+                "coverage=CASE WHEN returned_limit=requested_limit OR "
                 "(:total IS NOT NULL AND requested_offset+returned_limit>=:total) "
-                "THEN 1 ELSE 0 END,updated_at=CURRENT_TIMESTAMP WHERE account_id=:account AND "
+                "THEN 'server' ELSE 'stale' END,updated_at=CURRENT_TIMESTAMP WHERE "
+                "account_id=:account AND "
                 "mailbox_id=:mailbox AND query_key=:query_key AND query_state=:old_state AND "
-                "is_valid=1 AND requested_offset<:covered_end"));
+                "coverage='server' AND requested_offset<:covered_end"));
             advanceWindows.bindValue(QStringLiteral(":new_state"),
                                      QString::fromStdString(std::string{newQueryState}));
             advanceWindows.bindValue(QStringLiteral(":total"),
@@ -387,7 +411,7 @@ namespace javelin::jmap::cache
 
             QSqlQuery invalidateSparse{m_connection.database()};
             invalidateSparse.prepare(QStringLiteral(
-                "UPDATE mailbox_query_windows SET is_valid=0 WHERE account_id=:account AND "
+                "UPDATE mailbox_query_windows SET coverage='stale' WHERE account_id=:account AND "
                 "mailbox_id=:mailbox AND query_key=:query_key AND query_state=:old_state AND "
                 "requested_offset>=:covered_end"));
             invalidateSparse.bindValue(QStringLiteral(":account"),
@@ -413,7 +437,7 @@ namespace javelin::jmap::cache
             "AND w.requested_offset=i.requested_offset AND "
             "w.requested_limit=i.requested_limit WHERE w.account_id=:account AND "
             "w.mailbox_id=:mailbox AND w.query_key=:query_key AND w.query_state=:query_state "
-            "AND w.is_valid=1 AND w.requested_offset<:covered_end ORDER BY "
+            "AND w.coverage='server' AND w.requested_offset<:covered_end ORDER BY "
             "w.requested_offset,i.position"));
         readItems.bindValue(QStringLiteral(":account"),
                             QString::fromStdString(std::string{accountId}));
@@ -449,7 +473,7 @@ namespace javelin::jmap::cache
         QSqlQuery updateWindow{m_connection.database()};
         updateWindow.prepare(QStringLiteral(
             "UPDATE mailbox_query_windows SET query_state=:new_state,total=:total,"
-            "returned_limit=:returned_limit,is_valid=:is_valid,updated_at=CURRENT_TIMESTAMP "
+            "returned_limit=:returned_limit,coverage=:coverage,updated_at=CURRENT_TIMESTAMP "
             "WHERE account_id=:account AND query_key=:query_key AND requested_offset=:offset AND "
             "requested_limit=:limit"));
         QSqlQuery deleteItems{m_connection.database()};
@@ -480,12 +504,14 @@ namespace javelin::jmap::cache
                                                      : QVariant{});
             const auto end = std::min(ids.size(), window.offset + window.limit);
             const auto returnedLimit = end > window.offset ? end - window.offset : 0;
-            const bool isAuthoritative =
+            const bool authoritative =
                 returnedLimit == window.limit ||
                 (total.has_value() && window.offset + returnedLimit >= *total);
             updateWindow.bindValue(QStringLiteral(":returned_limit"),
                                    static_cast<qulonglong>(returnedLimit));
-            updateWindow.bindValue(QStringLiteral(":is_valid"), isAuthoritative ? 1 : 0);
+            updateWindow.bindValue(QStringLiteral(":coverage"),
+                                   coverageValue(authoritative ? QueryWindowCoverage::Server
+                                                               : QueryWindowCoverage::Stale));
             if (!updateWindow.exec())
                 return queryError(QStringLiteral("Rebase mailbox prefix window"), updateWindow);
             bindWindow(deleteItems);
@@ -507,7 +533,7 @@ namespace javelin::jmap::cache
 
         QSqlQuery invalidateSparse{m_connection.database()};
         invalidateSparse.prepare(QStringLiteral(
-            "UPDATE mailbox_query_windows SET is_valid=0 WHERE account_id=:account AND "
+            "UPDATE mailbox_query_windows SET coverage='stale' WHERE account_id=:account AND "
             "mailbox_id=:mailbox AND query_key=:query_key AND query_state=:old_state AND "
             "requested_offset>=:covered_end"));
         invalidateSparse.bindValue(QStringLiteral(":account"),

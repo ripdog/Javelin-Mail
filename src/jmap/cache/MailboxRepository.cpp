@@ -121,33 +121,39 @@ namespace javelin::jmap::cache
     MailboxRepository::replaceAll(const std::string_view accountId,
                                   const std::vector<javelin::jmap::domain::Mailbox>& mailboxes)
     {
-        if (const auto error = m_connection.validate())
-        {
+        auto transactionResult =
+            DatabaseTransaction::begin(m_connection, QStringLiteral("Replace mailboxes"));
+        if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
+            return *error;
+        auto transaction = std::get<DatabaseTransaction>(std::move(transactionResult));
+        if (const auto error = replaceAll(transaction, accountId, mailboxes))
             return error;
-        }
+        return transaction.commit();
+    }
 
-        const DatabaseWriteScope writeScope{m_connection};
-        QSqlDatabase& database = m_connection.database();
-        if (!database.transaction())
+    std::optional<DatabaseError>
+    MailboxRepository::replaceAll(DatabaseTransaction& transaction,
+                                  const std::string_view accountId,
+                                  const std::vector<javelin::jmap::domain::Mailbox>& mailboxes)
+    {
+        if (const auto error = m_connection.validate())
+            return error;
+        if (!transaction.isActive() || &transaction.connection() != &m_connection)
         {
             return DatabaseError{
                 .code = DatabaseErrorCode::QueryFailed,
-                .message = QStringLiteral("Begin mailbox replacement transaction: ") +
-                           database.lastError().text(),
+                .message = QStringLiteral("Mailbox replacement requires a matching transaction"),
             };
         }
 
-        QSqlQuery deleteQuery{database};
+        QSqlQuery deleteQuery{m_connection.database()};
         deleteQuery.prepare(QStringLiteral("DELETE FROM mailboxes WHERE account_id = :account_id"));
         deleteQuery.bindValue(QStringLiteral(":account_id"),
                               QString::fromStdString(std::string{accountId}));
         if (!deleteQuery.exec())
-        {
-            database.rollback();
             return makeQueryError(QStringLiteral("Delete account mailboxes"), deleteQuery);
-        }
 
-        QSqlQuery insertQuery{database};
+        QSqlQuery insertQuery{m_connection.database()};
         insertQuery.prepare(QStringLiteral(
             "INSERT INTO mailboxes ("
             "account_id, mailbox_id, parent_mailbox_id, name, role, sort_order, total_emails, "
@@ -161,20 +167,7 @@ namespace javelin::jmap::cache
         {
             bindMailbox(insertQuery, accountId, mailbox);
             if (!insertQuery.exec())
-            {
-                database.rollback();
                 return makeQueryError(QStringLiteral("Insert mailbox"), insertQuery);
-            }
-        }
-
-        if (!database.commit())
-        {
-            database.rollback();
-            return DatabaseError{
-                .code = DatabaseErrorCode::QueryFailed,
-                .message = QStringLiteral("Commit mailbox replacement transaction: ") +
-                           database.lastError().text(),
-            };
         }
 
         return std::nullopt;
@@ -194,18 +187,34 @@ namespace javelin::jmap::cache
             return std::nullopt;
         }
 
-        const DatabaseWriteScope writeScope{m_connection};
-        QSqlDatabase& database = m_connection.database();
-        if (!database.transaction())
+        auto transactionResult =
+            DatabaseTransaction::begin(m_connection, QStringLiteral("Upsert mailboxes"));
+        if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
+            return *error;
+        auto transaction = std::get<DatabaseTransaction>(std::move(transactionResult));
+        if (const auto error = upsertMany(transaction, accountId, mailboxes))
+            return error;
+        return transaction.commit();
+    }
+
+    std::optional<DatabaseError>
+    MailboxRepository::upsertMany(DatabaseTransaction& transaction,
+                                  const std::string_view accountId,
+                                  const std::vector<javelin::jmap::domain::Mailbox>& mailboxes)
+    {
+        if (const auto error = m_connection.validate())
+            return error;
+        if (!transaction.isActive() || &transaction.connection() != &m_connection)
         {
             return DatabaseError{
                 .code = DatabaseErrorCode::QueryFailed,
-                .message = QStringLiteral("Begin mailbox upsert transaction: ") +
-                           database.lastError().text(),
+                .message = QStringLiteral("Mailbox upsert requires a matching transaction"),
             };
         }
+        if (mailboxes.empty())
+            return std::nullopt;
 
-        QSqlQuery query{database};
+        QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
             "INSERT INTO mailboxes ("
             "account_id, mailbox_id, parent_mailbox_id, name, role, sort_order, total_emails, "
@@ -231,22 +240,8 @@ namespace javelin::jmap::cache
         {
             bindMailbox(query, accountId, mailbox);
             if (!query.exec())
-            {
-                database.rollback();
                 return makeQueryError(QStringLiteral("Upsert mailbox"), query);
-            }
         }
-
-        if (!database.commit())
-        {
-            database.rollback();
-            return DatabaseError{
-                .code = DatabaseErrorCode::QueryFailed,
-                .message = QStringLiteral("Commit mailbox upsert transaction: ") +
-                           database.lastError().text(),
-            };
-        }
-
         return std::nullopt;
     }
 

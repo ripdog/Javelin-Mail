@@ -16,6 +16,12 @@ namespace
     class FakeMailHistoryPort final : public MailHistoryPort
     {
       public:
+        javelin::jmap::AuthoritativeEmailsResult
+        getEffectiveEmails(std::string_view, std::span<const std::string>) override
+        {
+            return authoritative;
+        }
+
         javelin::jmap::AuthoritativeEmailsResult authoritative = javelin::jmap::AuthoritativeEmails{
             .accountId = "account-1",
             .state = "state-2",
@@ -29,6 +35,7 @@ namespace
                 .updatedEmailCount = 1,
                 .failedEmailCount = 0,
                 .items = {},
+                .receipt = {},
             };
         std::vector<javelin::jmap::EmailMailboxMutation> queued;
 
@@ -197,6 +204,7 @@ TEST_CASE("mail history executor blocks mixed server outcomes as partial",
         .updatedEmailCount = 1,
         .failedEmailCount = 1,
         .items = {},
+        .receipt = {},
     };
     MailHistoryExecutor executor{port};
 

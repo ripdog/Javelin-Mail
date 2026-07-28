@@ -116,8 +116,7 @@ namespace javelin::app::undo
         for (const auto& item : history->items)
             emailIds.push_back(item.emailId);
 
-        auto authoritativeResult =
-            co_await m_mailService.getAuthoritativeEmails(accountId, std::move(emailIds));
+        auto authoritativeResult = m_mailService.getEffectiveEmails(accountId, emailIds);
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&authoritativeResult))
         {
             co_return failure(outcomeFor(*error), error->message);

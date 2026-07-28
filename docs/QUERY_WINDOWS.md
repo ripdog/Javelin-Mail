@@ -24,14 +24,16 @@ deletes only that session's windows. Application shutdown does not delete them b
 tabs reuse the same session identity.
 
 Every watched mailbox has a canonical window: offset 0, limit 100, `receivedAt` descending, and
-`collapseThreads: true`. Background synchronization must materialize that window whenever it is
-missing or invalid; caching Email objects without the matching authoritative membership window is
-not a successful mailbox materialization. A post-commit cache change names the canonical window so
-an open view reloads it from SQLite.
+`collapseThreads: true`. Window coverage is typed: `server` is display-current and authoritative
+for positional pagination, `locallyProjected` is display-current but not authoritative for
+positions, and `stale` is neither. Background synchronization materializes a missing or stale
+canonical window. A post-commit cache change names the window so an open view reloads effective
+SQLite state.
 
 An Email or EmailQuery state token is not evidence that this ordered coverage exists. Push-state
-deduplication may skip a background refresh only when the state tokens are current and every
-configured canonical mailbox window is authoritative.
+deduplication may skip a background refresh when the state tokens are current and every configured
+canonical mailbox window is display-current. Only `server` coverage may be used for positional
+navigation.
 
 Sequential navigation anchors the next request to the final representative in the visible window.
 This preserves continuity when messages are inserted above the viewport. The returned `position`
@@ -58,16 +60,17 @@ For a contiguous cached prefix, `Email/queryChanges` uses the final cached repre
 `upToId`, applies removals and indexed additions across every retained page, and advances all those
 windows to the returned query state in one transaction. Updates are fetched only for objects already
 cached, plus additions that fall into the prefix; changes outside partial coverage are harmless.
-Sparse online windows that cannot be rebased exactly are invalidated. Optimistic Email mutations
-invalidate affected mailbox windows and account search windows in the same
-`MutationProjectionTransaction` as their projected Email state.
+Sparse online windows that cannot be rebased exactly become stale. Optimistic Email mutations mark
+affected mailbox windows and account search windows `locallyProjected` in the same
+`MutationProjectionTransaction` as their projected Email state. The effective Email projection and
+coverage classification are both durable across restart.
 
-Invalidated mailbox and search windows retain their server-ordered representative IDs as a stale
-projection scaffold. The GUI may join those positions to SQLite's effective Email state so
-removals and keyword changes render immediately, but a stale window is never a pagination cache hit
-and cannot derive new positions or totals. The application replaces it with an exact JMAP query
-window. After an optimistic Email mutation is submitted, the application coordinator refreshes an
-active search tab explicitly; inactive search tabs refresh when activated.
+Locally projected windows retain their server-ordered IDs as a scaffold. Mailbox display is rebuilt
+from effective SQLite membership, including locally decidable removals, additions, thread
+representatives, metadata, and totals. Online search keeps definite removals and metadata changes;
+unknown membership remains conservative. Neither kind may derive authoritative positions.
+Navigation, explicit refresh, or a genuinely newer push replaces the scaffold. Successful
+mutations do not automatically refresh active mailbox or search tabs.
 
 Totals are authoritative conversation counts for `collapseThreads: true`. Partial cached counts
 are diagnostic values only and must not replace query totals. Expanded thread members and retained

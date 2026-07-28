@@ -1715,6 +1715,7 @@ namespace javelin::jmap
                 .updatedEmailCount = 0,
                 .failedEmailCount = 0,
                 .items = {},
+                .receipt = {},
             };
         }
 
@@ -1868,6 +1869,38 @@ namespace javelin::jmap
         javelin::jmap::api::RequestBuilder requestBuilder;
         requestBuilder.useCore().useMail();
         const auto setHandle = requestBuilder.call(*requestMethod, "queued-email-set");
+        const bool mailboxCountsMayChange = std::ranges::any_of(
+            pendingActions,
+            [](const auto& action)
+            {
+                const auto affectsUnreadCount = [](const auto& keywords)
+                {
+                    return std::ranges::contains(keywords, std::string{"$seen"}) ||
+                           std::ranges::contains(keywords, std::string{"$draft"});
+                };
+                return action.patch.destroy || !action.patch.addMailboxIds.empty() ||
+                       !action.patch.removeMailboxIds.empty() ||
+                       affectsUnreadCount(action.patch.addKeywords) ||
+                       affectsUnreadCount(action.patch.removeKeywords);
+            });
+        std::optional<javelin::jmap::api::CallHandle<javelin::jmap::api::MailboxGetResponse>>
+            mailboxHandle;
+        if (mailboxCountsMayChange)
+        {
+            const auto mailboxRequest = javelin::jmap::api::mailboxGet({
+                .accountId = accountId,
+                .ids = std::nullopt,
+                .idsReference = std::nullopt,
+                .properties = std::nullopt,
+            });
+            if (!mailboxRequest.has_value())
+            {
+                co_return OperationError{
+                    .message = QStringLiteral("Failed to encode the post-mutation Mailbox/get."),
+                };
+            }
+            mailboxHandle = requestBuilder.call(*mailboxRequest, "queued-email-mailboxes");
+        }
 
         const auto transitionSubmittedMutations =
             [&emailMutationJournal, &mutationIdsByEmailId](
@@ -1983,6 +2016,22 @@ namespace javelin::jmap
             co_return operationError(*error);
         }
         const auto& parsed = std::get<javelin::jmap::api::EmailSetResponse>(parsedResult);
+        std::optional<javelin::jmap::api::MailboxGetResponse> parsedMailboxes;
+        if (mailboxHandle.has_value())
+        {
+            const auto mailboxResult = reader.require(*mailboxHandle);
+            if (const auto* mailboxError =
+                    std::get_if<javelin::jmap::api::ResponseReaderError>(&mailboxResult))
+            {
+                qWarning().noquote()
+                    << "Post-mutation Mailbox/get was incomplete; a later push will reconcile it"
+                    << operationError(*mailboxError).message;
+            }
+            else
+            {
+                parsedMailboxes = std::get<javelin::jmap::api::MailboxGetResponse>(mailboxResult);
+            }
+        }
 
         std::unordered_set<std::string> updatedEmailIds{parsed.updated.begin(),
                                                         parsed.updated.end()};
@@ -2029,6 +2078,26 @@ namespace javelin::jmap
             {
                 co_return javelin::jmap::operationError(*error);
             }
+        }
+
+        if (parsedMailboxes.has_value())
+        {
+            const std::array mailboxDomains{javelin::jmap::sync::ConsistencyDomain{
+                .accountId = accountId,
+                .dataType = "Mailbox",
+            }};
+            if (const auto error = transaction.advance(mailboxDomains))
+                co_return javelin::jmap::operationError(*error);
+            javelin::jmap::cache::MailboxRepository mailboxes{*m_impl->databaseConnection};
+            if (const auto error = mailboxes.replaceAll(transaction.cacheTransaction(), accountId,
+                                                        parsedMailboxes->list))
+                co_return javelin::jmap::operationError(*error);
+            javelin::jmap::cache::SyncStateRepository states{*m_impl->databaseConnection};
+            if (const auto error =
+                    states.upsert(transaction.cacheTransaction(),
+                                  {.accountId = accountId, .objectType = "Mailbox", .queryKey = {}},
+                                  parsedMailboxes->state))
+                co_return javelin::jmap::operationError(*error);
         }
 
         for (const auto& [emailId, email] : mergedEmails)
@@ -2137,6 +2206,30 @@ namespace javelin::jmap
             .updatedEmailCount = updatedEmailIds.size() + destroyedEmailIds.size(),
             .failedEmailCount = failedEmailIds.size(),
             .items = std::move(items),
+            .receipt =
+                {
+                    .domains =
+                        {
+                            {
+                                .accountId = parsed.accountId,
+                                .dataType = "Email",
+                                .oldState = parsed.oldState,
+                                .newState = parsed.newState,
+                            },
+                        },
+                    .acceptedObjectIds =
+                        [&]
+                    {
+                        std::vector<std::string> ids(parsed.updated.begin(), parsed.updated.end());
+                        ids.insert(ids.end(), parsed.destroyed.begin(), parsed.destroyed.end());
+                        return ids;
+                    }(),
+                    .rejectedObjectIds =
+                        std::vector<std::string>(failedEmailIds.begin(), failedEmailIds.end()),
+                    .affectedCacheViews = {"mailbox", "search"},
+                    .incompleteMaterialization =
+                        mailboxHandle.has_value() && !parsedMailboxes.has_value(),
+                },
         };
     }
 

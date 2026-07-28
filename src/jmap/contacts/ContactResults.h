@@ -1,6 +1,7 @@
 #pragma once
 
 #include "jmap/OperationError.h"
+#include "jmap/sync/MutationCommitReceipt.h"
 
 #include <QByteArray>
 
@@ -34,6 +35,7 @@ namespace javelin::jmap::contacts
         std::string newState;
         std::optional<std::string> createdId;
         std::vector<CreatedContactMapping> createdIds;
+        javelin::jmap::sync::MutationCommitReceipt receipt;
     };
 
     struct UploadedContactMedia

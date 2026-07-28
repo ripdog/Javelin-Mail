@@ -55,6 +55,35 @@ namespace javelin::jmap::cache
         return std::nullopt;
     }
 
+    std::optional<DatabaseError> SyncStateRepository::upsert(DatabaseTransaction& transaction,
+                                                             const SyncStateKey& key,
+                                                             const std::string_view stateToken)
+    {
+        if (const auto error = m_connection.validate())
+            return error;
+        if (!transaction.isActive() || &transaction.connection() != &m_connection)
+        {
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message = QStringLiteral("Sync state upsert requires a matching transaction"),
+            };
+        }
+
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "INSERT INTO sync_state (account_id, object_type, query_key, state_token, updated_at) "
+            "VALUES (:account_id, :object_type, :query_key, :state_token, CURRENT_TIMESTAMP) "
+            "ON CONFLICT(account_id, object_type, query_key) DO UPDATE SET "
+            "state_token = excluded.state_token, "
+            "updated_at = CURRENT_TIMESTAMP"));
+        bindKey(query, key);
+        query.bindValue(QStringLiteral(":state_token"),
+                        QString::fromStdString(std::string{stateToken}));
+        if (!query.exec())
+            return makeQueryError(QStringLiteral("Upsert sync_state"), query);
+        return std::nullopt;
+    }
+
     std::variant<bool, DatabaseError>
     SyncStateRepository::advanceIfCurrent(DatabaseTransaction& transaction, const SyncStateKey& key,
                                           const std::string_view expectedState,

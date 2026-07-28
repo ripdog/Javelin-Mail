@@ -339,11 +339,15 @@ namespace javelin::jmap::sync
             }
 
             std::vector<std::string> changedTypes;
-            changedTypes.reserve(changedStates.size());
-            for (const auto& [typeName, state] : changedStates)
+            for (const auto& [accountId, states] : changedStates)
             {
-                static_cast<void>(state);
-                changedTypes.push_back(typeName);
+                static_cast<void>(accountId);
+                for (const auto& [typeName, state] : states)
+                {
+                    static_cast<void>(state);
+                    if (std::ranges::find(changedTypes, typeName) == changedTypes.end())
+                        changedTypes.push_back(typeName);
+                }
             }
 
             return ParsedEvent{

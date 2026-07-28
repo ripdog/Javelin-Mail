@@ -26,7 +26,13 @@ namespace javelin::jmap::cache
         replaceAll(std::string_view accountId,
                    const std::vector<javelin::jmap::domain::Mailbox>& mailboxes);
         [[nodiscard]] std::optional<DatabaseError>
+        replaceAll(DatabaseTransaction& transaction, std::string_view accountId,
+                   const std::vector<javelin::jmap::domain::Mailbox>& mailboxes);
+        [[nodiscard]] std::optional<DatabaseError>
         upsertMany(std::string_view accountId,
+                   const std::vector<javelin::jmap::domain::Mailbox>& mailboxes);
+        [[nodiscard]] std::optional<DatabaseError>
+        upsertMany(DatabaseTransaction& transaction, std::string_view accountId,
                    const std::vector<javelin::jmap::domain::Mailbox>& mailboxes);
         [[nodiscard]] std::optional<DatabaseError>
         removeMany(std::string_view accountId, std::span<const std::string> mailboxIds);

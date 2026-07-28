@@ -67,6 +67,29 @@ TEST_CASE("calendar query serializes an unbounded UID lookup", "[jmap][calendar]
     CHECK(request->arguments.find(R"("before")") == std::string::npos);
 }
 
+TEST_CASE("calendar event get serializes result-referenced query ids", "[jmap][calendar]")
+{
+    const javelin::jmap::api::CallHandle<javelin::jmap::api::CalendarEventQueryResponse>
+        queryHandle{.callId = "expanded-query"};
+    const auto request = javelin::jmap::api::calendarEventGet({
+        .accountId = "a1",
+        .ids = std::nullopt,
+        .idsReference = javelin::jmap::api::resultReference(queryHandle, "/ids"),
+        .properties = std::nullopt,
+        .recurrenceOverridesBefore = std::nullopt,
+        .recurrenceOverridesAfter = std::nullopt,
+        .reduceParticipants = false,
+        .timeZone = {.value = "Pacific/Auckland"},
+    });
+
+    REQUIRE(request.has_value());
+    CHECK(
+        request->arguments.find(
+            R"("#ids":{"resultOf":"expanded-query","name":"CalendarEvent/query","path":"/ids"})") !=
+        std::string::npos);
+    CHECK(request->arguments.find(R"("ids")") == std::string::npos);
+}
+
 TEST_CASE("calendar get parses draft-26 rights", "[jmap][calendar]")
 {
     const auto parsed = javelin::jmap::api::parseCalendarGetResponse(

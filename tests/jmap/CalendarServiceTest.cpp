@@ -200,7 +200,8 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
                                       {.accountId = "a1",
                                        .event = event(),
                                        .operationGroupId = std::nullopt,
-                                       .ifInState = std::nullopt},
+                                       .ifInState = std::nullopt,
+                                       .materialization = std::nullopt},
                                       [&projectionNotifications] { ++projectionNotifications; }));
 
     REQUIRE(std::holds_alternative<javelin::jmap::calendar::CommittedMutation>(result));
@@ -229,7 +230,8 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
                                       {.accountId = "a1",
                                        .event = event(),
                                        .operationGroupId = std::nullopt,
-                                       .ifInState = std::nullopt},
+                                       .ifInState = std::nullopt,
+                                       .materialization = std::nullopt},
                                       [&projectionNotifications] { ++projectionNotifications; }));
     REQUIRE(std::holds_alternative<javelin::jmap::calendar::CommittedMutation>(noOpUpdate));
     CHECK_FALSE(transport.request.has_value());
@@ -452,7 +454,8 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
                                                          {.accountId = "a1",
                                                           .event = std::move(forbiddenEvent),
                                                           .operationGroupId = std::nullopt,
-                                                          .ifInState = std::nullopt}));
+                                                          .ifInState = std::nullopt,
+                                                          .materialization = std::nullopt}));
 
     REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(forbidden));
     CHECK(std::get<javelin::jmap::OperationError>(forbidden).code ==
@@ -473,7 +476,8 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
                                                           {.accountId = "a1",
                                                            .event = scheduledEvent,
                                                            .operationGroupId = std::nullopt,
-                                                           .ifInState = std::nullopt}));
+                                                           .ifInState = std::nullopt,
+                                                           .materialization = std::nullopt}));
 
     REQUIRE_FALSE(transport.requests.empty());
     REQUIRE(transport.requests.back().envelope.methodCalls.size() == 1);
@@ -516,7 +520,8 @@ TEST_CASE("calendar mutations use the cached event state", "[jmap][calendar][ser
                                                          {.accountId = "a1",
                                                           .event = uncertainEvent,
                                                           .operationGroupId = std::nullopt,
-                                                          .ifInState = std::nullopt}));
+                                                          .ifInState = std::nullopt,
+                                                          .materialization = std::nullopt}));
     REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(uncertain));
     const auto uncertainCached = calendars.findEvent("a1", "event-1");
     REQUIRE(std::holds_alternative<std::optional<javelin::jmap::calendar::CalendarEvent>>(

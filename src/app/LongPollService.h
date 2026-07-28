@@ -94,8 +94,10 @@ namespace javelin::app
       Q_SIGNALS:
         void statusChanged(javelin::app::AccountSyncCoordinator::Status status);
         void cacheCommitted(javelin::app::MailCacheChange change);
-        void calendarStateChanged(const QString& ownerAccountId);
-        void contactStateChanged(const QString& ownerAccountId);
+        void calendarStateChanged(const QString& ownerAccountId,
+                                  const javelin::jmap::sync::AccountTypeStateMap& changedStates);
+        void contactStateChanged(const QString& ownerAccountId,
+                                 const javelin::jmap::sync::AccountTypeStateMap& changedStates);
         void notificationRaised(const QString& accountId, const QString& mailboxId,
                                 const QString& threadId, const QString& emailId,
                                 const QString& mailboxName, const QString& title,
@@ -139,6 +141,12 @@ namespace javelin::app
         void handleResumeWatchdogTimeout();
         void scheduleDebouncedRefresh(bool forceEmailRefresh = false);
         void scheduleCatchUpRefresh();
+        void processGroupwareStateChanges();
+        [[nodiscard]] bool domainHasActiveMutation(std::string_view accountId,
+                                                   std::string_view type) const;
+        [[nodiscard]] bool stateChangeAlreadyApplied(std::string_view accountId,
+                                                     std::string_view type,
+                                                     std::string_view state) const;
         [[nodiscard]] bool pendingStateChangeAlreadyApplied(std::string_view type,
                                                             std::string_view state) const;
         [[nodiscard]] bool pendingStateChangesAlreadyApplied() const;
@@ -167,6 +175,8 @@ namespace javelin::app
         std::vector<std::string> m_notificationMailboxIds;
         bool m_notificationMailboxSelectionConfigured = false;
         std::unordered_map<std::string, std::string> m_pendingStateChanges;
+        javelin::jmap::sync::AccountTypeStateMap m_pendingCalendarStateChanges;
+        javelin::jmap::sync::AccountTypeStateMap m_pendingContactStateChanges;
         std::size_t m_generation = 0;
         Status m_status = Status::Disconnected;
         bool m_shouldCatchUpRefreshOnReconnect = false;

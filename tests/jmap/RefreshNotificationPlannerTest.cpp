@@ -217,7 +217,7 @@ TEST_CASE("notification outbox persists pending mail until delivery", "[jmap][ca
                           .returnedLimit = 2,
                           .total = 2,
                           .queryState = "query-state-1",
-                          .isAuthoritative = true,
+                          .coverage = javelin::jmap::cache::QueryWindowCoverage::Server,
                           .emailIds = {"eml-unread", "eml-seen"},
                       })
                       .has_value());

@@ -782,7 +782,7 @@ namespace javelin::jmap::cache
             .returnedLimit = (*window)->returnedLimit,
             .total = (*window)->total,
             .queryState = (*window)->queryState,
-            .isAuthoritative = (*window)->isAuthoritative,
+            .coverage = (*window)->coverage,
             .items = *messages,
         }};
     }
@@ -812,6 +812,29 @@ namespace javelin::jmap::cache
         if (!window->has_value())
             return std::optional<MailboxWindowPage>{std::nullopt};
 
+        if ((*window)->coverage == QueryWindowCoverage::LocallyProjected)
+        {
+            const auto projectedResult = listMailboxMessages(accountId, (*window)->mailboxId,
+                                                             requestedLimit, requestedOffset, sort);
+            const auto* projected = std::get_if<std::vector<MessageListItem>>(&projectedResult);
+            if (projected == nullptr)
+                return std::get<DatabaseError>(projectedResult);
+            const auto totalResult = countMailboxMessages(accountId, (*window)->mailboxId);
+            const auto* total = std::get_if<std::size_t>(&totalResult);
+            if (total == nullptr)
+                return std::get<DatabaseError>(totalResult);
+            return std::optional<MailboxWindowPage>{MailboxWindowPage{
+                .requestedOffset = requestedOffset,
+                .requestedLimit = requestedLimit,
+                .position = requestedOffset,
+                .returnedLimit = projected->size(),
+                .total = *total,
+                .queryState = (*window)->queryState,
+                .coverage = QueryWindowCoverage::LocallyProjected,
+                .items = *projected,
+            }};
+        }
+
         const auto messagesResult = listMailboxWindowMessagesByEmailIds(
             accountId, (*window)->mailboxId, (*window)->emailIds, sort);
         const auto messageMilliseconds = timer.elapsed();
@@ -834,7 +857,7 @@ namespace javelin::jmap::cache
             .returnedLimit = (*window)->returnedLimit,
             .total = (*window)->total,
             .queryState = (*window)->queryState,
-            .isAuthoritative = (*window)->isAuthoritative,
+            .coverage = (*window)->coverage,
             .items = *messages,
         }};
     }

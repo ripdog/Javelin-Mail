@@ -928,7 +928,8 @@ namespace javelin::jmap::sync
                 std::get<javelin::jmap::cache::DatabaseError>(canonicalWindowResult));
         }
         const bool canonicalWindowIsAuthoritative =
-            canonicalWindow->has_value() && (*canonicalWindow)->isAuthoritative;
+            canonicalWindow->has_value() &&
+            javelin::jmap::cache::isPaginationAuthoritative((*canonicalWindow)->coverage);
         const bool requireFullMaterialization = forceFullRefresh || !canonicalWindowIsAuthoritative;
         std::optional<std::string> cachedPrefixTail;
         {
@@ -938,7 +939,8 @@ namespace javelin::jmap::sync
                 "mailbox_query_window_items i ON i.account_id=w.account_id AND "
                 "i.query_key=w.query_key AND i.requested_offset=w.requested_offset AND "
                 "i.requested_limit=w.requested_limit WHERE w.account_id=:account AND "
-                "w.mailbox_id=:mailbox AND w.query_key=:query_key AND w.is_valid=1 ORDER BY "
+                "w.mailbox_id=:mailbox AND w.query_key=:query_key "
+                "AND w.coverage='server' ORDER BY "
                 "w.requested_offset DESC,i.position DESC LIMIT 1"));
             cachedTailQuery.bindValue(QStringLiteral(":account"),
                                       QString::fromStdString(accountId));
@@ -1186,7 +1188,7 @@ namespace javelin::jmap::sync
                     .returnedLimit = fetch.returnedLimit,
                     .total = fetch.total,
                     .queryState = fetch.queryState,
-                    .isAuthoritative = true,
+                    .coverage = javelin::jmap::cache::QueryWindowCoverage::Server,
                     .emailIds = fetch.representativeIds,
                 }))
             {

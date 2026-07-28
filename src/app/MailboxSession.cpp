@@ -106,8 +106,8 @@ namespace javelin::app
         m_page.returnedLimit = (*page)->returnedLimit;
         m_page.total = (*page)->total;
         m_page.queryState = (*page)->queryState;
-        m_page.cacheLoaded = (*page)->isAuthoritative;
-        m_page.stale = !(*page)->isAuthoritative;
+        m_page.cacheLoaded = javelin::jmap::cache::isDisplayCurrent((*page)->coverage);
+        m_page.stale = !javelin::jmap::cache::isDisplayCurrent((*page)->coverage);
     }
 
     void MailboxSession::refresh()
