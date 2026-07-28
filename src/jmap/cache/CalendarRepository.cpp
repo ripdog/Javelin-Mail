@@ -226,7 +226,9 @@ namespace javelin::jmap::cache
             "SELECT c.calendar_id,c.name,c.description,c.color,c.sort_order,c.is_subscribed,"
             "COALESCE(p.is_visible,c.is_visible),c.is_default,c.time_zone,c.rights_json FROM "
             "calendars c LEFT JOIN calendar_preferences p ON p.account_id=c.account_id AND "
-            "p.calendar_id=c.calendar_id WHERE c.account_id=:account ORDER BY c.sort_order,"
+            "p.calendar_id=c.calendar_id WHERE c.account_id=:account AND NOT EXISTS (SELECT 1 "
+            "FROM calendar_deletion_projections d WHERE d.account_id=c.account_id AND "
+            "d.calendar_id=c.calendar_id) ORDER BY c.sort_order,"
             "c.name COLLATE NOCASE,c.calendar_id"));
         query.bindValue(QStringLiteral(":account"), QString::fromStdString(std::string{accountId}));
         if (!query.exec())
@@ -365,6 +367,131 @@ namespace javelin::jmap::cache
         if (!stateToken.exec())
             return queryError(QStringLiteral("Store Calendar state after default change"),
                               stateToken);
+        return std::nullopt;
+    }
+
+    std::optional<DatabaseError> CalendarRepository::projectCalendarCreation(
+        DatabaseTransaction& transaction, const std::string_view accountId,
+        const std::string_view state, const calendar::Calendar& calendar)
+    {
+        if (!transaction.isActive())
+            return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
+                                 .message = QStringLiteral("Project calendar without transaction")};
+        QSqlQuery query{transaction.connection().database()};
+        query.prepare(QStringLiteral(
+            "INSERT INTO calendars (account_id,calendar_id,name,description,color,sort_order,"
+            "is_subscribed,is_visible,is_default,time_zone,rights_json,state) VALUES "
+            "(:account,:id,:name,:description,:color,:sort,:subscribed,:visible,:default,"
+            ":time_zone,:rights,:state)"));
+        query.bindValue(QStringLiteral(":account"), QString::fromStdString(std::string{accountId}));
+        query.bindValue(QStringLiteral(":id"), QString::fromStdString(calendar.id));
+        query.bindValue(QStringLiteral(":name"), QString::fromStdString(calendar.name));
+        query.bindValue(QStringLiteral(":description"), optionalString(calendar.description));
+        query.bindValue(QStringLiteral(":color"), optionalString(calendar.color));
+        query.bindValue(QStringLiteral(":sort"), calendar.sortOrder);
+        query.bindValue(QStringLiteral(":subscribed"), calendar.isSubscribed ? 1 : 0);
+        query.bindValue(QStringLiteral(":visible"), calendar.isVisible ? 1 : 0);
+        query.bindValue(QStringLiteral(":default"), calendar.isDefault ? 1 : 0);
+        query.bindValue(QStringLiteral(":time_zone"),
+                        calendar.timeZone
+                            ? QVariant{QString::fromStdString(calendar.timeZone->value)}
+                            : QVariant{});
+        query.bindValue(QStringLiteral(":rights"), rightsMask(calendar.myRights));
+        query.bindValue(QStringLiteral(":state"), QString::fromStdString(std::string{state}));
+        if (!query.exec())
+            return queryError(QStringLiteral("Project calendar creation"), query);
+        return std::nullopt;
+    }
+
+    std::optional<DatabaseError> CalendarRepository::projectCalendarDeletion(
+        DatabaseTransaction& transaction, const std::string_view accountId,
+        const std::string_view calendarId, const std::string_view mutationId)
+    {
+        if (!transaction.isActive())
+            return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
+                                 .message = QStringLiteral("Project deletion without transaction")};
+        QSqlQuery query{transaction.connection().database()};
+        query.prepare(QStringLiteral(
+            "INSERT INTO calendar_deletion_projections(account_id,calendar_id,mutation_id) "
+            "VALUES(:account,:calendar,:mutation)"));
+        query.bindValue(QStringLiteral(":account"), QString::fromStdString(std::string{accountId}));
+        query.bindValue(QStringLiteral(":calendar"),
+                        QString::fromStdString(std::string{calendarId}));
+        query.bindValue(QStringLiteral(":mutation"),
+                        QString::fromStdString(std::string{mutationId}));
+        if (!query.exec())
+            return queryError(QStringLiteral("Project calendar deletion"), query);
+        return std::nullopt;
+    }
+
+    std::optional<DatabaseError>
+    CalendarRepository::clearCalendarDeletion(DatabaseTransaction& transaction,
+                                              const std::string_view mutationId)
+    {
+        QSqlQuery query{transaction.connection().database()};
+        query.prepare(
+            QStringLiteral("DELETE FROM calendar_deletion_projections WHERE mutation_id=:id"));
+        query.bindValue(QStringLiteral(":id"), QString::fromStdString(std::string{mutationId}));
+        if (!query.exec())
+            return queryError(QStringLiteral("Clear calendar deletion projection"), query);
+        return std::nullopt;
+    }
+
+    std::optional<DatabaseError>
+    CalendarRepository::removeProjectedCalendar(DatabaseTransaction& transaction,
+                                                const std::string_view accountId,
+                                                const std::string_view calendarId)
+    {
+        QSqlQuery query{transaction.connection().database()};
+        query.prepare(QStringLiteral(
+            "DELETE FROM calendars WHERE account_id=:account AND calendar_id=:calendar"));
+        query.bindValue(QStringLiteral(":account"), QString::fromStdString(std::string{accountId}));
+        query.bindValue(QStringLiteral(":calendar"),
+                        QString::fromStdString(std::string{calendarId}));
+        if (!query.exec())
+            return queryError(QStringLiteral("Remove projected calendar"), query);
+        return std::nullopt;
+    }
+
+    std::optional<DatabaseError> CalendarRepository::acceptProjectedCalendar(
+        DatabaseTransaction& transaction, const std::string_view accountId,
+        const std::string_view projectedId, const std::string_view acceptedId,
+        const std::string_view state, const bool isDefault)
+    {
+        auto& database = transaction.connection().database();
+        if (isDefault)
+        {
+            QSqlQuery clear{database};
+            clear.prepare(
+                QStringLiteral("UPDATE calendars SET is_default=0 WHERE account_id=:account"));
+            clear.bindValue(QStringLiteral(":account"),
+                            QString::fromStdString(std::string{accountId}));
+            if (!clear.exec())
+                return queryError(QStringLiteral("Clear calendar default for creation"), clear);
+        }
+        QSqlQuery update{database};
+        update.prepare(QStringLiteral(
+            "UPDATE calendars SET calendar_id=:accepted,is_default=:default,state=:state "
+            "WHERE account_id=:account AND calendar_id=:projected"));
+        update.bindValue(QStringLiteral(":accepted"),
+                         QString::fromStdString(std::string{acceptedId}));
+        update.bindValue(QStringLiteral(":default"), isDefault ? 1 : 0);
+        update.bindValue(QStringLiteral(":state"), QString::fromStdString(std::string{state}));
+        update.bindValue(QStringLiteral(":account"),
+                         QString::fromStdString(std::string{accountId}));
+        update.bindValue(QStringLiteral(":projected"),
+                         QString::fromStdString(std::string{projectedId}));
+        if (!update.exec())
+            return queryError(QStringLiteral("Accept projected calendar"), update);
+        QSqlQuery token{database};
+        token.prepare(QStringLiteral(
+            "INSERT INTO calendar_state_tokens(account_id,data_type,state) VALUES "
+            "(:account,'Calendar',:state) ON CONFLICT(account_id,data_type) DO UPDATE SET "
+            "state=excluded.state"));
+        token.bindValue(QStringLiteral(":account"), QString::fromStdString(std::string{accountId}));
+        token.bindValue(QStringLiteral(":state"), QString::fromStdString(std::string{state}));
+        if (!token.exec())
+            return queryError(QStringLiteral("Store Calendar state after creation"), token);
         return std::nullopt;
     }
 

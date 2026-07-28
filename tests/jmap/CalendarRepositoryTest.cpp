@@ -72,6 +72,97 @@ namespace
     }
 } // namespace
 
+TEST_CASE("calendar create and delete projections render effective state",
+          "[jmap][calendar][cache]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open(
+        {.connectionName = QStringLiteral("calendar-object-projections"),
+         .databasePath = directory.filePath(QStringLiteral("cache.sqlite3"))});
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    QSqlQuery account{connection.database()};
+    REQUIRE(account.exec(QStringLiteral(
+        "INSERT INTO accounts (account_id,email_address,session_url,is_primary) VALUES "
+        "('a1','alice@example.test','https://example.test/jmap',1)")));
+    javelin::jmap::cache::CalendarRepository repository{connection};
+    const javelin::jmap::calendar::Calendar work{
+        .accountId = "a1",
+        .id = "work",
+        .name = "Work",
+        .description = std::nullopt,
+        .color = "#2457a6",
+        .sortOrder = 0,
+        .isSubscribed = true,
+        .isVisible = true,
+        .isDefault = true,
+        .timeZone = std::nullopt,
+        .defaultAlertsWithTime = {},
+        .defaultAlertsWithoutTime = {},
+        .myRights = {.mayReadFreeBusy = true,
+                     .mayReadItems = true,
+                     .mayWriteAll = true,
+                     .mayWriteOwn = true,
+                     .mayUpdatePrivate = true,
+                     .mayRSVP = true,
+                     .mayShare = false,
+                     .mayDelete = true},
+    };
+    REQUIRE_FALSE(repository.replaceCalendars("a1", "c1", {work}).has_value());
+
+    auto deleteResult = javelin::jmap::cache::DatabaseTransaction::begin(
+        connection, QStringLiteral("Project Calendar deletion"));
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(deleteResult));
+    auto deletion = std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(deleteResult));
+    REQUIRE_FALSE(
+        repository.projectCalendarDeletion(deletion, "a1", "work", "delete-1").has_value());
+    REQUIRE_FALSE(deletion.commit().has_value());
+    auto listed = repository.listCalendars("a1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::calendar::Calendar>>(listed));
+    CHECK(std::get<std::vector<javelin::jmap::calendar::Calendar>>(listed).empty());
+
+    auto rejectResult = javelin::jmap::cache::DatabaseTransaction::begin(
+        connection, QStringLiteral("Reject Calendar deletion"));
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(rejectResult));
+    auto rejection = std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(rejectResult));
+    REQUIRE_FALSE(repository.clearCalendarDeletion(rejection, "delete-1").has_value());
+    REQUIRE_FALSE(rejection.commit().has_value());
+    listed = repository.listCalendars("a1");
+    REQUIRE(std::get<std::vector<javelin::jmap::calendar::Calendar>>(listed).size() == 1);
+
+    auto pending = work;
+    pending.id = "pending-create";
+    pending.name = "Projects";
+    pending.isDefault = false;
+    auto createResult = javelin::jmap::cache::DatabaseTransaction::begin(
+        connection, QStringLiteral("Project Calendar creation"));
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(createResult));
+    auto creation = std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(createResult));
+    REQUIRE_FALSE(repository.projectCalendarCreation(creation, "a1", "c1", pending).has_value());
+    REQUIRE_FALSE(creation.commit().has_value());
+    listed = repository.listCalendars("a1");
+    REQUIRE(std::get<std::vector<javelin::jmap::calendar::Calendar>>(listed).size() == 2);
+
+    auto acceptResult = javelin::jmap::cache::DatabaseTransaction::begin(
+        connection, QStringLiteral("Accept Calendar creation"));
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(acceptResult));
+    auto acceptance = std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(acceptResult));
+    REQUIRE_FALSE(
+        repository
+            .acceptProjectedCalendar(acceptance, "a1", "pending-create", "projects", "c2", false)
+            .has_value());
+    REQUIRE_FALSE(acceptance.commit().has_value());
+    listed = repository.listCalendars("a1");
+    const auto& accepted = std::get<std::vector<javelin::jmap::calendar::Calendar>>(listed);
+    CHECK(std::ranges::find(accepted, "projects", &javelin::jmap::calendar::Calendar::id) !=
+          accepted.end());
+    CHECK(std::ranges::find(accepted, "pending-create", &javelin::jmap::calendar::Calendar::id) ==
+          accepted.end());
+}
+
 TEST_CASE("calendar windows retain occurrences referenced by overlapping windows",
           "[jmap][calendar][cache]")
 {

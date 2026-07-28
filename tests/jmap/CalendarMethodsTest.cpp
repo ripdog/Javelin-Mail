@@ -106,8 +106,12 @@ TEST_CASE("calendar get parses draft-26 rights", "[jmap][calendar]")
 
 TEST_CASE("calendar set changes the server default through the draft argument", "[jmap][calendar]")
 {
-    const auto method = javelin::jmap::api::calendarSet(
-        {.accountId = "a1", .ifInState = "calendar-state-1", .onSuccessSetIsDefault = "personal"});
+    const auto method = javelin::jmap::api::calendarSet({.accountId = "a1",
+                                                         .ifInState = "calendar-state-1",
+                                                         .create = {},
+                                                         .destroy = {},
+                                                         .onDestroyRemoveEvents = false,
+                                                         .onSuccessSetIsDefault = "personal"});
     REQUIRE(method.has_value());
     CHECK(method->name == "Calendar/set");
     CHECK(method->arguments.find(R"("onSuccessSetIsDefault":"personal")") != std::string::npos);
@@ -118,6 +122,47 @@ TEST_CASE("calendar set changes the server default through the draft argument", 
     REQUIRE(response.ok());
     CHECK(response.value->updated.at("work").isDefault == std::optional<bool>{false});
     CHECK(response.value->updated.at("personal").isDefault == std::optional<bool>{true});
+}
+
+TEST_CASE("calendar set serializes creation and destructive deletion", "[jmap][calendar]")
+{
+    javelin::jmap::calendar::Calendar calendar{
+        .accountId = "a1",
+        .id = {},
+        .name = "Projects",
+        .description = std::nullopt,
+        .color = "#336699",
+        .sortOrder = 0,
+        .isSubscribed = true,
+        .isVisible = true,
+        .isDefault = false,
+        .timeZone = std::nullopt,
+        .defaultAlertsWithTime = {},
+        .defaultAlertsWithoutTime = {},
+        .myRights = {},
+    };
+    const auto method = javelin::jmap::api::calendarSet({
+        .accountId = "a1",
+        .ifInState = "c1",
+        .create = {{"new-calendar", calendar}},
+        .destroy = {"old-calendar"},
+        .onDestroyRemoveEvents = true,
+        .onSuccessSetIsDefault = std::nullopt,
+    });
+    REQUIRE(method.has_value());
+    CHECK(method->arguments.find(R"("new-calendar":{"name":"Projects")") != std::string::npos);
+    CHECK(method->arguments.find(R"("color":"#336699")") != std::string::npos);
+    CHECK(method->arguments.find(R"("destroy":["old-calendar"])") != std::string::npos);
+    CHECK(method->arguments.find(R"("onDestroyRemoveEvents":true)") != std::string::npos);
+    CHECK(method->arguments.find(R"("myRights")") == std::string::npos);
+    CHECK(method->arguments.find(R"("isDefault")") == std::string::npos);
+
+    const auto response = javelin::jmap::api::parseCalendarSetResponse(
+        R"({"accountId":"a1","oldState":"c1","newState":"c2","created":{"new-calendar":{"id":"calendar-2","isDefault":false}},"updated":{},"destroyed":["old-calendar"],"notCreated":{},"notUpdated":{},"notDestroyed":{}})");
+    REQUIRE(response.ok());
+    CHECK(response.value->created.at("new-calendar").id ==
+          std::optional<std::string>{"calendar-2"});
+    CHECK(response.value->destroyed == std::vector<std::string>{"old-calendar"});
 }
 
 TEST_CASE("calendar event documents preserve recurrence and attendees", "[jmap][calendar]")

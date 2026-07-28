@@ -1591,6 +1591,21 @@ namespace javelin::jmap::cache
                             QStringLiteral("ALTER TABLE search_windows DROP COLUMN is_valid"),
                         },
                 },
+                MigrationStep{
+                    .version = 35,
+                    .name = QStringLiteral("calendar_deletion_projections"),
+                    .statements =
+                        {
+                            QStringLiteral("CREATE TABLE calendar_deletion_projections ("
+                                           "account_id TEXT NOT NULL,"
+                                           "calendar_id TEXT NOT NULL,"
+                                           "mutation_id TEXT NOT NULL UNIQUE,"
+                                           "PRIMARY KEY(account_id,calendar_id),"
+                                           "FOREIGN KEY(account_id,calendar_id) REFERENCES "
+                                           "calendars(account_id,calendar_id) ON DELETE CASCADE"
+                                           ") STRICT"),
+                        },
+                },
             },
         };
     }

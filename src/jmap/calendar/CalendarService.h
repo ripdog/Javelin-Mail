@@ -19,7 +19,8 @@
 namespace javelin::jmap::api
 {
     class JmapMethodTransport;
-}
+    struct Session;
+} // namespace javelin::jmap::api
 
 namespace javelin::jmap::calendar
 {
@@ -84,6 +85,20 @@ namespace javelin::jmap::calendar
         std::optional<std::string> ifInState;
     };
 
+    struct CreateCalendarCommand
+    {
+        std::string accountId;
+        std::string name;
+        std::optional<std::string> color;
+    };
+
+    struct DeleteCalendarCommand
+    {
+        std::string accountId;
+        std::string calendarId;
+        bool removeEvents = true;
+    };
+
     using CalendarLoadResult = std::variant<std::optional<cache::CalendarWindow>, OperationError>;
     using CalendarRefreshResult = std::variant<RefreshedRange, OperationError>;
     using CalendarMutationResult = std::variant<CommittedMutation, OperationError>;
@@ -114,6 +129,12 @@ namespace javelin::jmap::calendar
         [[nodiscard]] QCoro::Task<CalendarMutationResult>
         setDefaultCalendar(LiveConnectionSettings settings, std::string ownerAccountId,
                            std::string accountId, std::string calendarId);
+        [[nodiscard]] QCoro::Task<CalendarMutationResult>
+        createCalendar(LiveConnectionSettings settings, std::string ownerAccountId,
+                       CreateCalendarCommand command);
+        [[nodiscard]] QCoro::Task<CalendarMutationResult>
+        deleteCalendar(LiveConnectionSettings settings, std::string ownerAccountId,
+                       DeleteCalendarCommand command);
         [[nodiscard]] QCoro::Task<CalendarRefreshResult> refresh(LiveConnectionSettings settings,
                                                                  std::string ownerAccountId,
                                                                  VisibleInterval interval,
@@ -141,6 +162,10 @@ namespace javelin::jmap::calendar
                std::optional<std::string> operationGroupId,
                std::optional<CalendarRangeMaterialization> materialization,
                std::function<void()> projectionCommitted);
+        [[nodiscard]] QCoro::Task<CalendarMutationResult>
+        mutateCalendar(LiveConnectionSettings settings, api::Session session,
+                       api::CalendarSetRequest request, std::optional<Calendar> projectedCalendar,
+                       std::optional<std::string> deletedCalendarId);
 
         cache::DatabaseConnection& m_connection;
         api::JmapMethodTransport& m_methodTransport;

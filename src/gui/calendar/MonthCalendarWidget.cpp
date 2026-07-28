@@ -8,10 +8,13 @@
 #include <QEvent>
 #include <QGridLayout>
 #include <QHBoxLayout>
+#include <QInputDialog>
 #include <QKeyEvent>
 #include <QLabel>
+#include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
+#include <QMessageBox>
 #include <QMouseEvent>
 #include <QPixmap>
 #include <QPushButton>
@@ -285,6 +288,11 @@ namespace javelin::gui::calendar
         rebuildEvents();
     }
 
+    void MonthCalendarWidget::setCalendarAccounts(std::vector<CalendarAccountDisplay> accounts)
+    {
+        m_calendarAccounts = std::move(accounts);
+    }
+
     void MonthCalendarWidget::setHiddenCalendars(std::vector<std::string> calendarIds)
     {
         m_hiddenCalendars = std::move(calendarIds);
@@ -364,22 +372,102 @@ namespace javelin::gui::calendar
             auto* item = new QListWidgetItem(colorSwatch(effectiveCalendarColor(calendar.id)),
                                              calendar.name, list);
             item->setData(Qt::UserRole, QString::fromStdString(calendar.id));
+            item->setData(Qt::UserRole + 1, calendar.deletable);
         }
         layout->addWidget(list);
         auto* colorButtons = new QHBoxLayout();
+        auto* addCalendar = new QPushButton(QIcon::fromTheme(QStringLiteral("list-add")),
+                                            QStringLiteral("Add…"), &dialog);
+        addCalendar->setEnabled(!m_calendarAccounts.empty());
+        auto* deleteCalendar = new QPushButton(QIcon::fromTheme(QStringLiteral("edit-delete")),
+                                               QStringLiteral("Delete"), &dialog);
         auto* chooseColor = new QPushButton(QStringLiteral("Choose Color…"), &dialog);
         auto* resetColor = new QPushButton(QStringLiteral("Use Calendar Color"), &dialog);
+        deleteCalendar->setEnabled(false);
         chooseColor->setEnabled(false);
         resetColor->setEnabled(false);
+        colorButtons->addWidget(addCalendar);
+        colorButtons->addWidget(deleteCalendar);
+        colorButtons->addSpacing(12);
         colorButtons->addWidget(chooseColor);
         colorButtons->addWidget(resetColor);
         colorButtons->addStretch(1);
         layout->addLayout(colorButtons);
-        connect(list, &QListWidget::currentItemChanged, &dialog,
-                [chooseColor, resetColor](QListWidgetItem* current, QListWidgetItem*)
+        connect(
+            list, &QListWidget::currentItemChanged, &dialog,
+            [chooseColor, resetColor, deleteCalendar](QListWidgetItem* current, QListWidgetItem*)
+            {
+                chooseColor->setEnabled(current != nullptr);
+                resetColor->setEnabled(current != nullptr);
+                deleteCalendar->setEnabled(current != nullptr &&
+                                           current->data(Qt::UserRole + 1).toBool());
+            });
+        connect(addCalendar, &QPushButton::clicked, &dialog,
+                [this, &dialog]
                 {
-                    chooseColor->setEnabled(current != nullptr);
-                    resetColor->setEnabled(current != nullptr);
+                    if (m_calendarAccounts.empty())
+                        return;
+                    bool accepted = false;
+                    const auto name = QInputDialog::getText(
+                        &dialog, QStringLiteral("Create Calendar"), QStringLiteral("Name:"),
+                        QLineEdit::Normal, {}, &accepted);
+                    if (!accepted)
+                        return;
+                    if (name.trimmed().isEmpty())
+                    {
+                        QMessageBox::warning(&dialog, QStringLiteral("Create Calendar"),
+                                             QStringLiteral("Enter a calendar name."));
+                        return;
+                    }
+                    std::size_t accountIndex = 0;
+                    if (m_calendarAccounts.size() > 1)
+                    {
+                        QStringList names;
+                        for (const auto& account : m_calendarAccounts)
+                            names.push_back(account.name);
+                        const auto selected = QInputDialog::getItem(
+                            &dialog, QStringLiteral("Create Calendar"), QStringLiteral("Account:"),
+                            names, 0, false, &accepted);
+                        if (!accepted)
+                            return;
+                        const auto found = std::ranges::find(names, selected);
+                        accountIndex =
+                            static_cast<std::size_t>(std::distance(names.begin(), found));
+                    }
+                    const auto color =
+                        QColorDialog::getColor(palette().color(QPalette::Highlight), &dialog,
+                                               QStringLiteral("Calendar Color"));
+                    if (!color.isValid())
+                        return;
+                    Q_EMIT calendarCreationRequested(
+                        QString::fromStdString(m_calendarAccounts[accountIndex].id), name.trimmed(),
+                        color.name());
+                    dialog.accept();
+                });
+        connect(deleteCalendar, &QPushButton::clicked, &dialog,
+                [this, list, &dialog]
+                {
+                    auto* item = list->currentItem();
+                    if (item == nullptr)
+                        return;
+                    QMessageBox prompt{
+                        QMessageBox::Warning,
+                        QStringLiteral("Delete Calendar"),
+                        QStringLiteral(
+                            "Delete “%1”? Events that belong only to this calendar will also be "
+                            "deleted. This cannot be undone.")
+                            .arg(item->text()),
+                        QMessageBox::NoButton,
+                        &dialog,
+                    };
+                    auto* deleteButton =
+                        prompt.addButton(QStringLiteral("Delete"), QMessageBox::DestructiveRole);
+                    prompt.addButton(QMessageBox::Cancel);
+                    prompt.exec();
+                    if (prompt.clickedButton() != deleteButton)
+                        return;
+                    Q_EMIT calendarDeletionRequested(item->data(Qt::UserRole).toString());
+                    dialog.accept();
                 });
         connect(chooseColor, &QPushButton::clicked, &dialog,
                 [this, list, &dialog, &pendingColors]

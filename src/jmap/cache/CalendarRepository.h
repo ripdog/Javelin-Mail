@@ -49,6 +49,21 @@ namespace javelin::jmap::cache
         applyCalendarDefaults(DatabaseTransaction& transaction, std::string_view accountId,
                               std::string_view state,
                               const std::unordered_map<std::string, bool>& defaults);
+        [[nodiscard]] std::optional<DatabaseError>
+        projectCalendarCreation(DatabaseTransaction& transaction, std::string_view accountId,
+                                std::string_view state, const calendar::Calendar& calendar);
+        [[nodiscard]] std::optional<DatabaseError>
+        projectCalendarDeletion(DatabaseTransaction& transaction, std::string_view accountId,
+                                std::string_view calendarId, std::string_view mutationId);
+        [[nodiscard]] std::optional<DatabaseError>
+        clearCalendarDeletion(DatabaseTransaction& transaction, std::string_view mutationId);
+        [[nodiscard]] std::optional<DatabaseError>
+        removeProjectedCalendar(DatabaseTransaction& transaction, std::string_view accountId,
+                                std::string_view calendarId);
+        [[nodiscard]] std::optional<DatabaseError>
+        acceptProjectedCalendar(DatabaseTransaction& transaction, std::string_view accountId,
+                                std::string_view projectedId, std::string_view acceptedId,
+                                std::string_view state, bool isDefault);
         [[nodiscard]] std::variant<std::vector<CalendarAccount>, DatabaseError>
         listAccounts() const;
         [[nodiscard]] std::variant<std::optional<std::string>, DatabaseError>

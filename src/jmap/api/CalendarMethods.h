@@ -100,6 +100,9 @@ namespace javelin::jmap::api
     {
         std::string accountId;
         std::optional<std::string> ifInState;
+        std::unordered_map<std::string, calendar::Calendar> create;
+        std::vector<std::string> destroy;
+        bool onDestroyRemoveEvents = false;
         std::optional<std::string> onSuccessSetIsDefault;
     };
 
@@ -107,14 +110,19 @@ namespace javelin::jmap::api
     {
         struct SetResult
         {
+            std::optional<std::string> id;
             std::optional<bool> isDefault;
         };
 
         std::string accountId;
         std::string oldState;
         std::string newState;
+        std::unordered_map<std::string, SetResult> created;
         std::unordered_map<std::string, SetResult> updated;
+        std::vector<std::string> destroyed;
+        std::unordered_map<std::string, CalendarSetError> notCreated;
         std::unordered_map<std::string, CalendarSetError> notUpdated;
+        std::unordered_map<std::string, CalendarSetError> notDestroyed;
     };
 
     struct CalendarEventSetRequest

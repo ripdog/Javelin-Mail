@@ -36,11 +36,20 @@ namespace javelin::gui::calendar
     struct CalendarDisplay
     {
         std::string id;
+        std::string accountId;
+        QString accountName;
         QString name;
         QColor color;
         bool visible = true;
         bool writable = false;
+        bool deletable = false;
         bool defaultDestination = false;
+    };
+
+    struct CalendarAccountDisplay
+    {
+        std::string id;
+        QString name;
     };
 
     class DayCellWidget;
@@ -56,6 +65,7 @@ namespace javelin::gui::calendar
         void setDisplayedMonth(const QDate& month);
         void setEvents(std::vector<MonthEvent> events);
         void setCalendars(std::vector<CalendarDisplay> calendars);
+        void setCalendarAccounts(std::vector<CalendarAccountDisplay> accounts);
         void setHiddenCalendars(std::vector<std::string> calendarIds);
 
         [[nodiscard]] QDate displayedMonth() const;
@@ -83,6 +93,9 @@ namespace javelin::gui::calendar
         void emptyTimeActivated(const QDate& date);
         void calendarVisibilityChanged(const QString& calendarId, bool visible);
         void defaultCalendarChanged(const QString& calendarId);
+        void calendarCreationRequested(const QString& accountId, const QString& name,
+                                       const QString& color);
+        void calendarDeletionRequested(const QString& calendarId);
 
       protected:
         void keyPressEvent(QKeyEvent* event) override;
@@ -108,6 +121,7 @@ namespace javelin::gui::calendar
         std::array<QLabel*, 7> m_weekdayHeaders{};
         std::array<DayCellWidget*, 42> m_cells{};
         std::vector<CalendarDisplay> m_calendars;
+        std::vector<CalendarAccountDisplay> m_calendarAccounts;
         std::vector<MonthEvent> m_events;
         std::vector<std::string> m_hiddenCalendars;
         std::vector<std::string> m_knownCalendars;

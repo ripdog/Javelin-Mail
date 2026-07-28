@@ -24,11 +24,14 @@ namespace javelin::gui::calendar
             colors.emplace(key, color);
             result.calendars.push_back({
                 .id = key,
+                .accountId = account.accountId,
+                .accountName = QString::fromStdString(account.name),
                 .name = QStringLiteral("%1 — %2").arg(QString::fromStdString(calendar.name),
                                                       QString::fromStdString(account.name)),
                 .color = color,
                 .visible = calendar.isVisible,
                 .writable = calendar.myRights.mayWriteAll || calendar.myRights.mayWriteOwn,
+                .deletable = calendar.myRights.mayDelete,
                 .defaultDestination = calendar.isDefault,
             });
         }
@@ -45,16 +48,17 @@ namespace javelin::gui::calendar
             if (event == events.end())
                 continue;
             const auto calendarId = std::ranges::find_if(
-                event->second->calendarIds, [](const auto& item) { return item.second; });
+                event->second->calendarIds, [&account, &colors](const auto& item)
+                { return item.second && colors.contains(account.accountId + '\n' + item.first); });
+            if (calendarId == event->second->calendarIds.end())
+                continue;
             auto startTime = QDateTime::fromString(
                 QString::fromStdString(occurrence.localStart.value), Qt::ISODate);
             auto endTime = QDateTime::fromString(QString::fromStdString(occurrence.localEnd.value),
                                                  Qt::ISODate);
             if (!endTime.isValid() || endTime <= startTime)
                 endTime = startTime.addSecs(3600);
-            const auto displayCalendarId = calendarId == event->second->calendarIds.end()
-                                               ? account.accountId + '\n'
-                                               : account.accountId + '\n' + calendarId->first;
+            const auto displayCalendarId = account.accountId + '\n' + calendarId->first;
             const auto color = colors.find(displayCalendarId);
             auto title = event->second->title;
             if (occurrence.recurrenceId)

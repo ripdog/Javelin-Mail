@@ -1935,6 +1935,50 @@ namespace javelin::app
     }
 
     QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
+    MailApplicationService::createCalendar(std::string ownerAccountId,
+                                           javelin::jmap::calendar::CreateCalendarCommand command)
+    {
+        const ForegroundWorkScope foreground{m_workScheduler};
+        const auto configuration = m_configurations.find(ownerAccountId);
+        if (configuration == m_configurations.end())
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
+                .message = QStringLiteral("Account synchronization is not configured.")};
+        auto result = co_await m_calendarService.createCalendar(
+            toLiveConnectionSettings(configuration->second.settings), ownerAccountId,
+            std::move(command));
+        Q_EMIT calendarCacheCommitted({.ownerAccountId = QString::fromStdString(ownerAccountId),
+                                       .interval = {},
+                                       .displayTimeZone = {},
+                                       .accountCount = 1,
+                                       .eventCount = 0});
+        co_return observeResult(m_errorCoordinator, configuration->second.settings, ownerAccountId,
+                                QStringLiteral("Create calendar"), std::move(result));
+    }
+
+    QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
+    MailApplicationService::deleteCalendar(std::string ownerAccountId,
+                                           javelin::jmap::calendar::DeleteCalendarCommand command)
+    {
+        const ForegroundWorkScope foreground{m_workScheduler};
+        const auto configuration = m_configurations.find(ownerAccountId);
+        if (configuration == m_configurations.end())
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::AuthenticationRequired,
+                .message = QStringLiteral("Account synchronization is not configured.")};
+        auto result = co_await m_calendarService.deleteCalendar(
+            toLiveConnectionSettings(configuration->second.settings), ownerAccountId,
+            std::move(command));
+        Q_EMIT calendarCacheCommitted({.ownerAccountId = QString::fromStdString(ownerAccountId),
+                                       .interval = {},
+                                       .displayTimeZone = {},
+                                       .accountCount = 1,
+                                       .eventCount = 0});
+        co_return observeResult(m_errorCoordinator, configuration->second.settings, ownerAccountId,
+                                QStringLiteral("Delete calendar"), std::move(result));
+    }
+
+    QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
     MailApplicationService::updateCalendarEvent(std::string ownerAccountId,
                                                 javelin::jmap::calendar::UpdateEventCommand command,
                                                 const javelin::app::undo::CommandOrigin origin)

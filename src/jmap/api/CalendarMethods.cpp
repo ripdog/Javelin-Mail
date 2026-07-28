@@ -64,6 +64,17 @@ namespace javelin::jmap::api::detail
         std::vector<std::string> notFound;
     };
 
+    struct RawCalendarCreate
+    {
+        std::string name;
+        std::optional<std::string> description;
+        std::optional<std::string> color;
+        std::uint32_t sortOrder = 0;
+        bool isSubscribed = true;
+        bool isVisible = true;
+        std::optional<std::string> timeZone;
+    };
+
     struct RawQueryFilter
     {
         std::optional<std::string> inCalendar;
@@ -263,11 +274,15 @@ namespace javelin::jmap::api::detail
     {
         std::string accountId;
         std::optional<std::string> ifInState;
+        std::unordered_map<std::string, RawCalendarCreate> create;
+        std::vector<std::string> destroy;
+        bool onDestroyRemoveEvents = false;
         std::optional<std::string> onSuccessSetIsDefault;
     };
 
     struct RawCalendarSetResult
     {
+        std::optional<std::string> id;
         std::optional<bool> isDefault;
     };
 
@@ -276,8 +291,12 @@ namespace javelin::jmap::api::detail
         std::string accountId;
         std::string oldState;
         std::string newState;
+        std::unordered_map<std::string, RawCalendarSetResult> created;
         std::unordered_map<std::string, RawCalendarSetResult> updated;
+        std::vector<std::string> destroyed;
+        std::unordered_map<std::string, RawSetError> notCreated;
         std::unordered_map<std::string, RawSetError> notUpdated;
+        std::unordered_map<std::string, RawSetError> notDestroyed;
     };
 
     struct RawCalendarEventSetResult
@@ -327,6 +346,9 @@ JAVELIN_GLZ_META(RawCalendar, "id", &T::id, "name", &T::name, "description", &T:
                  &T::defaultAlertsWithoutTime, "myRights", &T::myRights);
 JAVELIN_GLZ_META(RawCalendarGetResponse, "accountId", &T::accountId, "state", &T::state, "list",
                  &T::list, "notFound", &T::notFound);
+JAVELIN_GLZ_META(RawCalendarCreate, "name", &T::name, "description", &T::description, "color",
+                 &T::color, "sortOrder", &T::sortOrder, "isSubscribed", &T::isSubscribed,
+                 "isVisible", &T::isVisible, "timeZone", &T::timeZone);
 JAVELIN_GLZ_META(RawQueryFilter, "inCalendar", &T::inCalendar, "after", &T::after, "before",
                  &T::before, "text", &T::text, "uid", &T::uid);
 JAVELIN_GLZ_META(RawQueryRequest, "accountId", &T::accountId, "filter", &T::filter,
@@ -385,10 +407,13 @@ JAVELIN_GLZ_META(RawEventGetResponse, "accountId", &T::accountId, "state", &T::s
 JAVELIN_GLZ_META(RawSetError, "type", &T::type, "description", &T::description, "properties",
                  &T::properties);
 JAVELIN_GLZ_META(RawCalendarSetRequest, "accountId", &T::accountId, "ifInState", &T::ifInState,
-                 "onSuccessSetIsDefault", &T::onSuccessSetIsDefault);
-JAVELIN_GLZ_META(RawCalendarSetResult, "isDefault", &T::isDefault);
+                 "create", &T::create, "destroy", &T::destroy, "onDestroyRemoveEvents",
+                 &T::onDestroyRemoveEvents, "onSuccessSetIsDefault", &T::onSuccessSetIsDefault);
+JAVELIN_GLZ_META(RawCalendarSetResult, "id", &T::id, "isDefault", &T::isDefault);
 JAVELIN_GLZ_META(RawCalendarSetResponse, "accountId", &T::accountId, "oldState", &T::oldState,
-                 "newState", &T::newState, "updated", &T::updated, "notUpdated", &T::notUpdated);
+                 "newState", &T::newState, "created", &T::created, "updated", &T::updated,
+                 "destroyed", &T::destroyed, "notCreated", &T::notCreated, "notUpdated",
+                 &T::notUpdated, "notDestroyed", &T::notDestroyed);
 JAVELIN_GLZ_META(RawCalendarEventSetResult, "id", &T::id);
 JAVELIN_GLZ_META(RawSetRequest, "accountId", &T::accountId, "ifInState", &T::ifInState, "create",
                  &T::create, "update", &T::update, "destroy", &T::destroy, "sendSchedulingMessages",
@@ -913,9 +938,26 @@ namespace javelin::jmap::api
 
     std::optional<MethodRequest<CalendarSetResponse>> calendarSet(const CalendarSetRequest& request)
     {
+        std::unordered_map<std::string, detail::RawCalendarCreate> create;
+        create.reserve(request.create.size());
+        for (const auto& [creationId, calendar] : request.create)
+            create.emplace(creationId, detail::RawCalendarCreate{
+                                           .name = calendar.name,
+                                           .description = calendar.description,
+                                           .color = calendar.color,
+                                           .sortOrder = calendar.sortOrder,
+                                           .isSubscribed = calendar.isSubscribed,
+                                           .isVisible = calendar.isVisible,
+                                           .timeZone = calendar.timeZone
+                                                           ? std::optional{calendar.timeZone->value}
+                                                           : std::nullopt,
+                                       });
         const auto arguments = serialize(
             detail::RawCalendarSetRequest{.accountId = request.accountId,
                                           .ifInState = request.ifInState,
+                                          .create = std::move(create),
+                                          .destroy = request.destroy,
+                                          .onDestroyRemoveEvents = request.onDestroyRemoveEvents,
                                           .onSuccessSetIsDefault = request.onSuccessSetIsDefault});
         return arguments ? std::optional{MethodRequest<CalendarSetResponse>{
                                .name = "Calendar/set", .arguments = *arguments}}
@@ -1079,13 +1121,26 @@ namespace javelin::jmap::api
         CalendarSetResponse result{.accountId = std::move(raw.value->accountId),
                                    .oldState = std::move(raw.value->oldState),
                                    .newState = std::move(raw.value->newState),
+                                   .created = {},
                                    .updated = {},
-                                   .notUpdated = {}};
+                                   .destroyed = std::move(raw.value->destroyed),
+                                   .notCreated = {},
+                                   .notUpdated = {},
+                                   .notDestroyed = {}};
+        for (auto& [id, value] : raw.value->created)
+            result.created.emplace(std::move(id),
+                                   CalendarSetResponse::SetResult{.id = std::move(value.id),
+                                                                  .isDefault = value.isDefault});
         for (auto& [id, value] : raw.value->updated)
             result.updated.emplace(std::move(id),
-                                   CalendarSetResponse::SetResult{.isDefault = value.isDefault});
+                                   CalendarSetResponse::SetResult{.id = std::move(value.id),
+                                                                  .isDefault = value.isDefault});
+        for (auto& [id, value] : raw.value->notCreated)
+            result.notCreated.emplace(std::move(id), setError(value));
         for (auto& [id, value] : raw.value->notUpdated)
             result.notUpdated.emplace(std::move(id), setError(value));
+        for (auto& [id, value] : raw.value->notDestroyed)
+            result.notDestroyed.emplace(std::move(id), setError(value));
         return {.value = std::move(result), .error = std::nullopt};
     }
 

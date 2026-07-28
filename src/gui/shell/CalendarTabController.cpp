@@ -71,6 +71,12 @@ namespace javelin::gui::shell
         }
 
         auto* widget = new javelin::gui::calendar::MonthCalendarWidget(&m_contentStack);
+        std::vector<javelin::gui::calendar::CalendarAccountDisplay> accountDisplays;
+        accountDisplays.reserve(accounts->size());
+        for (const auto& account : *accounts)
+            accountDisplays.push_back(
+                {.id = account.accountId, .name = QString::fromStdString(account.name)});
+        widget->setCalendarAccounts(std::move(accountDisplays));
         const auto loadVisible =
             [this, widget, accounts = *accounts](const QDate& start, const QDate& end)
         {
@@ -148,6 +154,54 @@ namespace javelin::gui::shell
                                    }
                                });
             });
+        connect(
+            widget, &javelin::gui::calendar::MonthCalendarWidget::calendarCreationRequested, widget,
+            [this, accounts = *accounts, widget](const QString& accountId, const QString& name,
+                                                 const QString& color)
+            {
+                const auto account =
+                    std::ranges::find(accounts, accountId.toStdString(),
+                                      &javelin::jmap::cache::CalendarAccount::accountId);
+                if (account == accounts.end())
+                    return;
+                auto task = m_mailService.createCalendar(
+                    account->ownerAccountId,
+                    {.accountId = account->accountId,
+                     .name = name.toStdString(),
+                     .color = color.isEmpty() ? std::nullopt : std::optional{color.toStdString()}});
+                QCoro::connect(std::move(task), widget,
+                               [this](javelin::jmap::calendar::CalendarMutationResult result)
+                               {
+                                   if (const auto* error =
+                                           std::get_if<javelin::jmap::OperationError>(&result))
+                                       Q_EMIT operationFailed(*error);
+                               });
+            });
+        connect(widget, &javelin::gui::calendar::MonthCalendarWidget::calendarDeletionRequested,
+                widget,
+                [this, accounts = *accounts, widget](const QString& displayId)
+                {
+                    const auto separator = displayId.indexOf(QLatin1Char('\n'));
+                    if (separator <= 0 || separator == displayId.size() - 1)
+                        return;
+                    const auto accountId = displayId.first(separator).toStdString();
+                    const auto account = std::ranges::find(
+                        accounts, accountId, &javelin::jmap::cache::CalendarAccount::accountId);
+                    if (account == accounts.end())
+                        return;
+                    auto task = m_mailService.deleteCalendar(
+                        account->ownerAccountId,
+                        {.accountId = accountId,
+                         .calendarId = displayId.sliced(separator + 1).toStdString(),
+                         .removeEvents = true});
+                    QCoro::connect(std::move(task), widget,
+                                   [this](javelin::jmap::calendar::CalendarMutationResult result)
+                                   {
+                                       if (const auto* error =
+                                               std::get_if<javelin::jmap::OperationError>(&result))
+                                           Q_EMIT operationFailed(*error);
+                                   });
+                });
         connect(&m_mailService, &javelin::app::MailApplicationService::calendarCacheCommitted,
                 widget,
                 [widget, accounts = *accounts,

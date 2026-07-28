@@ -248,6 +248,12 @@ namespace javelin::app
         setDefaultCalendar(
             std::string ownerAccountId, std::string accountId, std::string calendarId,
             javelin::app::undo::CommandOrigin origin = javelin::app::undo::CommandOrigin::User);
+        [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
+        createCalendar(std::string ownerAccountId,
+                       javelin::jmap::calendar::CreateCalendarCommand command);
+        [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
+        deleteCalendar(std::string ownerAccountId,
+                       javelin::jmap::calendar::DeleteCalendarCommand command);
         [[nodiscard]] javelin::jmap::calendar::CalendarPreferenceResult setCalendarVisible(
             std::string accountId, std::string calendarId, bool visible,
             javelin::app::undo::CommandOrigin origin = javelin::app::undo::CommandOrigin::User);
