@@ -439,7 +439,10 @@ namespace javelin::app
             const auto& delta = std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(deltaResult);
             if (delta.superseded)
             {
-                scheduleDebouncedRefresh();
+                m_refreshAgainRequested = true;
+                m_refreshMailboxAgainRequested =
+                    m_refreshMailboxAgainRequested || refreshMailboxState;
+                m_refreshEmailAgainRequested = m_refreshEmailAgainRequested || refreshEmailState;
                 co_return;
             }
             mailboxStateChanged = delta.mailboxChanged;

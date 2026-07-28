@@ -7,6 +7,7 @@
 #include "jmap/cache/MailboxRepository.h"
 #include "jmap/cache/MailboxWindowRepository.h"
 #include "jmap/cache/SyncStateRepository.h"
+#include "jmap/sync/EmailMutationJournal.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
 
 #include <QCoroTask>
@@ -359,4 +360,70 @@ TEST_CASE("account mail delta targets only old and new mailboxes for an external
     const auto& summary = std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(result);
     CHECK(summary.queryAffectedMailboxIds == std::vector<std::string>{"archive", "inbox"});
     REQUIRE(transport.requests.size() == 1);
+}
+
+TEST_CASE("account mail delta rebases retained accepted overlays over an external unread change",
+          "[jmap][sync][mail-delta]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    auto database = makeDatabaseContext();
+    seedAccount(database.connection);
+    seedMail(database.connection);
+
+    javelin::jmap::cache::EmailRepository emails{database.connection};
+    REQUIRE_FALSE(emails.upsertMany("account-1", {email({"archive"}, {"$seen"})}).has_value());
+    javelin::jmap::sync::EmailMutationJournal journal{database.connection};
+    REQUIRE_FALSE(journal
+                      .put({
+                          .mutationId = "accepted-archive-overlay",
+                          .operationGroupId = std::nullopt,
+                          .accountId = "account-1",
+                          .status = javelin::jmap::sync::MutationStatus::Accepted,
+                          .patch =
+                              {
+                                  .emailId = "email-1",
+                                  .addMailboxIds = {"archive"},
+                                  .removeMailboxIds = {},
+                                  .addKeywords = {},
+                                  .removeKeywords = {},
+                                  .destroy = false,
+                              },
+                          .baseMailboxIds = std::vector<std::string>{"archive"},
+                          .baseKeywords = std::vector<std::string>{"$seen"},
+                          .baseState = "email-state-1",
+                          .acceptedState = "email-state-1",
+                          .errorJson = std::nullopt,
+                      })
+                      .has_value());
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(deltaResponse("archive", false));
+    javelin::jmap::api::MethodCaller caller{transport};
+    javelin::jmap::sync::MailDeltaRefreshExecutor executor{database.connection, caller,
+                                                           requestContext()};
+    const auto result =
+        QCoro::waitFor(executor.refresh("account-1", {.mailbox = true, .email = true}));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::MailDeltaRefreshSummary>(result));
+    const auto& summary = std::get<javelin::jmap::sync::MailDeltaRefreshSummary>(result);
+    CHECK_FALSE(summary.superseded);
+    CHECK(summary.emailChanged);
+    CHECK(summary.queryAffectedMailboxIds.empty());
+    REQUIRE(transport.requests.size() == 1);
+
+    const auto cachedResult = emails.find("account-1", "email-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(cachedResult));
+    const auto& cached = std::get<std::optional<javelin::jmap::domain::Email>>(cachedResult);
+    REQUIRE(cached.has_value());
+    CHECK(cached->keywords.empty());
+
+    javelin::jmap::cache::SyncStateRepository states{database.connection};
+    const auto stateResult =
+        states.find({.accountId = "account-1", .objectType = "Email", .queryKey = {}});
+    REQUIRE(
+        std::holds_alternative<std::optional<javelin::jmap::cache::SyncStateRecord>>(stateResult));
+    const auto& state = std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(stateResult);
+    REQUIRE(state.has_value());
+    CHECK(state->stateToken == "email-state-2");
 }

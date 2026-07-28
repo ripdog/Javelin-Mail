@@ -309,7 +309,7 @@ namespace javelin::jmap::sync
         auto parsed = std::get<ParsedDelta>(std::move(parsedResult));
         if (emailFence.has_value())
         {
-            const auto canCommit = consistency.canCommitRefresh(*emailFence);
+            const auto canCommit = consistency.isCurrent(*emailFence);
             if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&canCommit))
                 co_return operationError(*error);
             if (!std::get<bool>(canCommit))
