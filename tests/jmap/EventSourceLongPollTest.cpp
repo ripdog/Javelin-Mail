@@ -121,6 +121,7 @@ TEST_CASE("push activity tracking shares status and timeout state", "[jmap][push
             CHECK(status == javelin::jmap::sync::StateChangeConnectionStatus::Connected);
             ++connectedReports;
         },
+        QUrl{QStringLiteral("https://user:secret@mail.example.com:8443/jmap/events?ping=30")},
         350s,
     };
 
@@ -128,6 +129,7 @@ TEST_CASE("push activity tracking shares status and timeout state", "[jmap][push
     activity.setTimeout(75s);
 
     CHECK(connectedReports == 1);
+    CHECK(activity.serverBaseUrl() == QStringLiteral("https://mail.example.com:8443"));
     CHECK(activity.timeout() == 75s);
     CHECK_FALSE(activity.hasTimedOut());
 }
