@@ -34,8 +34,6 @@ namespace javelin::jmap::sync
         void cancel() override;
 
       private:
-        void reportConnectedActivity() const;
-
         QNetworkAccessManager& m_networkAccessManager;
         std::string m_eventSourceUrl;
         std::string m_accessToken;

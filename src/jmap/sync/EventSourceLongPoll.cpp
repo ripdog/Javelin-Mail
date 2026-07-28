@@ -1,7 +1,9 @@
 #include "jmap/sync/EventSourceLongPoll.h"
 
 #include "jmap/api/Error.h"
+#include "jmap/sync/PushActivityTracker.h"
 #include "jmap/sync/PushProtocol.h"
+#include "jmap/sync/PushStreamSession.h"
 
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic push
@@ -45,9 +47,6 @@ namespace javelin::jmap::sync
 
             return body.first(maxBytes) + "...";
         }
-
-        using ParsedStreamEvent =
-            std::variant<StateChangeEvent, javelin::jmap::api::TransportError>;
 
         [[nodiscard]] javelin::jmap::api::TransportError
         makeTransportError(const javelin::jmap::api::TransportErrorCode code, std::string message,
@@ -168,14 +167,6 @@ namespace javelin::jmap::sync
         cancel();
     }
 
-    void EventSourceStateChangeSource::reportConnectedActivity() const
-    {
-        if (m_statusCallback)
-        {
-            m_statusCallback(StateChangeConnectionStatus::Connected);
-        }
-    }
-
     void EventSourceStateChangeSource::cancel()
     {
         auto* activeReply = m_activeReply.data();
@@ -218,6 +209,7 @@ namespace javelin::jmap::sync
 
         QNetworkReply* reply = m_networkAccessManager.get(networkRequest);
         m_activeReply = reply;
+        PushActivityTracker activity{m_statusCallback, maximumPushActivityTimeout};
         const auto deleteReply = qScopeGuard(
             [this, reply]()
             {
@@ -227,6 +219,7 @@ namespace javelin::jmap::sync
                 }
                 if (reply != nullptr)
                 {
+                    QObject::disconnect(reply, nullptr, reply, nullptr);
                     reply->deleteLater();
                 }
             });
@@ -241,12 +234,12 @@ namespace javelin::jmap::sync
                          });
         bool connectedReported = false;
         QObject::connect(reply, &QNetworkReply::requestSent, reply,
-                         [this, &connectedReported]()
+                         [&activity, &connectedReported]()
                          {
                              if (!connectedReported)
                              {
                                  connectedReported = true;
-                                 reportConnectedActivity();
+                                 activity.recordActivity();
                              }
                          });
 
@@ -262,61 +255,50 @@ namespace javelin::jmap::sync
             eventData.clear();
         };
 
-        StateChangeStreamSummary streamSummary{
-            .lastState = subscription.lastState,
-            .updateCount = 0,
-        };
-        auto activityTimeout = maximumPushActivityTimeout;
+        PushStreamSession stream{std::move(subscription), consumer};
         bool responseHeadersValidated = false;
 
-        const auto finalizeEvent = [&]() -> std::optional<ParsedStreamEvent>
+        const auto finalizeEvent =
+            [&]() -> QCoro::Task<std::optional<javelin::jmap::api::TransportError>>
         {
             if (eventName.empty() && eventId.empty() && eventData.empty())
             {
-                return std::nullopt;
+                co_return std::nullopt;
             }
 
-            auto parsed = parseEventSourcePushMessage(subscription, subscription.lastState,
-                                                      eventName, eventId, eventData);
+            auto parsed = parseEventSourcePushMessage(
+                stream.subscription(), stream.summary().lastState, eventName, eventId, eventData);
             const auto parsedEventName = eventName;
             const auto parsedEventId = eventId;
             const auto parsedEventData = eventData;
             resetEvent();
 
-            if (const auto* ping = std::get_if<PushPing>(&parsed))
+            auto outcome = co_await stream.accept(std::move(parsed));
+            if (const auto* ping = std::get_if<PushStreamPing>(&outcome))
             {
-                activityTimeout = pushActivityTimeout(ping->interval);
+                activity.setTimeout(pushActivityTimeout(ping->interval));
                 qCDebug(logEventSource).noquote()
                     << "server ping interval" << ping->interval.count() << "seconds";
-                return std::nullopt;
+                co_return std::nullopt;
             }
-            if (std::holds_alternative<PushMessageIgnored>(parsed))
-                return std::nullopt;
-            if (const auto* error = std::get_if<PushProtocolError>(&parsed))
+            if (const auto* error = std::get_if<PushStreamProtocolFailure>(&outcome))
             {
                 qWarning().noquote() << "State-change source invalid event payload"
                                      << QString::fromStdString(parsedEventName)
                                      << QString::fromStdString(parsedEventId)
                                      << summarizeBody(QByteArray::fromStdString(parsedEventData));
-                return makeTransportError(
+                co_return makeTransportError(
                     javelin::jmap::api::TransportErrorCode::ResponseDecodingFailed, error->message);
             }
 
-            auto response = std::get<StateChangeEvent>(std::move(parsed));
-            if (!response.notifyConsumer)
-            {
-                subscription.lastState = response.newState;
-                streamSummary.lastState = response.newState;
-                return std::nullopt;
-            }
-            return response;
+            co_return std::nullopt;
         };
 
         while (true)
         {
             if (cancellation.isCancelled())
             {
-                co_return streamSummary;
+                co_return stream.summary();
             }
 
             if (reply->error() != QNetworkReply::NoError && reply->isFinished())
@@ -360,13 +342,13 @@ namespace javelin::jmap::sync
                 if (!connectedReported)
                 {
                     connectedReported = true;
-                    reportConnectedActivity();
+                    activity.recordActivity();
                 }
             }
 
             if (!reply->isFinished() && reply->bytesAvailable() == 0)
             {
-                const bool ready = co_await qCoro(reply).waitForReadyRead(activityTimeout);
+                const bool ready = co_await qCoro(reply).waitForReadyRead(activity.timeout());
                 if (!ready && !reply->isFinished())
                 {
                     reply->abort();
@@ -383,7 +365,7 @@ namespace javelin::jmap::sync
                     const QByteArray chunk = reply->readAll();
                     if (!chunk.isEmpty())
                     {
-                        reportConnectedActivity();
+                        activity.recordActivity();
                     }
                     pendingBuffer += chunk;
                 }
@@ -392,7 +374,7 @@ namespace javelin::jmap::sync
                     const QByteArray chunk = reply->readAll();
                     if (!chunk.isEmpty())
                     {
-                        reportConnectedActivity();
+                        activity.recordActivity();
                     }
                     pendingBuffer += chunk;
                 }
@@ -402,7 +384,7 @@ namespace javelin::jmap::sync
                 const QByteArray chunk = reply->readAll();
                 if (!chunk.isEmpty())
                 {
-                    reportConnectedActivity();
+                    activity.recordActivity();
                 }
                 pendingBuffer += chunk;
             }
@@ -424,19 +406,9 @@ namespace javelin::jmap::sync
 
                 if (line.isEmpty())
                 {
-                    if (const auto parsed = finalizeEvent(); parsed.has_value())
+                    if (const auto error = co_await finalizeEvent(); error.has_value())
                     {
-                        if (const auto* error =
-                                std::get_if<javelin::jmap::api::TransportError>(&*parsed))
-                        {
-                            co_return *error;
-                        }
-
-                        auto event = std::get<StateChangeEvent>(*parsed);
-                        subscription.lastState = event.newState;
-                        streamSummary.lastState = event.newState;
-                        ++streamSummary.updateCount;
-                        co_await consumer.onStateChange(std::move(event));
+                        co_return *error;
                     }
                     continue;
                 }
@@ -481,25 +453,14 @@ namespace javelin::jmap::sync
                     continue;
                 }
 
-                if (const auto parsed = finalizeEvent(); parsed.has_value())
+                if (const auto error = co_await finalizeEvent(); error.has_value())
                 {
-                    if (const auto* error =
-                            std::get_if<javelin::jmap::api::TransportError>(&*parsed))
-                    {
-                        co_return *error;
-                    }
-
-                    auto event = std::get<StateChangeEvent>(*parsed);
-                    subscription.lastState = event.newState;
-                    streamSummary.lastState = event.newState;
-                    ++streamSummary.updateCount;
-                    co_await consumer.onStateChange(std::move(event));
-                    co_return streamSummary;
+                    co_return *error;
                 }
 
-                if (streamSummary.updateCount > 0)
+                if (stream.summary().updateCount > 0)
                 {
-                    co_return streamSummary;
+                    co_return stream.summary();
                 }
 
                 qWarning().noquote()
