@@ -87,13 +87,14 @@ namespace javelin::jmap::sync
                                         StateChangeConsumer& consumer,
                                         StateChangeCancellation& cancellation)
     {
-        PushActivityTracker activity{m_statusCallback,
+        const QUrl endpoint{QString::fromStdString(m_url)};
+        PushActivityTracker activity{m_statusCallback, endpoint,
                                      pushActivityTimeout(requestedPushPingInterval)};
         QWebSocket socket;
         m_activeSocket = &socket;
         const auto clearSocket = qScopeGuard([this]() { m_activeSocket = nullptr; });
 
-        QNetworkRequest handshake{QUrl{QString::fromStdString(m_url)}};
+        QNetworkRequest handshake{endpoint};
         handshake.setRawHeader("Authorization",
                                QByteArray{"Bearer "} + QByteArray::fromStdString(m_accessToken));
         QWebSocketHandshakeOptions handshakeOptions;
@@ -146,7 +147,7 @@ namespace javelin::jmap::sync
                              activity.recordActivity();
                              qCDebug(logWebSocket).noquote()
                                  << "server ping interval" << requestedPushPingInterval.count()
-                                 << "seconds";
+                                 << "seconds" << activity.serverBaseUrl();
                          });
 
         // Install the receive handlers before enabling push. A server may send the initial

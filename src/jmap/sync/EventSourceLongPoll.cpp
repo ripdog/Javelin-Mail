@@ -209,7 +209,7 @@ namespace javelin::jmap::sync
 
         QNetworkReply* reply = m_networkAccessManager.get(networkRequest);
         m_activeReply = reply;
-        PushActivityTracker activity{m_statusCallback, maximumPushActivityTimeout};
+        PushActivityTracker activity{m_statusCallback, *url, maximumPushActivityTimeout};
         const auto deleteReply = qScopeGuard(
             [this, reply]()
             {
@@ -278,7 +278,8 @@ namespace javelin::jmap::sync
             {
                 activity.setTimeout(pushActivityTimeout(ping->interval));
                 qCDebug(logEventSource).noquote()
-                    << "server ping interval" << ping->interval.count() << "seconds";
+                    << "server ping interval" << ping->interval.count() << "seconds"
+                    << activity.serverBaseUrl();
                 co_return std::nullopt;
             }
             if (const auto* error = std::get_if<PushStreamProtocolFailure>(&outcome))
