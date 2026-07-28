@@ -1,6 +1,7 @@
 #include "jmap/sync/WebSocketPushChannel.h"
 
 #include "jmap/api/Error.h"
+#include "jmap/sync/PushProtocol.h"
 
 #include <QCoroSignal>
 #include <QCoroTimer>
@@ -16,19 +17,11 @@
 
 #include <glaze/glaze.hpp>
 
-#include <algorithm>
 #include <deque>
-#include <unordered_map>
 
 namespace javelin::jmap::sync
 {
-    Q_LOGGING_CATEGORY(logWebSocket, "jmap.push.websocket")
-    struct WebSocketStateChange
-    {
-        std::optional<std::string> type;
-        std::unordered_map<std::string, std::unordered_map<std::string, std::string>> changed;
-        std::optional<std::string> pushState;
-    };
+    Q_LOGGING_CATEGORY(logWebSocket, "jmap.push.ws")
 
     struct PushEnable
     {
@@ -40,17 +33,9 @@ namespace javelin::jmap::sync
     namespace
     {
         constexpr auto connectTimeout = std::chrono::seconds{15};
-        constexpr auto messageTimeout = std::chrono::seconds{350};
 
     } // namespace
 } // namespace javelin::jmap::sync
-
-template <> struct glz::meta<javelin::jmap::sync::WebSocketStateChange>
-{
-    using T = javelin::jmap::sync::WebSocketStateChange;
-    static constexpr auto value =
-        glz::object("@type", &T::type, "changed", &T::changed, "pushState", &T::pushState);
-};
 
 template <> struct glz::meta<javelin::jmap::sync::PushEnable>
 {
@@ -168,6 +153,9 @@ namespace javelin::jmap::sync
                          {
                              lastActivity.restart();
                              reportConnectedActivity();
+                             qCDebug(logWebSocket).noquote()
+                                 << "server ping interval" << requestedPushPingInterval.count()
+                                 << "seconds";
                          });
 
         // Install the receive handlers before enabling push. A server may send the initial
@@ -180,7 +168,7 @@ namespace javelin::jmap::sync
             << "push subscription sent for" << subscribedTypes.join(QStringLiteral(", "));
 
         QTimer pingTimer;
-        pingTimer.setInterval(std::chrono::seconds{30});
+        pingTimer.setInterval(requestedPushPingInterval);
         QObject::connect(&pingTimer, &QTimer::timeout, &socket, [&socket]() { socket.ping(); });
         pingTimer.start();
 
@@ -196,8 +184,9 @@ namespace javelin::jmap::sync
                     .httpStatus = std::nullopt,
                 };
             }
-            if (lastActivity.elapsed() >
-                std::chrono::duration_cast<std::chrono::milliseconds>(messageTimeout).count())
+            if (lastActivity.elapsed() > std::chrono::duration_cast<std::chrono::milliseconds>(
+                                             pushActivityTimeout(requestedPushPingInterval))
+                                             .count())
             {
                 qCWarning(logWebSocket) << "activity timeout";
                 socket.abort();
@@ -216,31 +205,18 @@ namespace javelin::jmap::sync
                 continue;
             }
 
-            WebSocketStateChange change;
             std::string buffer = messages.front().toStdString();
             messages.pop_front();
-            if (glz::read<glz::opts{.error_on_unknown_keys = false}>(change, buffer) ||
-                change.type != std::optional<std::string>{"StateChange"})
+            auto parsed = parseWebSocketPushMessage(subscription, summary.lastState, buffer);
+            if (std::holds_alternative<PushMessageIgnored>(parsed))
+                continue;
+            if (const auto* error = std::get_if<PushProtocolError>(&parsed))
             {
-                qCWarning(logWebSocket) << "invalid push message received";
+                qCWarning(logWebSocket).noquote()
+                    << "invalid push message received" << QString::fromStdString(error->message);
                 continue;
             }
-            auto changedStates = subscribedStateChanges(subscription, change.changed);
-            if (changedStates.empty())
-                continue;
-            StateChangeEvent event;
-            event.newState = change.pushState.value_or(summary.lastState);
-            event.changedStates = std::move(changedStates);
-            for (const auto& [accountId, states] : event.changedStates)
-            {
-                static_cast<void>(accountId);
-                for (const auto& [type, state] : states)
-                {
-                    static_cast<void>(state);
-                    if (std::ranges::find(event.changedTypes, type) == event.changedTypes.end())
-                        event.changedTypes.push_back(type);
-                }
-            }
+            auto event = std::get<StateChangeEvent>(std::move(parsed));
             QStringList changedTypes;
             for (const auto& type : event.changedTypes)
                 changedTypes.push_back(QString::fromStdString(type));

@@ -370,6 +370,8 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/sync/LongPollWorker.h
     src/jmap/sync/EventSourceLongPoll.cpp
     src/jmap/sync/EventSourceLongPoll.h
+    src/jmap/sync/PushProtocol.cpp
+    src/jmap/sync/PushProtocol.h
     src/jmap/sync/WebSocketPushChannel.cpp
     src/jmap/sync/WebSocketPushChannel.h
     src/jmap/sync/ConsistencyDomain.cpp
@@ -595,6 +597,8 @@ add_library(javelin_jmap STATIC
     src/jmap/sync/LongPollWorker.h
     src/jmap/sync/EventSourceLongPoll.cpp
     src/jmap/sync/EventSourceLongPoll.h
+    src/jmap/sync/PushProtocol.cpp
+    src/jmap/sync/PushProtocol.h
     src/jmap/sync/WebSocketPushChannel.cpp
     src/jmap/sync/WebSocketPushChannel.h
     src/jmap/sync/ConsistencyDomain.cpp

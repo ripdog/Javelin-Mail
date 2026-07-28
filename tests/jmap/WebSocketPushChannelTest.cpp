@@ -1,5 +1,7 @@
 #include "jmap/sync/WebSocketPushChannel.h"
 
+#include "jmap/sync/PushProtocol.h"
+
 #include <catch2/catch_test_macros.hpp>
 
 TEST_CASE("WebSocket push enable uses the requested data types", "[jmap][push][websocket]")
@@ -36,4 +38,24 @@ TEST_CASE("state-change routing includes groupware changes from secondary accoun
           javelin::jmap::sync::AccountTypeStateMap{
               {"mail-account", {{"Email", "mail-2"}, {"Mailbox", "boxes-2"}}},
               {"contacts-account", {{"ContactCard", "contacts-2"}}}});
+}
+
+TEST_CASE("WebSocket push messages use the shared protocol parser", "[jmap][push][websocket]")
+{
+    const javelin::jmap::sync::StateChangeSubscription subscription{
+        .accountId = "account-1",
+        .lastState = "push-state-1",
+        .types = {"Email", "Mailbox"},
+        .groupwareAccountIds = {},
+    };
+    auto parsed = javelin::jmap::sync::parseWebSocketPushMessage(
+        subscription, subscription.lastState,
+        R"({"@type":"StateChange","changed":{"account-1":{"Email":"email-2"}},"pushState":"push-state-2"})");
+
+    REQUIRE(std::holds_alternative<javelin::jmap::sync::StateChangeEvent>(parsed));
+    const auto& event = std::get<javelin::jmap::sync::StateChangeEvent>(parsed);
+    CHECK(event.newState == "push-state-2");
+    CHECK(event.changedTypes == std::vector<std::string>{"Email"});
+    CHECK(event.changedStates ==
+          javelin::jmap::sync::AccountTypeStateMap{{"account-1", {{"Email", "email-2"}}}});
 }

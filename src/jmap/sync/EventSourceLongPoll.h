@@ -6,23 +6,13 @@
 
 #include <QPointer>
 
-#include <chrono>
-#include <optional>
 #include <string>
-#include <string_view>
-#include <variant>
 
 class QNetworkAccessManager;
 class QNetworkReply;
 
 namespace javelin::jmap::sync
 {
-
-    using EventSourcePingIntervalResult =
-        std::variant<std::optional<std::chrono::seconds>, std::string>;
-
-    [[nodiscard]] EventSourcePingIntervalResult
-    parseEventSourcePingInterval(std::string_view eventData);
 
     class QtStateChangeSleeper final : public StateChangeSleeper
     {
