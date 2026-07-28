@@ -1,11 +1,13 @@
 #include "jmap/sync/WebSocketPushChannel.h"
 
 #include "jmap/api/Error.h"
+#include "jmap/sync/PushActivityTracker.h"
+#include "jmap/sync/PushProtocol.h"
+#include "jmap/sync/PushStreamSession.h"
 
 #include <QCoroSignal>
 #include <QCoroTimer>
 
-#include <QElapsedTimer>
 #include <QLoggingCategory>
 #include <QNetworkRequest>
 #include <QScopeGuard>
@@ -16,19 +18,11 @@
 
 #include <glaze/glaze.hpp>
 
-#include <algorithm>
 #include <deque>
-#include <unordered_map>
 
 namespace javelin::jmap::sync
 {
-    Q_LOGGING_CATEGORY(logWebSocket, "jmap.push.websocket")
-    struct WebSocketStateChange
-    {
-        std::optional<std::string> type;
-        std::unordered_map<std::string, std::unordered_map<std::string, std::string>> changed;
-        std::optional<std::string> pushState;
-    };
+    Q_LOGGING_CATEGORY(logWebSocket, "jmap.push.ws")
 
     struct PushEnable
     {
@@ -40,17 +34,9 @@ namespace javelin::jmap::sync
     namespace
     {
         constexpr auto connectTimeout = std::chrono::seconds{15};
-        constexpr auto messageTimeout = std::chrono::seconds{350};
 
     } // namespace
 } // namespace javelin::jmap::sync
-
-template <> struct glz::meta<javelin::jmap::sync::WebSocketStateChange>
-{
-    using T = javelin::jmap::sync::WebSocketStateChange;
-    static constexpr auto value =
-        glz::object("@type", &T::type, "changed", &T::changed, "pushState", &T::pushState);
-};
 
 template <> struct glz::meta<javelin::jmap::sync::PushEnable>
 {
@@ -88,14 +74,6 @@ namespace javelin::jmap::sync
         cancel();
     }
 
-    void WebSocketStateChangeSource::reportConnectedActivity() const
-    {
-        if (m_statusCallback)
-        {
-            m_statusCallback(StateChangeConnectionStatus::Connected);
-        }
-    }
-
     void WebSocketStateChangeSource::cancel()
     {
         if (m_activeSocket != nullptr)
@@ -109,6 +87,8 @@ namespace javelin::jmap::sync
                                         StateChangeConsumer& consumer,
                                         StateChangeCancellation& cancellation)
     {
+        PushActivityTracker activity{m_statusCallback,
+                                     pushActivityTimeout(requestedPushPingInterval)};
         QWebSocket socket;
         m_activeSocket = &socket;
         const auto clearSocket = qScopeGuard([this]() { m_activeSocket = nullptr; });
@@ -141,7 +121,7 @@ namespace javelin::jmap::sync
                 .httpStatus = std::nullopt,
             };
         }
-        reportConnectedActivity();
+        activity.recordActivity();
         qCInfo(logWebSocket) << "connected";
 
         const auto enable = encodeWebSocketPushEnable(subscription);
@@ -154,20 +134,19 @@ namespace javelin::jmap::sync
             };
         }
         std::deque<QString> messages;
-        QElapsedTimer lastActivity;
-        lastActivity.start();
         QObject::connect(&socket, &QWebSocket::textMessageReceived, &socket,
-                         [this, &messages, &lastActivity](QString message)
+                         [&messages, &activity](QString message)
                          {
-                             lastActivity.restart();
-                             reportConnectedActivity();
+                             activity.recordActivity();
                              messages.push_back(std::move(message));
                          });
         QObject::connect(&socket, &QWebSocket::pong, &socket,
-                         [this, &lastActivity](quint64, const QByteArray&)
+                         [&activity](quint64, const QByteArray&)
                          {
-                             lastActivity.restart();
-                             reportConnectedActivity();
+                             activity.recordActivity();
+                             qCDebug(logWebSocket).noquote()
+                                 << "server ping interval" << requestedPushPingInterval.count()
+                                 << "seconds";
                          });
 
         // Install the receive handlers before enabling push. A server may send the initial
@@ -180,11 +159,11 @@ namespace javelin::jmap::sync
             << "push subscription sent for" << subscribedTypes.join(QStringLiteral(", "));
 
         QTimer pingTimer;
-        pingTimer.setInterval(std::chrono::seconds{30});
+        pingTimer.setInterval(requestedPushPingInterval);
         QObject::connect(&pingTimer, &QTimer::timeout, &socket, [&socket]() { socket.ping(); });
         pingTimer.start();
 
-        StateChangeStreamSummary summary{.lastState = subscription.lastState, .updateCount = 0};
+        PushStreamSession stream{std::move(subscription), consumer};
         while (!cancellation.isCancelled())
         {
             if (socket.state() != QAbstractSocket::ConnectedState)
@@ -196,8 +175,7 @@ namespace javelin::jmap::sync
                     .httpStatus = std::nullopt,
                 };
             }
-            if (lastActivity.elapsed() >
-                std::chrono::duration_cast<std::chrono::milliseconds>(messageTimeout).count())
+            if (activity.hasTimedOut())
             {
                 qCWarning(logWebSocket) << "activity timeout";
                 socket.abort();
@@ -216,41 +194,18 @@ namespace javelin::jmap::sync
                 continue;
             }
 
-            WebSocketStateChange change;
             std::string buffer = messages.front().toStdString();
             messages.pop_front();
-            if (glz::read<glz::opts{.error_on_unknown_keys = false}>(change, buffer) ||
-                change.type != std::optional<std::string>{"StateChange"})
+            auto outcome = co_await stream.accept(parseWebSocketPushMessage(
+                stream.subscription(), stream.summary().lastState, buffer));
+            if (const auto* error = std::get_if<PushStreamProtocolFailure>(&outcome))
             {
-                qCWarning(logWebSocket) << "invalid push message received";
-                continue;
+                qCWarning(logWebSocket).noquote()
+                    << "invalid push message received" << QString::fromStdString(error->message);
             }
-            auto changedStates = subscribedStateChanges(subscription, change.changed);
-            if (changedStates.empty())
-                continue;
-            StateChangeEvent event;
-            event.newState = change.pushState.value_or(summary.lastState);
-            event.changedStates = std::move(changedStates);
-            for (const auto& [accountId, states] : event.changedStates)
-            {
-                static_cast<void>(accountId);
-                for (const auto& [type, state] : states)
-                {
-                    static_cast<void>(state);
-                    if (std::ranges::find(event.changedTypes, type) == event.changedTypes.end())
-                        event.changedTypes.push_back(type);
-                }
-            }
-            QStringList changedTypes;
-            for (const auto& type : event.changedTypes)
-                changedTypes.push_back(QString::fromStdString(type));
-            qCInfo(logWebSocket).noquote() << "state change" << changedTypes.join(QLatin1Char(','));
-            summary.lastState = event.newState;
-            ++summary.updateCount;
-            co_await consumer.onStateChange(std::move(event));
         }
         socket.close();
         qCInfo(logWebSocket) << "closed";
-        co_return summary;
+        co_return stream.summary();
     }
 } // namespace javelin::jmap::sync

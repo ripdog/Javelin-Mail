@@ -1,6 +1,9 @@
 #include "jmap/sync/EventSourceLongPoll.h"
 
 #include "jmap/api/Error.h"
+#include "jmap/sync/PushActivityTracker.h"
+#include "jmap/sync/PushProtocol.h"
+#include "jmap/sync/PushStreamSession.h"
 
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic push
@@ -11,8 +14,6 @@
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic pop
 #endif
-
-#include <glaze/glaze.hpp>
 
 #include <QByteArray>
 #include <QDebug>
@@ -26,95 +27,16 @@
 #include <QUrlQuery>
 
 #include <algorithm>
-#include <charconv>
 #include <optional>
 #include <string_view>
-#include <unordered_map>
 #include <utility>
 
 namespace javelin::jmap::sync
 {
-    Q_LOGGING_CATEGORY(logEventSource, "jmap.push.eventsource")
-
-    struct RawStateChange
-    {
-        std::optional<std::string> type;
-        std::unordered_map<std::string, std::unordered_map<std::string, std::string>> changed;
-    };
-
-    struct RawPing
-    {
-        std::optional<std::variant<unsigned int, std::string>> interval;
-    };
-
-} // namespace javelin::jmap::sync
-
-template <> struct glz::meta<javelin::jmap::sync::RawStateChange>
-{
-    using T = javelin::jmap::sync::RawStateChange;
-
-    static constexpr auto value = glz::object("type", &T::type, "changed", &T::changed);
-};
-
-template <> struct glz::meta<javelin::jmap::sync::RawPing>
-{
-    using T = javelin::jmap::sync::RawPing;
-
-    static constexpr auto value = glz::object("interval", &T::interval);
-};
-
-namespace javelin::jmap::sync
-{
-
-    EventSourcePingIntervalResult parseEventSourcePingInterval(const std::string_view eventData)
-    {
-        RawPing ping;
-        std::string buffer{eventData};
-        if (const auto readError =
-                glz::read<glz::opts{.error_on_unknown_keys = false}>(ping, buffer))
-            return std::string{glz::format_error(readError, buffer)};
-        if (!ping.interval.has_value())
-            return std::optional<std::chrono::seconds>{std::nullopt};
-
-        unsigned int interval = 0;
-        if (const auto* numeric = std::get_if<unsigned int>(&*ping.interval))
-        {
-            interval = *numeric;
-        }
-        else
-        {
-            const auto& text = std::get<std::string>(*ping.interval);
-            const auto [end, error] =
-                std::from_chars(text.data(), text.data() + text.size(), interval);
-            if (error != std::errc{} || end != text.data() + text.size())
-                return std::string{"Ping interval string is not an unsigned decimal integer."};
-        }
-
-        if (interval > 1000 && interval % 1000 == 0)
-        {
-            // Stalwart currently reports this RFC 8620 value in milliseconds.
-            interval /= 1000;
-        }
-        return interval > 0 ? std::optional<std::chrono::seconds>{std::chrono::seconds{interval}}
-                            : std::optional<std::chrono::seconds>{std::nullopt};
-    }
+    Q_LOGGING_CATEGORY(logEventSource, "jmap.push.http")
 
     namespace
     {
-        enum class ParsedEventStatus
-        {
-            NeedMoreData,
-            Ignored,
-            Parsed,
-            Invalid,
-        };
-
-        constexpr auto requestedPingInterval = std::chrono::seconds{30};
-        constexpr auto eventSourcePingGrace = std::chrono::seconds{15};
-        constexpr auto maximumAcceptedPingInterval = std::chrono::seconds{300};
-        constexpr auto maximumEventSourceIdleTimeout = std::chrono::seconds{350};
-        constexpr auto defaultEventSourceIdleTimeout = maximumEventSourceIdleTimeout;
-
         [[nodiscard]] QByteArray summarizeBody(const QByteArray& body)
         {
             constexpr qsizetype maxBytes = 4096;
@@ -125,33 +47,6 @@ namespace javelin::jmap::sync
 
             return body.first(maxBytes) + "...";
         }
-
-        [[nodiscard]] const char* parsedEventStatusName(const ParsedEventStatus status)
-        {
-            switch (status)
-            {
-            case ParsedEventStatus::NeedMoreData:
-                return "need-more-data";
-            case ParsedEventStatus::Ignored:
-                return "ignored";
-            case ParsedEventStatus::Parsed:
-                return "parsed";
-            case ParsedEventStatus::Invalid:
-                return "invalid";
-            }
-            return "unknown";
-        }
-
-        struct ParsedEvent
-        {
-            ParsedEventStatus status = ParsedEventStatus::NeedMoreData;
-            std::optional<StateChangeEvent> response;
-            std::optional<std::string> errorMessage;
-            std::optional<std::chrono::seconds> pingInterval;
-        };
-
-        using ParsedStreamEvent =
-            std::variant<StateChangeEvent, javelin::jmap::api::TransportError>;
 
         [[nodiscard]] javelin::jmap::api::TransportError
         makeTransportError(const javelin::jmap::api::TransportErrorCode code, std::string message,
@@ -214,11 +109,11 @@ namespace javelin::jmap::sync
             expanded.replace(QStringLiteral("{?types,closeafter,ping}"),
                              QStringLiteral("?types=%1&closeafter=no&ping=%2")
                                  .arg(encodeTemplateValue(types))
-                                 .arg(requestedPingInterval.count()));
+                                 .arg(requestedPushPingInterval.count()));
             expanded.replace(QStringLiteral("{types}"), encodeTemplateValue(types));
             expanded.replace(QStringLiteral("{closeafter}"), QStringLiteral("no"));
             expanded.replace(QStringLiteral("{ping}"),
-                             QString::number(requestedPingInterval.count()));
+                             QString::number(requestedPushPingInterval.count()));
 
             QUrl url{expanded};
             if (!url.isValid() || url.isEmpty())
@@ -232,136 +127,11 @@ namespace javelin::jmap::sync
                 query.addQueryItem(QStringLiteral("types"), QString::fromStdString(types));
                 query.addQueryItem(QStringLiteral("closeafter"), QStringLiteral("no"));
                 query.addQueryItem(QStringLiteral("ping"),
-                                   QString::number(requestedPingInterval.count()));
+                                   QString::number(requestedPushPingInterval.count()));
                 url.setQuery(query);
             }
 
             return url;
-        }
-
-        [[nodiscard]] ParsedEvent parseStateEvent(const StateChangeSubscription& subscription,
-                                                  const std::string_view fallbackState,
-                                                  const std::string_view eventName,
-                                                  const std::string_view eventId,
-                                                  const std::string_view eventData)
-        {
-            if (eventName.empty() || eventName == "message")
-            {
-                return ParsedEvent{
-                    .status = ParsedEventStatus::Ignored,
-                    .response = std::nullopt,
-                    .errorMessage = std::nullopt,
-                    .pingInterval = std::nullopt,
-                };
-            }
-
-            if (eventName == "ping")
-            {
-                const auto pingIntervalResult = parseEventSourcePingInterval(eventData);
-                if (const auto* error = std::get_if<std::string>(&pingIntervalResult))
-                {
-                    return ParsedEvent{
-                        .status = ParsedEventStatus::Invalid,
-                        .response = std::nullopt,
-                        .errorMessage = *error,
-                        .pingInterval = std::nullopt,
-                    };
-                }
-
-                return ParsedEvent{
-                    .status = ParsedEventStatus::Ignored,
-                    .response = std::nullopt,
-                    .errorMessage = std::nullopt,
-                    .pingInterval =
-                        std::get<std::optional<std::chrono::seconds>>(pingIntervalResult),
-                };
-            }
-
-            if (eventName != "state")
-            {
-                return ParsedEvent{
-                    .status = ParsedEventStatus::Ignored,
-                    .response = std::nullopt,
-                    .errorMessage = std::nullopt,
-                    .pingInterval = std::nullopt,
-                };
-            }
-
-            RawStateChange stateChange;
-            std::string buffer = std::string{eventData};
-            if (const auto readError =
-                    glz::read<glz::opts{.error_on_unknown_keys = false}>(stateChange, buffer))
-            {
-                return ParsedEvent{
-                    .status = ParsedEventStatus::Invalid,
-                    .response = std::nullopt,
-                    .errorMessage = std::string{glz::format_error(readError, buffer)},
-                    .pingInterval = std::nullopt,
-                };
-            }
-
-            if (stateChange.type == std::optional<std::string>{"connect"})
-            {
-                return ParsedEvent{
-                    .status = ParsedEventStatus::Parsed,
-                    .response =
-                        StateChangeEvent{
-                            .newState =
-                                eventId.empty() ? std::string{fallbackState} : std::string{eventId},
-                            .changedTypes = {},
-                            .changedStates = {},
-                            .notifyConsumer = false,
-                        },
-                    .errorMessage = std::nullopt,
-                    .pingInterval = std::nullopt,
-                };
-            }
-
-            if (stateChange.type.has_value() && *stateChange.type != "StateChange")
-            {
-                return ParsedEvent{
-                    .status = ParsedEventStatus::Invalid,
-                    .response = std::nullopt,
-                    .errorMessage = std::string{"Expected a StateChange event payload."},
-                    .pingInterval = std::nullopt,
-                };
-            }
-
-            auto changedStates = subscribedStateChanges(subscription, stateChange.changed);
-            if (changedStates.empty())
-            {
-                return ParsedEvent{
-                    .status = ParsedEventStatus::Ignored,
-                    .response = std::nullopt,
-                    .errorMessage = std::nullopt,
-                    .pingInterval = std::nullopt,
-                };
-            }
-
-            std::vector<std::string> changedTypes;
-            for (const auto& [accountId, states] : changedStates)
-            {
-                static_cast<void>(accountId);
-                for (const auto& [typeName, state] : states)
-                {
-                    static_cast<void>(state);
-                    if (std::ranges::find(changedTypes, typeName) == changedTypes.end())
-                        changedTypes.push_back(typeName);
-                }
-            }
-
-            return ParsedEvent{
-                .status = ParsedEventStatus::Parsed,
-                .response =
-                    StateChangeEvent{
-                        .newState =
-                            eventId.empty() ? std::string{fallbackState} : std::string{eventId},
-                        .changedTypes = std::move(changedTypes),
-                        .changedStates = std::move(changedStates),
-                    },
-                .errorMessage = std::nullopt,
-                .pingInterval = std::nullopt,
-            };
         }
 
     } // namespace
@@ -395,14 +165,6 @@ namespace javelin::jmap::sync
     EventSourceStateChangeSource::~EventSourceStateChangeSource()
     {
         cancel();
-    }
-
-    void EventSourceStateChangeSource::reportConnectedActivity() const
-    {
-        if (m_statusCallback)
-        {
-            m_statusCallback(StateChangeConnectionStatus::Connected);
-        }
     }
 
     void EventSourceStateChangeSource::cancel()
@@ -447,6 +209,7 @@ namespace javelin::jmap::sync
 
         QNetworkReply* reply = m_networkAccessManager.get(networkRequest);
         m_activeReply = reply;
+        PushActivityTracker activity{m_statusCallback, maximumPushActivityTimeout};
         const auto deleteReply = qScopeGuard(
             [this, reply]()
             {
@@ -456,6 +219,7 @@ namespace javelin::jmap::sync
                 }
                 if (reply != nullptr)
                 {
+                    QObject::disconnect(reply, nullptr, reply, nullptr);
                     reply->deleteLater();
                 }
             });
@@ -470,12 +234,12 @@ namespace javelin::jmap::sync
                          });
         bool connectedReported = false;
         QObject::connect(reply, &QNetworkReply::requestSent, reply,
-                         [this, &connectedReported]()
+                         [&activity, &connectedReported]()
                          {
                              if (!connectedReported)
                              {
                                  connectedReported = true;
-                                 reportConnectedActivity();
+                                 activity.recordActivity();
                              }
                          });
 
@@ -491,76 +255,50 @@ namespace javelin::jmap::sync
             eventData.clear();
         };
 
-        StateChangeStreamSummary streamSummary{
-            .lastState = subscription.lastState,
-            .updateCount = 0,
-        };
-        auto activityTimeout = defaultEventSourceIdleTimeout;
+        PushStreamSession stream{std::move(subscription), consumer};
         bool responseHeadersValidated = false;
 
-        const auto finalizeEvent = [&]() -> std::optional<ParsedStreamEvent>
+        const auto finalizeEvent =
+            [&]() -> QCoro::Task<std::optional<javelin::jmap::api::TransportError>>
         {
             if (eventName.empty() && eventId.empty() && eventData.empty())
             {
-                return std::nullopt;
+                co_return std::nullopt;
             }
 
-            const auto parsed = parseStateEvent(subscription, subscription.lastState, eventName,
-                                                eventId, eventData);
-            if (parsed.pingInterval.has_value())
-            {
-                const auto effectivePingInterval =
-                    std::min(*parsed.pingInterval, maximumAcceptedPingInterval);
-                activityTimeout = std::min(effectivePingInterval * 2 + eventSourcePingGrace,
-                                           maximumEventSourceIdleTimeout);
-                qCDebug(logEventSource).noquote()
-                    << "server ping interval" << parsed.pingInterval->count()
-                    << "seconds; effective interval" << effectivePingInterval.count()
-                    << "seconds; activity timeout" << activityTimeout.count() << "seconds";
-            }
-            if (eventName == "ping")
-                qCDebug(logEventSource).noquote() << "ping received";
-            else
-                qCInfo(logEventSource).noquote()
-                    << "event" << QString::fromStdString(eventName) << "id"
-                    << QString::fromStdString(eventId) << "status"
-                    << parsedEventStatusName(parsed.status);
-            if (parsed.status == ParsedEventStatus::Invalid)
-            {
-                qWarning().noquote()
-                    << "State-change source invalid event payload"
-                    << QString::fromStdString(eventName) << QString::fromStdString(eventId)
-                    << summarizeBody(QByteArray::fromStdString(eventData));
-            }
+            auto parsed = parseEventSourcePushMessage(
+                stream.subscription(), stream.summary().lastState, eventName, eventId, eventData);
+            const auto parsedEventName = eventName;
+            const auto parsedEventId = eventId;
+            const auto parsedEventData = eventData;
             resetEvent();
 
-            switch (parsed.status)
+            auto outcome = co_await stream.accept(std::move(parsed));
+            if (const auto* ping = std::get_if<PushStreamPing>(&outcome))
             {
-            case ParsedEventStatus::NeedMoreData:
-            case ParsedEventStatus::Ignored:
-                return std::nullopt;
-            case ParsedEventStatus::Parsed:
-                if (parsed.response.has_value() && !parsed.response->notifyConsumer)
-                {
-                    subscription.lastState = parsed.response->newState;
-                    streamSummary.lastState = parsed.response->newState;
-                    return std::nullopt;
-                }
-                return *parsed.response;
-            case ParsedEventStatus::Invalid:
-                return makeTransportError(
-                    javelin::jmap::api::TransportErrorCode::ResponseDecodingFailed,
-                    parsed.errorMessage.value_or("Failed to parse event-source state event."));
+                activity.setTimeout(pushActivityTimeout(ping->interval));
+                qCDebug(logEventSource).noquote()
+                    << "server ping interval" << ping->interval.count() << "seconds";
+                co_return std::nullopt;
+            }
+            if (const auto* error = std::get_if<PushStreamProtocolFailure>(&outcome))
+            {
+                qWarning().noquote() << "State-change source invalid event payload"
+                                     << QString::fromStdString(parsedEventName)
+                                     << QString::fromStdString(parsedEventId)
+                                     << summarizeBody(QByteArray::fromStdString(parsedEventData));
+                co_return makeTransportError(
+                    javelin::jmap::api::TransportErrorCode::ResponseDecodingFailed, error->message);
             }
 
-            return std::nullopt;
+            co_return std::nullopt;
         };
 
         while (true)
         {
             if (cancellation.isCancelled())
             {
-                co_return streamSummary;
+                co_return stream.summary();
             }
 
             if (reply->error() != QNetworkReply::NoError && reply->isFinished())
@@ -604,13 +342,13 @@ namespace javelin::jmap::sync
                 if (!connectedReported)
                 {
                     connectedReported = true;
-                    reportConnectedActivity();
+                    activity.recordActivity();
                 }
             }
 
             if (!reply->isFinished() && reply->bytesAvailable() == 0)
             {
-                const bool ready = co_await qCoro(reply).waitForReadyRead(activityTimeout);
+                const bool ready = co_await qCoro(reply).waitForReadyRead(activity.timeout());
                 if (!ready && !reply->isFinished())
                 {
                     reply->abort();
@@ -625,24 +363,18 @@ namespace javelin::jmap::sync
                 if (!ready && reply->isFinished())
                 {
                     const QByteArray chunk = reply->readAll();
-                    qCDebug(logEventSource).noquote()
-                        << "raw event-source bytes" << reply->url().toString() << chunk.size()
-                        << summarizeBody(chunk);
                     if (!chunk.isEmpty())
                     {
-                        reportConnectedActivity();
+                        activity.recordActivity();
                     }
                     pendingBuffer += chunk;
                 }
                 else if (ready)
                 {
                     const QByteArray chunk = reply->readAll();
-                    qCDebug(logEventSource).noquote()
-                        << "raw event-source bytes" << reply->url().toString() << chunk.size()
-                        << summarizeBody(chunk);
                     if (!chunk.isEmpty())
                     {
-                        reportConnectedActivity();
+                        activity.recordActivity();
                     }
                     pendingBuffer += chunk;
                 }
@@ -650,12 +382,9 @@ namespace javelin::jmap::sync
             else
             {
                 const QByteArray chunk = reply->readAll();
-                qCDebug(logEventSource).noquote()
-                    << "raw event-source bytes" << reply->url().toString() << chunk.size()
-                    << summarizeBody(chunk);
                 if (!chunk.isEmpty())
                 {
-                    reportConnectedActivity();
+                    activity.recordActivity();
                 }
                 pendingBuffer += chunk;
             }
@@ -677,19 +406,9 @@ namespace javelin::jmap::sync
 
                 if (line.isEmpty())
                 {
-                    if (const auto parsed = finalizeEvent(); parsed.has_value())
+                    if (const auto error = co_await finalizeEvent(); error.has_value())
                     {
-                        if (const auto* error =
-                                std::get_if<javelin::jmap::api::TransportError>(&*parsed))
-                        {
-                            co_return *error;
-                        }
-
-                        auto event = std::get<StateChangeEvent>(*parsed);
-                        subscription.lastState = event.newState;
-                        streamSummary.lastState = event.newState;
-                        ++streamSummary.updateCount;
-                        co_await consumer.onStateChange(std::move(event));
+                        co_return *error;
                     }
                     continue;
                 }
@@ -734,25 +453,14 @@ namespace javelin::jmap::sync
                     continue;
                 }
 
-                if (const auto parsed = finalizeEvent(); parsed.has_value())
+                if (const auto error = co_await finalizeEvent(); error.has_value())
                 {
-                    if (const auto* error =
-                            std::get_if<javelin::jmap::api::TransportError>(&*parsed))
-                    {
-                        co_return *error;
-                    }
-
-                    auto event = std::get<StateChangeEvent>(*parsed);
-                    subscription.lastState = event.newState;
-                    streamSummary.lastState = event.newState;
-                    ++streamSummary.updateCount;
-                    co_await consumer.onStateChange(std::move(event));
-                    co_return streamSummary;
+                    co_return *error;
                 }
 
-                if (streamSummary.updateCount > 0)
+                if (stream.summary().updateCount > 0)
                 {
-                    co_return streamSummary;
+                    co_return stream.summary();
                 }
 
                 qWarning().noquote()

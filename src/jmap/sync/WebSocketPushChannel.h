@@ -24,8 +24,6 @@ namespace javelin::jmap::sync
         void cancel() override;
 
       private:
-        void reportConnectedActivity() const;
-
         std::string m_url;
         std::string m_accessToken;
         StateChangeStatusCallback m_statusCallback;
