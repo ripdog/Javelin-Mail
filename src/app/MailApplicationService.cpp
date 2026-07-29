@@ -1185,6 +1185,7 @@ namespace javelin::app
                 .searchWindows = {},
                 .mailboxTreeChanged = false,
                 .hasNewMail = false,
+                .optimisticProjection = true,
             });
         }
         return result;

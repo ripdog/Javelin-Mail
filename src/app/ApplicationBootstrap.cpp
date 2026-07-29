@@ -346,8 +346,11 @@ namespace javelin::app
                          [this](const MailCacheChange& change)
                          {
                              m_processServices->localMaintenanceService().requestReplay();
-                             m_processServices->fullMailSyncService().requestCatchUp(
-                                 change.accountId.toStdString());
+                             if (!change.optimisticProjection)
+                             {
+                                 m_processServices->fullMailSyncService().requestCatchUp(
+                                     change.accountId.toStdString());
+                             }
                              if (change.hasNewMail)
                              {
                                  m_processServices->mailIndexService().requestIndex(

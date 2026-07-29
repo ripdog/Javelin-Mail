@@ -54,6 +54,7 @@ namespace javelin::app
         std::vector<SearchQueryWindowChange> searchWindows;
         bool mailboxTreeChanged = false;
         bool hasNewMail = false;
+        bool optimisticProjection = false;
     };
 
     class AccountSyncCoordinator final : public QObject,
