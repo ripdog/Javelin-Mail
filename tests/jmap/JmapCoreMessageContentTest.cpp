@@ -5,6 +5,7 @@
 #include "jmap/api/SessionParser.h"
 #include "jmap/api/Transport.h"
 #include "jmap/cache/EmailRepository.h"
+#include "jmap/cache/MailVault.h"
 #include "jmap/cache/MailboxWindowRepository.h"
 #include "jmap/cache/QueryService.h"
 #include "jmap/cache/RawMessageSourceRepository.h"
@@ -20,6 +21,8 @@
 #include <QCoroTask>
 
 #include <QCoreApplication>
+#include <QDir>
+#include <QFileInfo>
 #include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QUrlQuery>
@@ -540,6 +543,22 @@ TEST_CASE("JmapCore queues archive and delete mailbox moves as mutations",
 
     javelin::jmap::cache::EmailRepository emailRepository{databaseContext.connection};
     REQUIRE_FALSE(emailRepository.replaceAll("account-1", {email}).has_value());
+    javelin::jmap::cache::RawMessageSourceRepository sources{databaseContext.connection};
+    REQUIRE_FALSE(
+        sources
+            .upsert("account-1", {.emailId = email.id,
+                                  .blobId = email.blobId,
+                                  .payload = QByteArrayLiteral("Subject: Test\r\n\r\nBody\r\n")})
+            .has_value());
+    const auto vault = javelin::jmap::cache::MailVault::forDatabase(databaseContext.connection);
+    const auto inboxSourcePath =
+        QDir(vault.rootPath())
+            .filePath(QStringLiteral("accounts/account-1/mailboxes/mbx-inbox/messages/eml-1.eml"));
+    const auto archiveSourcePath =
+        QDir(vault.rootPath())
+            .filePath(
+                QStringLiteral("accounts/account-1/mailboxes/mbx-archive/messages/eml-1.eml"));
+    REQUIRE(QFileInfo::exists(inboxSourcePath));
     const std::string inboxQueryKey = "mailbox:mbx-inbox|sort:receivedAt:desc|collapseThreads:true";
     javelin::jmap::cache::MailboxWindowRepository mailboxWindows{databaseContext.connection};
     REQUIRE_FALSE(mailboxWindows
@@ -563,6 +582,11 @@ TEST_CASE("JmapCore queues archive and delete mailbox moves as mutations",
     const auto archiveResult =
         core.queueArchiveEmail("account-1", "eml-1", "mbx-inbox", "mbx-archive");
     REQUIRE(std::holds_alternative<javelin::jmap::QueuedEmailMutation>(archiveResult));
+    CHECK(QFileInfo::exists(inboxSourcePath));
+    CHECK_FALSE(QFileInfo::exists(archiveSourcePath));
+    REQUIRE_FALSE(sources.replayProjectionJobs().has_value());
+    CHECK_FALSE(QFileInfo::exists(inboxSourcePath));
+    CHECK(QFileInfo::exists(archiveSourcePath));
 
     const auto archivedEmailResult = emailRepository.find("account-1", "eml-1");
     REQUIRE(

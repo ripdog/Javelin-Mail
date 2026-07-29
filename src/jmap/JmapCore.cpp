@@ -492,12 +492,6 @@ namespace javelin::jmap
             {
                 return javelin::jmap::operationError(*error);
             }
-            javelin::jmap::cache::RawMessageSourceRepository sources{connection};
-            if (const auto projectionError = sources.replayProjectionJobs())
-            {
-                qWarning().noquote()
-                    << "Mail vault mailbox projection deferred" << projectionError->message;
-            }
 
             return QueuedEmailMutation{
                 .mutationId = mutationId.toStdString(),
