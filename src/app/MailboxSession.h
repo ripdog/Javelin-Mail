@@ -43,6 +43,8 @@ namespace javelin::app
         [[nodiscard]] bool goToNextPage() override;
 
       private:
+        void reloadProjectedPage();
+        void applyCachedPage(javelin::jmap::cache::MailboxWindowPage page);
         void resetForPageChange();
         [[nodiscard]] std::string queryKey() const;
 
@@ -58,5 +60,7 @@ namespace javelin::app
         MailboxObservation m_observation;
         std::int64_t m_anchorOffset = 1;
         std::uint64_t m_generation = 0;
+        bool m_projectedReloadInFlight = false;
+        bool m_projectedReloadPending = false;
     };
 } // namespace javelin::app
