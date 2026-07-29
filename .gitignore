@@ -93,6 +93,7 @@ compile_commands.json
 
 #docs
 /docs/vendor
+/references
 
 #AI crap
 /logs
