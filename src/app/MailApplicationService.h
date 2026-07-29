@@ -174,6 +174,8 @@ namespace javelin::app
 
         void applySettings(std::vector<AccountSyncConfiguration> configurations);
         void networkBecameReachable();
+        [[nodiscard]] std::unordered_map<std::string, AccountSyncCoordinator::Status>
+        accountStatuses() const;
         [[nodiscard]] std::optional<AccountConnectionSettings>
         connectionSettingsFor(std::string_view ownerAccountId) const override;
         [[nodiscard]] MailboxObservation observeMailbox(std::string accountId,

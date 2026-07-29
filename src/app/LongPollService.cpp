@@ -95,6 +95,11 @@ namespace javelin::app
         stop();
     }
 
+    AccountSyncCoordinator::Status AccountSyncCoordinator::status() const
+    {
+        return m_status;
+    }
+
     void AccountSyncCoordinator::applySettings(AccountConnectionSettings settings,
                                                std::string accountId,
                                                std::vector<std::string> mailboxIds,

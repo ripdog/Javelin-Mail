@@ -503,26 +503,28 @@ namespace javelin::gui::shell
         connect(&m_messageNavigationCoordinator,
                 &javelin::app::MessageNavigationCoordinator::routeRequested, this,
                 &MainWindow::openEmailRoute);
+        const auto applyAccountStatus = [this](const QString& accountId, const auto status)
+        {
+            using Model = javelin::gui::mailboxes::MailboxTreeModel;
+            Model::ConnectionStatus modelStatus = Model::ConnectionStatus::Disconnected;
+            if (status == javelin::app::AccountSyncCoordinator::Status::Connecting)
+            {
+                modelStatus = Model::ConnectionStatus::Connecting;
+            }
+            else if (status == javelin::app::AccountSyncCoordinator::Status::Connected)
+            {
+                modelStatus = Model::ConnectionStatus::Connected;
+            }
+            else if (status == javelin::app::AccountSyncCoordinator::Status::AuthenticationPaused)
+            {
+                modelStatus = Model::ConnectionStatus::AuthenticationPaused;
+            }
+            m_mailboxModel->setConnectionStatus(accountId, modelStatus);
+        };
         connect(&m_mailService, &javelin::app::MailApplicationService::accountStatusChanged, this,
-                [this](const QString& accountId, const auto status)
-                {
-                    using Model = javelin::gui::mailboxes::MailboxTreeModel;
-                    Model::ConnectionStatus modelStatus = Model::ConnectionStatus::Disconnected;
-                    if (status == javelin::app::AccountSyncCoordinator::Status::Connecting)
-                    {
-                        modelStatus = Model::ConnectionStatus::Connecting;
-                    }
-                    else if (status == javelin::app::AccountSyncCoordinator::Status::Connected)
-                    {
-                        modelStatus = Model::ConnectionStatus::Connected;
-                    }
-                    else if (status ==
-                             javelin::app::AccountSyncCoordinator::Status::AuthenticationPaused)
-                    {
-                        modelStatus = Model::ConnectionStatus::AuthenticationPaused;
-                    }
-                    m_mailboxModel->setConnectionStatus(accountId, modelStatus);
-                });
+                applyAccountStatus);
+        for (const auto& [accountId, status] : m_mailService.accountStatuses())
+            applyAccountStatus(QString::fromStdString(accountId), status);
         connect(&m_mailService, &javelin::app::MailApplicationService::cacheCommitted, this,
                 [this](const javelin::app::MailCacheChange& change)
                 {

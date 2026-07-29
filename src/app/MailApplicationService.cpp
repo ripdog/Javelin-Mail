@@ -302,6 +302,16 @@ namespace javelin::app
         }
     }
 
+    std::unordered_map<std::string, AccountSyncCoordinator::Status>
+    MailApplicationService::accountStatuses() const
+    {
+        std::unordered_map<std::string, AccountSyncCoordinator::Status> statuses;
+        statuses.reserve(m_coordinators.size());
+        for (const auto& [accountId, coordinator] : m_coordinators)
+            statuses.emplace(accountId, coordinator->status());
+        return statuses;
+    }
+
     std::optional<AccountConnectionSettings>
     MailApplicationService::connectionSettingsFor(const std::string_view ownerAccountId) const
     {
