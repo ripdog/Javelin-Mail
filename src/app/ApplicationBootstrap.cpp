@@ -23,6 +23,7 @@
 #include <QGuiApplication>
 #include <QIcon>
 #include <QMenu>
+#include <QNetworkInformation>
 #include <QStatusBar>
 #include <QSystemTrayIcon>
 #include <QToolButton>
@@ -176,6 +177,7 @@ namespace javelin::app
         }
 
         reloadAccountSynchronizationSettings();
+        setupNetworkReachability();
         setupSystemTray();
         m_processServices->deferredSendService().start();
         createMainWindow();
@@ -260,6 +262,31 @@ namespace javelin::app
         m_processServices->fullMailSyncService().applySettings(std::move(fullSync));
         m_processServices->mailIndexService().applyAccounts(std::move(accountIds));
         m_processServices->localMaintenanceService().requestReplay();
+    }
+
+    void ApplicationBootstrap::setupNetworkReachability()
+    {
+        if (!QNetworkInformation::loadDefaultBackend())
+        {
+            qWarning() << QStringLiteral(
+                "Network reachability backend unavailable; resume watchdog remains active");
+            return;
+        }
+
+        auto* networkInformation = QNetworkInformation::instance();
+        if (networkInformation == nullptr)
+            return;
+
+        QObject::connect(networkInformation, &QNetworkInformation::reachabilityChanged,
+                         &m_application,
+                         [this](const QNetworkInformation::Reachability reachability)
+                         {
+                             if (reachability != QNetworkInformation::Reachability::Online)
+                                 return;
+                             qInfo() << QStringLiteral(
+                                 "Network became reachable; reconnecting account synchronization");
+                             m_processServices->mailService().networkBecameReachable();
+                         });
     }
 
     void ApplicationBootstrap::toggleMainWindow()

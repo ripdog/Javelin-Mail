@@ -90,6 +90,8 @@ namespace javelin::jmap::api
       public:
         explicit HttpJmapMethodTransport(AbstractTransport& transport);
 
+        void invalidateConnection(std::string_view accountId) override;
+
         [[nodiscard]] QCoro::Task<JmapMethodTransportResult>
         call(JmapMethodRequest request) override;
 

@@ -173,6 +173,7 @@ namespace javelin::app
                                QObject* parent = nullptr);
 
         void applySettings(std::vector<AccountSyncConfiguration> configurations);
+        void networkBecameReachable();
         [[nodiscard]] std::optional<AccountConnectionSettings>
         connectionSettingsFor(std::string_view ownerAccountId) const override;
         [[nodiscard]] MailboxObservation observeMailbox(std::string accountId,

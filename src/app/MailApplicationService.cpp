@@ -18,6 +18,7 @@
 #include <QCoroTask>
 
 #include <QDebug>
+#include <QNetworkAccessManager>
 #include <QTimer>
 #include <QUuid>
 #include <algorithm>
@@ -289,6 +290,16 @@ namespace javelin::app
         }
         restoreContactRefreshJobs();
         refreshConfiguredSessions();
+    }
+
+    void MailApplicationService::networkBecameReachable()
+    {
+        m_networkAccessManager.clearConnectionCache();
+        for (const auto& [accountId, coordinator] : m_coordinators)
+        {
+            static_cast<void>(accountId);
+            coordinator->networkBecameReachable();
+        }
     }
 
     std::optional<AccountConnectionSettings>

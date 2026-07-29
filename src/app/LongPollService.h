@@ -86,6 +86,7 @@ namespace javelin::app
                            bool notificationMailboxSelectionConfigured);
         void stop();
         void pauseForAuthentication();
+        void networkBecameReachable();
         [[nodiscard]] bool requestSynchronization();
 
         [[nodiscard]] QCoro::Task<void>

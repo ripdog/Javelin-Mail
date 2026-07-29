@@ -195,6 +195,11 @@ namespace javelin::app
         setStatus(Status::AuthenticationPaused);
     }
 
+    void AccountSyncCoordinator::networkBecameReachable()
+    {
+        restartForCatchUp();
+    }
+
     bool AccountSyncCoordinator::requestSynchronization()
     {
         if (m_status == Status::AuthenticationPaused)
@@ -786,7 +791,7 @@ namespace javelin::app
 
     void AccountSyncCoordinator::restartForCatchUp()
     {
-        if (!hasValidSettings())
+        if (!hasValidSettings() || m_status == Status::AuthenticationPaused)
         {
             return;
         }

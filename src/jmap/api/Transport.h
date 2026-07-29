@@ -9,10 +9,12 @@
 #include <QList>
 #include <QNetworkAccessManager>
 #include <QPair>
+#include <QPointer>
 #include <QUrl>
 
 #include <functional>
 #include <variant>
+#include <vector>
 
 namespace javelin::jmap::api
 {
@@ -52,6 +54,10 @@ namespace javelin::jmap::api
       public:
         virtual ~AbstractTransport() = default;
 
+        virtual void invalidateConnections()
+        {
+        }
+
         [[nodiscard]] virtual QCoro::Task<TransportResult> send(HttpRequest request) = 0;
     };
 
@@ -61,10 +67,13 @@ namespace javelin::jmap::api
         explicit QtNetworkTransport(QNetworkAccessManager& networkAccessManager);
         ~QtNetworkTransport() override = default;
 
+        void invalidateConnections() override;
+
         [[nodiscard]] QCoro::Task<TransportResult> send(HttpRequest request) override;
 
       private:
         QNetworkAccessManager& m_networkAccessManager;
+        std::vector<QPointer<QNetworkReply>> m_activeReplies;
     };
 
 } // namespace javelin::jmap::api

@@ -745,6 +745,12 @@ namespace javelin::jmap::api
     {
     }
 
+    void HttpJmapMethodTransport::invalidateConnection(const std::string_view accountId)
+    {
+        static_cast<void>(accountId);
+        m_transport.invalidateConnections();
+    }
+
     QCoro::Task<JmapMethodTransportResult> HttpJmapMethodTransport::call(JmapMethodRequest request)
     {
         if (request.cancellation.isCancellationRequested())
@@ -821,6 +827,8 @@ namespace javelin::jmap::api
 
     void PreferredJmapMethodTransport::invalidateConnection(const std::string_view accountId)
     {
+        m_impl->httpTransport.invalidateConnection(accountId);
+
         javelin::jmap::cache::JmapTransportPreferenceRepository preferences{
             m_impl->databaseConnection};
         const auto targetResult = preferences.resolve(accountId);

@@ -29,6 +29,7 @@ namespace javelin::jmap::api
     namespace
     {
         constexpr int requestTimeoutMs = 30000;
+        constexpr auto networkInvalidatedProperty = "javelinNetworkInvalidated";
 
         [[nodiscard]] QByteArray summarizeBody(const QByteArray& body)
         {
@@ -105,6 +106,16 @@ namespace javelin::jmap::api
 
         [[nodiscard]] TransportError mapReplyError(QNetworkReply& reply)
         {
+            if (reply.property(networkInvalidatedProperty).toBool())
+            {
+                return TransportError{
+                    .code = TransportErrorCode::NetworkFailure,
+                    .message = "Network changed while the HTTP request was in flight",
+                    .httpStatus = std::nullopt,
+                    .networkError = static_cast<int>(reply.error()),
+                    .retryAfter = std::nullopt,
+                };
+            }
             if (reply.error() == QNetworkReply::OperationCanceledError)
             {
                 return TransportError{
@@ -133,6 +144,21 @@ namespace javelin::jmap::api
     QtNetworkTransport::QtNetworkTransport(QNetworkAccessManager& networkAccessManager)
         : m_networkAccessManager(networkAccessManager)
     {
+    }
+
+    void QtNetworkTransport::invalidateConnections()
+    {
+        std::vector<QPointer<QNetworkReply>> activeReplies;
+        activeReplies.swap(m_activeReplies);
+        for (const auto& reply : activeReplies)
+        {
+            if (!reply.isNull())
+            {
+                reply->setProperty(networkInvalidatedProperty, true);
+                reply->abort();
+            }
+        }
+        m_networkAccessManager.clearConnectionCache();
     }
 
     QCoro::Task<TransportResult> QtNetworkTransport::send(HttpRequest request)
@@ -169,6 +195,14 @@ namespace javelin::jmap::api
             reply = m_networkAccessManager.post(networkRequest, request.body);
             break;
         }
+        m_activeReplies.emplace_back(reply);
+        const auto unregisterReply = qScopeGuard(
+            [this, reply]()
+            {
+                std::erase_if(m_activeReplies, [reply](const QPointer<QNetworkReply>& active)
+                              { return active.isNull() || active.data() == reply; });
+            });
+        static_cast<void>(unregisterReply);
         if (request.dispatched)
             request.dispatched();
 

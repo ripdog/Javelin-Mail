@@ -44,6 +44,7 @@ namespace javelin::app
         void toggleMainWindow();
         void createMainWindow();
         void reloadAccountSynchronizationSettings();
+        void setupNetworkReachability();
         void setupSystemTray();
         void showTaskCenter();
 

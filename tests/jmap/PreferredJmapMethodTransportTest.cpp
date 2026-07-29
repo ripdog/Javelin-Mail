@@ -38,7 +38,13 @@ namespace
     {
       public:
         std::size_t calls = 0;
+        std::size_t invalidations = 0;
         javelin::jmap::api::TransportResult result;
+
+        void invalidateConnections() override
+        {
+            ++invalidations;
+        }
 
         [[nodiscard]] QCoro::Task<javelin::jmap::api::TransportResult>
         send(javelin::jmap::api::HttpRequest) override
@@ -140,6 +146,22 @@ TEST_CASE("preferred JMAP transport falls back to HTTP before websocket dispatch
     CHECK(resourceTransport.calls == 1);
 
     CHECK(cooldowns.retryDelay(session.capabilities.websocket->url).has_value());
+}
+
+TEST_CASE("preferred JMAP transport invalidates HTTP connections when reachability returns",
+          "[jmap][method][transport]")
+{
+    ensureApplication();
+    auto database = makeDatabaseContext();
+    FakeHttpTransport resourceTransport;
+    javelin::jmap::api::HttpJmapMethodTransport httpTransport{resourceTransport};
+    javelin::jmap::api::WebSocketFailureCooldowns cooldowns;
+    javelin::jmap::api::PreferredJmapMethodTransport preferred{database.connection, httpTransport,
+                                                               cooldowns};
+
+    preferred.invalidateConnection("u1");
+
+    CHECK(resourceTransport.invalidations == 1);
 }
 
 TEST_CASE("JMAP request diagnostics resolve methods and human-readable mailbox names",
