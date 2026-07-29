@@ -3,6 +3,8 @@
 #include "app/MailApplicationService.h"
 #include "jmap/OperationError.h"
 
+#include <QElapsedTimer>
+#include <QLoggingCategory>
 #include <QUuid>
 
 #include <algorithm>
@@ -12,6 +14,7 @@
 
 namespace javelin::app::undo
 {
+    Q_LOGGING_CATEGORY(logMailHistoryPerformance, "app.undo.mail.performance")
 
     namespace
     {
@@ -116,7 +119,11 @@ namespace javelin::app::undo
         for (const auto& item : history->items)
             emailIds.push_back(item.emailId);
 
+        QElapsedTimer preparationTimer;
+        preparationTimer.start();
         auto authoritativeResult = m_mailService.getEffectiveEmails(accountId, emailIds);
+        qCDebug(logMailHistoryPerformance)
+            << "effective-state lookup" << preparationTimer.restart() << "ms";
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&authoritativeResult))
         {
             co_return failure(outcomeFor(*error), error->message);
@@ -177,6 +184,8 @@ namespace javelin::app::undo
             auto queuedResult = m_mailService.queueExactEmailMutation(
                 accountId, mutationFrom(item, patch, operationGroupId, authoritative.state,
                                         *authoritativeEmail->second));
+            qCDebug(logMailHistoryPerformance)
+                << "journal projection" << preparationTimer.restart() << "ms";
             if (const auto* error = std::get_if<javelin::jmap::OperationError>(&queuedResult))
             {
                 co_return failure(queuedCount == 0 ? outcomeFor(*error)
