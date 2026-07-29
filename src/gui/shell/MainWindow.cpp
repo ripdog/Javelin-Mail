@@ -632,7 +632,11 @@ namespace javelin::gui::shell
                                    QStringLiteral("Redo"), this);
         connect(m_redoAction, &QAction::triggered, this, &MainWindow::routeRedo);
         actionCollection()->addAction(QStringLiteral("redo_operation"), m_redoAction);
-        actionCollection()->setDefaultShortcut(m_redoAction, QKeySequence::Redo);
+        auto redoShortcuts = QKeySequence::keyBindings(QKeySequence::Redo);
+        const QKeySequence controlShiftZ{Qt::CTRL | Qt::SHIFT | Qt::Key_Z};
+        if (!redoShortcuts.contains(controlShiftZ))
+            redoShortcuts.prepend(controlShiftZ);
+        actionCollection()->setDefaultShortcuts(m_redoAction, redoShortcuts);
 
         m_refreshAction = new QAction(
             thunderbirdIcon(QStringLiteral(":/icons/thunderbird-icons/cloud-download.svg")),

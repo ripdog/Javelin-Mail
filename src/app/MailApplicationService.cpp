@@ -1160,7 +1160,34 @@ namespace javelin::app
     MailApplicationService::queueExactEmailMutation(std::string accountId,
                                                     javelin::jmap::EmailMailboxMutation mutation)
     {
-        return m_jmapCore.queueEmailMailboxMutation(std::move(accountId), std::move(mutation));
+        QStringList affectedMailboxIds;
+        const auto appendMailboxIds = [&affectedMailboxIds](const auto& mailboxIds)
+        {
+            for (const auto& mailboxId : mailboxIds)
+            {
+                const auto value = QString::fromStdString(mailboxId);
+                if (!affectedMailboxIds.contains(value))
+                    affectedMailboxIds.push_back(value);
+            }
+        };
+        appendMailboxIds(mutation.addMailboxIds);
+        appendMailboxIds(mutation.removeMailboxIds);
+        if (mutation.authoritativeMailboxIds.has_value())
+            appendMailboxIds(*mutation.authoritativeMailboxIds);
+
+        const auto result = m_jmapCore.queueEmailMailboxMutation(accountId, std::move(mutation));
+        if (std::holds_alternative<javelin::jmap::QueuedEmailMutation>(result))
+        {
+            Q_EMIT cacheCommitted(MailCacheChange{
+                .accountId = QString::fromStdString(accountId),
+                .mailboxIds = std::move(affectedMailboxIds),
+                .queryWindows = {},
+                .searchWindows = {},
+                .mailboxTreeChanged = false,
+                .hasNewMail = false,
+            });
+        }
+        return result;
     }
 
     QCoro::Task<javelin::jmap::SubmittedEmailMutationsResult>
