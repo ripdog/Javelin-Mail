@@ -188,6 +188,8 @@ set(JAVELIN_FORMAT_FILES
     src/gui/messageview/GoogleHtmlTranslator.h
     src/gui/messageview/HtmlMessageView.cpp
     src/gui/messageview/HtmlMessageView.h
+    src/gui/messageview/MessageAppearance.cpp
+    src/gui/messageview/MessageAppearance.h
     src/gui/messageview/MessageViewContainer.cpp
     src/gui/messageview/MessageViewContainer.h
     src/gui/messageview/MessageViewPresentation.h
@@ -818,6 +820,16 @@ add_library(javelin_gui STATIC
     src/gui/tasks/TaskCenterDialog.cpp
     src/gui/tasks/TaskCenterDialog.h
 )
+target_sources(javelin_gui PRIVATE
+    src/gui/messageview/MessageAppearance.cpp
+    src/gui/messageview/MessageAppearance.h
+)
+qt_add_resources(javelin_gui "javelin_darkreader"
+    PREFIX "/vendor/darkreader"
+    BASE "res/vendor/darkreader"
+    FILES
+        "res/vendor/darkreader/darkreader.js"
+)
 
 file(GLOB_RECURSE javelin_gui_boundary_sources CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/gui/*.cpp"
@@ -1186,6 +1198,9 @@ install(TARGETS Javelin-Mail
 
 install(FILES res/javelinmailui.rc
     DESTINATION ${KDE_INSTALL_KXMLGUIDIR}/javelinmail
+)
+install(FILES res/vendor/darkreader/LICENSE
+    DESTINATION ${KDE_INSTALL_DATADIR}/licenses/javelinmail/darkreader
 )
 
 install(DIRECTORY res/models/fasttext/

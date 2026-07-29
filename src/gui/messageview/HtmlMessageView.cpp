@@ -4,35 +4,127 @@
 
 #include <QAction>
 #include <QChildEvent>
+#include <QColor>
 #include <QContextMenuEvent>
 #include <QDesktopServices>
+#include <QFile>
+#include <QGuiApplication>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QMenu>
+#include <QPalette>
 #include <QPointer>
 #include <QRegularExpression>
+#include <QResource>
 #include <QString>
+#include <QStyleHints>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QVariant>
 #include <QWebEngineContextMenuRequest>
 #include <QWebEnginePage>
+#include <QWebEngineScript>
 #include <QWebEngineSettings>
 #include <QWebEngineView>
 
 #include <array>
 #include <memory>
 
+static void initializeDarkReaderResource()
+{
+    Q_INIT_RESOURCE(javelin_darkreader);
+}
+
 namespace javelin::gui::messageview
 {
 
     namespace
     {
+        constexpr auto darkBackground = "#181a1b";
+        constexpr auto darkText = "#e8e6e3";
+        constexpr auto darkModeBootstrapId = "__javelin-dark-mode-bootstrap";
+
         [[nodiscard]] bool shouldOpenExternally(const QUrl& url)
         {
             const auto scheme = url.scheme();
             return scheme == QStringLiteral("http") || scheme == QStringLiteral("https") ||
                    scheme == QStringLiteral("mailto");
+        }
+
+        [[nodiscard]] const QString& darkReaderSource()
+        {
+            static const QString source = []
+            {
+                QFile file{QStringLiteral(":/vendor/darkreader/darkreader.js")};
+                if (!file.open(QIODevice::ReadOnly))
+                {
+                    return QString{};
+                }
+                return QString::fromUtf8(file.readAll());
+            }();
+            return source;
+        }
+
+        [[nodiscard]] QString darkModeBootstrapStyle()
+        {
+            return QStringLiteral("<style id=\"%1\">html,body{background-color:%2!important;"
+                                  "color:%3!important;color-scheme:dark!important}</style>")
+                .arg(QLatin1StringView{darkModeBootstrapId}, QLatin1StringView{darkBackground},
+                     QLatin1StringView{darkText});
+        }
+
+        [[nodiscard]] QString darkReaderEnableScript()
+        {
+            return QStringLiteral(R"JS(
+;(() => {
+  if (!globalThis.DarkReader) return false;
+  globalThis.DarkReader.enable({
+    mode: 1,
+    brightness: 100,
+    contrast: 100,
+    grayscale: 0,
+    sepia: 0,
+    darkSchemeBackgroundColor: "%1",
+    darkSchemeTextColor: "%2",
+    selectionColor: "auto",
+    scrollbarColor: "auto",
+    styleSystemControls: true,
+    immediateModify: true,
+  }, {
+    invert: [],
+    css: "",
+    ignoreInlineStyle: [],
+    ignoreImageAnalysis: ["*"],
+    disableStyleSheetsProxy: true,
+    disableCustomElementRegistryProxy: true,
+    ignoreCSSUrl: [],
+  });
+  document.getElementById("%3")?.remove();
+  return true;
+})();
+)JS")
+                .arg(QLatin1StringView{darkBackground}, QLatin1StringView{darkText},
+                     QLatin1StringView{darkModeBootstrapId});
+        }
+
+        [[nodiscard]] QString darkReaderInitialScript()
+        {
+            const auto cleanReservedMarkers = QStringLiteral(R"JS(
+;(() => {
+  document.querySelectorAll('meta[name="darkreader"],meta[name="darkreader-lock"]')
+    .forEach((element) => element.remove());
+  document.querySelectorAll(".darkreader")
+    .forEach((element) => element.classList.remove("darkreader"));
+  document.querySelectorAll("*").forEach((element) => {
+    for (const attribute of Array.from(element.attributes)) {
+      if (attribute.name.startsWith("data-darkreader-")) {
+        element.removeAttribute(attribute.name);
+      }
+    }
+  });
+})();
+)JS");
+            return cleanReservedMarkers + darkReaderSource() + darkReaderEnableScript();
         }
 
         class ExternalNavigationPage final : public QWebEnginePage
@@ -81,8 +173,12 @@ namespace javelin::gui::messageview
         class FilteredWebEngineView final : public QWebEngineView
         {
           public:
-            explicit FilteredWebEngineView(std::function<void()> viewSourceAction, QWidget* parent)
-                : QWebEngineView(parent), m_viewSourceAction(std::move(viewSourceAction))
+            explicit FilteredWebEngineView(std::function<void()> viewSourceAction,
+                                           std::function<void()> toggleDarkModeAction,
+                                           std::function<bool()> darkModeEnabled, QWidget* parent)
+                : QWebEngineView(parent), m_viewSourceAction(std::move(viewSourceAction)),
+                  m_toggleDarkModeAction(std::move(toggleDarkModeAction)),
+                  m_darkModeEnabled(std::move(darkModeEnabled))
             {
             }
 
@@ -97,6 +193,10 @@ namespace javelin::gui::messageview
 
                 QMenu menu(this);
                 auto* sourceAction = menu.addAction(QStringLiteral("View Source"));
+                auto* appearanceAction =
+                    menu.addAction(m_darkModeEnabled && m_darkModeEnabled()
+                                       ? QStringLiteral("Use Original Colours")
+                                       : QStringLiteral("Use Dark Appearance"));
 
                 if (request->editFlags().testFlag(QWebEngineContextMenuRequest::CanCopy))
                 {
@@ -135,20 +235,30 @@ namespace javelin::gui::messageview
                 {
                     m_viewSourceAction();
                 }
+                else if (chosen == appearanceAction && m_toggleDarkModeAction)
+                {
+                    m_toggleDarkModeAction();
+                }
             }
 
           private:
             std::function<void()> m_viewSourceAction;
+            std::function<void()> m_toggleDarkModeAction;
+            std::function<bool()> m_darkModeEnabled;
         };
 
     } // namespace
 
-    HtmlMessageView::HtmlMessageView(QWidget* parent) : QWidget(parent)
+    HtmlMessageView::HtmlMessageView(QWidget* parent)
+        : QWidget(parent), m_appearanceSettings(loadMessageAppearanceSettings())
     {
+        initializeDarkReaderResource();
         auto* layout = new QVBoxLayout(this);
         layout->setContentsMargins(0, 0, 0, 0);
 
-        m_view = new FilteredWebEngineView([this] { Q_EMIT viewSourceRequested(); }, this);
+        m_view = new FilteredWebEngineView([this] { Q_EMIT viewSourceRequested(); },
+                                           [this] { toggleDarkModeForCurrentDocument(); },
+                                           [this] { return shouldUseDarkMode(); }, this);
         m_view->setPage(new MessageWebEnginePage(m_view));
         installRenderEventFilter(m_view);
         connect(m_view->page(), &QWebEnginePage::linkHovered, this,
@@ -171,6 +281,15 @@ namespace javelin::gui::messageview
         settings->setAttribute(QWebEngineSettings::ErrorPageEnabled, false);
         settings->setAttribute(QWebEngineSettings::PluginsEnabled, false);
         settings->setAttribute(QWebEngineSettings::PlaybackRequiresUserGesture, true);
+        connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged, this,
+                [this]
+                {
+                    if (m_appearanceSettings.colorMode == MessageColorMode::FollowApplication)
+                    {
+                        applyDarkModePolicy();
+                    }
+                });
+        updatePageBackground();
         layout->addWidget(m_view);
     }
 
@@ -186,6 +305,8 @@ namespace javelin::gui::messageview
                                           const std::string_view documentId)
     {
         m_remoteContentEnabled = false;
+        m_darkModeOverride.reset();
+        m_darkReaderLoaded = false;
         m_expectedDocumentId =
             QString::fromUtf8(documentId.data(), static_cast<qsizetype>(documentId.size()));
         m_expectedDocumentUrl = QUrl(
@@ -217,6 +338,22 @@ namespace javelin::gui::messageview
             documentHtml.prepend(generationMarker);
         }
 
+        if (shouldUseDarkMode())
+        {
+            const QRegularExpression closingHead{QStringLiteral("</head\\s*>"),
+                                                 QRegularExpression::CaseInsensitiveOption};
+            const auto closingHeadMatch = closingHead.match(documentHtml);
+            if (closingHeadMatch.hasMatch())
+            {
+                documentHtml.insert(closingHeadMatch.capturedStart(), darkModeBootstrapStyle());
+            }
+            else
+            {
+                documentHtml.prepend(darkModeBootstrapStyle());
+            }
+        }
+
+        updatePageBackground();
         m_view->setHtml(documentHtml, m_expectedDocumentUrl);
         const auto generation = m_documentGeneration;
         QTimer::singleShot(0, this, [this, generation] { probeDocumentReady(generation); });
@@ -225,6 +362,8 @@ namespace javelin::gui::messageview
     void HtmlMessageView::clearDocument()
     {
         m_remoteContentEnabled = false;
+        m_darkModeOverride.reset();
+        m_darkReaderLoaded = false;
         ++m_documentGeneration;
         m_expectedDocumentId.clear();
         m_expectedDocumentUrl = {};
@@ -232,6 +371,7 @@ namespace javelin::gui::messageview
         m_tracePaints = false;
         m_waitingForSurfacePaint = false;
         m_documentReadyAccepted = false;
+        updatePageBackground();
         m_view->setUrl(QUrl{QStringLiteral("about:blank")});
     }
 
@@ -246,6 +386,57 @@ namespace javelin::gui::messageview
     bool HtmlMessageView::remoteContentEnabled() const
     {
         return m_remoteContentEnabled;
+    }
+
+    void HtmlMessageView::reloadAppearanceSettings()
+    {
+        m_appearanceSettings = loadMessageAppearanceSettings();
+        m_darkModeOverride.reset();
+        updatePageBackground();
+        applyDarkModePolicy();
+    }
+
+    bool HtmlMessageView::shouldUseDarkMode() const
+    {
+        if (m_darkModeOverride.has_value())
+        {
+            return *m_darkModeOverride;
+        }
+
+        const auto baseColor = palette().color(QPalette::Base);
+        return shouldUseDarkMessageColors(m_appearanceSettings.colorMode,
+                                          QGuiApplication::styleHints()->colorScheme(),
+                                          baseColor.lightness() < 128);
+    }
+
+    void HtmlMessageView::toggleDarkModeForCurrentDocument()
+    {
+        m_darkModeOverride = !shouldUseDarkMode();
+        updatePageBackground();
+        applyDarkModePolicy();
+    }
+
+    void HtmlMessageView::updatePageBackground()
+    {
+        m_view->page()->setBackgroundColor(shouldUseDarkMode()
+                                               ? QColor{QLatin1StringView{darkBackground}}
+                                               : palette().color(QPalette::Base));
+    }
+
+    void HtmlMessageView::changeEvent(QEvent* event)
+    {
+        QWidget::changeEvent(event);
+        if (event->type() != QEvent::PaletteChange &&
+            event->type() != QEvent::ApplicationPaletteChange)
+        {
+            return;
+        }
+
+        updatePageBackground();
+        if (m_appearanceSettings.colorMode == MessageColorMode::FollowApplication)
+        {
+            applyDarkModePolicy();
+        }
     }
 
     void
@@ -436,6 +627,85 @@ namespace javelin::gui::messageview
             });
     }
 
+    void HtmlMessageView::applyDarkModePolicy(std::function<void()> callback)
+    {
+        updatePageBackground();
+        if (!m_documentReadyAccepted)
+        {
+            if (callback)
+            {
+                callback();
+            }
+            return;
+        }
+
+        const auto generation = m_documentGeneration;
+        const QPointer<HtmlMessageView> guard{this};
+        if (!shouldUseDarkMode())
+        {
+            if (!m_darkReaderLoaded)
+            {
+                m_view->page()->runJavaScript(
+                    QStringLiteral("document.getElementById(\"%1\")?.remove();")
+                        .arg(QLatin1StringView{darkModeBootstrapId}),
+                    QWebEngineScript::ApplicationWorld,
+                    [callback = std::move(callback)](const QVariant&)
+                    {
+                        if (callback)
+                        {
+                            callback();
+                        }
+                    });
+                return;
+            }
+
+            m_view->page()->runJavaScript(QStringLiteral(R"JS(
+(() => {
+  globalThis.DarkReader?.disable();
+  document.getElementById("%1")?.remove();
+  return true;
+})();
+)JS")
+                                              .arg(QLatin1StringView{darkModeBootstrapId}),
+                                          QWebEngineScript::ApplicationWorld,
+                                          [callback = std::move(callback)](const QVariant&)
+                                          {
+                                              if (callback)
+                                              {
+                                                  callback();
+                                              }
+                                          });
+            return;
+        }
+
+        const auto& source = darkReaderSource();
+        if (source.isEmpty())
+        {
+            if (callback)
+            {
+                callback();
+            }
+            return;
+        }
+
+        const auto script =
+            m_darkReaderLoaded ? darkReaderEnableScript() : darkReaderInitialScript();
+        m_view->page()->runJavaScript(
+            script, QWebEngineScript::ApplicationWorld,
+            [guard, generation, callback = std::move(callback)](const QVariant& result)
+            {
+                if (auto* view = guard.data();
+                    view != nullptr && view->m_documentGeneration == generation)
+                {
+                    view->m_darkReaderLoaded = result.toBool();
+                }
+                if (callback)
+                {
+                    callback();
+                }
+            });
+    }
+
     void HtmlMessageView::probeDocumentReady(const std::uint64_t generation)
     {
         if (generation != m_documentGeneration || m_documentReadyAccepted)
@@ -473,7 +743,15 @@ namespace javelin::gui::messageview
                         {
                             if (auto* activeView = guard.data())
                             {
-                                activeView->awaitRenderedDocument(documentUrl, readyTitle);
+                                activeView->applyDarkModePolicy(
+                                    [guard, documentUrl, readyTitle]
+                                    {
+                                        if (auto* themedView = guard.data())
+                                        {
+                                            themedView->awaitRenderedDocument(documentUrl,
+                                                                              readyTitle);
+                                        }
+                                    });
                             }
                         });
                     return;

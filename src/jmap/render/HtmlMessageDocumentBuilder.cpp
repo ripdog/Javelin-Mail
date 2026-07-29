@@ -83,6 +83,12 @@ namespace javelin::jmap::render
         html.replace(QRegularExpression{QStringLiteral(
                          "(?i)\\s+on[a-z0-9_-]+\\s*=\\s*(\"[^\"]*\"|'[^']*'|[^\\s>]+)")},
                      QString{});
+        html.replace(QRegularExpression{QStringLiteral(
+                         "(?i)\\s+data-javelin-[a-z0-9_-]+\\s*=\\s*(\"[^\"]*\"|'[^']*'|[^\\s>]+)")},
+                     QString{});
+        html.replace(QRegularExpression{QStringLiteral(
+                         "(?i)\\s+id\\s*=\\s*(\"__javelin-[^\"]*\"|'__javelin-[^']*')")},
+                     QString{});
 
         std::size_t inlineResourceCount = 0;
         std::size_t blockedRemoteResourceCount = 0;

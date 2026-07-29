@@ -65,3 +65,21 @@ TEST_CASE("html message document builder preserves blocked remote styles for liv
     CHECK(document.html.find("data-javelin-blocked-style=") != std::string::npos);
     CHECK(document.html.find("data-javelin-disabled-style=") != std::string::npos);
 }
+
+TEST_CASE("html message document builder reserves application render attributes",
+          "[jmap][render][html]")
+{
+    javelin::jmap::render::HtmlMessageDocumentBuilder builder;
+    const auto document =
+        builder.build("account-1", "eml-1",
+                      R"HTML(<img data-javelin-blocked-src="https://attacker.example/pixel"
+                    data-javelin-remote-attr="src"
+                    id="__javelin-dark-mode-bootstrap"
+                    src="cid:missing">)HTML",
+                      {});
+
+    CHECK(document.blockedRemoteResourceCount == 0);
+    CHECK(document.html.find("data-javelin-blocked-src") == std::string::npos);
+    CHECK(document.html.find("data-javelin-remote-attr") == std::string::npos);
+    CHECK(document.html.find("__javelin-dark-mode-bootstrap") == std::string::npos);
+}

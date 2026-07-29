@@ -2570,6 +2570,7 @@ namespace javelin::gui::shell
         if (dialog.exec() == QDialog::Accepted)
         {
             m_translationService.reloadSettings();
+            m_messageViewContainer->appearanceSettingsChanged();
             m_messageViewContainer->translationSettingsChanged();
             m_statusBar->showMessage(QStringLiteral("Saved preferences."), 3000);
             Q_EMIT accountSettingsChanged();

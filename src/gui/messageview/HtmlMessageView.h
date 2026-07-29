@@ -1,5 +1,7 @@
 #pragma once
 
+#include "gui/messageview/MessageAppearance.h"
+
 #include <QWidget>
 
 #include <QElapsedTimer>
@@ -9,8 +11,10 @@
 
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string_view>
 
+class QEvent;
 class QWebEngineView;
 
 namespace javelin::gui::messageview
@@ -28,6 +32,7 @@ namespace javelin::gui::messageview
         void clearDocument();
         void setRemoteContentEnabled(bool enabled);
         [[nodiscard]] bool remoteContentEnabled() const;
+        void reloadAppearanceSettings();
         void collectTranslationChunks(std::function<void(QVector<QStringList>)> callback);
         void applyTranslationChunks(const QVector<QStringList>& translatedChunks);
         void restoreOriginalText();
@@ -39,14 +44,22 @@ namespace javelin::gui::messageview
 
       private:
         void applyRemoteContentPolicy(std::function<void()> callback = {});
+        void applyDarkModePolicy(std::function<void()> callback = {});
         void awaitRenderedDocument(const QUrl& documentUrl, const QString& readyTitle);
         void probeDocumentReady(std::uint64_t generation);
+        [[nodiscard]] bool shouldUseDarkMode() const;
+        void toggleDarkModeForCurrentDocument();
+        void updatePageBackground();
+        void changeEvent(QEvent* event) override;
         bool eventFilter(QObject* watched, QEvent* event) override;
         void installRenderEventFilter(QObject* object);
         void recordViewPaint(QObject* paintedObject);
 
         QWebEngineView* m_view = nullptr;
+        MessageAppearanceSettings m_appearanceSettings;
+        std::optional<bool> m_darkModeOverride;
         bool m_remoteContentEnabled = false;
+        bool m_darkReaderLoaded = false;
         std::uint64_t m_documentGeneration = 0;
         QString m_expectedDocumentId;
         QUrl m_expectedDocumentUrl;

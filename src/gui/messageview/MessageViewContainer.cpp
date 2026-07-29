@@ -963,6 +963,11 @@ namespace javelin::gui::messageview
         updatePresentation();
     }
 
+    void MessageViewContainer::appearanceSettingsChanged()
+    {
+        m_htmlView->reloadAppearanceSettings();
+    }
+
     void MessageViewContainer::updateSenderRemoteContentPermit()
     {
         const auto sender = currentSenderAddress();

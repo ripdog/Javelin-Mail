@@ -1,6 +1,7 @@
 #pragma once
 
 #include "app/TranslationService.h"
+#include "gui/messageview/MessageAppearance.h"
 #include "gui/settings/ConnectionSettings.h"
 
 #include <KConfigDialog>
@@ -98,6 +99,7 @@ namespace javelin::gui::settings
         javelin::app::TranslationSettings m_translationSettings;
         QStringList m_autoTranslateSenders;
         QStringList m_autoTranslateDomains;
+        javelin::gui::messageview::MessageAppearanceSettings m_messageAppearanceSettings;
         AttachmentSaveSettings m_attachmentSaveSettings;
         int m_undoSendDelaySeconds = 10;
         bool m_hasPendingChanges = false;
@@ -116,6 +118,7 @@ namespace javelin::gui::settings
         QLineEdit* m_translationApiKeyEdit = nullptr;
         QListWidget* m_autoTranslateList = nullptr;
         QPushButton* m_removeAutoTranslateButton = nullptr;
+        QComboBox* m_messageColorMode = nullptr;
         QRadioButton* m_askAttachmentDirectoryRadio = nullptr;
         QRadioButton* m_saveAttachmentDirectoryRadio = nullptr;
         QLineEdit* m_attachmentDirectoryEdit = nullptr;

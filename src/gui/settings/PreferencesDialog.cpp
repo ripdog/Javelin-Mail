@@ -157,6 +157,7 @@ namespace javelin::gui::settings
           m_translationSettings(javelin::app::TranslationService::loadSettings()),
           m_autoTranslateSenders(m_translationSettings.autoTranslateSenders),
           m_autoTranslateDomains(m_translationSettings.autoTranslateDomains),
+          m_messageAppearanceSettings(javelin::gui::messageview::loadMessageAppearanceSettings()),
           m_attachmentSaveSettings(loadAttachmentSaveSettings()),
           m_undoSendDelaySeconds(javelin::app::ComposePreferences::undoSendDelaySeconds())
     {
@@ -264,6 +265,25 @@ namespace javelin::gui::settings
         remoteContentLayout->addLayout(remoteContentButtons);
         addPage(remoteContentPage, QStringLiteral("Remote Content"),
                 QStringLiteral("network-wireless-on"), QString{}, false);
+
+        auto* appearancePage = new QWidget(this);
+        auto* appearanceLayout = new QFormLayout(appearancePage);
+        m_messageColorMode = new QComboBox(appearancePage);
+        m_messageColorMode->addItem(
+            QStringLiteral("Follow application"),
+            static_cast<int>(javelin::gui::messageview::MessageColorMode::FollowApplication));
+        m_messageColorMode->addItem(
+            QStringLiteral("Always use original colours"),
+            static_cast<int>(javelin::gui::messageview::MessageColorMode::Light));
+        m_messageColorMode->addItem(
+            QStringLiteral("Always use dark colours"),
+            static_cast<int>(javelin::gui::messageview::MessageColorMode::Dark));
+        const int messageColorModeIndex =
+            m_messageColorMode->findData(static_cast<int>(m_messageAppearanceSettings.colorMode));
+        m_messageColorMode->setCurrentIndex(messageColorModeIndex);
+        appearanceLayout->addRow(QStringLiteral("HTML message colours"), m_messageColorMode);
+        addPage(appearancePage, QStringLiteral("Appearance"),
+                QStringLiteral("preferences-desktop-theme"), QString{}, false);
 
         auto* translationPage = new QWidget(this);
         auto* translationLayout = new QVBoxLayout(translationPage);
@@ -384,6 +404,14 @@ namespace javelin::gui::settings
                 {
                     m_removeRemoteContentButton->setEnabled(
                         !m_remoteContentList->selectedItems().empty());
+                });
+        connect(m_messageColorMode, &QComboBox::currentIndexChanged, this,
+                [this](const int index)
+                {
+                    m_messageAppearanceSettings.colorMode =
+                        javelin::gui::messageview::messageColorModeFromStorage(
+                            m_messageColorMode->itemData(index).toInt());
+                    noteUnsavedChanges();
                 });
         connect(m_translationEnabledCheckBox, &QCheckBox::toggled, this,
                 [this](const bool enabled)
@@ -786,6 +814,7 @@ namespace javelin::gui::settings
         m_translationSettings.autoTranslateSenders = m_autoTranslateSenders;
         m_translationSettings.autoTranslateDomains = m_autoTranslateDomains;
         javelin::app::TranslationService::saveSettings(m_translationSettings);
+        javelin::gui::messageview::saveMessageAppearanceSettings(m_messageAppearanceSettings);
         saveAttachmentSaveSettings(m_attachmentSaveSettings);
         javelin::app::ComposePreferences::setUndoSendDelaySeconds(m_undoSendDelaySeconds);
         storeMailboxSyncSelection();
