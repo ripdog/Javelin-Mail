@@ -408,6 +408,16 @@ namespace javelin::jmap::api
                 m_socket.abort();
             }
 
+            void invalidate()
+            {
+                m_opening = false;
+                m_pingTimer.stop();
+                ++m_disconnectGeneration;
+                m_responses.clear();
+                m_ignoredRequestIds.clear();
+                m_socket.abort();
+            }
+
             [[nodiscard]] QCoro::Task<WebSocketAttemptResult>
             call(const std::string_view webSocketUrl, const JmapMethodRequest& request,
                  const detail::JmapRequestLogContext& logContext)
@@ -725,6 +735,11 @@ namespace javelin::jmap::api
         m_retryAfter.erase(std::string{url});
     }
 
+    void JmapMethodTransport::invalidateConnection(const std::string_view accountId)
+    {
+        static_cast<void>(accountId);
+    }
+
     HttpJmapMethodTransport::HttpJmapMethodTransport(AbstractTransport& transport)
         : m_transport(transport)
     {
@@ -803,6 +818,26 @@ namespace javelin::jmap::api
     }
 
     PreferredJmapMethodTransport::~PreferredJmapMethodTransport() = default;
+
+    void PreferredJmapMethodTransport::invalidateConnection(const std::string_view accountId)
+    {
+        javelin::jmap::cache::JmapTransportPreferenceRepository preferences{
+            m_impl->databaseConnection};
+        const auto targetResult = preferences.resolve(accountId);
+        const auto* target =
+            std::get_if<std::optional<javelin::jmap::cache::JmapTransportTarget>>(&targetResult);
+        if (target == nullptr || !target->has_value())
+            return;
+
+        const auto connection = m_impl->connections.find((*target)->ownerAccountId);
+        if (connection == m_impl->connections.end() || connection->second == nullptr)
+            return;
+
+        connection->second->invalidate();
+        qCInfo(logJmapWebSocketTransport).noquote()
+            << "invalidated connection after network discontinuity"
+            << QString::fromStdString((*target)->webSocketUrl);
+    }
 
     QCoro::Task<JmapMethodTransportResult>
     PreferredJmapMethodTransport::call(JmapMethodRequest request)

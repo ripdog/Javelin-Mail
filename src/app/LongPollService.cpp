@@ -791,6 +791,7 @@ namespace javelin::app
             return;
         }
 
+        m_methodTransport.invalidateConnection(m_accountId);
         restart();
         if (m_runContext != nullptr)
         {

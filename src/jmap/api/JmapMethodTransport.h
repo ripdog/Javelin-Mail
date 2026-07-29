@@ -79,6 +79,8 @@ namespace javelin::jmap::api
       public:
         virtual ~JmapMethodTransport() = default;
 
+        virtual void invalidateConnection(std::string_view accountId);
+
         [[nodiscard]] virtual QCoro::Task<JmapMethodTransportResult>
         call(JmapMethodRequest request) = 0;
     };
@@ -107,6 +109,8 @@ namespace javelin::jmap::api
         PreferredJmapMethodTransport& operator=(const PreferredJmapMethodTransport&) = delete;
         PreferredJmapMethodTransport(PreferredJmapMethodTransport&&) = delete;
         PreferredJmapMethodTransport& operator=(PreferredJmapMethodTransport&&) = delete;
+
+        void invalidateConnection(std::string_view accountId) override;
 
         [[nodiscard]] QCoro::Task<JmapMethodTransportResult>
         call(JmapMethodRequest request) override;
