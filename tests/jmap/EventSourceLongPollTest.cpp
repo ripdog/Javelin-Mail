@@ -115,20 +115,29 @@ TEST_CASE("push stream sessions own state delivery for every transport", "[jmap]
 TEST_CASE("push activity tracking shares status and timeout state", "[jmap][push]")
 {
     std::size_t connectedReports = 0;
+    bool indicatorConnected = false;
     javelin::jmap::sync::PushActivityTracker activity{
-        [&connectedReports](const javelin::jmap::sync::StateChangeConnectionStatus status)
+        [&connectedReports,
+         &indicatorConnected](const javelin::jmap::sync::StateChangeConnectionStatus status)
         {
             CHECK(status == javelin::jmap::sync::StateChangeConnectionStatus::Connected);
             ++connectedReports;
+            indicatorConnected = true;
+            if (connectedReports == 1)
+            {
+                indicatorConnected = false;
+            }
         },
         QUrl{QStringLiteral("https://user:secret@mail.example.com:8443/jmap/events?ping=30")},
         350s,
     };
 
     activity.recordActivity();
+    activity.recordActivity();
     activity.setTimeout(75s);
 
-    CHECK(connectedReports == 1);
+    CHECK(connectedReports == 2);
+    CHECK(indicatorConnected);
     CHECK(activity.serverBaseUrl() == QStringLiteral("https://mail.example.com:8443"));
     CHECK(activity.timeout() == 75s);
     CHECK_FALSE(activity.hasTimedOut());
