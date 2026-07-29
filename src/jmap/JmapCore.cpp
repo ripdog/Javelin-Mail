@@ -30,8 +30,6 @@
 #include <QCoroFuture>
 
 #include <QDebug>
-#include <QElapsedTimer>
-#include <QLoggingCategory>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QUrl>
@@ -46,7 +44,6 @@
 
 namespace javelin::jmap
 {
-    Q_LOGGING_CATEGORY(logEmailMutationPerformance, "jmap.email.mutation.performance")
     struct JmapCore::Impl
     {
         javelin::jmap::cache::DatabaseConnection* databaseConnection = nullptr;
@@ -357,8 +354,6 @@ namespace javelin::jmap
         queueEmailPatch(javelin::jmap::cache::DatabaseConnection& connection, std::string accountId,
                         EmailMailboxMutation mutation)
         {
-            QElapsedTimer preparationTimer;
-            preparationTimer.start();
             if (mutation.emailId.empty())
             {
                 return OperationError{
@@ -411,8 +406,6 @@ namespace javelin::jmap
 
             javelin::jmap::cache::EmailRepository emailRepository{connection};
             const auto emailResult = emailRepository.find(accountId, mutation.emailId);
-            qCDebug(logEmailMutationPerformance)
-                << "queue email lookup" << preparationTimer.restart() << "ms";
             if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&emailResult))
             {
                 return javelin::jmap::operationError(*error);
@@ -467,8 +460,6 @@ namespace javelin::jmap
                           .keywords = *mutation.authoritativeKeywords,
                       }}
                     : emailMutationBase(emailMutationJournal, accountId, effectiveEmail);
-            qCDebug(logEmailMutationPerformance)
-                << "queue mutation base" << preparationTimer.restart() << "ms";
             if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&baseResult))
             {
                 return javelin::jmap::operationError(*error);
@@ -501,8 +492,12 @@ namespace javelin::jmap
             {
                 return javelin::jmap::operationError(*error);
             }
-            qCDebug(logEmailMutationPerformance)
-                << "queue projection transaction" << preparationTimer.elapsed() << "ms";
+            javelin::jmap::cache::RawMessageSourceRepository sources{connection};
+            if (const auto projectionError = sources.replayProjectionJobs())
+            {
+                qWarning().noquote()
+                    << "Mail vault mailbox projection deferred" << projectionError->message;
+            }
 
             return QueuedEmailMutation{
                 .mutationId = mutationId.toStdString(),
@@ -1679,8 +1674,6 @@ namespace javelin::jmap
                                           std::optional<std::string> operationGroupId,
                                           const std::size_t limit)
     {
-        QElapsedTimer preparationTimer;
-        preparationTimer.start();
         if (m_impl->databaseConnection == nullptr || m_impl->methodTransport == nullptr)
         {
             co_return OperationError{
@@ -1694,8 +1687,6 @@ namespace javelin::jmap
         }
 
         const auto sessionResult = loadCachedSession(*m_impl->databaseConnection, accountId);
-        qCDebug(logEmailMutationPerformance)
-            << "submit session lookup" << preparationTimer.restart() << "ms";
         if (const auto* error = std::get_if<OperationError>(&sessionResult))
         {
             co_return *error;
@@ -1708,8 +1699,6 @@ namespace javelin::jmap
                 ? emailMutationJournal.listForOperationGroup(accountId, *operationGroupId)
                 : emailMutationJournal.listByStatus(
                       accountId, javelin::jmap::sync::MutationStatus::Pending, limit);
-        qCDebug(logEmailMutationPerformance)
-            << "submit journal lookup" << preparationTimer.restart() << "ms";
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&pendingResult))
         {
             co_return javelin::jmap::operationError(*error);
@@ -1800,8 +1789,6 @@ namespace javelin::jmap
                 }
             }
         }
-        qCDebug(logEmailMutationPerformance)
-            << "submit materialize and transition" << preparationTimer.restart() << "ms";
 
         std::unordered_map<std::string, javelin::jmap::api::EmailSetUpdate> updates;
         std::vector<std::string> destroys;
@@ -1915,8 +1902,6 @@ namespace javelin::jmap
             }
             mailboxHandle = requestBuilder.call(*mailboxRequest, "queued-email-mailboxes");
         }
-        qCDebug(logEmailMutationPerformance)
-            << "submit request construction" << preparationTimer.elapsed() << "ms";
 
         const auto transitionSubmittedMutations =
             [&emailMutationJournal, &mutationIdsByEmailId](

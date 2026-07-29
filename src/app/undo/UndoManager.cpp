@@ -2,8 +2,6 @@
 
 #include "app/undo/HistorySerialization.h"
 
-#include <QElapsedTimer>
-#include <QLoggingCategory>
 #include <QUuid>
 
 #include <algorithm>
@@ -12,8 +10,6 @@
 
 namespace javelin::app::undo
 {
-    Q_LOGGING_CATEGORY(logUndoPerformance, "app.undo.performance")
-
     namespace
     {
         [[nodiscard]] std::size_t domainIndex(const HistoryDomain domain)
@@ -239,18 +235,13 @@ namespace javelin::app::undo
         m_executing = true;
         entry->status = stack == HistoryStack::Undo ? HistoryEntryStatus::ExecutingUndo
                                                     : HistoryEntryStatus::ExecutingRedo;
-        QElapsedTimer preparationTimer;
-        preparationTimer.start();
         if (const auto error = m_repository.update(*entry))
         {
             m_executing = false;
             publishRepositoryFailure(*entry, QStringLiteral("Start history operation"), *error);
             co_return false;
         }
-        qCDebug(logUndoPerformance)
-            << "history status update" << preparationTimer.restart() << "ms";
         static_cast<void>(reload());
-        qCDebug(logUndoPerformance) << "history reload" << preparationTimer.elapsed() << "ms";
         Q_EMIT executionStarted(entry->entryId);
 
         const auto direction = stack == HistoryStack::Undo ? HistoryExecutionDirection::Undo
