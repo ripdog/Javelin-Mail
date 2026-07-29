@@ -10,3 +10,4 @@ index 9185d107..a5c330d0 100644
          const proxyScript = createOrUpdateScript('darkreader--proxy');
          proxyScript.append(`(${injectProxy})(${enableStyleSheetsProxy}, ${enableCustomElementRegistryProxy})`);
          document.head.insertBefore(proxyScript, rootVarsStyle.nextSibling);
+         proxyScript.remove();

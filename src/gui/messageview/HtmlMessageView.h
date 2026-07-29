@@ -50,12 +50,14 @@ namespace javelin::gui::messageview
         [[nodiscard]] bool shouldUseDarkMode() const;
         void toggleDarkModeForCurrentDocument();
         void updatePageBackground();
+        void updateLoadingCover();
         void changeEvent(QEvent* event) override;
         bool eventFilter(QObject* watched, QEvent* event) override;
         void installRenderEventFilter(QObject* object);
         void recordViewPaint(QObject* paintedObject);
 
         QWebEngineView* m_view = nullptr;
+        QWidget* m_loadingCover = nullptr;
         MessageAppearanceSettings m_appearanceSettings;
         std::optional<bool> m_darkModeOverride;
         bool m_remoteContentEnabled = false;

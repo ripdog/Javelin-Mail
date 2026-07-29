@@ -1,16 +1,16 @@
 # Dark Reader API bundle
 
-`darkreader.js` is the generated UMD API bundle from Dark Reader 4.9.129, commit
-`6fc3e2c40648a48af0f43c819e60926d13b9dd21`. The corresponding MIT licence is in
-`LICENSE`.
+`darkreader.js` is the generated UMD API bundle recorded in `VERSION`. The corresponding MIT
+licence is in `LICENSE`.
 
 To update it:
 
-1. Update the source checkout under `references/darkreader`.
-2. Apply `mail-profile.patch` to that checkout.
-3. Run `npm ci` and `npm run api` there.
-4. Copy the generated `darkreader.js` and `LICENSE` into this directory.
+1. Update the clean source checkout under `references/darkreader` to the desired revision.
+2. Run `scripts/update-darkreader.sh` from anywhere in the repository.
+3. Build and smoke-test an HTML message in both original and dark modes.
 
 The mail-profile patch prevents an inline proxy script from being inserted when both proxy
-features are disabled. Only the generated runtime and licence ship with Javelin Mail; the Dark
-Reader build dependencies do not.
+features are disabled. The update script applies this patch temporarily, installs the exact
+lockfile dependencies, builds the API, normalizes its line endings, copies the runtime and
+licence, records the version, commit, and checksum, then restores the source checkout. Only the
+generated runtime and licence ship with Javelin Mail; the Dark Reader build dependencies do not.

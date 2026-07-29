@@ -16,6 +16,7 @@
 #include <QPointer>
 #include <QRegularExpression>
 #include <QResource>
+#include <QStackedLayout>
 #include <QString>
 #include <QStyleHints>
 #include <QTimer>
@@ -67,8 +68,9 @@ namespace javelin::gui::messageview
 
         [[nodiscard]] QString darkModeBootstrapStyle()
         {
-            return QStringLiteral("<style id=\"%1\">html,body{background-color:%2!important;"
-                                  "color:%3!important;color-scheme:dark!important}</style>")
+            return QStringLiteral("<style id=\"%1\">html,body,body :not(iframe){"
+                                  "background-color:%2!important;border-color:#736b5e!important;"
+                                  "color:%3!important}html{color-scheme:dark!important}</style>")
                 .arg(QLatin1StringView{darkModeBootstrapId}, QLatin1StringView{darkBackground},
                      QLatin1StringView{darkText});
         }
@@ -256,10 +258,20 @@ namespace javelin::gui::messageview
         auto* layout = new QVBoxLayout(this);
         layout->setContentsMargins(0, 0, 0, 0);
 
+        auto* renderSurface = new QWidget(this);
+        auto* renderLayout = new QStackedLayout(renderSurface);
+        renderLayout->setContentsMargins(0, 0, 0, 0);
+        renderLayout->setStackingMode(QStackedLayout::StackAll);
         m_view = new FilteredWebEngineView([this] { Q_EMIT viewSourceRequested(); },
                                            [this] { toggleDarkModeForCurrentDocument(); },
-                                           [this] { return shouldUseDarkMode(); }, this);
+                                           [this] { return shouldUseDarkMode(); }, renderSurface);
         m_view->setPage(new MessageWebEnginePage(m_view));
+        renderLayout->addWidget(m_view);
+        m_loadingCover = new QWidget(renderSurface);
+        m_loadingCover->setAttribute(Qt::WA_TransparentForMouseEvents);
+        m_loadingCover->setAutoFillBackground(true);
+        m_loadingCover->hide();
+        renderLayout->addWidget(m_loadingCover);
         installRenderEventFilter(m_view);
         connect(m_view->page(), &QWebEnginePage::linkHovered, this,
                 [this](const QString& url) { Q_EMIT hoveredLinkChanged(url); });
@@ -290,7 +302,7 @@ namespace javelin::gui::messageview
                     }
                 });
         updatePageBackground();
-        layout->addWidget(m_view);
+        layout->addWidget(renderSurface);
     }
 
     HtmlMessageView::~HtmlMessageView()
@@ -321,6 +333,7 @@ namespace javelin::gui::messageview
         m_tracePaints = true;
         m_waitingForSurfacePaint = false;
         m_documentReadyAccepted = false;
+        updateLoadingCover();
 
         auto documentHtml = QString::fromUtf8(html.data(), static_cast<qsizetype>(html.size()));
         const auto generationMarker =
@@ -371,6 +384,7 @@ namespace javelin::gui::messageview
         m_tracePaints = false;
         m_waitingForSurfacePaint = false;
         m_documentReadyAccepted = false;
+        m_loadingCover->hide();
         updatePageBackground();
         m_view->setUrl(QUrl{QStringLiteral("about:blank")});
     }
@@ -421,6 +435,20 @@ namespace javelin::gui::messageview
         m_view->page()->setBackgroundColor(shouldUseDarkMode()
                                                ? QColor{QLatin1StringView{darkBackground}}
                                                : palette().color(QPalette::Base));
+    }
+
+    void HtmlMessageView::updateLoadingCover()
+    {
+        auto coverPalette = m_loadingCover->palette();
+        coverPalette.setColor(QPalette::Window, shouldUseDarkMode()
+                                                    ? QColor{QLatin1StringView{darkBackground}}
+                                                    : palette().color(QPalette::Base));
+        m_loadingCover->setPalette(coverPalette);
+        m_loadingCover->setVisible(shouldUseDarkMode());
+        if (m_loadingCover->isVisible())
+        {
+            m_loadingCover->raise();
+        }
     }
 
     void HtmlMessageView::changeEvent(QEvent* event)
@@ -759,6 +787,7 @@ namespace javelin::gui::messageview
 
                 if (view->m_renderTimer.elapsed() >= 30000)
                 {
+                    view->m_loadingCover->hide();
                     return;
                 }
 
@@ -861,6 +890,7 @@ namespace javelin::gui::messageview
                         return;
                     }
 
+                    m_loadingCover->hide();
                     Q_EMIT documentLoaded(documentId);
                 },
                 Qt::QueuedConnection);

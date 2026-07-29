@@ -27,3 +27,6 @@ The mail configuration deliberately differs from a browser extension:
 
 The context menu can temporarily switch the current message between its original colours and the
 dark appearance. This override is discarded when another message is loaded.
+
+The vendored bundle is updated with `scripts/update-darkreader.sh`; its source revision and
+checksum are recorded in `res/vendor/darkreader/VERSION`.
