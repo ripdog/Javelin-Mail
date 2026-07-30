@@ -156,7 +156,7 @@ namespace javelin::app
                                     &result);
                             page != nullptr && page->has_value())
                         {
-                        applyCachedPage(**page);
+                            applyCachedPage(**page);
                             Q_EMIT pageChanged();
                         }
                         else if (const auto* error =
