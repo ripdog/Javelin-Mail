@@ -908,6 +908,7 @@ namespace javelin::jmap::contacts
                                 javelin::jmap::OperationErrorCode::UnsupportedCapability);
             }
 
+            const std::string expectedName = methodName;
             javelin::jmap::api::RequestBuilder builder;
             builder.useCore().useCapability(std::string{javelin::jmap::api::contactsCapabilityUri});
             static_cast<void>(builder.call(
@@ -925,16 +926,22 @@ namespace javelin::jmap::contacts
             std::optional<javelin::jmap::api::MethodInvocation> actual;
             for (const auto& item : envelope->methodResponses)
             {
-                if (item.callId == "contacts-set" && item.name != "error")
+                if (item.callId != "contacts-set")
+                    continue;
+                if (item.name == "error")
                 {
-                    actual = item;
-                    break;
+                    const auto parsed = javelin::jmap::api::parseMethodError(item.arguments);
+                    if (!parsed.ok())
+                        co_return error(QStringLiteral("Invalid Contacts set error response."),
+                                        javelin::jmap::OperationErrorCode::ProtocolViolation);
+                    co_return javelin::jmap::operationError(*parsed.value);
                 }
+                if (item.name == expectedName)
+                    actual = item;
             }
             if (!actual.has_value())
-            {
-                co_return error(QStringLiteral("The server rejected the Contacts change."));
-            }
+                co_return error(QStringLiteral("The Contacts response omitted the set result."),
+                                javelin::jmap::OperationErrorCode::ProtocolViolation);
             const auto parsed = javelin::jmap::api::parseContactsSetResponse(actual->arguments);
             if (!parsed.ok())
             {

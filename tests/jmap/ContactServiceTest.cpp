@@ -462,6 +462,29 @@ TEST_CASE("contact group membership uses exact optimistic member patches",
     CHECK(std::get<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(mutations)
               .front()
               .status == javelin::jmap::sync::MutationStatus::Rejected);
+
+    transport.results.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body =
+            QByteArray{
+                R"({"methodResponses":[["error",{"type":"stateMismatch","description":"Contacts changed on the server."},"contacts-set"]],"sessionState":"s3"})"},
+    });
+    const auto stateMismatch = QCoro::waitFor(service.setGroupMembership(
+        {.sessionUrl = "https://example.test/.well-known/jmap",
+         .loginEmail = "alice@example.test",
+         .apiKey = "secret"},
+        "a1",
+        {.accountId = "a1", .groupId = "group-1", .memberUids = {"uid-card-3"}, .included = true}));
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(stateMismatch));
+    const auto& conflict = std::get<javelin::jmap::OperationError>(stateMismatch);
+    CHECK(conflict.code == javelin::jmap::OperationErrorCode::Conflict);
+    CHECK(conflict.message == QStringLiteral("Contacts changed on the server."));
+    CHECK(conflict.protocolType == "stateMismatch");
+    cached = contacts.findContact("a1", "group-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::contacts::ContactSummary>>(cached));
+    REQUIRE(std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(cached).has_value());
+    CHECK_FALSE(groupContains(
+        *std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(cached), "uid-card-3"));
 }
 
 TEST_CASE("AddressBook mutations project, reconcile rejection, and preserve uncertainty",
