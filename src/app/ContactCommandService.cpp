@@ -213,7 +213,7 @@ namespace javelin::app
         co_return co_await submitContactCards(
             std::move(ownerAccountId),
             std::get<javelin::jmap::api::ContactCardSetRequest>(std::move(prepared)),
-            QStringLiteral("Create contact group"), true);
+            QStringLiteral("Create contact group"));
     }
 
     QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
@@ -226,7 +226,7 @@ namespace javelin::app
         co_return co_await submitContactCards(
             std::move(ownerAccountId),
             std::get<javelin::jmap::api::ContactCardSetRequest>(std::move(prepared)),
-            QStringLiteral("Delete contact group"), true);
+            QStringLiteral("Delete contact group"));
     }
 
     QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
@@ -250,8 +250,7 @@ namespace javelin::app
                 .receipt = {},
             };
         co_return co_await submitContactCards(std::move(ownerAccountId), std::move(request),
-                                              QStringLiteral("Change contact group membership"),
-                                              true);
+                                              QStringLiteral("Change contact group membership"));
     }
 
     QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
@@ -583,8 +582,7 @@ namespace javelin::app
     QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
     ContactCommandService::submitContactCards(std::string ownerAccountId,
                                               javelin::jmap::api::ContactCardSetRequest request,
-                                              QString operationDescription,
-                                              const bool retryAfterStateMismatch)
+                                              QString operationDescription)
     {
         const ForegroundWorkScope foreground{m_workScheduler};
         const auto settings = m_connectionProvider.connectionSettingsFor(ownerAccountId);
@@ -657,12 +655,11 @@ namespace javelin::app
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&preparedResult))
             co_return reportError(javelin::jmap::operationError(*error));
         auto prepared = std::get<std::optional<undo::HistoryEntry>>(std::move(preparedResult));
-        auto firstRequest = retryAfterStateMismatch ? request : std::move(request);
+        auto firstRequest = request;
         auto result = co_await m_contactService.setContactCards(
             toLiveConnectionSettings(*settings), ownerAccountId, std::move(firstRequest));
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result);
-            retryAfterStateMismatch && error != nullptr &&
-            error->code == javelin::jmap::OperationErrorCode::Conflict &&
+            error != nullptr && error->code == javelin::jmap::OperationErrorCode::Conflict &&
             error->protocolType == "stateMismatch")
         {
             const auto refreshed = co_await m_contactService.refreshAll(

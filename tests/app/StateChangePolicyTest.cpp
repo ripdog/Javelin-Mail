@@ -42,3 +42,11 @@ TEST_CASE("unfinished contact refresh jobs are restored after restart", "[app][s
     CHECK_FALSE(javelin::app::shouldRestoreContactRefresh(javelin::app::WorkStatus::Failed));
     CHECK_FALSE(javelin::app::shouldRestoreContactRefresh(javelin::app::WorkStatus::Complete));
 }
+
+TEST_CASE("contact refresh rebases active mutation projections", "[app][sync][contacts]")
+{
+    CHECK_FALSE(javelin::app::shouldDeferForActiveMutation("AddressBook"));
+    CHECK_FALSE(javelin::app::shouldDeferForActiveMutation("ContactCard"));
+    CHECK(javelin::app::shouldDeferForActiveMutation("Calendar"));
+    CHECK(javelin::app::shouldDeferForActiveMutation("CalendarEvent"));
+}

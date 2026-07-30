@@ -753,7 +753,8 @@ namespace javelin::app
             {
                 for (auto& [type, state] : states)
                 {
-                    if (domainHasActiveMutation(accountId, type))
+                    if (shouldDeferForActiveMutation(type) &&
+                        domainHasActiveMutation(accountId, type))
                     {
                         deferred[accountId].insert_or_assign(type, state);
                         continue;

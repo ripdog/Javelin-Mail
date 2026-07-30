@@ -46,6 +46,11 @@ namespace javelin::app
                status == WorkStatus::WaitingForNetwork || status == WorkStatus::WaitingForAuth;
     }
 
+    [[nodiscard]] inline bool shouldDeferForActiveMutation(const std::string_view dataType)
+    {
+        return dataType != "AddressBook" && dataType != "ContactCard";
+    }
+
     [[nodiscard]] inline RoutedStateChanges
     routeStateChanges(javelin::jmap::sync::AccountTypeStateMap changedStates,
                       const std::string_view primaryAccountId)
