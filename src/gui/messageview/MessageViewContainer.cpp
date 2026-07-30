@@ -514,7 +514,7 @@ namespace javelin::gui::messageview
         m_remoteContentIconLabel = new QLabel(m_bodyControlsWidget);
         m_remoteContentIconLabel->setPixmap(javelin::gui::themedSvgPixmap(
             QStringLiteral(":/icons/thunderbird-icons/remote-blocked.svg"),
-            palette().color(QPalette::HighlightedText), 18));
+            palette().color(QPalette::Active, QPalette::HighlightedText), 18));
         m_remoteContentIconLabel->setFixedSize(20, 20);
         m_remoteContentIconLabel->setAlignment(Qt::AlignCenter);
 
@@ -765,6 +765,20 @@ namespace javelin::gui::messageview
     }
 
     MessageViewContainer::~MessageViewContainer() = default;
+
+    void MessageViewContainer::changeEvent(QEvent* event)
+    {
+        QWidget::changeEvent(event);
+        if (event->type() != QEvent::PaletteChange &&
+            event->type() != QEvent::ApplicationPaletteChange)
+        {
+            return;
+        }
+
+        m_remoteContentIconLabel->setPixmap(javelin::gui::themedSvgPixmap(
+            QStringLiteral(":/icons/thunderbird-icons/remote-blocked.svg"),
+            palette().color(QPalette::Active, QPalette::HighlightedText), 18));
+    }
 
     void MessageViewContainer::translationSettingsChanged()
     {

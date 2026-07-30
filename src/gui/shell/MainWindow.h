@@ -243,6 +243,10 @@ namespace javelin::gui::shell
         void updateMessageListHeader();
         void updateMessageActions();
         void updateSortButton();
+        void scheduleApplicationPaletteRefresh();
+        void applyApplicationPalette();
+        void updatePaletteDependentIcons();
+        void changeEvent(QEvent* event) override;
         void closeEvent(QCloseEvent* event) override;
         bool eventFilter(QObject* watched, QEvent* event) override;
 
@@ -338,6 +342,7 @@ namespace javelin::gui::shell
         QAction* m_calendarListAction = nullptr;
         QAction* m_calendarRefreshAction = nullptr;
         javelin::jmap::query::EmailListSort m_emailListSort;
+        bool m_paletteRefreshPending = false;
         std::optional<int> m_activeTabIndex;
         std::vector<TabState> m_tabs;
     };

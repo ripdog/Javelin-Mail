@@ -41,47 +41,7 @@ namespace javelin::gui::messageview
 
     namespace
     {
-        constexpr auto darkBackground = "#181a1b";
-        constexpr auto darkText = "#e8e6e3";
-        constexpr auto darkBorder = "#736b5e";
         constexpr auto darkModeBootstrapId = "__javelin-dark-mode-bootstrap";
-
-        struct DarkReaderThemeColors
-        {
-            QString background;
-            QString text;
-            QString selection;
-            QString scrollbar;
-            QString border;
-        };
-
-        [[nodiscard]] QString cssColor(const QColor& color)
-        {
-            return color.name(QColor::HexRgb);
-        }
-
-        [[nodiscard]] DarkReaderThemeColors darkReaderThemeColors(const QPalette& palette)
-        {
-            const auto background = palette.color(QPalette::Base);
-            if (background.lightness() >= 128)
-            {
-                return {
-                    .background = QString::fromLatin1(darkBackground),
-                    .text = QString::fromLatin1(darkText),
-                    .selection = QStringLiteral("auto"),
-                    .scrollbar = QStringLiteral("auto"),
-                    .border = QString::fromLatin1(darkBorder),
-                };
-            }
-
-            return {
-                .background = cssColor(background),
-                .text = cssColor(palette.color(QPalette::Text)),
-                .selection = cssColor(palette.color(QPalette::Highlight)),
-                .scrollbar = cssColor(palette.color(QPalette::Mid)),
-                .border = cssColor(palette.color(QPalette::Mid)),
-            };
-        }
 
         [[nodiscard]] bool shouldOpenExternally(const QUrl& url)
         {
@@ -332,11 +292,7 @@ namespace javelin::gui::messageview
         settings->setAttribute(QWebEngineSettings::PluginsEnabled, false);
         settings->setAttribute(QWebEngineSettings::PlaybackRequiresUserGesture, true);
         connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged, this,
-                [this]
-                {
-                    updateLoadingCover(false);
-                    applyDarkModePolicy();
-                });
+                [this] { schedulePaletteRefresh(); });
         updatePageBackground();
         layout->addWidget(renderSurface);
     }
@@ -455,7 +411,7 @@ namespace javelin::gui::messageview
             return *m_darkModeOverride;
         }
 
-        const auto baseColor = palette().color(QPalette::Base);
+        const auto baseColor = palette().color(QPalette::Active, QPalette::Base);
         return shouldUseDarkMessageColors(m_appearanceSettings.colorMode,
                                           QGuiApplication::styleHints()->colorScheme(),
                                           baseColor.lightness() < 128);
@@ -468,20 +424,39 @@ namespace javelin::gui::messageview
         applyDarkModePolicy();
     }
 
+    void HtmlMessageView::schedulePaletteRefresh()
+    {
+        if (m_paletteRefreshPending)
+        {
+            return;
+        }
+
+        m_paletteRefreshPending = true;
+        QTimer::singleShot(0, this,
+                           [this]
+                           {
+                               m_paletteRefreshPending = false;
+                               updateLoadingCover(false);
+                               applyDarkModePolicy();
+                           });
+    }
+
     void HtmlMessageView::updatePageBackground()
     {
         const auto background = darkReaderThemeColors(palette()).background;
-        m_view->page()->setBackgroundColor(shouldUseDarkMode() ? QColor{background}
-                                                               : palette().color(QPalette::Base));
+        m_view->page()->setBackgroundColor(shouldUseDarkMode()
+                                               ? QColor{background}
+                                               : palette().color(QPalette::Active, QPalette::Base));
     }
 
     void HtmlMessageView::updateLoadingCover(const bool revealForLoad)
     {
         auto coverPalette = m_loadingCover->palette();
         const auto background = darkReaderThemeColors(palette()).background;
-        coverPalette.setColor(QPalette::Window, shouldUseDarkMode()
-                                                    ? QColor{background}
-                                                    : palette().color(QPalette::Base));
+        coverPalette.setColor(QPalette::Window,
+                              shouldUseDarkMode()
+                                  ? QColor{background}
+                                  : palette().color(QPalette::Active, QPalette::Base));
         m_loadingCover->setPalette(coverPalette);
         if (revealForLoad || !shouldUseDarkMode())
         {
@@ -502,9 +477,7 @@ namespace javelin::gui::messageview
             return;
         }
 
-        updatePageBackground();
-        updateLoadingCover(false);
-        applyDarkModePolicy();
+        schedulePaletteRefresh();
     }
 
     void

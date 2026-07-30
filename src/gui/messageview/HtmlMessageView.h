@@ -49,6 +49,7 @@ namespace javelin::gui::messageview
         void probeDocumentReady(std::uint64_t generation);
         [[nodiscard]] bool shouldUseDarkMode() const;
         void toggleDarkModeForCurrentDocument();
+        void schedulePaletteRefresh();
         void updatePageBackground();
         void updateLoadingCover(bool revealForLoad);
         void changeEvent(QEvent* event) override;
@@ -71,6 +72,7 @@ namespace javelin::gui::messageview
         bool m_tracePaints = false;
         bool m_waitingForSurfacePaint = false;
         bool m_documentReadyAccepted = false;
+        bool m_paletteRefreshPending = false;
     };
 
 } // namespace javelin::gui::messageview

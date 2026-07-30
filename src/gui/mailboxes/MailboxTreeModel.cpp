@@ -187,7 +187,8 @@ namespace javelin::gui::mailboxes
 
         if (role == Qt::DecorationRole)
         {
-            return mailboxIcon(node->role, QApplication::palette().color(QPalette::Text));
+            return mailboxIcon(node->role,
+                               QApplication::palette().color(QPalette::Active, QPalette::Text));
         }
 
         if (role == Qt::CheckStateRole && m_options.checkable && !node->mailboxId.empty())

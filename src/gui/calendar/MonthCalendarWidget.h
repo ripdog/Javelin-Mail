@@ -67,6 +67,7 @@ namespace javelin::gui::calendar
         void setCalendars(std::vector<CalendarDisplay> calendars);
         void setCalendarAccounts(std::vector<CalendarAccountDisplay> accounts);
         void setHiddenCalendars(std::vector<std::string> calendarIds);
+        void applicationPaletteChanged();
 
         [[nodiscard]] QDate displayedMonth() const;
         [[nodiscard]] QDate selectedDate() const;

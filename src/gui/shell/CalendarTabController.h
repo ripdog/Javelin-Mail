@@ -55,6 +55,7 @@ namespace javelin::gui::shell
         [[nodiscard]] bool close(TabState& tab);
         [[nodiscard]] QWidget* contentWidgetForTab(const TabState* tab) const;
         [[nodiscard]] QMenu* calendarMenuForTab(const TabState* tab) const;
+        void applicationPaletteChanged();
 
       Q_SIGNALS:
         void tabReady(int index);

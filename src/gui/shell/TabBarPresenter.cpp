@@ -145,7 +145,7 @@ namespace javelin::gui::shell
 
     QIcon TabBarPresenter::iconForTab(const TabState& tab) const
     {
-        const auto color = m_tabBar.palette().color(QPalette::Text);
+        const auto color = m_tabBar.palette().color(QPalette::Active, QPalette::Text);
         if (const auto* mailboxTab = std::get_if<MailboxTabState>(&tab.content))
         {
             return mailboxTab->session == nullptr

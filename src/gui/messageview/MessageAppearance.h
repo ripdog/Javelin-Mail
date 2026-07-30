@@ -1,5 +1,7 @@
 #pragma once
 
+#include <QPalette>
+#include <QString>
 #include <Qt>
 
 namespace javelin::gui::messageview
@@ -17,8 +19,18 @@ namespace javelin::gui::messageview
         MessageColorMode colorMode = MessageColorMode::FollowApplication;
     };
 
+    struct DarkReaderThemeColors
+    {
+        QString background;
+        QString text;
+        QString selection;
+        QString scrollbar;
+        QString border;
+    };
+
     [[nodiscard]] MessageAppearanceSettings loadMessageAppearanceSettings();
     void saveMessageAppearanceSettings(const MessageAppearanceSettings& settings);
+    [[nodiscard]] DarkReaderThemeColors darkReaderThemeColors(const QPalette& palette);
 
     [[nodiscard]] constexpr MessageColorMode messageColorModeFromStorage(const int value)
     {

@@ -72,10 +72,11 @@ namespace javelin::gui::calendar
                 setMinimumWidth(0);
                 setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
                 setAutoRaise(true);
-                const auto color =
-                    event.color.isValid() ? event.color : palette().color(QPalette::Highlight);
-                const auto text = palette().color(QPalette::Text);
-                const auto base = palette().color(QPalette::Base);
+                const auto color = event.color.isValid()
+                                       ? event.color
+                                       : palette().color(QPalette::Active, QPalette::Highlight);
+                const auto text = palette().color(QPalette::Active, QPalette::Text);
+                const auto base = palette().color(QPalette::Active, QPalette::Base);
                 const auto foreground =
                     contrastRatio(color, text) >= contrastRatio(color, base) ? text : base;
                 const auto leftRadius =
@@ -134,8 +135,9 @@ namespace javelin::gui::calendar
                                     : QStringLiteral("1px solid palette(mid)");
             const auto background = selected ? QStringLiteral("palette(alternate-base)")
                                              : QStringLiteral("palette(base)");
-            const auto text = adjacent ? palette().color(QPalette::PlaceholderText)
-                                       : palette().color(QPalette::Text);
+            const auto text = adjacent
+                                  ? palette().color(QPalette::Active, QPalette::PlaceholderText)
+                                  : palette().color(QPalette::Active, QPalette::Text);
             auto dayPalette = m_day->palette();
             dayPalette.setColor(QPalette::WindowText, text);
             m_day->setPalette(dayPalette);
@@ -300,6 +302,19 @@ namespace javelin::gui::calendar
         rebuildEvents();
     }
 
+    void MonthCalendarWidget::applicationPaletteChanged()
+    {
+        for (int index = 0; index < 42; ++index)
+        {
+            const auto date = cellDate(index);
+            m_cells[static_cast<std::size_t>(index)]->setDate(
+                date, date.month() != m_displayedMonth.month(), date == m_selectedDate);
+        }
+        applyCalendarColors();
+        rebuildCalendarMenu();
+        rebuildEvents();
+    }
+
     QColor MonthCalendarWidget::effectiveCalendarColor(const std::string& calendarId) const
     {
         if (const auto custom = m_customCalendarColors.find(calendarId);
@@ -308,7 +323,7 @@ namespace javelin::gui::calendar
         const auto calendar = std::ranges::find(m_calendars, calendarId, &CalendarDisplay::id);
         if (calendar != m_calendars.end() && calendar->color.isValid())
             return calendar->color;
-        return palette().color(QPalette::Highlight);
+        return palette().color(QPalette::Active, QPalette::Highlight);
     }
 
     void MonthCalendarWidget::applyCalendarColors()
@@ -617,6 +632,8 @@ namespace javelin::gui::calendar
     {
         QWidget::changeEvent(event);
         if (event->type() == QEvent::FontChange || event->type() == QEvent::ApplicationFontChange ||
+            event->type() == QEvent::PaletteChange ||
+            event->type() == QEvent::ApplicationPaletteChange ||
             event->type() == QEvent::StyleChange)
             scheduleEventRebuild();
     }

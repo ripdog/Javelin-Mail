@@ -41,6 +41,17 @@ namespace javelin::gui::shell
     {
     }
 
+    void CalendarTabController::applicationPaletteChanged()
+    {
+        for (auto& tab : m_tabs)
+        {
+            if (auto* widget = widgetForTab(&tab); widget != nullptr)
+            {
+                widget->applicationPaletteChanged();
+            }
+        }
+    }
+
     void CalendarTabController::open(const std::optional<QDate> displayedMonth)
     {
         for (std::size_t index = 0; index < m_tabs.size(); ++index)

@@ -12,6 +12,7 @@
 #include <string>
 
 class QLabel;
+class QEvent;
 class QGridLayout;
 class QProgressBar;
 class QScrollArea;
@@ -99,6 +100,7 @@ namespace javelin::gui::messageview
         [[nodiscard]] QString currentSenderAddress() const;
         [[nodiscard]] QString currentSenderDomain() const;
         [[nodiscard]] QString contactAwareSenderLabel() const;
+        void changeEvent(QEvent* event) override;
         void resizeEvent(QResizeEvent* event) override;
 
         std::optional<std::string> m_accountId;

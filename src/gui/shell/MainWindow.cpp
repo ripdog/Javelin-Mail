@@ -90,6 +90,7 @@
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QStyle>
+#include <QStyleHints>
 #include <QTabBar>
 #include <QTimer>
 #include <QToolButton>
@@ -266,6 +267,8 @@ namespace javelin::gui::shell
         connect(m_messageFileController, &MessageFileController::userInterventionRequired, this,
                 &MainWindow::presentUserInterventionError);
         setupUi();
+        connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged, this,
+                [this] { scheduleApplicationPaletteRefresh(); });
         connect(&m_undoManager, &javelin::app::undo::UndoManager::historyStateChanged, this,
                 [this](const javelin::app::undo::HistoryState&) { updateUndoRedoActions(); });
         connect(
@@ -2470,8 +2473,87 @@ namespace javelin::gui::shell
                                                  sortDirectionLabel(m_emailListSort.direction)));
     }
 
+    void MainWindow::scheduleApplicationPaletteRefresh()
+    {
+        if (m_paletteRefreshPending)
+        {
+            return;
+        }
+
+        m_paletteRefreshPending = true;
+        QTimer::singleShot(0, this,
+                           [this]
+                           {
+                               m_paletteRefreshPending = false;
+                               applyApplicationPalette();
+                           });
+    }
+
+    void MainWindow::applyApplicationPalette()
+    {
+        // Widgets created while the window has a resolved application palette can retain those
+        // roles as explicit state, especially through QStyleSheetStyle. Clear every resolved
+        // widget palette so the hierarchy inherits the new application palette again.
+        const auto descendants = findChildren<QWidget*>();
+        for (auto widget = descendants.crbegin(); widget != descendants.crend(); ++widget)
+        {
+            (*widget)->setPalette(QPalette{});
+        }
+        setPalette(QPalette{});
+
+        updatePaletteDependentIcons();
+        updateTabBar();
+        m_calendarTabController->applicationPaletteChanged();
+        m_contactsTabController->applicationPaletteChanged();
+        m_mailboxView->viewport()->update();
+        m_messageView->viewport()->update();
+        update();
+    }
+
+    void MainWindow::updatePaletteDependentIcons()
+    {
+        const auto iconColor = palette().color(QPalette::Active, QPalette::Text);
+        const auto icon = [iconColor](const QString& resourcePath)
+        { return javelin::gui::themedSvgIcon(resourcePath, iconColor); };
+
+        m_refreshAction->setIcon(
+            icon(QStringLiteral(":/icons/thunderbird-icons/cloud-download.svg")));
+        m_preferencesAction->setIcon(
+            icon(QStringLiteral(":/icons/thunderbird-icons/settings.svg")));
+        m_newMessageAction->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/new-mail.svg")));
+        m_replyAction->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/reply.svg")));
+        m_replyAllAction->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/reply-all.svg")));
+        m_forwardAction->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/forward.svg")));
+        m_editDraftAction->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/draft.svg")));
+        m_archiveAction->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/archive.svg")));
+        m_markUnreadAction->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/unread.svg")));
+        m_deleteAction->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/delete.svg")));
+        m_advancedSearchAction->setIcon(
+            icon(QStringLiteral(":/icons/thunderbird-icons/search.svg")));
+
+        m_messageSortButton->setIcon(
+            icon(QStringLiteral(":/icons/thunderbird-icons/display-options.svg")));
+        m_previousPageButton->setIcon(
+            icon(QStringLiteral(":/icons/thunderbird-icons/nav-left.svg")));
+        m_nextPageButton->setIcon(icon(QStringLiteral(":/icons/thunderbird-icons/nav-right.svg")));
+    }
+
+    void MainWindow::changeEvent(QEvent* event)
+    {
+        KXmlGuiWindow::changeEvent(event);
+        if (event->type() == QEvent::ApplicationPaletteChange)
+        {
+            scheduleApplicationPaletteRefresh();
+        }
+    }
+
     bool MainWindow::eventFilter(QObject* watched, QEvent* event)
     {
+        if (watched == qApp && event->type() == QEvent::ApplicationPaletteChange)
+        {
+            scheduleApplicationPaletteRefresh();
+        }
+
         if (event->type() == QEvent::KeyRelease || event->type() == QEvent::InputMethod ||
             event->type() == QEvent::FocusIn || event->type() == QEvent::FocusOut ||
             event->type() == QEvent::MouseButtonRelease)

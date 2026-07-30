@@ -526,6 +526,53 @@ namespace javelin::gui::contacts
         reloadAccounts();
     }
 
+    void ContactsManagerWidget::applicationPaletteChanged()
+    {
+        const auto highlight =
+            m_contactList->palette().color(QPalette::Active, QPalette::Highlight);
+        for (int row = 0; row < m_contactList->count(); ++row)
+        {
+            auto* item = m_contactList->item(row);
+            const auto contactIndex = static_cast<std::size_t>(row);
+            item->setIcon(
+                contactIndex < m_contacts.size() && m_contacts[contactIndex].isImportant
+                    ? javelin::gui::themedSvgIcon(
+                          QStringLiteral(":/icons/thunderbird-icons/starred.svg"), highlight)
+                    : QIcon{});
+        }
+        for (int row = 0; row < m_groupList->count(); ++row)
+        {
+            auto* item = m_groupList->item(row);
+            const auto mode = static_cast<GroupFilterMode>(item->data(groupFilterModeRole).toInt());
+            item->setIcon(mode == GroupFilterMode::Group
+                              ? QIcon::fromTheme(QStringLiteral("system-users"))
+                              : QIcon{});
+        }
+
+        const auto selected = selectedContacts();
+        if (selected.size() > 1)
+        {
+            rebuildMultipleSelectionSummary(selected);
+            return;
+        }
+        if (selected.empty())
+        {
+            return;
+        }
+
+        const auto* contact = selected.front();
+        m_starButton->setIcon(javelin::gui::themedSvgIcon(
+            contact->isImportant ? QStringLiteral(":/icons/thunderbird-icons/starred.svg")
+                                 : QStringLiteral(":/icons/thunderbird-icons/star.svg"),
+            m_starButton->palette().color(QPalette::Active, contact->isImportant
+                                                                ? QPalette::Highlight
+                                                                : QPalette::ButtonText)));
+        if (m_detailStack->currentIndex() == 1)
+        {
+            populateContactCards(*contact);
+        }
+    }
+
     bool ContactsManagerWidget::operationInFlight() const
     {
         return m_busy;
@@ -1247,7 +1294,7 @@ namespace javelin::gui::contacts
             if (contact.isImportant)
                 item->setIcon(javelin::gui::themedSvgIcon(
                     QStringLiteral(":/icons/thunderbird-icons/starred.svg"),
-                    m_contactList->palette().color(QPalette::Highlight)));
+                    m_contactList->palette().color(QPalette::Active, QPalette::Highlight)));
             QString detail;
             if (contact.organization.has_value())
                 detail = QString::fromStdString(*contact.organization);
@@ -1304,8 +1351,9 @@ namespace javelin::gui::contacts
         m_starButton->setIcon(javelin::gui::themedSvgIcon(
             contact->isImportant ? QStringLiteral(":/icons/thunderbird-icons/starred.svg")
                                  : QStringLiteral(":/icons/thunderbird-icons/star.svg"),
-            m_starButton->palette().color(contact->isImportant ? QPalette::Highlight
-                                                               : QPalette::ButtonText)));
+            m_starButton->palette().color(QPalette::Active, contact->isImportant
+                                                                ? QPalette::Highlight
+                                                                : QPalette::ButtonText)));
         m_starButton->setToolTip(contact->isImportant ? QStringLiteral("Remove from Starred")
                                                       : QStringLiteral("Add to Starred"));
         m_starButton->setAccessibleName(m_starButton->toolTip());
@@ -1338,8 +1386,8 @@ namespace javelin::gui::contacts
         m_multipleStarButton->setIcon(javelin::gui::themedSvgIcon(
             allStarred ? QStringLiteral(":/icons/thunderbird-icons/starred.svg")
                        : QStringLiteral(":/icons/thunderbird-icons/star.svg"),
-            m_multipleStarButton->palette().color(allStarred ? QPalette::Highlight
-                                                             : QPalette::ButtonText)));
+            m_multipleStarButton->palette().color(
+                QPalette::Active, allStarred ? QPalette::Highlight : QPalette::ButtonText)));
         m_multipleStarButton->setEnabled(!m_busy && canStarSelectedContacts());
 
         for (std::size_t index = 0; index < contacts.size(); ++index)
@@ -2850,7 +2898,7 @@ namespace javelin::gui::contacts
                 auto* compose = new QToolButton(card);
                 compose->setIcon(javelin::gui::themedSvgIcon(
                     QStringLiteral(":/icons/thunderbird-icons/new-mail.svg"),
-                    compose->palette().color(QPalette::ButtonText)));
+                    compose->palette().color(QPalette::Active, QPalette::ButtonText)));
                 compose->setToolTip(QStringLiteral("Compose mail"));
                 connect(compose, &QToolButton::clicked, this,
                         [this, email = *email, name]

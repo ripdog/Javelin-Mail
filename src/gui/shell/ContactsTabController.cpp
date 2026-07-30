@@ -189,6 +189,17 @@ namespace javelin::gui::shell
         return widgetForTab(tab);
     }
 
+    void ContactsTabController::applicationPaletteChanged()
+    {
+        for (auto& tab : m_tabs)
+        {
+            if (auto* widget = widgetForTab(&tab); widget != nullptr)
+            {
+                widget->applicationPaletteChanged();
+            }
+        }
+    }
+
     javelin::gui::contacts::ContactsManagerWidget*
     ContactsTabController::materialize(std::string ownerAccountId, QString title)
     {

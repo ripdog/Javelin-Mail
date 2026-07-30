@@ -50,6 +50,7 @@ namespace javelin::gui::contacts
         [[nodiscard]] bool canRemoveSelectedContactFromGroup() const;
         [[nodiscard]] ContactsViewState viewState() const;
         void restoreViewState(const ContactsViewState& state);
+        void applicationPaletteChanged();
         void populateAddToGroupMenu(QMenu& menu);
         void populateRemoveFromGroupMenu(QMenu& menu);
 
