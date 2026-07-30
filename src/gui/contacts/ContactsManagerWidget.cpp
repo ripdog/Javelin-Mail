@@ -50,6 +50,7 @@
 #include <functional>
 #include <iterator>
 #include <unordered_set>
+#include <utility>
 
 namespace javelin::gui::contacts
 {
@@ -68,11 +69,87 @@ namespace javelin::gui::contacts
         constexpr int groupIdRole = Qt::UserRole + 11;
         constexpr int contactAccountIdRole = Qt::UserRole + 12;
         constexpr int contactUidRole = Qt::UserRole + 13;
+        constexpr int stableItemKeyRole = Qt::UserRole + 14;
 
         [[nodiscard]] std::string contactSelectionKey(const std::string_view accountId,
                                                       const std::string_view contactId)
         {
             return std::string{accountId} + '\n' + std::string{contactId};
+        }
+
+        struct ComboEntry
+        {
+            QString label;
+            QString id;
+        };
+
+        void mergeComboEntries(QComboBox& combo, const std::vector<ComboEntry>& desired,
+                               const QString& selectedId)
+        {
+            QSignalBlocker blocker{&combo};
+            for (int row = combo.count() - 1; row >= 0; --row)
+            {
+                const auto found =
+                    std::ranges::find(desired, combo.itemData(row).toString(), &ComboEntry::id);
+                if (found == desired.end())
+                    combo.removeItem(row);
+            }
+            for (std::size_t index = 0; index < desired.size(); ++index)
+            {
+                const auto& entry = desired[index];
+                int row = combo.findData(entry.id);
+                const auto target = static_cast<int>(index);
+                if (row < 0)
+                {
+                    combo.insertItem(target, entry.label, entry.id);
+                    row = target;
+                }
+                else if (row != target)
+                {
+                    combo.removeItem(row);
+                    combo.insertItem(target, entry.label, entry.id);
+                    row = target;
+                }
+                combo.setItemText(row, entry.label);
+            }
+            const int selected = combo.findData(selectedId);
+            combo.setCurrentIndex(selected >= 0 ? selected : (combo.count() == 0 ? -1 : 0));
+        }
+
+        template <typename Update>
+        void mergeListItems(QListWidget& list, const std::vector<QString>& desiredKeys,
+                            Update&& update)
+        {
+            for (std::size_t index = 0; index < desiredKeys.size(); ++index)
+            {
+                const int target = static_cast<int>(index);
+                int existing = -1;
+                for (int row = target; row < list.count(); ++row)
+                {
+                    if (list.item(row)->data(stableItemKeyRole).toString() == desiredKeys[index])
+                    {
+                        existing = row;
+                        break;
+                    }
+                }
+                QListWidgetItem* item = nullptr;
+                if (existing < 0)
+                {
+                    item = new QListWidgetItem();
+                    list.insertItem(target, item);
+                }
+                else if (existing != target)
+                {
+                    item = list.takeItem(existing);
+                    list.insertItem(target, item);
+                }
+                else
+                    item = list.item(target);
+                item->setData(stableItemKeyRole, desiredKeys[index]);
+                std::invoke(std::forward<Update>(update), *item, index);
+            }
+            while (list.count() > static_cast<int>(desiredKeys.size()))
+                delete list.takeItem(list.count() - 1);
         }
 
         class ContactGroupList final : public QListWidget
@@ -799,7 +876,9 @@ namespace javelin::gui::contacts
         root->setSpacing(12);
         auto* top = new QHBoxLayout();
         m_accountCombo = new QComboBox(this);
+        m_accountCombo->setObjectName(QStringLiteral("contactsAccountCombo"));
         m_addressBookCombo = new QComboBox(this);
+        m_addressBookCombo->setObjectName(QStringLiteral("contactsAddressBookCombo"));
         top->addWidget(new QLabel(QStringLiteral("Account"), this));
         top->addWidget(m_accountCombo);
         top->addWidget(new QLabel(QStringLiteral("Address book"), this));
@@ -811,6 +890,7 @@ namespace javelin::gui::contacts
         auto* groupsLayout = new QVBoxLayout(groups);
         groupsLayout->addWidget(new QLabel(QStringLiteral("Groups"), groups));
         m_groupList = new ContactGroupList(groups);
+        m_groupList->setObjectName(QStringLiteral("contactsGroupList"));
         m_groupList->setAcceptDrops(true);
         m_groupList->setDragDropMode(QAbstractItemView::DropOnly);
         m_groupList->setDefaultDropAction(Qt::CopyAction);
@@ -834,6 +914,7 @@ namespace javelin::gui::contacts
         searchRow->addWidget(m_sortCombo);
         leftLayout->addLayout(searchRow);
         m_contactList = new QListWidget(left);
+        m_contactList->setObjectName(QStringLiteral("contactsContactList"));
         m_contactList->setSelectionMode(QAbstractItemView::ExtendedSelection);
         m_contactList->setContextMenuPolicy(Qt::CustomContextMenu);
         m_contactList->setDragEnabled(true);
@@ -841,6 +922,7 @@ namespace javelin::gui::contacts
         leftLayout->addWidget(m_contactList, 1);
 
         m_detailStack = new QStackedWidget(splitter);
+        m_detailStack->setObjectName(QStringLiteral("contactsDetailStack"));
         auto* empty = new QLabel(QStringLiteral("Select a contact to view it."), m_detailStack);
         empty->setAlignment(Qt::AlignCenter);
         m_detailStack->addWidget(empty);
@@ -940,6 +1022,7 @@ namespace javelin::gui::contacts
         m_kindEdit->addItem(QStringLiteral("Organization"), QStringLiteral("org"));
         m_kindEdit->addItem(QStringLiteral("Group"), QStringLiteral("group"));
         m_nameEdit = new QLineEdit(formWidget);
+        m_nameEdit->setObjectName(QStringLiteral("contactsNameEdit"));
         m_nameEdit->setPlaceholderText(QStringLiteral("Full name"));
         m_organizationEdit = new QLineEdit(formWidget);
         m_organizationEdit->setPlaceholderText(QStringLiteral("Company or organization"));
@@ -1015,6 +1098,7 @@ namespace javelin::gui::contacts
         editButtons->addStretch(1);
         m_cancelButton = new QPushButton(QStringLiteral("Cancel"), edit);
         m_saveButton = new QPushButton(QStringLiteral("Save"), edit);
+        m_saveButton->setObjectName(QStringLiteral("contactsSaveButton"));
         editButtons->addWidget(m_cancelButton);
         editButtons->addWidget(m_saveButton);
         editLayout->addWidget(scroll, 1);
@@ -1052,7 +1136,7 @@ namespace javelin::gui::contacts
 
     void ContactsManagerWidget::reloadAccounts()
     {
-        const auto selected = currentAccountId();
+        const QString selected = QString::fromStdString(currentAccountId().value_or(std::string{}));
         const auto result = m_repository.listAccounts(m_ownerAccountId);
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
         {
@@ -1060,31 +1144,25 @@ namespace javelin::gui::contacts
             return;
         }
         m_accounts = std::get<std::vector<javelin::jmap::cache::ContactAccount>>(result);
-        m_accountCombo->clear();
+        std::vector<ComboEntry> entries;
+        entries.reserve(m_accounts.size());
         for (const auto& account : m_accounts)
-        {
-            m_accountCombo->addItem(accountLabel(account),
-                                    QString::fromStdString(account.accountId));
-        }
-        if (selected.has_value())
-        {
-            const int index = m_accountCombo->findData(QString::fromStdString(*selected));
-            if (index >= 0)
-            {
-                m_accountCombo->setCurrentIndex(index);
-            }
-        }
+            entries.push_back(
+                {.label = accountLabel(account), .id = QString::fromStdString(account.accountId)});
+        mergeComboEntries(*m_accountCombo, entries, selected);
         reloadAddressBooks();
     }
 
     void ContactsManagerWidget::reloadAddressBooks()
     {
-        m_addressBooks.clear();
-        m_addressBookCombo->clear();
-        m_addressBookCombo->addItem(QStringLiteral("All address books"), QStringLiteral(""));
+        const QString selected =
+            QString::fromStdString(currentAddressBookId().value_or(std::string{}));
         const auto accountId = currentAccountId();
         if (!accountId.has_value())
         {
+            m_addressBooks.clear();
+            mergeComboEntries(*m_addressBookCombo,
+                              {{.label = QStringLiteral("All address books"), .id = {}}}, selected);
             reloadContacts();
             return;
         }
@@ -1095,6 +1173,8 @@ namespace javelin::gui::contacts
             return;
         }
         m_addressBooks = std::get<std::vector<javelin::jmap::api::AddressBook>>(result);
+        std::vector<ComboEntry> entries{{.label = QStringLiteral("All address books"), .id = {}}};
+        entries.reserve(m_addressBooks.size() + 1);
         for (const auto& book : m_addressBooks)
         {
             QString label = QString::fromStdString(book.name);
@@ -1106,13 +1186,15 @@ namespace javelin::gui::contacts
             {
                 label += QStringLiteral(" (unsubscribed)");
             }
-            m_addressBookCombo->addItem(label, QString::fromStdString(book.id));
+            entries.push_back({.label = std::move(label), .id = QString::fromStdString(book.id)});
         }
+        mergeComboEntries(*m_addressBookCombo, entries, selected);
         reloadContacts();
     }
 
     void ContactsManagerWidget::reloadContacts()
     {
+        const bool preserveEditor = m_detailStack->currentIndex() == 3;
         const auto accountId = currentAccountId();
         std::unordered_set<std::string> selectedContactKeys;
         for (const auto* contact : selectedContacts())
@@ -1135,13 +1217,17 @@ namespace javelin::gui::contacts
                 ? QString{}
                 : m_contactList->currentItem()->data(contactAccountIdRole).toString();
         QSignalBlocker contactSelectionBlocker{m_contactList};
-        m_contacts.clear();
-        m_groups.clear();
-        m_contactList->clear();
         if (!accountId.has_value())
         {
-            m_groupList->clear();
-            showSelectedContact();
+            m_contacts.clear();
+            m_groups.clear();
+            {
+                QSignalBlocker groupBlocker{m_groupList};
+                mergeListItems(*m_groupList, {}, [](QListWidgetItem&, std::size_t) {});
+            }
+            mergeListItems(*m_contactList, {}, [](QListWidgetItem&, std::size_t) {});
+            if (!preserveEditor)
+                showSelectedContact();
             return;
         }
         const auto bookId = currentAddressBookId();
@@ -1151,6 +1237,7 @@ namespace javelin::gui::contacts
             Q_EMIT statusMessageRequested(error->message, 10000);
             return;
         }
+        m_groups.clear();
         for (const auto& contact :
              std::get<std::vector<javelin::jmap::contacts::ContactSummary>>(unfiltered))
         {
@@ -1161,27 +1248,59 @@ namespace javelin::gui::contacts
 
         {
             QSignalBlocker blocker{m_groupList};
-            m_groupList->clear();
-            const auto addFilter = [this](const QString& label, const GroupFilterMode mode,
-                                          const QString& groupId = QString{})
+            struct GroupRow
             {
-                auto* item = new QListWidgetItem(label, m_groupList);
-                item->setData(groupFilterModeRole, static_cast<int>(mode));
-                item->setData(groupIdRole, groupId);
-                return item;
+                QString key;
+                QString label;
+                GroupFilterMode mode;
+                QString groupId;
             };
-            addFilter(QStringLiteral("All contacts"), GroupFilterMode::All);
-            addFilter(QStringLiteral("Starred contacts"), GroupFilterMode::Starred);
-            addFilter(QStringLiteral("No group"), GroupFilterMode::Ungrouped);
-            auto* divider = addFilter(QStringLiteral("────────"), GroupFilterMode::Divider);
-            divider->setFlags(Qt::NoItemFlags);
-            divider->setTextAlignment(Qt::AlignCenter);
+            std::vector<GroupRow> rows{
+                {.key = QStringLiteral("filter:all"),
+                 .label = QStringLiteral("All contacts"),
+                 .mode = GroupFilterMode::All,
+                 .groupId = {}},
+                {.key = QStringLiteral("filter:starred"),
+                 .label = QStringLiteral("Starred contacts"),
+                 .mode = GroupFilterMode::Starred,
+                 .groupId = {}},
+                {.key = QStringLiteral("filter:ungrouped"),
+                 .label = QStringLiteral("No group"),
+                 .mode = GroupFilterMode::Ungrouped,
+                 .groupId = {}},
+                {.key = QStringLiteral("filter:divider"),
+                 .label = QStringLiteral("────────"),
+                 .mode = GroupFilterMode::Divider,
+                 .groupId = {}},
+            };
+            rows.reserve(rows.size() + m_groups.size());
             for (const auto& group : m_groups)
-            {
-                auto* item = addFilter(QString::fromStdString(group.displayName),
-                                       GroupFilterMode::Group, QString::fromStdString(group.id));
-                item->setIcon(QIcon::fromTheme(QStringLiteral("system-users")));
-            }
+                rows.push_back(
+                    {.key = QStringLiteral("group:%1").arg(QString::fromStdString(group.id)),
+                     .label = QString::fromStdString(group.displayName),
+                     .mode = GroupFilterMode::Group,
+                     .groupId = QString::fromStdString(group.id)});
+            std::vector<QString> keys;
+            keys.reserve(rows.size());
+            for (const auto& row : rows)
+                keys.push_back(row.key);
+            mergeListItems(*m_groupList, keys,
+                           [&rows](QListWidgetItem& item, const std::size_t index)
+                           {
+                               const auto& row = rows[index];
+                               item.setText(row.label);
+                               item.setData(groupFilterModeRole, static_cast<int>(row.mode));
+                               item.setData(groupIdRole, row.groupId);
+                               item.setFlags(row.mode == GroupFilterMode::Divider
+                                                 ? Qt::NoItemFlags
+                                                 : Qt::ItemIsSelectable | Qt::ItemIsEnabled);
+                               item.setTextAlignment(row.mode == GroupFilterMode::Divider
+                                                         ? Qt::AlignCenter
+                                                         : Qt::AlignLeft);
+                               item.setIcon(row.mode == GroupFilterMode::Group
+                                                ? QIcon::fromTheme(QStringLiteral("system-users"))
+                                                : QIcon{});
+                           });
             QListWidgetItem* restoredGroup = nullptr;
             for (int row = 0; row < m_groupList->count(); ++row)
             {
@@ -1202,6 +1321,7 @@ namespace javelin::gui::contacts
 
         const auto activeMode = static_cast<GroupFilterMode>(
             m_groupList->currentItem()->data(groupFilterModeRole).toInt());
+        m_contacts.clear();
         if (activeMode == GroupFilterMode::Group)
         {
             const auto* group = currentGroup();
@@ -1287,37 +1407,49 @@ namespace javelin::gui::contacts
                               };
                               return sort == 1 ? key(left) > key(right) : key(left) < key(right);
                           });
-        QListWidgetItem* firstContactItem = nullptr;
+        std::vector<QString> contactKeys;
+        contactKeys.reserve(m_contacts.size());
+        for (const auto& contact : m_contacts)
+            contactKeys.push_back(
+                QString::fromStdString(contactSelectionKey(contact.accountId, contact.id)));
+        mergeListItems(
+            *m_contactList, contactKeys,
+            [this, &selectedContactKeys](QListWidgetItem& item, const std::size_t index)
+            {
+                const auto& contact = m_contacts[index];
+                item.setText(QString::fromStdString(contact.displayName));
+                item.setIcon(
+                    contact.isImportant
+                        ? javelin::gui::themedSvgIcon(
+                              QStringLiteral(":/icons/thunderbird-icons/starred.svg"),
+                              m_contactList->palette().color(QPalette::Active, QPalette::Highlight))
+                        : QIcon{});
+                QString detail;
+                if (contact.organization.has_value())
+                    detail = QString::fromStdString(*contact.organization);
+                else if (!contact.emails.empty())
+                    detail = QString::fromStdString(contact.emails.front().address);
+                item.setToolTip(detail);
+                item.setData(Qt::UserRole, QString::fromStdString(contact.id));
+                item.setData(contactAccountIdRole, QString::fromStdString(contact.accountId));
+                item.setData(contactUidRole, QString::fromStdString(contact.uid));
+                item.setFlags(item.flags() | Qt::ItemIsDragEnabled);
+                item.setSelected(selectedContactKeys.contains(
+                    contactSelectionKey(contact.accountId, contact.id)));
+            });
+
+        QListWidgetItem* firstContactItem =
+            m_contactList->count() == 0 ? nullptr : m_contactList->item(0);
         QListWidgetItem* selectedItem = nullptr;
         QListWidgetItem* lastRestoredSelection = nullptr;
-        for (const auto& contact : m_contacts)
+        for (int row = 0; row < m_contactList->count(); ++row)
         {
-            auto* item =
-                new QListWidgetItem(QString::fromStdString(contact.displayName), m_contactList);
-            if (contact.isImportant)
-                item->setIcon(javelin::gui::themedSvgIcon(
-                    QStringLiteral(":/icons/thunderbird-icons/starred.svg"),
-                    m_contactList->palette().color(QPalette::Active, QPalette::Highlight)));
-            QString detail;
-            if (contact.organization.has_value())
-                detail = QString::fromStdString(*contact.organization);
-            else if (!contact.emails.empty())
-                detail = QString::fromStdString(contact.emails.front().address);
-            item->setToolTip(detail);
-            item->setData(Qt::UserRole, QString::fromStdString(contact.id));
-            item->setData(contactAccountIdRole, QString::fromStdString(contact.accountId));
-            item->setData(contactUidRole, QString::fromStdString(contact.uid));
-            item->setFlags(item->flags() | Qt::ItemIsDragEnabled);
-            if (firstContactItem == nullptr)
-                firstContactItem = item;
+            auto* item = m_contactList->item(row);
             if (item->data(Qt::UserRole).toString() == selectedId &&
                 item->data(contactAccountIdRole).toString() == selectedAccountId)
                 selectedItem = item;
-            if (selectedContactKeys.contains(contactSelectionKey(contact.accountId, contact.id)))
-            {
-                item->setSelected(true);
+            if (item->isSelected())
                 lastRestoredSelection = item;
-            }
         }
         if (firstContactItem != nullptr)
         {
@@ -1328,7 +1460,8 @@ namespace javelin::gui::contacts
                                                        ? QItemSelectionModel::ClearAndSelect
                                                        : QItemSelectionModel::NoUpdate);
         }
-        showSelectedContact();
+        if (!preserveEditor)
+            showSelectedContact();
     }
 
     void ContactsManagerWidget::showSelectedContact()
@@ -2510,15 +2643,15 @@ namespace javelin::gui::contacts
 
     void ContactsManagerWidget::requestRefresh()
     {
-        if (m_busy)
+        if (m_refreshInFlight)
             return;
-        setBusy(true);
+        m_refreshInFlight = true;
         Q_EMIT statusMessageRequested(QStringLiteral("Refreshing contacts…"), 5000);
         auto task = m_refreshPort.requestContacts(m_ownerAccountId);
         QCoro::connect(std::move(task), this,
                        [this](javelin::jmap::contacts::ContactRefreshResult result)
                        {
-                           setBusy(false);
+                           m_refreshInFlight = false;
                            if (const auto* error =
                                    std::get_if<javelin::jmap::OperationError>(&result))
                            {

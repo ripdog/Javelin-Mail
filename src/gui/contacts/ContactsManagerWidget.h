@@ -124,6 +124,7 @@ namespace javelin::gui::contacts
         std::vector<javelin::jmap::contacts::ContactSummary> m_contacts;
         std::vector<javelin::jmap::contacts::ContactSummary> m_groups;
         bool m_busy = false;
+        bool m_refreshInFlight = false;
         bool m_creating = false;
         QComboBox* m_accountCombo = nullptr;
         QComboBox* m_addressBookCombo = nullptr;
