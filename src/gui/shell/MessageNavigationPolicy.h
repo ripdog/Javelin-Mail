@@ -28,6 +28,11 @@ namespace javelin::gui::shell
         bool requestReveal = false;
     };
 
+    [[nodiscard]] bool
+    isStartedMessageNavigationRoute(const javelin::app::OpenEmailRoute* route,
+                                    std::optional<std::uint64_t> startedRouteId,
+                                    std::optional<std::string_view> activeAccountId,
+                                    std::optional<std::string_view> activeMailboxId);
     [[nodiscard]] MessageNavigationPlan
     planMessageNavigation(const MessageNavigationPolicyInput& input);
 

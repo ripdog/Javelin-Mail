@@ -611,17 +611,18 @@ namespace javelin::gui::shell
             const auto index = m_messageModel->index(static_cast<int>(*resolution.currentRow), 0);
             if (index.isValid())
             {
-                if (auto* selectionModel = m_messageView->selectionModel())
+                const auto rowEmailId =
+                    index.data(javelin::gui::messages::MessageListModel::EmailIdRole).toString();
+                if (m_messageSelectionController->selectMessageAlone(rowEmailId))
                 {
-                    selectionModel->setCurrentIndex(index, QItemSelectionModel::ClearAndSelect |
-                                                               QItemSelectionModel::Rows);
+                    m_messageSelectionController->syncTabSelection(activeTab());
+                    if (resolution.completeRoute &&
+                        m_messageSelectionController->currentEmailId() ==
+                            std::optional<std::string>{route.emailId})
+                    {
+                        m_messageNavigationController->complete(route.id);
+                    }
                 }
-                else
-                {
-                    m_messageView->setCurrentIndex(index);
-                }
-                m_messageView->scrollTo(index);
-                m_messageSelectionController->syncTabSelection(activeTab());
             }
         }
 

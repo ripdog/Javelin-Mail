@@ -20,6 +20,7 @@ namespace javelin::gui::shell
             .emailId = route.emailId,
             .selectedEmailIds = {},
         };
+        m_startedRouteId = route.id;
         m_revealRequestedForRoute.reset();
     }
 
@@ -28,11 +29,13 @@ namespace javelin::gui::shell
     {
         const auto& route = m_coordinator.currentRoute();
         if (!route.has_value() || activeTab == nullptr ||
-            tabAccountId(*activeTab) != std::optional<std::string>{route->accountId} ||
-            tabMailboxId(*activeTab) != std::optional<std::string>{route->mailboxId})
-        {
+            !isStartedMessageNavigationRoute(
+                &*route, m_startedRouteId,
+                tabAccountId(*activeTab)
+                    .transform([](const auto& id) { return std::string_view{id}; }),
+                tabMailboxId(*activeTab)
+                    .transform([](const auto& id) { return std::string_view{id}; })))
             return nullptr;
-        }
         return &*route;
     }
 
@@ -59,16 +62,19 @@ namespace javelin::gui::shell
         if (plan.requestReveal && m_messageListTabController.reveal(*activeTab, route->emailId))
             m_revealRequestedForRoute = route->id;
 
-        if (plan.completeRoute)
-        {
-            m_revealRequestedForRoute.reset();
-            m_coordinator.complete(route->id);
-        }
-
         return {
             .route = routeCopy,
             .currentRow = plan.currentRow,
+            .completeRoute = plan.completeRoute,
         };
+    }
+
+    void MessageNavigationController::complete(const std::uint64_t routeId)
+    {
+        if (m_startedRouteId == std::optional<std::uint64_t>{routeId})
+            m_startedRouteId.reset();
+        m_revealRequestedForRoute.reset();
+        m_coordinator.complete(routeId);
     }
 
     void MessageNavigationController::cancelIfSelectionChanged(
@@ -82,6 +88,7 @@ namespace javelin::gui::shell
             return;
         }
 
+        m_startedRouteId.reset();
         m_revealRequestedForRoute.reset();
         m_coordinator.cancel();
     }

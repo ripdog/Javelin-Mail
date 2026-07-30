@@ -2,6 +2,16 @@
 
 namespace javelin::gui::shell
 {
+    bool isStartedMessageNavigationRoute(const javelin::app::OpenEmailRoute* route,
+                                         const std::optional<std::uint64_t> startedRouteId,
+                                         const std::optional<std::string_view> activeAccountId,
+                                         const std::optional<std::string_view> activeMailboxId)
+    {
+        return route != nullptr && startedRouteId == std::optional<std::uint64_t>{route->id} &&
+               activeAccountId == std::optional<std::string_view>{route->accountId} &&
+               activeMailboxId == std::optional<std::string_view>{route->mailboxId};
+    }
+
     MessageNavigationPlan planMessageNavigation(const MessageNavigationPolicyInput& input)
     {
         if (input.route == nullptr || !input.activeAccountId.has_value() ||

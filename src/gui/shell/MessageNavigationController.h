@@ -17,6 +17,7 @@ namespace javelin::gui::shell
     {
         std::optional<javelin::app::OpenEmailRoute> route;
         std::optional<std::size_t> currentRow;
+        bool completeRoute = false;
     };
 
     class MessageNavigationController
@@ -31,12 +32,14 @@ namespace javelin::gui::shell
         [[nodiscard]] MessageNavigationResolution
         resolve(TabState* activeTab,
                 std::span<const javelin::gui::messages::MessageRowIdentity> rows);
+        void complete(std::uint64_t routeId);
         void cancelIfSelectionChanged(const TabState* activeTab, std::string_view selectedEmailId,
                                       std::optional<std::string_view> selectedThreadId);
 
       private:
         javelin::app::MessageNavigationCoordinator& m_coordinator;
         MessageListTabController& m_messageListTabController;
+        std::optional<std::uint64_t> m_startedRouteId;
         std::optional<std::uint64_t> m_revealRequestedForRoute;
     };
 } // namespace javelin::gui::shell

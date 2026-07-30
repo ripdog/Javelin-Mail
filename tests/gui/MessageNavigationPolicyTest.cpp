@@ -35,6 +35,16 @@ TEST_CASE("message navigation ignores routes for another active mailbox")
     CHECK_FALSE(plan.requestReveal);
 }
 
+TEST_CASE("message navigation is inactive until the GUI begins the route")
+{
+    CHECK_FALSE(isStartedMessageNavigationRoute(&route, std::nullopt, std::string_view{"account"},
+                                                std::string_view{"inbox"}));
+    CHECK_FALSE(isStartedMessageNavigationRoute(&route, route.id - 1, std::string_view{"account"},
+                                                std::string_view{"inbox"}));
+    CHECK(isStartedMessageNavigationRoute(&route, route.id, std::string_view{"account"},
+                                          std::string_view{"inbox"}));
+}
+
 TEST_CASE("message navigation completes when the requested email is visible")
 {
     const std::array rows{
