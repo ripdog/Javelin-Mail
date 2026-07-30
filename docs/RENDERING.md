@@ -25,6 +25,11 @@ The mail configuration deliberately differs from a browser extension:
   flash, then removed after the dynamic theme is active.
 - Sender-provided Dark Reader markers are cleared before the engine starts.
 
+When the application palette is dark, its base, text, highlight, and mid colours are passed to
+Dark Reader as the message background, text, selection, and scrollbar colours. Forced dark mode
+under a light application palette uses Dark Reader's dark defaults because Qt does not expose an
+inactive dark palette.
+
 The context menu can temporarily switch the current message between its original colours and the
 dark appearance. This override is discarded when another message is loaded.
 

@@ -50,7 +50,7 @@ namespace javelin::gui::messageview
         [[nodiscard]] bool shouldUseDarkMode() const;
         void toggleDarkModeForCurrentDocument();
         void updatePageBackground();
-        void updateLoadingCover();
+        void updateLoadingCover(bool revealForLoad);
         void changeEvent(QEvent* event) override;
         bool eventFilter(QObject* watched, QEvent* event) override;
         void installRenderEventFilter(QObject* object);
