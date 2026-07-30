@@ -2222,13 +2222,12 @@ namespace javelin::jmap::contacts
         co_return reconciled;
     }
 
-    QCoro::Task<ContactMutationResult>
-    ContactService::setContactCards(javelin::jmap::LiveConnectionSettings settings,
-                                    std::string ownerAccountId,
-                                    javelin::jmap::api::ContactCardSetRequest request)
+    QCoro::Task<ContactMutationResult> ContactService::setContactCards(
+        javelin::jmap::LiveConnectionSettings settings, std::string ownerAccountId,
+        javelin::jmap::api::ContactCardSetRequest request, const ContactSetOptions options)
     {
         const auto accountId = request.accountId;
-        const auto serialized = javelin::jmap::api::serializeContactCardSetRequest(request);
+        auto serialized = javelin::jmap::api::serializeContactCardSetRequest(request);
         if (!serialized.has_value())
         {
             co_return error(QStringLiteral("Unable to serialize the Contacts change."));
@@ -2271,9 +2270,55 @@ namespace javelin::jmap::contacts
             }
         }
 
-        const auto result = co_await setObjects(m_methodTransport, m_connection,
-                                                std::move(settings), std::move(ownerAccountId),
-                                                accountId, "ContactCard/set", serialized);
+        auto result = co_await setObjects(m_methodTransport, m_connection, settings, ownerAccountId,
+                                          accountId, "ContactCard/set", serialized);
+        if (const auto* operationError = std::get_if<javelin::jmap::OperationError>(&result);
+            options.refreshAndRetryStateMismatch && operationError != nullptr &&
+            operationError->code == javelin::jmap::OperationErrorCode::Conflict &&
+            operationError->protocolType == "stateMismatch")
+        {
+            if (const auto cacheError = journal.transition(
+                    prepared.records, javelin::jmap::sync::MutationStatus::Pending))
+                co_return error(cacheError->message,
+                                javelin::jmap::OperationErrorCode::LocalStorageFailure);
+
+            const auto rejectRetry =
+                [&journal,
+                 &prepared](javelin::jmap::OperationError failure) -> ContactMutationResult
+            {
+                if (const auto cacheError =
+                        journal.restoreRejected(prepared.records, failure.message.toStdString()))
+                    return error(cacheError->message,
+                                 javelin::jmap::OperationErrorCode::LocalStorageFailure);
+                return failure;
+            };
+            const auto refreshed = co_await refreshAll(settings, ownerAccountId);
+            if (const auto* refreshError = std::get_if<javelin::jmap::OperationError>(&refreshed))
+                co_return rejectRetry(*refreshError);
+
+            const auto state = m_repository.contactState(accountId);
+            if (const auto* cacheError = std::get_if<javelin::jmap::cache::DatabaseError>(&state))
+                co_return rejectRetry(error(
+                    cacheError->message, javelin::jmap::OperationErrorCode::LocalStorageFailure));
+            const auto& currentState = std::get<std::optional<std::string>>(state);
+            if (!currentState.has_value())
+                co_return rejectRetry(
+                    error(QStringLiteral("The Contacts refresh omitted the current state."),
+                          javelin::jmap::OperationErrorCode::ProtocolViolation));
+
+            request.ifInState = *currentState;
+            serialized = javelin::jmap::api::serializeContactCardSetRequest(request);
+            if (!serialized.has_value())
+                co_return rejectRetry(
+                    error(QStringLiteral("Unable to serialize the retried Contacts change."),
+                          javelin::jmap::OperationErrorCode::ProtocolViolation));
+            if (const auto cacheError = journal.transition(
+                    prepared.records, javelin::jmap::sync::MutationStatus::InFlight))
+                co_return error(cacheError->message,
+                                javelin::jmap::OperationErrorCode::LocalStorageFailure);
+            result = co_await setObjects(m_methodTransport, m_connection, settings, ownerAccountId,
+                                         accountId, "ContactCard/set", serialized);
+        }
         if (const auto* operationError = std::get_if<javelin::jmap::OperationError>(&result))
         {
             if (!prepared.records.empty())

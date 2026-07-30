@@ -373,7 +373,7 @@ namespace javelin::app
         auto connection = std::get<ResolvedHistoryConnection>(std::move(resolved));
         co_return co_await m_contactService.setContactCards(
             toLiveConnectionSettings(connection.settings), std::move(connection.ownerAccountId),
-            std::move(request));
+            std::move(request), {.refreshAndRetryStateMismatch = true});
     }
 
     QCoro::Task<undo::AuthoritativeAddressBooksResult>
@@ -655,44 +655,9 @@ namespace javelin::app
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&preparedResult))
             co_return reportError(javelin::jmap::operationError(*error));
         auto prepared = std::get<std::optional<undo::HistoryEntry>>(std::move(preparedResult));
-        auto firstRequest = request;
         auto result = co_await m_contactService.setContactCards(
-            toLiveConnectionSettings(*settings), ownerAccountId, std::move(firstRequest));
-        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result);
-            error != nullptr && error->code == javelin::jmap::OperationErrorCode::Conflict &&
-            error->protocolType == "stateMismatch")
-        {
-            const auto refreshed = co_await m_contactService.refreshAll(
-                toLiveConnectionSettings(*settings), ownerAccountId);
-            if (const auto* refreshError = std::get_if<javelin::jmap::OperationError>(&refreshed))
-            {
-                result = *refreshError;
-            }
-            else
-            {
-                const auto state = m_contactRepository.contactState(request.accountId);
-                if (const auto* databaseError =
-                        std::get_if<javelin::jmap::cache::DatabaseError>(&state))
-                {
-                    result = javelin::jmap::operationError(*databaseError);
-                }
-                else if (const auto& current = std::get<std::optional<std::string>>(state);
-                         !current.has_value())
-                {
-                    result = javelin::jmap::OperationError{
-                        .code = javelin::jmap::OperationErrorCode::ProtocolViolation,
-                        .message =
-                            QStringLiteral("The Contacts refresh omitted the current state."),
-                    };
-                }
-                else
-                {
-                    request.ifInState = *current;
-                    result = co_await m_contactService.setContactCards(
-                        toLiveConnectionSettings(*settings), ownerAccountId, std::move(request));
-                }
-            }
-        }
+            toLiveConnectionSettings(*settings), ownerAccountId, std::move(request),
+            {.refreshAndRetryStateMismatch = true});
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
         {
             if (prepared.has_value())

@@ -506,6 +506,95 @@ TEST_CASE("contact group membership uses exact optimistic member patches",
                          "ContactCard/get(contacts-set), ContactCard/set(other-call)."));
 }
 
+TEST_CASE("state mismatch retry preserves the contact projection across refresh",
+          "[jmap][contacts][groups][consistency]")
+{
+    ensureApplication();
+    QTemporaryDir directory;
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("contact-state-retry-projection-test"),
+        .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    javelin::jmap::cache::SessionRepository sessions{connection};
+    REQUIRE_FALSE(sessions.replace("a1", session()).has_value());
+    javelin::jmap::cache::ContactRepository contacts{connection};
+    REQUIRE_FALSE(contacts
+                      .replaceAll("a1", {addressBook()},
+                                  {cachedGroup("group-1", "Friends", {"uid-card-1"})}, "b1", "c1")
+                      .has_value());
+
+    FakeTransport transport;
+    transport.results.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body =
+            QByteArray{
+                R"({"methodResponses":[["error",{"type":"stateMismatch"},"contacts-set"]],"sessionState":"s2"})"},
+    });
+    transport.results.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body =
+            QByteArray{
+                R"({"methodResponses":[["AddressBook/get",{"accountId":"a1","state":"b2","list":[{"id":"book-1","name":"Personal","description":null,"sortOrder":0,"isDefault":true,"isSubscribed":true,"shareWith":null,"myRights":{"mayRead":true,"mayWrite":true,"mayShare":false,"mayDelete":true}}],"notFound":[]},"address-books"],["ContactCard/get",{"accountId":"a1","state":"c2","list":[{"id":"group-1","uid":"uid-group-1","kind":"group","addressBookIds":{"book-1":true},"name":{"full":"Friends"},"members":{"uid-card-1":true}}],"notFound":[]},"contact-cards"]],"sessionState":"s3"})"},
+    });
+    transport.results.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body =
+            QByteArray{
+                R"({"methodResponses":[["ContactCard/set",{"accountId":"a1","oldState":"c2","newState":"c3","updated":{"group-1":null}},"contacts-set"]],"sessionState":"s4"})"},
+    });
+
+    const auto assertMemberRemainsRemoved = [&contacts]
+    {
+        const auto cached = contacts.findContact("a1", "group-1");
+        REQUIRE(
+            std::holds_alternative<std::optional<javelin::jmap::contacts::ContactSummary>>(cached));
+        const auto& group =
+            std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(cached);
+        REQUIRE(group.has_value());
+        CHECK_FALSE(groupContains(*group, "uid-card-1"));
+    };
+    transport.beforeReturn = [&transport, &assertMemberRemainsRemoved]
+    {
+        assertMemberRemainsRemoved();
+        transport.beforeReturn = [&transport, &assertMemberRemainsRemoved]
+        {
+            assertMemberRemainsRemoved();
+            transport.beforeReturn = [&assertMemberRemainsRemoved]
+            { assertMemberRemainsRemoved(); };
+        };
+    };
+
+    const auto patch = javelin::jmap::contacts::contactGroupMembershipPatch("uid-card-1", false);
+    REQUIRE(std::holds_alternative<std::string>(patch));
+    javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
+    javelin::jmap::contacts::ContactService service{connection, contacts, transport,
+                                                    methodTransport};
+    const auto result = QCoro::waitFor(
+        service.setContactCards({.sessionUrl = "https://example.test/.well-known/jmap",
+                                 .loginEmail = "alice@example.test",
+                                 .apiKey = "secret"},
+                                "a1",
+                                {.accountId = "a1",
+                                 .ifInState = "c1",
+                                 .create = {},
+                                 .update = {{"group-1", {.json = std::get<std::string>(patch)}}},
+                                 .destroy = {}},
+                                {.refreshAndRetryStateMismatch = true}));
+    REQUIRE(std::holds_alternative<javelin::jmap::contacts::ContactMutationSummary>(result));
+    REQUIRE(transport.requests.size() == 3);
+    CHECK(transport.requests.front().body.contains("\"ifInState\":\"c1\""));
+    CHECK(transport.requests.back().body.contains("\"ifInState\":\"c2\""));
+    assertMemberRemainsRemoved();
+
+    javelin::jmap::contacts::ContactMutationJournal journal{connection, contacts};
+    const auto mutations = journal.listForContact("a1", "group-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(
+        mutations));
+    CHECK(std::get<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(mutations).empty());
+}
+
 TEST_CASE("AddressBook mutations project, reconcile rejection, and preserve uncertainty",
           "[jmap][contacts][service][consistency]")
 {
