@@ -1801,7 +1801,9 @@ namespace javelin::jmap::contacts
             std::vector<javelin::jmap::api::AddressBook> books;
             std::vector<ContactSummary> contacts;
             std::vector<const AddressBookMutationRecord*> acceptedBooks;
+            std::vector<const AddressBookMutationRecord*> rejectedBooks;
             std::vector<const ContactMutationRecord*> acceptedContacts;
+            std::vector<const ContactMutationRecord*> rejectedContacts;
         };
 
         [[nodiscard]] std::variant<RebasedContacts, javelin::jmap::OperationError>
@@ -1815,7 +1817,9 @@ namespace javelin::jmap::contacts
                 .books = std::move(serverBooks),
                 .contacts = std::move(serverContacts),
                 .acceptedBooks = {},
+                .rejectedBooks = {},
                 .acceptedContacts = {},
+                .rejectedContacts = {},
             };
             const auto serverBooksSnapshot = result.books;
             const auto serverContactsSnapshot = result.contacts;
@@ -1834,6 +1838,13 @@ namespace javelin::jmap::contacts
                 }
                 if (!mutation.projectedDocument.has_value())
                     continue;
+                if (mutation.kind == AddressBookMutationKind::Update &&
+                    mutation.status == javelin::jmap::sync::MutationStatus::Unknown &&
+                    server == serverBooksSnapshot.end())
+                {
+                    result.rejectedBooks.push_back(&mutation);
+                    continue;
+                }
                 const auto projected = javelin::jmap::api::parseAddressBookDocument(
                     mutation.objectId, *mutation.projectedDocument);
                 if (!projected.ok() || !projected.value.has_value())
@@ -1878,6 +1889,13 @@ namespace javelin::jmap::contacts
                 }
                 if (!mutation.projectedDocument.has_value())
                     continue;
+                if (mutation.kind == ContactMutationKind::Update &&
+                    mutation.status == javelin::jmap::sync::MutationStatus::Unknown &&
+                    server == serverContactsSnapshot.end())
+                {
+                    result.rejectedContacts.push_back(&mutation);
+                    continue;
+                }
                 auto projected =
                     summarizeContact(accountId, javelin::jmap::api::ContactCard{
                                                     .id = mutation.objectId,
@@ -2102,6 +2120,17 @@ namespace javelin::jmap::contacts
                 if (const auto cacheError = transaction.remove(mutation->mutationId))
                     co_return error(cacheError->message);
             }
+            constexpr std::string_view notFoundError = R"({"type":"notFound"})";
+            for (const auto* mutation : rebased.rejectedBooks)
+                if (const auto cacheError = transaction.transition(
+                        mutation->mutationId, javelin::jmap::sync::MutationStatus::Rejected,
+                        std::nullopt, notFoundError))
+                    co_return error(cacheError->message);
+            for (const auto* mutation : rebased.rejectedContacts)
+                if (const auto cacheError = transaction.transition(
+                        mutation->mutationId, javelin::jmap::sync::MutationStatus::Rejected,
+                        std::nullopt, notFoundError))
+                    co_return error(cacheError->message);
             if (const auto cacheError = m_repository.replaceAll(
                     transaction.cacheTransaction(), accountId, rebased.books, rebased.contacts,
                     books.value->state, cards.value->state))
