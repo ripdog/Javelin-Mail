@@ -814,6 +814,7 @@ namespace javelin::gui::contacts
         m_groupList->setAcceptDrops(true);
         m_groupList->setDragDropMode(QAbstractItemView::DropOnly);
         m_groupList->setDefaultDropAction(Qt::CopyAction);
+        m_groupList->setContextMenuPolicy(Qt::CustomContextMenu);
         m_groupList->setMinimumWidth(165);
         static_cast<ContactGroupList*>(m_groupList)->membershipDropped =
             [this](std::string groupId, std::vector<std::string> memberUids)
@@ -1035,6 +1036,8 @@ namespace javelin::gui::contacts
         connect(m_sortCombo, qOverload<int>(&QComboBox::currentIndexChanged), this,
                 [this] { reloadContacts(); });
         connect(m_groupList, &QListWidget::currentRowChanged, this, [this] { reloadContacts(); });
+        connect(m_groupList, &QListWidget::customContextMenuRequested, this,
+                &ContactsManagerWidget::showGroupContextMenu);
         connect(m_contactList, &QListWidget::itemSelectionChanged, this,
                 &ContactsManagerWidget::showSelectedContact);
         connect(m_contactList, &QListWidget::customContextMenuRequested, this,
@@ -1549,6 +1552,27 @@ namespace javelin::gui::contacts
         menu->popup(m_contactList->viewport()->mapToGlobal(position));
     }
 
+    void ContactsManagerWidget::showGroupContextMenu(const QPoint& position)
+    {
+        auto* item = m_groupList->itemAt(position);
+        if (item == nullptr ||
+            static_cast<GroupFilterMode>(item->data(groupFilterModeRole).toInt()) !=
+                GroupFilterMode::Group)
+            return;
+        m_groupList->setCurrentItem(item);
+        const auto* group = currentGroup();
+        if (group == nullptr)
+            return;
+
+        auto* menu = new QMenu{this};
+        menu->setAttribute(Qt::WA_DeleteOnClose);
+        auto* remove = menu->addAction(QIcon::fromTheme(QStringLiteral("edit-delete")),
+                                       QStringLiteral("Delete Group"));
+        remove->setEnabled(!m_busy && groupIsWritable(*group));
+        connect(remove, &QAction::triggered, this, &ContactsManagerWidget::deleteContactGroup);
+        menu->popup(m_groupList->viewport()->mapToGlobal(position));
+    }
+
     void ContactsManagerWidget::populateAddToGroupMenu(QMenu& menu)
     {
         menu.clear();
@@ -1705,6 +1729,31 @@ namespace javelin::gui::contacts
                                                              .groupId = std::move(groupId),
                                                              .memberUids = std::move(memberUids),
                                                              .included = included});
+        QCoro::connect(std::move(task), this,
+                       [this](javelin::jmap::contacts::ContactMutationResult result)
+                       {
+                           setBusy(false);
+                           if (const auto* error =
+                                   std::get_if<javelin::jmap::OperationError>(&result))
+                               Q_EMIT statusMessageRequested(error->message, 10000);
+                       });
+    }
+
+    void ContactsManagerWidget::deleteContactGroup()
+    {
+        if (m_busy)
+            return;
+        const auto* group = currentGroup();
+        if (group == nullptr || !groupIsWritable(*group) ||
+            QMessageBox::question(
+                this, QStringLiteral("Delete Contact Group"),
+                QStringLiteral("Delete %1?").arg(QString::fromStdString(group->displayName))) !=
+                QMessageBox::Yes)
+            return;
+
+        setBusy(true);
+        auto task = m_commandPort.deleteContactGroup(
+            m_ownerAccountId, {.accountId = group->accountId, .groupId = group->id});
         QCoro::connect(std::move(task), this,
                        [this](javelin::jmap::contacts::ContactMutationResult result)
                        {

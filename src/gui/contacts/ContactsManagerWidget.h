@@ -83,7 +83,9 @@ namespace javelin::gui::contacts
         void showSelectedContact();
         void rebuildMultipleSelectionSummary(
             const std::vector<const javelin::jmap::contacts::ContactSummary*>& contacts);
+        void showGroupContextMenu(const QPoint& position);
         void showContactContextMenu(const QPoint& position);
+        void deleteContactGroup();
         void setContactGroupMembership(std::string groupId, std::vector<std::string> memberUids,
                                        bool included);
         void cancelEdit();

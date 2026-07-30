@@ -21,6 +21,8 @@ namespace javelin::app
     [[nodiscard]] PreparedContactSetRequest
     prepareSetContactsStarred(SetContactsStarredCommand command);
     [[nodiscard]] PreparedContactSetRequest prepareDeleteContacts(DeleteContactsCommand command);
+    [[nodiscard]] PreparedContactSetRequest
+    prepareDeleteContactGroup(DeleteContactGroupCommand command);
     [[nodiscard]] PreparedContactCopyRequest prepareCopyContact(CopyContactCommand command);
     [[nodiscard]] PreparedContactSetRequest prepareImportContacts(ImportContactsCommand command);
     [[nodiscard]] PreparedContactSetRequest prepareMergeContacts(MergeContactsCommand command);

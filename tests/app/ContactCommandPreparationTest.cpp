@@ -130,6 +130,18 @@ TEST_CASE("contact commands validate documents before protocol submission", "[ap
           javelin::jmap::OperationErrorCode::InvalidUserInput);
 }
 
+TEST_CASE("contact group deletion prepares a typed destroy request", "[app][contacts][groups]")
+{
+    auto result = javelin::app::prepareDeleteContactGroup({
+        .accountId = "contacts-account",
+        .groupId = "group-1",
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::api::ContactCardSetRequest>(result));
+    const auto& request = std::get<javelin::jmap::api::ContactCardSetRequest>(result);
+    CHECK(request.accountId == "contacts-account");
+    CHECK(request.destroy == std::vector<std::string>{"group-1"});
+}
+
 TEST_CASE("contact copy commands escape protocol documents safely", "[app][contacts]")
 {
     auto result = javelin::app::prepareCopyContact({

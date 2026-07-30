@@ -51,6 +51,8 @@ namespace javelin::app
         [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
         createContactGroup(std::string ownerAccountId, CreateContactGroupCommand command) override;
         [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
+        deleteContactGroup(std::string ownerAccountId, DeleteContactGroupCommand command) override;
+        [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
         setContactGroupMembership(std::string ownerAccountId,
                                   SetContactGroupMembershipCommand command) override;
         [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
@@ -89,7 +91,7 @@ namespace javelin::app
         [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
         submitContactCards(std::string ownerAccountId,
                            javelin::jmap::api::ContactCardSetRequest request,
-                           QString operationDescription);
+                           QString operationDescription, bool retryAfterStateMismatch = false);
         [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
         submitContactCopy(std::string ownerAccountId,
                           javelin::jmap::api::ContactCardCopyRequest request,

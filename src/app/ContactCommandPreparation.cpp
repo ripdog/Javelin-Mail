@@ -155,6 +155,17 @@ namespace javelin::app
         return request;
     }
 
+    PreparedContactSetRequest prepareDeleteContactGroup(DeleteContactGroupCommand command)
+    {
+        if (command.accountId.empty() || command.groupId.empty())
+            return invalidContactCommand("Deleting a contact group requires an account and group.");
+
+        javelin::jmap::api::ContactCardSetRequest request;
+        request.accountId = std::move(command.accountId);
+        request.destroy.push_back(std::move(command.groupId));
+        return request;
+    }
+
     PreparedContactCopyRequest prepareCopyContact(CopyContactCommand command)
     {
         if (command.sourceAccountId.empty() || command.destinationAccountId.empty())

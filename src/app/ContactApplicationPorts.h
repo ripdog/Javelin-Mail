@@ -36,6 +36,8 @@ namespace javelin::app
         [[nodiscard]] virtual QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
         createContactGroup(std::string ownerAccountId, CreateContactGroupCommand command) = 0;
         [[nodiscard]] virtual QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
+        deleteContactGroup(std::string ownerAccountId, DeleteContactGroupCommand command) = 0;
+        [[nodiscard]] virtual QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
         setContactGroupMembership(std::string ownerAccountId,
                                   SetContactGroupMembershipCommand command) = 0;
         [[nodiscard]] virtual QCoro::Task<javelin::jmap::contacts::ContactMutationResult>

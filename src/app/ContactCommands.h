@@ -51,6 +51,12 @@ namespace javelin::app
         std::string name;
     };
 
+    struct DeleteContactGroupCommand
+    {
+        std::string accountId;
+        std::string groupId;
+    };
+
     struct SetContactGroupMembershipCommand
     {
         std::string accountId;
