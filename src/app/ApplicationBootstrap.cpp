@@ -11,6 +11,7 @@
 #include "app/MailIndexService.h"
 #include "app/MessageNavigationCoordinator.h"
 #include "app/ProcessServices.h"
+#include "app/TranslationService.h"
 #include "app/WorkScheduler.h"
 #include "gui/settings/PreferencesDialog.h"
 #include "gui/shell/MainWindow.h"
@@ -161,6 +162,8 @@ namespace javelin::app
                              QStringLiteral("A JMAP email client"), KAboutLicense::GPL_V3);
         aboutData.setOrganizationDomain("javelin.app");
         KAboutData::setApplicationData(aboutData);
+        // Process services are constructed before KAboutData finalizes the QSettings identity.
+        m_processServices->translationService().reloadSettings();
 
         m_application.setWindowIcon(QIcon(QStringLiteral(":/icons/icon.svg")));
         m_application.setQuitOnLastWindowClosed(false);

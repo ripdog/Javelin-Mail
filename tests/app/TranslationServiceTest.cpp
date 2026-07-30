@@ -36,6 +36,26 @@ namespace
         std::unique_ptr<QCoreApplication> m_application;
     };
 
+    class ApplicationIdentityGuard
+    {
+      public:
+        ApplicationIdentityGuard()
+            : m_applicationName(QCoreApplication::applicationName()),
+              m_organizationName(QCoreApplication::organizationName())
+        {
+        }
+
+        ~ApplicationIdentityGuard()
+        {
+            QCoreApplication::setApplicationName(m_applicationName);
+            QCoreApplication::setOrganizationName(m_organizationName);
+        }
+
+      private:
+        QString m_applicationName;
+        QString m_organizationName;
+    };
+
     void useTemporarySettings(const QTemporaryDir& directory)
     {
         QSettings::setDefaultFormat(QSettings::IniFormat);
@@ -142,4 +162,56 @@ TEST_CASE("translation service uses the configured target-language cache before 
         QCoro::waitFor(service.translate(std::move(disabledChunks), QStringLiteral("auto"), false));
     REQUIRE(std::holds_alternative<QString>(disabled));
     CHECK(std::get<QString>(disabled).contains(QStringLiteral("disabled"), Qt::CaseInsensitive));
+}
+
+TEST_CASE("translation service reloads settings after the application identity is finalized",
+          "[app][translation][settings]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    ApplicationIdentityGuard identity;
+    QTemporaryDir settingsDirectory;
+    QTemporaryDir cacheDirectory;
+    REQUIRE(settingsDirectory.isValid());
+    REQUIRE(cacheDirectory.isValid());
+    useTemporarySettings(settingsDirectory);
+
+    QCoreApplication::setOrganizationName(QStringLiteral("Javelin Mail"));
+    QCoreApplication::setApplicationName(QStringLiteral("Javelin Mail"));
+    javelin::app::TranslationService::saveSettings({
+        .enabled = true,
+        .apiKeyOverride = {},
+        .targetLanguage = QStringLiteral("en"),
+        .autoTranslateSenders = {},
+        .autoTranslateDomains = {},
+    });
+
+    auto connectionResult = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = makeConnectionName(),
+        .databasePath = cacheDirectory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&connectionResult))
+    {
+        FAIL(error->message.toStdString());
+    }
+    auto connection =
+        std::get<javelin::jmap::cache::DatabaseConnection>(std::move(connectionResult));
+    javelin::jmap::cache::TranslationCacheRepository repository{connection};
+    QNetworkAccessManager networkAccessManager;
+    javelin::app::TranslationService service{networkAccessManager, repository};
+
+    QCoreApplication::setApplicationName(QStringLiteral("javelinmail"));
+    javelin::app::TranslationService::saveSettings({
+        .enabled = true,
+        .apiKeyOverride = {},
+        .targetLanguage = QStringLiteral("en"),
+        .autoTranslateSenders = {QStringLiteral("no-reply@ci-en.net")},
+        .autoTranslateDomains = {},
+    });
+
+    CHECK_FALSE(service.shouldAutoTranslate(QStringLiteral("no-reply@ci-en.net"),
+                                            QStringLiteral("ci-en.net")));
+    service.reloadSettings();
+    CHECK(service.shouldAutoTranslate(QStringLiteral("no-reply@ci-en.net"),
+                                      QStringLiteral("ci-en.net")));
 }
