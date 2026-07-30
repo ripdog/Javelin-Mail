@@ -11,6 +11,9 @@
 
 #include <glaze/glaze.hpp>
 
+#include <QLoggingCategory>
+#include <QUuid>
+
 #include <algorithm>
 #include <ranges>
 #include <unordered_map>
@@ -19,6 +22,8 @@
 
 namespace javelin::app
 {
+    Q_LOGGING_CATEGORY(logContactCommands, "application.contacts.commands")
+
     namespace
     {
         class ForegroundWorkScope final
@@ -204,6 +209,8 @@ namespace javelin::app
     ContactCommandService::createContactGroup(std::string ownerAccountId,
                                               CreateContactGroupCommand command)
     {
+        const QString actionDescription =
+            QStringLiteral("Create contact group “%1”").arg(QString::fromStdString(command.name));
         auto prepared =
             m_contactService.prepareCreateGroup({.accountId = std::move(command.accountId),
                                                  .addressBookId = std::move(command.addressBookId),
@@ -213,26 +220,49 @@ namespace javelin::app
         co_return co_await submitContactCards(
             std::move(ownerAccountId),
             std::get<javelin::jmap::api::ContactCardSetRequest>(std::move(prepared)),
-            QStringLiteral("Create contact group"));
+            QStringLiteral("Create contact group"), actionDescription);
     }
 
     QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
     ContactCommandService::deleteContactGroup(std::string ownerAccountId,
                                               DeleteContactGroupCommand command)
     {
+        QString groupName = QString::fromStdString(command.groupId);
+        const auto cached = m_contactRepository.findContact(command.accountId, command.groupId);
+        if (const auto* contact =
+                std::get_if<std::optional<javelin::jmap::contacts::ContactSummary>>(&cached);
+            contact != nullptr && contact->has_value())
+            groupName = QString::fromStdString(contact->value().displayName);
+        const QString actionDescription =
+            QStringLiteral("Delete contact group “%1” (%2)")
+                .arg(groupName, QString::fromStdString(command.groupId));
         auto prepared = prepareDeleteContactGroup(std::move(command));
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&prepared))
             co_return *error;
         co_return co_await submitContactCards(
             std::move(ownerAccountId),
             std::get<javelin::jmap::api::ContactCardSetRequest>(std::move(prepared)),
-            QStringLiteral("Delete contact group"));
+            QStringLiteral("Delete contact group"), actionDescription);
     }
 
     QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
     ContactCommandService::setContactGroupMembership(std::string ownerAccountId,
                                                      SetContactGroupMembershipCommand command)
     {
+        QString groupName = QString::fromStdString(command.groupId);
+        const auto cached = m_contactRepository.findContact(command.accountId, command.groupId);
+        if (const auto* contact =
+                std::get_if<std::optional<javelin::jmap::contacts::ContactSummary>>(&cached);
+            contact != nullptr && contact->has_value())
+            groupName = QString::fromStdString(contact->value().displayName);
+        const auto memberCount = command.memberUids.size();
+        const QString actionDescription =
+            QStringLiteral("%1 %2 contact%3 %4 group “%5” (%6)")
+                .arg(command.included ? QStringLiteral("Add") : QStringLiteral("Remove"))
+                .arg(memberCount)
+                .arg(memberCount == 1 ? QString{} : QStringLiteral("s"))
+                .arg(command.included ? QStringLiteral("to") : QStringLiteral("from"))
+                .arg(groupName, QString::fromStdString(command.groupId));
         auto prepared =
             m_contactService.prepareGroupMembership({.accountId = std::move(command.accountId),
                                                      .groupId = std::move(command.groupId),
@@ -242,6 +272,10 @@ namespace javelin::app
             co_return *error;
         auto request = std::get<javelin::jmap::api::ContactCardSetRequest>(std::move(prepared));
         if (request.update.empty())
+        {
+            qCInfo(logContactCommands).noquote()
+                << actionDescription << "account=" << QString::fromStdString(request.accountId)
+                << "outcome=no_change";
             co_return javelin::jmap::contacts::ContactMutationSummary{
                 .accountId = std::move(request.accountId),
                 .newState = request.ifInState.value_or(std::string{}),
@@ -249,8 +283,10 @@ namespace javelin::app
                 .createdIds = {},
                 .receipt = {},
             };
+        }
         co_return co_await submitContactCards(std::move(ownerAccountId), std::move(request),
-                                              QStringLiteral("Change contact group membership"));
+                                              QStringLiteral("Change contact group membership"),
+                                              actionDescription);
     }
 
     QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
@@ -582,12 +618,23 @@ namespace javelin::app
     QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
     ContactCommandService::submitContactCards(std::string ownerAccountId,
                                               javelin::jmap::api::ContactCardSetRequest request,
-                                              QString operationDescription)
+                                              QString operationDescription,
+                                              QString actionDescription)
     {
         const ForegroundWorkScope foreground{m_workScheduler};
         const auto settings = m_connectionProvider.connectionSettingsFor(ownerAccountId);
         if (!settings.has_value())
             co_return missingConfiguration();
+        if (actionDescription.isEmpty())
+            actionDescription = operationDescription;
+        const auto traceId =
+            QUuid::createUuid().toString(QUuid::WithoutBraces).left(8).toStdString();
+        qCInfo(logContactCommands).noquote()
+            << "action=" << QString::fromStdString(traceId) << actionDescription
+            << "account=" << QString::fromStdString(request.accountId)
+            << "state=" << QString::fromStdString(request.ifInState.value_or(std::string{"<none>"}))
+            << "creates=" << request.create.size() << "updates=" << request.update.size()
+            << "destroys=" << request.destroy.size();
         const auto reportError = [this, &settings, &ownerAccountId,
                                   &operationDescription](javelin::jmap::OperationError error)
         {
@@ -657,9 +704,15 @@ namespace javelin::app
         auto prepared = std::get<std::optional<undo::HistoryEntry>>(std::move(preparedResult));
         auto result = co_await m_contactService.setContactCards(
             toLiveConnectionSettings(*settings), ownerAccountId, std::move(request),
-            {.refreshAndRetryStateMismatch = true});
+            {.refreshAndRetryStateMismatch = true, .traceId = traceId});
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
         {
+            qCWarning(logContactCommands).noquote()
+                << "action=" << QString::fromStdString(traceId) << "outcome=failure"
+                << "code=" << QString::fromLatin1(javelin::jmap::toString(error->code))
+                << "protocolType="
+                << QString::fromStdString(error->protocolType.value_or(std::string{"<none>"}))
+                << "message=" << error->message;
             if (prepared.has_value())
             {
                 if (javelin::jmap::isTransientError(*error) &&
@@ -680,11 +733,16 @@ namespace javelin::app
             }
             co_return reportError(*error);
         }
+        const auto& summary = std::get<javelin::jmap::contacts::ContactMutationSummary>(result);
+        qCInfo(logContactCommands).noquote()
+            << "action=" << QString::fromStdString(traceId) << "outcome=accepted"
+            << "state=" << QString::fromStdString(summary.newState)
+            << "acceptedObjects=" << summary.receipt.acceptedObjectIds.size()
+            << "rejectedObjects=" << summary.receipt.rejectedObjectIds.size();
 
         if (prepared.has_value())
         {
             auto& committedHistory = std::get<undo::ContactCardHistory>(prepared->payload);
-            const auto& summary = std::get<javelin::jmap::contacts::ContactMutationSummary>(result);
             for (const auto& mapping : summary.createdIds)
                 if (const auto found = creationItems.find(mapping.creationId);
                     found != creationItems.end())

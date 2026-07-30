@@ -30,6 +30,7 @@ namespace javelin::jmap::contacts
     struct ContactSetOptions
     {
         bool refreshAndRetryStateMismatch = false;
+        std::optional<std::string> traceId = std::nullopt;
     };
 
     struct CreateContactGroupCommand

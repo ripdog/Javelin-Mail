@@ -19,6 +19,7 @@
 
 #include <glaze/glaze.hpp>
 
+#include <QLoggingCategory>
 #include <QStringList>
 #include <QUrl>
 #include <QUuid>
@@ -61,6 +62,8 @@ template <> struct glz::meta<javelin::jmap::contacts::detail::CreatedObject>
 
 namespace javelin::jmap::contacts
 {
+    Q_LOGGING_CATEGORY(logContactMutations, "jmap.contacts.mutation")
+
     namespace
     {
         using SessionResult =
@@ -2088,6 +2091,17 @@ namespace javelin::jmap::contacts
                     std::get_if<javelin::jmap::OperationError>(&rebasedResult))
                 co_return *operationError;
             auto rebased = std::get<RebasedContacts>(rebasedResult);
+            if (!activeBooks.empty() || !activeContacts.empty())
+                qCInfo(logContactMutations).noquote()
+                    << "Rebase Contacts refresh"
+                    << "account=" << QString::fromStdString(accountId)
+                    << "serverState=" << QString::fromStdString(cards.value->state)
+                    << "activeAddressBooks=" << activeBooks.size()
+                    << "activeContacts=" << activeContacts.size()
+                    << "acceptedAddressBooks=" << rebased.acceptedBooks.size()
+                    << "acceptedContacts=" << rebased.acceptedContacts.size()
+                    << "rejectedAddressBooks=" << rebased.rejectedBooks.size()
+                    << "rejectedContacts=" << rebased.rejectedContacts.size();
             auto transactionResult = javelin::jmap::sync::MutationProjectionTransaction::begin(
                 m_connection, QStringLiteral("Rebase Contacts refresh"));
             if (const auto* cacheError =
@@ -2277,6 +2291,13 @@ namespace javelin::jmap::contacts
             operationError->code == javelin::jmap::OperationErrorCode::Conflict &&
             operationError->protocolType == "stateMismatch")
         {
+            qCInfo(logContactMutations).noquote()
+                << "action="
+                << QString::fromStdString(options.traceId.value_or(std::string{"<untracked>"}))
+                << "state mismatch; preserve projection and refresh"
+                << "account=" << QString::fromStdString(accountId) << "attemptedState="
+                << QString::fromStdString(request.ifInState.value_or(std::string{"<none>"}))
+                << "mutations=" << prepared.records.size();
             if (const auto cacheError = journal.transition(
                     prepared.records, javelin::jmap::sync::MutationStatus::Pending))
                 co_return error(cacheError->message,
@@ -2307,6 +2328,13 @@ namespace javelin::jmap::contacts
                           javelin::jmap::OperationErrorCode::ProtocolViolation));
 
             request.ifInState = *currentState;
+            qCInfo(logContactMutations).noquote()
+                << "action="
+                << QString::fromStdString(options.traceId.value_or(std::string{"<untracked>"}))
+                << "retry Contacts mutation"
+                << "account=" << QString::fromStdString(accountId)
+                << "refreshedState=" << QString::fromStdString(*currentState)
+                << "mutations=" << prepared.records.size();
             serialized = javelin::jmap::api::serializeContactCardSetRequest(request);
             if (!serialized.has_value())
                 co_return rejectRetry(

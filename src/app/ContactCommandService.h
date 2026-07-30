@@ -91,7 +91,7 @@ namespace javelin::app
         [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
         submitContactCards(std::string ownerAccountId,
                            javelin::jmap::api::ContactCardSetRequest request,
-                           QString operationDescription);
+                           QString operationDescription, QString actionDescription = {});
         [[nodiscard]] QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
         submitContactCopy(std::string ownerAccountId,
                           javelin::jmap::api::ContactCardCopyRequest request,
