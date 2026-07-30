@@ -1053,6 +1053,33 @@ namespace javelin::jmap::contacts
             return !result.created.empty() || !result.updated.empty() || !result.destroyed.empty();
         }
 
+        [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
+        advanceCachedSetState(javelin::jmap::cache::DatabaseConnection& connection,
+                              javelin::jmap::cache::DatabaseTransaction& transaction,
+                              const javelin::jmap::api::SetResult& result,
+                              const std::string_view dataType)
+        {
+            javelin::jmap::cache::SyncStateRepository states{connection};
+            const auto advanced = states.advanceIfCurrent(transaction,
+                                                          {
+                                                              .accountId = result.accountId,
+                                                              .objectType = std::string{dataType},
+                                                              .queryKey = {},
+                                                          },
+                                                          result.oldState, result.newState);
+            if (const auto* cacheError =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&advanced))
+                return *cacheError;
+            if (!std::get<bool>(advanced))
+                qCDebug(logContactMutations).noquote()
+                    << "Keep concurrently advanced Contacts state"
+                    << "account=" << QString::fromStdString(result.accountId)
+                    << "dataType=" << QString::fromStdString(std::string{dataType})
+                    << "responseOldState=" << QString::fromStdString(result.oldState)
+                    << "responseNewState=" << QString::fromStdString(result.newState);
+            return std::nullopt;
+        }
+
         [[nodiscard]] javelin::jmap::sync::MutationCommitReceipt
         contactReceipt(const javelin::jmap::api::SetResult& result, const std::string_view dataType)
         {
@@ -1108,6 +1135,11 @@ namespace javelin::jmap::contacts
                 if (const auto cacheError = transaction.advance(domains))
                     return error(cacheError->message,
                                  javelin::jmap::OperationErrorCode::LocalStorageFailure);
+                for (const auto& domain : domains)
+                    if (const auto cacheError = advanceCachedSetState(
+                            connection, transaction.cacheTransaction(), result, domain.dataType))
+                        return error(cacheError->message,
+                                     javelin::jmap::OperationErrorCode::LocalStorageFailure);
             }
             if (const auto cacheError = transaction.commit())
                 return error(cacheError->message,
@@ -1507,6 +1539,11 @@ namespace javelin::jmap::contacts
                 if (const auto cacheError = transaction.advance(domains))
                     return error(cacheError->message,
                                  javelin::jmap::OperationErrorCode::LocalStorageFailure);
+                if (const auto cacheError =
+                        advanceCachedSetState(connection, transaction.cacheTransaction(), result,
+                                              domains.front().dataType))
+                    return error(cacheError->message,
+                                 javelin::jmap::OperationErrorCode::LocalStorageFailure);
             }
             if (const auto cacheError =
                     repository.projectContacts(transaction.cacheTransaction(), result.accountId,
@@ -1724,6 +1761,23 @@ namespace javelin::jmap::contacts
             if (const auto cacheError = transaction.advance(acceptedDomains))
                 return error(cacheError->message,
                              javelin::jmap::OperationErrorCode::LocalStorageFailure);
+            if (hasSetSuccesses(responseValue.copied))
+            {
+                if (const auto cacheError =
+                        advanceCachedSetState(connection, transaction.cacheTransaction(),
+                                              responseValue.copied, "ContactCard"))
+                    return error(cacheError->message,
+                                 javelin::jmap::OperationErrorCode::LocalStorageFailure);
+            }
+            if (responseValue.destroyedOriginals.has_value() &&
+                hasSetSuccesses(*responseValue.destroyedOriginals))
+            {
+                if (const auto cacheError =
+                        advanceCachedSetState(connection, transaction.cacheTransaction(),
+                                              *responseValue.destroyedOriginals, "ContactCard"))
+                    return error(cacheError->message,
+                                 javelin::jmap::OperationErrorCode::LocalStorageFailure);
+            }
             if (const auto cacheError = repository.projectContacts(
                     transaction.cacheTransaction(), responseValue.copied.accountId,
                     destinationContacts, destinationRemoved))

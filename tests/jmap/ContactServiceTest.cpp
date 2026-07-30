@@ -351,6 +351,10 @@ TEST_CASE("successful ContactCard sets advance only the ContactCard consistency 
     REQUIRE(std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(accepted).has_value());
     CHECK(std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(accepted)->displayName ==
           "Updated");
+    const auto contactState = contacts.contactState("a1");
+    REQUIRE(std::holds_alternative<std::optional<std::string>>(contactState));
+    REQUIRE(std::get<std::optional<std::string>>(contactState).has_value());
+    CHECK(*std::get<std::optional<std::string>>(contactState) == "c2");
     javelin::jmap::contacts::ContactMutationJournal journal{connection, contacts};
     const auto mutations = journal.listForContact("a1", "card-1");
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::contacts::ContactMutationRecord>>(
@@ -426,6 +430,10 @@ TEST_CASE("contact group membership uses exact optimistic member patches",
                         "uid-card-1"));
     CHECK(groupContains(*std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(cached),
                         "uid-card-2"));
+    const auto contactState = contacts.contactState("a1");
+    REQUIRE(std::holds_alternative<std::optional<std::string>>(contactState));
+    REQUIRE(std::get<std::optional<std::string>>(contactState).has_value());
+    CHECK(*std::get<std::optional<std::string>>(contactState) == "c2");
 
     transport.results.push_back(javelin::jmap::api::HttpResponse{
         .statusCode = 200,
@@ -443,6 +451,7 @@ TEST_CASE("contact group membership uses exact optimistic member patches",
                                     .memberUids = {"uid-card-1", "uid-card-2"},
                                     .included = false}));
     REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(rejected));
+    CHECK(transport.requests.back().body.contains("\"ifInState\":\"c2\""));
     CHECK(transport.requests.back().body.contains("\"members/uid-card-1\":null"));
     CHECK(transport.requests.back().body.contains("\"members/uid-card-2\":null"));
     cached = contacts.findContact("a1", "group-1");
