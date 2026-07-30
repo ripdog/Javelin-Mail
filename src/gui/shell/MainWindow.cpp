@@ -611,7 +611,15 @@ namespace javelin::gui::shell
             const auto index = m_messageModel->index(static_cast<int>(*resolution.currentRow), 0);
             if (index.isValid())
             {
-                m_messageView->setCurrentIndex(index);
+                if (auto* selectionModel = m_messageView->selectionModel())
+                {
+                    selectionModel->setCurrentIndex(index, QItemSelectionModel::ClearAndSelect |
+                                                               QItemSelectionModel::Rows);
+                }
+                else
+                {
+                    m_messageView->setCurrentIndex(index);
+                }
                 m_messageView->scrollTo(index);
                 m_messageSelectionController->syncTabSelection(activeTab());
             }

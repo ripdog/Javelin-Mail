@@ -21,11 +21,13 @@ namespace javelin::gui::shell
                         });
         if (selection.currentRow.has_value())
         {
+            const bool targetEmailVisible = !selection.currentEmailChanged;
             return {
                 .presentRoute = true,
                 .currentRow = selection.currentRow,
-                .completeRoute = true,
-                .requestReveal = false,
+                .completeRoute = targetEmailVisible,
+                .requestReveal = !targetEmailVisible && !input.mailboxRefreshInFlight &&
+                                 !input.revealAlreadyRequested,
             };
         }
 

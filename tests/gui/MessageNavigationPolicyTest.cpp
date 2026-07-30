@@ -81,6 +81,29 @@ TEST_CASE("message navigation reveals a missing email only once")
     CHECK_FALSE(repeated.requestReveal);
 }
 
+TEST_CASE("message navigation remains pending on a same-thread placeholder")
+{
+    const std::array rows{
+        javelin::gui::messages::MessageRowIdentity{
+            .threadId = "thread",
+            .emailId = "older-email",
+        },
+    };
+    const auto plan = planMessageNavigation({
+        .route = &route,
+        .activeAccountId = std::string_view{"account"},
+        .activeMailboxId = std::string_view{"inbox"},
+        .rows = rows,
+        .mailboxRefreshInFlight = false,
+        .revealAlreadyRequested = false,
+    });
+
+    CHECK(plan.presentRoute);
+    CHECK(plan.currentRow == std::optional<std::size_t>{0});
+    CHECK_FALSE(plan.completeRoute);
+    CHECK(plan.requestReveal);
+}
+
 TEST_CASE("message navigation waits for an in-flight mailbox refresh")
 {
     const auto plan = planMessageNavigation({
