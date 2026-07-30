@@ -971,7 +971,7 @@ TEST_CASE("ambiguous ContactCard outcomes preserve the optimistic contact",
         .statusCode = 200,
         .body =
             QByteArray{
-                R"({"methodResponses":[["AddressBook/get",{"accountId":"a1","state":"b2","list":[{"id":"book-1","name":"Personal","description":null,"sortOrder":0,"isDefault":true,"isSubscribed":true,"shareWith":null,"myRights":{"mayRead":true,"mayWrite":true,"mayShare":false,"mayDelete":true}}],"notFound":[]},"address-books"],["ContactCard/get",{"accountId":"a1","state":"c2","list":[{"id":"card-1","uid":"uid-card-1","kind":"individual","addressBookIds":{"book-1":true},"name":{"full":"Original"},"emails":{"email-1":{"address":"original@example.test"}}}],"notFound":[]},"contact-cards"]],"sessionState":"s3"})"},
+                R"({"methodResponses":[["AddressBook/get",{"accountId":"a1","state":"b2","list":[{"id":"book-1","name":"Personal","description":null,"sortOrder":0,"isDefault":true,"isSubscribed":true,"shareWith":null,"myRights":{"mayRead":true,"mayWrite":true,"mayShare":false,"mayDelete":true}}],"notFound":[]},"address-books"],["ContactCard/get",{"accountId":"a1","state":"c2","list":[{"id":"card-1","uid":"uid-card-1","kind":"individual","addressBookIds":{"book-1":true},"name":{"full":"Original"},"emails":{"email-1":{"address":"server-new@example.test"}}}],"notFound":[]},"contact-cards"]],"sessionState":"s3"})"},
     });
     const auto staleRefresh =
         QCoro::waitFor(service.refreshAll({.sessionUrl = "https://example.test/.well-known/jmap",
@@ -986,12 +986,17 @@ TEST_CASE("ambiguous ContactCard outcomes preserve the optimistic contact",
                 .has_value());
     CHECK(std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(stillProjected)
               ->displayName == "Uncertain");
+    REQUIRE(std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(stillProjected)
+                ->emails.size() == 1);
+    CHECK(std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(stillProjected)
+              ->emails.front()
+              .address == "server-new@example.test");
 
     transport.results.push_back(javelin::jmap::api::HttpResponse{
         .statusCode = 200,
         .body =
             QByteArray{
-                R"({"methodResponses":[["AddressBook/get",{"accountId":"a1","state":"b3","list":[{"id":"book-1","name":"Personal","description":null,"sortOrder":0,"isDefault":true,"isSubscribed":true,"shareWith":null,"myRights":{"mayRead":true,"mayWrite":true,"mayShare":false,"mayDelete":true}}],"notFound":[]},"address-books"],["ContactCard/get",{"accountId":"a1","state":"c3","list":[{"id":"card-1","uid":"uid-card-1","kind":"individual","addressBookIds":{"book-1":true},"name":{"full":"Uncertain"},"emails":{"email-1":{"address":"original@example.test"}}}],"notFound":[]},"contact-cards"]],"sessionState":"s4"})"},
+                R"({"methodResponses":[["AddressBook/get",{"accountId":"a1","state":"b3","list":[{"id":"book-1","name":"Personal","description":null,"sortOrder":0,"isDefault":true,"isSubscribed":true,"shareWith":null,"myRights":{"mayRead":true,"mayWrite":true,"mayShare":false,"mayDelete":true}}],"notFound":[]},"address-books"],["ContactCard/get",{"accountId":"a1","state":"c3","list":[{"id":"card-1","uid":"uid-card-1","kind":"individual","addressBookIds":{"book-1":true},"name":{"full":"Uncertain"},"emails":{"email-1":{"address":"server-new@example.test"}}}],"notFound":[]},"contact-cards"]],"sessionState":"s4"})"},
     });
     const auto confirmedRefresh =
         QCoro::waitFor(service.refreshAll({.sessionUrl = "https://example.test/.well-known/jmap",

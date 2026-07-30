@@ -1953,17 +1953,49 @@ namespace javelin::jmap::contacts
                     result.rejectedContacts.push_back(&mutation);
                     continue;
                 }
-                auto projected =
-                    summarizeContact(accountId, javelin::jmap::api::ContactCard{
-                                                    .id = mutation.objectId,
-                                                    .uid = {},
-                                                    .kind = {},
-                                                    .document = *mutation.projectedDocument,
-                                                });
+                std::optional<ContactSummary> projected;
+                bool confirmed = false;
+                if (mutation.kind == ContactMutationKind::Update &&
+                    server != serverContactsSnapshot.end())
+                {
+                    const auto visible =
+                        std::ranges::find(result.contacts, mutation.objectId, &ContactSummary::id);
+                    const auto& visibleDocument =
+                        visible == result.contacts.end() ? server->document : visible->document;
+                    const auto rebasedDocument = javelin::jmap::api::applyPatchObject(
+                        visibleDocument, mutation.requestedDocument);
+                    const auto* rebasedJson = std::get_if<std::string>(&rebasedDocument);
+                    if (rebasedJson == nullptr)
+                        return error(QStringLiteral("A ContactCard projection patch is invalid."),
+                                     javelin::jmap::OperationErrorCode::LocalStorageFailure);
+                    projected = summarizeContact(accountId, javelin::jmap::api::ContactCard{
+                                                                .id = mutation.objectId,
+                                                                .uid = {},
+                                                                .kind = {},
+                                                                .document = *rebasedJson,
+                                                            });
+
+                    const auto serverWithPatch = javelin::jmap::api::applyPatchObject(
+                        server->document, mutation.requestedDocument);
+                    const auto* serverWithPatchJson = std::get_if<std::string>(&serverWithPatch);
+                    const auto expected =
+                        serverWithPatchJson == nullptr
+                            ? std::nullopt
+                            : canonicalContactDocument(*serverWithPatchJson, false);
+                    const auto actual = canonicalContactDocument(server->document, false);
+                    confirmed = expected.has_value() && expected == actual;
+                }
+                else
+                    projected =
+                        summarizeContact(accountId, javelin::jmap::api::ContactCard{
+                                                        .id = mutation.objectId,
+                                                        .uid = {},
+                                                        .kind = {},
+                                                        .document = *mutation.projectedDocument,
+                                                    });
                 if (!projected.has_value())
                     return error(QStringLiteral("A projected ContactCard is invalid."),
                                  javelin::jmap::OperationErrorCode::LocalStorageFailure);
-                bool confirmed = false;
                 if (mutation.kind == ContactMutationKind::Create)
                 {
                     const auto matched = std::ranges::find(serverContactsSnapshot, projected->uid,
@@ -1976,12 +2008,6 @@ namespace javelin::jmap::contacts
                         projected = *matched;
                         confirmed = true;
                     }
-                }
-                else if (server != serverContactsSnapshot.end())
-                {
-                    const auto expected = canonicalContactDocument(projected->document, false);
-                    const auto actual = canonicalContactDocument(server->document, false);
-                    confirmed = expected.has_value() && expected == actual;
                 }
                 if (mutation.status == javelin::jmap::sync::MutationStatus::Unknown && confirmed)
                     result.acceptedContacts.push_back(&mutation);
