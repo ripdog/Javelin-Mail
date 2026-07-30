@@ -506,12 +506,8 @@ namespace javelin::app
         const auto watchedMailboxes = runContext->configuration.mailboxes;
         for (const auto& [mailboxId, mailboxName] : watchedMailboxes)
         {
-            const bool refreshForNotification =
-                hasNewMail &&
-                runContext->configuration.notificationMailboxIds.contains(mailboxId) &&
-                std::ranges::find(queryAffectedMailboxIds, mailboxId) !=
-                    queryAffectedMailboxIds.end();
-            if (!refreshEveryMailbox && !refreshForNotification)
+            if (!shouldRefreshMailboxWindow(refreshEveryMailbox, queryAffectedMailboxIds,
+                                            mailboxId))
                 continue;
             const auto refreshResult = co_await mailboxRefreshExecutor.refreshCollapsedMailbox(
                 runContext->configuration.accountId, mailboxId, {}, false,

@@ -3,7 +3,10 @@
 #include "app/WorkScheduler.h"
 #include "jmap/sync/StateChangeSource.h"
 
+#include <ranges>
+#include <span>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -49,6 +52,15 @@ namespace javelin::app
     [[nodiscard]] inline bool shouldDeferForActiveMutation(const std::string_view dataType)
     {
         return dataType != "AddressBook" && dataType != "ContactCard";
+    }
+
+    [[nodiscard]] inline bool
+    shouldRefreshMailboxWindow(const bool refreshEveryMailbox,
+                               const std::span<const std::string> queryAffectedMailboxIds,
+                               const std::string_view mailboxId)
+    {
+        return refreshEveryMailbox || std::ranges::find(queryAffectedMailboxIds, mailboxId) !=
+                                          queryAffectedMailboxIds.end();
     }
 
     [[nodiscard]] inline RoutedStateChanges

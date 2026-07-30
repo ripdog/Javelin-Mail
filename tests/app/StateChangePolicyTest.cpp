@@ -50,3 +50,12 @@ TEST_CASE("contact refresh rebases active mutation projections", "[app][sync][co
     CHECK(javelin::app::shouldDeferForActiveMutation("Calendar"));
     CHECK(javelin::app::shouldDeferForActiveMutation("CalendarEvent"));
 }
+
+TEST_CASE("mail state changes refresh every affected watched mailbox window", "[app][sync][mail]")
+{
+    const std::vector<std::string> affectedMailboxIds{"inbox", "junk"};
+
+    CHECK(javelin::app::shouldRefreshMailboxWindow(false, affectedMailboxIds, "junk"));
+    CHECK_FALSE(javelin::app::shouldRefreshMailboxWindow(false, affectedMailboxIds, "archive"));
+    CHECK(javelin::app::shouldRefreshMailboxWindow(true, affectedMailboxIds, "archive"));
+}
