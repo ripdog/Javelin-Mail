@@ -485,6 +485,25 @@ TEST_CASE("contact group membership uses exact optimistic member patches",
     REQUIRE(std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(cached).has_value());
     CHECK_FALSE(groupContains(
         *std::get<std::optional<javelin::jmap::contacts::ContactSummary>>(cached), "uid-card-3"));
+
+    transport.results.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body =
+            QByteArray{
+                R"({"methodResponses":[["ContactCard/get",{"accountId":"a1","state":"c2","list":[],"notFound":[]},"contacts-set"],["ContactCard/set",{"accountId":"a1","oldState":"c2","newState":"c3","updated":{"group-1":null}},"other-call"]],"sessionState":"s4"})"},
+    });
+    const auto mismatchedResponse = QCoro::waitFor(service.setGroupMembership(
+        {.sessionUrl = "https://example.test/.well-known/jmap",
+         .loginEmail = "alice@example.test",
+         .apiKey = "secret"},
+        "a1",
+        {.accountId = "a1", .groupId = "group-1", .memberUids = {"uid-card-4"}, .included = true}));
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(mismatchedResponse));
+    const auto& protocolError = std::get<javelin::jmap::OperationError>(mismatchedResponse);
+    CHECK(protocolError.code == javelin::jmap::OperationErrorCode::ProtocolViolation);
+    CHECK(protocolError.message ==
+          QStringLiteral("The Contacts response omitted ContactCard/set(contacts-set); received "
+                         "ContactCard/get(contacts-set), ContactCard/set(other-call)."));
 }
 
 TEST_CASE("AddressBook mutations project, reconcile rejection, and preserve uncertainty",

@@ -148,6 +148,8 @@ int main(int argc, char* argv[])
                       QStringLiteral("json")});
     parser.addOption({QStringLiteral("verbose"),
                       QStringLiteral("Print the selected endpoint and request to stderr.")});
+    parser.addOption({QStringLiteral("websocket"),
+                      QStringLiteral("Require the advertised JMAP WebSocket transport.")});
     parser.process(application);
 
     try
@@ -200,7 +202,14 @@ int main(int argc, char* argv[])
 
         QNetworkAccessManager network;
         javelin::jmap::api::QtNetworkTransport networkTransport{network};
-        javelin::jmap::api::HttpJmapMethodTransport transport{networkTransport};
+        javelin::jmap::api::HttpJmapMethodTransport httpTransport{networkTransport};
+        javelin::jmap::api::WebSocketFailureCooldowns cooldowns;
+        javelin::jmap::api::PreferredJmapMethodTransport preferredTransport{database, httpTransport,
+                                                                            cooldowns};
+        auto& transport =
+            parser.isSet(QStringLiteral("websocket"))
+                ? static_cast<javelin::jmap::api::JmapMethodTransport&>(preferredTransport)
+                : static_cast<javelin::jmap::api::JmapMethodTransport&>(httpTransport);
         javelin::jmap::api::MethodCaller caller{transport};
         const javelin::jmap::api::ApiRequestContext context{
             .credentials = {.accountId = ownerAccountId,
@@ -210,7 +219,9 @@ int main(int argc, char* argv[])
                                       .refreshToken = std::nullopt,
                                       .expiry = std::nullopt}},
             .apiUrl = session->value().apiUrl,
-            .transportPolicy = javelin::jmap::api::JmapTransportPolicy::Preferred,
+            .transportPolicy = parser.isSet(QStringLiteral("websocket"))
+                                   ? javelin::jmap::api::JmapTransportPolicy::ForceWebSocket
+                                   : javelin::jmap::api::JmapTransportPolicy::Preferred,
             .requestLimits = javelin::jmap::api::coreRequestLimits(session->value()),
         };
         int exitCode = 1;

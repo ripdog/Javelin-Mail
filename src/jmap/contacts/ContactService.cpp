@@ -19,6 +19,7 @@
 
 #include <glaze/glaze.hpp>
 
+#include <QStringList>
 #include <QUrl>
 #include <QUuid>
 
@@ -883,6 +884,19 @@ namespace javelin::jmap::contacts
 
         using CopyObjectsResult = std::variant<CopyObjectsResponse, javelin::jmap::OperationError>;
 
+        [[nodiscard]] QString
+        invocationSummary(const std::vector<javelin::jmap::api::MethodInvocation>& invocations)
+        {
+            QStringList summary;
+            summary.reserve(static_cast<qsizetype>(invocations.size()));
+            for (const auto& invocation : invocations)
+                summary.push_back(
+                    QStringLiteral("%1(%2)").arg(QString::fromStdString(invocation.name),
+                                                 QString::fromStdString(invocation.callId)));
+            return summary.isEmpty() ? QStringLiteral("<none>")
+                                     : summary.join(QStringLiteral(", "));
+        }
+
         [[nodiscard]] QCoro::Task<SetObjectsResult>
         setObjects(javelin::jmap::api::JmapMethodTransport& methodTransport,
                    javelin::jmap::cache::DatabaseConnection& connection,
@@ -940,8 +954,11 @@ namespace javelin::jmap::contacts
                     actual = item;
             }
             if (!actual.has_value())
-                co_return error(QStringLiteral("The Contacts response omitted the set result."),
-                                javelin::jmap::OperationErrorCode::ProtocolViolation);
+                co_return error(
+                    QStringLiteral("The Contacts response omitted %1(contacts-set); received %2.")
+                        .arg(QString::fromStdString(expectedName),
+                             invocationSummary(envelope->methodResponses)),
+                    javelin::jmap::OperationErrorCode::ProtocolViolation);
             const auto parsed = javelin::jmap::api::parseContactsSetResponse(actual->arguments);
             if (!parsed.ok())
             {
