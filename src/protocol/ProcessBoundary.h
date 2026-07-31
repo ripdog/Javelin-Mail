@@ -255,6 +255,8 @@ namespace javelin::protocol
         IncompatibleBuild,
         SettingsStorageFailure,
         SettingsMigrationFailure,
+        TransportUnavailable,
+        ProtocolViolation,
     };
 
     struct BoundaryError

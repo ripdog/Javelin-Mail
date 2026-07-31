@@ -1,11 +1,29 @@
 #include "protocol/InProcessEndpoint.h"
+#include "protocol/SocketTransport.h"
+
+#include <QCoreApplication>
+#include <QDir>
+#include <QElapsedTimer>
+#include <QEventLoop>
+#include <QLocalSocket>
+#include <QMetaObject>
+#include <QTemporaryDir>
+#include <QThread>
 
 #include <catch2/catch_test_macros.hpp>
+
+#include <functional>
+#include <utility>
 
 namespace
 {
 
     using namespace javelin::protocol;
+
+    int testArgc = 1;
+    char testProgramName[] = "javelin_protocol_tests";
+    char* testArgv[] = {testProgramName, nullptr};
+    QCoreApplication testApplication{testArgc, testArgv};
 
     class RecordingHandler final : public DaemonRequestHandler
     {
@@ -24,6 +42,15 @@ namespace
         CommandReply handleCommand(CommandRequest request) override
         {
             receivedCommand = std::move(request);
+            if (onCommand)
+                onCommand();
+            if (returnInvalidBoundaryError)
+            {
+                return CommandRejected{.id = receivedCommand->id,
+                                       .error = {.code = static_cast<BoundaryErrorCode>(255),
+                                                 .field = QStringLiteral("command"),
+                                                 .detail = QStringLiteral("invalid test enum")}};
+            }
             return CommandAccepted{.id = receivedCommand->id,
                                    .operation = std::nullopt,
                                    .epoch = {.value = 12},
@@ -90,6 +117,8 @@ namespace
         std::optional<CacheInstanceId> acknowledgedCache;
         bool pinged = false;
         bool guiReady = false;
+        bool returnInvalidBoundaryError = false;
+        std::function<void()> onCommand;
     };
 
     class RecordingSink final : public BoundaryEventSink
@@ -110,6 +139,173 @@ namespace
                     RefreshAccountCommand{.accountId = QStringLiteral("account-1"), .force = true}};
     }
 
+    void exerciseCommonSurface(CommandClient& commandClient,
+                               MaterializationClient& materializationClient,
+                               SettingsClient& settingsClient,
+                               DaemonStatusClient& daemonStatusClient,
+                               ActivationClient& activationClient,
+                               CacheAccessClient& cacheAccessClient, RecordingHandler& handler)
+    {
+        const auto handshake =
+            daemonStatusClient.hello({.protocol = {.major = 1, .minor = 0},
+                                      .build = {.application = QStringLiteral("Javelin-Mail"),
+                                                .revision = QStringLiteral("test")}});
+        REQUIRE(std::get_if<ReadyReply>(&handshake) != nullptr);
+
+        const auto command = refreshRequest();
+        const auto commandReply = commandClient.submitCommand(command);
+        const auto* accepted = std::get_if<CommandAccepted>(&commandReply);
+        REQUIRE(accepted != nullptr);
+        if (accepted == nullptr)
+            return;
+        CHECK(accepted->id == command.id);
+        REQUIRE(handler.receivedCommand.has_value());
+
+        const MaterializationRequest materialization{
+            .id = {.value = QUuid::createUuid()},
+            .scope = {.value = QUuid::createUuid()},
+            .request = MailboxWindowMaterialization{.accountId = QStringLiteral("account-1"),
+                                                    .mailboxId = QStringLiteral("inbox"),
+                                                    .offset = 20,
+                                                    .limit = 25}};
+        const auto materializationReply =
+            materializationClient.requestMaterialization(materialization);
+        REQUIRE(std::holds_alternative<MaterializationAccepted>(materializationReply));
+        CHECK(std::get<MaterializationAccepted>(materializationReply).id == materialization.id);
+        materializationClient.cancelMaterializationScope(materialization.scope);
+        REQUIRE(handler.cancelledScope.has_value());
+        CHECK(*handler.cancelledScope == materialization.scope);
+
+        const auto settings = settingsClient.getSettings();
+        REQUIRE(std::holds_alternative<SettingsSnapshotReply>(settings));
+        CHECK(std::get<SettingsSnapshotReply>(settings).snapshot.revision.value == 5);
+
+        const auto settingsUpdate = settingsClient.updateSettings(
+            {.baseRevision = {.value = 5},
+             .update = {.accounts = std::nullopt,
+                        .syncedMailboxSelections = std::nullopt,
+                        .notificationMailboxSelections = std::nullopt,
+                        .remoteContentSenders = std::nullopt,
+                        .remoteContentDomains = std::nullopt,
+                        .translation =
+                            TranslationSettings{.enabled = true,
+                                                .apiKeyOverride = {},
+                                                .targetLanguage = QStringLiteral("mi-NZ"),
+                                                .autoTranslateSenders = {},
+                                                .autoTranslateDomains = {}},
+                        .appearance = std::nullopt,
+                        .attachments = std::nullopt,
+                        .undoSendDelaySeconds = std::nullopt}});
+        REQUIRE(std::holds_alternative<SettingsUpdated>(settingsUpdate));
+        CHECK(std::get<SettingsUpdated>(settingsUpdate).revision.value == 6);
+        REQUIRE(handler.receivedSettingsUpdate.has_value());
+
+        CHECK_FALSE(daemonStatusClient.ping().has_value());
+        CHECK_FALSE(activationClient.readyForActivation().has_value());
+        CHECK_FALSE(
+            cacheAccessClient
+                .acknowledgeCacheAccessSuspended({.instance = {.value = QUuid::createUuid()}})
+                .has_value());
+    }
+
+    [[nodiscard]] SocketEndpointOptions socketOptions(const QTemporaryDir& directory)
+    {
+        return {.runtimeDirectory = directory.path(),
+                .socketPath = QDir{directory.path()}.filePath(QStringLiteral("javelind.sock")),
+                .limits = {},
+                .protocol = {.major = 1, .minor = 0},
+                .expectedBuild = BuildIdentity{.application = QStringLiteral("Javelin-Mail"),
+                                               .revision = QStringLiteral("test")},
+                .maximumQueuedFrames = 8,
+                .maximumQueuedBytes = 4096,
+                .responseTimeoutMilliseconds = 2000,
+                .enforcePeerCredentials = true};
+    }
+
+    template <typename Predicate> void processUntil(Predicate predicate)
+    {
+        QElapsedTimer timer;
+        timer.start();
+        while (!predicate() && timer.elapsed() < 2000)
+        {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+            QThread::msleep(1);
+        }
+    }
+
+    class SocketEndpointThread final
+    {
+      public:
+        SocketEndpointThread(RecordingHandler& handler, SocketEndpointOptions options)
+            : m_endpoint(new SocketDaemonEndpoint(handler, std::move(options)))
+        {
+            m_endpoint->moveToThread(&m_thread);
+            m_thread.start();
+        }
+
+        SocketEndpointThread(const SocketEndpointThread&) = delete;
+        SocketEndpointThread& operator=(const SocketEndpointThread&) = delete;
+
+        ~SocketEndpointThread()
+        {
+            if (m_endpoint != nullptr)
+            {
+                auto* endpoint = m_endpoint;
+                QMetaObject::invokeMethod(
+                    endpoint,
+                    [this, endpoint]
+                    {
+                        endpoint->close();
+                        delete endpoint;
+                        m_endpoint = nullptr;
+                    },
+                    Qt::BlockingQueuedConnection);
+            }
+            m_thread.quit();
+            m_thread.wait();
+        }
+
+        [[nodiscard]] std::optional<SocketTransportError> listen()
+        {
+            std::optional<SocketTransportError> error;
+            QMetaObject::invokeMethod(
+                m_endpoint, [this, &error] { error = m_endpoint->listen(); },
+                Qt::BlockingQueuedConnection);
+            return error;
+        }
+
+        void close()
+        {
+            QMetaObject::invokeMethod(
+                m_endpoint, [this] { m_endpoint->close(); }, Qt::BlockingQueuedConnection);
+        }
+
+        void publishEvent(const BoundaryEvent& event)
+        {
+            QMetaObject::invokeMethod(
+                m_endpoint, [this, event] { m_endpoint->publishEvent(event); },
+                Qt::BlockingQueuedConnection);
+        }
+
+        [[nodiscard]] std::optional<SocketTransportError> lastError() const
+        {
+            std::optional<SocketTransportError> error;
+            QMetaObject::invokeMethod(
+                m_endpoint, [this, &error] { error = m_endpoint->lastError(); },
+                Qt::BlockingQueuedConnection);
+            return error;
+        }
+
+        [[nodiscard]] SocketDaemonEndpoint* endpointForThreadCallback() const
+        {
+            return m_endpoint;
+        }
+
+      private:
+        QThread m_thread;
+        SocketDaemonEndpoint* m_endpoint = nullptr;
+    };
+
 } // namespace
 
 TEST_CASE("in-process endpoint carries typed command admission", "[protocol]")
@@ -129,6 +325,14 @@ TEST_CASE("in-process endpoint carries typed command admission", "[protocol]")
     REQUIRE(refresh != nullptr);
     CHECK(refresh->accountId == QStringLiteral("account-1"));
     CHECK(refresh->force);
+}
+
+TEST_CASE("in-process endpoint runs the transport-neutral typed surface", "[protocol]")
+{
+    RecordingHandler handler;
+    InProcessEndpoint endpoint{handler};
+
+    exerciseCommonSurface(endpoint, endpoint, endpoint, endpoint, endpoint, endpoint, handler);
 }
 
 TEST_CASE("invalid typed commands are rejected before daemon dispatch", "[protocol]")
@@ -245,4 +449,168 @@ TEST_CASE("endpoint exposes settings, handshake, lifecycle and events through ty
     REQUIRE(handler.receivedSettingsUpdate->update.translation.has_value());
     CHECK(handler.receivedSettingsUpdate->update.translation->targetLanguage ==
           QStringLiteral("mi-NZ"));
+}
+
+TEST_CASE("socket frame codec handles partial, oversized, and unknown frames", "[protocol][socket]")
+{
+    const auto encoded = encodeSocketFrame(SocketFrameKind::PingRequest, 42, {});
+    REQUIRE(std::holds_alternative<QByteArray>(encoded));
+    const auto bytes = std::get<QByteArray>(encoded);
+
+    SocketFrameDecoder decoder;
+    REQUIRE_FALSE(decoder.append(bytes.left(5)).has_value());
+    auto partial = decoder.takeFrame();
+    REQUIRE(std::holds_alternative<std::optional<SocketFrame>>(partial));
+    CHECK_FALSE(std::get<std::optional<SocketFrame>>(partial).has_value());
+    REQUIRE_FALSE(decoder.append(bytes.mid(5)).has_value());
+    auto complete = decoder.takeFrame();
+    REQUIRE(std::holds_alternative<std::optional<SocketFrame>>(complete));
+    REQUIRE(std::get<std::optional<SocketFrame>>(complete).has_value());
+    CHECK(std::get<std::optional<SocketFrame>>(complete)->kind == SocketFrameKind::PingRequest);
+    CHECK(std::get<std::optional<SocketFrame>>(complete)->correlation == 42);
+
+    QByteArray unknown = bytes;
+    unknown[6] = static_cast<char>(0x7f);
+    unknown[7] = static_cast<char>(0xff);
+    SocketFrameDecoder unknownDecoder;
+    REQUIRE_FALSE(unknownDecoder.append(unknown).has_value());
+    const auto unknownResult = unknownDecoder.takeFrame();
+    REQUIRE(std::holds_alternative<SocketFrameError>(unknownResult));
+    CHECK(std::get<SocketFrameError>(unknownResult).code ==
+          SocketFrameErrorCode::UnknownMessageKind);
+
+    BoundaryLimits smallLimits{.maximumFrameBytes = 32};
+    const auto oversized = encodeSocketFrame(SocketFrameKind::PingRequest, 1, QByteArray(16, 'x'),
+                                             smallLimits.maximumFrameBytes);
+    REQUIRE(std::holds_alternative<SocketFrameError>(oversized));
+    CHECK(std::get<SocketFrameError>(oversized).code == SocketFrameErrorCode::FrameTooLarge);
+
+    QByteArray invalidVariant;
+    invalidVariant.append(static_cast<char>(9));
+    const auto malformed = encodeSocketFrame(SocketFrameKind::CommandRequest, 2, invalidVariant);
+    REQUIRE(std::holds_alternative<QByteArray>(malformed));
+    SocketFrameDecoder malformedDecoder;
+    REQUIRE_FALSE(malformedDecoder.append(std::get<QByteArray>(malformed)).has_value());
+    const auto malformedFrame = malformedDecoder.takeFrame();
+    REQUIRE(std::holds_alternative<std::optional<SocketFrame>>(malformedFrame));
+    CHECK(std::get<std::optional<SocketFrame>>(malformedFrame)->kind ==
+          SocketFrameKind::CommandRequest);
+}
+
+TEST_CASE("socket endpoint runs the transport-neutral typed surface", "[protocol][socket]")
+{
+    QTemporaryDir runtimeDirectory;
+    REQUIRE(runtimeDirectory.isValid());
+
+    RecordingHandler handler;
+    const auto options = socketOptions(runtimeDirectory);
+    SocketEndpointThread endpoint{handler, options};
+    const auto listenError = endpoint.listen();
+    REQUIRE_FALSE(listenError.has_value());
+
+    SocketDaemonClient client{options};
+    RecordingSink sink;
+    REQUIRE_FALSE(client.attachEventSink(sink).has_value());
+    REQUIRE_FALSE(client.connectToDaemon().has_value());
+    exerciseCommonSurface(client, client, client, client, client, client, handler);
+
+    handler.returnInvalidBoundaryError = true;
+    const auto invalidReply = client.submitCommand(refreshRequest());
+    handler.returnInvalidBoundaryError = false;
+    const auto* invalidReplyRejected = std::get_if<CommandRejected>(&invalidReply);
+    REQUIRE(invalidReplyRejected != nullptr);
+    CHECK(invalidReplyRejected->error.code == BoundaryErrorCode::ProtocolViolation);
+
+    endpoint.publishEvent(CacheInvalidation{.epoch = {.value = 13},
+                                            .changedDomains = {ChangedDomain::MessageMetadata},
+                                            .affectedKeys = {QStringLiteral("email-1")}});
+    processUntil([&sink] { return sink.received.has_value(); });
+    REQUIRE(sink.received.has_value());
+    const auto* invalidation = std::get_if<CacheInvalidation>(&*sink.received);
+    REQUIRE(invalidation != nullptr);
+    CHECK(invalidation->epoch.value == 13);
+
+    for (int index = 0; index < 100; ++index)
+    {
+        endpoint.publishEvent(
+            DaemonStatusChanged{.status = {.lifecycle = DaemonLifecycle::Ready, .accounts = {}}});
+    }
+    CHECK_FALSE(endpoint.lastError().has_value());
+
+    endpoint.close();
+    client.disconnectFromDaemon();
+    REQUIRE_FALSE(endpoint.listen().has_value());
+    REQUIRE_FALSE(client.connectToDaemon().has_value());
+    CHECK(std::holds_alternative<ReadyReply>(
+        client.hello({.protocol = {.major = 1, .minor = 0},
+                      .build = {.application = QStringLiteral("Javelin-Mail"),
+                                .revision = QStringLiteral("test")}})));
+    CHECK_FALSE(client.ping().has_value());
+}
+
+TEST_CASE("socket endpoint rejects malformed peers and classifies lost replies",
+          "[protocol][socket]")
+{
+    QTemporaryDir runtimeDirectory;
+    REQUIRE(runtimeDirectory.isValid());
+    RecordingHandler handler;
+    const auto options = socketOptions(runtimeDirectory);
+    SocketEndpointThread endpoint{handler, options};
+    const auto listenError = endpoint.listen();
+    REQUIRE_FALSE(listenError.has_value());
+
+    QLocalSocket raw;
+    raw.connectToServer(options.socketPath);
+    REQUIRE(raw.waitForConnected(2000));
+    QByteArray unknown;
+    const auto valid = encodeSocketFrame(SocketFrameKind::PingRequest, 1, {});
+    REQUIRE(std::holds_alternative<QByteArray>(valid));
+    unknown = std::get<QByteArray>(valid);
+    unknown[6] = static_cast<char>(0x7f);
+    unknown[7] = static_cast<char>(0xff);
+    REQUIRE(raw.write(unknown) == unknown.size());
+    REQUIRE(raw.waitForReadyRead(2000));
+    SocketFrameDecoder decoder;
+    REQUIRE_FALSE(decoder.append(raw.readAll()).has_value());
+    const auto errorFrame = decoder.takeFrame();
+    REQUIRE(std::holds_alternative<std::optional<SocketFrame>>(errorFrame));
+    REQUIRE(std::get<std::optional<SocketFrame>>(errorFrame).has_value());
+    CHECK(std::get<std::optional<SocketFrame>>(errorFrame)->kind == SocketFrameKind::ProtocolError);
+    raw.abort();
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+
+    QLocalSocket malformedPeer;
+    malformedPeer.connectToServer(options.socketPath);
+    REQUIRE(malformedPeer.waitForConnected(2000));
+    QByteArray invalidCommandPayload(17, '\0');
+    invalidCommandPayload[16] = static_cast<char>(9);
+    const auto invalidCommand =
+        encodeSocketFrame(SocketFrameKind::CommandRequest, 2, invalidCommandPayload);
+    REQUIRE(std::holds_alternative<QByteArray>(invalidCommand));
+    const auto invalidCommandFrame = std::get<QByteArray>(invalidCommand);
+    REQUIRE(malformedPeer.write(invalidCommandFrame) == invalidCommandFrame.size());
+    REQUIRE(malformedPeer.waitForReadyRead(2000));
+    SocketFrameDecoder malformedPeerDecoder;
+    REQUIRE_FALSE(malformedPeerDecoder.append(malformedPeer.readAll()).has_value());
+    const auto malformedPeerReply = malformedPeerDecoder.takeFrame();
+    REQUIRE(std::holds_alternative<std::optional<SocketFrame>>(malformedPeerReply));
+    REQUIRE(std::get<std::optional<SocketFrame>>(malformedPeerReply).has_value());
+    CHECK(std::get<std::optional<SocketFrame>>(malformedPeerReply)->kind ==
+          SocketFrameKind::ProtocolError);
+    malformedPeer.abort();
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+
+    SocketDaemonClient client{options};
+    REQUIRE_FALSE(client.connectToDaemon().has_value());
+    REQUIRE(std::holds_alternative<ReadyReply>(
+        client.hello({.protocol = {.major = 1, .minor = 0},
+                      .build = {.application = QStringLiteral("Javelin-Mail"),
+                                .revision = QStringLiteral("test")}})));
+    SocketDaemonEndpoint* endpointPointer = endpoint.endpointForThreadCallback();
+    handler.onCommand = [endpointPointer] { endpointPointer->close(); };
+    const auto lostReply = client.submitCommand(refreshRequest());
+    REQUIRE(std::holds_alternative<CommandRejected>(lostReply));
+    CHECK(std::get<CommandRejected>(lostReply).error.code ==
+          BoundaryErrorCode::TransportUnavailable);
+    CHECK_FALSE(client.isConnected());
 }

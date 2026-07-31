@@ -11,6 +11,7 @@ target_link_libraries(javelin_protocol_tests
     PRIVATE
         Catch2::Catch2WithMain
         javelin_protocol
+        Qt::Network
 )
 javelin_set_project_warnings(javelin_protocol_tests)
 javelin_enable_static_analysis(javelin_protocol_tests)

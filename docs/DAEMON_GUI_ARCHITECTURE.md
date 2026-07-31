@@ -436,8 +436,20 @@ Daemon -> GUI
     SHUTTING_DOWN
 ```
 
-The exact encoding is an implementation choice. It must be framed, versioned, bounded, and reject
-unknown message kinds cleanly.
+The socket implementation uses a fixed 24-byte big-endian `JVIP` frame header:
+
+- bytes 0-3: magic (`JVIP`);
+- bytes 4-5: wire version (`1`);
+- bytes 6-7: typed message kind;
+- bytes 8-11: reserved flags (currently zero);
+- bytes 12-15: payload byte length;
+- bytes 16-23: request/reply correlation number.
+
+The payload is encoded with Qt 6.6 `QDataStream` in big-endian mode, but only through the explicit
+typed protocol codecs. It contains no Qt object pointers, C++ addresses, raw JMAP JSON, credentials,
+or mutable SQLite values. The configured maximum frame size includes the 24-byte header; partial
+frames are accumulated, while unsupported wire versions, unknown kinds, invalid enum/variant tags,
+trailing payload bytes, and over-limit values are rejected before dispatch.
 
 The connection also has explicit queue and coalescing policy. Command replies, settings replies,
 cache-access barriers, and activation requests are lossless and ordered. Cache invalidations merge
@@ -480,10 +492,13 @@ may also produce `OPERATION_FAILED` while the GUI is connected. The GUI never tr
 
 ### Locality
 
-The socket is local to the user's desktop session. It must not listen on a network interface.
-Use a private runtime-directory path, normal local socket permissions, and peer credential checking
-where readily available. This is basic process hygiene, not a separate sandbox or adversarial
-security design.
+The socket is local to the user's desktop session. It must not listen on a network interface. The
+endpoint and client require an existing private runtime directory, require the socket path to remain
+inside that directory, and check same-user peer credentials on Linux and macOS when enabled. Both
+directions use ordered writes with independently bounded frame and byte queues. Replies and barrier
+events remain lossless; invalidations merge bounded domains and keys, while status/settings events
+replace older queued values. A queue that cannot retain a lossless value disconnects with a classified
+overflow rather than allocating without limit.
 
 ## Cache invalidation and refresh
 

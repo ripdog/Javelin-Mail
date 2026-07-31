@@ -41,11 +41,13 @@ add_library(javelin_protocol STATIC
     src/protocol/InProcessEndpoint.h
     src/protocol/ProcessBoundary.cpp
     src/protocol/ProcessBoundary.h
+    src/protocol/SocketTransport.cpp
+    src/protocol/SocketTransport.h
 )
 target_include_directories(javelin_protocol PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
 )
-target_link_libraries(javelin_protocol PUBLIC Qt::Core)
+target_link_libraries(javelin_protocol PUBLIC Qt::Core Qt::Network)
 javelin_set_project_warnings(javelin_protocol)
 javelin_enable_static_analysis(javelin_protocol)
 javelin_enable_sanitizers(javelin_protocol)
@@ -71,6 +73,9 @@ javelin_enable_static_analysis(javelin_cache_read)
 javelin_enable_sanitizers(javelin_cache_read)
 
 set(JAVELIN_FORMAT_FILES
+    src/protocol/SocketTransport.cpp
+    src/protocol/SocketTransport.h
+    tests/protocol/ProcessBoundaryTest.cpp
     src/jmap/sync/PreferredStateChangeSource.cpp
     src/jmap/sync/PreferredStateChangeSource.h
     src/jmap/sync/EmailMutationQueue.cpp

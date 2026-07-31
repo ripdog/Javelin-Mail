@@ -579,6 +579,20 @@ and [Locality](DAEMON_GUI_ARCHITECTURE.md#locality).
 - No C++ object address, Qt object, raw JMAP payload, bearer token, or mutable SQLite object crosses the
   socket.
 
+### Implementation status
+
+Phase 8 is complete. `javelin_protocol` now provides a typed `SocketDaemonEndpoint` and
+`SocketDaemonClient` alongside the in-process endpoint. The implementation uses the documented
+24-byte `JVIP` header, Qt 6.6 big-endian payload codecs, negotiated protocol/build identity, bounded
+correlated request/reply queues, ordered asynchronous writes, event coalescing, runtime-directory
+and peer-credential checks, explicit disconnect classification, and materialization-scope cleanup.
+
+The protocol tests run the common typed surface against both endpoint implementations and cover
+partial and oversized frames, invalid variants and enums, unknown kinds, malformed-peer rejection,
+lost replies during admission, bounded event delivery, reconnect, and cache-access barrier
+acknowledgement. The production socket path carries only typed boundary values; it does not expose
+Qt objects, raw JMAP data, bearer credentials, or mutable SQLite state.
+
 ## Phase 9: split executables and implement lifecycle
 
 This phase implements [Split the executables](DAEMON_GUI_ARCHITECTURE.md#7-split-the-executables),
