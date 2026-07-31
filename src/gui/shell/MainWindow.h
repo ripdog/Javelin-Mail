@@ -49,7 +49,7 @@ namespace javelin::app
     class UndoCommandPort;
     class MailboxSession;
     class MessageListSession;
-    class MessageNavigationCoordinator;
+    class MessageNavigationPort;
     class SearchSession;
     class TranslationPort;
     struct OpenEmailRoute;
@@ -129,28 +129,28 @@ namespace javelin::gui::shell
         Q_OBJECT
 
       public:
-        explicit MainWindow(
-            javelin::app::AccountCommandPort& accountCommandPort,
-            javelin::jmap::cache::AccountReader& accountReader,
-            javelin::jmap::cache::MailboxReader& mailboxReader,
-            javelin::jmap::cache::ContactReader& contactReader,
-            javelin::jmap::calendar::CalendarReader& calendarReader,
-            javelin::app::CalendarCommandPort& calendarCommandPort,
-            javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
-            javelin::jmap::cache::IdentityReader& identityReader,
-            javelin::jmap::cache::MessageViewReader& messageViewReader,
-            javelin::jmap::cache::QueryReader& queryReader,
-            javelin::app::TranslationPort& translationPort,
-            javelin::app::ComposeCommandPort& composeCommandPort,
-            javelin::app::ContactCommandPort& contactCommandPort,
-            javelin::app::MailCommandPort& mailCommandPort,
-            javelin::app::SieveCommandPort& sieveCommandPort,
-            javelin::app::AccountRefreshPort& accountRefreshPort,
-            javelin::app::MessageContentPort& messageContentPort,
-            javelin::app::MessageListSessionFactoryPort& messageListSessionFactory,
-            javelin::app::MailApplicationEventsPort& mailEvents,
-            javelin::app::MessageNavigationCoordinator& messageNavigationCoordinator,
-            javelin::app::UndoCommandPort& undoCommandPort, QWidget* parent = nullptr);
+        explicit MainWindow(javelin::app::AccountCommandPort& accountCommandPort,
+                            javelin::jmap::cache::AccountReader& accountReader,
+                            javelin::jmap::cache::MailboxReader& mailboxReader,
+                            javelin::jmap::cache::ContactReader& contactReader,
+                            javelin::jmap::calendar::CalendarReader& calendarReader,
+                            javelin::app::CalendarCommandPort& calendarCommandPort,
+                            javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
+                            javelin::jmap::cache::IdentityReader& identityReader,
+                            javelin::jmap::cache::MessageViewReader& messageViewReader,
+                            javelin::jmap::cache::QueryReader& queryReader,
+                            javelin::app::TranslationPort& translationPort,
+                            javelin::app::ComposeCommandPort& composeCommandPort,
+                            javelin::app::ContactCommandPort& contactCommandPort,
+                            javelin::app::MailCommandPort& mailCommandPort,
+                            javelin::app::SieveCommandPort& sieveCommandPort,
+                            javelin::app::AccountRefreshPort& accountRefreshPort,
+                            javelin::app::MessageContentPort& messageContentPort,
+                            javelin::app::MessageListSessionFactoryPort& messageListSessionFactory,
+                            javelin::app::MailApplicationEventsPort& mailEvents,
+                            javelin::app::MessageNavigationPort& messageNavigationPort,
+                            javelin::app::UndoCommandPort& undoCommandPort,
+                            QWidget* parent = nullptr);
         ~MainWindow() override;
         void openPreferencesForConnection(const QString& connectionId);
         void restoreDraft(const QString& accountId, const QString& draftEmailId,
@@ -285,7 +285,7 @@ namespace javelin::gui::shell
         javelin::app::MessageContentPort& m_messageContentPort;
         javelin::app::MessageListSessionFactoryPort& m_messageListSessionFactory;
         javelin::app::MailApplicationEventsPort& m_mailEvents;
-        javelin::app::MessageNavigationCoordinator& m_messageNavigationCoordinator;
+        javelin::app::MessageNavigationPort& m_messageNavigationPort;
         javelin::app::UndoCommandPort& m_undoCommandPort;
         AccountRefreshController* m_accountRefreshController = nullptr;
         CalendarTabController* m_calendarTabController = nullptr;

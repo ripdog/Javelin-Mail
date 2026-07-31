@@ -2,8 +2,8 @@
 
 #include "app/ComposeService.h"
 #include "app/ContactApplicationPorts.h"
+#include "app/DaemonServices.h"
 #include "app/MailApplicationService.h"
-#include "app/ProcessServices.h"
 #include "app/undo/AddressBookHistoryExecutor.h"
 #include "app/undo/AddressBookHistoryPort.h"
 #include "app/undo/CalendarHistoryExecutor.h"
@@ -369,7 +369,7 @@ namespace javelin::tools
         }
 
         [[nodiscard]] QCoro::Task<ContactFixtureContext>
-        contactContext(javelin::app::ProcessServices& services,
+        contactContext(javelin::app::DaemonServices& services,
                        const AutonomousSuiteAccount& account, const std::string& runTag)
         {
             auto* contactPort = dynamic_cast<ContactHistoryPort*>(&services.contactCommandPort());
@@ -412,7 +412,7 @@ namespace javelin::tools
             throw std::runtime_error("no writable contact address book is available");
         }
 
-        [[nodiscard]] QCoro::Task<void> runContacts(javelin::app::ProcessServices& services,
+        [[nodiscard]] QCoro::Task<void> runContacts(javelin::app::DaemonServices& services,
                                                     const AutonomousSuiteAccount& account,
                                                     const std::string& runTag)
         {
@@ -536,7 +536,7 @@ namespace javelin::tools
                 throw operationFailure("address-book cleanup", *error);
         }
 
-        [[nodiscard]] QCoro::Task<void> runAddressBooks(javelin::app::ProcessServices& services,
+        [[nodiscard]] QCoro::Task<void> runAddressBooks(javelin::app::DaemonServices& services,
                                                         const AutonomousSuiteAccount& account,
                                                         const std::string& accountId,
                                                         const std::string& runTag)
@@ -751,7 +751,7 @@ namespace javelin::tools
             }
         }
 
-        [[nodiscard]] QCoro::Task<void> runCalendar(javelin::app::ProcessServices& services,
+        [[nodiscard]] QCoro::Task<void> runCalendar(javelin::app::DaemonServices& services,
                                                     const AutonomousSuiteAccount& account,
                                                     const std::string& runTag)
         {
@@ -915,7 +915,7 @@ namespace javelin::tools
                 std::rethrow_exception(failure);
         }
 
-        [[nodiscard]] QCoro::Task<void> runDraft(javelin::app::ProcessServices& services,
+        [[nodiscard]] QCoro::Task<void> runDraft(javelin::app::DaemonServices& services,
                                                  const AutonomousSuiteAccount& account,
                                                  const std::string& runTag)
         {
@@ -1023,7 +1023,7 @@ namespace javelin::tools
         }
     } // namespace
 
-    QCoro::Task<int> runUndoRedoAutonomousSuite(javelin::app::ProcessServices& services,
+    QCoro::Task<int> runUndoRedoAutonomousSuite(javelin::app::DaemonServices& services,
                                                 AutonomousSuiteAccount account)
     {
         const auto runTag =

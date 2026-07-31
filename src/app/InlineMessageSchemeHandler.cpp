@@ -2,7 +2,7 @@
 #include "app/WebEngineSetup.h"
 
 #include "jmap/cache/MimeMessageParser.h"
-#include "jmap/cache/RawMessageSourceRepository.h"
+#include "jmap/cache/RawMessageSourceReadRepository.h"
 #include "jmap/render/InlineMessageUrl.h"
 
 #include <QBuffer>
@@ -35,7 +35,7 @@ namespace javelin::app
     } // namespace
 
     InlineMessageSchemeHandler::InlineMessageSchemeHandler(
-        javelin::jmap::cache::DatabaseConnection& connection, QObject* parent)
+        const javelin::jmap::cache::ReadOnlyDatabaseConnection& connection, QObject* parent)
         : QWebEngineUrlSchemeHandler(parent), m_connection(connection)
     {
     }
@@ -64,7 +64,8 @@ namespace javelin::app
             return std::nullopt;
         }
 
-        javelin::jmap::cache::RawMessageSourceRepository repository{m_connection};
+        const javelin::jmap::cache::DatabaseReadView readView{m_connection};
+        javelin::jmap::cache::RawMessageSourceReadRepository repository{readView};
         const auto sourceResult = repository.find(parts->accountId, parts->emailId);
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&sourceResult))
         {

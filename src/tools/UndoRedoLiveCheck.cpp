@@ -1,8 +1,8 @@
 #include "app/ComposeService.h"
 #include "app/ContactApplicationPorts.h"
+#include "app/DaemonServices.h"
 #include "app/DeferredSendService.h"
 #include "app/MailApplicationService.h"
-#include "app/ProcessServices.h"
 #include "app/undo/AddressBookHistoryExecutor.h"
 #include "app/undo/AddressBookHistoryPort.h"
 #include "app/undo/CalendarHistoryExecutor.h"
@@ -210,7 +210,7 @@ namespace
     class ExecutorRegistry
     {
       public:
-        explicit ExecutorRegistry(javelin::app::ProcessServices& services)
+        explicit ExecutorRegistry(javelin::app::DaemonServices& services)
             : m_draft{services.composeService()}, m_mail{services.mailService()},
               m_sieve{services.mailService()}, m_calendar{services.mailService()},
               m_calendarPreference{services.mailService()},
@@ -243,7 +243,7 @@ namespace
         template <typename Port> [[nodiscard]] static Port& required(Port* port, const char* name)
         {
             if (port == nullptr)
-                throw std::runtime_error(std::string{"ProcessServices did not expose "} + name);
+                throw std::runtime_error(std::string{"DaemonServices did not expose "} + name);
             return *port;
         }
 
@@ -363,7 +363,7 @@ int main(int argc, char* argv[])
         if (connections.empty())
             throw std::runtime_error("No complete configured Javelin connection is available");
 
-        javelin::app::ProcessServices services{false};
+        javelin::app::DaemonServices services;
         services.mailService().applySettings(syncConfigurations(connections));
         const bool autonomous = parser.isSet(QStringLiteral("autonomous"));
         if (autonomous)

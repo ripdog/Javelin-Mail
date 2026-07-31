@@ -13,7 +13,7 @@ causality, cache projections, and reconciliation. GUI code selects user intent, 
 state, and presents typed failures; it never constructs inverse JMAP patches or reads generic
 mutation rows.
 
-`ProcessServices` owns one `UndoManager`, so history and deferred sends outlive any `MainWindow`.
+`DaemonServices` owns one `UndoManager`, so history and deferred sends outlive any `MainWindow`.
 Nested work uses `CommandOrigin::SystemChild` and never registers a second history entry.
 
 ## Durable entry lifecycle

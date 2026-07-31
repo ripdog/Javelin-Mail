@@ -8,7 +8,7 @@
 #include "app/MessageContentApplicationPorts.h"
 #include "app/MessageListSession.h"
 #include "app/MessageListSessionFactory.h"
-#include "app/MessageNavigationCoordinator.h"
+#include "app/MessageNavigationPort.h"
 #include "app/SearchSession.h"
 #include "app/TranslationApplicationPorts.h"
 #include "app/UndoApplicationPorts.h"
@@ -253,7 +253,7 @@ namespace javelin::gui::shell
                            javelin::app::MessageContentPort& messageContentPort,
                            javelin::app::MessageListSessionFactoryPort& messageListSessionFactory,
                            javelin::app::MailApplicationEventsPort& mailEvents,
-                           javelin::app::MessageNavigationCoordinator& messageNavigationCoordinator,
+                           javelin::app::MessageNavigationPort& messageNavigationPort,
                            javelin::app::UndoCommandPort& undoCommandPort, QWidget* parent)
         : KXmlGuiWindow(parent), m_accountCommandPort(accountCommandPort),
           m_accountReader(accountReader), m_mailboxReader(mailboxReader),
@@ -266,8 +266,7 @@ namespace javelin::gui::shell
           m_sieveCommandPort(sieveCommandPort), m_accountRefreshPort(accountRefreshPort),
           m_messageContentPort(messageContentPort),
           m_messageListSessionFactory(messageListSessionFactory), m_mailEvents(mailEvents),
-          m_messageNavigationCoordinator(messageNavigationCoordinator),
-          m_undoCommandPort(undoCommandPort)
+          m_messageNavigationPort(messageNavigationPort), m_undoCommandPort(undoCommandPort)
     {
         m_statusBar = new LayeredStatusBar(this);
         setStatusBar(m_statusBar);
@@ -438,7 +437,7 @@ namespace javelin::gui::shell
         m_messageListTabController = new MessageListTabController(
             m_queryReader, m_messageListSessionFactory, pageSize, this, this);
         m_messageNavigationController = std::make_unique<MessageNavigationController>(
-            m_messageNavigationCoordinator, *m_messageListTabController);
+            m_messageNavigationPort, *m_messageListTabController);
         m_messageContentController = new MessageContentController(m_messageContentPort, this);
         connect(m_messageViewContainer,
                 &javelin::gui::messageview::MessageViewContainer::contentRequired,
@@ -522,9 +521,8 @@ namespace javelin::gui::shell
                  QStringLiteral("javelinmailui.rc"));
         updateToolbarForActiveTab();
         connectSelection();
-        connect(&m_messageNavigationCoordinator,
-                &javelin::app::MessageNavigationCoordinator::routeRequested, this,
-                &MainWindow::openEmailRoute);
+        connect(&m_messageNavigationPort, &javelin::app::MessageNavigationPort::routeRequested,
+                this, &MainWindow::openEmailRoute);
         const auto applyAccountStatus = [this](const QString& accountId, const auto status)
         {
             using Model = javelin::gui::mailboxes::MailboxTreeModel;
@@ -1361,7 +1359,7 @@ namespace javelin::gui::shell
         connect(m_tabBar, &QTabBar::currentChanged, this,
                 [this](const int index)
                 {
-                    m_messageNavigationCoordinator.cancel();
+                    m_messageNavigationPort.cancel();
                     activateTab(index, true);
                 });
         connect(m_tabBar, &QTabBar::tabCloseRequested, this, &MainWindow::closeTab);
@@ -2048,7 +2046,7 @@ namespace javelin::gui::shell
             return;
         }
 
-        m_messageNavigationCoordinator.cancel();
+        m_messageNavigationPort.cancel();
 
         const auto currentIndex = m_mailboxView->currentIndex();
         const auto totalThreadsValue =

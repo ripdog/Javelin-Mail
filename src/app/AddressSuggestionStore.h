@@ -8,11 +8,6 @@
 
 #include <optional>
 
-namespace javelin::jmap::cache
-{
-    class DatabaseConnection;
-}
-
 namespace javelin::app
 {
     class AddressSuggestionStore final : public QObject
@@ -21,7 +16,7 @@ namespace javelin::app
 
       public:
         static AddressSuggestionStore& instance();
-        void initialize(javelin::jmap::cache::DatabaseConnection& connection);
+        void initialize(QString databasePath);
         [[nodiscard]] QStringListModel& model();
 
       public Q_SLOTS:

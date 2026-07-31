@@ -1,6 +1,7 @@
 #include "gui/tasks/TaskCenterDialog.h"
 
-#include "app/WorkScheduler.h"
+#include "app/WorkTaskModel.h"
+#include "app/WorkTaskPort.h"
 
 #include <QApplication>
 #include <QClipboard>
@@ -76,9 +77,9 @@ namespace javelin::gui::tasks
         class TaskActionDelegate final : public QStyledItemDelegate
         {
           public:
-            TaskActionDelegate(javelin::app::WorkScheduler& scheduler,
+            TaskActionDelegate(javelin::app::WorkTaskPort& taskPort,
                                javelin::app::WorkTaskModel& model, QObject* parent)
-                : QStyledItemDelegate(parent), m_scheduler(scheduler), m_model(model)
+                : QStyledItemDelegate(parent), m_taskPort(taskPort), m_model(model)
             {
             }
 
@@ -117,13 +118,13 @@ namespace javelin::gui::tasks
                 switch (actionForStatus(record->status))
                 {
                 case RowAction::Pause:
-                    static_cast<void>(m_scheduler.pause(jobId));
+                    static_cast<void>(m_taskPort.pause(jobId));
                     return true;
                 case RowAction::Resume:
-                    static_cast<void>(m_scheduler.resume(jobId));
+                    static_cast<void>(m_taskPort.resume(jobId));
                     return true;
                 case RowAction::Retry:
-                    static_cast<void>(m_scheduler.retry(jobId));
+                    static_cast<void>(m_taskPort.retry(jobId));
                     return true;
                 case RowAction::None:
                     return false;
@@ -132,12 +133,12 @@ namespace javelin::gui::tasks
             }
 
           private:
-            javelin::app::WorkScheduler& m_scheduler;
+            javelin::app::WorkTaskPort& m_taskPort;
             javelin::app::WorkTaskModel& m_model;
         };
     } // namespace
 
-    TaskCenterDialog::TaskCenterDialog(javelin::app::WorkScheduler& scheduler, QWidget* parent)
+    TaskCenterDialog::TaskCenterDialog(javelin::app::WorkTaskPort& taskPort, QWidget* parent)
         : QDialog(parent)
     {
         setWindowTitle(QStringLiteral("Task Center"));
@@ -145,14 +146,14 @@ namespace javelin::gui::tasks
         resize(760, 360);
 
         auto* layout = new QVBoxLayout(this);
-        m_model = new javelin::app::WorkTaskModel(scheduler, this);
+        m_model = new javelin::app::WorkTaskModel(taskPort, this);
         m_table = new QTableView(this);
         m_table->setModel(m_model);
         m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
         m_table->setSelectionMode(QAbstractItemView::SingleSelection);
         m_table->setAlternatingRowColors(true);
         m_table->setContextMenuPolicy(Qt::CustomContextMenu);
-        m_table->setItemDelegateForColumn(4, new TaskActionDelegate(scheduler, *m_model, m_table));
+        m_table->setItemDelegateForColumn(4, new TaskActionDelegate(taskPort, *m_model, m_table));
         m_table->horizontalHeader()->setStretchLastSection(false);
         m_table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
         m_table->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Stretch);

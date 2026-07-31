@@ -13,8 +13,9 @@ namespace javelin::app
     class InlineMessageSchemeHandler : public QWebEngineUrlSchemeHandler
     {
       public:
-        explicit InlineMessageSchemeHandler(javelin::jmap::cache::DatabaseConnection& connection,
-                                            QObject* parent = nullptr);
+        explicit InlineMessageSchemeHandler(
+            const javelin::jmap::cache::ReadOnlyDatabaseConnection& connection,
+            QObject* parent = nullptr);
 
         void requestStarted(QWebEngineUrlRequestJob* job) override;
 
@@ -28,7 +29,7 @@ namespace javelin::app
         [[nodiscard]] std::optional<ReplyPayload> buildReply(const QUrl& url) const;
         [[nodiscard]] static QByteArray unavailableInlineImageSvg(const QString& label);
 
-        javelin::jmap::cache::DatabaseConnection& m_connection;
+        const javelin::jmap::cache::ReadOnlyDatabaseConnection& m_connection;
     };
 
 } // namespace javelin::app

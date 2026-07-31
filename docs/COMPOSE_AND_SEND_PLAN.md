@@ -507,7 +507,7 @@ Expected actions:
 
 ## Integration Points
 
-### `ProcessServices`
+### `DaemonServices`
 
 Construct and expose:
 

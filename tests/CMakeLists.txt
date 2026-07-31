@@ -65,11 +65,14 @@ add_executable(javelin_jmap_tests
     ${PROJECT_SOURCE_DIR}/src/app/MessageSelection.cpp
     ${PROJECT_SOURCE_DIR}/src/app/MailboxSyncCoverage.cpp
     ${PROJECT_SOURCE_DIR}/src/app/MessageNavigationCoordinator.cpp
+    ${PROJECT_SOURCE_DIR}/src/app/MessageNavigationPort.h
     ${PROJECT_SOURCE_DIR}/src/app/SettingsRepository.cpp
     ${PROJECT_SOURCE_DIR}/src/app/SettingsRepository.h
     ${PROJECT_SOURCE_DIR}/src/app/TranslationService.cpp
     ${PROJECT_SOURCE_DIR}/src/app/TranslationService.h
     ${PROJECT_SOURCE_DIR}/src/app/WorkScheduler.cpp
+    ${PROJECT_SOURCE_DIR}/src/app/WorkScheduler.h
+    ${PROJECT_SOURCE_DIR}/src/app/WorkTaskPort.h
     ${PROJECT_SOURCE_DIR}/src/app/CacheInvalidationPublisher.cpp
     ${PROJECT_SOURCE_DIR}/src/app/CacheInvalidationPublisher.h
     FixtureReader.cpp
@@ -245,7 +248,7 @@ target_link_libraries(javelin_contacts_gui_tests
         Catch2::Catch2
         Qt::Widgets
         javelin_gui
-        javelin_jmap
+        javelin_daemon_core
 )
 javelin_set_project_warnings(javelin_contacts_gui_tests)
 javelin_enable_static_analysis(javelin_contacts_gui_tests)

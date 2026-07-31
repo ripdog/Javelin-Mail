@@ -1,10 +1,10 @@
 #include "app/WorkScheduler.h"
 
-#include <QDateTime>
 #include <QSqlError>
 #include <QSqlQuery>
 
 #include <algorithm>
+#include <utility>
 
 namespace javelin::app
 {
@@ -441,6 +441,12 @@ namespace javelin::app
                                  .arg(active == 1 ? QString{} : QStringLiteral("s"));
     }
 
+    QMetaObject::Connection WorkScheduler::connectChanged(QObject* context,
+                                                          std::function<void()> callback)
+    {
+        return QObject::connect(this, &WorkScheduler::jobsChanged, context, std::move(callback));
+    }
+
     std::optional<javelin::jmap::cache::DatabaseError>
     WorkScheduler::setControlStatus(const std::string_view jobId, const WorkStatus status,
                                     const bool pauseRequested)
@@ -458,160 +464,6 @@ namespace javelin::app
             return queryError(QStringLiteral("Control background job"), query);
         Q_EMIT jobsChanged();
         return std::nullopt;
-    }
-
-    WorkTaskModel::WorkTaskModel(WorkScheduler& scheduler, QObject* parent)
-        : QAbstractTableModel(parent), m_scheduler(scheduler)
-    {
-        m_reloadTimer.setSingleShot(true);
-        m_reloadTimer.setInterval(std::chrono::milliseconds{100});
-        connect(&m_reloadTimer, &QTimer::timeout, this, &WorkTaskModel::reload);
-        connect(&m_scheduler, &WorkScheduler::jobsChanged, this,
-                [this]()
-                {
-                    if (!m_reloadTimer.isActive())
-                        m_reloadTimer.start();
-                });
-        reload();
-    }
-
-    int WorkTaskModel::rowCount(const QModelIndex& parent) const
-    {
-        return parent.isValid() ? 0 : static_cast<int>(m_records.size());
-    }
-
-    int WorkTaskModel::columnCount(const QModelIndex& parent) const
-    {
-        return parent.isValid() ? 0 : 5;
-    }
-
-    QVariant WorkTaskModel::data(const QModelIndex& index, const int role) const
-    {
-        if (!index.isValid() || index.row() < 0 ||
-            static_cast<std::size_t>(index.row()) >= m_records.size())
-            return {};
-        const auto& item = m_records.at(static_cast<std::size_t>(index.row()));
-        if (role != Qt::DisplayRole)
-            return {};
-        switch (index.column())
-        {
-        case 0:
-            return item.title;
-        case 1:
-            return QString::fromStdString(std::string{toString(item.status)});
-        case 2:
-            if (item.progress.totalUnits && *item.progress.totalUnits > 0)
-                return QStringLiteral("%1 / %2")
-                    .arg(item.progress.completedUnits)
-                    .arg(*item.progress.totalUnits);
-            return item.progress.completedUnits > 0 ? QString::number(item.progress.completedUnits)
-                                                    : QStringLiteral("—");
-        case 3:
-            return item.errorText.value_or(item.progress.detail);
-        case 4:
-            return {};
-        default:
-            return {};
-        }
-    }
-
-    QVariant WorkTaskModel::headerData(const int section, const Qt::Orientation orientation,
-                                       const int role) const
-    {
-        if (orientation != Qt::Horizontal || role != Qt::DisplayRole)
-            return {};
-        switch (section)
-        {
-        case 0:
-            return QStringLiteral("Task");
-        case 1:
-            return QStringLiteral("State");
-        case 2:
-            return QStringLiteral("Progress");
-        case 3:
-            return QStringLiteral("Details");
-        case 4:
-            return QStringLiteral("Actions");
-        default:
-            return {};
-        }
-    }
-
-    const WorkRecord* WorkTaskModel::recordAt(const int row) const
-    {
-        return row >= 0 && static_cast<std::size_t>(row) < m_records.size()
-                   ? &m_records.at(static_cast<std::size_t>(row))
-                   : nullptr;
-    }
-
-    void WorkTaskModel::reload()
-    {
-        const auto result = m_scheduler.list();
-        const auto* records = std::get_if<std::vector<WorkRecord>>(&result);
-        if (records == nullptr)
-            return;
-        const bool sameRows =
-            m_records.size() == records->size() &&
-            std::ranges::equal(m_records, *records, {}, &WorkRecord::jobId, &WorkRecord::jobId);
-        if (!sameRows)
-        {
-            beginResetModel();
-            m_records = *records;
-            endResetModel();
-            return;
-        }
-        m_records = *records;
-        if (!m_records.empty())
-            Q_EMIT dataChanged(index(0, 0),
-                               index(static_cast<int>(m_records.size()) - 1, columnCount() - 1));
-    }
-
-    std::string_view toString(const WorkKind kind)
-    {
-        switch (kind)
-        {
-        case WorkKind::FullMailSync:
-            return "full_mail_sync";
-        case WorkKind::MessageDownload:
-            return "message_download";
-        case WorkKind::SearchIndex:
-            return "search_index";
-        case WorkKind::LegacyMigration:
-            return "legacy_migration";
-        case WorkKind::VaultProjection:
-            return "vault_projection";
-        case WorkKind::ContactRefresh:
-            return "contact_refresh";
-        case WorkKind::CalendarRefresh:
-            return "calendar_refresh";
-        case WorkKind::Maintenance:
-            return "maintenance";
-        }
-        return "maintenance";
-    }
-
-    std::string_view toString(const WorkStatus status)
-    {
-        switch (status)
-        {
-        case WorkStatus::Queued:
-            return "queued";
-        case WorkStatus::Running:
-            return "running";
-        case WorkStatus::Paused:
-            return "paused";
-        case WorkStatus::WaitingForSpace:
-            return "waiting_for_space";
-        case WorkStatus::WaitingForNetwork:
-            return "waiting_for_network";
-        case WorkStatus::WaitingForAuth:
-            return "waiting_for_auth";
-        case WorkStatus::Failed:
-            return "failed";
-        case WorkStatus::Complete:
-            return "complete";
-        }
-        return "queued";
     }
 
     WorkClass classify(const WorkKind kind)

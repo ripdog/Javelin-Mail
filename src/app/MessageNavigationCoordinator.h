@@ -1,24 +1,11 @@
 #pragma once
 
-#include <QObject>
-
-#include <cstdint>
-#include <optional>
-#include <string>
+#include "app/MessageNavigationPort.h"
 
 namespace javelin::app
 {
 
-    struct OpenEmailRoute
-    {
-        std::uint64_t id = 0;
-        std::string accountId;
-        std::string mailboxId;
-        std::optional<std::string> threadId;
-        std::string emailId;
-    };
-
-    class MessageNavigationCoordinator final : public QObject
+    class MessageNavigationCoordinator final : public MessageNavigationPort
     {
         Q_OBJECT
 
@@ -27,15 +14,11 @@ namespace javelin::app
 
         [[nodiscard]] std::uint64_t openEmail(std::string accountId, std::string mailboxId,
                                               std::optional<std::string> threadId,
-                                              std::string emailId);
-        [[nodiscard]] const std::optional<OpenEmailRoute>& currentRoute() const;
-        [[nodiscard]] bool isCurrent(std::uint64_t routeId) const;
-        void complete(std::uint64_t routeId);
-        void cancel();
-
-      Q_SIGNALS:
-        void routeRequested(const javelin::app::OpenEmailRoute& route);
-        void routeCleared(std::uint64_t routeId);
+                                              std::string emailId) override;
+        [[nodiscard]] const std::optional<OpenEmailRoute>& currentRoute() const override;
+        [[nodiscard]] bool isCurrent(std::uint64_t routeId) const override;
+        void complete(std::uint64_t routeId) override;
+        void cancel() override;
 
       private:
         std::optional<OpenEmailRoute> m_currentRoute;

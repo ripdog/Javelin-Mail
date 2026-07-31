@@ -5,7 +5,8 @@
 namespace javelin::app
 {
 
-    MessageNavigationCoordinator::MessageNavigationCoordinator(QObject* parent) : QObject(parent)
+    MessageNavigationCoordinator::MessageNavigationCoordinator(QObject* parent)
+        : MessageNavigationPort(parent)
     {
     }
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "app/MessageNavigationCoordinator.h"
+#include "app/MessageNavigationPort.h"
 #include "gui/messages/MessageSelectionRestoration.h"
 
 #include <cstddef>

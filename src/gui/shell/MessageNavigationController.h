@@ -1,6 +1,6 @@
 #pragma once
 
-#include "app/MessageNavigationCoordinator.h"
+#include "app/MessageNavigationPort.h"
 #include "gui/messages/MessageSelectionRestoration.h"
 #include "gui/shell/TabWorkspace.h"
 
@@ -23,7 +23,7 @@ namespace javelin::gui::shell
     class MessageNavigationController
     {
       public:
-        MessageNavigationController(javelin::app::MessageNavigationCoordinator& coordinator,
+        MessageNavigationController(javelin::app::MessageNavigationPort& coordinator,
                                     MessageListTabController& messageListTabController);
 
         void begin(TabState& tab, const javelin::app::OpenEmailRoute& route);
@@ -37,7 +37,7 @@ namespace javelin::gui::shell
                                       std::optional<std::string_view> selectedThreadId);
 
       private:
-        javelin::app::MessageNavigationCoordinator& m_coordinator;
+        javelin::app::MessageNavigationPort& m_coordinator;
         MessageListTabController& m_messageListTabController;
         std::optional<std::uint64_t> m_startedRouteId;
         std::optional<std::uint64_t> m_revealRequestedForRoute;

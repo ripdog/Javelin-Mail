@@ -54,8 +54,8 @@ This is the intended structure after the first major refactor:
 │   │   ├── main.cpp
 │   │   ├── ApplicationBootstrap.cpp
 │   │   ├── ApplicationBootstrap.h
-│   │   ├── ProcessServices.cpp
-│   │   └── ProcessServices.h
+│   │   ├── DaemonServices.cpp
+│   │   └── DaemonServices.h
 │   ├── jmap/
 │   │   ├── api/
 │   │   ├── cache/

@@ -7,7 +7,7 @@
 
 namespace javelin::app
 {
-    class ProcessServices;
+    class DaemonServices;
 }
 
 namespace javelin::tools
@@ -19,6 +19,6 @@ namespace javelin::tools
     };
 
     [[nodiscard]] QCoro::Task<int>
-    runUndoRedoAutonomousSuite(javelin::app::ProcessServices& services,
+    runUndoRedoAutonomousSuite(javelin::app::DaemonServices& services,
                                AutonomousSuiteAccount account);
 } // namespace javelin::tools

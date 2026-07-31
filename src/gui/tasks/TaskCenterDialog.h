@@ -6,7 +6,7 @@ class QTableView;
 
 namespace javelin::app
 {
-    class WorkScheduler;
+    class WorkTaskPort;
     class WorkTaskModel;
 } // namespace javelin::app
 
@@ -17,8 +17,7 @@ namespace javelin::gui::tasks
         Q_OBJECT
 
       public:
-        explicit TaskCenterDialog(javelin::app::WorkScheduler& scheduler,
-                                  QWidget* parent = nullptr);
+        explicit TaskCenterDialog(javelin::app::WorkTaskPort& taskPort, QWidget* parent = nullptr);
 
       private:
         javelin::app::WorkTaskModel* m_model = nullptr;

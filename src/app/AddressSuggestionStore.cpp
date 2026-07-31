@@ -7,6 +7,8 @@
 #include <QSqlQuery>
 #include <QtConcurrentRun>
 
+#include <utility>
+
 namespace javelin::app
 {
     namespace
@@ -78,9 +80,9 @@ namespace javelin::app
         return store;
     }
 
-    void AddressSuggestionStore::initialize(javelin::jmap::cache::DatabaseConnection& connection)
+    void AddressSuggestionStore::initialize(QString databasePath)
     {
-        m_databasePath = connection.database().databaseName();
+        m_databasePath = std::move(databasePath);
         refresh();
     }
 

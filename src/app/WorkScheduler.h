@@ -1,8 +1,9 @@
 #pragma once
 
+#include "app/WorkTaskPort.h"
+
 #include "jmap/cache/Database.h"
 
-#include <QAbstractTableModel>
 #include <QObject>
 #include <QTimer>
 
@@ -16,29 +17,6 @@
 
 namespace javelin::app
 {
-    enum class WorkKind
-    {
-        FullMailSync,
-        MessageDownload,
-        SearchIndex,
-        LegacyMigration,
-        VaultProjection,
-        ContactRefresh,
-        CalendarRefresh,
-        Maintenance,
-    };
-
-    enum class WorkPriority : int
-    {
-        Maintenance = 100,
-        Derived = 200,
-        Bulk = 300,
-        Freshness = 400,
-        Foreground = 500,
-        VisibleMaterialization = 550,
-        Interactive = 600,
-    };
-
     enum class WorkClass
     {
         ForegroundCommand,
@@ -47,42 +25,6 @@ namespace javelin::app
         Indexing,
         OfflineSynchronization,
         Maintenance,
-    };
-
-    enum class WorkStatus
-    {
-        Queued,
-        Running,
-        Paused,
-        WaitingForSpace,
-        WaitingForNetwork,
-        WaitingForAuth,
-        Failed,
-        Complete,
-    };
-
-    struct WorkProgress
-    {
-        std::uint64_t completedUnits = 0;
-        std::optional<std::uint64_t> totalUnits;
-        std::uint64_t completedBytes = 0;
-        std::optional<std::uint64_t> totalBytes;
-        QString detail;
-    };
-
-    struct WorkRecord
-    {
-        std::string jobId;
-        std::optional<std::string> parentJobId;
-        std::optional<std::string> accountId;
-        WorkKind kind = WorkKind::Maintenance;
-        WorkPriority priority = WorkPriority::Maintenance;
-        WorkStatus status = WorkStatus::Queued;
-        QString title;
-        WorkProgress progress;
-        QString checkpointJson = QStringLiteral("{}");
-        std::optional<QString> errorText;
-        bool pauseRequested = false;
     };
 
     struct WorkSpec
@@ -118,7 +60,7 @@ namespace javelin::app
         std::chrono::microseconds totalForegroundAdmissionLatency{};
     };
 
-    class WorkScheduler final : public QObject
+    class WorkScheduler final : public QObject, public WorkTaskPort
     {
         Q_OBJECT
 
@@ -137,13 +79,13 @@ namespace javelin::app
                QString checkpointJson = QStringLiteral("{}"),
                std::optional<QString> errorText = std::nullopt);
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
-        pause(std::string_view jobId);
+        pause(std::string_view jobId) override;
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
-        resume(std::string_view jobId);
+        resume(std::string_view jobId) override;
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
-        retry(std::string_view jobId);
+        retry(std::string_view jobId) override;
         [[nodiscard]] std::variant<std::vector<WorkRecord>, javelin::jmap::cache::DatabaseError>
-        list() const;
+        list() const override;
         [[nodiscard]] std::variant<std::optional<WorkRecord>, javelin::jmap::cache::DatabaseError>
         find(std::string_view jobId) const;
 
@@ -157,7 +99,9 @@ namespace javelin::app
         void beginForegroundWork();
         void endForegroundWork();
         [[nodiscard]] bool mayStartBackgroundNetwork() const;
-        [[nodiscard]] QString summary() const;
+        [[nodiscard]] QString summary() const override;
+        [[nodiscard]] QMetaObject::Connection
+        connectChanged(QObject* context, std::function<void()> callback) override;
 
       Q_SIGNALS:
         void jobsChanged();
@@ -179,31 +123,6 @@ namespace javelin::app
         std::size_t m_maxConcurrentAdmissions = 2;
     };
 
-    class WorkTaskModel final : public QAbstractTableModel
-    {
-        Q_OBJECT
-
-      public:
-        explicit WorkTaskModel(WorkScheduler& scheduler, QObject* parent = nullptr);
-        [[nodiscard]] int rowCount(const QModelIndex& parent = {}) const override;
-        [[nodiscard]] int columnCount(const QModelIndex& parent = {}) const override;
-        [[nodiscard]] QVariant data(const QModelIndex& index,
-                                    int role = Qt::DisplayRole) const override;
-        [[nodiscard]] QVariant headerData(int section, Qt::Orientation orientation,
-                                          int role = Qt::DisplayRole) const override;
-        [[nodiscard]] const WorkRecord* recordAt(int row) const;
-
-      public Q_SLOTS:
-        void reload();
-
-      private:
-        WorkScheduler& m_scheduler;
-        std::vector<WorkRecord> m_records;
-        QTimer m_reloadTimer;
-    };
-
-    [[nodiscard]] std::string_view toString(WorkKind kind);
-    [[nodiscard]] std::string_view toString(WorkStatus status);
     [[nodiscard]] WorkClass classify(WorkKind kind);
     [[nodiscard]] WorkClass classify(WorkKind kind, WorkPriority priority);
 

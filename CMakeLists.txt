@@ -51,6 +51,8 @@ javelin_enable_static_analysis(javelin_protocol)
 javelin_enable_sanitizers(javelin_protocol)
 
 add_library(javelin_cache_read STATIC
+    src/app/CacheAccessBarrier.cpp
+    src/app/CacheAccessBarrier.h
     src/jmap/cache/Database.cpp
     src/jmap/cache/Database.h
     src/jmap/cache/EmailReadRepository.cpp
@@ -223,8 +225,16 @@ set(JAVELIN_FORMAT_FILES
     src/app/MessageNavigationCoordinator.h
     src/app/WebEngineSetup.h
     src/app/main.cpp
-    src/app/ProcessServices.cpp
-    src/app/ProcessServices.h
+    src/app/DaemonServices.cpp
+    src/app/DaemonServices.h
+    src/app/DaemonBootstrap.cpp
+    src/app/DaemonBootstrap.h
+    src/app/GuiServices.cpp
+    src/app/GuiServices.h
+    src/app/MessageNavigationPort.h
+    src/app/WorkTaskModel.cpp
+    src/app/WorkTaskModel.h
+    src/app/WorkTaskPort.h
     src/gui/IconUtils.cpp
     src/gui/IconUtils.h
     src/gui/logging/LogViewerDialog.cpp
@@ -816,6 +826,15 @@ javelin_enable_static_analysis(javelin_jmap)
 javelin_enable_sanitizers(javelin_jmap)
 
 add_library(javelin_gui STATIC
+    src/app/AddressSuggestionStore.cpp
+    src/app/AddressSuggestionStore.h
+    src/app/GuiServices.cpp
+    src/app/GuiServices.h
+    src/app/InlineMessageSchemeHandler.cpp
+    src/app/InlineMessageSchemeHandler.h
+    src/app/WorkTaskModel.cpp
+    src/app/WorkTaskModel.h
+    src/app/WorkTaskPort.h
     src/gui/IconUtils.cpp
     src/gui/IconUtils.h
     src/gui/logging/LogViewerDialog.cpp
@@ -974,7 +993,9 @@ foreach(gui_source IN LISTS javelin_gui_boundary_sources)
        gui_source_contents MATCHES "javelin::jmap::LiveConnectionSettings" OR
        gui_source_contents MATCHES "javelin::jmap::api::((AddressBook|ContactCard)(Set|Copy)Request|ContactDocument)" OR
        gui_source_contents MATCHES "javelin::jmap::submission::ComposeService" OR
-       gui_source_contents MATCHES "javelin::app::LongPoll(Service|Coordinator|AccountConfiguration)")
+       gui_source_contents MATCHES "javelin::app::LongPoll(Service|Coordinator|AccountConfiguration)" OR
+       gui_source_contents MATCHES "#include \"app/(DaemonServices|ProcessServices|WorkScheduler|MessageNavigationCoordinator)\\.h\"" OR
+       gui_source_contents MATCHES "javelin::app::(DaemonServices|ProcessServices|WorkScheduler|MessageNavigationCoordinator|UndoManager)")
         message(FATAL_ERROR "GUI boundary violation in ${gui_source}")
     endif()
 endforeach()
@@ -1083,9 +1104,10 @@ target_link_libraries(javelin_gui
         KF6::ConfigWidgets
         KF6::XmlGui
         KF6::TextEditor
+        QCoro6::Coro
     PRIVATE
         Qt::Concurrent
-        javelin_application
+        javelin_cache_read
 )
 javelin_set_project_warnings(javelin_gui)
 javelin_enable_static_analysis(javelin_gui)
@@ -1108,13 +1130,13 @@ add_library(javelin_calendar_gui STATIC
 target_include_directories(javelin_calendar_gui PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
 )
-target_link_libraries(javelin_calendar_gui PUBLIC Qt::Widgets PRIVATE javelin_application)
+target_link_libraries(javelin_calendar_gui PUBLIC Qt::Widgets PRIVATE javelin_cache_read)
 javelin_set_project_warnings(javelin_calendar_gui)
 javelin_enable_static_analysis(javelin_calendar_gui)
 javelin_enable_sanitizers(javelin_calendar_gui)
 target_compile_options(javelin_calendar_gui PRIVATE -fexceptions)
 
-add_library(javelin_application STATIC
+add_library(javelin_daemon_core STATIC
     src/app/AccountApplicationPorts.h
     src/app/AccountCommandService.cpp
     src/app/AccountCommandService.h
@@ -1129,12 +1151,8 @@ add_library(javelin_application STATIC
     src/app/MailApplicationEventsPorts.h
     src/app/MailApplicationEventsService.cpp
     src/app/MailApplicationEventsService.h
-    src/app/CacheAccessBarrier.cpp
-    src/app/CacheAccessBarrier.h
     src/app/AccountConnectionProvider.h
     src/app/AccountConnectionSettings.h
-    src/app/AddressSuggestionStore.cpp
-    src/app/AddressSuggestionStore.h
     src/app/ApplicationErrorCoordinator.cpp
     src/app/ApplicationErrorCoordinator.h
     src/app/CacheLocationProvider.cpp
@@ -1214,8 +1232,6 @@ add_library(javelin_application STATIC
     src/app/undo/SieveHistoryPort.h
     src/app/undo/UndoManager.cpp
     src/app/undo/UndoManager.h
-    src/app/InlineMessageSchemeHandler.cpp
-    src/app/InlineMessageSchemeHandler.h
     src/app/LocalMaintenanceService.cpp
     src/app/LocalMaintenanceService.h
     src/app/LogStore.cpp
@@ -1235,10 +1251,13 @@ add_library(javelin_application STATIC
     src/app/MessageListSession.h
     src/app/MessageNavigationCoordinator.cpp
     src/app/MessageNavigationCoordinator.h
+    src/app/MessageNavigationPort.h
     src/app/MessageSelection.cpp
     src/app/MessageSelection.h
-    src/app/ProcessServices.cpp
-    src/app/ProcessServices.h
+    src/app/DaemonBootstrap.cpp
+    src/app/DaemonBootstrap.h
+    src/app/DaemonServices.cpp
+    src/app/DaemonServices.h
     src/app/SearchSession.cpp
     src/app/SearchSession.h
     src/app/SettingsRepository.cpp
@@ -1247,14 +1266,14 @@ add_library(javelin_application STATIC
     src/app/TranslationService.h
     src/app/WorkScheduler.cpp
     src/app/WorkScheduler.h
+    src/app/WorkTaskPort.h
 )
-target_include_directories(javelin_application PUBLIC
+target_include_directories(javelin_daemon_core PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
 )
-target_link_libraries(javelin_application
+target_link_libraries(javelin_daemon_core
     PUBLIC
         Qt::Core
-        Qt::WebEngineCore
         javelin_protocol
         javelin_jmap
     PRIVATE
@@ -1263,11 +1282,33 @@ target_link_libraries(javelin_application
         Qt::DBus
         Qt::Network
 )
-javelin_set_project_warnings(javelin_application)
-javelin_enable_static_analysis(javelin_application)
-javelin_enable_sanitizers(javelin_application)
-# QCoro and ProcessServices use exceptions internally
-target_compile_options(javelin_application PRIVATE -fexceptions)
+javelin_set_project_warnings(javelin_daemon_core)
+javelin_enable_static_analysis(javelin_daemon_core)
+javelin_enable_sanitizers(javelin_daemon_core)
+# QCoro and daemon composition use exceptions internally
+target_compile_options(javelin_daemon_core PRIVATE -fexceptions)
+
+# Phase 7 composition checks.  The daemon target is the socket-safe half of
+# the application graph; GUI support is linked only by the thin in-process
+# bootstrap target below.
+get_target_property(javelin_daemon_core_links javelin_daemon_core LINK_LIBRARIES)
+if(javelin_daemon_core_links MATCHES "Qt::(Widgets|Gui)|Qt::WebEngine")
+    message(FATAL_ERROR "javelin_daemon_core must not link GUI or WebEngine targets")
+endif()
+get_target_property(javelin_gui_links javelin_gui LINK_LIBRARIES)
+if(javelin_gui_links MATCHES "javelin_daemon_core|javelin_jmap")
+    message(FATAL_ERROR "javelin_gui must not link daemon or JMAP transport targets")
+endif()
+
+get_target_property(javelin_daemon_core_sources javelin_daemon_core SOURCES)
+foreach(daemon_source IN LISTS javelin_daemon_core_sources)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${daemon_source}")
+        file(READ "${CMAKE_CURRENT_SOURCE_DIR}/${daemon_source}" daemon_source_contents)
+        if(daemon_source_contents MATCHES "QWebEngine|QWidget|QApplication|MainWindow")
+            message(FATAL_ERROR "Daemon boundary violation in ${daemon_source}")
+        endif()
+    endif()
+endforeach()
 
 add_library(javelin_app STATIC
     src/app/ApplicationBootstrap.cpp
@@ -1315,17 +1356,16 @@ target_link_libraries(javelin_app
     PUBLIC
         Qt::Core
         Qt::Widgets
-        Qt::WebEngineCore
         Qt::Svg
         KF6::CoreAddons
     PRIVATE
-        javelin_application
         javelin_gui
+        javelin_daemon_core
 )
 javelin_set_project_warnings(javelin_app)
 javelin_enable_static_analysis(javelin_app)
 javelin_enable_sanitizers(javelin_app)
-# QCoro and ProcessServices use exceptions internally
+# QCoro and daemon bootstrap use exceptions internally
 target_compile_options(javelin_app PRIVATE -fexceptions)
 
 qt_add_executable(Javelin-Mail
@@ -1354,7 +1394,7 @@ qt_add_executable(javelin-undo-live-check
     src/tools/UndoRedoAutonomousSuite.h
     src/tools/UndoRedoLiveCheck.cpp
 )
-target_link_libraries(javelin-undo-live-check PRIVATE javelin_application Qt::Widgets)
+target_link_libraries(javelin-undo-live-check PRIVATE javelin_daemon_core Qt::Widgets)
 target_compile_options(javelin-undo-live-check PRIVATE -fexceptions)
 javelin_set_project_warnings(javelin-undo-live-check)
 javelin_enable_sanitizers(javelin-undo-live-check)

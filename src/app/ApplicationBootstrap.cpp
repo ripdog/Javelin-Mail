@@ -3,14 +3,16 @@
 #include "app/AddressSuggestionStore.h"
 #include "app/ApplicationErrorCoordinator.h"
 #include "app/CalendarNotificationService.h"
+#include "app/DaemonBootstrap.h"
+#include "app/DaemonServices.h"
 #include "app/DeferredSendService.h"
 #include "app/DesktopNotificationController.h"
 #include "app/FullMailSyncService.h"
+#include "app/GuiServices.h"
 #include "app/LocalMaintenanceService.h"
 #include "app/MailApplicationService.h"
 #include "app/MailIndexService.h"
-#include "app/MessageNavigationCoordinator.h"
-#include "app/ProcessServices.h"
+#include "app/MessageNavigationPort.h"
 #include "app/TranslationApplicationPorts.h"
 #include "app/WorkScheduler.h"
 #include "gui/settings/PreferencesDialog.h"
@@ -149,12 +151,26 @@ namespace javelin::app
     } // namespace
 
     ApplicationBootstrap::ApplicationBootstrap(QApplication& application)
-        : m_application(application), m_processServices(std::make_unique<ProcessServices>()),
+        : m_application(application), m_daemonBootstrap(std::make_unique<DaemonBootstrap>()),
+          m_guiServices(
+              std::make_unique<GuiServices>(m_daemonBootstrap->services().databasePath(),
+                                            m_daemonBootstrap->services().cacheAccessBarrier(),
+                                            m_daemonBootstrap->services().contactRepository())),
           m_notificationController(std::make_unique<DesktopNotificationController>())
     {
     }
 
     ApplicationBootstrap::~ApplicationBootstrap() = default;
+
+    DaemonServices& ApplicationBootstrap::daemonServices()
+    {
+        return m_daemonBootstrap->services();
+    }
+
+    GuiServices& ApplicationBootstrap::guiServices()
+    {
+        return *m_guiServices;
+    }
 
     int ApplicationBootstrap::run()
     {
@@ -164,7 +180,7 @@ namespace javelin::app
         aboutData.setOrganizationDomain("javelin.app");
         KAboutData::setApplicationData(aboutData);
         // Process services are constructed before KAboutData finalizes the QSettings identity.
-        m_processServices->translationService().reloadSettings();
+        daemonServices().translationService().reloadSettings();
 
         m_application.setWindowIcon(QIcon(QStringLiteral(":/icons/icon.svg")));
         m_application.setQuitOnLastWindowClosed(false);
@@ -175,16 +191,16 @@ namespace javelin::app
             { return !settings.loginEmail.isEmpty() && !settings.apiKey.isEmpty(); });
         if (!hasUsableConnection)
         {
-            javelin::gui::settings::PreferencesDialog dialog{
-                m_processServices->accountCommandPort(), m_processServices->accountReader(),
-                m_processServices->mailboxReader()};
+            javelin::gui::settings::PreferencesDialog dialog{daemonServices().accountCommandPort(),
+                                                             guiServices().accountReader(),
+                                                             guiServices().mailboxReader()};
             dialog.exec();
         }
 
         reloadAccountSynchronizationSettings();
         setupNetworkReachability();
         setupSystemTray();
-        m_processServices->deferredSendService().start();
+        daemonServices().deferredSendService().start();
         createMainWindow();
 
         return m_application.exec();
@@ -221,18 +237,17 @@ namespace javelin::app
         }
 
         m_mainWindow = new javelin::gui::shell::MainWindow(
-            m_processServices->accountCommandPort(), m_processServices->accountReader(),
-            m_processServices->mailboxReader(), m_processServices->contactReader(),
-            m_processServices->calendarReader(), m_processServices->calendarCommandPort(),
-            m_processServices->contactIdentityLookup(), m_processServices->identityReader(),
-            m_processServices->messageViewReader(), m_processServices->queryReader(),
-            m_processServices->translationService(), m_processServices->composeCommandPort(),
-            m_processServices->contactCommandPort(), m_processServices->mailCommandPort(),
-            m_processServices->sieveCommandPort(), m_processServices->accountRefreshPort(),
-            m_processServices->messageContentPort(), m_processServices->messageListSessionFactory(),
-            m_processServices->mailApplicationEvents(),
-            m_processServices->messageNavigationCoordinator(),
-            m_processServices->undoCommandPort());
+            daemonServices().accountCommandPort(), guiServices().accountReader(),
+            guiServices().mailboxReader(), guiServices().contactReader(),
+            guiServices().calendarReader(), daemonServices().calendarCommandPort(),
+            guiServices().contactIdentityLookup(), guiServices().identityReader(),
+            guiServices().messageViewReader(), guiServices().queryReader(),
+            daemonServices().translationService(), daemonServices().composeCommandPort(),
+            daemonServices().contactCommandPort(), daemonServices().mailCommandPort(),
+            daemonServices().sieveCommandPort(), daemonServices().accountRefreshPort(),
+            daemonServices().messageContentPort(), daemonServices().messageListSessionFactory(),
+            daemonServices().mailApplicationEvents(), daemonServices().messageNavigationPort(),
+            daemonServices().undoCommandPort());
 
         m_mainWindow->setAttribute(Qt::WA_DeleteOnClose);
         auto* taskButton = new QToolButton(m_mainWindow);
@@ -241,13 +256,13 @@ namespace javelin::app
         m_mainWindow->statusBar()->addPermanentWidget(taskButton);
         const auto updateTaskButton = [this, taskButton]()
         {
-            const QString summary = m_processServices->workScheduler().summary();
+            const QString summary = daemonServices().workScheduler().summary();
             taskButton->setText(summary);
             taskButton->setVisible(!summary.isEmpty());
         };
         QObject::connect(taskButton, &QToolButton::clicked, [this]() { showTaskCenter(); });
-        QObject::connect(&m_processServices->workScheduler(), &WorkScheduler::jobsChanged,
-                         taskButton, updateTaskButton);
+        QObject::connect(&daemonServices().workScheduler(), &WorkScheduler::jobsChanged, taskButton,
+                         updateTaskButton);
         updateTaskButton();
         QObject::connect(m_mainWindow, &javelin::gui::shell::MainWindow::accountSettingsChanged,
                          m_mainWindow, [this]() { reloadAccountSynchronizationSettings(); });
@@ -268,10 +283,10 @@ namespace javelin::app
                                 .mailboxIds = configuration.fullSyncMailboxIds});
             accountIds.push_back(configuration.accountId);
         }
-        m_processServices->mailService().applySettings(std::move(configurations));
-        m_processServices->fullMailSyncService().applySettings(std::move(fullSync));
-        m_processServices->mailIndexService().applyAccounts(std::move(accountIds));
-        m_processServices->localMaintenanceService().requestReplay();
+        daemonServices().mailService().applySettings(std::move(configurations));
+        daemonServices().fullMailSyncService().applySettings(std::move(fullSync));
+        daemonServices().mailIndexService().applyAccounts(std::move(accountIds));
+        daemonServices().localMaintenanceService().requestReplay();
     }
 
     void ApplicationBootstrap::setupNetworkReachability()
@@ -295,7 +310,7 @@ namespace javelin::app
                                  return;
                              qInfo() << QStringLiteral(
                                  "Network became reachable; reconnecting account synchronization");
-                             m_processServices->mailService().networkBecameReachable();
+                             daemonServices().mailService().networkBecameReachable();
                          });
     }
 
@@ -329,19 +344,19 @@ namespace javelin::app
 
         m_trayIcon->setContextMenu(m_trayMenu.get());
         QObject::connect(
-            &m_processServices->workScheduler(), &WorkScheduler::jobsChanged, &m_application,
+            &daemonServices().workScheduler(), &WorkScheduler::jobsChanged, &m_application,
             [this]()
             {
-                const QString summary = m_processServices->workScheduler().summary();
+                const QString summary = daemonServices().workScheduler().summary();
                 m_trayIcon->setToolTip(summary.isEmpty()
                                            ? QStringLiteral("Javelin Mail")
                                            : QStringLiteral("Javelin Mail — %1").arg(summary));
             });
 
-        if (const auto error = m_processServices->mailService().recoverMailNotificationDispatches())
+        if (const auto error = daemonServices().mailService().recoverMailNotificationDispatches())
             qWarning().noquote() << "Recover mail notification delivery:" << error->message;
         QObject::connect(
-            &m_processServices->mailService(), &MailApplicationService::notificationRaised,
+            &daemonServices().mailService(), &MailApplicationService::notificationRaised,
             m_notificationController.get(),
             [this](const QString& accountId, const QString& mailboxId, const QString& threadId,
                    const QString& emailId, const QString& mailboxName, const QString& title,
@@ -351,7 +366,7 @@ namespace javelin::app
                                                             mailboxName, title, message))
                 {
                     if (const auto error =
-                            m_processServices->mailService().markMailNotificationsDelivered(
+                            daemonServices().mailService().markMailNotificationsDelivered(
                                 accountId.toStdString(), mailboxId.toStdString(),
                                 deliveredEmailIds))
                         qWarning().noquote()
@@ -359,7 +374,7 @@ namespace javelin::app
                     return;
                 }
                 if (const auto error =
-                        m_processServices->mailService().releaseMailNotificationDispatches(
+                        daemonServices().mailService().releaseMailNotificationDispatches(
                             accountId.toStdString(), deliveredEmailIds))
                     qWarning().noquote() << "Release mail notification delivery:" << error->message;
                 QTimer::singleShot(
@@ -367,30 +382,30 @@ namespace javelin::app
                     [this, accountId]()
                     {
                         static_cast<void>(
-                            m_processServices->mailService().requestAccountSynchronization(
+                            daemonServices().mailService().requestAccountSynchronization(
                                 accountId.toStdString()));
                     });
             });
-        QObject::connect(&m_processServices->mailService(), &MailApplicationService::cacheCommitted,
-                         &AddressSuggestionStore::instance(), &AddressSuggestionStore::refresh);
-        QObject::connect(&m_processServices->mailService(), &MailApplicationService::cacheCommitted,
+        QObject::connect(&daemonServices().mailService(), &MailApplicationService::cacheCommitted,
+                         &guiServices().addressSuggestionStore(), &AddressSuggestionStore::refresh);
+        QObject::connect(&daemonServices().mailService(), &MailApplicationService::cacheCommitted,
                          &m_application,
                          [this](const MailCacheChange& change)
                          {
-                             m_processServices->localMaintenanceService().requestReplay();
+                             daemonServices().localMaintenanceService().requestReplay();
                              if (!change.optimisticProjection)
                              {
-                                 m_processServices->fullMailSyncService().requestCatchUp(
+                                 daemonServices().fullMailSyncService().requestCatchUp(
                                      change.accountId.toStdString());
                              }
                              if (change.hasNewMail)
                              {
-                                 m_processServices->mailIndexService().requestIndex(
+                                 daemonServices().mailIndexService().requestIndex(
                                      change.accountId.toStdString());
                              }
                          });
         QObject::connect(
-            &m_processServices->errorCoordinator(), &ApplicationErrorCoordinator::incidentRaised,
+            &daemonServices().errorCoordinator(), &ApplicationErrorCoordinator::incidentRaised,
             m_notificationController.get(),
             [this](const QString& connectionId, const QString&, const QString& title,
                    const QString& message, const bool persistent, const bool opensSettings)
@@ -408,30 +423,30 @@ namespace javelin::app
                 const auto thread = threadId.isEmpty()
                                         ? std::optional<std::string>{std::nullopt}
                                         : std::optional<std::string>{threadId.toStdString()};
-                static_cast<void>(m_processServices->messageNavigationCoordinator().openEmail(
+                static_cast<void>(daemonServices().messageNavigationPort().openEmail(
                     accountId.toStdString(), mailboxId.toStdString(), thread,
                     emailId.toStdString()));
             });
-        QObject::connect(
-            &m_processServices->calendarNotificationService(),
-            &CalendarNotificationService::reminderDue, m_notificationController.get(),
-            [this](const QString& key, const QString& title, const QString& message)
-            {
-                if (m_notificationController->notifyCalendarEvent(key, title, message))
-                    m_processServices->calendarNotificationService().deliveryAccepted(key);
-                else
-                    m_processServices->calendarNotificationService().deliveryFailed(key);
-            });
+        QObject::connect(&daemonServices().calendarNotificationService(),
+                         &CalendarNotificationService::reminderDue, m_notificationController.get(),
+                         [this](const QString& key, const QString& title, const QString& message)
+                         {
+                             if (m_notificationController->notifyCalendarEvent(key, title, message))
+                                 daemonServices().calendarNotificationService().deliveryAccepted(
+                                     key);
+                             else
+                                 daemonServices().calendarNotificationService().deliveryFailed(key);
+                         });
         QObject::connect(m_notificationController.get(),
                          &DesktopNotificationController::calendarNotificationAction, &m_application,
                          [this](const QString& key, const bool snooze)
                          {
                              if (snooze)
-                                 m_processServices->calendarNotificationService().snooze(key);
+                                 daemonServices().calendarNotificationService().snooze(key);
                              else
-                                 m_processServices->calendarNotificationService().dismiss(key);
+                                 daemonServices().calendarNotificationService().dismiss(key);
                          });
-        m_processServices->calendarNotificationService().start();
+        daemonServices().calendarNotificationService().start();
         QObject::connect(m_notificationController.get(),
                          &DesktopNotificationController::errorNotificationActivated, &m_application,
                          [this](const QString& connectionId, const QString& activationToken)
@@ -441,24 +456,21 @@ namespace javelin::app
                                  m_mainWindow->openPreferencesForConnection(connectionId);
                          });
         QObject::connect(
-            &m_processServices->deferredSendService(), &DeferredSendService::undoableSendScheduled,
+            &daemonServices().deferredSendService(), &DeferredSendService::undoableSendScheduled,
             m_notificationController.get(), &DesktopNotificationController::notifyUndoableSend);
         QObject::connect(
-            &m_processServices->deferredSendService(), &DeferredSendService::undoableSendWaiting,
+            &daemonServices().deferredSendService(), &DeferredSendService::undoableSendWaiting,
             m_notificationController.get(),
             [this](const QString& sendId, const QString& title, const QString& message)
             { m_notificationController->notifyUndoableSend(sendId, title, message, 0); });
-        QObject::connect(&m_processServices->deferredSendService(),
+        QObject::connect(&daemonServices().deferredSendService(),
                          &DeferredSendService::undoableSendClosed, m_notificationController.get(),
                          &DesktopNotificationController::closeUndoableSendNotification);
-        QObject::connect(m_notificationController.get(),
-                         &DesktopNotificationController::undoSendRequested, &m_application,
-                         [this](const QString& sendId)
-                         {
-                             static_cast<void>(
-                                 m_processServices->deferredSendService().cancelTargeted(sendId));
-                         });
-        QObject::connect(&m_processServices->deferredSendService(),
+        QObject::connect(
+            m_notificationController.get(), &DesktopNotificationController::undoSendRequested,
+            &m_application, [this](const QString& sendId)
+            { static_cast<void>(daemonServices().deferredSendService().cancelTargeted(sendId)); });
+        QObject::connect(&daemonServices().deferredSendService(),
                          &DeferredSendService::draftRestoreRequested, &m_application,
                          [this](const QString& accountId, const QString& draftEmailId,
                                 const QString& composeSessionId)
@@ -468,8 +480,8 @@ namespace javelin::app
                                  m_mainWindow->restoreDraft(accountId, draftEmailId,
                                                             composeSessionId);
                          });
-        QObject::connect(&m_processServices->deferredSendService(),
-                         &DeferredSendService::sendFailed, m_notificationController.get(),
+        QObject::connect(&daemonServices().deferredSendService(), &DeferredSendService::sendFailed,
+                         m_notificationController.get(),
                          [this](const QString&, const QString& message)
                          {
                              m_notificationController->notifyError(
@@ -494,7 +506,7 @@ namespace javelin::app
     {
         if (m_taskCenter == nullptr)
             m_taskCenter = new javelin::gui::tasks::TaskCenterDialog(
-                m_processServices->workScheduler(), m_mainWindow);
+                daemonServices().workScheduler(), m_mainWindow);
         m_taskCenter->show();
         m_taskCenter->raise();
         m_taskCenter->activateWindow();

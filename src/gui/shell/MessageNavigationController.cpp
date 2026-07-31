@@ -6,7 +6,7 @@
 namespace javelin::gui::shell
 {
     MessageNavigationController::MessageNavigationController(
-        javelin::app::MessageNavigationCoordinator& coordinator,
+        javelin::app::MessageNavigationPort& coordinator,
         MessageListTabController& messageListTabController)
         : m_coordinator(coordinator), m_messageListTabController(messageListTabController)
     {

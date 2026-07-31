@@ -52,8 +52,9 @@ migration, including while everything still runs in one process.
 
 ## Current migration surface
 
-The current monolithic process is assembled by `ApplicationBootstrap` and `ProcessServices`.
-`ProcessServices` owns the main database connection, JMAP transports, synchronization, repositories,
+The current in-process application is assembled by `DaemonBootstrap`, `DaemonServices`,
+`GuiServices`, and the GUI portion of `ApplicationBootstrap`. `DaemonServices` owns the main database
+connection, JMAP transports, synchronization, repositories,
 mutations, history, deferred send, indexing, maintenance, translation, and read services. It also
 installs a WebEngine URL scheme handler. `ApplicationBootstrap` owns the main window, system tray,
 notifications, network reachability, account settings application, and process lifetime.
@@ -68,8 +69,8 @@ The most important existing direct crossings are:
   preferences;
 - GUI presentation repositories share the same write-capable `DatabaseConnection` as operational
   services; and
-- `javelin_application` links `Qt::WebEngineCore` because GUI-only scheme handling is mixed into
-  `ProcessServices`.
+- `javelin_daemon_core` is GUI-free; WebEngine scheme handling now belongs to `GuiServices` and
+  the GUI target's read-only cache surface.
 
 These are migration inputs, not exceptions to the target architecture.
 
@@ -311,7 +312,7 @@ refresh, message content, attachment and source retrieval, message-list session 
 and mail observation. Migrated GUI consumers no longer include or accept the concrete application
 services for those slices, and CMake boundary checks reject those direct crossings.
 
-`ProcessServices` owns the shared `CommandDispatcher`. It validates typed protocol requests, preserves
+`DaemonServices` owns the shared `CommandDispatcher`. It validates typed protocol requests, preserves
 exact command identity for replay, rejects UUID reuse with a different payload, reports committed
 epochs and affected-key hints, keeps direct rejection separate from later operation failure, and maps
 the current refresh workflow into the process-boundary error taxonomy. Conformance coverage exercises
@@ -525,6 +526,26 @@ This phase prepares the codebase for two executables without yet adding socket t
 - No GUI controller retains a concrete daemon-service reference.
 - Introducing a socket no longer requires changing application semantics or controller APIs.
 
+### Implementation status
+
+Completed for the temporary in-process composition. `DaemonServices` and the daemon-safe
+`DaemonBootstrap` now own the writable database, transports, synchronization, mutation commands,
+history, deferred send, indexing, maintenance, notifications, and translation cache. `GuiServices`
+owns the GUI-thread read-only database connection and repositories, and registers that connection
+with the shared cache barrier.
+
+`InlineMessageSchemeHandler` and `QWebEngineProfile` installation moved out of daemon core. Inline
+message reads use `DatabaseReadView` and `RawMessageSourceReadRepository`, so GUI media access does
+not receive a write-capable connection. Address completion likewise opens its own read-only worker
+connection.
+
+The CMake graph now exposes `javelin_protocol`, `javelin_cache_read`, `javelin_daemon_core`,
+`javelin_gui`, and the thin `javelin_app` bootstrap. Configure-time checks reject GUI/WebEngine
+links in daemon core, daemon/JMAP transport links in the GUI target, and forbidden daemon includes
+in GUI sources. Task Center and message navigation consume `WorkTaskPort` and
+`MessageNavigationPort`; the single-process executable wires both roots without changing the GUI's
+typed command and read surfaces.
+
 ## Phase 8: framed local-socket transport
 
 This phase implements [Introduce the local socket](DAEMON_GUI_ARCHITECTURE.md#6-introduce-the-local-socket)
@@ -636,7 +657,7 @@ and [Move tray and notification ownership](DAEMON_GUI_ARCHITECTURE.md#8-move-tra
 
 1. Remove the temporary single-process composition executable and production use of the in-process
    endpoint. Retain the in-process endpoint only as a fast test implementation if useful.
-2. Delete `ProcessServices` and the old mixed `ApplicationBootstrap` once their responsibilities are
+2. Delete the remaining transitional bootstrap composition once its responsibilities are
    fully represented by the two composition roots.
 3. Remove all legacy direct settings helpers and storage access from GUI code.
 4. Remove all direct GUI service constructors and compatibility adapters.
