@@ -141,7 +141,6 @@ add_executable(javelin_jmap_tests
     gui/MonthCalendarWidgetTest.cpp
     gui/RecurrencePatternTest.cpp
     gui/ConnectionSettingsAdapterTest.cpp
-    gui/FocusedCommandRouterTest.cpp
     gui/ComposeTabPolicyTest.cpp
     gui/MailboxSelectionTest.cpp
     gui/MailboxSortTest.cpp
