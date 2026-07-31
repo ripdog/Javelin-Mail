@@ -157,7 +157,8 @@ namespace javelin::jmap::sync
         for (const auto& type : subscription.types)
             subscribedTypes.push_back(QString::fromStdString(type));
         qCDebug(logWebSocket).noquote()
-            << "push subscription sent for" << subscribedTypes.join(QStringLiteral(", "));
+            << "push subscription sent for" << subscribedTypes.join(QStringLiteral(", "))
+            << activity.serverBaseUrl();
 
         QTimer pingTimer;
         pingTimer.setInterval(requestedPushPingInterval);
