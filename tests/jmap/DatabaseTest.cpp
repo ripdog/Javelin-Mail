@@ -48,7 +48,7 @@ namespace
         return QStringLiteral("javelin-test-db-%1").arg(counter);
     }
 
-    [[nodiscard]] QString pragmaValue(QSqlDatabase& database, const QString& name)
+    [[nodiscard]] QString pragmaValue(const QSqlDatabase& database, const QString& name)
     {
         QSqlQuery query{database};
         REQUIRE(query.exec(QStringLiteral("PRAGMA %1").arg(name)));
@@ -189,6 +189,90 @@ TEST_CASE("database migrations are repeatable when reopening an existing cache",
         migrations, runner.steps(), [](const auto& applied, const auto& configured)
         { return applied.version == configured.version && applied.name == configured.name; }));
     CHECK(connection.schemaVersion() == runner.latestVersion());
+}
+
+TEST_CASE("GUI database factory opens an existing cache read-only", "[jmap][cache][database]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    QTemporaryDir temporaryDir;
+    REQUIRE(temporaryDir.isValid());
+    const QString databasePath = temporaryDir.filePath(QStringLiteral("cache.sqlite3"));
+
+    auto daemonResult = javelin::jmap::cache::DaemonDatabaseFactory{
+        javelin::jmap::cache::DatabaseConnectionOptions{
+            .connectionName = makeConnectionName(),
+            .databasePath = databasePath,
+        }}.open();
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(daemonResult));
+    auto daemon = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(daemonResult));
+    const auto expectedSchema =
+        javelin::jmap::cache::createDefaultMigrationRunner().latestVersion();
+    const auto writerDataVersion = daemon.dataVersion();
+    REQUIRE(std::holds_alternative<std::uint64_t>(writerDataVersion));
+    daemon = {};
+
+    auto guiResult = javelin::jmap::cache::GuiDatabaseFactory{
+        javelin::jmap::cache::ReadOnlyThreadConnectionFactoryOptions{
+            .connectionNamePrefix = QStringLiteral("javelin-gui-read"),
+            .databasePath = databasePath,
+            .busyTimeout = std::chrono::milliseconds{125},
+        }}.openForCurrentThread("mail-list");
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::ReadOnlyDatabaseConnection>(guiResult));
+    auto gui = std::get<javelin::jmap::cache::ReadOnlyDatabaseConnection>(std::move(guiResult));
+
+    CHECK(gui.schemaVersion() == expectedSchema);
+    const auto guiDataVersion = gui.dataVersion();
+    REQUIRE(std::holds_alternative<std::uint64_t>(guiDataVersion));
+    CHECK(std::get<std::uint64_t>(guiDataVersion) == std::get<std::uint64_t>(writerDataVersion));
+    CHECK(pragmaValue(gui.database(), QStringLiteral("query_only")) == QStringLiteral("1"));
+    CHECK(pragmaValue(gui.database(), QStringLiteral("busy_timeout")) == QStringLiteral("125"));
+
+    QSqlQuery writeQuery{gui.database()};
+    CHECK_FALSE(writeQuery.exec(QStringLiteral("CREATE TABLE must_not_be_created(value TEXT)")));
+    QSqlQuery schemaQuery{gui.database()};
+    REQUIRE(schemaQuery.exec(
+        QStringLiteral("SELECT COUNT(*) FROM sqlite_master WHERE name='must_not_be_created'")));
+    REQUIRE(schemaQuery.next());
+    CHECK(schemaQuery.value(0).toInt() == 0);
+}
+
+TEST_CASE("GUI database factory never migrates a legacy SQLite file", "[jmap][cache][database]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    QTemporaryDir temporaryDir;
+    REQUIRE(temporaryDir.isValid());
+    const QString databasePath = temporaryDir.filePath(QStringLiteral("legacy.sqlite3"));
+    {
+        QSqlDatabase fixture =
+            QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), makeConnectionName());
+        fixture.setDatabaseName(databasePath);
+        REQUIRE(fixture.open());
+        QSqlQuery create{fixture};
+        REQUIRE(create.exec(QStringLiteral("CREATE TABLE legacy_probe(value TEXT)")));
+        fixture.close();
+        const QString fixtureName = fixture.connectionName();
+        fixture = QSqlDatabase{};
+        QSqlDatabase::removeDatabase(fixtureName);
+    }
+
+    auto guiResult = javelin::jmap::cache::GuiDatabaseFactory{
+        javelin::jmap::cache::ReadOnlyThreadConnectionFactoryOptions{
+            .connectionNamePrefix = QStringLiteral("javelin-gui-read"),
+            .databasePath = databasePath,
+        }}.openForCurrentThread("legacy");
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::ReadOnlyDatabaseConnection>(guiResult));
+    auto gui = std::get<javelin::jmap::cache::ReadOnlyDatabaseConnection>(std::move(guiResult));
+
+    CHECK(gui.schemaVersion() == 0);
+    QSqlQuery probe{gui.database()};
+    REQUIRE(probe.exec(
+        QStringLiteral("SELECT COUNT(*) FROM sqlite_master WHERE name='schema_migrations'")));
+    REQUIRE(probe.next());
+    CHECK(probe.value(0).toInt() == 0);
 }
 
 TEST_CASE("thread connection factory encodes owner tag and current thread in connection names",

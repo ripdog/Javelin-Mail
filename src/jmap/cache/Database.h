@@ -5,6 +5,7 @@
 #include <Qt>
 
 #include <chrono>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -80,6 +81,20 @@ namespace javelin::jmap::cache
         std::chrono::milliseconds busyTimeout = std::chrono::seconds{30};
     };
 
+    struct ReadOnlyDatabaseConnectionOptions
+    {
+        QString connectionName;
+        QString databasePath;
+        std::chrono::milliseconds busyTimeout = std::chrono::milliseconds{250};
+    };
+
+    struct ReadOnlyThreadConnectionFactoryOptions
+    {
+        QString connectionNamePrefix;
+        QString databasePath;
+        std::chrono::milliseconds busyTimeout = std::chrono::milliseconds{250};
+    };
+
     class DatabaseConnection
     {
       public:
@@ -98,6 +113,7 @@ namespace javelin::jmap::cache
         [[nodiscard]] const QString& connectionName() const;
         [[nodiscard]] std::optional<DatabaseError> validate() const;
         [[nodiscard]] int schemaVersion() const;
+        [[nodiscard]] std::variant<std::uint64_t, DatabaseError> dataVersion() const;
         [[nodiscard]] std::variant<std::vector<AppliedMigration>, DatabaseError>
         appliedMigrations() const;
 
@@ -113,6 +129,60 @@ namespace javelin::jmap::cache
         QSqlDatabase m_database;
         std::shared_ptr<std::recursive_mutex> m_writeMutex;
         Qt::HANDLE m_ownerThread = nullptr;
+    };
+
+    class ReadOnlyDatabaseConnection
+    {
+      public:
+        ReadOnlyDatabaseConnection();
+        ReadOnlyDatabaseConnection(const ReadOnlyDatabaseConnection&) = delete;
+        ReadOnlyDatabaseConnection& operator=(const ReadOnlyDatabaseConnection&) = delete;
+        ReadOnlyDatabaseConnection(ReadOnlyDatabaseConnection&& other) noexcept;
+        ReadOnlyDatabaseConnection& operator=(ReadOnlyDatabaseConnection&& other) noexcept;
+        ~ReadOnlyDatabaseConnection();
+
+        [[nodiscard]] static std::variant<ReadOnlyDatabaseConnection, DatabaseError>
+        open(const ReadOnlyDatabaseConnectionOptions& options);
+
+        [[nodiscard]] const QSqlDatabase& database() const;
+        [[nodiscard]] const QString& connectionName() const;
+        [[nodiscard]] std::optional<DatabaseError> validate() const;
+        [[nodiscard]] int schemaVersion() const;
+        [[nodiscard]] std::variant<std::uint64_t, DatabaseError> dataVersion() const;
+
+      private:
+        ReadOnlyDatabaseConnection(QString connectionName, QSqlDatabase database);
+
+        void reset();
+
+        QString m_connectionName;
+        QSqlDatabase m_database;
+        Qt::HANDLE m_ownerThread = nullptr;
+    };
+
+    class DaemonDatabaseFactory final
+    {
+      public:
+        explicit DaemonDatabaseFactory(DatabaseConnectionOptions options);
+
+        [[nodiscard]] std::variant<DatabaseConnection, DatabaseError> open() const;
+
+      private:
+        DatabaseConnectionOptions m_options;
+    };
+
+    class GuiDatabaseFactory final
+    {
+      public:
+        explicit GuiDatabaseFactory(ReadOnlyThreadConnectionFactoryOptions options);
+
+        [[nodiscard]] std::variant<ReadOnlyDatabaseConnection, DatabaseError>
+        openForCurrentThread(std::string_view ownerTag) const;
+
+      private:
+        [[nodiscard]] QString makeConnectionName(std::string_view ownerTag) const;
+
+        ReadOnlyThreadConnectionFactoryOptions m_options;
     };
 
     class DatabaseWriteScope final
@@ -171,6 +241,21 @@ namespace javelin::jmap::cache
         [[nodiscard]] QString makeConnectionName(std::string_view ownerTag) const;
 
         ThreadConnectionFactoryOptions m_options;
+    };
+
+    class ReadOnlyThreadConnectionFactory
+    {
+      public:
+        explicit ReadOnlyThreadConnectionFactory(ReadOnlyThreadConnectionFactoryOptions options);
+
+        [[nodiscard]] static QString currentThreadTag();
+        [[nodiscard]] std::variant<ReadOnlyDatabaseConnection, DatabaseError>
+        openForCurrentThread(std::string_view ownerTag) const;
+
+      private:
+        [[nodiscard]] QString makeConnectionName(std::string_view ownerTag) const;
+
+        ReadOnlyThreadConnectionFactoryOptions m_options;
     };
 
     [[nodiscard]] MigrationRunner createDefaultMigrationRunner();

@@ -2,6 +2,7 @@
 
 #include "app/AddressSuggestionStore.h"
 #include "app/ApplicationErrorCoordinator.h"
+#include "app/CacheLocationProvider.h"
 #include "app/CalendarNotificationService.h"
 #include "app/ComposeService.h"
 #include "app/ContactCommandService.h"
@@ -43,8 +44,6 @@
 #include "jmap/submission/ComposeService.h"
 #include "jmap/sync/MutationJournal.h"
 
-#include <QDir>
-#include <QStandardPaths>
 #include <QWebEngineProfile>
 
 #include <memory>
@@ -56,23 +55,24 @@ namespace javelin::app
     namespace
     {
 
-        [[nodiscard]] QString cacheDatabasePath()
+        [[nodiscard]] CacheLocation cacheLocation()
         {
-            const QString basePath =
-                QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
-            QDir directory;
-            directory.mkpath(basePath);
-            return QDir(basePath).filePath(QStringLiteral("cache.sqlite3"));
+            const auto result = CacheLocationProvider::forApplication().loadOrCreate();
+            if (const auto* error = std::get_if<CacheLocationError>(&result))
+                throw std::runtime_error(error->detail.toStdString());
+            return std::get<CacheLocation>(result);
         }
 
     } // namespace
 
     ProcessServices::ProcessServices(const bool installInlineMessageSchemeHandler)
     {
-        auto databaseResult = javelin::jmap::cache::DatabaseConnection::open({
-            .connectionName = QStringLiteral("javelin-gui-main"),
-            .databasePath = cacheDatabasePath(),
-        });
+        const auto location = cacheLocation();
+        auto databaseResult = javelin::jmap::cache::DaemonDatabaseFactory{
+            javelin::jmap::cache::DatabaseConnectionOptions{
+                .connectionName = QStringLiteral("javelin-gui-main"),
+                .databasePath = location.databasePath,
+            }}.open();
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&databaseResult))
         {
             throw std::runtime_error(error->message.toStdString());

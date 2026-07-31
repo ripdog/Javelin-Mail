@@ -156,6 +156,55 @@ namespace javelin::jmap::cache
             return std::nullopt;
         }
 
+        [[nodiscard]] std::optional<DatabaseError>
+        applyReadOnlyPragmas(QSqlDatabase& database, const std::chrono::milliseconds busyTimeout)
+        {
+            const std::vector<std::pair<QString, QString>> pragmas{
+                {QStringLiteral("Enable query-only mode"),
+                 QStringLiteral("PRAGMA query_only = ON")},
+                {QStringLiteral("Configure busy timeout"),
+                 QStringLiteral("PRAGMA busy_timeout = %1")
+                     .arg(std::max<std::int64_t>(0, busyTimeout.count()))},
+            };
+
+            for (const auto& [operation, statement] : pragmas)
+            {
+                if (const auto error = executeStatement(database, statement, operation))
+                    return error;
+            }
+
+            QSqlQuery query{database};
+            if (!query.exec(QStringLiteral("PRAGMA query_only")) || !query.next() ||
+                query.value(0).toInt() != 1)
+            {
+                return makeQueryError(DatabaseErrorCode::QueryFailed,
+                                      QStringLiteral("Verify query-only mode"), query);
+            }
+            return std::nullopt;
+        }
+
+        [[nodiscard]] std::variant<std::uint64_t, DatabaseError>
+        readDataVersion(const QSqlDatabase& database)
+        {
+            QSqlQuery query{database};
+            if (!query.exec(QStringLiteral("PRAGMA data_version")) || !query.next())
+            {
+                return makeQueryError(DatabaseErrorCode::QueryFailed,
+                                      QStringLiteral("Read SQLite data version"), query);
+            }
+
+            bool ok = false;
+            const auto version = query.value(0).toULongLong(&ok);
+            if (!ok)
+            {
+                return DatabaseError{
+                    .code = DatabaseErrorCode::QueryFailed,
+                    .message = QStringLiteral("SQLite data version is not numeric"),
+                };
+            }
+            return version;
+        }
+
         [[nodiscard]] QString encodeThreadHandle(const Qt::HANDLE threadHandle)
         {
             std::ostringstream stream;
@@ -536,6 +585,13 @@ namespace javelin::jmap::cache
         return std::get<int>(versionResult);
     }
 
+    std::variant<std::uint64_t, DatabaseError> DatabaseConnection::dataVersion() const
+    {
+        if (const auto error = validate())
+            return *error;
+        return readDataVersion(m_database);
+    }
+
     std::variant<std::vector<AppliedMigration>, DatabaseError>
     DatabaseConnection::appliedMigrations() const
     {
@@ -583,6 +639,189 @@ namespace javelin::jmap::cache
         QSqlDatabase::removeDatabase(connectionName);
     }
 
+    ReadOnlyDatabaseConnection::ReadOnlyDatabaseConnection() = default;
+
+    ReadOnlyDatabaseConnection::ReadOnlyDatabaseConnection(QString connectionName,
+                                                           QSqlDatabase database)
+        : m_connectionName(std::move(connectionName)), m_database(std::move(database)),
+          m_ownerThread(QThread::currentThreadId())
+    {
+    }
+
+    ReadOnlyDatabaseConnection::ReadOnlyDatabaseConnection(
+        ReadOnlyDatabaseConnection&& other) noexcept
+        : m_connectionName(std::move(other.m_connectionName)),
+          m_database(std::move(other.m_database)),
+          m_ownerThread(std::exchange(other.m_ownerThread, nullptr))
+    {
+        other.m_database = QSqlDatabase{};
+        other.m_connectionName.clear();
+    }
+
+    ReadOnlyDatabaseConnection&
+    ReadOnlyDatabaseConnection::operator=(ReadOnlyDatabaseConnection&& other) noexcept
+    {
+        if (this == &other)
+            return *this;
+
+        reset();
+        m_connectionName = std::move(other.m_connectionName);
+        m_database = std::move(other.m_database);
+        m_ownerThread = std::exchange(other.m_ownerThread, nullptr);
+        other.m_database = QSqlDatabase{};
+        other.m_connectionName.clear();
+        return *this;
+    }
+
+    ReadOnlyDatabaseConnection::~ReadOnlyDatabaseConnection()
+    {
+        reset();
+    }
+
+    std::variant<ReadOnlyDatabaseConnection, DatabaseError>
+    ReadOnlyDatabaseConnection::open(const ReadOnlyDatabaseConnectionOptions& options)
+    {
+        if (!QSqlDatabase::isDriverAvailable(QStringLiteral("QSQLITE")))
+        {
+            return DatabaseError{
+                .code = DatabaseErrorCode::DriverUnavailable,
+                .message = QStringLiteral("Qt SQLite driver is not available"),
+            };
+        }
+        if (options.connectionName.isEmpty() || options.databasePath.isEmpty())
+        {
+            return DatabaseError{
+                .code = DatabaseErrorCode::OpenFailed,
+                .message = QStringLiteral("Read-only database connection requires a name and path"),
+            };
+        }
+
+        QSqlDatabase database =
+            QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), options.connectionName);
+        const auto discardConnection = [&database, &options]()
+        {
+            database.close();
+            database = QSqlDatabase{};
+            QSqlDatabase::removeDatabase(options.connectionName);
+        };
+        database.setConnectOptions(QStringLiteral("QSQLITE_OPEN_READONLY"));
+        database.setDatabaseName(options.databasePath);
+        if (!database.open())
+        {
+            const auto error = makeError(DatabaseErrorCode::OpenFailed,
+                                         QStringLiteral("Open read-only database"), database);
+            discardConnection();
+            return error;
+        }
+
+        if (const auto pragmaError = applyReadOnlyPragmas(database, options.busyTimeout))
+        {
+            discardConnection();
+            return *pragmaError;
+        }
+
+        return ReadOnlyDatabaseConnection{options.connectionName, database};
+    }
+
+    const QSqlDatabase& ReadOnlyDatabaseConnection::database() const
+    {
+        Q_ASSERT_X(m_ownerThread == QThread::currentThreadId(),
+                   "ReadOnlyDatabaseConnection::database",
+                   "A database connection was accessed from a thread that does not own it");
+        return m_database;
+    }
+
+    const QString& ReadOnlyDatabaseConnection::connectionName() const
+    {
+        return m_connectionName;
+    }
+
+    std::optional<DatabaseError> ReadOnlyDatabaseConnection::validate() const
+    {
+        if (m_ownerThread != nullptr && m_ownerThread != QThread::currentThreadId())
+        {
+            return DatabaseError{
+                .code = DatabaseErrorCode::ThreadAffinityViolation,
+                .message = QStringLiteral(
+                    "Read-only database connection accessed from a thread that does not own it"),
+            };
+        }
+        if (!m_database.isValid() || !m_database.isOpen())
+        {
+            return DatabaseError{
+                .code = DatabaseErrorCode::OpenFailed,
+                .message = QStringLiteral("Read-only database connection is not open"),
+            };
+        }
+        return std::nullopt;
+    }
+
+    int ReadOnlyDatabaseConnection::schemaVersion() const
+    {
+        if (const auto error = validate())
+        {
+            Q_UNUSED(error);
+            return 0;
+        }
+
+        const auto versionResult = readCurrentVersion(m_database);
+        if (std::holds_alternative<DatabaseError>(versionResult))
+            return 0;
+        return std::get<int>(versionResult);
+    }
+
+    std::variant<std::uint64_t, DatabaseError> ReadOnlyDatabaseConnection::dataVersion() const
+    {
+        if (const auto error = validate())
+            return *error;
+        return readDataVersion(m_database);
+    }
+
+    void ReadOnlyDatabaseConnection::reset()
+    {
+        if (m_connectionName.isEmpty())
+            return;
+
+        const QString connectionName = std::move(m_connectionName);
+        if (m_database.isValid())
+            m_database.close();
+        m_database = QSqlDatabase{};
+        m_ownerThread = nullptr;
+        QSqlDatabase::removeDatabase(connectionName);
+    }
+
+    DaemonDatabaseFactory::DaemonDatabaseFactory(DatabaseConnectionOptions options)
+        : m_options(std::move(options))
+    {
+    }
+
+    std::variant<DatabaseConnection, DatabaseError> DaemonDatabaseFactory::open() const
+    {
+        return DatabaseConnection::open(m_options);
+    }
+
+    GuiDatabaseFactory::GuiDatabaseFactory(ReadOnlyThreadConnectionFactoryOptions options)
+        : m_options(std::move(options))
+    {
+    }
+
+    std::variant<ReadOnlyDatabaseConnection, DatabaseError>
+    GuiDatabaseFactory::openForCurrentThread(const std::string_view ownerTag) const
+    {
+        return ReadOnlyDatabaseConnection::open({
+            .connectionName = makeConnectionName(ownerTag),
+            .databasePath = m_options.databasePath,
+            .busyTimeout = m_options.busyTimeout,
+        });
+    }
+
+    QString GuiDatabaseFactory::makeConnectionName(const std::string_view ownerTag) const
+    {
+        return QStringLiteral("%1-%2-thread-%3")
+            .arg(m_options.connectionNamePrefix, QString::fromStdString(std::string{ownerTag}),
+                 ReadOnlyThreadConnectionFactory::currentThreadTag());
+    }
+
     ThreadConnectionFactory::ThreadConnectionFactory(ThreadConnectionFactoryOptions options)
         : m_options(std::move(options))
     {
@@ -604,6 +843,35 @@ namespace javelin::jmap::cache
     }
 
     QString ThreadConnectionFactory::makeConnectionName(const std::string_view ownerTag) const
+    {
+        return QStringLiteral("%1-%2-thread-%3")
+            .arg(m_options.connectionNamePrefix, QString::fromStdString(std::string{ownerTag}),
+                 currentThreadTag());
+    }
+
+    ReadOnlyThreadConnectionFactory::ReadOnlyThreadConnectionFactory(
+        ReadOnlyThreadConnectionFactoryOptions options)
+        : m_options(std::move(options))
+    {
+    }
+
+    QString ReadOnlyThreadConnectionFactory::currentThreadTag()
+    {
+        return encodeThreadHandle(QThread::currentThreadId());
+    }
+
+    std::variant<ReadOnlyDatabaseConnection, DatabaseError>
+    ReadOnlyThreadConnectionFactory::openForCurrentThread(const std::string_view ownerTag) const
+    {
+        return ReadOnlyDatabaseConnection::open({
+            .connectionName = makeConnectionName(ownerTag),
+            .databasePath = m_options.databasePath,
+            .busyTimeout = m_options.busyTimeout,
+        });
+    }
+
+    QString
+    ReadOnlyThreadConnectionFactory::makeConnectionName(const std::string_view ownerTag) const
     {
         return QStringLiteral("%1-%2-thread-%3")
             .arg(m_options.connectionNamePrefix, QString::fromStdString(std::string{ownerTag}),

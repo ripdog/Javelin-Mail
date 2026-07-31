@@ -20,6 +20,8 @@ catch_discover_tests(javelin_protocol_tests)
 add_executable(javelin_jmap_tests
     ${PROJECT_SOURCE_DIR}/src/app/ApplicationErrorCoordinator.cpp
     ${PROJECT_SOURCE_DIR}/src/app/ApplicationErrorCoordinator.h
+    ${PROJECT_SOURCE_DIR}/src/app/CacheLocationProvider.cpp
+    ${PROJECT_SOURCE_DIR}/src/app/CacheLocationProvider.h
     ${PROJECT_SOURCE_DIR}/src/app/DeferredSendRepository.cpp
     ${PROJECT_SOURCE_DIR}/src/app/DeferredSendRepository.h
     ${PROJECT_SOURCE_DIR}/src/app/ContactCommandPreparation.cpp
@@ -143,6 +145,7 @@ add_executable(javelin_jmap_tests
     jmap/WebSocketPushChannelTest.cpp
     gui/MonthCalendarWidgetTest.cpp
     gui/RecurrencePatternTest.cpp
+    app/CacheLocationProviderTest.cpp
     gui/ConnectionSettingsAdapterTest.cpp
     gui/ComposeTabPolicyTest.cpp
     gui/MailboxSelectionTest.cpp

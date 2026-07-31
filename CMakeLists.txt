@@ -937,6 +937,8 @@ add_library(javelin_application STATIC
     src/app/AddressSuggestionStore.h
     src/app/ApplicationErrorCoordinator.cpp
     src/app/ApplicationErrorCoordinator.h
+    src/app/CacheLocationProvider.cpp
+    src/app/CacheLocationProvider.h
     src/app/CalendarNotificationService.cpp
     src/app/CalendarNotificationService.h
     src/app/ContactApplicationPorts.h
