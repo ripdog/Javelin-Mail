@@ -11,6 +11,7 @@
 #include "jmap/cache/ComposeSessionRepository.h"
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/IdentityRepository.h"
+#include "jmap/cache/MailVault.h"
 #include "jmap/cache/MessageViewService.h"
 #include "jmap/cache/QueryService.h"
 #include "jmap/cache/SessionRepository.h"
@@ -20,6 +21,7 @@
 #include "jmap/sync/EmailMutationJournal.h"
 #include "jmap/sync/MutationJournal.h"
 
+#include <QCryptographicHash>
 #include <QDateTime>
 #include <QDebug>
 #include <QFile>
@@ -327,6 +329,7 @@ namespace javelin::jmap::submission
                     .inlineDisposition =
                         attachment.disposition == std::optional<std::string>{std::string{"inline"}},
                     .contentId = attachment.cid,
+                    .contentHash = std::nullopt,
                 });
             }
             return draftAttachments;
@@ -490,30 +493,21 @@ namespace javelin::jmap::submission
             std::string blobId;
             std::string type;
             std::uint64_t size = 0;
+            std::string contentHash;
         };
 
         [[nodiscard]] QCoro::Task<std::variant<UploadSummary, javelin::jmap::OperationError>>
         uploadAttachment(javelin::jmap::api::AbstractTransport& transport,
                          javelin::jmap::LiveConnectionSettings settings,
                          javelin::jmap::api::Session session, std::string accountId,
-                         DraftAttachment attachment)
+                         DraftAttachment attachment, QByteArray body)
         {
-            QFile file{QString::fromStdString(attachment.localFilePath)};
-            if (!file.open(QIODevice::ReadOnly))
-            {
-                co_return javelin::jmap::OperationError{
-                    .message = QStringLiteral("Failed to read attachment file %1.")
-                                   .arg(QString::fromStdString(attachment.localFilePath)),
-                };
-            }
-
             const auto tokenResult = resolveAccessToken(buildCredentials(settings, accountId));
             if (const auto* error = std::get_if<javelin::jmap::OperationError>(&tokenResult))
             {
                 co_return *error;
             }
 
-            const auto body = file.readAll();
             const auto transportResult = co_await transport.send({
                 .method = javelin::jmap::api::HttpMethod::Post,
                 .url =
@@ -573,6 +567,10 @@ namespace javelin::jmap::submission
                 .size = static_cast<std::uint64_t>(
                     object.value(QStringLiteral("size"))
                         .toInteger(static_cast<qint64>(attachment.size))),
+                .contentHash =
+                    QString::fromLatin1(
+                        QCryptographicHash::hash(body, QCryptographicHash::Sha256).toHex())
+                        .toStdString(),
             };
         }
 
@@ -1012,6 +1010,95 @@ namespace javelin::jmap::submission
         {
             co_return *validationError;
         }
+        if (!isBoundedComposeSnapshot(snapshot))
+        {
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::PreconditionFailed,
+                .message = QStringLiteral("The compose revision exceeds the supported bounds."),
+            };
+        }
+
+        std::vector<std::optional<QByteArray>> stagedPayloads(snapshot.attachments.size());
+        const javelin::jmap::cache::MailVault vault =
+            javelin::jmap::cache::MailVault::forDatabase(m_connection);
+        for (std::size_t index = 0; index < snapshot.attachments.size(); ++index)
+        {
+            auto& attachment = snapshot.attachments[index];
+            if (attachment.blobId.has_value() || attachment.localFilePath.empty())
+                continue;
+
+            QFile file{QString::fromStdString(attachment.localFilePath)};
+            if (!file.open(QIODevice::ReadOnly))
+            {
+                co_return javelin::jmap::OperationError{
+                    .code = javelin::jmap::OperationErrorCode::PreconditionFailed,
+                    .message = QStringLiteral("Failed to stage attachment %1.")
+                                   .arg(QString::fromStdString(attachment.localFilePath)),
+                };
+            }
+            const auto payload = file.readAll();
+            if (file.error() != QFileDevice::NoError)
+            {
+                co_return javelin::jmap::OperationError{
+                    .code = javelin::jmap::OperationErrorCode::PreconditionFailed,
+                    .message = QStringLiteral("Failed to read attachment %1.")
+                                   .arg(QString::fromStdString(attachment.localFilePath)),
+                };
+            }
+            if (attachment.size != 0 &&
+                attachment.size != static_cast<std::uint64_t>(payload.size()))
+            {
+                co_return javelin::jmap::OperationError{
+                    .code = javelin::jmap::OperationErrorCode::Conflict,
+                    .message = QStringLiteral("Attachment %1 changed after it was selected.")
+                                   .arg(QString::fromStdString(attachment.localFilePath)),
+                };
+            }
+            const auto contentHash =
+                QString::fromLatin1(
+                    QCryptographicHash::hash(payload, QCryptographicHash::Sha256).toHex())
+                    .toStdString();
+            if (attachment.contentHash.has_value() && *attachment.contentHash != contentHash)
+            {
+                co_return javelin::jmap::OperationError{
+                    .code = javelin::jmap::OperationErrorCode::Conflict,
+                    .message = QStringLiteral("Attachment %1 changed after staging.")
+                                   .arg(QString::fromStdString(attachment.localFilePath)),
+                };
+            }
+            const auto staged = vault.stage(payload);
+            if (const auto* error = std::get_if<javelin::jmap::cache::MailVaultError>(&staged))
+            {
+                co_return javelin::jmap::OperationError{
+                    .code = javelin::jmap::OperationErrorCode::LocalStorageFailure,
+                    .message = error->message,
+                };
+            }
+            attachment.contentHash = contentHash;
+            attachment.size = static_cast<std::uint64_t>(payload.size());
+            stagedPayloads[index] = payload;
+        }
+        if (!isBoundedComposeSnapshot(snapshot))
+        {
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::PreconditionFailed,
+                .message =
+                    QStringLiteral("The staged compose revision exceeds the supported bounds."),
+            };
+        }
+
+        const auto admission = m_revisionGate.admit(snapshot.composeSessionId, snapshot.revision,
+                                                    acceptedAttachmentManifest(snapshot));
+        if (admission != ComposeRevisionAdmission::Accepted)
+        {
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::Conflict,
+                .message = admission == ComposeRevisionAdmission::Stale
+                               ? QStringLiteral("An older compose revision was superseded.")
+                               : QStringLiteral(
+                                     "The attachment manifest changed for an accepted revision."),
+            };
+        }
 
         DraftMutationJournal draftJournal{m_connection};
         const auto activeDraft =
@@ -1068,8 +1155,9 @@ namespace javelin::jmap::submission
             snapshot.plainTextBody = strippedPlainText(snapshot.htmlBody);
         }
 
-        for (auto& attachment : snapshot.attachments)
+        for (std::size_t index = 0; index < snapshot.attachments.size(); ++index)
         {
+            auto& attachment = snapshot.attachments[index];
             if (attachment.blobId.has_value() || attachment.localFilePath.empty())
             {
                 if (attachment.displayName.empty() && !attachment.localFilePath.empty())
@@ -1100,7 +1188,8 @@ namespace javelin::jmap::submission
             }
 
             const auto uploadResult = co_await uploadAttachment(
-                m_resourceTransport, settings, session, snapshot.accountId, attachment);
+                m_resourceTransport, settings, session, snapshot.accountId, attachment,
+                stagedPayloads[index].value_or(QByteArray{}));
             if (const auto* error = std::get_if<javelin::jmap::OperationError>(&uploadResult))
             {
                 co_return *error;
@@ -1109,6 +1198,7 @@ namespace javelin::jmap::submission
             attachment.blobId = upload.blobId;
             attachment.mediaType = upload.type;
             attachment.size = upload.size;
+            attachment.contentHash = upload.contentHash;
         }
 
         javelin::jmap::api::EmailSetRequest request{
@@ -1381,6 +1471,18 @@ namespace javelin::jmap::submission
             }
         }
 
+        const auto acceptedManifest = acceptedAttachmentManifest(snapshot);
+        if (!m_revisionGate.accept(snapshot.composeSessionId, snapshot.revision, acceptedManifest))
+        {
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::Conflict,
+                .message = QStringLiteral("A newer compose revision superseded this save."),
+            };
+        }
+        javelin::jmap::cache::ComposeSessionRepository composeRepository{m_connection};
+        if (const auto error = composeRepository.upsert(snapshot))
+            co_return javelin::jmap::operationError(*error);
+
         co_return DraftSaveSummary{
             .composeSessionId = snapshot.composeSessionId,
             .accountId = snapshot.accountId,
@@ -1388,6 +1490,8 @@ namespace javelin::jmap::submission
             .operationGroupId = resolvedOperationGroupId,
             .createMutationId = draftMutation.createMutationId,
             .destroyMutationId = draftMutation.destroyMutationId,
+            .acceptedRevision = snapshot.revision,
+            .acceptedManifest = acceptedManifest,
             .savedSnapshot = snapshot,
         };
     }
@@ -1453,8 +1557,13 @@ namespace javelin::jmap::submission
         const auto draftSaveResult = co_await saveDraft(settings, std::move(snapshot));
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&draftSaveResult))
             co_return *error;
+        auto draft = std::get<DraftSaveSummary>(std::move(draftSaveResult));
+        const auto acceptedRevision = draft.acceptedRevision;
+        auto acceptedManifest = draft.acceptedManifest;
         co_return PreparedSend{
-            .draft = std::get<DraftSaveSummary>(std::move(draftSaveResult)),
+            .draft = std::move(draft),
+            .acceptedRevision = acceptedRevision,
+            .acceptedManifest = std::move(acceptedManifest),
         };
     }
 
@@ -1492,6 +1601,27 @@ namespace javelin::jmap::submission
         {
             co_return javelin::jmap::OperationError{
                 .message = QStringLiteral("The compose session is unavailable."),
+            };
+        }
+        const bool hasExplicitAcceptedSnapshot =
+            !prepared.draft.savedSnapshot.composeSessionId.empty();
+        const auto expectedRevision =
+            hasExplicitAcceptedSnapshot ? prepared.acceptedRevision : draftSnapshot->revision;
+        const auto expectedManifest = hasExplicitAcceptedSnapshot
+                                          ? prepared.acceptedManifest
+                                          : acceptedAttachmentManifest(*draftSnapshot);
+        if (!hasExplicitAcceptedSnapshot)
+            static_cast<void>(m_revisionGate.restoreAccepted(draftSummary.composeSessionId,
+                                                             expectedRevision, expectedManifest));
+        if (draftSnapshot->revision != expectedRevision ||
+            !sameAcceptedManifest(acceptedAttachmentManifest(*draftSnapshot), expectedManifest) ||
+            !m_revisionGate.isAccepted(draftSummary.composeSessionId, expectedRevision,
+                                       expectedManifest))
+        {
+            co_return javelin::jmap::OperationError{
+                .code = javelin::jmap::OperationErrorCode::Conflict,
+                .message = QStringLiteral(
+                    "The compose revision or attachment manifest is no longer accepted."),
             };
         }
 
@@ -1770,6 +1900,7 @@ namespace javelin::jmap::submission
                 .accountId = draftSummary.accountId,
                 .draftEmailId = draftSummary.draftEmailId,
                 .submissionId = createdSubmission.id,
+                .acceptedRevision = expectedRevision,
             };
         }
         const auto& implicitEmailResponse =
@@ -1851,6 +1982,7 @@ namespace javelin::jmap::submission
             .accountId = draftSummary.accountId,
             .draftEmailId = draftSummary.draftEmailId,
             .submissionId = createdSubmission.id,
+            .acceptedRevision = expectedRevision,
         };
     }
 

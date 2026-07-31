@@ -1101,6 +1101,7 @@ namespace javelin::gui::compose
             m_snapshot.plainTextBody = m_richTextEdit->toPlainText().toStdString();
         }
 
+        ++m_snapshot.revision;
         updateTabTitle();
     }
 
@@ -1208,6 +1209,7 @@ namespace javelin::gui::compose
                 .blobId = std::nullopt,
                 .inlineDisposition = false,
                 .contentId = std::nullopt,
+                .contentHash = std::nullopt,
             });
         }
 
@@ -1382,7 +1384,8 @@ namespace javelin::gui::compose
                 }
 
                 const auto& summary = std::get<javelin::jmap::submission::DraftSaveSummary>(result);
-                m_snapshot.draftEmailId = summary.draftEmailId;
+                m_snapshot = summary.savedSnapshot;
+                populateAttachments();
                 if (const auto error = m_composeCommandPort.storeWorkingCopy(m_snapshot))
                 {
                     Q_EMIT statusMessageRequested(error->message, 10000);

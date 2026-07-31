@@ -19,6 +19,7 @@ namespace javelin::app
         struct MaintenanceResult
         {
             std::size_t migrated = 0;
+            std::size_t evicted = 0;
             bool migrationComplete = false;
             std::size_t pendingProjections = 0;
             QString error;
@@ -41,6 +42,9 @@ namespace javelin::app
                 return {.error = error->message};
             if (const auto error = sources.replayProjectionJobs(100))
                 return {.error = error->message};
+            const auto evicted = sources.evictUnretained(25);
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&evicted))
+                return {.error = error->message};
 
             QSqlQuery state{connection.database()};
             if (!state.exec(QStringLiteral(
@@ -54,6 +58,7 @@ namespace javelin::app
                 !projections.next())
                 return {.error = projections.lastError().text()};
             return {.migrated = std::get<std::size_t>(migrated),
+                    .evicted = std::get<std::size_t>(evicted),
                     .migrationComplete = state.value(0).toBool(),
                     .pendingProjections =
                         static_cast<std::size_t>(projections.value(0).toULongLong()),
@@ -128,12 +133,20 @@ namespace javelin::app
                                m_scheduled = false;
                                if (!m_scheduler.mayStartBackgroundNetwork())
                                    return;
+                               std::optional<std::string> admissionJob;
+                               if (m_scheduler.admit("legacy-mail-vault-migration").has_value())
+                                   admissionJob = "legacy-mail-vault-migration";
+                               else if (m_scheduler.admit("mail-vault-projections").has_value())
+                                   admissionJob = "mail-vault-projections";
+                               if (!admissionJob.has_value())
+                                   return;
                                m_running = true;
                                m_replayRequested = false;
                                auto task = run();
                                QCoro::connect(std::move(task), this,
-                                              [this]()
+                                              [this, admissionJob = std::move(admissionJob)]()
                                               {
+                                                  m_scheduler.release(*admissionJob);
                                                   m_running = false;
                                                   if (m_replayRequested)
                                                   {
@@ -171,6 +184,11 @@ namespace javelin::app
         migrationProgress.detail = result.migrationComplete
                                        ? QStringLiteral("Saved message migration complete")
                                        : QStringLiteral("Migrating saved messages");
+        if (result.evicted > 0)
+            migrationProgress.detail =
+                QStringLiteral("Evicted %1 unretained vault object%2")
+                    .arg(result.evicted)
+                    .arg(result.evicted == 1 ? QString{} : QStringLiteral("s"));
         static_cast<void>(
             m_scheduler.update("legacy-mail-vault-migration",
                                result.migrationComplete ? WorkStatus::Complete : WorkStatus::Queued,

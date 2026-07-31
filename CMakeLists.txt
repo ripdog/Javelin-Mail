@@ -523,6 +523,7 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/language/LanguageDetection.h
     src/jmap/submission/ComposeService.cpp
     src/jmap/submission/ComposeService.h
+    src/jmap/submission/ComposeRevisionGate.h
     src/jmap/submission/ComposeTypes.h
     src/jmap/submission/DraftSnapshotSerialization.h
     src/jmap/submission/DraftMutationJournal.cpp
@@ -772,6 +773,7 @@ add_library(javelin_jmap STATIC
     src/jmap/language/LanguageDetection.h
     src/jmap/submission/ComposeService.cpp
     src/jmap/submission/ComposeService.h
+    src/jmap/submission/ComposeRevisionGate.h
     src/jmap/submission/ComposeTypes.h
     src/jmap/submission/DraftSnapshotSerialization.h
     src/jmap/submission/DraftMutationJournal.cpp

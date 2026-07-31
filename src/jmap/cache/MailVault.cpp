@@ -9,13 +9,112 @@
 #include <QSaveFile>
 #include <QUrl>
 
+#include <atomic>
 #include <filesystem>
+#include <functional>
+#include <memory>
+#include <mutex>
 #include <system_error>
+#include <unordered_map>
+#include <vector>
 
 namespace javelin::jmap::cache
 {
     namespace
     {
+        struct LeaseToken
+        {
+            std::string path;
+            std::atomic_bool active = true;
+        };
+
+        class LeaseRegistry final
+        {
+          public:
+            [[nodiscard]] bool acquire(const std::string& path,
+                                       const std::shared_ptr<LeaseToken>& token,
+                                       const std::function<bool()>& exists)
+            {
+                std::scoped_lock lock{m_mutex};
+                if (!exists())
+                    return false;
+                ++m_counts[path];
+                auto& tokens = m_tokens[path];
+                std::erase_if(tokens, [](const auto& candidate) { return candidate.expired(); });
+                tokens.push_back(token);
+                return true;
+            }
+
+            void release(const std::shared_ptr<LeaseToken>& token)
+            {
+                if (!token)
+                    return;
+                std::scoped_lock lock{m_mutex};
+                if (token->active.exchange(false))
+                {
+                    const auto found = m_counts.find(token->path);
+                    if (found != m_counts.end())
+                    {
+                        if (found->second <= 1)
+                            m_counts.erase(found);
+                        else
+                            --found->second;
+                    }
+                }
+                const auto tokens = m_tokens.find(token->path);
+                if (tokens == m_tokens.end())
+                    return;
+                std::erase_if(tokens->second,
+                              [](const auto& candidate) { return candidate.expired(); });
+                if (tokens->second.empty())
+                    m_tokens.erase(tokens);
+            }
+
+            [[nodiscard]] std::optional<bool> evict(const std::string& path,
+                                                    const std::function<bool()>& remove)
+            {
+                std::scoped_lock lock{m_mutex};
+                const auto found = m_counts.find(path);
+                if (found != m_counts.end() && found->second > 0)
+                    return std::nullopt;
+                return remove();
+            }
+
+            [[nodiscard]] bool isLeased(const std::string& path) const
+            {
+                std::scoped_lock lock{m_mutex};
+                const auto found = m_counts.find(path);
+                return found != m_counts.end() && found->second > 0;
+            }
+
+            void releaseAll()
+            {
+                std::scoped_lock lock{m_mutex};
+                for (auto& [path, tokens] : m_tokens)
+                {
+                    Q_UNUSED(path);
+                    for (const auto& token : tokens)
+                    {
+                        if (const auto lease = token.lock())
+                            lease->active.store(false);
+                    }
+                }
+                m_counts.clear();
+                m_tokens.clear();
+            }
+
+          private:
+            mutable std::mutex m_mutex;
+            std::unordered_map<std::string, std::size_t> m_counts;
+            std::unordered_map<std::string, std::vector<std::weak_ptr<LeaseToken>>> m_tokens;
+        };
+
+        [[nodiscard]] LeaseRegistry& leaseRegistry()
+        {
+            static LeaseRegistry registry;
+            return registry;
+        }
+
         [[nodiscard]] QString component(const std::string_view value)
         {
             const auto encoded = QUrl::toPercentEncoding(
@@ -61,6 +160,18 @@ namespace javelin::jmap::cache
         }
     } // namespace
 
+    struct MailVaultLease::State
+    {
+        MailVaultObject object;
+        QString path;
+        std::shared_ptr<LeaseToken> token;
+
+        ~State()
+        {
+            leaseRegistry().release(token);
+        }
+    };
+
     MailVault::MailVault(QString rootPath) : m_rootPath(QDir::cleanPath(std::move(rootPath)))
     {
     }
@@ -90,13 +201,14 @@ namespace javelin::jmap::cache
             .filePath(QStringLiteral("indexes/%1/search.sqlite3").arg(component(accountId)));
     }
 
-    std::variant<MailVaultObject, MailVaultError>
-    MailVault::install(const QByteArray& payload) const
+    std::variant<MailVaultObject, MailVaultError> MailVault::installAt(const QByteArray& payload,
+                                                                       QString relativePrefix) const
     {
         const QString hash = QString::fromLatin1(
             QCryptographicHash::hash(payload, QCryptographicHash::Sha256).toHex());
-        const QString relativePath = QStringLiteral("objects/sha256/%1/%2/%3.eml")
-                                         .arg(hash.first(2), hash.sliced(2, 2), hash);
+        const QString relativePath =
+            QStringLiteral("%1/%2/%3/%4.eml")
+                .arg(std::move(relativePrefix), hash.first(2), hash.sliced(2, 2), hash);
         const QString absolutePath = QDir(m_rootPath).filePath(relativePath);
         const QFileInfo existing{absolutePath};
         if (existing.exists())
@@ -134,24 +246,96 @@ namespace javelin::jmap::cache
                                .size = static_cast<std::uint64_t>(payload.size())};
     }
 
-    std::variant<QByteArray, MailVaultError> MailVault::read(const MailVaultObject& object) const
+    std::variant<MailVaultObject, MailVaultError>
+    MailVault::install(const QByteArray& payload) const
     {
-        QFile file{objectPath(object)};
+        return installAt(payload, QStringLiteral("objects/sha256"));
+    }
+
+    std::variant<MailVaultObject, MailVaultError> MailVault::stage(const QByteArray& payload) const
+    {
+        return installAt(payload, QStringLiteral("staging/sha256"));
+    }
+
+    MailVaultLease::MailVaultLease(std::shared_ptr<State> state) : m_state(std::move(state))
+    {
+    }
+
+    MailVaultLease::~MailVaultLease() = default;
+
+    bool MailVaultLease::isValid() const
+    {
+        return m_state != nullptr && m_state->token != nullptr && m_state->token->active.load();
+    }
+
+    const MailVaultObject& MailVaultLease::object() const
+    {
+        return m_state->object;
+    }
+
+    std::variant<QByteArray, MailVaultError> MailVaultLease::read() const
+    {
+        if (!isValid())
+            return error(QStringLiteral("Read mail vault object"),
+                         QStringLiteral("The vault lease is no longer active."));
+        QFile file{m_state->path};
         if (!file.open(QIODevice::ReadOnly))
-        {
             return error(QStringLiteral("Open mail vault object"), file.errorString());
-        }
         const auto payload = file.readAll();
         if (file.error() != QFileDevice::NoError)
-        {
             return error(QStringLiteral("Read mail vault object"), file.errorString());
-        }
         const auto hash = QCryptographicHash::hash(payload, QCryptographicHash::Sha256).toHex();
-        if (hash.toStdString() != object.contentHash)
-        {
-            return error(QStringLiteral("Verify mail vault object"), objectPath(object));
-        }
+        if (hash.toStdString() != m_state->object.contentHash)
+            return error(QStringLiteral("Verify mail vault object"), m_state->path);
         return payload;
+    }
+
+    std::variant<MailVaultLease, MailVaultError>
+    MailVault::acquireLease(const MailVaultObject& object) const
+    {
+        const QString path = objectPath(object);
+        auto token = std::make_shared<LeaseToken>();
+        token->path = path.toStdString();
+        if (!leaseRegistry().acquire(token->path, token,
+                                     [&path] { return QFileInfo::exists(path); }))
+            return error(QStringLiteral("Open mail vault object"), path);
+        auto state = std::make_shared<MailVaultLease::State>();
+        state->object = object;
+        state->path = path;
+        state->token = std::move(token);
+        return MailVaultLease{std::move(state)};
+    }
+
+    bool MailVault::isLeased(const MailVaultObject& object) const
+    {
+        return leaseRegistry().isLeased(objectPath(object).toStdString());
+    }
+
+    std::variant<QByteArray, MailVaultError> MailVault::read(const MailVaultObject& object) const
+    {
+        auto leaseResult = acquireLease(object);
+        if (const auto* failure = std::get_if<MailVaultError>(&leaseResult))
+            return *failure;
+        return std::get<MailVaultLease>(std::move(leaseResult)).read();
+    }
+
+    std::optional<MailVaultError> MailVault::evict(const MailVaultObject& object) const
+    {
+        const QString path = objectPath(object);
+        const auto eviction =
+            leaseRegistry().evict(path.toStdString(), [&path]
+                                  { return !QFileInfo::exists(path) || QFile::remove(path); });
+        if (!eviction.has_value())
+            return error(QStringLiteral("Evict mail vault object"),
+                         QStringLiteral("The object is still in use."));
+        if (!*eviction)
+            return error(QStringLiteral("Evict mail vault object"), path);
+        return std::nullopt;
+    }
+
+    void MailVault::releaseAllLeases()
+    {
+        leaseRegistry().releaseAll();
     }
 
     std::optional<MailVaultError> MailVault::project(const std::string_view accountId,

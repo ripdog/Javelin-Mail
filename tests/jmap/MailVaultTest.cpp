@@ -143,3 +143,106 @@ TEST_CASE("mail vault stores one immutable object and projects effective mailbox
     REQUIRE_FALSE(sources.replayProjectionJobs().has_value());
     CHECK_FALSE(QFileInfo::exists(movedPath));
 }
+
+TEST_CASE("mail vault leases prevent eviction and release on disconnect",
+          "[jmap][cache][vault][lease]")
+{
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    const javelin::jmap::cache::MailVault vault{directory.path()};
+    const auto installed = vault.install(QByteArrayLiteral("leased payload"));
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::MailVaultObject>(installed));
+    const auto object = std::get<javelin::jmap::cache::MailVaultObject>(installed);
+
+    auto leaseResult = vault.acquireLease(object);
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::MailVaultLease>(leaseResult));
+    auto lease = std::get<javelin::jmap::cache::MailVaultLease>(std::move(leaseResult));
+    CHECK(lease.isValid());
+    CHECK(std::get<QByteArray>(lease.read()) == QByteArrayLiteral("leased payload"));
+    CHECK(vault.evict(object).has_value());
+
+    lease = {};
+    CHECK_FALSE(vault.evict(object).has_value());
+
+    const auto staged = vault.stage(QByteArrayLiteral("staged payload"));
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::MailVaultObject>(staged));
+    auto stagedLeaseResult =
+        vault.acquireLease(std::get<javelin::jmap::cache::MailVaultObject>(staged));
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::MailVaultLease>(stagedLeaseResult));
+    auto stagedLease = std::get<javelin::jmap::cache::MailVaultLease>(std::move(stagedLeaseResult));
+    javelin::jmap::cache::MailVault::releaseAllLeases();
+    CHECK_FALSE(stagedLease.isValid());
+    CHECK(vault.evict(std::get<javelin::jmap::cache::MailVaultObject>(staged)).has_value() ==
+          false);
+}
+
+TEST_CASE("mail vault eviction removes projections and respects active leases",
+          "[jmap][cache][vault][eviction]")
+{
+    if (QCoreApplication::instance() == nullptr)
+    {
+        static int argc = 1;
+        static char name[] = "vault-eviction-test";
+        static char* argv[]{name, nullptr};
+        static const auto application = std::make_unique<QCoreApplication>(argc, argv);
+        Q_UNUSED(application);
+    }
+    auto context = database();
+    seedAccount(context.connection);
+    const auto message = email("email-evict", {"inbox"});
+    javelin::jmap::cache::EmailRepository emails{context.connection};
+    REQUIRE_FALSE(emails.upsertMany("account-1", {message}).has_value());
+
+    const QByteArray payload = QByteArrayLiteral("evictable payload");
+    javelin::jmap::cache::RawMessageSourceRepository sources{context.connection};
+    REQUIRE_FALSE(sources
+                      .upsert("account-1",
+                              {.emailId = message.id, .blobId = message.blobId, .payload = payload})
+                      .has_value());
+
+    QSqlQuery markIndexed{context.connection.database()};
+    REQUIRE(markIndexed.exec(QStringLiteral(
+        "UPDATE mail_vault_email_refs SET indexed_hash=content_hash WHERE account_id="
+        "'account-1' AND email_id='email-evict'")));
+
+    QSqlQuery objectQuery{context.connection.database()};
+    REQUIRE(objectQuery.exec(QStringLiteral(
+        "SELECT o.content_hash,o.relative_path,o.size FROM mail_vault_objects o JOIN "
+        "mail_vault_email_refs r ON r.content_hash=o.content_hash WHERE r.account_id="
+        "'account-1' AND r.email_id='email-evict'")));
+    REQUIRE(objectQuery.next());
+    const javelin::jmap::cache::MailVaultObject object{
+        .contentHash = objectQuery.value(0).toString().toStdString(),
+        .relativePath = objectQuery.value(1).toString(),
+        .size = objectQuery.value(2).toULongLong(),
+    };
+    const auto vault = javelin::jmap::cache::MailVault::forDatabase(context.connection);
+    const auto projectionPath =
+        QDir(vault.rootPath())
+            .filePath(QStringLiteral("accounts/account-1/mailboxes/inbox/messages/"
+                                     "email-evict.eml"));
+    REQUIRE(QFileInfo::exists(projectionPath));
+
+    auto leaseResult = vault.acquireLease(object);
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::MailVaultLease>(leaseResult));
+    auto lease = std::get<javelin::jmap::cache::MailVaultLease>(std::move(leaseResult));
+    const auto blocked = sources.evictUnretained(10);
+    REQUIRE(std::holds_alternative<std::size_t>(blocked));
+    CHECK(std::get<std::size_t>(blocked) == 0);
+    CHECK(QFileInfo::exists(projectionPath));
+
+    lease = {};
+    const auto evicted = sources.evictUnretained(10);
+    REQUIRE(std::holds_alternative<std::size_t>(evicted));
+    CHECK(std::get<std::size_t>(evicted) == 1);
+    CHECK_FALSE(QFileInfo::exists(projectionPath));
+
+    QSqlQuery rows{context.connection.database()};
+    REQUIRE(rows.exec(QStringLiteral(
+        "SELECT (SELECT COUNT(*) FROM mail_vault_objects), (SELECT COUNT(*) FROM "
+        "mail_vault_email_refs), (SELECT COUNT(*) FROM mail_vault_projection_jobs)")));
+    REQUIRE(rows.next());
+    CHECK(rows.value(0).toInt() == 0);
+    CHECK(rows.value(1).toInt() == 0);
+    CHECK(rows.value(2).toInt() == 0);
+}

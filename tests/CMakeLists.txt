@@ -87,6 +87,7 @@ add_executable(javelin_jmap_tests
     jmap/ContactsMethodsTest.cpp
     jmap/ContactRepositoryTest.cpp
     jmap/ContactServiceTest.cpp
+    jmap/ComposeRevisionGateTest.cpp
     jmap/ComposeServiceTest.cpp
     jmap/ConsistencyDomainTest.cpp
     jmap/DatabaseTest.cpp

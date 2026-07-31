@@ -43,6 +43,8 @@ namespace
                 .operationGroupId = "group",
                 .createMutationId = "create",
                 .destroyMutationId = std::nullopt,
+                .acceptedRevision = snapshot.revision,
+                .acceptedManifest = snapshot.attachments,
                 .savedSnapshot = snapshot,
             };
         }

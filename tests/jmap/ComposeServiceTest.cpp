@@ -13,6 +13,8 @@
 #include <QCoroTask>
 
 #include <QCoreApplication>
+#include <QCryptographicHash>
+#include <QFile>
 #include <QTemporaryDir>
 
 #include <catch2/catch_test_macros.hpp>
@@ -551,4 +553,75 @@ TEST_CASE("an ambiguous draft creation keeps the local draft projection",
     CHECK(std::get<javelin::jmap::OperationError>(retry).code ==
           javelin::jmap::OperationErrorCode::Conflict);
     CHECK(transport.requests.size() == 1);
+}
+
+TEST_CASE("compose save rejects a replaced attachment source",
+          "[jmap][submission][compose][attachment]")
+{
+    ensureApplication();
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("compose-attachment-replacement-test"),
+        .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+
+    const auto sourcePath = directory.filePath(QStringLiteral("attachment.bin"));
+    const QByteArray original = QByteArrayLiteral("old");
+    QFile source{sourcePath};
+    REQUIRE(source.open(QIODevice::WriteOnly));
+    REQUIRE(source.write(original) == original.size());
+    source.close();
+    const auto originalHash =
+        QString::fromLatin1(QCryptographicHash::hash(original, QCryptographicHash::Sha256).toHex())
+            .toStdString();
+    REQUIRE(source.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    REQUIRE(source.write(QByteArrayLiteral("new")) == original.size());
+    source.close();
+
+    FakeTransport transport;
+    javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
+    javelin::jmap::JmapCore core{connection, transport, methodTransport};
+    javelin::jmap::submission::ComposeService service{connection, transport, methodTransport, core};
+    const auto result = QCoro::waitFor(service.saveDraft(
+        {
+            .sessionUrl = "https://account-1.example.test/.well-known/jmap",
+            .loginEmail = "alice@example.test",
+            .apiKey = "account-1-secret",
+        },
+        {
+            .composeSessionId = "compose-attachment-replacement",
+            .accountId = "account-1",
+            .revision = 7,
+            .draftEmailId = std::nullopt,
+            .mode = javelin::jmap::submission::ComposeMode::NewMessage,
+            .editorMode = javelin::jmap::submission::BodyEditorMode::RichText,
+            .identityId = "identity-1",
+            .to = {},
+            .cc = {},
+            .bcc = {},
+            .subject = std::nullopt,
+            .plainTextBody = "Body",
+            .htmlBody = "<p>Body</p>",
+            .threading = {},
+            .attachments =
+                {
+                    {
+                        .localFilePath = sourcePath.toStdString(),
+                        .displayName = "attachment.bin",
+                        .mediaType = "application/octet-stream",
+                        .size = static_cast<std::uint64_t>(original.size()),
+                        .blobId = std::nullopt,
+                        .inlineDisposition = false,
+                        .contentId = std::nullopt,
+                        .contentHash = originalHash,
+                    },
+                },
+        }));
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
+    CHECK(std::get<javelin::jmap::OperationError>(result).code ==
+          javelin::jmap::OperationErrorCode::Conflict);
+    CHECK(transport.requests.empty());
 }

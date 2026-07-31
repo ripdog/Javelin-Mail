@@ -2,6 +2,7 @@
 
 #include "jmap/domain/MailEntities.h"
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -34,6 +35,7 @@ namespace javelin::jmap::submission
         std::optional<std::string> blobId;
         bool inlineDisposition = false;
         std::optional<std::string> contentId;
+        std::optional<std::string> contentHash;
     };
 
     struct ThreadingContext
@@ -47,6 +49,7 @@ namespace javelin::jmap::submission
     {
         std::string composeSessionId;
         std::string accountId;
+        std::uint64_t revision = 1;
         std::optional<std::string> draftEmailId;
         ComposeMode mode = ComposeMode::NewMessage;
         BodyEditorMode editorMode = BodyEditorMode::RichText;
@@ -80,6 +83,8 @@ namespace javelin::jmap::submission
         std::string operationGroupId;
         std::string createMutationId;
         std::optional<std::string> destroyMutationId;
+        std::uint64_t acceptedRevision = 1;
+        std::vector<DraftAttachment> acceptedManifest;
         DraftSnapshot savedSnapshot;
     };
 
@@ -97,12 +102,15 @@ namespace javelin::jmap::submission
         std::string accountId;
         std::string draftEmailId;
         std::optional<std::string> submissionId;
+        std::uint64_t acceptedRevision = 1;
         bool scheduled = false;
     };
 
     struct PreparedSend
     {
         DraftSaveSummary draft;
+        std::uint64_t acceptedRevision = 1;
+        std::vector<DraftAttachment> acceptedManifest;
     };
 
     [[nodiscard]] inline std::string_view toString(const ComposeMode mode)

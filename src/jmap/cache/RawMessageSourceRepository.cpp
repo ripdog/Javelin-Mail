@@ -39,6 +39,13 @@ namespace javelin::jmap::cache
             std::string operation;
         };
 
+        struct VaultProjection
+        {
+            std::string accountId;
+            std::string emailId;
+            std::string mailboxId;
+        };
+
     } // namespace
 
     RawMessageSourceRepository::RawMessageSourceRepository(DatabaseConnection& connection)
@@ -257,6 +264,120 @@ namespace javelin::jmap::cache
             .blobId = legacyQuery.value(0).toString().toStdString(),
             .payload = legacyQuery.value(1).toByteArray(),
         }};
+    }
+
+    std::variant<std::size_t, DatabaseError>
+    RawMessageSourceRepository::evictUnretained(const std::size_t limit)
+    {
+        if (const auto error = m_connection.validate())
+            return *error;
+
+        QSqlQuery select{m_connection.database()};
+        select.prepare(
+            QStringLiteral("SELECT o.content_hash,o.relative_path,o.size FROM mail_vault_objects o "
+                           "WHERE NOT EXISTS(SELECT 1 FROM mail_vault_projection_jobs p WHERE "
+                           "p.content_hash=o.content_hash AND p.status='pending') AND "
+                           "(NOT EXISTS(SELECT 1 FROM mail_vault_email_refs r WHERE "
+                           "r.content_hash=o.content_hash) "
+                           "OR NOT EXISTS(SELECT 1 FROM mail_vault_email_refs r WHERE "
+                           "r.content_hash=o.content_hash "
+                           "AND (r.retention<>'evictable' OR r.indexed_hash IS NULL OR "
+                           "r.indexed_hash<>r.content_hash))) "
+                           "ORDER BY o.content_hash LIMIT :limit"));
+        select.bindValue(QStringLiteral(":limit"), static_cast<qulonglong>(limit));
+        if (!select.exec())
+            return makeQueryError(QStringLiteral("List evictable mail vault objects"), select);
+
+        std::vector<MailVaultObject> objects;
+        while (select.next())
+        {
+            objects.push_back({
+                .contentHash = select.value(0).toString().toStdString(),
+                .relativePath = select.value(1).toString(),
+                .size = select.value(2).toULongLong(),
+            });
+        }
+        select.finish();
+
+        const MailVault vault = MailVault::forDatabase(m_connection);
+        std::size_t evicted = 0;
+        for (const auto& object : objects)
+        {
+            if (vault.isLeased(object))
+                continue;
+
+            QSqlQuery projectionQuery{m_connection.database()};
+            projectionQuery.prepare(QStringLiteral(
+                "SELECT account_id,email_id,mailbox_id FROM mail_vault_projection_jobs WHERE "
+                "content_hash=:content_hash AND operation='link' AND mailbox_id IS NOT NULL "
+                "UNION SELECT em.account_id,em.email_id,em.mailbox_id FROM email_mailboxes em "
+                "JOIN mail_vault_email_refs r ON r.account_id=em.account_id AND "
+                "r.email_id=em.email_id WHERE r.content_hash=:content_hash"));
+            projectionQuery.bindValue(QStringLiteral(":content_hash"),
+                                      QString::fromStdString(object.contentHash));
+            if (!projectionQuery.exec())
+                return makeQueryError(QStringLiteral("List mail vault projections"),
+                                      projectionQuery);
+
+            std::vector<VaultProjection> projections;
+            while (projectionQuery.next())
+            {
+                projections.push_back(
+                    {.accountId = projectionQuery.value(0).toString().toStdString(),
+                     .emailId = projectionQuery.value(1).toString().toStdString(),
+                     .mailboxId = projectionQuery.value(2).toString().toStdString()});
+            }
+            projectionQuery.finish();
+            for (const auto& projection : projections)
+            {
+                if (const auto error = vault.removeProjection(
+                        projection.accountId, projection.mailboxId, projection.emailId))
+                    return vaultError(*error);
+            }
+            if (vault.evict(object).has_value())
+                continue;
+            auto transactionResult =
+                DatabaseTransaction::begin(m_connection, QStringLiteral("Evict mail vault object"));
+            if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
+                return *error;
+            auto transaction = std::get<DatabaseTransaction>(std::move(transactionResult));
+            QSqlQuery refs{m_connection.database()};
+            refs.prepare(QStringLiteral(
+                "DELETE FROM mail_vault_email_refs WHERE content_hash=:content_hash"));
+            refs.bindValue(QStringLiteral(":content_hash"),
+                           QString::fromStdString(object.contentHash));
+            if (!refs.exec())
+            {
+                transaction.rollback();
+                return makeQueryError(QStringLiteral("Delete evicted mail vault references"), refs);
+            }
+            QSqlQuery objectRow{m_connection.database()};
+            objectRow.prepare(
+                QStringLiteral("DELETE FROM mail_vault_objects WHERE content_hash=:content_hash"));
+            objectRow.bindValue(QStringLiteral(":content_hash"),
+                                QString::fromStdString(object.contentHash));
+            if (!objectRow.exec())
+            {
+                transaction.rollback();
+                return makeQueryError(QStringLiteral("Delete evicted mail vault object"),
+                                      objectRow);
+            }
+            QSqlQuery jobs{m_connection.database()};
+            jobs.prepare(QStringLiteral(
+                "DELETE FROM mail_vault_projection_jobs WHERE content_hash=:content_hash"));
+            jobs.bindValue(QStringLiteral(":content_hash"),
+                           QString::fromStdString(object.contentHash));
+            if (!jobs.exec())
+            {
+                transaction.rollback();
+                return makeQueryError(QStringLiteral("Delete evicted mail vault projections"),
+                                      jobs);
+            }
+            if (const auto error = transaction.commit())
+                return *error;
+            ++evicted;
+        }
+        return evicted;
     }
 
     std::variant<std::size_t, DatabaseError>

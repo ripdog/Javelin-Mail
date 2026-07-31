@@ -122,6 +122,29 @@ namespace javelin::app
     std::optional<javelin::jmap::cache::DatabaseError> WorkScheduler::ensure(const WorkSpec& spec)
     {
         const javelin::jmap::cache::DatabaseWriteScope writeScope{m_connection};
+        QSqlQuery existing{m_connection.database()};
+        existing.prepare(
+            QStringLiteral("SELECT EXISTS(SELECT 1 FROM background_jobs WHERE job_id=:job_id)"));
+        existing.bindValue(QStringLiteral(":job_id"), QString::fromStdString(spec.jobId));
+        if (!existing.exec() || !existing.next())
+            return queryError(QStringLiteral("Inspect background work queue"), existing);
+        if (!existing.value(0).toBool())
+        {
+            QSqlQuery queued{m_connection.database()};
+            if (!queued.exec(QStringLiteral(
+                    "SELECT COUNT(*) FROM background_jobs WHERE status IN "
+                    "('queued','waiting_for_space','waiting_for_network','waiting_for_auth')")))
+                return queryError(QStringLiteral("Count background work queue"), queued);
+            if (!queued.next())
+                return queryError(QStringLiteral("Count background work queue"), queued);
+            if (queued.value(0).toULongLong() >= maximumQueuedWork)
+            {
+                return javelin::jmap::cache::DatabaseError{
+                    .code = javelin::jmap::cache::DatabaseErrorCode::QueryFailed,
+                    .message = QStringLiteral("The background work queue is full."),
+                };
+            }
+        }
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
             "INSERT INTO "
@@ -151,6 +174,7 @@ namespace javelin::app
         query.bindValue(QStringLiteral(":restart_completed"), spec.restartCompleted ? 1 : 0);
         if (!query.exec())
             return queryError(QStringLiteral("Create background job"), query);
+        m_firstQueuedAt.try_emplace(spec.jobId, std::chrono::steady_clock::now());
         Q_EMIT jobsChanged();
         return std::nullopt;
     }
@@ -239,8 +263,139 @@ namespace javelin::app
         return std::optional<WorkRecord>{record(query)};
     }
 
+    std::optional<WorkAdmission> WorkScheduler::admit(const std::string_view jobId)
+    {
+        const auto found = find(jobId);
+        const auto* recordValue = std::get_if<std::optional<WorkRecord>>(&found);
+        if (recordValue == nullptr || !recordValue->has_value() ||
+            (*recordValue)->status != WorkStatus::Queued || (*recordValue)->pauseRequested)
+        {
+            ++m_admissionMetrics.rejected;
+            return std::nullopt;
+        }
+
+        const auto& job = **recordValue;
+        if (m_admissions.contains(job.jobId))
+        {
+            ++m_admissionMetrics.rejected;
+            return std::nullopt;
+        }
+        if (static_cast<int>(job.priority) < static_cast<int>(WorkPriority::Foreground) &&
+            !mayStartBackgroundNetwork())
+        {
+            ++m_admissionMetrics.rejected;
+            return std::nullopt;
+        }
+        if (m_admissions.size() >= m_maxConcurrentAdmissions)
+        {
+            ++m_admissionMetrics.rejected;
+            return std::nullopt;
+        }
+        if (job.accountId.has_value() && m_activeAccounts.contains(*job.accountId))
+        {
+            ++m_admissionMetrics.rejected;
+            return std::nullopt;
+        }
+
+        const auto records = list();
+        const auto* queued = std::get_if<std::vector<WorkRecord>>(&records);
+        if (queued == nullptr)
+        {
+            ++m_admissionMetrics.rejected;
+            return std::nullopt;
+        }
+        for (const auto& candidate : *queued)
+        {
+            if (candidate.status != WorkStatus::Queued || candidate.pauseRequested)
+                continue;
+            if (static_cast<int>(candidate.priority) < static_cast<int>(WorkPriority::Foreground) &&
+                !mayStartBackgroundNetwork())
+                continue;
+            if (candidate.accountId.has_value() && m_activeAccounts.contains(*candidate.accountId))
+                continue;
+            if (static_cast<int>(candidate.priority) > static_cast<int>(job.priority) ||
+                (candidate.priority == job.priority && candidate.jobId != job.jobId))
+            {
+                ++m_admissionMetrics.rejected;
+                return std::nullopt;
+            }
+            break;
+        }
+
+        const auto now = std::chrono::steady_clock::now();
+        const auto firstQueued = m_firstQueuedAt.find(job.jobId);
+        const auto queueWait =
+            firstQueued == m_firstQueuedAt.end()
+                ? std::chrono::microseconds{}
+                : std::chrono::duration_cast<std::chrono::microseconds>(now - firstQueued->second);
+        m_admissionMetrics.totalQueueWait += queueWait;
+        m_admissionMetrics.maximumQueueWait =
+            std::max(m_admissionMetrics.maximumQueueWait, queueWait);
+        WorkAdmission admission{
+            .jobId = job.jobId,
+            .accountId = job.accountId,
+            .priority = job.priority,
+            .sequence = m_nextAdmissionSequence++,
+            .admittedAt = now,
+        };
+        m_admissions.emplace(admission.jobId, admission);
+        if (job.accountId.has_value())
+            ++m_activeAccounts[*job.accountId];
+        ++m_admissionMetrics.admitted;
+        Q_EMIT foregroundAvailabilityChanged();
+        return admission;
+    }
+
+    void WorkScheduler::release(const std::string_view jobId)
+    {
+        const auto found = m_admissions.find(std::string{jobId});
+        if (found == m_admissions.end())
+            return;
+        if (found->second.accountId.has_value())
+        {
+            const auto account = m_activeAccounts.find(*found->second.accountId);
+            if (account != m_activeAccounts.end())
+            {
+                if (account->second <= 1)
+                    m_activeAccounts.erase(account);
+                else
+                    --account->second;
+            }
+        }
+        m_admissions.erase(found);
+        const auto current = find(jobId);
+        const auto* currentRecord = std::get_if<std::optional<WorkRecord>>(&current);
+        if (currentRecord == nullptr || !currentRecord->has_value() ||
+            (*currentRecord)->status != WorkStatus::Queued)
+            m_firstQueuedAt.erase(std::string{jobId});
+        ++m_admissionMetrics.completed;
+        Q_EMIT foregroundAvailabilityChanged();
+    }
+
+    void WorkScheduler::recordTransactionDuration(const std::chrono::microseconds duration)
+    {
+        m_admissionMetrics.totalTransactionTime += duration;
+    }
+
+    void WorkScheduler::recordForegroundAdmissionLatency(const std::chrono::microseconds duration)
+    {
+        m_admissionMetrics.totalForegroundAdmissionLatency += duration;
+    }
+
+    WorkAdmissionMetrics WorkScheduler::admissionMetrics() const
+    {
+        return m_admissionMetrics;
+    }
+
+    std::size_t WorkScheduler::activeAdmissions() const
+    {
+        return m_admissions.size();
+    }
+
     void WorkScheduler::beginForegroundWork()
     {
+        if (m_foregroundDepth == 0)
+            m_foregroundStartedAt = std::chrono::steady_clock::now();
         ++m_foregroundDepth;
         m_quietTimer.stop();
         Q_EMIT foregroundAvailabilityChanged();
@@ -251,6 +406,13 @@ namespace javelin::app
         m_foregroundDepth = std::max(0, m_foregroundDepth - 1);
         if (m_foregroundDepth == 0)
         {
+            if (m_foregroundStartedAt.has_value())
+            {
+                m_admissionMetrics.totalForegroundTime +=
+                    std::chrono::duration_cast<std::chrono::microseconds>(
+                        std::chrono::steady_clock::now() - *m_foregroundStartedAt);
+                m_foregroundStartedAt.reset();
+            }
             if (m_quietTimer.interval() == 0)
                 m_quietTimer.stop();
             else
@@ -450,6 +612,34 @@ namespace javelin::app
             return "complete";
         }
         return "queued";
+    }
+
+    WorkClass classify(const WorkKind kind)
+    {
+        switch (kind)
+        {
+        case WorkKind::MessageDownload:
+            return WorkClass::VisibleMaterialization;
+        case WorkKind::SearchIndex:
+            return WorkClass::Indexing;
+        case WorkKind::FullMailSync:
+            return WorkClass::OfflineSynchronization;
+        case WorkKind::ContactRefresh:
+        case WorkKind::CalendarRefresh:
+            return WorkClass::Prefetch;
+        case WorkKind::LegacyMigration:
+        case WorkKind::VaultProjection:
+        case WorkKind::Maintenance:
+            return WorkClass::Maintenance;
+        }
+        return WorkClass::Maintenance;
+    }
+
+    WorkClass classify(const WorkKind kind, const WorkPriority priority)
+    {
+        if (static_cast<int>(priority) >= static_cast<int>(WorkPriority::Foreground))
+            return WorkClass::ForegroundCommand;
+        return classify(kind);
     }
 
 } // namespace javelin::app

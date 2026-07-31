@@ -147,6 +147,7 @@ namespace javelin::app
             .accountId = prepared.draft.accountId,
             .draftEmailId = prepared.draft.draftEmailId,
             .submissionId = std::nullopt,
+            .acceptedRevision = prepared.acceptedRevision,
             .scheduled = true,
         };
     }
@@ -301,8 +302,12 @@ namespace javelin::app
                      .operationGroupId = {},
                      .createMutationId = {},
                      .destroyMutationId = std::nullopt,
+                     .acceptedRevision = 1,
+                     .acceptedManifest = {},
                      .savedSnapshot = {},
-                 }},
+                 },
+             .acceptedRevision = 1,
+             .acceptedManifest = {}},
             [this, &dispatched, send]()
             {
                 dispatched = true;

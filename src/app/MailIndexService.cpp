@@ -183,11 +183,14 @@ namespace javelin::app
             const auto account = m_jobs.find(job.jobId);
             if (account == m_jobs.end() || m_runningAccounts.contains(account->second))
                 continue;
+            if (!m_scheduler.admit(job.jobId).has_value())
+                continue;
             m_runningAccounts.insert(account->second);
             auto task = runAccount(account->second, job.jobId);
             QCoro::connect(std::move(task), this,
-                           [this, accountId = account->second]()
+                           [this, accountId = account->second, jobId = job.jobId]()
                            {
+                               m_scheduler.release(jobId);
                                m_runningAccounts.erase(accountId);
                                schedulePump();
                            });

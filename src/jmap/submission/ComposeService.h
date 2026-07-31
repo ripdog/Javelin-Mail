@@ -1,6 +1,7 @@
 #pragma once
 
 #include "jmap/JmapCore.h"
+#include "jmap/submission/ComposeRevisionGate.h"
 #include "jmap/submission/ComposeTypes.h"
 
 #include <QCoroTask>
@@ -66,6 +67,7 @@ namespace javelin::jmap::submission
         javelin::jmap::api::AbstractTransport& m_resourceTransport;
         javelin::jmap::api::JmapMethodTransport& m_methodTransport;
         javelin::jmap::JmapCore& m_jmapCore;
+        ComposeRevisionGate m_revisionGate;
     };
 
 } // namespace javelin::jmap::submission

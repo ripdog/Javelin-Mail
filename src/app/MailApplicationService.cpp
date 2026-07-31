@@ -1585,6 +1585,8 @@ namespace javelin::app
             const auto* job = std::get_if<std::optional<WorkRecord>>(&current);
             if (job == nullptr || !job->has_value() || (*job)->status != WorkStatus::Queued)
                 continue;
+            if (!m_workScheduler.admit(jobId).has_value())
+                continue;
 
             m_pendingContactRefreshes.erase(ownerAccountId);
             m_runningContactRefreshes.insert(ownerAccountId);
@@ -1592,6 +1594,7 @@ namespace javelin::app
             QCoro::connect(std::move(task), this,
                            [this, ownerAccountId, jobId]()
                            {
+                               m_workScheduler.release(jobId);
                                m_runningContactRefreshes.erase(ownerAccountId);
                                if (m_pendingContactRefreshes.contains(ownerAccountId))
                                {

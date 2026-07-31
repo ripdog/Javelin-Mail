@@ -211,3 +211,116 @@ TEST_CASE("work scheduler atomically restarts completed refresh work", "[app][wo
     CHECK(std::get<std::optional<javelin::app::WorkRecord>>(restarted)->status ==
           javelin::app::WorkStatus::Queued);
 }
+
+TEST_CASE("work scheduler admits priority work fairly across accounts",
+          "[app][work-scheduler][admission]")
+{
+    if (QCoreApplication::instance() == nullptr)
+    {
+        static int argc = 1;
+        static char name[] = "work-scheduler-admission-test";
+        static char* argv[]{name, nullptr};
+        static const auto application = std::make_unique<QCoreApplication>(argc, argv);
+        Q_UNUSED(application);
+    }
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("work-scheduler-admission-test"),
+        .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    javelin::app::WorkScheduler scheduler{connection, nullptr, std::chrono::milliseconds{0}};
+
+    REQUIRE_FALSE(scheduler
+                      .ensure({.jobId = "bulk-a",
+                               .parentJobId = std::nullopt,
+                               .accountId = "account-a",
+                               .kind = javelin::app::WorkKind::FullMailSync,
+                               .priority = javelin::app::WorkPriority::Bulk,
+                               .title = QStringLiteral("Bulk A"),
+                               .checkpointJson = QStringLiteral("{}")})
+                      .has_value());
+    REQUIRE_FALSE(scheduler
+                      .ensure({.jobId = "fresh-b",
+                               .parentJobId = std::nullopt,
+                               .accountId = "account-b",
+                               .kind = javelin::app::WorkKind::CalendarRefresh,
+                               .priority = javelin::app::WorkPriority::Freshness,
+                               .title = QStringLiteral("Fresh B"),
+                               .checkpointJson = QStringLiteral("{}")})
+                      .has_value());
+
+    CHECK_FALSE(scheduler.admit("bulk-a").has_value());
+    const auto freshAdmission = scheduler.admit("fresh-b");
+    REQUIRE(freshAdmission.has_value());
+    CHECK(scheduler.activeAdmissions() == 1);
+    CHECK_FALSE(scheduler.admit("fresh-b").has_value());
+
+    const auto bulkAdmission = scheduler.admit("bulk-a");
+    REQUIRE(bulkAdmission.has_value());
+    CHECK(scheduler.activeAdmissions() == 2);
+    CHECK(scheduler.admissionMetrics().admitted == 2);
+
+    scheduler.release("fresh-b");
+    scheduler.release("bulk-a");
+    CHECK(scheduler.activeAdmissions() == 0);
+    CHECK(scheduler.admissionMetrics().completed == 2);
+    CHECK(scheduler.admissionMetrics().maximumQueueWait.count() >= 0);
+    scheduler.recordTransactionDuration(std::chrono::microseconds{17});
+    scheduler.recordForegroundAdmissionLatency(std::chrono::microseconds{11});
+    CHECK(scheduler.admissionMetrics().totalTransactionTime == std::chrono::microseconds{17});
+    CHECK(scheduler.admissionMetrics().totalForegroundAdmissionLatency ==
+          std::chrono::microseconds{11});
+    CHECK(javelin::app::classify(javelin::app::WorkKind::SearchIndex) ==
+          javelin::app::WorkClass::Indexing);
+    CHECK(javelin::app::classify(javelin::app::WorkKind::FullMailSync) ==
+          javelin::app::WorkClass::OfflineSynchronization);
+    CHECK(javelin::app::classify(javelin::app::WorkKind::Maintenance,
+                                 javelin::app::WorkPriority::Interactive) ==
+          javelin::app::WorkClass::ForegroundCommand);
+}
+
+TEST_CASE("work scheduler bounds durable queued work", "[app][work-scheduler][queue]")
+{
+    if (QCoreApplication::instance() == nullptr)
+    {
+        static int argc = 1;
+        static char name[] = "work-scheduler-queue-test";
+        static char* argv[]{name, nullptr};
+        static const auto application = std::make_unique<QCoreApplication>(argc, argv);
+        Q_UNUSED(application);
+    }
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("work-scheduler-queue-test"),
+        .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    javelin::app::WorkScheduler scheduler{connection, nullptr, std::chrono::milliseconds{0}};
+
+    for (std::size_t index = 0; index < javelin::app::WorkScheduler::maximumQueuedWork; ++index)
+    {
+        REQUIRE_FALSE(scheduler
+                          .ensure({.jobId = "bounded-" + std::to_string(index),
+                                   .parentJobId = std::nullopt,
+                                   .accountId = std::nullopt,
+                                   .kind = javelin::app::WorkKind::Maintenance,
+                                   .priority = javelin::app::WorkPriority::Maintenance,
+                                   .title = QStringLiteral("Maintenance"),
+                                   .checkpointJson = QStringLiteral("{}")})
+                          .has_value());
+    }
+    CHECK(scheduler
+              .ensure({.jobId = "bounded-overflow",
+                       .parentJobId = std::nullopt,
+                       .accountId = std::nullopt,
+                       .kind = javelin::app::WorkKind::Maintenance,
+                       .priority = javelin::app::WorkPriority::Maintenance,
+                       .title = QStringLiteral("Overflow"),
+                       .checkpointJson = QStringLiteral("{}")})
+              .has_value());
+}

@@ -11,6 +11,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace javelin::app
@@ -34,7 +35,18 @@ namespace javelin::app
         Bulk = 300,
         Freshness = 400,
         Foreground = 500,
+        VisibleMaterialization = 550,
         Interactive = 600,
+    };
+
+    enum class WorkClass
+    {
+        ForegroundCommand,
+        VisibleMaterialization,
+        Prefetch,
+        Indexing,
+        OfflineSynchronization,
+        Maintenance,
     };
 
     enum class WorkStatus
@@ -85,11 +97,34 @@ namespace javelin::app
         bool restartCompleted = false;
     };
 
+    struct WorkAdmission
+    {
+        std::string jobId;
+        std::optional<std::string> accountId;
+        WorkPriority priority = WorkPriority::Maintenance;
+        std::uint64_t sequence = 0;
+        std::chrono::steady_clock::time_point admittedAt;
+    };
+
+    struct WorkAdmissionMetrics
+    {
+        std::uint64_t admitted = 0;
+        std::uint64_t completed = 0;
+        std::uint64_t rejected = 0;
+        std::chrono::microseconds totalQueueWait{};
+        std::chrono::microseconds maximumQueueWait{};
+        std::chrono::microseconds totalTransactionTime{};
+        std::chrono::microseconds totalForegroundTime{};
+        std::chrono::microseconds totalForegroundAdmissionLatency{};
+    };
+
     class WorkScheduler final : public QObject
     {
         Q_OBJECT
 
       public:
+        static constexpr std::size_t maximumQueuedWork = 256;
+
         explicit WorkScheduler(javelin::jmap::cache::DatabaseConnection& connection,
                                QObject* parent = nullptr,
                                std::chrono::milliseconds quietPeriod = std::chrono::milliseconds{
@@ -112,6 +147,13 @@ namespace javelin::app
         [[nodiscard]] std::variant<std::optional<WorkRecord>, javelin::jmap::cache::DatabaseError>
         find(std::string_view jobId) const;
 
+        [[nodiscard]] std::optional<WorkAdmission> admit(std::string_view jobId);
+        void release(std::string_view jobId);
+        void recordTransactionDuration(std::chrono::microseconds duration);
+        void recordForegroundAdmissionLatency(std::chrono::microseconds duration);
+        [[nodiscard]] WorkAdmissionMetrics admissionMetrics() const;
+        [[nodiscard]] std::size_t activeAdmissions() const;
+
         void beginForegroundWork();
         void endForegroundWork();
         [[nodiscard]] bool mayStartBackgroundNetwork() const;
@@ -128,6 +170,13 @@ namespace javelin::app
         javelin::jmap::cache::DatabaseConnection& m_connection;
         int m_foregroundDepth = 0;
         QTimer m_quietTimer;
+        std::uint64_t m_nextAdmissionSequence = 1;
+        std::unordered_map<std::string, WorkAdmission> m_admissions;
+        std::unordered_map<std::string, std::size_t> m_activeAccounts;
+        std::unordered_map<std::string, std::chrono::steady_clock::time_point> m_firstQueuedAt;
+        WorkAdmissionMetrics m_admissionMetrics;
+        std::optional<std::chrono::steady_clock::time_point> m_foregroundStartedAt;
+        std::size_t m_maxConcurrentAdmissions = 2;
     };
 
     class WorkTaskModel final : public QAbstractTableModel
@@ -155,5 +204,7 @@ namespace javelin::app
 
     [[nodiscard]] std::string_view toString(WorkKind kind);
     [[nodiscard]] std::string_view toString(WorkStatus status);
+    [[nodiscard]] WorkClass classify(WorkKind kind);
+    [[nodiscard]] WorkClass classify(WorkKind kind, WorkPriority priority);
 
 } // namespace javelin::app

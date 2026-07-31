@@ -610,11 +610,14 @@ namespace javelin::app
             const auto scope = m_scopes.find(job.jobId);
             if (scope == m_scopes.end() || m_runningAccounts.contains(scope->second.accountId))
                 continue;
+            if (!m_scheduler.admit(job.jobId).has_value())
+                continue;
             m_runningAccounts.insert(scope->second.accountId);
             auto task = run(scope->second);
             QCoro::connect(std::move(task), this,
-                           [this, accountId = scope->second.accountId]()
+                           [this, accountId = scope->second.accountId, jobId = job.jobId]()
                            {
+                               m_scheduler.release(jobId);
                                m_runningAccounts.erase(accountId);
                                if (m_dirtyAccounts.erase(accountId) != 0)
                                    requestCatchUp(accountId);

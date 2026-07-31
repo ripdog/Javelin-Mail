@@ -469,6 +469,24 @@ This phase completes the process-sensitive mechanisms described in
 - Foreground work can pass queued background work but never interrupt an active transaction.
 - Scheduling tests prove both responsiveness and unchanged consistency semantics.
 
+### Implementation status
+
+Completed. Compose snapshots now carry bounded revisions, and accepted saves persist the exact
+revision and normalized attachment manifest used by Send and delayed Send. Local attachments are
+hashed and copied into daemon-owned immutable staging before upload; source replacement, stale
+revisions, manifest changes, and oversized snapshots fail before a server mutation is dispatched.
+
+Vault objects now support move-only leases with content verification, atomic lease-aware eviction,
+projection cleanup, and process-wide release on GUI disconnect. Ordinary invalidation values remain
+metadata-only and do not carry paths or byte streams.
+
+The work scheduler admits foreground, visible-materialization, prefetch, indexing, offline-sync,
+and maintenance work ahead of the writer coordinator with account fairness, a bounded durable
+queue, quiet-period protection, and queue/transaction/foreground timing counters. Full sync,
+indexing, contact prefetch, and vault maintenance all release their admission at task completion.
+Deterministic coverage includes revision fencing, attachment source replacement, lease lifetime,
+projection eviction, queue fairness, classification, and scheduler instrumentation.
+
 ## Phase 7: split service composition and enforce the target dependency graph
 
 This phase prepares the codebase for two executables without yet adding socket transport. Follow

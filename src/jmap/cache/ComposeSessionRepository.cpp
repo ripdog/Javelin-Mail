@@ -7,6 +7,8 @@
 #include <QSqlError>
 #include <QSqlQuery>
 
+#include <cstdint>
+
 namespace javelin::jmap::cache
 {
 
@@ -145,6 +147,11 @@ namespace javelin::jmap::cache
                     object.insert(QStringLiteral("contentId"),
                                   QString::fromStdString(*attachment.contentId));
                 }
+                if (attachment.contentHash.has_value())
+                {
+                    object.insert(QStringLiteral("contentHash"),
+                                  QString::fromStdString(*attachment.contentHash));
+                }
                 array.push_back(object);
             }
             return array;
@@ -191,6 +198,12 @@ namespace javelin::jmap::cache
                             : std::optional<std::string>{object.value(QStringLiteral("contentId"))
                                                              .toString()
                                                              .toStdString()},
+                    .contentHash =
+                        object.value(QStringLiteral("contentHash")).isUndefined()
+                            ? std::nullopt
+                            : std::optional<std::string>{object.value(QStringLiteral("contentHash"))
+                                                             .toString()
+                                                             .toStdString()},
                 });
             }
 
@@ -204,6 +217,7 @@ namespace javelin::jmap::cache
             object.insert(QStringLiteral("composeSessionId"),
                           QString::fromStdString(snapshot.composeSessionId));
             object.insert(QStringLiteral("accountId"), QString::fromStdString(snapshot.accountId));
+            object.insert(QStringLiteral("revision"), static_cast<qint64>(snapshot.revision));
             if (snapshot.draftEmailId.has_value())
             {
                 object.insert(QStringLiteral("draftEmailId"),
@@ -270,6 +284,8 @@ namespace javelin::jmap::cache
             return javelin::jmap::submission::DraftSnapshot{
                 .composeSessionId = composeSessionId.toStdString(),
                 .accountId = accountId.toStdString(),
+                .revision = static_cast<std::uint64_t>(
+                    object.value(QStringLiteral("revision")).toInteger(1)),
                 .draftEmailId =
                     object.value(QStringLiteral("draftEmailId")).isUndefined()
                         ? std::nullopt
