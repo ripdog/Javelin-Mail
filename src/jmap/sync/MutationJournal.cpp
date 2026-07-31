@@ -47,6 +47,7 @@ namespace javelin::jmap::sync
                 .baseState = optionalString(query.value(8)),
                 .acceptedState = optionalString(query.value(9)),
                 .errorJson = optionalString(query.value(10)),
+                .sequence = query.value(11).toLongLong(),
             };
         }
 
@@ -54,7 +55,7 @@ namespace javelin::jmap::sync
         {
             return QStringLiteral(
                 "mutation_id,operation_group_id,account_id,data_type,object_id,mutation_kind,"
-                "status,payload_json,base_state,accepted_state,error_json");
+                "status,payload_json,base_state,accepted_state,error_json,sequence");
         }
 
     } // namespace
@@ -83,19 +84,22 @@ namespace javelin::jmap::sync
             };
         }
 
+        QSqlQuery sequence{m_connection.database()};
+        if (!sequence.exec(
+                QStringLiteral("UPDATE mutation_journal_sequence SET next_value=next_value+1 "
+                               "WHERE singleton=1 RETURNING next_value-1")) ||
+            !sequence.next())
+        {
+            return queryError(QStringLiteral("Allocate mutation journal sequence"), sequence);
+        }
+
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral(
             "INSERT INTO mutation_journal (mutation_id,operation_group_id,account_id,data_type,"
-            "object_id,mutation_kind,status,payload_json,base_state,accepted_state,error_json) "
-            "VALUES (:mutation_id,:operation_group_id,:account_id,:data_type,:object_id,"
-            ":mutation_kind,:status,:payload_json,:base_state,:accepted_state,:error_json) "
-            "ON CONFLICT(mutation_id) DO UPDATE SET "
-            "operation_group_id=excluded.operation_group_id,account_id=excluded.account_id,"
-            "data_type=excluded.data_type,object_id=excluded.object_id,"
-            "mutation_kind=excluded.mutation_kind,status=excluded.status,"
-            "payload_json=excluded.payload_json,base_state=excluded.base_state,"
-            "accepted_state=excluded.accepted_state,error_json=excluded.error_json,"
-            "updated_at=CURRENT_TIMESTAMP"));
+            "object_id,mutation_kind,status,payload_json,base_state,accepted_state,error_json,"
+            "sequence) VALUES (:mutation_id,:operation_group_id,:account_id,:data_type,:object_id,"
+            ":mutation_kind,:status,:payload_json,:base_state,:accepted_state,:error_json,"
+            ":sequence)"));
         query.bindValue(QStringLiteral(":mutation_id"), QString::fromStdString(record.mutationId));
         query.bindValue(QStringLiteral(":operation_group_id"),
                         record.operationGroupId.has_value()
@@ -124,6 +128,7 @@ namespace javelin::jmap::sync
                         record.errorJson.has_value()
                             ? QVariant{QString::fromStdString(*record.errorJson)}
                             : QVariant{});
+        query.bindValue(QStringLiteral(":sequence"), sequence.value(0));
         if (!query.exec())
         {
             return queryError(QStringLiteral("Upsert mutation journal record"), query);
@@ -175,7 +180,7 @@ namespace javelin::jmap::sync
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral("SELECT %1 FROM mutation_journal WHERE account_id=:account_id "
                                      "AND data_type=:data_type AND object_id=:object_id "
-                                     "ORDER BY created_at,mutation_id")
+                                     "ORDER BY sequence")
                           .arg(selectColumns()));
         query.bindValue(QStringLiteral(":account_id"), QString::fromStdString(domain.accountId));
         query.bindValue(QStringLiteral(":data_type"), QString::fromStdString(domain.dataType));
@@ -213,7 +218,7 @@ namespace javelin::jmap::sync
         query.prepare(
             QStringLiteral("SELECT %1 FROM mutation_journal WHERE account_id=:account_id "
                            "AND data_type=:data_type AND operation_group_id=:operation_group_id "
-                           "ORDER BY created_at,mutation_id")
+                           "ORDER BY sequence")
                 .arg(selectColumns()));
         query.bindValue(QStringLiteral(":account_id"), QString::fromStdString(domain.accountId));
         query.bindValue(QStringLiteral(":data_type"), QString::fromStdString(domain.dataType));
@@ -251,7 +256,7 @@ namespace javelin::jmap::sync
         QSqlQuery query{m_connection.database()};
         query.prepare(QStringLiteral("SELECT %1 FROM mutation_journal WHERE account_id=:account_id "
                                      "AND data_type=:data_type AND status=:status "
-                                     "ORDER BY created_at,mutation_id LIMIT :limit")
+                                     "ORDER BY sequence LIMIT :limit")
                           .arg(selectColumns()));
         query.bindValue(QStringLiteral(":account_id"), QString::fromStdString(domain.accountId));
         query.bindValue(QStringLiteral(":data_type"), QString::fromStdString(domain.dataType));
@@ -289,7 +294,7 @@ namespace javelin::jmap::sync
             QStringLiteral(
                 "SELECT %1 FROM mutation_journal WHERE account_id=:account_id "
                 "AND data_type=:data_type AND status IN ('pending','in_flight','unknown') "
-                "ORDER BY created_at,mutation_id")
+                "ORDER BY sequence")
                 .arg(selectColumns()));
         query.bindValue(QStringLiteral(":account_id"), QString::fromStdString(domain.accountId));
         query.bindValue(QStringLiteral(":data_type"), QString::fromStdString(domain.dataType));
@@ -340,6 +345,14 @@ namespace javelin::jmap::sync
         if (!query.exec())
         {
             return queryError(QStringLiteral("Transition mutation journal record"), query);
+        }
+        if (query.numRowsAffected() != 1)
+        {
+            return javelin::jmap::cache::DatabaseError{
+                .code = javelin::jmap::cache::DatabaseErrorCode::QueryFailed,
+                .message =
+                    QStringLiteral("Transition mutation journal record: record does not exist"),
+            };
         }
         return std::nullopt;
     }

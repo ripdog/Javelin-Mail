@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <unordered_set>
 #include <utility>
 
 namespace javelin::app::undo
@@ -148,6 +149,48 @@ namespace javelin::app::undo
         return replaceEntry(std::move(entry));
     }
 
+    std::variant<std::optional<HistoryEntry>, javelin::jmap::cache::DatabaseError>
+    UndoManager::prepareImpossible(QString label, const HistoryDomain domain, QString explanation,
+                                   std::optional<QString> operationGroupId)
+    {
+        HistoryEntry entry{
+            .entryId = QUuid::createUuid().toString(QUuid::WithoutBraces),
+            .stack = HistoryStack::Undo,
+            .stackOrder = 0,
+            .label = std::move(label),
+            .domain = domain,
+            .commandKind = QStringLiteral("impossible"),
+            .payloadVersion = 1,
+            .payload = ImpossibleHistory{.explanation = explanation.toStdString()},
+            .status = HistoryEntryStatus::Preparing,
+            .operationGroupId = std::move(operationGroupId),
+            .expiresAt = std::nullopt,
+            .explanation = std::move(explanation),
+            .failureJson = std::nullopt,
+            .createdAt = {},
+            .updatedAt = {},
+        };
+        auto result = m_repository.insertPreparing(std::move(entry));
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
+            return *error;
+        if (const auto error = reload())
+            return *error;
+        return std::optional<HistoryEntry>{std::get<HistoryEntry>(std::move(result))};
+    }
+
+    std::variant<HistoryEntry, javelin::jmap::cache::DatabaseError>
+    UndoManager::commitImpossible(HistoryEntry entry)
+    {
+        auto result = m_repository.markPreparedImpossible(std::move(entry));
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
+            return *error;
+        if (const auto error = prune())
+            return *error;
+        if (const auto error = reload())
+            return *error;
+        return std::get<HistoryEntry>(std::move(result));
+    }
+
     std::variant<HistoryEntry, javelin::jmap::cache::DatabaseError>
     UndoManager::recordImpossible(QString label, const HistoryDomain domain, QString explanation,
                                   std::optional<QString> operationGroupId)
@@ -191,10 +234,13 @@ namespace javelin::app::undo
 
     QCoro::Task<bool> UndoManager::executeTop(const HistoryStack stack)
     {
-        if (m_executing)
+        if (m_executing ||
+            std::ranges::any_of(m_entries, [](const HistoryEntry& entry)
+                                { return entry.status == HistoryEntryStatus::Preparing; }))
             co_return false;
         auto entry = top(stack);
-        if (!entry.has_value() || isBlocking(entry->status))
+        if (!entry.has_value() || isBlocking(entry->status) ||
+            entry->status == HistoryEntryStatus::Preparing)
             co_return false;
 
         if (entry->status == HistoryEntryStatus::Impossible ||
@@ -390,8 +436,97 @@ namespace javelin::app::undo
 
     std::optional<javelin::jmap::cache::DatabaseError> UndoManager::recoverInterruptedEntries()
     {
-        for (auto& entry : m_entries)
+        for (auto entry : m_entries)
         {
+            if (entry.status == HistoryEntryStatus::Preparing)
+            {
+                bool hasMutations = false;
+                if (entry.operationGroupId.has_value())
+                {
+                    if (auto* history = std::get_if<MailPatchHistory>(&entry.payload);
+                        history != nullptr && !history->items.empty())
+                    {
+                        const auto& accountId = history->items.front().accountId;
+                        const bool oneAccount =
+                            std::ranges::all_of(history->items, [&](const auto& item)
+                                                { return item.accountId == accountId; });
+                        if (oneAccount)
+                        {
+                            const auto group = m_repository.mutationGroup(accountId, "Email",
+                                                                          *entry.operationGroupId);
+                            if (const auto* error =
+                                    std::get_if<javelin::jmap::cache::DatabaseError>(&group))
+                                return *error;
+                            const auto& records =
+                                std::get<std::vector<javelin::jmap::sync::MutationRecord>>(group);
+                            hasMutations = !records.empty();
+                            bool recoverable = records.size() == history->items.size();
+                            std::unordered_set<std::string> usedMutationIds;
+                            for (auto& item : history->items)
+                            {
+                                const auto record = std::ranges::find(
+                                    records, item.emailId,
+                                    &javelin::jmap::sync::MutationRecord::objectId);
+                                if (record == records.end() ||
+                                    record->status !=
+                                        javelin::jmap::sync::MutationStatus::Pending ||
+                                    !usedMutationIds.insert(record->mutationId).second)
+                                {
+                                    recoverable = false;
+                                    break;
+                                }
+                                item.mutationId = record->mutationId;
+                            }
+                            if (recoverable)
+                            {
+                                const auto ready = m_repository.markPreparedReady(entry);
+                                if (const auto* error =
+                                        std::get_if<javelin::jmap::cache::DatabaseError>(&ready))
+                                    return *error;
+                                continue;
+                            }
+                        }
+                        else
+                        {
+                            const auto found =
+                                m_repository.hasMutationGroup(*entry.operationGroupId);
+                            if (const auto* error =
+                                    std::get_if<javelin::jmap::cache::DatabaseError>(&found))
+                                return *error;
+                            hasMutations = std::get<bool>(found);
+                        }
+                    }
+                    else
+                    {
+                        const auto found = m_repository.hasMutationGroup(*entry.operationGroupId);
+                        if (const auto* error =
+                                std::get_if<javelin::jmap::cache::DatabaseError>(&found))
+                            return *error;
+                        hasMutations = std::get<bool>(found);
+                        if (hasMutations &&
+                            std::holds_alternative<ImpossibleHistory>(entry.payload))
+                        {
+                            const auto impossible = m_repository.markPreparedImpossible(entry);
+                            if (const auto* error =
+                                    std::get_if<javelin::jmap::cache::DatabaseError>(&impossible))
+                                return *error;
+                            continue;
+                        }
+                    }
+                }
+                if (entry.operationGroupId.has_value() && !hasMutations)
+                {
+                    if (const auto error = m_repository.remove(entry.entryId))
+                        return error;
+                    continue;
+                }
+                entry.status = HistoryEntryStatus::BlockedUnknown;
+                entry.failureJson = QStringLiteral(
+                    "The application stopped while this operation was being prepared.");
+                if (const auto error = m_repository.update(entry))
+                    return error;
+                continue;
+            }
             if (entry.status != HistoryEntryStatus::ExecutingUndo &&
                 entry.status != HistoryEntryStatus::ExecutingRedo &&
                 entry.status != HistoryEntryStatus::ExecutingForward)
@@ -446,14 +581,21 @@ namespace javelin::app::undo
         const auto redoEntry = top(HistoryStack::Redo);
         const bool blocked = (undoEntry.has_value() && isBlocking(undoEntry->status)) ||
                              (redoEntry.has_value() && isBlocking(redoEntry->status));
+        const bool undoPreparing =
+            undoEntry.has_value() && undoEntry->status == HistoryEntryStatus::Preparing;
+        const bool redoPreparing =
+            redoEntry.has_value() && redoEntry->status == HistoryEntryStatus::Preparing;
+        const bool preparing = undoPreparing || redoPreparing;
         HistoryState next{
-            .undoLabel = undoEntry.has_value() ? QStringLiteral("Undo ") + undoEntry->label
-                                               : QStringLiteral("Undo"),
-            .redoLabel = redoEntry.has_value() ? QStringLiteral("Redo ") + redoEntry->label
-                                               : QStringLiteral("Redo"),
-            .canUndo = undoEntry.has_value() && !m_executing && !blocked,
-            .canRedo = redoEntry.has_value() && !m_executing && !blocked,
-            .executing = m_executing,
+            .undoLabel = undoEntry.has_value() && !undoPreparing
+                             ? QStringLiteral("Undo ") + undoEntry->label
+                             : QStringLiteral("Undo"),
+            .redoLabel = redoEntry.has_value() && !redoPreparing
+                             ? QStringLiteral("Redo ") + redoEntry->label
+                             : QStringLiteral("Redo"),
+            .canUndo = undoEntry.has_value() && !preparing && !m_executing && !blocked,
+            .canRedo = redoEntry.has_value() && !preparing && !m_executing && !blocked,
+            .executing = m_executing || preparing,
             .blocked = blocked,
         };
         if (next.undoLabel == m_state.undoLabel && next.redoLabel == m_state.redoLabel &&

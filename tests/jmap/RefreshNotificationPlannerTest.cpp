@@ -234,7 +234,14 @@ TEST_CASE("notification outbox persists pending mail until delivery", "[jmap][ca
     REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(
         pendingAgain));
     CHECK(std::get<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(pendingAgain)
-              .size() == 1);
+              .empty());
+    REQUIRE_FALSE(notifications.releaseDispatches("account-1", {"eml-unread"}).has_value());
+    const auto retried = notifications.enqueueUnreadMailboxEmails("account-1", "mbx-inbox");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(
+        retried));
+    CHECK(
+        std::get<std::vector<javelin::jmap::sync::RefreshNotificationCandidate>>(retried).size() ==
+        1);
     REQUIRE_FALSE(
         notifications.markDelivered("account-1", "mbx-inbox", {"eml-unread"}).has_value());
 

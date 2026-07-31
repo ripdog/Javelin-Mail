@@ -20,6 +20,7 @@ namespace javelin::jmap::sync
         std::size_t mailboxCount = 0;
         bool usedIncrementalRefresh = false;
         bool changed = false;
+        bool superseded = false;
     };
 
     using MailboxStateRefreshResult = std::variant<MailboxStateRefreshSummary, OperationError>;

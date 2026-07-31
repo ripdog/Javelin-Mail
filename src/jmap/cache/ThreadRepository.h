@@ -22,6 +22,9 @@ namespace javelin::jmap::cache
         [[nodiscard]] std::optional<DatabaseError>
         upsertMany(std::string_view accountId,
                    const std::vector<javelin::jmap::domain::Thread>& threads);
+        [[nodiscard]] std::optional<DatabaseError>
+        upsertMany(DatabaseTransaction& transaction, std::string_view accountId,
+                   const std::vector<javelin::jmap::domain::Thread>& threads);
         [[nodiscard]] std::variant<std::optional<javelin::jmap::domain::Thread>, DatabaseError>
         find(std::string_view accountId, std::string_view threadId) const;
 

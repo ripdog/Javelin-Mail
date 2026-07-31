@@ -19,13 +19,14 @@ namespace javelin::app
       public:
         explicit DesktopNotificationController(QObject* parent = nullptr);
 
-        void notifyNewMail(const QString& accountId, const QString& mailboxId,
-                           const QString& threadId, const QString& emailId,
-                           const QString& mailboxName, const QString& title,
-                           const QString& message);
+        [[nodiscard]] bool notifyNewMail(const QString& accountId, const QString& mailboxId,
+                                         const QString& threadId, const QString& emailId,
+                                         const QString& mailboxName, const QString& title,
+                                         const QString& message);
         void notifyError(const QString& connectionId, const QString& title, const QString& message,
                          bool persistent, bool opensSettings);
-        void notifyCalendarEvent(const QString& key, const QString& title, const QString& message);
+        [[nodiscard]] bool notifyCalendarEvent(const QString& key, const QString& title,
+                                               const QString& message);
         void notifyUndoableSend(const QString& sendId, const QString& title, const QString& message,
                                 int timeoutMs);
         void closeUndoableSendNotification(const QString& sendId);

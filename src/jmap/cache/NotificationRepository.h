@@ -24,6 +24,9 @@ namespace javelin::jmap::cache
         [[nodiscard]] std::optional<DatabaseError>
         markDelivered(std::string_view accountId, std::string_view mailboxId,
                       const std::vector<std::string>& emailIds);
+        [[nodiscard]] std::optional<DatabaseError>
+        releaseDispatches(std::string_view accountId, const std::vector<std::string>& emailIds);
+        [[nodiscard]] std::optional<DatabaseError> recoverDispatches();
 
       private:
         DatabaseConnection& m_connection;

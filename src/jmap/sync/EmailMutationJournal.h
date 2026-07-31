@@ -4,6 +4,7 @@
 #include "jmap/sync/MutationJournal.h"
 
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -50,6 +51,10 @@ namespace javelin::jmap::sync
         queueGroup(const EmailMutationRecord& record,
                    const javelin::jmap::domain::Email& projectedEmail,
                    std::span<const MutationRecord> companionRecords);
+        [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
+        queueGroup(const std::vector<EmailMutationRecord>& records,
+                   const std::vector<javelin::jmap::domain::Email>& projectedEmails,
+                   std::span<const MutationRecord> companionRecords = {});
         [[nodiscard]]
         std::variant<std::vector<EmailMutationRecord>, javelin::jmap::cache::DatabaseError>
         listForEmail(std::string_view accountId, std::string_view emailId) const;

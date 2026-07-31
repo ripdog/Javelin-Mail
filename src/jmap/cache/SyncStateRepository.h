@@ -37,6 +37,9 @@ namespace javelin::jmap::cache
         [[nodiscard]] std::variant<bool, DatabaseError>
         advanceIfCurrent(DatabaseTransaction& transaction, const SyncStateKey& key,
                          std::string_view expectedState, std::string_view newState);
+        [[nodiscard]] std::variant<bool, DatabaseError>
+        replaceIfCurrent(DatabaseTransaction& transaction, const SyncStateKey& key,
+                         std::optional<std::string_view> expectedState, std::string_view newState);
         [[nodiscard]] std::variant<std::optional<SyncStateRecord>, DatabaseError>
         find(const SyncStateKey& key) const;
         [[nodiscard]] std::optional<DatabaseError> remove(const SyncStateKey& key);

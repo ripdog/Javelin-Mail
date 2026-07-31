@@ -126,16 +126,6 @@ namespace javelin::jmap
 
     using MailboxPageResult = std::variant<MailboxPageSummary, OperationError>;
 
-    struct QueuedEmailMutation
-    {
-        std::string mutationId;
-        std::string accountId;
-        std::string emailId;
-        EmailMailboxMutation patch;
-    };
-
-    using QueuedEmailMutationResult = std::variant<QueuedEmailMutation, OperationError>;
-
     struct SubmittedEmailMutations
     {
         struct Item
@@ -250,6 +240,9 @@ namespace javelin::jmap
                                                                std::string destinationMailboxId);
         [[nodiscard]] QueuedEmailMutationResult
         queueEmailMailboxMutation(std::string accountId, EmailMailboxMutation mutation);
+        [[nodiscard]] QueuedEmailMutationsResult
+        queueEmailMailboxMutations(std::string accountId,
+                                   std::vector<EmailMailboxMutation> mutations);
         [[nodiscard]] QueuedEmailMutationResult queueCopyEmail(std::string accountId,
                                                                std::string emailId,
                                                                std::string sourceMailboxId,

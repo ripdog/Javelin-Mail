@@ -1626,6 +1626,41 @@ namespace javelin::jmap::cache
                                            "WHERE coverage!='server'"),
                         },
                 },
+                MigrationStep{
+                    .version = 37,
+                    .name = QStringLiteral("ordered_mutation_journal"),
+                    .statements =
+                        {
+                            QStringLiteral("ALTER TABLE mutation_journal ADD COLUMN sequence "
+                                           "INTEGER NOT NULL DEFAULT 0"),
+                            QStringLiteral(
+                                "WITH ordered AS (SELECT mutation_id,ROW_NUMBER() OVER "
+                                "(ORDER BY created_at,mutation_id) AS value FROM mutation_journal) "
+                                "UPDATE mutation_journal SET sequence=(SELECT value FROM ordered "
+                                "WHERE ordered.mutation_id=mutation_journal.mutation_id)"),
+                            QStringLiteral("CREATE UNIQUE INDEX idx_mutation_journal_sequence ON "
+                                           "mutation_journal(sequence)"),
+                            QStringLiteral(
+                                "CREATE TABLE mutation_journal_sequence ("
+                                "singleton INTEGER PRIMARY KEY CHECK(singleton=1),"
+                                "next_value INTEGER NOT NULL CHECK(next_value>0)) STRICT"),
+                            QStringLiteral(
+                                "INSERT INTO mutation_journal_sequence(singleton,next_value) "
+                                "SELECT 1,COALESCE(MAX(sequence),0)+1 FROM mutation_journal"),
+                        },
+                },
+                MigrationStep{
+                    .version = 38,
+                    .name = QStringLiteral("notification_dispatch_claims"),
+                    .statements =
+                        {
+                            QStringLiteral(
+                                "CREATE TABLE notification_dispatch_claims ("
+                                "kind TEXT NOT NULL CHECK(kind IN ('mail','calendar')),"
+                                "claim_key TEXT NOT NULL,claimed_at TEXT NOT NULL DEFAULT "
+                                "CURRENT_TIMESTAMP,PRIMARY KEY(kind,claim_key)) STRICT"),
+                        },
+                },
             },
         };
     }

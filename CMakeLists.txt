@@ -39,6 +39,8 @@ qt_standard_project_setup()
 set(JAVELIN_FORMAT_FILES
     src/jmap/sync/PreferredStateChangeSource.cpp
     src/jmap/sync/PreferredStateChangeSource.h
+    src/jmap/sync/EmailMutationQueue.cpp
+    src/jmap/sync/EmailMutationQueue.h
     tests/jmap/PreferredStateChangeSourceTest.cpp
     src/jmap/api/Cancellation.cpp
     src/jmap/api/Cancellation.h
@@ -48,6 +50,8 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/cache/MailboxWindowRepository.h
     src/jmap/cache/NotificationRepository.cpp
     src/jmap/cache/NotificationRepository.h
+    src/jmap/cache/NotificationDispatchRepository.cpp
+    src/jmap/cache/NotificationDispatchRepository.h
     src/jmap/cache/CalendarNotificationRepository.cpp
     src/jmap/cache/CalendarNotificationRepository.h
     src/jmap/sync/StateChangeSource.h
@@ -494,6 +498,8 @@ add_library(javelin_jmap STATIC
     src/jmap/cache/CalendarRepository.h
     src/jmap/sync/PreferredStateChangeSource.cpp
     src/jmap/sync/PreferredStateChangeSource.h
+    src/jmap/sync/EmailMutationQueue.cpp
+    src/jmap/sync/EmailMutationQueue.h
     src/jmap/api/Cancellation.cpp
     src/jmap/api/Cancellation.h
     src/jmap/cache/SearchWindowRepository.cpp
@@ -502,6 +508,8 @@ add_library(javelin_jmap STATIC
     src/jmap/cache/MailboxWindowRepository.h
     src/jmap/cache/NotificationRepository.cpp
     src/jmap/cache/NotificationRepository.h
+    src/jmap/cache/NotificationDispatchRepository.cpp
+    src/jmap/cache/NotificationDispatchRepository.h
     src/jmap/cache/CalendarNotificationRepository.cpp
     src/jmap/cache/CalendarNotificationRepository.h
     src/jmap/sync/StateChangeSource.h

@@ -26,6 +26,9 @@ namespace javelin::app::undo
         [[nodiscard]] virtual javelin::jmap::QueuedEmailMutationResult
         queueExactEmailMutation(std::string accountId,
                                 javelin::jmap::EmailMailboxMutation mutation) = 0;
+        [[nodiscard]] virtual javelin::jmap::QueuedEmailMutationsResult
+        queueExactEmailMutations(std::string accountId,
+                                 std::vector<javelin::jmap::EmailMailboxMutation> mutations) = 0;
         [[nodiscard]] virtual QCoro::Task<javelin::jmap::SubmittedEmailMutationsResult>
         submitPendingEmailMutations(std::string accountId,
                                     std::optional<std::string> operationGroupId = std::nullopt) = 0;

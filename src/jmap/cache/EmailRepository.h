@@ -34,6 +34,9 @@ namespace javelin::jmap::cache
         [[nodiscard]] std::optional<DatabaseError>
         removeFromMailbox(std::string_view accountId, std::string_view mailboxId,
                           std::span<const std::string> emailIds);
+        [[nodiscard]] std::optional<DatabaseError>
+        removeFromMailbox(DatabaseTransaction& transaction, std::string_view accountId,
+                          std::string_view mailboxId, std::span<const std::string> emailIds);
         [[nodiscard]] std::optional<DatabaseError> markSearchIndexed(std::string_view accountId,
                                                                      std::string_view emailId,
                                                                      std::string_view contentHash,

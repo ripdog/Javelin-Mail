@@ -704,33 +704,41 @@ namespace javelin::jmap::cache
                                        const std::string_view mailboxId,
                                        const std::span<const std::string> emailIds)
     {
-        if (const auto error = m_connection.validate())
-        {
-            return error;
-        }
-
         if (emailIds.empty())
-        {
             return std::nullopt;
-        }
+        auto transactionResult = DatabaseTransaction::begin(
+            m_connection, QStringLiteral("Begin email mailbox removal transaction"));
+        if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
+            return *error;
+        auto transaction = std::get<DatabaseTransaction>(std::move(transactionResult));
+        if (const auto error = removeFromMailbox(transaction, accountId, mailboxId, emailIds))
+            return error;
+        return transaction.commit();
+    }
 
-        const DatabaseWriteScope writeScope{m_connection};
-        QSqlDatabase& database = m_connection.database();
-        if (!database.transaction())
+    std::optional<DatabaseError> EmailRepository::removeFromMailbox(
+        DatabaseTransaction& transaction, const std::string_view accountId,
+        const std::string_view mailboxId, const std::span<const std::string> emailIds)
+    {
+        if (const auto error = m_connection.validate())
+            return error;
+        if (!transaction.isActive() || &transaction.connection() != &m_connection)
         {
             return DatabaseError{
                 .code = DatabaseErrorCode::QueryFailed,
-                .message = QStringLiteral("Begin email mailbox removal transaction: ") +
-                           database.lastError().text(),
+                .message =
+                    QStringLiteral("Email mailbox removal requires an active matching transaction"),
             };
         }
+        if (emailIds.empty())
+            return std::nullopt;
 
-        QSqlQuery deleteQuery{database};
+        QSqlQuery deleteQuery{m_connection.database()};
         deleteQuery.prepare(QStringLiteral(
             "DELETE FROM email_mailboxes "
             "WHERE account_id = :account_id AND mailbox_id = :mailbox_id AND email_id = "
             ":email_id"));
-        QSqlQuery projectionQuery{database};
+        QSqlQuery projectionQuery{m_connection.database()};
         projectionQuery.prepare(QStringLiteral(
             "INSERT INTO mail_vault_projection_jobs(account_id,email_id,mailbox_id,content_hash,"
             "operation) SELECT :account_id,:email_id,:mailbox_id,r.content_hash,'unlink' FROM "
@@ -744,33 +752,18 @@ namespace javelin::jmap::cache
                                       QString::fromStdString(std::string{mailboxId}));
             projectionQuery.bindValue(QStringLiteral(":email_id"), QString::fromStdString(emailId));
             if (!projectionQuery.exec())
-            {
-                database.rollback();
                 return makeQueryError(QStringLiteral("Queue removed mailbox projection"),
                                       projectionQuery);
-            }
+            projectionQuery.finish();
             deleteQuery.bindValue(QStringLiteral(":account_id"),
                                   QString::fromStdString(std::string{accountId}));
             deleteQuery.bindValue(QStringLiteral(":mailbox_id"),
                                   QString::fromStdString(std::string{mailboxId}));
             deleteQuery.bindValue(QStringLiteral(":email_id"), QString::fromStdString(emailId));
             if (!deleteQuery.exec())
-            {
-                database.rollback();
                 return makeQueryError(QStringLiteral("Remove email from mailbox"), deleteQuery);
-            }
+            deleteQuery.finish();
         }
-
-        if (!database.commit())
-        {
-            database.rollback();
-            return DatabaseError{
-                .code = DatabaseErrorCode::QueryFailed,
-                .message = QStringLiteral("Commit email mailbox removal transaction: ") +
-                           database.lastError().text(),
-            };
-        }
-
         return std::nullopt;
     }
 

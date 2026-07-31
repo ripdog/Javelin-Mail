@@ -2,11 +2,10 @@
 
 #include "jmap/api/MailMethods.h"
 #include "jmap/api/ResponseReader.h"
-#include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/MailboxRepository.h"
 #include "jmap/cache/SyncStateRepository.h"
+#include "jmap/sync/ConsistencyDomain.h"
 #include "jmap/sync/SyncPlanner.h"
-#include "jmap/sync/SyncReconciler.h"
 
 #include <algorithm>
 #include <unordered_set>
@@ -249,6 +248,13 @@ namespace javelin::jmap::sync
         }
 
         const auto& plan = std::get<SyncPlan>(planResult);
+        ConsistencyDomainRepository consistency{m_databaseConnection};
+        const auto fenceResult =
+            consistency.captureRefresh({.accountId = accountId, .dataType = "Mailbox"});
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&fenceResult))
+            co_return javelin::jmap::operationError(*error);
+        const auto fence = std::get<RefreshFence>(fenceResult);
+
         if (plan.kind == SyncPlanKind::IncrementalChanges && plan.sinceState.has_value())
         {
             const auto changesResult = co_await fetchMailboxChangesAndMailboxes(
@@ -256,14 +262,33 @@ namespace javelin::jmap::sync
             const auto* incrementalFetch = std::get_if<IncrementalMailboxFetch>(&changesResult);
             if (incrementalFetch != nullptr && !incrementalFetch->changes.hasMoreChanges)
             {
-                javelin::jmap::cache::MailboxRepository mailboxRepository{m_databaseConnection};
-                javelin::jmap::cache::EmailRepository emailRepository{m_databaseConnection};
-                SyncReconciler reconciler{mailboxRepository, emailRepository, syncStateRepository};
-                if (const auto error = reconciler.applyMailboxChanges(
-                        key, incrementalFetch->changes, incrementalFetch->fetched))
-                {
+                auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+                    m_databaseConnection, QStringLiteral("Apply mailbox state delta"));
+                if (const auto* error =
+                        std::get_if<javelin::jmap::cache::DatabaseError>(&transactionResult))
                     co_return javelin::jmap::operationError(*error);
-                }
+                auto transaction = std::get<javelin::jmap::cache::DatabaseTransaction>(
+                    std::move(transactionResult));
+                const auto current = consistency.isCurrent(fence);
+                if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&current))
+                    co_return javelin::jmap::operationError(*error);
+                const auto advanced = syncStateRepository.advanceIfCurrent(
+                    transaction, key, incrementalFetch->changes.oldState,
+                    incrementalFetch->changes.newState);
+                if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&advanced))
+                    co_return javelin::jmap::operationError(*error);
+                if (!std::get<bool>(current) || !std::get<bool>(advanced))
+                    co_return MailboxStateRefreshSummary{.superseded = true};
+
+                javelin::jmap::cache::MailboxRepository mailboxRepository{m_databaseConnection};
+                if (const auto error = mailboxRepository.upsertMany(transaction, accountId,
+                                                                    incrementalFetch->fetched.list))
+                    co_return javelin::jmap::operationError(*error);
+                if (const auto error = mailboxRepository.removeMany(
+                        transaction, accountId, incrementalFetch->changes.destroyed))
+                    co_return javelin::jmap::operationError(*error);
+                if (const auto error = transaction.commit())
+                    co_return javelin::jmap::operationError(*error);
 
                 co_return MailboxStateRefreshSummary{
                     .mailboxCount = incrementalFetch->fetched.list.size(),
@@ -289,15 +314,31 @@ namespace javelin::jmap::sync
         }
 
         const auto& fetched = std::get<javelin::jmap::api::MailboxGetResponse>(fetchedResult);
+        auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
+            m_databaseConnection, QStringLiteral("Apply mailbox state refresh"));
+        if (const auto* error =
+                std::get_if<javelin::jmap::cache::DatabaseError>(&transactionResult))
+            co_return javelin::jmap::operationError(*error);
+        auto transaction =
+            std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
+        const auto current = consistency.isCurrent(fence);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&current))
+            co_return javelin::jmap::operationError(*error);
+        const auto expected = plan.sinceState.has_value()
+                                  ? std::optional<std::string_view>{*plan.sinceState}
+                                  : std::nullopt;
+        const auto advanced =
+            syncStateRepository.replaceIfCurrent(transaction, key, expected, fetched.state);
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&advanced))
+            co_return javelin::jmap::operationError(*error);
+        if (!std::get<bool>(current) || !std::get<bool>(advanced))
+            co_return MailboxStateRefreshSummary{.superseded = true};
+
         javelin::jmap::cache::MailboxRepository mailboxRepository{m_databaseConnection};
-        if (const auto error = mailboxRepository.replaceAll(accountId, fetched.list))
-        {
+        if (const auto error = mailboxRepository.replaceAll(transaction, accountId, fetched.list))
             co_return javelin::jmap::operationError(*error);
-        }
-        if (const auto error = syncStateRepository.upsert(key, fetched.state))
-        {
+        if (const auto error = transaction.commit())
             co_return javelin::jmap::operationError(*error);
-        }
 
         co_return MailboxStateRefreshSummary{
             .mailboxCount = fetched.list.size(),

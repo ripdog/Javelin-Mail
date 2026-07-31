@@ -27,12 +27,29 @@ namespace javelin::app
 
     void CalendarNotificationService::start()
     {
+        if (const auto error = m_repository.recoverDispatches())
+            qWarning().noquote() << "Recover calendar notification delivery:" << error->message;
         scan();
     }
 
     void CalendarNotificationService::requestScan()
     {
         m_timer->start(0);
+    }
+
+    void CalendarNotificationService::deliveryAccepted(const QString& key)
+    {
+        if (const auto error =
+                m_repository.markDelivered(key.toStdString(), QDateTime::currentDateTimeUtc()))
+            qWarning().noquote() << "Record calendar notification delivery:" << error->message;
+    }
+
+    void CalendarNotificationService::deliveryFailed(const QString& key)
+    {
+        if (const auto error = m_repository.releaseDispatch(key.toStdString()))
+            qWarning().noquote() << "Release calendar notification delivery:" << error->message;
+        m_candidates.erase(key.toStdString());
+        m_timer->start(60000);
     }
 
     void CalendarNotificationService::dismiss(const QString& key)

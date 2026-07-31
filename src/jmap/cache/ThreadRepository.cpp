@@ -119,28 +119,35 @@ namespace javelin::jmap::cache
     ThreadRepository::upsertMany(const std::string_view accountId,
                                  const std::vector<javelin::jmap::domain::Thread>& threads)
     {
-        if (const auto error = m_connection.validate())
-        {
-            return error;
-        }
-
         if (threads.empty())
-        {
             return std::nullopt;
-        }
+        auto transactionResult = DatabaseTransaction::begin(
+            m_connection, QStringLiteral("Begin thread upsert transaction"));
+        if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
+            return *error;
+        auto transaction = std::get<DatabaseTransaction>(std::move(transactionResult));
+        if (const auto error = upsertMany(transaction, accountId, threads))
+            return error;
+        return transaction.commit();
+    }
 
-        const DatabaseWriteScope writeScope{m_connection};
-        QSqlDatabase& database = m_connection.database();
-        if (!database.transaction())
+    std::optional<DatabaseError>
+    ThreadRepository::upsertMany(DatabaseTransaction& transaction, const std::string_view accountId,
+                                 const std::vector<javelin::jmap::domain::Thread>& threads)
+    {
+        if (const auto error = m_connection.validate())
+            return error;
+        if (!transaction.isActive() || &transaction.connection() != &m_connection)
         {
             return DatabaseError{
                 .code = DatabaseErrorCode::QueryFailed,
-                .message = QStringLiteral("Begin thread upsert transaction: ") +
-                           database.lastError().text(),
+                .message = QStringLiteral("Thread upsert requires an active matching transaction"),
             };
         }
+        if (threads.empty())
+            return std::nullopt;
 
-        QSqlQuery query{database};
+        QSqlQuery query{m_connection.database()};
         query.prepare(
             QStringLiteral("INSERT INTO threads (account_id, thread_id, email_ids_json, state) "
                            "VALUES (:account_id, :thread_id, :email_ids_json, :state) "
@@ -157,22 +164,9 @@ namespace javelin::jmap::cache
                             QString::fromStdString(serializeEmailIds(thread.emailIds)));
             query.bindValue(QStringLiteral(":state"), QVariant{});
             if (!query.exec())
-            {
-                database.rollback();
                 return makeQueryError(QStringLiteral("Upsert thread"), query);
-            }
+            query.finish();
         }
-
-        if (!database.commit())
-        {
-            database.rollback();
-            return DatabaseError{
-                .code = DatabaseErrorCode::QueryFailed,
-                .message = QStringLiteral("Commit thread upsert transaction: ") +
-                           database.lastError().text(),
-            };
-        }
-
         return std::nullopt;
     }
 

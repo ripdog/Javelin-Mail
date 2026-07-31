@@ -138,6 +138,51 @@ TEST_CASE("sync state repository updates existing state tokens in place",
     CHECK(countQuery.value(0).toInt() == 1);
 }
 
+TEST_CASE("sync state conditional replacement rejects stale refresh commits",
+          "[jmap][cache][repository]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    javelin::jmap::cache::SyncStateRepository repository{databaseContext.connection};
+
+    auto firstResult = javelin::jmap::cache::DatabaseTransaction::begin(
+        databaseContext.connection, QStringLiteral("Initialize sync state"));
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(firstResult));
+    auto first = std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(firstResult));
+    const auto initialized = repository.replaceIfCurrent(first, makeKey(), std::nullopt, "state-1");
+    REQUIRE(std::holds_alternative<bool>(initialized));
+    CHECK(std::get<bool>(initialized));
+    REQUIRE_FALSE(first.commit().has_value());
+
+    auto staleResult = javelin::jmap::cache::DatabaseTransaction::begin(
+        databaseContext.connection, QStringLiteral("Reject stale sync state"));
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(staleResult));
+    auto stale = std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(staleResult));
+    const auto rejected = repository.replaceIfCurrent(stale, makeKey(), std::nullopt, "state-2");
+    REQUIRE(std::holds_alternative<bool>(rejected));
+    CHECK_FALSE(std::get<bool>(rejected));
+    REQUIRE_FALSE(stale.commit().has_value());
+
+    auto currentResult = javelin::jmap::cache::DatabaseTransaction::begin(
+        databaseContext.connection, QStringLiteral("Advance current sync state"));
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseTransaction>(currentResult));
+    auto current = std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(currentResult));
+    const auto advanced = repository.replaceIfCurrent(
+        current, makeKey(), std::optional<std::string_view>{"state-1"}, "state-2");
+    REQUIRE(std::holds_alternative<bool>(advanced));
+    CHECK(std::get<bool>(advanced));
+    REQUIRE_FALSE(current.commit().has_value());
+
+    const auto found = repository.find(makeKey());
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::SyncStateRecord>>(found));
+    REQUIRE(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(found).has_value());
+    CHECK(std::get<std::optional<javelin::jmap::cache::SyncStateRecord>>(found)->stateToken ==
+          "state-2");
+}
+
 TEST_CASE("sync state repository removes stored state tokens", "[jmap][cache][repository]")
 {
     ApplicationGuard application;

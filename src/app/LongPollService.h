@@ -104,7 +104,7 @@ namespace javelin::app
         void notificationRaised(const QString& accountId, const QString& mailboxId,
                                 const QString& threadId, const QString& emailId,
                                 const QString& mailboxName, const QString& title,
-                                const QString& message);
+                                const QString& message, const QStringList& deliveredEmailIds);
         void operationFailed(const QString& operation, javelin::jmap::OperationError error);
 
       private:
@@ -133,15 +133,36 @@ namespace javelin::app
             std::unique_ptr<javelin::jmap::sync::StateChangeWorker> worker;
         };
 
+        struct MailRefreshDemand
+        {
+            bool mailboxState = false;
+            bool emailState = false;
+            bool allMailboxes = false;
+
+            [[nodiscard]] bool empty() const
+            {
+                return !mailboxState && !emailState && !allMailboxes;
+            }
+
+            void merge(const MailRefreshDemand& other)
+            {
+                mailboxState = mailboxState || other.mailboxState;
+                emailState = emailState || other.emailState;
+                allMailboxes = allMailboxes || other.allMailboxes;
+            }
+
+            [[nodiscard]] static MailRefreshDemand full()
+            {
+                return {.mailboxState = true, .emailState = true, .allMailboxes = true};
+            }
+        };
+
         [[nodiscard]] bool hasValidSettings() const;
         [[nodiscard]] std::optional<RunConfiguration> resolveConfiguration() const;
         [[nodiscard]] QCoro::Task<void> runLoop(std::shared_ptr<RunContext> runContext);
-        [[nodiscard]] QCoro::Task<void> refreshWatchedMailbox(bool refreshMailboxState,
-                                                              bool refreshEmailState,
-                                                              bool refreshAllMailboxes);
+        [[nodiscard]] QCoro::Task<void> refreshWatchedMailbox(MailRefreshDemand demand);
         [[nodiscard]] QCoro::Task<void>
-        refreshWatchedMailboxOnce(std::shared_ptr<RunContext> runContext, bool refreshMailboxState,
-                                  bool refreshEmailState, bool refreshAllMailboxes);
+        refreshWatchedMailboxOnce(std::shared_ptr<RunContext> runContext, MailRefreshDemand demand);
         [[nodiscard]] QCoro::Task<bool>
         refreshMailboxStateOnce(std::shared_ptr<RunContext> runContext);
         void handleResumeWatchdogTimeout();
@@ -186,11 +207,9 @@ namespace javelin::app
         Status m_status = Status::Disconnected;
         bool m_shouldCatchUpRefreshOnReconnect = false;
         bool m_refreshInFlight = false;
-        bool m_refreshAgainRequested = false;
-        bool m_refreshMailboxAgainRequested = false;
-        bool m_refreshEmailAgainRequested = false;
-        bool m_refreshAllMailboxesAgainRequested = false;
-        bool m_forceEmailRefreshRequested = false;
+        std::optional<std::size_t> m_refreshGenerationInFlight;
+        MailRefreshDemand m_queuedRefreshDemand;
+        MailRefreshDemand m_debouncedRefreshDemand;
         QTimer m_refreshDebounceTimer;
         QTimer m_resumeWatchdogTimer;
         qint64 m_lastResumeWatchdogTickMs = 0;

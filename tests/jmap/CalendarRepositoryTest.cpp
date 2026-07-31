@@ -547,6 +547,7 @@ TEST_CASE("calendar reminders are claimed once and can be snoozed or dismissed",
     CHECK(std::get<std::vector<javelin::jmap::cache::CalendarNotificationCandidate>>(
               notifications.claimDue(now))
               .empty());
+    REQUIRE_FALSE(notifications.markDelivered(candidates.front().key, now).has_value());
 
     REQUIRE_FALSE(notifications.snooze(candidates.front().key, now.addSecs(300)).has_value());
     CHECK(std::get<std::vector<javelin::jmap::cache::CalendarNotificationCandidate>>(
@@ -555,6 +556,8 @@ TEST_CASE("calendar reminders are claimed once and can be snoozed or dismissed",
     auto snoozed = notifications.claimDue(now.addSecs(300));
     REQUIRE(std::get<std::vector<javelin::jmap::cache::CalendarNotificationCandidate>>(snoozed)
                 .size() == 1);
+    REQUIRE_FALSE(
+        notifications.markDelivered(candidates.front().key, now.addSecs(300)).has_value());
     REQUIRE_FALSE(notifications.dismiss(candidates.front().key).has_value());
     CHECK(std::get<std::vector<javelin::jmap::cache::CalendarNotificationCandidate>>(
               notifications.claimDue(now.addSecs(600)))

@@ -181,6 +181,13 @@ namespace javelin::app
         [[nodiscard]] MailboxObservation observeMailbox(std::string accountId,
                                                         std::string mailboxId);
         [[nodiscard]] bool requestAccountSynchronization(std::string_view accountId);
+        [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
+        markMailNotificationsDelivered(std::string_view accountId, std::string_view mailboxId,
+                                       const QStringList& emailIds);
+        [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
+        releaseMailNotificationDispatches(std::string_view accountId, const QStringList& emailIds);
+        [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
+        recoverMailNotificationDispatches();
         void publishMailboxWindowCommitted(QString accountId, QString mailboxId, std::size_t offset,
                                            std::size_t limit);
         [[nodiscard]] QCoro::Task<MailboxWindowResult>
@@ -203,6 +210,9 @@ namespace javelin::app
         [[nodiscard]] javelin::jmap::QueuedEmailMutationResult
         queueExactEmailMutation(std::string accountId,
                                 javelin::jmap::EmailMailboxMutation mutation) override;
+        [[nodiscard]] javelin::jmap::QueuedEmailMutationsResult queueExactEmailMutations(
+            std::string accountId,
+            std::vector<javelin::jmap::EmailMailboxMutation> mutations) override;
         [[nodiscard]] QCoro::Task<javelin::jmap::SubmittedEmailMutationsResult>
         submitPendingEmailMutations(
             std::string accountId,
@@ -297,7 +307,7 @@ namespace javelin::app
         void notificationRaised(const QString& accountId, const QString& mailboxId,
                                 const QString& threadId, const QString& emailId,
                                 const QString& mailboxName, const QString& title,
-                                const QString& message);
+                                const QString& message, const QStringList& deliveredEmailIds);
 
       private:
         friend class MailboxObservation;
@@ -327,6 +337,9 @@ namespace javelin::app
                                  const AccountConnectionSettings& settings);
         void releaseMailboxObservation(
             javelin::jmap::sync::MailboxInterestRegistry::ObservationId observationId);
+        [[nodiscard]] bool beginSearchWindowRequest(const std::string& leaseKey);
+        void finishSearchWindowRequest(const std::string& leaseKey);
+        [[nodiscard]] bool searchWindowRetired(const std::string& leaseKey) const;
 
         javelin::jmap::cache::DatabaseConnection& m_databaseConnection;
         javelin::jmap::JmapCore& m_jmapCore;
@@ -352,7 +365,12 @@ namespace javelin::app
         std::unordered_set<std::string> m_sessionRefreshesInFlight;
         std::unordered_set<std::string> m_pendingContactRefreshes;
         std::unordered_set<std::string> m_runningContactRefreshes;
-        std::unordered_set<std::string> m_retiredSearchWindowKeys;
+        struct SearchWindowRequestState
+        {
+            std::size_t activeRequests = 0;
+            bool retired = false;
+        };
+        std::unordered_map<std::string, SearchWindowRequestState> m_searchWindowRequests;
         bool m_contactRefreshPumpScheduled = false;
         javelin::jmap::sync::MailboxInterestRegistry m_mailboxInterests;
     };

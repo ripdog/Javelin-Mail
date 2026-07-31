@@ -1,5 +1,7 @@
 #include "jmap/cache/NotificationRepository.h"
 
+#include "jmap/cache/NotificationDispatchRepository.h"
+
 #include <QSqlError>
 #include <QSqlQuery>
 
@@ -9,10 +11,14 @@ namespace javelin::jmap::cache
     {
         [[nodiscard]] DatabaseError queryError(const QString& operation, const QSqlQuery& query)
         {
-            return DatabaseError{
-                .code = DatabaseErrorCode::QueryFailed,
-                .message = operation + QStringLiteral(": ") + query.lastError().text(),
-            };
+            return databaseError(operation, query.lastError());
+        }
+
+        [[nodiscard]] std::string mailClaimKey(const std::string_view accountId,
+                                               const std::string_view emailId)
+        {
+            return std::to_string(accountId.size()) + ":" + std::string{accountId} +
+                   std::string{emailId};
         }
     } // namespace
 
@@ -25,19 +31,12 @@ namespace javelin::jmap::cache
     NotificationRepository::enqueueUnreadMailboxEmails(const std::string_view accountId,
                                                        const std::string_view mailboxId)
     {
-        if (const auto error = m_connection.validate())
-        {
+        auto transactionResult = DatabaseTransaction::begin(
+            m_connection, QStringLiteral("Claim pending mail notifications"));
+        if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
             return *error;
-        }
-
-        const DatabaseWriteScope writeScope{m_connection};
+        auto transaction = std::get<DatabaseTransaction>(std::move(transactionResult));
         auto& database = m_connection.database();
-        if (!database.transaction())
-        {
-            return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
-                                 .message = QStringLiteral("Begin notification claim: ") +
-                                            database.lastError().text()};
-        }
 
         QSqlQuery emails{database};
         emails.prepare(QStringLiteral(
@@ -65,16 +64,12 @@ namespace javelin::jmap::cache
         emails.bindValue(QStringLiteral(":mailbox_id"),
                          QString::fromStdString(std::string{mailboxId}));
         if (!emails.exec())
-        {
-            database.rollback();
             return queryError(QStringLiteral("Read notification mailbox"), emails);
-        }
 
         QSqlQuery observe{database};
         observe.prepare(QStringLiteral(
             "INSERT OR IGNORE INTO observed_notification_emails (account_id, email_id) "
             "VALUES (:account_id, :email_id)"));
-
         QSqlQuery enqueue{database};
         enqueue.prepare(QStringLiteral(
             "INSERT OR IGNORE INTO mail_notification_outbox "
@@ -88,10 +83,7 @@ namespace javelin::jmap::cache
                               QString::fromStdString(std::string{accountId}));
             observe.bindValue(QStringLiteral(":email_id"), emailId);
             if (!observe.exec())
-            {
-                database.rollback();
                 return queryError(QStringLiteral("Record observed notification email"), observe);
-            }
             if (observe.numRowsAffected() == 1 && !emails.value(4).toBool())
             {
                 enqueue.bindValue(QStringLiteral(":account_id"),
@@ -103,10 +95,7 @@ namespace javelin::jmap::cache
                 enqueue.bindValue(QStringLiteral(":subject"), emails.value(2));
                 enqueue.bindValue(QStringLiteral(":received_at"), emails.value(3));
                 if (!enqueue.exec())
-                {
-                    database.rollback();
                     return queryError(QStringLiteral("Enqueue mail notification"), enqueue);
-                }
                 enqueue.finish();
             }
             observe.finish();
@@ -122,16 +111,21 @@ namespace javelin::jmap::cache
         pending.bindValue(QStringLiteral(":mailbox_id"),
                           QString::fromStdString(std::string{mailboxId}));
         if (!pending.exec())
-        {
-            database.rollback();
             return queryError(QStringLiteral("Read pending mail notifications"), pending);
-        }
 
+        NotificationDispatchRepository dispatches{m_connection};
         std::vector<javelin::jmap::sync::RefreshNotificationCandidate> candidates;
         while (pending.next())
         {
+            const auto emailId = pending.value(0).toString().toStdString();
+            const auto claimed = dispatches.claim(transaction, NotificationDispatchKind::Mail,
+                                                  mailClaimKey(accountId, emailId));
+            if (const auto* error = std::get_if<DatabaseError>(&claimed))
+                return *error;
+            if (!std::get<bool>(claimed))
+                continue;
             candidates.push_back(javelin::jmap::sync::RefreshNotificationCandidate{
-                .emailId = pending.value(0).toString().toStdString(),
+                .emailId = emailId,
                 .threadId = pending.value(1).toString().toStdString(),
                 .subject = pending.value(2).isNull()
                                ? std::nullopt
@@ -139,14 +133,8 @@ namespace javelin::jmap::cache
                 .receivedAt = pending.value(3).toString().toStdString(),
             });
         }
-
-        if (!database.commit())
-        {
-            database.rollback();
-            return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
-                                 .message = QStringLiteral("Commit notification claim: ") +
-                                            database.lastError().text()};
-        }
+        if (const auto error = transaction.commit())
+            return *error;
         return candidates;
     }
 
@@ -155,17 +143,20 @@ namespace javelin::jmap::cache
                                           const std::string_view mailboxId,
                                           const std::vector<std::string>& emailIds)
     {
-        const DatabaseWriteScope writeScope{m_connection};
         if (emailIds.empty())
             return std::nullopt;
-        if (const auto error = m_connection.validate())
-            return error;
+        auto transactionResult = DatabaseTransaction::begin(
+            m_connection, QStringLiteral("Complete mail notification delivery"));
+        if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
+            return *error;
+        auto transaction = std::get<DatabaseTransaction>(std::move(transactionResult));
 
         QSqlQuery update{m_connection.database()};
         update.prepare(QStringLiteral(
             "UPDATE mail_notification_outbox SET status='delivered',delivered_at=CURRENT_TIMESTAMP "
             "WHERE account_id=:account_id AND mailbox_id=:mailbox_id AND email_id=:email_id "
             "AND status='pending'"));
+        NotificationDispatchRepository dispatches{m_connection};
         for (const auto& emailId : emailIds)
         {
             update.bindValue(QStringLiteral(":account_id"),
@@ -176,8 +167,36 @@ namespace javelin::jmap::cache
             if (!update.exec())
                 return queryError(QStringLiteral("Mark mail notification delivered"), update);
             update.finish();
+            if (const auto error = dispatches.release(transaction, NotificationDispatchKind::Mail,
+                                                      mailClaimKey(accountId, emailId)))
+                return error;
         }
-        return std::nullopt;
+        return transaction.commit();
+    }
+
+    std::optional<DatabaseError>
+    NotificationRepository::releaseDispatches(const std::string_view accountId,
+                                              const std::vector<std::string>& emailIds)
+    {
+        if (emailIds.empty())
+            return std::nullopt;
+        auto transactionResult = DatabaseTransaction::begin(
+            m_connection, QStringLiteral("Release mail notification delivery"));
+        if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
+            return *error;
+        auto transaction = std::get<DatabaseTransaction>(std::move(transactionResult));
+        NotificationDispatchRepository dispatches{m_connection};
+        for (const auto& emailId : emailIds)
+            if (const auto error = dispatches.release(transaction, NotificationDispatchKind::Mail,
+                                                      mailClaimKey(accountId, emailId)))
+                return error;
+        return transaction.commit();
+    }
+
+    std::optional<DatabaseError> NotificationRepository::recoverDispatches()
+    {
+        NotificationDispatchRepository dispatches{m_connection};
+        return dispatches.recover(NotificationDispatchKind::Mail);
     }
 
 } // namespace javelin::jmap::cache

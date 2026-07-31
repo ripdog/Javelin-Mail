@@ -487,6 +487,44 @@ namespace javelin::jmap::sync
                 std::get_if<javelin::jmap::cache::DatabaseError>(&transactionResult))
             co_return operationError(*error);
         auto transaction = std::get<MutationProjectionTransaction>(std::move(transactionResult));
+        if (emailFence.has_value())
+        {
+            const auto fenceCurrent = consistency.isCurrent(*emailFence);
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&fenceCurrent))
+                co_return operationError(*error);
+            if (!std::get<bool>(fenceCurrent))
+            {
+                summary.superseded = true;
+                co_return summary;
+            }
+        }
+        if (parsed.mailboxChanges.has_value())
+        {
+            const auto advanced = states.advanceIfCurrent(
+                transaction.cacheTransaction(), syncKey(accountId, "Mailbox"),
+                parsed.mailboxChanges->oldState, parsed.mailboxChanges->newState);
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&advanced))
+                co_return operationError(*error);
+            if (!std::get<bool>(advanced))
+            {
+                summary.superseded = true;
+                co_return summary;
+            }
+        }
+        if (parsed.emailChanges.has_value())
+        {
+            const auto advanced = states.advanceIfCurrent(
+                transaction.cacheTransaction(), syncKey(accountId, "Email"),
+                parsed.emailChanges->oldState, parsed.emailChanges->newState);
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&advanced))
+                co_return operationError(*error);
+            if (!std::get<bool>(advanced))
+            {
+                summary.superseded = true;
+                co_return summary;
+            }
+        }
+
         javelin::jmap::cache::MailboxRepository mailboxes{m_databaseConnection};
         if (parsed.mailboxChanges.has_value())
         {
@@ -498,10 +536,6 @@ namespace javelin::jmap::sync
                 co_return operationError(*error);
             if (const auto error = mailboxes.removeMany(transaction.cacheTransaction(), accountId,
                                                         parsed.lateDestroyedMailboxes))
-                co_return operationError(*error);
-            if (const auto error =
-                    states.upsert(transaction.cacheTransaction(), syncKey(accountId, "Mailbox"),
-                                  parsed.mailboxChanges->newState))
                 co_return operationError(*error);
             summary.mailboxChanged = !parsed.mailboxChanges->created.empty() ||
                                      !parsed.mailboxChanges->updated.empty() ||
@@ -526,10 +560,6 @@ namespace javelin::jmap::sync
                 co_return operationError(*error);
             if (const auto error = emails.removeMany(transaction.cacheTransaction(), accountId,
                                                      parsed.lateDestroyedEmails))
-                co_return operationError(*error);
-            if (const auto error =
-                    states.upsert(transaction.cacheTransaction(), syncKey(accountId, "Email"),
-                                  parsed.emailChanges->newState))
                 co_return operationError(*error);
             if (!parsed.emailChanges->created.empty() || !parsed.emailChanges->updated.empty() ||
                 !parsed.emailChanges->destroyed.empty() || !parsed.lateDestroyedEmails.empty())

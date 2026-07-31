@@ -27,6 +27,7 @@
 #include <QNetworkInformation>
 #include <QStatusBar>
 #include <QSystemTrayIcon>
+#include <QTimer>
 #include <QToolButton>
 
 namespace javelin::app
@@ -331,16 +332,38 @@ namespace javelin::app
                                            : QStringLiteral("Javelin Mail — %1").arg(summary));
             });
 
+        if (const auto error = m_processServices->mailService().recoverMailNotificationDispatches())
+            qWarning().noquote() << "Recover mail notification delivery:" << error->message;
         QObject::connect(
             &m_processServices->mailService(), &MailApplicationService::notificationRaised,
             m_notificationController.get(),
             [this](const QString& accountId, const QString& mailboxId, const QString& threadId,
                    const QString& emailId, const QString& mailboxName, const QString& title,
-                   const QString& message)
+                   const QString& message, const QStringList& deliveredEmailIds)
             {
-                static_cast<void>(this);
-                m_notificationController->notifyNewMail(accountId, mailboxId, threadId, emailId,
-                                                        mailboxName, title, message);
+                if (m_notificationController->notifyNewMail(accountId, mailboxId, threadId, emailId,
+                                                            mailboxName, title, message))
+                {
+                    if (const auto error =
+                            m_processServices->mailService().markMailNotificationsDelivered(
+                                accountId.toStdString(), mailboxId.toStdString(),
+                                deliveredEmailIds))
+                        qWarning().noquote()
+                            << "Record mail notification delivery:" << error->message;
+                    return;
+                }
+                if (const auto error =
+                        m_processServices->mailService().releaseMailNotificationDispatches(
+                            accountId.toStdString(), deliveredEmailIds))
+                    qWarning().noquote() << "Release mail notification delivery:" << error->message;
+                QTimer::singleShot(
+                    60000, &m_application,
+                    [this, accountId]()
+                    {
+                        static_cast<void>(
+                            m_processServices->mailService().requestAccountSynchronization(
+                                accountId.toStdString()));
+                    });
             });
         QObject::connect(&m_processServices->mailService(), &MailApplicationService::cacheCommitted,
                          &AddressSuggestionStore::instance(), &AddressSuggestionStore::refresh);
@@ -383,9 +406,16 @@ namespace javelin::app
                     accountId.toStdString(), mailboxId.toStdString(), thread,
                     emailId.toStdString()));
             });
-        QObject::connect(&m_processServices->calendarNotificationService(),
-                         &CalendarNotificationService::reminderDue, m_notificationController.get(),
-                         &DesktopNotificationController::notifyCalendarEvent);
+        QObject::connect(
+            &m_processServices->calendarNotificationService(),
+            &CalendarNotificationService::reminderDue, m_notificationController.get(),
+            [this](const QString& key, const QString& title, const QString& message)
+            {
+                if (m_notificationController->notifyCalendarEvent(key, title, message))
+                    m_processServices->calendarNotificationService().deliveryAccepted(key);
+                else
+                    m_processServices->calendarNotificationService().deliveryFailed(key);
+            });
         QObject::connect(m_notificationController.get(),
                          &DesktopNotificationController::calendarNotificationAction, &m_application,
                          [this](const QString& key, const bool snooze)

@@ -49,13 +49,31 @@ namespace
         queueExactEmailMutation(std::string accountId,
                                 javelin::jmap::EmailMailboxMutation mutation) override
         {
-            queued.push_back(mutation);
-            return javelin::jmap::QueuedEmailMutation{
-                .mutationId = "inverse-1",
-                .accountId = std::move(accountId),
-                .emailId = mutation.emailId,
-                .patch = std::move(mutation),
-            };
+            auto result = queueExactEmailMutations(std::move(accountId), {std::move(mutation)});
+            if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                return *error;
+            auto values =
+                std::get<std::vector<javelin::jmap::QueuedEmailMutation>>(std::move(result));
+            return std::move(values.front());
+        }
+
+        javelin::jmap::QueuedEmailMutationsResult queueExactEmailMutations(
+            std::string accountId,
+            std::vector<javelin::jmap::EmailMailboxMutation> mutations) override
+        {
+            std::vector<javelin::jmap::QueuedEmailMutation> values;
+            values.reserve(mutations.size());
+            for (std::size_t index = 0; index < mutations.size(); ++index)
+            {
+                queued.push_back(mutations[index]);
+                values.push_back({
+                    .mutationId = "inverse-" + std::to_string(index + 1),
+                    .accountId = accountId,
+                    .emailId = mutations[index].emailId,
+                    .patch = std::move(mutations[index]),
+                });
+            }
+            return values;
         }
 
         QCoro::Task<javelin::jmap::SubmittedEmailMutationsResult>

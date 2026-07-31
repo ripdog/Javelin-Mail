@@ -118,6 +118,37 @@ namespace javelin::jmap::cache
         return query.numRowsAffected() == 1;
     }
 
+    std::variant<bool, DatabaseError>
+    SyncStateRepository::replaceIfCurrent(DatabaseTransaction& transaction, const SyncStateKey& key,
+                                          const std::optional<std::string_view> expectedState,
+                                          const std::string_view newState)
+    {
+        if (expectedState.has_value())
+            return advanceIfCurrent(transaction, key, *expectedState, newState);
+        if (const auto error = m_connection.validate())
+            return *error;
+        if (!transaction.isActive() || &transaction.connection() != &m_connection)
+        {
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message = QStringLiteral("Sync state replacement requires a matching transaction"),
+            };
+        }
+
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "INSERT INTO sync_state (account_id,object_type,query_key,state_token,updated_at) "
+            "SELECT :account_id,:object_type,:query_key,:new_state,CURRENT_TIMESTAMP "
+            "WHERE NOT EXISTS(SELECT 1 FROM sync_state WHERE account_id=:account_id AND "
+            "object_type=:object_type AND query_key=:query_key)"));
+        bindKey(query, key);
+        query.bindValue(QStringLiteral(":new_state"),
+                        QString::fromStdString(std::string{newState}));
+        if (!query.exec())
+            return makeQueryError(QStringLiteral("Conditionally initialize sync_state"), query);
+        return query.numRowsAffected() == 1;
+    }
+
     std::variant<std::optional<SyncStateRecord>, DatabaseError>
     SyncStateRepository::find(const SyncStateKey& key) const
     {

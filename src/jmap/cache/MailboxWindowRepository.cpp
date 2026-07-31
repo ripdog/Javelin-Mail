@@ -70,14 +70,29 @@ namespace javelin::jmap::cache
 
     std::optional<DatabaseError> MailboxWindowRepository::replace(const MailboxWindowRecord& window)
     {
-        if (const auto error = m_connection.validate())
-            return error;
-
         auto transactionResult = DatabaseTransaction::begin(
             m_connection, QStringLiteral("Begin mailbox-window transaction"));
         if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
             return *error;
         auto transaction = std::get<DatabaseTransaction>(std::move(transactionResult));
+        if (const auto error = replace(transaction, window))
+            return error;
+        return transaction.commit();
+    }
+
+    std::optional<DatabaseError> MailboxWindowRepository::replace(DatabaseTransaction& transaction,
+                                                                  const MailboxWindowRecord& window)
+    {
+        if (const auto error = m_connection.validate())
+            return error;
+        if (!transaction.isActive() || &transaction.connection() != &m_connection)
+        {
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message =
+                    QStringLiteral("Mailbox-window replacement requires a matching transaction"),
+            };
+        }
         auto& database = m_connection.database();
 
         auto effectiveTotal = window.total;
@@ -242,7 +257,7 @@ namespace javelin::jmap::cache
             }
         }
 
-        return transaction.commit();
+        return std::nullopt;
     }
 
     MailboxWindowResult MailboxWindowRepository::find(const std::string_view accountId,

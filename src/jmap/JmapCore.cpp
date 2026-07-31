@@ -24,6 +24,7 @@
 #include "jmap/cache/ThreadRepository.h"
 #include "jmap/sync/ConsistencyDomain.h"
 #include "jmap/sync/EmailMutationJournal.h"
+#include "jmap/sync/EmailMutationQueue.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
 #include "jmap/sync/MailboxRefreshExecutor.h"
 
@@ -313,331 +314,6 @@ namespace javelin::jmap
             }
 
             return *email;
-        }
-
-        struct EmailMutationBase
-        {
-            std::vector<std::string> mailboxIds;
-            std::vector<std::string> keywords;
-        };
-
-        [[nodiscard]] std::variant<EmailMutationBase, javelin::jmap::cache::DatabaseError>
-        emailMutationBase(javelin::jmap::sync::EmailMutationJournal& journal,
-                          const std::string_view accountId,
-                          const javelin::jmap::domain::Email& email)
-        {
-            const auto recordsResult = journal.listForEmail(accountId, email.id);
-            if (const auto* error =
-                    std::get_if<javelin::jmap::cache::DatabaseError>(&recordsResult))
-            {
-                return *error;
-            }
-            for (const auto& record :
-                 std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(recordsResult))
-            {
-                if (javelin::jmap::sync::projectsOptimistically(record.status) &&
-                    record.baseMailboxIds.has_value() && record.baseKeywords.has_value())
-                {
-                    return EmailMutationBase{
-                        .mailboxIds = *record.baseMailboxIds,
-                        .keywords = *record.baseKeywords,
-                    };
-                }
-            }
-            return EmailMutationBase{
-                .mailboxIds = email.mailboxIds,
-                .keywords = email.keywords,
-            };
-        }
-
-        [[nodiscard]] QueuedEmailMutationResult
-        queueEmailPatch(javelin::jmap::cache::DatabaseConnection& connection, std::string accountId,
-                        EmailMailboxMutation mutation)
-        {
-            if (mutation.emailId.empty())
-            {
-                return OperationError{
-                    .message = QStringLiteral("An email id is required for an email patch."),
-                };
-            }
-            if (mutation.addMailboxIds.empty() && mutation.removeMailboxIds.empty() &&
-                mutation.addKeywords.empty() && mutation.removeKeywords.empty())
-            {
-                return OperationError{
-                    .message = QStringLiteral("An email mutation must change a property."),
-                };
-            }
-            for (const auto& mailboxId : mutation.addMailboxIds)
-            {
-                if (mailboxId.empty() || std::ranges::find(mutation.removeMailboxIds, mailboxId) !=
-                                             mutation.removeMailboxIds.end())
-                {
-                    return OperationError{
-                        .message = QStringLiteral(
-                            "Email mailbox additions and removals must be non-empty and disjoint."),
-                    };
-                }
-            }
-            if (std::ranges::any_of(mutation.removeMailboxIds,
-                                    [](const std::string& mailboxId) { return mailboxId.empty(); }))
-            {
-                return OperationError{
-                    .message = QStringLiteral("Email mailbox removals must be non-empty."),
-                };
-            }
-            for (const auto& keyword : mutation.addKeywords)
-            {
-                if (keyword.empty() || std::ranges::find(mutation.removeKeywords, keyword) !=
-                                           mutation.removeKeywords.end())
-                {
-                    return OperationError{
-                        .message = QStringLiteral(
-                            "Email keyword additions and removals must be non-empty and disjoint."),
-                    };
-                }
-            }
-            if (std::ranges::any_of(mutation.removeKeywords,
-                                    [](const std::string& keyword) { return keyword.empty(); }))
-            {
-                return OperationError{
-                    .message = QStringLiteral("Email keyword removals must be non-empty."),
-                };
-            }
-
-            javelin::jmap::cache::EmailRepository emailRepository{connection};
-            const auto emailResult = emailRepository.find(accountId, mutation.emailId);
-            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&emailResult))
-            {
-                return javelin::jmap::operationError(*error);
-            }
-
-            const auto& email = std::get<std::optional<javelin::jmap::domain::Email>>(emailResult);
-            if (!email.has_value())
-            {
-                return OperationError{
-                    .message = QStringLiteral("The selected message is not cached locally."),
-                };
-            }
-
-            if (mutation.authoritativeMailboxIds.has_value() !=
-                mutation.authoritativeKeywords.has_value())
-            {
-                return OperationError{
-                    .message = QStringLiteral("An authoritative email mutation base must include "
-                                              "mailboxes and keywords."),
-                };
-            }
-
-            auto effectiveEmail = *email;
-            if (mutation.authoritativeMailboxIds.has_value())
-            {
-                effectiveEmail.mailboxIds = *mutation.authoritativeMailboxIds;
-                effectiveEmail.keywords = *mutation.authoritativeKeywords;
-            }
-
-            auto resultingMailboxIds = effectiveEmail.mailboxIds;
-            std::erase_if(resultingMailboxIds,
-                          [&mutation](const std::string& mailboxId)
-                          {
-                              return std::ranges::find(mutation.removeMailboxIds, mailboxId) !=
-                                     mutation.removeMailboxIds.end();
-                          });
-            resultingMailboxIds.insert(resultingMailboxIds.end(), mutation.addMailboxIds.begin(),
-                                       mutation.addMailboxIds.end());
-            if (resultingMailboxIds.empty())
-            {
-                return OperationError{
-                    .message = QStringLiteral("An email must remain in at least one mailbox."),
-                };
-            }
-
-            javelin::jmap::sync::EmailMutationJournal emailMutationJournal{connection};
-            const auto baseResult =
-                mutation.authoritativeMailboxIds.has_value()
-                    ? std::variant<EmailMutationBase,
-                                   javelin::jmap::cache::DatabaseError>{EmailMutationBase{
-                          .mailboxIds = *mutation.authoritativeMailboxIds,
-                          .keywords = *mutation.authoritativeKeywords,
-                      }}
-                    : emailMutationBase(emailMutationJournal, accountId, effectiveEmail);
-            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&baseResult))
-            {
-                return javelin::jmap::operationError(*error);
-            }
-            const auto& base = std::get<EmailMutationBase>(baseResult);
-            const auto mutationId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-            const javelin::jmap::sync::EmailMutationRecord pendingAction{
-                .mutationId = mutationId.toStdString(),
-                .operationGroupId = mutation.operationGroupId,
-                .accountId = accountId,
-                .status = javelin::jmap::sync::MutationStatus::Pending,
-                .patch =
-                    {
-                        .emailId = mutation.emailId,
-                        .addMailboxIds = mutation.addMailboxIds,
-                        .removeMailboxIds = mutation.removeMailboxIds,
-                        .addKeywords = mutation.addKeywords,
-                        .removeKeywords = mutation.removeKeywords,
-                    },
-                .baseMailboxIds = base.mailboxIds,
-                .baseKeywords = base.keywords,
-                .baseState = mutation.ifInState,
-                .acceptedState = std::nullopt,
-                .errorJson = std::nullopt,
-            };
-
-            const auto reconciledEmail =
-                javelin::jmap::sync::projectEmailMutations(effectiveEmail, {pendingAction});
-            if (const auto error = emailMutationJournal.queue(pendingAction, reconciledEmail))
-            {
-                return javelin::jmap::operationError(*error);
-            }
-            javelin::jmap::cache::RawMessageSourceRepository sources{connection};
-            if (const auto projectionError = sources.replayProjectionJobs())
-            {
-                qWarning().noquote()
-                    << "Mail vault mailbox projection deferred" << projectionError->message;
-            }
-
-            return QueuedEmailMutation{
-                .mutationId = mutationId.toStdString(),
-                .accountId = accountId,
-                .emailId = mutation.emailId,
-                .patch = std::move(mutation),
-            };
-        }
-
-        [[nodiscard]] QueuedEmailMutationResult
-        queueMailboxPatch(javelin::jmap::cache::DatabaseConnection& connection,
-                          std::string accountId, std::string emailId, std::string sourceMailboxId,
-                          std::string destinationMailboxId, const bool removeSourceMailbox)
-        {
-            if (sourceMailboxId.empty() || destinationMailboxId.empty())
-            {
-                return OperationError{
-                    .message = QStringLiteral("Source and destination mailbox ids are required."),
-                };
-            }
-            if (sourceMailboxId == destinationMailboxId)
-            {
-                return OperationError{
-                    .message =
-                        QStringLiteral("Source and destination mailboxes must be different."),
-                };
-            }
-
-            return queueEmailPatch(
-                connection, std::move(accountId),
-                EmailMailboxMutation{
-                    .emailId = std::move(emailId),
-                    .addMailboxIds = {std::move(destinationMailboxId)},
-                    .removeMailboxIds = removeSourceMailbox
-                                            ? std::vector<std::string>{std::move(sourceMailboxId)}
-                                            : std::vector<std::string>{},
-                    .addKeywords = {},
-                    .removeKeywords = {},
-                    .operationGroupId = std::nullopt,
-                    .ifInState = std::nullopt,
-                    .authoritativeMailboxIds = std::nullopt,
-                    .authoritativeKeywords = std::nullopt,
-                });
-        }
-
-        [[nodiscard]] QueuedEmailMutationResult
-        queueDestroyEmailMutation(javelin::jmap::cache::DatabaseConnection& connection,
-                                  std::string accountId, std::string emailId,
-                                  std::optional<std::string> operationGroupId)
-        {
-            javelin::jmap::cache::EmailRepository emailRepository{connection};
-            const auto emailResult = emailRepository.find(accountId, emailId);
-            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&emailResult))
-            {
-                return javelin::jmap::operationError(*error);
-            }
-
-            const auto& email = std::get<std::optional<javelin::jmap::domain::Email>>(emailResult);
-            if (!email.has_value())
-            {
-                return OperationError{
-                    .message = QStringLiteral("The selected message is not cached locally."),
-                };
-            }
-
-            javelin::jmap::sync::EmailMutationJournal emailMutationJournal{connection};
-            const auto baseResult = emailMutationBase(emailMutationJournal, accountId, *email);
-            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&baseResult))
-            {
-                return javelin::jmap::operationError(*error);
-            }
-            const auto& base = std::get<EmailMutationBase>(baseResult);
-            const auto mutationId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-            const javelin::jmap::sync::EmailMutationRecord pendingAction{
-                .mutationId = mutationId.toStdString(),
-                .operationGroupId = operationGroupId,
-                .accountId = accountId,
-                .status = javelin::jmap::sync::MutationStatus::Pending,
-                .patch =
-                    {
-                        .emailId = emailId,
-                        .addMailboxIds = {},
-                        .removeMailboxIds = email->mailboxIds,
-                        .addKeywords = {},
-                        .removeKeywords = {},
-                        .destroy = true,
-                    },
-                .baseMailboxIds = base.mailboxIds,
-                .baseKeywords = base.keywords,
-                .baseState = std::nullopt,
-                .acceptedState = std::nullopt,
-                .errorJson = std::nullopt,
-            };
-
-            const auto reconciledEmail =
-                javelin::jmap::sync::projectEmailMutations(*email, {pendingAction});
-            if (const auto error = emailMutationJournal.queue(pendingAction, reconciledEmail))
-            {
-                return javelin::jmap::operationError(*error);
-            }
-
-            return QueuedEmailMutation{
-                .mutationId = mutationId.toStdString(),
-                .accountId = std::move(accountId),
-                .emailId = std::move(emailId),
-                .patch =
-                    {
-                        .emailId = pendingAction.patch.emailId,
-                        .addMailboxIds = {},
-                        .removeMailboxIds = pendingAction.patch.removeMailboxIds,
-                        .addKeywords = {},
-                        .removeKeywords = {},
-                        .operationGroupId = std::move(operationGroupId),
-                        .ifInState = std::nullopt,
-                        .authoritativeMailboxIds = std::nullopt,
-                        .authoritativeKeywords = std::nullopt,
-                    },
-            };
-        }
-
-        [[nodiscard]] QueuedEmailMutationResult
-        queueKeywordPatch(javelin::jmap::cache::DatabaseConnection& connection,
-                          std::string accountId, std::string emailId, std::string keyword,
-                          const bool enabled)
-        {
-            return queueEmailPatch(connection, std::move(accountId),
-                                   EmailMailboxMutation{
-                                       .emailId = std::move(emailId),
-                                       .addMailboxIds = {},
-                                       .removeMailboxIds = {},
-                                       .addKeywords = enabled ? std::vector<std::string>{keyword}
-                                                              : std::vector<std::string>{},
-                                       .removeKeywords = enabled
-                                                             ? std::vector<std::string>{}
-                                                             : std::vector<std::string>{keyword},
-                                       .operationGroupId = std::nullopt,
-                                       .ifInState = std::nullopt,
-                                       .authoritativeMailboxIds = std::nullopt,
-                                       .authoritativeKeywords = std::nullopt,
-                                   });
         }
 
         [[nodiscard]] std::vector<javelin::jmap::sync::EmailMutationRecord>
@@ -1560,9 +1236,9 @@ namespace javelin::jmap
             };
         }
 
-        return queueMailboxPatch(*m_impl->databaseConnection, std::move(accountId),
-                                 std::move(emailId), std::move(sourceMailboxId),
-                                 std::move(destinationMailboxId), true);
+        return sync::queueMailboxEmailMutation(*m_impl->databaseConnection, std::move(accountId),
+                                               std::move(emailId), std::move(sourceMailboxId),
+                                               std::move(destinationMailboxId), true);
     }
 
     QueuedEmailMutationResult JmapCore::queueEmailMailboxMutation(std::string accountId,
@@ -1575,8 +1251,22 @@ namespace javelin::jmap
             };
         }
 
-        return ::javelin::jmap::queueEmailPatch(*m_impl->databaseConnection, std::move(accountId),
-                                                std::move(mutation));
+        return sync::queueEmailMutation(*m_impl->databaseConnection, std::move(accountId),
+                                        std::move(mutation));
+    }
+
+    QueuedEmailMutationsResult
+    JmapCore::queueEmailMailboxMutations(std::string accountId,
+                                         std::vector<EmailMailboxMutation> mutations)
+    {
+        if (m_impl->databaseConnection == nullptr)
+        {
+            return OperationError{
+                .message = QStringLiteral("Queued mutations are unavailable in this process."),
+            };
+        }
+        return sync::queueEmailMutations(*m_impl->databaseConnection, std::move(accountId),
+                                         std::move(mutations));
     }
 
     QueuedEmailMutationResult JmapCore::queueCopyEmail(std::string accountId, std::string emailId,
@@ -1590,9 +1280,9 @@ namespace javelin::jmap
             };
         }
 
-        return queueMailboxPatch(*m_impl->databaseConnection, std::move(accountId),
-                                 std::move(emailId), std::move(sourceMailboxId),
-                                 std::move(destinationMailboxId), false);
+        return sync::queueMailboxEmailMutation(*m_impl->databaseConnection, std::move(accountId),
+                                               std::move(emailId), std::move(sourceMailboxId),
+                                               std::move(destinationMailboxId), false);
     }
 
     QueuedEmailMutationResult JmapCore::queueArchiveEmail(std::string accountId,
@@ -1623,8 +1313,8 @@ namespace javelin::jmap
             };
         }
 
-        return queueDestroyEmailMutation(*m_impl->databaseConnection, std::move(accountId),
-                                         std::move(emailId), std::move(operationGroupId));
+        return sync::queueDestroyEmailMutation(*m_impl->databaseConnection, std::move(accountId),
+                                               std::move(emailId), std::move(operationGroupId));
     }
 
     QueuedEmailMutationResult JmapCore::queueMarkEmailRead(std::string accountId,
@@ -1637,8 +1327,8 @@ namespace javelin::jmap
             };
         }
 
-        return queueKeywordPatch(*m_impl->databaseConnection, std::move(accountId),
-                                 std::move(emailId), "$seen", true);
+        return sync::queueEmailKeywordMutation(*m_impl->databaseConnection, std::move(accountId),
+                                               std::move(emailId), "$seen", true);
     }
 
     QueuedEmailMutationResult JmapCore::queueMarkEmailUnread(std::string accountId,
@@ -1651,8 +1341,8 @@ namespace javelin::jmap
             };
         }
 
-        return queueKeywordPatch(*m_impl->databaseConnection, std::move(accountId),
-                                 std::move(emailId), "$seen", false);
+        return sync::queueEmailKeywordMutation(*m_impl->databaseConnection, std::move(accountId),
+                                               std::move(emailId), "$seen", false);
     }
 
     QueuedEmailMutationResult
@@ -1665,8 +1355,8 @@ namespace javelin::jmap
             };
         }
 
-        return queueKeywordPatch(*m_impl->databaseConnection, std::move(accountId),
-                                 std::move(emailId), "$flagged", flagged);
+        return sync::queueEmailKeywordMutation(*m_impl->databaseConnection, std::move(accountId),
+                                               std::move(emailId), "$flagged", flagged);
     }
 
     QCoro::Task<SubmittedEmailMutationsResult>

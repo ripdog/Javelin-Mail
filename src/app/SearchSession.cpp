@@ -280,13 +280,14 @@ namespace javelin::app
                 m_page.stale = false;
                 m_page.refreshError.clear();
                 const auto nextOffset = summary.position + summary.representativeCount;
-                const auto remainingPages =
+                const auto remainingRequests =
                     summary.total.has_value() && *summary.total <= completeManifestThreshold
-                        ? messageListPageCount(*summary.total, m_pageSize)
+                        ? (*summary.total > nextOffset ? *summary.total - nextOffset : 0)
                         : readAheadPages;
-                if (summary.representativeCount != 0 && remainingPages > 0)
+                if (summary.representativeCount != 0 && remainingRequests > 0)
                 {
-                    prefetchOnlinePages(nextOffset, remainingPages, generation, summary.queryState);
+                    prefetchOnlinePages(nextOffset, remainingRequests, generation,
+                                        summary.queryState);
                 }
                 const bool refreshAgain = std::exchange(m_refreshAfterCurrent, false);
                 Q_EMIT pageChanged();
@@ -296,10 +297,10 @@ namespace javelin::app
     }
 
     void SearchSession::prefetchOnlinePages(const std::size_t offset,
-                                            const std::size_t remainingPages,
+                                            const std::size_t remainingRequests,
                                             const std::uint64_t generation, std::string queryState)
     {
-        if (remainingPages == 0 || generation != m_generation || m_mode != SearchMode::Online ||
+        if (remainingRequests == 0 || generation != m_generation || m_mode != SearchMode::Online ||
             (m_page.total.has_value() && offset >= *m_page.total))
         {
             return;
@@ -316,7 +317,7 @@ namespace javelin::app
         {
             const auto next = (*page)->position + (*page)->items.size();
             if (next > offset)
-                prefetchOnlinePages(next, remainingPages - 1, generation, std::move(queryState));
+                prefetchOnlinePages(next, remainingRequests - 1, generation, std::move(queryState));
             return;
         }
 
@@ -331,7 +332,7 @@ namespace javelin::app
             .windowKey = onlineWindowKey(),
         });
         QCoro::connect(std::move(task), this,
-                       [this, offset, remainingPages, generation,
+                       [this, offset, remainingRequests, generation,
                         queryState = std::move(queryState)](SearchWindowResult result)
                        {
                            m_prefetchOffsets.erase(offset);
@@ -339,30 +340,34 @@ namespace javelin::app
                                m_mode != SearchMode::Online)
                                return;
                            const auto* summary = std::get_if<SearchWindowSummary>(&result);
-                           if (m_page.offset == offset)
+                           const bool currentPage = m_page.offset == offset;
+                           if (summary == nullptr || summary->queryState != queryState)
                            {
-                               m_page.refreshInFlight = false;
-                               if (summary == nullptr)
+                               if (currentPage)
                                {
+                                   m_page.refreshInFlight = false;
+                                   m_page.stale = true;
+                                   Q_EMIT pageChanged();
                                    requestOnlinePage();
-                                   return;
                                }
-                               applyCommittedServerPage();
-                           }
-                           if (summary == nullptr || summary->queryState != queryState ||
-                               summary->representativeCount == 0)
-                           {
-                               if (summary != nullptr && summary->queryState != queryState)
+                               else if (summary != nullptr)
                                {
                                    m_page.stale = true;
                                    Q_EMIT pageChanged();
                                }
                                return;
                            }
+                           if (currentPage)
+                           {
+                               m_page.refreshInFlight = false;
+                               applyCommittedServerPage();
+                           }
+                           if (summary->representativeCount == 0)
+                               return;
                            const auto next = summary->position + summary->representativeCount;
                            if (next > offset)
                            {
-                               prefetchOnlinePages(next, remainingPages - 1, generation,
+                               prefetchOnlinePages(next, remainingRequests - 1, generation,
                                                    std::move(queryState));
                            }
                        });
@@ -398,6 +403,11 @@ namespace javelin::app
     {
         if (m_sort.property == sort.property && m_sort.direction == sort.direction)
             return;
+        if (m_mode == SearchMode::Online)
+        {
+            m_mailService.retireSearchWindow(m_accountId, onlineWindowKey());
+            m_sessionId = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
+        }
         m_sort = sort;
         ++m_generation;
         m_page.offset = 0;

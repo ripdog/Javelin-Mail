@@ -32,6 +32,10 @@ namespace javelin::jmap::cache
 
         [[nodiscard]] std::variant<std::vector<CalendarNotificationCandidate>, DatabaseError>
         claimDue(const QDateTime& now);
+        [[nodiscard]] std::optional<DatabaseError> markDelivered(std::string_view key,
+                                                                 const QDateTime& deliveredAt);
+        [[nodiscard]] std::optional<DatabaseError> releaseDispatch(std::string_view key);
+        [[nodiscard]] std::optional<DatabaseError> recoverDispatches();
         [[nodiscard]] std::optional<QDateTime> nextTrigger() const;
         [[nodiscard]] std::optional<DatabaseError> dismiss(std::string_view key);
         [[nodiscard]] std::optional<DatabaseError> snooze(std::string_view key,

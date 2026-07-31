@@ -43,6 +43,8 @@ namespace javelin::jmap::cache
         explicit MailboxWindowRepository(DatabaseConnection& connection);
 
         [[nodiscard]] std::optional<DatabaseError> replace(const MailboxWindowRecord& window);
+        [[nodiscard]] std::optional<DatabaseError> replace(DatabaseTransaction& transaction,
+                                                           const MailboxWindowRecord& window);
         [[nodiscard]] MailboxWindowResult find(std::string_view accountId,
                                                std::string_view queryKey,
                                                std::size_t requestedOffset,

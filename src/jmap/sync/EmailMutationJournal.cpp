@@ -182,58 +182,71 @@ namespace javelin::jmap::sync
                                      const javelin::jmap::domain::Email& projectedEmail,
                                      const std::span<const MutationRecord> companionRecords)
     {
+        return queueGroup(std::vector{record}, std::vector{projectedEmail}, companionRecords);
+    }
+
+    std::optional<javelin::jmap::cache::DatabaseError> EmailMutationJournal::queueGroup(
+        const std::vector<EmailMutationRecord>& records,
+        const std::vector<javelin::jmap::domain::Email>& projectedEmails,
+        const std::span<const MutationRecord> companionRecords)
+    {
+        if (records.empty())
+            return std::nullopt;
+        const auto& accountId = records.front().accountId;
+        if (accountId.empty() || std::ranges::any_of(records, [&](const auto& record)
+                                                     { return record.accountId != accountId; }))
+        {
+            return javelin::jmap::cache::DatabaseError{
+                .code = javelin::jmap::cache::DatabaseErrorCode::QueryFailed,
+                .message = QStringLiteral("An Email mutation group must use one account."),
+            };
+        }
+
         auto transactionResult = MutationProjectionTransaction::begin(
-            m_connection, QStringLiteral("Begin Email mutation projection"));
+            m_connection, QStringLiteral("Begin Email mutation group projection"));
         if (const auto* error =
                 std::get_if<javelin::jmap::cache::DatabaseError>(&transactionResult))
-        {
             return *error;
-        }
         auto transaction = std::get<MutationProjectionTransaction>(std::move(transactionResult));
-        const auto generic = genericRecord(record);
-        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&generic))
+
+        std::vector<std::string> affectedMailboxIds;
+        for (const auto& record : records)
         {
-            return *error;
-        }
-        if (const auto error = transaction.append(std::get<MutationRecord>(generic)))
-        {
-            return error;
+            const auto generic = genericRecord(record);
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&generic))
+                return *error;
+            if (const auto error = transaction.append(std::get<MutationRecord>(generic)))
+                return error;
+            affectedMailboxIds.insert(affectedMailboxIds.end(), record.patch.addMailboxIds.begin(),
+                                      record.patch.addMailboxIds.end());
+            affectedMailboxIds.insert(affectedMailboxIds.end(),
+                                      record.patch.removeMailboxIds.begin(),
+                                      record.patch.removeMailboxIds.end());
+            if (record.patch.destroy && record.baseMailboxIds.has_value())
+                affectedMailboxIds.insert(affectedMailboxIds.end(), record.baseMailboxIds->begin(),
+                                          record.baseMailboxIds->end());
         }
         for (const auto& companion : companionRecords)
-        {
             if (const auto error = transaction.append(companion))
-            {
                 return error;
-            }
-        }
+
         javelin::jmap::cache::EmailRepository emails{m_connection};
-        if (const auto error = emails.upsertMany(transaction.cacheTransaction(), record.accountId,
-                                                 {projectedEmail}))
-        {
+        if (const auto error =
+                emails.upsertMany(transaction.cacheTransaction(), accountId, projectedEmails))
             return error;
-        }
-        std::vector<std::string> affectedMailboxIds = record.patch.addMailboxIds;
-        affectedMailboxIds.insert(affectedMailboxIds.end(), record.patch.removeMailboxIds.begin(),
-                                  record.patch.removeMailboxIds.end());
-        if (record.patch.destroy && record.baseMailboxIds.has_value())
-        {
-            affectedMailboxIds.insert(affectedMailboxIds.end(), record.baseMailboxIds->begin(),
-                                      record.baseMailboxIds->end());
-        }
+
         std::ranges::sort(affectedMailboxIds);
         const auto uniqueEnd = std::ranges::unique(affectedMailboxIds).begin();
         affectedMailboxIds.erase(uniqueEnd, affectedMailboxIds.end());
         javelin::jmap::cache::MailboxWindowRepository windows{m_connection};
         for (const auto& mailboxId : affectedMailboxIds)
-        {
             if (const auto error = windows.invalidateMailbox(
-                    transaction.cacheTransaction(), record.accountId, mailboxId,
+                    transaction.cacheTransaction(), accountId, mailboxId,
                     javelin::jmap::cache::QueryWindowCoverage::LocallyProjected))
                 return error;
-        }
         javelin::jmap::cache::SearchWindowRepository searchWindows{m_connection};
         if (const auto error =
-                searchWindows.projectAccount(transaction.cacheTransaction(), record.accountId))
+                searchWindows.projectAccount(transaction.cacheTransaction(), accountId))
             return error;
         return transaction.commit();
     }

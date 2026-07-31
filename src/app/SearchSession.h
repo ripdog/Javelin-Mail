@@ -66,7 +66,7 @@ namespace javelin::app
         void startLocalSnapshot();
         void applyLocalPage();
         void requestOnlinePage();
-        void prefetchOnlinePages(std::size_t offset, std::size_t remainingPages,
+        void prefetchOnlinePages(std::size_t offset, std::size_t remainingRequests,
                                  std::uint64_t generation, std::string queryState);
         void applyCommittedServerPage();
         void resetForPageChange();

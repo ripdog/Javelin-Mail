@@ -294,6 +294,77 @@ TEST_CASE("generic mutation journal preserves ambiguous outcomes across recovery
           std::optional<std::string>{"state-3"});
 }
 
+TEST_CASE("mutation journal preserves append order independently of mutation ids", "[jmap][sync]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    javelin::jmap::sync::MutationJournalRepository repository{databaseContext.connection};
+    const auto record = [](std::string mutationId, std::string payload)
+    {
+        return javelin::jmap::sync::MutationRecord{
+            .mutationId = std::move(mutationId),
+            .operationGroupId = std::nullopt,
+            .domain = {.accountId = "account-1", .dataType = "Email"},
+            .objectId = "eml-1",
+            .mutationKind = "email_patch",
+            .status = javelin::jmap::sync::MutationStatus::Pending,
+            .payloadJson = std::move(payload),
+            .baseState = std::nullopt,
+            .acceptedState = std::nullopt,
+            .errorJson = std::nullopt,
+        };
+    };
+
+    REQUIRE_FALSE(repository.put(record("z-first", R"({"order":1})")).has_value());
+    REQUIRE_FALSE(repository.put(record("a-second", R"({"order":2})")).has_value());
+
+    const auto result =
+        repository.listForObject({.accountId = "account-1", .dataType = "Email"}, "eml-1");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::MutationRecord>>(result));
+    const auto& records = std::get<std::vector<javelin::jmap::sync::MutationRecord>>(result);
+    REQUIRE(records.size() == 2);
+    CHECK(records[0].mutationId == "z-first");
+    CHECK(records[1].mutationId == "a-second");
+    CHECK(records[0].sequence < records[1].sequence);
+}
+
+TEST_CASE("mutation journal append rejects duplicate ids and missing transitions", "[jmap][sync]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    javelin::jmap::sync::MutationJournalRepository repository{databaseContext.connection};
+    const javelin::jmap::sync::MutationRecord record{
+        .mutationId = "immutable-1",
+        .operationGroupId = std::nullopt,
+        .domain = {.accountId = "account-1", .dataType = "Email"},
+        .objectId = "eml-1",
+        .mutationKind = "email_patch",
+        .status = javelin::jmap::sync::MutationStatus::Pending,
+        .payloadJson = R"({"value":1})",
+        .baseState = std::nullopt,
+        .acceptedState = std::nullopt,
+        .errorJson = std::nullopt,
+    };
+    REQUIRE_FALSE(repository.put(record).has_value());
+    auto duplicate = record;
+    duplicate.payloadJson = R"({"value":2})";
+    CHECK(repository.put(duplicate).has_value());
+    CHECK(repository.transition("missing", javelin::jmap::sync::MutationStatus::Accepted)
+              .has_value());
+
+    const auto found = repository.find("immutable-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::sync::MutationRecord>>(found));
+    REQUIRE(std::get<std::optional<javelin::jmap::sync::MutationRecord>>(found).has_value());
+    CHECK(std::get<std::optional<javelin::jmap::sync::MutationRecord>>(found)->payloadJson ==
+          R"({"value":1})");
+}
+
 TEST_CASE(
     "Email mutation projection rolls back its journal record when cache materialization fails",
     "[jmap][sync][consistency]")

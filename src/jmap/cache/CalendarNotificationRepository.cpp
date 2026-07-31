@@ -1,6 +1,7 @@
 #include "jmap/cache/CalendarNotificationRepository.h"
 
 #include "jmap/api/CalendarMethods.h"
+#include "jmap/cache/NotificationDispatchRepository.h"
 
 #include <QRegularExpression>
 #include <QSqlError>
@@ -49,14 +50,12 @@ namespace javelin::jmap::cache
     CalendarNotificationRepository::claimDue(const QDateTime& now)
     {
         m_nextTrigger = std::nullopt;
-        if (const auto error = m_connection.validate())
+        auto transactionResult = DatabaseTransaction::begin(
+            m_connection, QStringLiteral("Claim due calendar notifications"));
+        if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
             return *error;
-        const DatabaseWriteScope writeScope{m_connection};
+        auto transaction = std::get<DatabaseTransaction>(std::move(transactionResult));
         auto& database = m_connection.database();
-        if (!database.transaction())
-            return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
-                                 .message = QStringLiteral("Begin calendar notification scan: ") +
-                                            database.lastError().text()};
 
         QSqlQuery query{database};
         query.prepare(QStringLiteral(
@@ -77,12 +76,7 @@ namespace javelin::jmap::cache
         state.prepare(
             QStringLiteral("SELECT status,snoozed_until FROM calendar_notification_state WHERE "
                            "notification_key=:key"));
-        QSqlQuery claim{database};
-        claim.prepare(QStringLiteral(
-            "INSERT INTO calendar_notification_state(notification_key,status,notified_at) "
-            "VALUES(:key,'notified',:now) ON CONFLICT(notification_key) DO UPDATE SET "
-            "status='notified',notified_at=excluded.notified_at,snoozed_until=NULL"));
-
+        NotificationDispatchRepository dispatches{m_connection};
         std::vector<CalendarNotificationCandidate> candidates;
         const auto oldestTrigger = now.addDays(-1);
         while (query.next())
@@ -200,13 +194,12 @@ namespace javelin::jmap::cache
                 }
                 if (!due)
                     continue;
-                claim.bindValue(QStringLiteral(":key"), QString::fromStdString(key));
-                claim.bindValue(QStringLiteral(":now"), now.toString(Qt::ISODateWithMs));
-                if (!claim.exec())
-                {
-                    database.rollback();
-                    return queryError(QStringLiteral("Claim calendar notification"), claim);
-                }
+                const auto claimed =
+                    dispatches.claim(transaction, NotificationDispatchKind::Calendar, key);
+                if (const auto* error = std::get_if<DatabaseError>(&claimed))
+                    return *error;
+                if (!std::get<bool>(claimed))
+                    continue;
                 candidates.push_back({.key = key,
                                       .ownerAccountId = query.value(7).toString().toStdString(),
                                       .accountId = accountId,
@@ -218,11 +211,55 @@ namespace javelin::jmap::cache
                                       .alert = alert});
             }
         }
-        if (!database.commit())
-            return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
-                                 .message = QStringLiteral("Commit calendar notification scan: ") +
-                                            database.lastError().text()};
+        if (const auto error = transaction.commit())
+            return *error;
         return candidates;
+    }
+
+    std::optional<DatabaseError>
+    CalendarNotificationRepository::markDelivered(const std::string_view key,
+                                                  const QDateTime& deliveredAt)
+    {
+        auto transactionResult = DatabaseTransaction::begin(
+            m_connection, QStringLiteral("Complete calendar notification delivery"));
+        if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
+            return *error;
+        auto transaction = std::get<DatabaseTransaction>(std::move(transactionResult));
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "INSERT INTO calendar_notification_state(notification_key,status,notified_at) "
+            "VALUES(:key,'notified',:now) ON CONFLICT(notification_key) DO UPDATE SET "
+            "status='notified',notified_at=excluded.notified_at,snoozed_until=NULL"));
+        query.bindValue(QStringLiteral(":key"), QString::fromStdString(std::string{key}));
+        query.bindValue(QStringLiteral(":now"), deliveredAt.toUTC().toString(Qt::ISODateWithMs));
+        if (!query.exec())
+            return queryError(QStringLiteral("Record calendar notification delivery"), query);
+        NotificationDispatchRepository dispatches{m_connection};
+        if (const auto error =
+                dispatches.release(transaction, NotificationDispatchKind::Calendar, key))
+            return error;
+        return transaction.commit();
+    }
+
+    std::optional<DatabaseError>
+    CalendarNotificationRepository::releaseDispatch(const std::string_view key)
+    {
+        auto transactionResult = DatabaseTransaction::begin(
+            m_connection, QStringLiteral("Release calendar notification delivery"));
+        if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
+            return *error;
+        auto transaction = std::get<DatabaseTransaction>(std::move(transactionResult));
+        NotificationDispatchRepository dispatches{m_connection};
+        if (const auto error =
+                dispatches.release(transaction, NotificationDispatchKind::Calendar, key))
+            return error;
+        return transaction.commit();
+    }
+
+    std::optional<DatabaseError> CalendarNotificationRepository::recoverDispatches()
+    {
+        NotificationDispatchRepository dispatches{m_connection};
+        return dispatches.recover(NotificationDispatchKind::Calendar);
     }
 
     std::optional<QDateTime> CalendarNotificationRepository::nextTrigger() const

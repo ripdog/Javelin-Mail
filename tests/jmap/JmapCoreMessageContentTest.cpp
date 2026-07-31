@@ -732,6 +732,53 @@ TEST_CASE("JmapCore queues mailbox copies as mutations", "[jmap][core][mutation-
     CHECK(records.front().patch.removeMailboxIds.empty());
 }
 
+TEST_CASE("JmapCore rejects an invalid email mutation group atomically",
+          "[jmap][core][mutation-journal]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+
+    auto databaseContext = makeDatabaseContext();
+    seedAccount(databaseContext.connection);
+    auto email = loadEmailFixture();
+    email.id = "eml-1";
+    email.threadId = "thr-1";
+    email.mailboxIds = {"mbx-inbox"};
+    email.keywords = {};
+
+    javelin::jmap::cache::EmailRepository emails{databaseContext.connection};
+    REQUIRE_FALSE(emails.replaceAll("account-1", {email}).has_value());
+    FakeTransport transport;
+    javelin::jmap::JmapCore core{databaseContext.connection, transport, transport.methodTransport};
+
+    const auto result =
+        core.queueEmailMailboxMutations("account-1", {
+                                                         {
+                                                             .emailId = "eml-1",
+                                                             .addMailboxIds = {"mbx-archive"},
+                                                             .removeMailboxIds = {"mbx-inbox"},
+                                                             .operationGroupId = "atomic-group",
+                                                         },
+                                                         {
+                                                             .emailId = "missing",
+                                                             .addKeywords = {"$flagged"},
+                                                             .operationGroupId = "atomic-group",
+                                                         },
+                                                     });
+    REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
+
+    const auto unchanged = emails.find("account-1", "eml-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::domain::Email>>(unchanged));
+    REQUIRE(std::get<std::optional<javelin::jmap::domain::Email>>(unchanged).has_value());
+    CHECK(std::get<std::optional<javelin::jmap::domain::Email>>(unchanged)->mailboxIds ==
+          std::vector<std::string>{"mbx-inbox"});
+
+    javelin::jmap::sync::EmailMutationJournal journal{databaseContext.connection};
+    const auto grouped = journal.listForOperationGroup("account-1", "atomic-group");
+    REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::EmailMutationRecord>>(grouped));
+    CHECK(std::get<std::vector<javelin::jmap::sync::EmailMutationRecord>>(grouped).empty());
+}
+
 TEST_CASE("JmapCore queues exact mailbox patches as mutations", "[jmap][core][mutation-journal]")
 {
     ApplicationGuard application;

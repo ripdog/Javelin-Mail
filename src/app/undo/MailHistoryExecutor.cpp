@@ -167,24 +167,23 @@ namespace javelin::app::undo
 
         const auto operationGroupId =
             QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
-        std::size_t queuedCount = 0;
-        for (auto& item : history->items)
+        std::vector<javelin::jmap::EmailMailboxMutation> mutations;
+        mutations.reserve(history->items.size());
+        for (const auto& item : history->items)
         {
             const auto& patch =
                 direction == HistoryExecutionDirection::Undo ? item.inverse : item.forward;
             const auto authoritativeEmail = emails.find(item.emailId);
-            auto queuedResult = m_mailService.queueExactEmailMutation(
-                accountId, mutationFrom(item, patch, operationGroupId, authoritative.state,
-                                        *authoritativeEmail->second));
-            if (const auto* error = std::get_if<javelin::jmap::OperationError>(&queuedResult))
-            {
-                co_return failure(queuedCount == 0 ? outcomeFor(*error)
-                                                   : HistoryExecutionOutcome::PartialFailure,
-                                  error->message);
-            }
-            item.mutationId = std::get<javelin::jmap::QueuedEmailMutation>(queuedResult).mutationId;
-            ++queuedCount;
+            mutations.push_back(mutationFrom(item, patch, operationGroupId, authoritative.state,
+                                             *authoritativeEmail->second));
         }
+        auto queuedResult = m_mailService.queueExactEmailMutations(accountId, std::move(mutations));
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&queuedResult))
+            co_return failure(outcomeFor(*error), error->message);
+        const auto& queued =
+            std::get<std::vector<javelin::jmap::QueuedEmailMutation>>(queuedResult);
+        for (std::size_t index = 0; index < history->items.size(); ++index)
+            history->items[index].mutationId = queued[index].mutationId;
 
         auto submitResult =
             co_await m_mailService.submitPendingEmailMutations(accountId, operationGroupId);
@@ -235,6 +234,8 @@ namespace javelin::app::undo
 
             const auto compensationGroupId =
                 QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
+            std::vector<javelin::jmap::EmailMailboxMutation> compensationMutations;
+            compensationMutations.reserve(acceptedEmailIds.size());
             for (const auto& acceptedId : acceptedEmailIds)
             {
                 const auto historyItem =
@@ -264,15 +265,17 @@ namespace javelin::app::undo
                 const auto& compensationPatch = direction == HistoryExecutionDirection::Undo
                                                     ? historyItem->forward
                                                     : historyItem->inverse;
-                const auto queued = m_mailService.queueExactEmailMutation(
-                    accountId, mutationFrom(*historyItem, compensationPatch, compensationGroupId,
-                                            current.state, *currentEmail->second));
-                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&queued))
-                {
-                    auto result = failure(HistoryExecutionOutcome::PartialFailure, error->message);
-                    result.updatedPayload = *history;
-                    co_return result;
-                }
+                compensationMutations.push_back(mutationFrom(*historyItem, compensationPatch,
+                                                             compensationGroupId, current.state,
+                                                             *currentEmail->second));
+            }
+            const auto queuedCompensation =
+                m_mailService.queueExactEmailMutations(accountId, std::move(compensationMutations));
+            if (const auto* error = std::get_if<javelin::jmap::OperationError>(&queuedCompensation))
+            {
+                auto result = failure(HistoryExecutionOutcome::PartialFailure, error->message);
+                result.updatedPayload = *history;
+                co_return result;
             }
 
             const auto compensated =

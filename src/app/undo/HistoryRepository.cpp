@@ -176,6 +176,33 @@ namespace javelin::app::undo
         return std::optional<HistoryEntry>{std::get<HistoryEntry>(std::move(entry))};
     }
 
+    std::variant<bool, javelin::jmap::cache::DatabaseError>
+    HistoryRepository::hasMutationGroup(const QString& operationGroupId) const
+    {
+        if (const auto error = m_connection.validate())
+            return *error;
+
+        QSqlQuery query{m_connection.database()};
+        query.prepare(QStringLiteral(
+            "SELECT EXISTS(SELECT 1 FROM mutation_journal WHERE operation_group_id=:group_id)"));
+        query.bindValue(QStringLiteral(":group_id"), operationGroupId);
+        if (!query.exec() || !query.next())
+            return queryError(QStringLiteral("Find operation history mutation group"), query);
+        return query.value(0).toBool();
+    }
+
+    std::variant<std::vector<javelin::jmap::sync::MutationRecord>,
+                 javelin::jmap::cache::DatabaseError>
+    HistoryRepository::mutationGroup(const std::string_view accountId,
+                                     const std::string_view dataType,
+                                     const QString& operationGroupId) const
+    {
+        javelin::jmap::sync::MutationJournalRepository journal{m_connection};
+        return journal.listForOperationGroup(
+            {.accountId = std::string{accountId}, .dataType = std::string{dataType}},
+            operationGroupId.toStdString());
+    }
+
     std::variant<std::int64_t, javelin::jmap::cache::DatabaseError> HistoryRepository::nextOrder()
     {
         QSqlQuery read{m_connection.database()};
@@ -336,6 +363,18 @@ namespace javelin::app::undo
     std::variant<HistoryEntry, javelin::jmap::cache::DatabaseError>
     HistoryRepository::markPreparedReady(HistoryEntry entry)
     {
+        return markPrepared(std::move(entry), HistoryEntryStatus::Ready);
+    }
+
+    std::variant<HistoryEntry, javelin::jmap::cache::DatabaseError>
+    HistoryRepository::markPreparedImpossible(HistoryEntry entry)
+    {
+        return markPrepared(std::move(entry), HistoryEntryStatus::Impossible);
+    }
+
+    std::variant<HistoryEntry, javelin::jmap::cache::DatabaseError>
+    HistoryRepository::markPrepared(HistoryEntry entry, const HistoryEntryStatus status)
+    {
         auto transactionResult = javelin::jmap::cache::DatabaseTransaction::begin(
             m_connection, QStringLiteral("Commit preparing history entry"));
         if (const auto* error =
@@ -352,7 +391,7 @@ namespace javelin::app::undo
             return *error;
         entry.stack = HistoryStack::Undo;
         entry.stackOrder = std::get<std::int64_t>(order);
-        entry.status = HistoryEntryStatus::Ready;
+        entry.status = status;
         entry.updatedAt = QDateTime::currentDateTimeUtc();
         if (const auto error = updateStored(entry))
             return *error;

@@ -4,6 +4,7 @@
 #include "jmap/sync/ConsistencyDomain.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <span>
 #include <string>
@@ -35,6 +36,7 @@ namespace javelin::jmap::sync
         std::optional<std::string> baseState;
         std::optional<std::string> acceptedState;
         std::optional<std::string> errorJson;
+        std::int64_t sequence = 0;
     };
 
     class MutationJournalRepository

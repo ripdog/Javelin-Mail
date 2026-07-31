@@ -32,7 +32,7 @@ namespace javelin::app
         connectSignal("NotificationClosed", SLOT(onNotificationClosed(uint, uint)));
     }
 
-    void DesktopNotificationController::notifyNewMail(const QString& accountId,
+    bool DesktopNotificationController::notifyNewMail(const QString& accountId,
                                                       const QString& mailboxId,
                                                       const QString& threadId,
                                                       const QString& emailId,
@@ -45,7 +45,7 @@ namespace javelin::app
         if (!notifications.isValid())
         {
             qWarning() << "Desktop notifications are unavailable on the session bus";
-            return;
+            return false;
         }
 
         const QString summary = mailboxName.isEmpty() ? title : QStringLiteral("%1").arg(title);
@@ -62,7 +62,7 @@ namespace javelin::app
         {
             qWarning().noquote() << "Failed to send desktop notification"
                                  << notificationReply.error().message();
-            return;
+            return false;
         }
 
         const auto notificationId = notificationReply.value();
@@ -77,6 +77,7 @@ namespace javelin::app
                                                                     .sendId = {},
                                                                     .opensSettings = false,
                                                                 });
+        return true;
     }
 
     void DesktopNotificationController::notifyError(const QString& connectionId,
@@ -121,7 +122,7 @@ namespace javelin::app
                                                            .opensSettings = opensSettings});
     }
 
-    void DesktopNotificationController::notifyCalendarEvent(const QString& key,
+    bool DesktopNotificationController::notifyCalendarEvent(const QString& key,
                                                             const QString& title,
                                                             const QString& message)
     {
@@ -131,7 +132,7 @@ namespace javelin::app
         if (!notifications.isValid())
         {
             qWarning() << "Desktop notifications are unavailable on the session bus";
-            return;
+            return false;
         }
         const QStringList actions = {QStringLiteral("dismiss"), QStringLiteral("Dismiss"),
                                      QStringLiteral("snooze"), QStringLiteral("Snooze 5 min")};
@@ -143,7 +144,7 @@ namespace javelin::app
         {
             qWarning().noquote() << "Failed to send calendar notification"
                                  << reply.error().message();
-            return;
+            return false;
         }
         m_trackedNotifications.insert_or_assign(reply.value(),
                                                 TrackedNotification{.accountId = {},
@@ -155,6 +156,7 @@ namespace javelin::app
                                                                     .calendarNotificationKey = key,
                                                                     .sendId = {},
                                                                     .opensSettings = false});
+        return true;
     }
 
     void DesktopNotificationController::notifyUndoableSend(const QString& sendId,

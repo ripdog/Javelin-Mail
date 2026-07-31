@@ -22,6 +22,8 @@ namespace javelin::app
                                              QObject* parent = nullptr);
         void start();
         void requestScan();
+        void deliveryAccepted(const QString& key);
+        void deliveryFailed(const QString& key);
         void dismiss(const QString& key);
         void snooze(const QString& key);
 

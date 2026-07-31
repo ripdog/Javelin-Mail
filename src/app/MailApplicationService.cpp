@@ -10,6 +10,7 @@
 #include "jmap/cache/CalendarRepository.h"
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/MailboxWindowRepository.h"
+#include "jmap/cache/NotificationRepository.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/cache/SyncStateRepository.h"
 #include "jmap/contacts/ContactService.h"
@@ -19,6 +20,7 @@
 
 #include <QDebug>
 #include <QNetworkAccessManager>
+#include <QScopeGuard>
 #include <QTimer>
 #include <QUuid>
 #include <algorithm>
@@ -110,6 +112,17 @@ namespace javelin::app
         [[nodiscard]] std::string contactRefreshJobId(const std::string_view ownerAccountId)
         {
             return "contact-refresh:" + std::string{ownerAccountId};
+        }
+
+        [[nodiscard]] std::string searchWindowLeaseKey(const std::string_view accountId,
+                                                       const std::string_view queryKey)
+        {
+            std::string key;
+            key.reserve(accountId.size() + queryKey.size() + 1);
+            key.append(accountId);
+            key.push_back('\0');
+            key.append(queryKey);
+            return key;
         }
 
         template <typename Result>
@@ -450,12 +463,70 @@ namespace javelin::app
         applyAccountConfiguration(interest->accountId);
     }
 
+    bool MailApplicationService::beginSearchWindowRequest(const std::string& leaseKey)
+    {
+        auto& state = m_searchWindowRequests[leaseKey];
+        if (state.retired)
+            return false;
+        ++state.activeRequests;
+        return true;
+    }
+
+    void MailApplicationService::finishSearchWindowRequest(const std::string& leaseKey)
+    {
+        const auto found = m_searchWindowRequests.find(leaseKey);
+        if (found == m_searchWindowRequests.end())
+            return;
+        if (found->second.activeRequests > 0)
+            --found->second.activeRequests;
+        if (found->second.retired && found->second.activeRequests == 0)
+            m_searchWindowRequests.erase(found);
+    }
+
+    bool MailApplicationService::searchWindowRetired(const std::string& leaseKey) const
+    {
+        const auto found = m_searchWindowRequests.find(leaseKey);
+        return found != m_searchWindowRequests.end() && found->second.retired;
+    }
+
     bool MailApplicationService::requestAccountSynchronization(const std::string_view accountId)
     {
         const auto coordinator = m_coordinators.find(std::string{accountId});
         if (coordinator == m_coordinators.end())
             return false;
         return coordinator->second->requestSynchronization();
+    }
+
+    std::optional<javelin::jmap::cache::DatabaseError>
+    MailApplicationService::markMailNotificationsDelivered(const std::string_view accountId,
+                                                           const std::string_view mailboxId,
+                                                           const QStringList& emailIds)
+    {
+        std::vector<std::string> ids;
+        ids.reserve(static_cast<std::size_t>(emailIds.size()));
+        for (const auto& emailId : emailIds)
+            ids.push_back(emailId.toStdString());
+        javelin::jmap::cache::NotificationRepository notifications{m_databaseConnection};
+        return notifications.markDelivered(accountId, mailboxId, ids);
+    }
+
+    std::optional<javelin::jmap::cache::DatabaseError>
+    MailApplicationService::releaseMailNotificationDispatches(const std::string_view accountId,
+                                                              const QStringList& emailIds)
+    {
+        std::vector<std::string> ids;
+        ids.reserve(static_cast<std::size_t>(emailIds.size()));
+        for (const auto& emailId : emailIds)
+            ids.push_back(emailId.toStdString());
+        javelin::jmap::cache::NotificationRepository notifications{m_databaseConnection};
+        return notifications.releaseDispatches(accountId, ids);
+    }
+
+    std::optional<javelin::jmap::cache::DatabaseError>
+    MailApplicationService::recoverMailNotificationDispatches()
+    {
+        javelin::jmap::cache::NotificationRepository notifications{m_databaseConnection};
+        return notifications.recoverDispatches();
     }
 
     void MailApplicationService::publishMailboxWindowCommitted(QString accountId, QString mailboxId,
@@ -662,27 +733,30 @@ namespace javelin::app
         const auto queryKey = intent.windowKey.empty()
                                   ? javelin::jmap::search::cacheKey(intent.criteria, intent.sort)
                                   : intent.windowKey;
-        if (m_retiredSearchWindowKeys.contains(queryKey))
+        const auto leaseKey = searchWindowLeaseKey(intent.accountId, queryKey);
+        if (!beginSearchWindowRequest(leaseKey))
         {
             co_return javelin::jmap::OperationError{
                 .message = QStringLiteral("The search tab has been closed."),
             };
         }
+        const auto requestLease =
+            qScopeGuard([this, leaseKey]() { finishSearchWindowRequest(leaseKey); });
+        const auto settings = configuration->second.settings;
         const ForegroundWorkScope foreground{m_workScheduler};
         auto result = co_await m_jmapCore.searchMessages(
-            toLiveConnectionSettings(configuration->second.settings), intent.accountId,
-            intent.criteria, intent.offset, intent.limit, intent.sort, std::move(intent.anchor),
-            queryKey);
+            toLiveConnectionSettings(settings), intent.accountId, intent.criteria, intent.offset,
+            intent.limit, intent.sort, std::move(intent.anchor), queryKey);
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
         {
-            m_errorCoordinator.reportFailure(configuration->second.settings, intent.accountId,
+            m_errorCoordinator.reportFailure(settings, intent.accountId,
                                              QStringLiteral("Search messages"), *error);
             co_return *error;
         }
-        m_errorCoordinator.reportSuccess(configuration->second.settings.connectionId);
+        m_errorCoordinator.reportSuccess(settings.connectionId);
 
         const auto& page = std::get<javelin::jmap::MessageSearchSummary>(result);
-        if (m_retiredSearchWindowKeys.contains(queryKey))
+        if (searchWindowRetired(leaseKey))
         {
             static_cast<void>(m_queryService.eraseSearchWindows(intent.accountId, queryKey));
             co_return javelin::jmap::OperationError{
@@ -717,8 +791,12 @@ namespace javelin::app
 
     void MailApplicationService::retireSearchWindow(std::string accountId, std::string windowKey)
     {
-        m_retiredSearchWindowKeys.insert(windowKey);
+        const auto leaseKey = searchWindowLeaseKey(accountId, windowKey);
+        auto& state = m_searchWindowRequests[leaseKey];
+        state.retired = true;
         static_cast<void>(m_queryService.eraseSearchWindows(accountId, windowKey));
+        if (state.activeRequests == 0)
+            m_searchWindowRequests.erase(leaseKey);
     }
 
     QueuedMailboxSelectionMutationResult
@@ -844,25 +922,23 @@ namespace javelin::app
             };
         }
 
-        std::vector<javelin::jmap::QueuedEmailMutation> queuedMutations;
-        queuedMutations.reserve(plan.mutations.size());
-        for (std::size_t index = 0; index < plan.mutations.size(); ++index)
-        {
-            auto mutation = plan.mutations[index];
+        auto mutations = plan.mutations;
+        for (auto& mutation : mutations)
             mutation.operationGroupId = operationGroupId.toStdString();
-            const auto result =
-                m_jmapCore.queueEmailMailboxMutation(intent.accountId, std::move(mutation));
-            if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
-            {
-                static_cast<void>(m_undoManager.discardNormal(prepared->entryId));
-                return *error;
-            }
-            auto queued = std::get<javelin::jmap::QueuedEmailMutation>(result);
+        auto queuedResult =
+            m_jmapCore.queueEmailMailboxMutations(intent.accountId, std::move(mutations));
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&queuedResult))
+        {
+            if (const auto discardError = m_undoManager.discardNormal(prepared->entryId))
+                return javelin::jmap::operationError(*discardError);
+            return *error;
+        }
+        auto queuedMutations =
+            std::get<std::vector<javelin::jmap::QueuedEmailMutation>>(std::move(queuedResult));
+        for (std::size_t index = 0; index < queuedMutations.size(); ++index)
             std::get<javelin::app::undo::MailPatchHistory>(prepared->payload)
                 .items[index]
-                .mutationId = queued.mutationId;
-            queuedMutations.push_back(std::move(queued));
-        }
+                .mutationId = queuedMutations[index].mutationId;
 
         auto committedResult = m_undoManager.commitNormal(std::move(*prepared));
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&committedResult))
@@ -969,60 +1045,68 @@ namespace javelin::app
             prepared = std::get<std::optional<javelin::app::undo::HistoryEntry>>(
                 std::move(preparedResult));
         }
-
-        std::vector<javelin::jmap::QueuedEmailMutation> queuedMutations;
-        queuedMutations.reserve(selectedEmails.size());
-        for (std::size_t index = 0; index < selectedEmails.size(); ++index)
-        {
-            const auto& email = selectedEmails[index];
-            const auto result =
-                mutation == SelectedMessageMutation::Destroy
-                    ? m_jmapCore.queueDestroyEmail(accountId, email.id,
-                                                   operationGroupId.toStdString())
-                    : m_jmapCore.queueEmailMailboxMutation(
-                          accountId, {
-                                         .emailId = email.id,
-                                         .addMailboxIds = {},
-                                         .removeMailboxIds = {},
-                                         .addKeywords = {},
-                                         .removeKeywords = {"$seen"},
-                                         .operationGroupId = operationGroupId.toStdString(),
-                                         .ifInState = std::nullopt,
-                                     });
-            if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
-            {
-                if (prepared.has_value())
-                    static_cast<void>(m_undoManager.discardNormal(prepared->entryId));
-                return *error;
-            }
-            auto queued = std::get<javelin::jmap::QueuedEmailMutation>(result);
-            if (prepared.has_value())
-            {
-                std::get<javelin::app::undo::MailPatchHistory>(prepared->payload)
-                    .items[index]
-                    .mutationId = queued.mutationId;
-            }
-            queuedMutations.push_back(std::move(queued));
-        }
-
-        std::optional<QString> historyEntryId;
-        if (mutation == SelectedMessageMutation::Destroy)
+        else
         {
             const auto count = selectedEmails.size();
             const auto explanation =
                 count == 1
                     ? QStringLiteral("Unable to undo permanently deleting this message.")
                     : QStringLiteral("Unable to undo permanently deleting %1 messages.").arg(count);
-            auto impossible = m_undoManager.recordImpossible(
+            auto preparedResult = m_undoManager.prepareImpossible(
                 messageCountLabel(QStringLiteral("Permanently Delete"), count),
                 javelin::app::undo::HistoryDomain::Mail, explanation, operationGroupId);
-            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&impossible))
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&preparedResult))
                 return javelin::jmap::operationError(*error);
-            historyEntryId = std::get<javelin::app::undo::HistoryEntry>(impossible).entryId;
+            prepared = std::get<std::optional<javelin::app::undo::HistoryEntry>>(
+                std::move(preparedResult));
         }
-        else if (prepared.has_value())
+
+        std::vector<javelin::jmap::EmailMailboxMutation> mutations;
+        mutations.reserve(selectedEmails.size());
+        for (const auto& email : selectedEmails)
         {
-            auto committed = m_undoManager.commitNormal(std::move(*prepared));
+            mutations.push_back({
+                .emailId = email.id,
+                .addMailboxIds = {},
+                .removeMailboxIds = {},
+                .addKeywords = {},
+                .removeKeywords = mutation == SelectedMessageMutation::MarkUnread
+                                      ? std::vector<std::string>{"$seen"}
+                                      : std::vector<std::string>{},
+                .operationGroupId = operationGroupId.toStdString(),
+                .ifInState = std::nullopt,
+                .authoritativeMailboxIds = std::nullopt,
+                .authoritativeKeywords = std::nullopt,
+                .destroy = mutation == SelectedMessageMutation::Destroy,
+            });
+        }
+        auto queuedResult = m_jmapCore.queueEmailMailboxMutations(accountId, std::move(mutations));
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&queuedResult))
+        {
+            if (prepared.has_value())
+            {
+                if (const auto discardError = m_undoManager.discardNormal(prepared->entryId))
+                    return javelin::jmap::operationError(*discardError);
+            }
+            return *error;
+        }
+        auto queuedMutations =
+            std::get<std::vector<javelin::jmap::QueuedEmailMutation>>(std::move(queuedResult));
+        if (mutation == SelectedMessageMutation::MarkUnread && prepared.has_value())
+        {
+            for (std::size_t index = 0; index < queuedMutations.size(); ++index)
+                std::get<javelin::app::undo::MailPatchHistory>(prepared->payload)
+                    .items[index]
+                    .mutationId = queuedMutations[index].mutationId;
+        }
+
+        std::optional<QString> historyEntryId;
+        if (prepared.has_value())
+        {
+            auto committed = mutation == SelectedMessageMutation::Destroy
+                                 ? m_undoManager.commitImpossible(std::move(*prepared))
+                                 : m_undoManager.commitNormal(std::move(*prepared));
             if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&committed))
                 return javelin::jmap::operationError(*error);
             historyEntryId = std::get<javelin::app::undo::HistoryEntry>(committed).entryId;
@@ -1170,6 +1254,16 @@ namespace javelin::app
     MailApplicationService::queueExactEmailMutation(std::string accountId,
                                                     javelin::jmap::EmailMailboxMutation mutation)
     {
+        auto result = queueExactEmailMutations(std::move(accountId), {std::move(mutation)});
+        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+            return *error;
+        auto queued = std::get<std::vector<javelin::jmap::QueuedEmailMutation>>(std::move(result));
+        return std::move(queued.front());
+    }
+
+    javelin::jmap::QueuedEmailMutationsResult MailApplicationService::queueExactEmailMutations(
+        std::string accountId, std::vector<javelin::jmap::EmailMailboxMutation> mutations)
+    {
         QStringList affectedMailboxIds;
         const auto appendMailboxIds = [&affectedMailboxIds](const auto& mailboxIds)
         {
@@ -1180,13 +1274,16 @@ namespace javelin::app
                     affectedMailboxIds.push_back(value);
             }
         };
-        appendMailboxIds(mutation.addMailboxIds);
-        appendMailboxIds(mutation.removeMailboxIds);
-        if (mutation.authoritativeMailboxIds.has_value())
-            appendMailboxIds(*mutation.authoritativeMailboxIds);
+        for (const auto& mutation : mutations)
+        {
+            appendMailboxIds(mutation.addMailboxIds);
+            appendMailboxIds(mutation.removeMailboxIds);
+            if (mutation.authoritativeMailboxIds.has_value())
+                appendMailboxIds(*mutation.authoritativeMailboxIds);
+        }
 
-        const auto result = m_jmapCore.queueEmailMailboxMutation(accountId, std::move(mutation));
-        if (std::holds_alternative<javelin::jmap::QueuedEmailMutation>(result))
+        auto result = m_jmapCore.queueEmailMailboxMutations(accountId, std::move(mutations));
+        if (std::holds_alternative<std::vector<javelin::jmap::QueuedEmailMutation>>(result))
         {
             Q_EMIT cacheCommitted(MailCacheChange{
                 .accountId = QString::fromStdString(accountId),
