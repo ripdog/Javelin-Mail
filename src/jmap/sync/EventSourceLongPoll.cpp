@@ -22,6 +22,7 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QScopeGuard>
+#include <QStringList>
 #include <QTimer>
 #include <QUrl>
 #include <QUrlQuery>
@@ -223,6 +224,13 @@ namespace javelin::jmap::sync
                     reply->deleteLater();
                 }
             });
+
+        QStringList subscribedTypes;
+        for (const auto& type : subscription.types)
+            subscribedTypes.push_back(QString::fromStdString(type));
+        qCDebug(logEventSource).noquote()
+            << "push subscription sent for" << subscribedTypes.join(QStringLiteral(", "))
+            << activity.serverBaseUrl();
 
         QObject::connect(reply, &QObject::destroyed, reply,
                          [this, reply]()
