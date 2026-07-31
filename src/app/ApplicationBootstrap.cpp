@@ -175,9 +175,9 @@ namespace javelin::app
             { return !settings.loginEmail.isEmpty() && !settings.apiKey.isEmpty(); });
         if (!hasUsableConnection)
         {
-            javelin::gui::settings::PreferencesDialog dialog{m_processServices->accountRepository(),
-                                                             m_processServices->accountReader(),
-                                                             m_processServices->mailboxReader()};
+            javelin::gui::settings::PreferencesDialog dialog{
+                m_processServices->accountCommandPort(), m_processServices->accountReader(),
+                m_processServices->mailboxReader()};
             dialog.exec();
         }
 
@@ -221,11 +221,11 @@ namespace javelin::app
         }
 
         m_mainWindow = new javelin::gui::shell::MainWindow(
-            m_processServices->accountRepository(), m_processServices->accountReader(),
-            m_processServices->mailboxReader(), m_processServices->contactRepository(),
-            m_processServices->calendarService(), m_processServices->contactIdentityLookup(),
-            m_processServices->identityRepository(), m_processServices->messageViewService(),
-            m_processServices->queryService(), m_processServices->translationService(),
+            m_processServices->accountCommandPort(), m_processServices->accountReader(),
+            m_processServices->mailboxReader(), m_processServices->contactReader(),
+            m_processServices->calendarReader(), m_processServices->contactIdentityLookup(),
+            m_processServices->identityReader(), m_processServices->messageViewReader(),
+            m_processServices->queryReader(), m_processServices->translationService(),
             m_processServices->composeService(), m_processServices->contactCommandPort(),
             m_processServices->mailService(), m_processServices->messageNavigationCoordinator(),
             m_processServices->undoManager());

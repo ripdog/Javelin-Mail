@@ -1,7 +1,9 @@
 #include "app/ProcessServices.h"
 
+#include "app/AccountCommandService.h"
 #include "app/AddressSuggestionStore.h"
 #include "app/ApplicationErrorCoordinator.h"
+#include "app/CacheAccessBarrier.h"
 #include "app/CacheLocationProvider.h"
 #include "app/CalendarNotificationService.h"
 #include "app/ComposeService.h"
@@ -34,10 +36,13 @@
 #include "jmap/cache/ContactRepository.h"
 #include "jmap/cache/IdentityRepository.h"
 #include "jmap/cache/MailboxReadRepository.h"
+#include "jmap/cache/MessageViewReader.h"
 #include "jmap/cache/MessageViewService.h"
 #include "jmap/cache/QueryService.h"
 #include "jmap/cache/SubmissionRepository.h"
 #include "jmap/cache/TranslationCacheRepository.h"
+#include "jmap/calendar/CalendarReadService.h"
+#include "jmap/calendar/CalendarReader.h"
 #include "jmap/calendar/CalendarService.h"
 #include "jmap/contacts/ContactIdentityLookup.h"
 #include "jmap/contacts/ContactService.h"
@@ -94,6 +99,29 @@ namespace javelin::app
         }
         m_guiReadDatabaseConnection = std::get<javelin::jmap::cache::ReadOnlyDatabaseConnection>(
             std::move(guiDatabaseResult));
+        m_guiDatabasePath = location.databasePath;
+        m_cacheAccessBarrier = std::make_unique<CacheAccessBarrier>();
+        static_cast<void>(m_cacheAccessBarrier->registerParticipant({
+            .name = QStringLiteral("GUI cache connections"),
+            .suspend = [this]() -> std::optional<javelin::jmap::cache::DatabaseError>
+            {
+                m_guiReadDatabaseConnection = javelin::jmap::cache::ReadOnlyDatabaseConnection{};
+                return std::nullopt;
+            },
+            .resume = [this]() -> std::optional<javelin::jmap::cache::DatabaseError>
+            {
+                auto reopened = javelin::jmap::cache::GuiDatabaseFactory{
+                    javelin::jmap::cache::ReadOnlyThreadConnectionFactoryOptions{
+                        .connectionNamePrefix = QStringLiteral("javelin-gui-read"),
+                        .databasePath = m_guiDatabasePath,
+                    }}.openForCurrentThread("main");
+                if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&reopened))
+                    return std::optional{*error};
+                m_guiReadDatabaseConnection =
+                    std::get<javelin::jmap::cache::ReadOnlyDatabaseConnection>(std::move(reopened));
+                return std::nullopt;
+            },
+        }));
         m_workScheduler = std::make_unique<WorkScheduler>(m_databaseConnection);
         m_localMaintenanceService =
             std::make_unique<LocalMaintenanceService>(m_databaseConnection, *m_workScheduler);
@@ -136,12 +164,19 @@ namespace javelin::app
             m_databaseConnection, *m_jmapCore, *m_workScheduler, *m_mailIndexService);
         m_accountRepository =
             std::make_unique<javelin::jmap::cache::AccountRepository>(m_databaseConnection);
+        m_accountCommandService = std::make_unique<AccountCommandService>(*m_accountRepository);
         m_accountReadRepository = std::make_unique<javelin::jmap::cache::AccountReadRepository>(
             m_guiReadDatabaseConnection);
         m_mailboxReadRepository = std::make_unique<javelin::jmap::cache::MailboxReadRepository>(
             m_guiReadDatabaseConnection);
+        m_guiContactRepository =
+            std::make_unique<javelin::jmap::cache::ContactRepository>(m_guiReadDatabaseConnection);
         m_contactRepository =
             std::make_unique<javelin::jmap::cache::ContactRepository>(m_databaseConnection);
+        QObject::connect(m_contactRepository.get(),
+                         &javelin::jmap::cache::ContactRepository::contactsChanged,
+                         [this](const QString& accountId)
+                         { m_guiContactRepository->notifyChanged(accountId.toStdString()); });
         AddressSuggestionStore::instance().initialize(m_databaseConnection);
         QObject::connect(m_contactRepository.get(),
                          &javelin::jmap::cache::ContactRepository::contactsChanged,
@@ -150,15 +185,23 @@ namespace javelin::app
             m_databaseConnection, *m_contactRepository, *m_transport, *m_methodTransport);
         m_calendarService = std::make_unique<javelin::jmap::calendar::CalendarService>(
             m_databaseConnection, *m_methodTransport);
+        m_calendarReadService = std::make_unique<javelin::jmap::calendar::CalendarReadService>(
+            m_guiReadDatabaseConnection);
         m_sieveService = std::make_unique<javelin::jmap::sieve::SieveService>(
             m_databaseConnection, *m_transport, *m_methodTransport);
-        m_contactIdentityLookup =
-            std::make_unique<javelin::jmap::contacts::ContactIdentityLookup>(*m_contactRepository);
+        m_contactIdentityLookup = std::make_unique<javelin::jmap::contacts::ContactIdentityLookup>(
+            *m_guiContactRepository);
         m_identityRepository =
             std::make_unique<javelin::jmap::cache::IdentityRepository>(m_databaseConnection);
+        m_guiIdentityRepository =
+            std::make_unique<javelin::jmap::cache::IdentityRepository>(m_guiReadDatabaseConnection);
         m_messageViewService =
             std::make_unique<javelin::jmap::cache::MessageViewService>(m_databaseConnection);
+        m_guiMessageViewService =
+            std::make_unique<javelin::jmap::cache::MessageViewService>(m_guiReadDatabaseConnection);
         m_queryService = std::make_unique<javelin::jmap::cache::QueryService>(m_databaseConnection);
+        m_guiQueryService =
+            std::make_unique<javelin::jmap::cache::QueryService>(m_guiReadDatabaseConnection);
         m_translationCacheRepository =
             std::make_unique<javelin::jmap::cache::TranslationCacheRepository>(
                 m_databaseConnection);
@@ -232,6 +275,11 @@ namespace javelin::app
         return *m_accountRepository;
     }
 
+    AccountCommandPort& ProcessServices::accountCommandPort()
+    {
+        return *m_accountCommandService;
+    }
+
     javelin::jmap::cache::AccountReader& ProcessServices::accountReader()
     {
         return *m_accountReadRepository;
@@ -247,9 +295,24 @@ namespace javelin::app
         return m_databaseConnection;
     }
 
+    std::optional<javelin::jmap::cache::DatabaseError> ProcessServices::suspendGuiCacheAccess()
+    {
+        return m_cacheAccessBarrier->suspend();
+    }
+
+    std::optional<javelin::jmap::cache::DatabaseError> ProcessServices::resumeGuiCacheAccess()
+    {
+        return m_cacheAccessBarrier->resume();
+    }
+
     javelin::jmap::cache::ContactRepository& ProcessServices::contactRepository()
     {
         return *m_contactRepository;
+    }
+
+    javelin::jmap::cache::ContactReader& ProcessServices::contactReader()
+    {
+        return *m_guiContactRepository;
     }
 
     javelin::jmap::contacts::ContactService& ProcessServices::contactService()
@@ -262,6 +325,11 @@ namespace javelin::app
         return *m_calendarService;
     }
 
+    javelin::jmap::calendar::CalendarReader& ProcessServices::calendarReader()
+    {
+        return *m_calendarReadService;
+    }
+
     javelin::jmap::contacts::ContactIdentityLookup& ProcessServices::contactIdentityLookup()
     {
         return *m_contactIdentityLookup;
@@ -272,14 +340,29 @@ namespace javelin::app
         return *m_identityRepository;
     }
 
+    javelin::jmap::cache::IdentityReader& ProcessServices::identityReader()
+    {
+        return *m_guiIdentityRepository;
+    }
+
     javelin::jmap::cache::MessageViewService& ProcessServices::messageViewService()
     {
         return *m_messageViewService;
     }
 
+    javelin::jmap::cache::MessageViewReader& ProcessServices::messageViewReader()
+    {
+        return *m_guiMessageViewService;
+    }
+
     javelin::jmap::cache::QueryService& ProcessServices::queryService()
     {
         return *m_queryService;
+    }
+
+    javelin::jmap::cache::QueryReader& ProcessServices::queryReader()
+    {
+        return *m_guiQueryService;
     }
 
     TranslationService& ProcessServices::translationService()

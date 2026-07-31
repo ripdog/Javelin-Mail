@@ -1,7 +1,7 @@
 #pragma once
 
 #include "app/MailApplicationService.h"
-#include "jmap/cache/MessageViewService.h"
+#include "jmap/cache/MessageViewReader.h"
 
 #include <QCoroTask>
 

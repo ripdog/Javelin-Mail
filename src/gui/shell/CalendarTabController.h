@@ -21,7 +21,7 @@ namespace javelin::app
 
 namespace javelin::jmap::calendar
 {
-    class CalendarService;
+    class CalendarReader;
 }
 
 namespace javelin::gui::calendar
@@ -44,7 +44,7 @@ namespace javelin::gui::shell
         Q_OBJECT
 
       public:
-        CalendarTabController(javelin::jmap::calendar::CalendarService& calendarService,
+        CalendarTabController(javelin::jmap::calendar::CalendarReader& calendarReader,
                               javelin::app::MailApplicationService& mailService,
                               QStackedWidget& contentStack, std::vector<TabState>& tabs,
                               QObject* parent = nullptr);
@@ -66,7 +66,7 @@ namespace javelin::gui::shell
         [[nodiscard]] javelin::gui::calendar::MonthCalendarWidget*
         widgetForTab(const TabState* tab) const;
 
-        javelin::jmap::calendar::CalendarService& m_calendarService;
+        javelin::jmap::calendar::CalendarReader& m_calendarReader;
         javelin::app::MailApplicationService& m_mailService;
         QStackedWidget& m_contentStack;
         std::vector<TabState>& m_tabs;

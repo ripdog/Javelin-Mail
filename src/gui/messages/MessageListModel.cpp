@@ -50,9 +50,9 @@ namespace javelin::gui::messages
 
     } // namespace
 
-    MessageListModel::MessageListModel(javelin::jmap::cache::QueryService& queryService,
+    MessageListModel::MessageListModel(javelin::jmap::cache::QueryReader& queryReader,
                                        QObject* parent)
-        : QAbstractListModel(parent), m_queryService(queryService)
+        : QAbstractListModel(parent), m_queryReader(queryReader)
     {
     }
 
@@ -550,9 +550,9 @@ namespace javelin::gui::messages
 
         const auto result =
             m_mailboxId.has_value()
-                ? m_queryService.listMailboxThreadMessages(*m_accountId, *m_mailboxId,
-                                                           thread.summary.threadId)
-                : m_queryService.listThreadMessages(*m_accountId, thread.summary.threadId);
+                ? m_queryReader.listMailboxThreadMessages(*m_accountId, *m_mailboxId,
+                                                          thread.summary.threadId)
+                : m_queryReader.listThreadMessages(*m_accountId, thread.summary.threadId);
         const auto* items =
             std::get_if<std::vector<javelin::jmap::cache::MessageListItem>>(&result);
         if (items == nullptr)

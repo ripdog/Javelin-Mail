@@ -3,7 +3,7 @@
 #include "app/MailApplicationService.h"
 #include "gui/settings/PreferencesDialog.h"
 #include "gui/shell/MessageFileUtils.h"
-#include "jmap/cache/MessageViewService.h"
+#include "jmap/cache/MessageViewReader.h"
 
 #include <QCoroTask>
 
@@ -19,9 +19,9 @@ namespace javelin::gui::shell
 
     MessageFileController::MessageFileController(
         javelin::app::MailApplicationService& mailService,
-        javelin::jmap::cache::MessageViewService& messageViewService, QWidget* dialogParent,
+        javelin::jmap::cache::MessageViewReader& messageViewReader, QWidget* dialogParent,
         QObject* parent)
-        : QObject(parent), m_mailService(mailService), m_messageViewService(messageViewService),
+        : QObject(parent), m_mailService(mailService), m_messageViewReader(messageViewReader),
           m_dialogParent(dialogParent)
     {
     }
@@ -93,7 +93,7 @@ namespace javelin::gui::shell
 
     void MessageFileController::saveAllAttachments(std::string accountId, std::string emailId)
     {
-        const auto snapshotResult = m_messageViewService.load(accountId, emailId);
+        const auto snapshotResult = m_messageViewReader.load(accountId, emailId);
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&snapshotResult))
         {
             Q_EMIT userInterventionRequired(error->message);

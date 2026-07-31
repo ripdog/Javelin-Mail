@@ -17,7 +17,7 @@ namespace javelin::app
 
 namespace javelin::jmap::cache
 {
-    class MessageViewService;
+    class MessageViewReader;
 }
 
 namespace javelin::gui::shell
@@ -29,7 +29,7 @@ namespace javelin::gui::shell
 
       public:
         MessageFileController(javelin::app::MailApplicationService& mailService,
-                              javelin::jmap::cache::MessageViewService& messageViewService,
+                              javelin::jmap::cache::MessageViewReader& messageViewReader,
                               QWidget* dialogParent, QObject* parent = nullptr);
 
         void saveAttachment(std::string accountId, std::string emailId, std::string partId);
@@ -44,7 +44,7 @@ namespace javelin::gui::shell
 
       private:
         javelin::app::MailApplicationService& m_mailService;
-        javelin::jmap::cache::MessageViewService& m_messageViewService;
+        javelin::jmap::cache::MessageViewReader& m_messageViewReader;
         QPointer<QWidget> m_dialogParent;
         QTemporaryDir m_temporaryDirectory;
     };

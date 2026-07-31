@@ -28,9 +28,13 @@ namespace javelin::gui::mailboxes
 namespace javelin::jmap::cache
 {
     class AccountReader;
-    class AccountRepository;
     class MailboxReader;
 } // namespace javelin::jmap::cache
+
+namespace javelin::app
+{
+    class AccountCommandPort;
+}
 
 namespace javelin::gui::settings
 {
@@ -46,7 +50,7 @@ namespace javelin::gui::settings
         Q_OBJECT
 
       public:
-        explicit PreferencesDialog(javelin::jmap::cache::AccountRepository& accountRepository,
+        explicit PreferencesDialog(javelin::app::AccountCommandPort& accountCommandPort,
                                    javelin::jmap::cache::AccountReader& accountReader,
                                    javelin::jmap::cache::MailboxReader& mailboxReader,
                                    QWidget* parent = nullptr);
@@ -91,7 +95,7 @@ namespace javelin::gui::settings
         void storeMailboxSyncSelection();
         void storeMailboxNotificationSelection();
 
-        javelin::jmap::cache::AccountRepository& m_accountRepository;
+        javelin::app::AccountCommandPort& m_accountCommandPort;
         javelin::jmap::cache::AccountReader& m_accountReader;
         javelin::jmap::cache::MailboxReader& m_mailboxReader;
         std::vector<ConnectionSettings> m_accounts;

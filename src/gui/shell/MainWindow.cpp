@@ -1,5 +1,6 @@
 #include "gui/shell/MainWindow.h"
 
+#include "app/AccountApplicationPorts.h"
 #include "app/ComposeService.h"
 #include "app/MailApplicationService.h"
 #include "app/MailboxSession.h"
@@ -46,13 +47,12 @@
 #include "gui/shell/TabPersistence.h"
 #include "gui/sieve/SieveEditorDialog.h"
 #include "jmap/cache/AccountReadRepository.h"
-#include "jmap/cache/AccountRepository.h"
-#include "jmap/cache/ContactRepository.h"
-#include "jmap/cache/IdentityRepository.h"
+#include "jmap/cache/ContactReader.h"
+#include "jmap/cache/IdentityReader.h"
 #include "jmap/cache/MailboxReadRepository.h"
-#include "jmap/cache/MessageViewService.h"
-#include "jmap/cache/QueryService.h"
-#include "jmap/calendar/CalendarService.h"
+#include "jmap/cache/MessageViewReader.h"
+#include "jmap/cache/QueryReader.h"
+#include "jmap/calendar/CalendarReader.h"
 #include "jmap/contacts/ContactIdentityLookup.h"
 #include "jmap/contacts/ContactResults.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
@@ -231,26 +231,26 @@ namespace javelin::gui::shell
 
     } // namespace
 
-    MainWindow::MainWindow(javelin::jmap::cache::AccountRepository& accountRepository,
+    MainWindow::MainWindow(javelin::app::AccountCommandPort& accountCommandPort,
                            javelin::jmap::cache::AccountReader& accountReader,
                            javelin::jmap::cache::MailboxReader& mailboxReader,
-                           javelin::jmap::cache::ContactRepository& contactRepository,
-                           javelin::jmap::calendar::CalendarService& calendarService,
+                           javelin::jmap::cache::ContactReader& contactReader,
+                           javelin::jmap::calendar::CalendarReader& calendarReader,
                            javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
-                           javelin::jmap::cache::IdentityRepository& identityRepository,
-                           javelin::jmap::cache::MessageViewService& messageViewService,
-                           javelin::jmap::cache::QueryService& queryService,
+                           javelin::jmap::cache::IdentityReader& identityReader,
+                           javelin::jmap::cache::MessageViewReader& messageViewReader,
+                           javelin::jmap::cache::QueryReader& queryReader,
                            javelin::app::TranslationService& translationService,
                            javelin::app::ComposeService& composeService,
                            javelin::app::ContactCommandPort& contactCommandPort,
                            javelin::app::MailApplicationService& mailService,
                            javelin::app::MessageNavigationCoordinator& messageNavigationCoordinator,
                            javelin::app::undo::UndoManager& undoManager, QWidget* parent)
-        : KXmlGuiWindow(parent), m_accountRepository(accountRepository),
+        : KXmlGuiWindow(parent), m_accountCommandPort(accountCommandPort),
           m_accountReader(accountReader), m_mailboxReader(mailboxReader),
-          m_contactRepository(contactRepository), m_calendarService(calendarService),
-          m_contactIdentityLookup(contactIdentityLookup), m_identityRepository(identityRepository),
-          m_messageViewService(messageViewService), m_queryService(queryService),
+          m_contactReader(contactReader), m_calendarReader(calendarReader),
+          m_contactIdentityLookup(contactIdentityLookup), m_identityReader(identityReader),
+          m_messageViewReader(messageViewReader), m_queryReader(queryReader),
           m_translationService(translationService), m_composeService(composeService),
           m_contactCommandPort(contactCommandPort), m_mailService(mailService),
           m_messageNavigationCoordinator(messageNavigationCoordinator), m_undoManager(undoManager)
@@ -258,7 +258,7 @@ namespace javelin::gui::shell
         m_statusBar = new LayeredStatusBar(this);
         setStatusBar(m_statusBar);
         m_messageFileController =
-            new MessageFileController(m_mailService, m_messageViewService, this, this);
+            new MessageFileController(m_mailService, m_messageViewReader, this, this);
         connect(m_messageFileController, &MessageFileController::statusMessage, this,
                 [this](const QString& message, const int durationMilliseconds)
                 {
@@ -339,7 +339,7 @@ namespace javelin::gui::shell
         connect(m_accountRefreshController, &AccountRefreshController::contactsRefreshed, this,
                 [this](const javelin::jmap::contacts::ContactRefreshSummary&)
                 { reloadAccounts(); });
-        m_calendarTabController = new CalendarTabController(m_calendarService, m_mailService,
+        m_calendarTabController = new CalendarTabController(m_calendarReader, m_mailService,
                                                             *m_contentStack, m_tabs, this);
         connect(m_calendarTabController, &CalendarTabController::tabReady, this,
                 [this](const int index)
@@ -353,9 +353,8 @@ namespace javelin::gui::shell
                 { m_statusBar->showMessage(message, durationMilliseconds); });
         connect(m_calendarTabController, &CalendarTabController::operationFailed, this,
                 [this](const javelin::jmap::OperationError& error) { presentError(error); });
-        m_contactsTabController =
-            new ContactsTabController(m_contactRepository, m_mailService, m_contactCommandPort,
-                                      *m_contentStack, m_tabs, this);
+        m_contactsTabController = new ContactsTabController(
+            m_contactReader, m_mailService, m_contactCommandPort, *m_contentStack, m_tabs, this);
         connect(m_contactsTabController, &ContactsTabController::tabReady, this,
                 [this](const int index)
                 {
@@ -397,8 +396,8 @@ namespace javelin::gui::shell
                                             true);
                 });
         m_composeTabController =
-            new ComposeTabController(m_composeService, m_identityRepository,
-                                     m_contactIdentityLookup, *m_contentStack, m_tabs, this);
+            new ComposeTabController(m_composeService, m_identityReader, m_contactIdentityLookup,
+                                     *m_contentStack, m_tabs, this);
         connect(m_composeTabController, &ComposeTabController::tabReady, this,
                 [this](const int index)
                 {
@@ -422,7 +421,7 @@ namespace javelin::gui::shell
         m_messageSelectionController = std::make_unique<MessageSelectionController>(
             *m_mailboxModel, *m_mailboxView, *m_messageModel, *m_messageView);
         m_messageListTabController =
-            new MessageListTabController(m_queryService, m_mailService, pageSize, this, this);
+            new MessageListTabController(m_queryReader, m_mailService, pageSize, this, this);
         m_messageNavigationController = std::make_unique<MessageNavigationController>(
             m_messageNavigationCoordinator, *m_messageListTabController);
         m_messageContentController = new MessageContentController(m_mailService, this);
@@ -478,7 +477,7 @@ namespace javelin::gui::shell
                         return;
                     }
 
-                    m_messageViewContainer->refresh(m_messageViewService);
+                    m_messageViewContainer->refresh(m_messageViewReader);
                     updateEmptyStates();
                     updateMessageListHeader();
                     updateMessageActions();
@@ -631,7 +630,7 @@ namespace javelin::gui::shell
             }
         }
 
-        m_messageViewContainer->setSelection(m_messageViewService, route.accountId, route.mailboxId,
+        m_messageViewContainer->setSelection(m_messageViewReader, route.accountId, route.mailboxId,
                                              route.emailId);
     }
 
@@ -681,7 +680,7 @@ namespace javelin::gui::shell
                                        QStringLiteral("Contacts"), this);
         connect(m_contactsAction, &QAction::triggered, this, &MainWindow::openContacts);
         actionCollection()->addAction(QStringLiteral("open_contacts"), m_contactsAction);
-        const auto contactAccounts = m_contactRepository.listAccounts();
+        const auto contactAccounts = m_contactReader.listAccounts();
         m_contactsAction->setEnabled(
             std::holds_alternative<std::vector<javelin::jmap::cache::ContactAccount>>(
                 contactAccounts) &&
@@ -691,7 +690,7 @@ namespace javelin::gui::shell
                                        QStringLiteral("Calendar"), this);
         connect(m_calendarAction, &QAction::triggered, this, &MainWindow::openCalendar);
         actionCollection()->addAction(QStringLiteral("open_calendar"), m_calendarAction);
-        const auto calendarAccounts = m_calendarService.accounts();
+        const auto calendarAccounts = m_calendarReader.accounts();
         m_calendarAction->setEnabled(
             std::holds_alternative<std::vector<javelin::jmap::cache::CalendarAccount>>(
                 calendarAccounts) &&
@@ -1043,7 +1042,7 @@ namespace javelin::gui::shell
 
         m_mailboxModel =
             new javelin::gui::mailboxes::MailboxTreeModel(m_accountReader, m_mailboxReader, this);
-        m_messageModel = new javelin::gui::messages::MessageListModel(m_queryService, this);
+        m_messageModel = new javelin::gui::messages::MessageListModel(m_queryReader, this);
 
         m_mailboxSearchEdit = new QLineEdit(this);
         m_mailboxSearchEdit->setClearButtonEnabled(true);
@@ -1060,7 +1059,7 @@ namespace javelin::gui::shell
             QStringLiteral("QTabBar::tab { max-width: 220px; min-width: 120px; }"));
         m_tabBar->hide();
         m_tabBarPresenter =
-            new TabBarPresenter(*m_tabBar, *this, m_accountReader, m_queryService, this);
+            new TabBarPresenter(*m_tabBar, *this, m_accountReader, m_queryReader, this);
 
         m_mailboxView = new javelin::gui::mailboxes::MailboxTreeView(this);
         m_mailboxView->setModel(m_mailboxModel);
@@ -1421,7 +1420,7 @@ namespace javelin::gui::shell
         const bool allowSearchSelection = activeTabIsSearch() && accountId.has_value();
         if (!accountId.has_value() || (!mailboxId.has_value() && !allowSearchSelection))
         {
-            m_messageViewContainer->setSelection(m_messageViewService, accountId, mailboxId,
+            m_messageViewContainer->setSelection(m_messageViewReader, accountId, mailboxId,
                                                  std::nullopt);
             updateMessageActions();
             return;
@@ -1429,7 +1428,7 @@ namespace javelin::gui::shell
 
         if (!current.isValid())
         {
-            m_messageViewContainer->setSelection(m_messageViewService, accountId, mailboxId,
+            m_messageViewContainer->setSelection(m_messageViewReader, accountId, mailboxId,
                                                  std::nullopt);
             updateMessageActions();
             return;
@@ -1458,7 +1457,7 @@ namespace javelin::gui::shell
                                });
         }
         m_messageViewContainer->setSelection(
-            m_messageViewService, accountId, mailboxId,
+            m_messageViewReader, accountId, mailboxId,
             emailId.isEmpty() ? std::optional<std::string>{std::nullopt}
                               : std::optional<std::string>{emailId.toStdString()});
         updateEmptyStates();
@@ -1814,7 +1813,7 @@ namespace javelin::gui::shell
             const auto plan = planTabActivation({});
             m_activeTabIndex.reset();
             m_messageModel->clear();
-            m_messageViewContainer->setSelection(m_messageViewService, std::nullopt, std::nullopt,
+            m_messageViewContainer->setSelection(m_messageViewReader, std::nullopt, std::nullopt,
                                                  std::nullopt);
             if (m_contentStack != nullptr)
                 m_contentStack->setCurrentIndex(0);
@@ -1973,7 +1972,7 @@ namespace javelin::gui::shell
             if (plan.clearMessagePresentation)
             {
                 m_messageModel->clear();
-                m_messageViewContainer->setSelection(m_messageViewService, std::nullopt,
+                m_messageViewContainer->setSelection(m_messageViewReader, std::nullopt,
                                                      std::nullopt, std::nullopt);
             }
             updateMessageActions();
@@ -2361,14 +2360,14 @@ namespace javelin::gui::shell
         m_mailboxView->expandAll();
         if (m_contactsAction != nullptr)
         {
-            const auto result = m_contactRepository.listAccounts();
+            const auto result = m_contactReader.listAccounts();
             const auto* accounts =
                 std::get_if<std::vector<javelin::jmap::cache::ContactAccount>>(&result);
             m_contactsAction->setEnabled(accounts != nullptr && !accounts->empty());
         }
         if (m_calendarAction != nullptr)
         {
-            const auto result = m_calendarService.accounts();
+            const auto result = m_calendarReader.accounts();
             const auto* accounts =
                 std::get_if<std::vector<javelin::jmap::cache::CalendarAccount>>(&result);
             m_calendarAction->setEnabled(accounts != nullptr && !accounts->empty());
@@ -2409,7 +2408,7 @@ namespace javelin::gui::shell
         {
             if (const auto* route = m_messageNavigationController->activeRoute(activeTab()))
             {
-                m_messageViewContainer->setSelection(m_messageViewService, route->accountId,
+                m_messageViewContainer->setSelection(m_messageViewReader, route->accountId,
                                                      route->mailboxId, route->emailId);
                 updateEmptyStates();
                 updateMessageListHeader();
@@ -2417,7 +2416,7 @@ namespace javelin::gui::shell
                 return;
             }
         }
-        m_messageViewContainer->setSelection(m_messageViewService, accountId, mailboxId, emailId);
+        m_messageViewContainer->setSelection(m_messageViewReader, accountId, mailboxId, emailId);
         m_messageSelectionController->syncTabSelection(activeTab());
         updateEmptyStates();
         updateMessageListHeader();
@@ -2662,7 +2661,7 @@ namespace javelin::gui::shell
 
     void MainWindow::openPreferencesForConnection(const QString& connectionId)
     {
-        javelin::gui::settings::PreferencesDialog dialog{m_accountRepository, m_accountReader,
+        javelin::gui::settings::PreferencesDialog dialog{m_accountCommandPort, m_accountReader,
                                                          m_mailboxReader, this};
         if (!connectionId.isEmpty())
             dialog.selectConfiguredAccount(connectionId);

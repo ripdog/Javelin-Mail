@@ -4,7 +4,7 @@
 #include "gui/messageview/HtmlMessageView.h"
 #include "gui/settings/PreferencesDialog.h"
 #include "gui/widgets/EmailAddressLineEdit.h"
-#include "jmap/cache/IdentityRepository.h"
+#include "jmap/cache/IdentityReader.h"
 #include "jmap/contacts/ContactIdentityLookup.h"
 
 #include <QCoroTask>
@@ -492,7 +492,7 @@ namespace javelin::gui::compose
 
     ComposeTabWidget::ComposeTabWidget(
         javelin::app::ComposeService& composeService,
-        javelin::jmap::cache::IdentityRepository& identityRepository,
+        javelin::jmap::cache::IdentityReader& identityRepository,
         javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
         javelin::jmap::submission::DraftSnapshot snapshot, QWidget* parent)
         : QWidget(parent), m_composeService(composeService),

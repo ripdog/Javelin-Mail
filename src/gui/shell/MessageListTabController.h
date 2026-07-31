@@ -4,6 +4,7 @@
 #include "app/SearchSession.h"
 #include "gui/shell/MessageListTabPolicy.h"
 #include "gui/shell/TabWorkspace.h"
+#include "jmap/cache/QueryReader.h"
 #include "jmap/query/EmailListSort.h"
 #include "jmap/search/EmailSearch.h"
 
@@ -19,11 +20,6 @@
 namespace javelin::jmap
 {
     struct OperationError;
-}
-
-namespace javelin::jmap::cache
-{
-    class QueryService;
 }
 
 namespace javelin::app
@@ -62,7 +58,7 @@ namespace javelin::gui::shell
         Q_OBJECT
 
       public:
-        MessageListTabController(javelin::jmap::cache::QueryService& queryService,
+        MessageListTabController(javelin::jmap::cache::QueryReader& queryReader,
                                  javelin::app::MailApplicationService& mailService,
                                  std::size_t pageSize, QObject* sessionParent,
                                  QObject* parent = nullptr);
@@ -105,7 +101,7 @@ namespace javelin::gui::shell
         identities(const std::vector<TabState>& tabs) const;
         void bind(javelin::app::MessageListSession& session);
 
-        javelin::jmap::cache::QueryService& m_queryService;
+        javelin::jmap::cache::QueryReader& m_queryReader;
         javelin::app::MailApplicationService& m_mailService;
         std::size_t m_pageSize;
         QObject* m_sessionParent = nullptr;

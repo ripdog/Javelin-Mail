@@ -1,6 +1,6 @@
 #pragma once
 
-#include "jmap/cache/QueryService.h"
+#include "jmap/cache/QueryReader.h"
 
 #include <QString>
 
@@ -28,7 +28,7 @@ namespace javelin::app
     using ResolvedMessageSelection = std::variant<std::vector<std::string>, QString>;
 
     [[nodiscard]] ResolvedMessageSelection
-    resolveMessageSelection(const javelin::jmap::cache::QueryService& queryService,
+    resolveMessageSelection(const javelin::jmap::cache::QueryReader& queryReader,
                             std::string_view accountId, std::optional<std::string_view> mailboxId,
                             const MessageSelection& selection);
 

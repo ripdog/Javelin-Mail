@@ -2,7 +2,7 @@
 
 #include "gui/messages/MessageSelectionRestoration.h"
 #include "gui/shell/TabWorkspace.h"
-#include "jmap/cache/QueryService.h"
+#include "jmap/cache/QueryReader.h"
 
 #include <QString>
 

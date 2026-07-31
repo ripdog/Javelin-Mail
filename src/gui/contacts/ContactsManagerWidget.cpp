@@ -585,21 +585,21 @@ namespace javelin::gui::contacts
 
     } // namespace
 
-    ContactsManagerWidget::ContactsManagerWidget(
-        javelin::jmap::cache::ContactRepository& repository,
-        javelin::app::ContactRefreshPort& refreshPort,
-        javelin::app::ContactCommandPort& commandPort, std::string ownerAccountId, QWidget* parent)
+    ContactsManagerWidget::ContactsManagerWidget(javelin::jmap::cache::ContactReader& repository,
+                                                 javelin::app::ContactRefreshPort& refreshPort,
+                                                 javelin::app::ContactCommandPort& commandPort,
+                                                 std::string ownerAccountId, QWidget* parent)
         : QWidget(parent), m_repository(repository), m_refreshPort(refreshPort),
           m_commandPort(commandPort), m_ownerAccountId(std::move(ownerAccountId))
     {
+        static_cast<void>(m_repository.connectChanged(this,
+                                                      [this](const QString& accountId)
+                                                      {
+                                                          if (accountId == QString::fromStdString(
+                                                                               m_ownerAccountId))
+                                                              reloadAccounts();
+                                                      }));
         setupUi();
-        connect(&m_repository, &javelin::jmap::cache::ContactRepository::contactsChanged, this,
-                [this](const QString& accountId)
-                {
-                    if (currentAccountId() != std::optional<std::string>{accountId.toStdString()})
-                        return;
-                    reloadAddressBooks();
-                });
         reloadAccounts();
     }
 

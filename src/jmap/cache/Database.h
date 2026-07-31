@@ -160,6 +160,20 @@ namespace javelin::jmap::cache
         Qt::HANDLE m_ownerThread = nullptr;
     };
 
+    class DatabaseReadView final
+    {
+      public:
+        explicit DatabaseReadView(const DatabaseConnection& connection);
+        explicit DatabaseReadView(const ReadOnlyDatabaseConnection& connection);
+
+        [[nodiscard]] const QSqlDatabase& database() const;
+        [[nodiscard]] std::optional<DatabaseError> validate() const;
+        [[nodiscard]] std::variant<std::uint64_t, DatabaseError> dataVersion() const;
+
+      private:
+        std::variant<const DatabaseConnection*, const ReadOnlyDatabaseConnection*> m_connection;
+    };
+
     class DaemonDatabaseFactory final
     {
       public:

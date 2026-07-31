@@ -24,6 +24,8 @@ namespace javelin::jmap::cache
     {
       public:
         explicit MailSearchIndex(const DatabaseConnection& cacheConnection);
+        explicit MailSearchIndex(const ReadOnlyDatabaseConnection& cacheConnection);
+        explicit MailSearchIndex(const DatabaseReadView& cacheConnection);
 
         [[nodiscard]] std::optional<DatabaseError>
         upsert(std::string_view accountId, const SearchIndexDocument& document) const;
@@ -36,6 +38,7 @@ namespace javelin::jmap::cache
         [[nodiscard]] std::optional<DatabaseError> rebuild(std::string_view accountId) const;
 
       private:
-        const DatabaseConnection& m_cacheConnection;
+        DatabaseReadView m_cacheConnection;
+        DatabaseConnection* m_writerConnection = nullptr;
     };
 } // namespace javelin::jmap::cache

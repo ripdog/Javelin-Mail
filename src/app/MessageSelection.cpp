@@ -6,7 +6,7 @@ namespace javelin::app
 {
 
     ResolvedMessageSelection resolveMessageSelection(
-        const javelin::jmap::cache::QueryService& queryService, const std::string_view accountId,
+        const javelin::jmap::cache::QueryReader& queryReader, const std::string_view accountId,
         const std::optional<std::string_view> mailboxId, const MessageSelection& selection)
     {
         std::vector<std::string> emailIds;
@@ -30,8 +30,8 @@ namespace javelin::app
             const auto& thread = std::get<SelectedCollapsedThread>(item);
             const auto messagesResult =
                 mailboxId.has_value()
-                    ? queryService.listMailboxThreadMessages(accountId, *mailboxId, thread.threadId)
-                    : queryService.listThreadMessages(accountId, thread.threadId);
+                    ? queryReader.listMailboxThreadMessages(accountId, *mailboxId, thread.threadId)
+                    : queryReader.listThreadMessages(accountId, thread.threadId);
             if (const auto* error =
                     std::get_if<javelin::jmap::cache::DatabaseError>(&messagesResult))
             {

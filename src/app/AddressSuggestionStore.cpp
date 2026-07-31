@@ -13,7 +13,7 @@ namespace javelin::app
     {
         [[nodiscard]] std::optional<QStringList> loadSuggestions(const QString& databasePath)
         {
-            javelin::jmap::cache::ThreadConnectionFactory factory{
+            javelin::jmap::cache::ReadOnlyThreadConnectionFactory factory{
                 {.connectionNamePrefix = QStringLiteral("address-suggestions"),
                  .databasePath = databasePath}};
             auto opened = factory.openForCurrentThread("snapshot");
@@ -22,7 +22,8 @@ namespace javelin::app
                 qWarning().noquote() << "Open known email addresses" << error->message;
                 return std::nullopt;
             }
-            auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+            auto connection =
+                std::get<javelin::jmap::cache::ReadOnlyDatabaseConnection>(std::move(opened));
             QSqlQuery query{connection.database()};
             if (!query.exec(QStringLiteral(
                     "WITH known_addresses AS ("

@@ -2,7 +2,7 @@
 
 #include "app/MailApplicationService.h"
 #include "app/MessageListSession.h"
-#include "jmap/cache/QueryService.h"
+#include "jmap/cache/QueryReader.h"
 #include "jmap/search/EmailSearch.h"
 
 #include <utility>
@@ -10,10 +10,10 @@
 namespace javelin::gui::shell
 {
     MessageListTabController::MessageListTabController(
-        javelin::jmap::cache::QueryService& queryService,
+        javelin::jmap::cache::QueryReader& queryReader,
         javelin::app::MailApplicationService& mailService, const std::size_t pageSize,
         QObject* sessionParent, QObject* parent)
-        : QObject(parent), m_queryService(queryService), m_mailService(mailService),
+        : QObject(parent), m_queryReader(queryReader), m_mailService(mailService),
           m_pageSize(pageSize), m_sessionParent(sessionParent)
     {
     }
@@ -65,7 +65,7 @@ namespace javelin::gui::shell
     {
         auto* session = new javelin::app::MailboxSession(
             std::move(spec.accountId), std::move(spec.mailboxId), std::move(spec.title),
-            std::move(spec.role), spec.sort, m_queryService, m_mailService, m_pageSize,
+            std::move(spec.role), spec.sort, m_queryReader, m_mailService, m_pageSize,
             std::move(spec.restored), m_sessionParent);
         bind(*session);
         return {.content = MailboxTabState{.session = session, .selection = {}}};
@@ -74,7 +74,7 @@ namespace javelin::gui::shell
     TabState MessageListTabController::createSearchTab(SearchTabSessionSpec spec)
     {
         auto* session = new javelin::app::SearchSession(
-            std::move(spec.accountId), std::move(spec.criteria), spec.sort, m_queryService,
+            std::move(spec.accountId), std::move(spec.criteria), spec.sort, m_queryReader,
             m_mailService, m_pageSize, std::move(spec.restored), m_sessionParent);
         bind(*session);
         return {.content = SearchTabState{.session = session, .selection = {}}};

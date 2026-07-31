@@ -1,7 +1,7 @@
 #pragma once
 
 #include "gui/calendar/MonthCalendarWidget.h"
-#include "jmap/cache/CalendarRepository.h"
+#include "jmap/calendar/CalendarReader.h"
 #include "jmap/calendar/CalendarTypes.h"
 
 #include <QColor>

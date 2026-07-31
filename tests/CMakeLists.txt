@@ -22,6 +22,8 @@ add_executable(javelin_jmap_tests
     ${PROJECT_SOURCE_DIR}/src/app/ApplicationErrorCoordinator.h
     ${PROJECT_SOURCE_DIR}/src/app/CacheLocationProvider.cpp
     ${PROJECT_SOURCE_DIR}/src/app/CacheLocationProvider.h
+    ${PROJECT_SOURCE_DIR}/src/app/CacheAccessBarrier.cpp
+    ${PROJECT_SOURCE_DIR}/src/app/CacheAccessBarrier.h
     ${PROJECT_SOURCE_DIR}/src/app/DeferredSendRepository.cpp
     ${PROJECT_SOURCE_DIR}/src/app/DeferredSendRepository.h
     ${PROJECT_SOURCE_DIR}/src/app/ContactCommandPreparation.cpp
@@ -132,6 +134,7 @@ add_executable(javelin_jmap_tests
     jmap/PreferredStateChangeSourceTest.cpp
     jmap/QueryDiffTest.cpp
     jmap/QueryServiceTest.cpp
+    jmap/ReadOnlyCacheSurfaceTest.cpp
     jmap/RefreshNotificationPlannerTest.cpp
     jmap/MailEntityParsersTest.cpp
     jmap/SessionClientTest.cpp
@@ -148,6 +151,7 @@ add_executable(javelin_jmap_tests
     gui/MonthCalendarWidgetTest.cpp
     gui/RecurrencePatternTest.cpp
     app/CacheLocationProviderTest.cpp
+    app/CacheAccessBarrierTest.cpp
     gui/ConnectionSettingsAdapterTest.cpp
     gui/ComposeTabPolicyTest.cpp
     gui/MailboxSelectionTest.cpp

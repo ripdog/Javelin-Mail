@@ -22,12 +22,15 @@ namespace javelin::jmap::cache
         class IndexConnection final
         {
           public:
-            explicit IndexConnection(const QString& path)
+            explicit IndexConnection(const QString& path, const bool readOnly)
                 : m_name(QStringLiteral("mail-search-%1")
                              .arg(QUuid::createUuid().toString(QUuid::WithoutBraces)))
             {
-                QDir{}.mkpath(QFileInfo(path).absolutePath());
+                if (!readOnly)
+                    QDir{}.mkpath(QFileInfo(path).absolutePath());
                 m_database = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), m_name);
+                if (readOnly)
+                    m_database.setConnectOptions(QStringLiteral("QSQLITE_OPEN_READONLY"));
                 m_database.setDatabaseName(path);
                 if (!m_database.open())
                 {
@@ -36,18 +39,28 @@ namespace javelin::jmap::cache
                     return;
                 }
                 QSqlQuery query{m_database};
-                const QStringList statements{
-                    QStringLiteral("PRAGMA journal_mode=WAL"),
-                    QStringLiteral("PRAGMA synchronous=NORMAL"),
-                    QStringLiteral("PRAGMA busy_timeout=5000"),
-                    QStringLiteral(
-                        "CREATE TABLE IF NOT EXISTS search_documents(rowid INTEGER PRIMARY KEY,"
-                        "email_id TEXT NOT NULL UNIQUE,source_hash TEXT NOT NULL,index_version "
-                        "INTEGER NOT NULL DEFAULT 1) STRICT"),
-                    QStringLiteral(
-                        "CREATE VIRTUAL TABLE IF NOT EXISTS email_search_fts USING fts5(subject,"
-                        "body,content='',contentless_delete=1,tokenize='unicode61')"),
-                };
+                const QStringList statements = readOnly
+                                                   ? QStringList{
+                                                         QStringLiteral("PRAGMA query_only=ON"),
+                                                         QStringLiteral("PRAGMA busy_timeout=250"),
+                                                     }
+                                                   : QStringList{
+                                                         QStringLiteral("PRAGMA journal_mode=WAL"),
+                                                         QStringLiteral("PRAGMA synchronous=NORMAL"),
+                                                         QStringLiteral("PRAGMA busy_timeout=5000"),
+                                                         QStringLiteral(
+                                                             "CREATE TABLE IF NOT EXISTS "
+                                                             "search_documents(rowid INTEGER "
+                                                             "PRIMARY KEY,email_id TEXT NOT NULL "
+                                                             "UNIQUE,source_hash TEXT NOT NULL,"
+                                                             "index_version INTEGER NOT NULL DEFAULT "
+                                                             "1) STRICT"),
+                                                         QStringLiteral(
+                                                             "CREATE VIRTUAL TABLE IF NOT EXISTS "
+                                                             "email_search_fts USING fts5(subject,"
+                                                             "body,content='',contentless_delete=1,"
+                                                             "tokenize='unicode61')"),
+                                                     };
                 for (const auto& statement : statements)
                 {
                     if (!query.exec(statement))
@@ -82,14 +95,28 @@ namespace javelin::jmap::cache
             std::optional<DatabaseError> m_error;
         };
 
-        [[nodiscard]] QString indexPath(const DatabaseConnection& connection,
+        [[nodiscard]] QString indexPath(const DatabaseReadView& connection,
                                         const std::string_view accountId)
         {
-            return MailVault::forDatabase(connection).searchIndexPath(accountId);
+            const QFileInfo databaseInfo{connection.database().databaseName()};
+            return MailVault{
+                QDir(databaseInfo.absolutePath()).filePath(QStringLiteral("mail-vault/v1"))}
+                .searchIndexPath(accountId);
         }
     } // namespace
 
     MailSearchIndex::MailSearchIndex(const DatabaseConnection& cacheConnection)
+        : m_cacheConnection(cacheConnection),
+          m_writerConnection(const_cast<DatabaseConnection*>(&cacheConnection))
+    {
+    }
+
+    MailSearchIndex::MailSearchIndex(const ReadOnlyDatabaseConnection& cacheConnection)
+        : m_cacheConnection(cacheConnection)
+    {
+    }
+
+    MailSearchIndex::MailSearchIndex(const DatabaseReadView& cacheConnection)
         : m_cacheConnection(cacheConnection)
     {
     }
@@ -97,9 +124,12 @@ namespace javelin::jmap::cache
     std::optional<DatabaseError> MailSearchIndex::upsert(const std::string_view accountId,
                                                          const SearchIndexDocument& document) const
     {
+        if (m_writerConnection == nullptr)
+            return error(QStringLiteral("Update mail search index"),
+                         QStringLiteral("read-only cache access"));
         const QString path = indexPath(m_cacheConnection, accountId);
         const DatabaseWriteScope writeScope{path};
-        IndexConnection connection{path};
+        IndexConnection connection{path, false};
         if (connection.failure())
             return connection.failure();
         auto& database = connection.database();
@@ -152,9 +182,12 @@ namespace javelin::jmap::cache
     std::optional<DatabaseError> MailSearchIndex::remove(const std::string_view accountId,
                                                          const std::string_view emailId) const
     {
+        if (m_writerConnection == nullptr)
+            return error(QStringLiteral("Update mail search index"),
+                         QStringLiteral("read-only cache access"));
         const QString path = indexPath(m_cacheConnection, accountId);
         const DatabaseWriteScope writeScope{path};
-        IndexConnection connection{path};
+        IndexConnection connection{path, false};
         if (connection.failure())
             return connection.failure();
         QSqlQuery rowQuery{connection.database()};
@@ -186,7 +219,7 @@ namespace javelin::jmap::cache
     MailSearchIndex::search(const std::string_view accountId, const std::string_view text,
                             const std::size_t limit) const
     {
-        IndexConnection connection{indexPath(m_cacheConnection, accountId)};
+        IndexConnection connection{indexPath(m_cacheConnection, accountId), true};
         if (connection.failure())
             return *connection.failure();
         QString match = QStringLiteral("\"");
@@ -210,7 +243,7 @@ namespace javelin::jmap::cache
     std::variant<std::vector<std::string>, DatabaseError>
     MailSearchIndex::searchAll(const std::string_view accountId, const std::string_view text) const
     {
-        IndexConnection connection{indexPath(m_cacheConnection, accountId)};
+        IndexConnection connection{indexPath(m_cacheConnection, accountId), true};
         if (connection.failure())
             return *connection.failure();
         QString match = QStringLiteral("\"");
@@ -233,6 +266,9 @@ namespace javelin::jmap::cache
 
     std::optional<DatabaseError> MailSearchIndex::rebuild(const std::string_view accountId) const
     {
+        if (m_writerConnection == nullptr)
+            return error(QStringLiteral("Rebuild mail search index"),
+                         QStringLiteral("read-only cache access"));
         const QString path = indexPath(m_cacheConnection, accountId);
         if (QFileInfo::exists(path) && !QFile::remove(path))
             return error(QStringLiteral("Remove old mail search index"), path);

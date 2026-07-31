@@ -4,9 +4,8 @@
 #include "gui/calendar/CalendarPresentation.h"
 #include "gui/calendar/EventDialog.h"
 #include "gui/calendar/MonthCalendarWidget.h"
-#include "jmap/cache/CalendarRepository.h"
 #include "jmap/calendar/CalendarEventEditing.h"
-#include "jmap/calendar/CalendarService.h"
+#include "jmap/calendar/CalendarReader.h"
 
 #include <QCoroTask>
 
@@ -33,10 +32,10 @@ namespace javelin::gui::shell
     Q_LOGGING_CATEGORY(logCalendarOperations, "user.operations")
 
     CalendarTabController::CalendarTabController(
-        javelin::jmap::calendar::CalendarService& calendarService,
+        javelin::jmap::calendar::CalendarReader& calendarReader,
         javelin::app::MailApplicationService& mailService, QStackedWidget& contentStack,
         std::vector<TabState>& tabs, QObject* parent)
-        : QObject(parent), m_calendarService(calendarService), m_mailService(mailService),
+        : QObject(parent), m_calendarReader(calendarReader), m_mailService(mailService),
           m_contentStack(contentStack), m_tabs(tabs)
     {
     }
@@ -65,7 +64,7 @@ namespace javelin::gui::shell
             }
         }
 
-        const auto accountsResult = m_calendarService.accounts();
+        const auto accountsResult = m_calendarReader.accounts();
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&accountsResult))
         {
             Q_EMIT operationFailed(*error);
@@ -100,11 +99,11 @@ namespace javelin::gui::shell
                 .value = QTimeZone::systemTimeZoneId().toStdString()};
             for (const auto& account : accounts)
             {
-                const auto listed = m_calendarService.calendars(account.accountId);
+                const auto listed = m_calendarReader.calendars(account.accountId);
                 const auto* calendars =
                     std::get_if<std::vector<javelin::jmap::calendar::Calendar>>(&listed);
                 const auto loaded =
-                    m_calendarService.loadCached(account.accountId, interval, timeZone);
+                    m_calendarReader.loadCached(account.accountId, interval, timeZone);
                 const auto* window =
                     std::get_if<std::optional<javelin::jmap::cache::CalendarWindow>>(&loaded);
                 auto presentation = javelin::gui::calendar::buildCalendarAccountPresentation(
@@ -259,7 +258,7 @@ namespace javelin::gui::shell
                 std::optional<std::size_t> destinationIndex;
                 for (const auto& account : accounts)
                 {
-                    const auto calendarsResult = m_calendarService.calendars(account.accountId);
+                    const auto calendarsResult = m_calendarReader.calendars(account.accountId);
                     const auto* calendars =
                         std::get_if<std::vector<javelin::jmap::calendar::Calendar>>(
                             &calendarsResult);
@@ -396,7 +395,7 @@ namespace javelin::gui::shell
                 const javelin::jmap::calendar::TimeZoneId timeZone{
                     .value = QTimeZone::systemTimeZoneId().toStdString()};
                 const auto loaded =
-                    m_calendarService.loadCached(account->accountId, interval, timeZone);
+                    m_calendarReader.loadCached(account->accountId, interval, timeZone);
                 const auto* window =
                     std::get_if<std::optional<javelin::jmap::cache::CalendarWindow>>(&loaded);
                 if (window == nullptr || !window->has_value())
@@ -405,7 +404,7 @@ namespace javelin::gui::shell
                                                      &javelin::jmap::calendar::CalendarEvent::id);
                 if (event == window->value().events.end())
                     return;
-                const auto calendarsResult = m_calendarService.calendars(account->accountId);
+                const auto calendarsResult = m_calendarReader.calendars(account->accountId);
                 const auto* calendars =
                     std::get_if<std::vector<javelin::jmap::calendar::Calendar>>(&calendarsResult);
                 if (calendars == nullptr)

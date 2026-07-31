@@ -274,6 +274,28 @@ and [Database concurrency](DAEMON_GUI_ARCHITECTURE.md#database-concurrency).
 - Cache replacement while GUI reads are active succeeds only through the tested barrier.
 - Existing optimistic, query-window, and cache-recovery tests still pass unchanged in semantics.
 
+### Phase 3 status
+
+Complete for the current in-process composition. The cache read/write boundary is now explicit and
+covered by the build graph and tests:
+
+- `CacheLocationProvider` resolves the database, vault, search-index, and cache-instance identity
+  without opening SQLite; daemon and GUI factories are separate.
+- GUI-visible account, mailbox, query, message-view, contact, identity, and calendar reads use
+  reader ports backed by persistent `ReadOnlyDatabaseConnection` instances. Background mailbox,
+  search, address-suggestion, message-view, and calendar reads use the read-only worker factory.
+- `javelin_cache_read` contains the shared read-side database/vault/email/source primitives, while
+  the remaining service adapters stay in `javelin_jmap` during the single-process transition.
+- The GUI source boundary rejects direct writer-repository, mutable-database, transport, and sync
+  includes. Contact invalidations are relayed from the daemon repository to the GUI read surface
+  without exposing the writer to widgets.
+- `CacheAccessBarrier` coordinates close, replacement, and reopen; tests cover ordering, rollback,
+  and reopening a replaced cache. `data_version` is available through the database and query-reader
+  surfaces for reconnect/read coordination.
+
+Task and history command ownership remains an application-service concern and is intentionally left
+for Phase 4 command routing; it does not expose a cache connection to GUI presentation code.
+
 ## Phase 4: route all application commands through the typed boundary
 
 This phase moves interpretation and execution behind the daemon endpoint while retaining the current

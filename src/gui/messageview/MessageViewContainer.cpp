@@ -814,7 +814,7 @@ namespace javelin::gui::messageview
     }
 
     void
-    MessageViewContainer::setSelection(javelin::jmap::cache::MessageViewService& messageViewService,
+    MessageViewContainer::setSelection(javelin::jmap::cache::MessageViewReader& messageViewReader,
                                        std::optional<std::string> accountId,
                                        std::optional<std::string> mailboxId,
                                        std::optional<std::string> emailId)
@@ -845,7 +845,7 @@ namespace javelin::gui::messageview
 
         m_snapshot = std::nullopt;
         updatePresentation();
-        startSnapshotLoad(messageViewService, true);
+        startSnapshotLoad(messageViewReader, true);
     }
 
     void MessageViewContainer::setMultipleSelection(
@@ -873,7 +873,7 @@ namespace javelin::gui::messageview
         updatePresentation();
     }
 
-    void MessageViewContainer::refresh(javelin::jmap::cache::MessageViewService& messageViewService)
+    void MessageViewContainer::refresh(javelin::jmap::cache::MessageViewReader& messageViewReader)
     {
         m_errorMessage.clear();
         ++m_translationRequestToken;
@@ -886,11 +886,11 @@ namespace javelin::gui::messageview
         m_languageDetectionStarted = false;
         m_loading = m_emailId.has_value();
         updatePresentation(false);
-        startSnapshotLoad(messageViewService, false);
+        startSnapshotLoad(messageViewReader, false);
     }
 
     void MessageViewContainer::startSnapshotLoad(
-        javelin::jmap::cache::MessageViewService& messageViewService,
+        javelin::jmap::cache::MessageViewReader& messageViewReader,
         const bool requestContentIfMissing)
     {
         if (!m_accountId.has_value() || !m_emailId.has_value())
@@ -943,7 +943,7 @@ namespace javelin::gui::messageview
                 m_errorMessage.clear();
                 updatePresentation(previousRenderedBody != renderedBodyKey(m_snapshot));
             });
-        watcher->setFuture(messageViewService.loadAsync(accountId, emailId));
+        watcher->setFuture(messageViewReader.loadAsync(accountId, emailId));
     }
 
     void MessageViewContainer::setActiveView(const ActiveView view)

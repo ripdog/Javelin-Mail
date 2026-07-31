@@ -12,7 +12,7 @@
 
 namespace javelin::jmap::cache
 {
-    class ContactRepository;
+    class ContactReader;
 }
 
 namespace javelin::jmap::contacts
@@ -30,7 +30,7 @@ namespace javelin::jmap::contacts
         Q_OBJECT
 
       public:
-        explicit ContactIdentityLookup(javelin::jmap::cache::ContactRepository& repository);
+        explicit ContactIdentityLookup(javelin::jmap::cache::ContactReader& repository);
 
         [[nodiscard]] std::variant<std::optional<ContactIdentity>,
                                    javelin::jmap::cache::DatabaseError>
@@ -43,6 +43,6 @@ namespace javelin::jmap::contacts
         void contactDataChanged(const QString& accountId);
 
       private:
-        javelin::jmap::cache::ContactRepository& m_repository;
+        javelin::jmap::cache::ContactReader& m_repository;
     };
 } // namespace javelin::jmap::contacts

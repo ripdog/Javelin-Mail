@@ -3,7 +3,7 @@
 #include "app/ContactApplicationPorts.h"
 #include "gui/contacts/ContactsViewState.h"
 #include "jmap/api/ContactsMethods.h"
-#include "jmap/cache/ContactRepository.h"
+#include "jmap/cache/ContactReader.h"
 #include "jmap/contacts/ContactTypes.h"
 
 #include <QWidget>
@@ -33,7 +33,7 @@ namespace javelin::gui::contacts
         Q_OBJECT
 
       public:
-        ContactsManagerWidget(javelin::jmap::cache::ContactRepository& repository,
+        ContactsManagerWidget(javelin::jmap::cache::ContactReader& repository,
                               javelin::app::ContactRefreshPort& refreshPort,
                               javelin::app::ContactCommandPort& commandPort,
                               std::string ownerAccountId, QWidget* parent = nullptr);
@@ -115,7 +115,7 @@ namespace javelin::gui::contacts
         groupIsWritable(const javelin::jmap::contacts::ContactSummary& group) const;
         void populateContactCards(const javelin::jmap::contacts::ContactSummary& contact);
 
-        javelin::jmap::cache::ContactRepository& m_repository;
+        javelin::jmap::cache::ContactReader& m_repository;
         javelin::app::ContactRefreshPort& m_refreshPort;
         javelin::app::ContactCommandPort& m_commandPort;
         std::string m_ownerAccountId;

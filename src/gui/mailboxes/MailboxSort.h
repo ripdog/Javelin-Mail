@@ -1,6 +1,6 @@
 #pragma once
 
-#include "jmap/cache/QueryService.h"
+#include "jmap/cache/MailboxReadRepository.h"
 
 #include <QString>
 

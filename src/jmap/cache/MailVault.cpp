@@ -72,6 +72,13 @@ namespace javelin::jmap::cache
             QDir(databaseInfo.absolutePath()).filePath(QStringLiteral("mail-vault/v1"))};
     }
 
+    MailVault MailVault::forDatabase(const DatabaseReadView& connection)
+    {
+        const QFileInfo databaseInfo{connection.database().databaseName()};
+        return MailVault{
+            QDir(databaseInfo.absolutePath()).filePath(QStringLiteral("mail-vault/v1"))};
+    }
+
     const QString& MailVault::rootPath() const
     {
         return m_rootPath;

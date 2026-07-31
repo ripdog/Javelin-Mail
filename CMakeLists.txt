@@ -50,6 +50,24 @@ javelin_set_project_warnings(javelin_protocol)
 javelin_enable_static_analysis(javelin_protocol)
 javelin_enable_sanitizers(javelin_protocol)
 
+add_library(javelin_cache_read STATIC
+    src/jmap/cache/Database.cpp
+    src/jmap/cache/Database.h
+    src/jmap/cache/EmailReadRepository.cpp
+    src/jmap/cache/EmailReadRepository.h
+    src/jmap/cache/MailVault.cpp
+    src/jmap/cache/MailVault.h
+    src/jmap/cache/RawMessageSourceReadRepository.cpp
+    src/jmap/cache/RawMessageSourceReadRepository.h
+)
+target_include_directories(javelin_cache_read PUBLIC
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
+)
+target_link_libraries(javelin_cache_read PUBLIC Qt::Core Qt::Gui Qt::Sql)
+javelin_set_project_warnings(javelin_cache_read)
+javelin_enable_static_analysis(javelin_cache_read)
+javelin_enable_sanitizers(javelin_cache_read)
+
 set(JAVELIN_FORMAT_FILES
     src/jmap/sync/PreferredStateChangeSource.cpp
     src/jmap/sync/PreferredStateChangeSource.h
@@ -66,6 +84,19 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/cache/NotificationRepository.h
     src/jmap/cache/NotificationDispatchRepository.cpp
     src/jmap/cache/NotificationDispatchRepository.h
+    src/jmap/cache/ContactReader.h
+    src/jmap/cache/EmailReadRepository.cpp
+    src/jmap/cache/EmailReadRepository.h
+    src/jmap/cache/IdentityReader.h
+    src/jmap/cache/QueryReader.h
+    src/jmap/cache/CalendarReadRepository.cpp
+    src/jmap/cache/CalendarReadRepository.h
+    src/jmap/cache/MessageViewReader.h
+    src/jmap/cache/RawMessageSourceReadRepository.cpp
+    src/jmap/cache/RawMessageSourceReadRepository.h
+    src/jmap/calendar/CalendarReader.h
+    src/jmap/calendar/CalendarReadService.cpp
+    src/jmap/calendar/CalendarReadService.h
     src/jmap/cache/CalendarNotificationRepository.cpp
     src/jmap/cache/CalendarNotificationRepository.h
     src/jmap/sync/StateChangeSource.h
@@ -73,6 +104,11 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/sync/MailboxInterestRegistry.h
     src/app/AccountConnectionProvider.h
     src/app/AccountConnectionSettings.h
+    src/app/AccountApplicationPorts.h
+    src/app/AccountCommandService.cpp
+    src/app/AccountCommandService.h
+    src/app/CacheAccessBarrier.cpp
+    src/app/CacheAccessBarrier.h
     src/app/ApplicationErrorCoordinator.cpp
     src/app/ApplicationErrorCoordinator.h
     src/app/CalendarNotificationService.cpp
@@ -296,6 +332,9 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/calendar/CalendarEventEditing.h
     src/jmap/calendar/CalendarService.cpp
     src/jmap/calendar/CalendarService.h
+    src/jmap/calendar/CalendarReader.h
+    src/jmap/calendar/CalendarReadService.cpp
+    src/jmap/calendar/CalendarReadService.h
     src/jmap/api/MailMethods.cpp
     src/jmap/api/MailMethods.h
     src/jmap/api/MethodCaller.cpp
@@ -328,23 +367,26 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/cache/ComposeSessionRepository.h
     src/jmap/cache/ContactRepository.cpp
     src/jmap/cache/ContactRepository.h
+    src/jmap/cache/ContactReader.h
     src/jmap/cache/CalendarRepository.cpp
     src/jmap/cache/CalendarRepository.h
-    src/jmap/cache/Database.cpp
     src/jmap/cache/Database.h
     src/jmap/cache/EmailRepository.cpp
     src/jmap/cache/EmailRepository.h
-    src/jmap/cache/MailVault.cpp
     src/jmap/cache/MailVault.h
     src/jmap/cache/MailSearchIndex.cpp
     src/jmap/cache/MailSearchIndex.h
     src/jmap/cache/IdentityRepository.cpp
     src/jmap/cache/IdentityRepository.h
+    src/jmap/cache/IdentityReader.h
+    src/jmap/cache/CalendarReadRepository.cpp
+    src/jmap/cache/CalendarReadRepository.h
     src/jmap/cache/MailboxRepository.cpp
     src/jmap/cache/MailboxRepository.h
     src/jmap/cache/MessageContentTypes.h
     src/jmap/cache/MessageViewService.cpp
     src/jmap/cache/MessageViewService.h
+    src/jmap/cache/MessageViewReader.h
     src/jmap/cache/MimeMessageParser.cpp
     src/jmap/cache/MimeMessageParser.h
     src/jmap/cache/QueryService.cpp
@@ -501,6 +543,8 @@ set(JAVELIN_FORMAT_FILES
     tests/jmap/SyncPlannerTest.cpp
     tests/jmap/SyncReconcilerTest.cpp
     tests/jmap/ThreadRepositoryTest.cpp
+    tests/app/CacheAccessBarrierTest.cpp
+    tests/jmap/ReadOnlyCacheSurfaceTest.cpp
 )
 
 add_library(javelin_jmap STATIC
@@ -510,8 +554,13 @@ add_library(javelin_jmap STATIC
     src/jmap/calendar/CalendarTypes.h
     src/jmap/calendar/CalendarService.cpp
     src/jmap/calendar/CalendarService.h
+    src/jmap/calendar/CalendarReader.h
+    src/jmap/calendar/CalendarReadService.cpp
+    src/jmap/calendar/CalendarReadService.h
     src/jmap/calendar/CalendarEventEditing.cpp
     src/jmap/calendar/CalendarEventEditing.h
+    src/jmap/cache/CalendarReadRepository.cpp
+    src/jmap/cache/CalendarReadRepository.h
     src/jmap/cache/CalendarRepository.cpp
     src/jmap/cache/CalendarRepository.h
     src/jmap/sync/PreferredStateChangeSource.cpp
@@ -578,27 +627,29 @@ add_library(javelin_jmap STATIC
     src/jmap/cache/ComposeSessionRepository.h
     src/jmap/cache/ContactRepository.cpp
     src/jmap/cache/ContactRepository.h
-    src/jmap/cache/Database.cpp
+    src/jmap/cache/ContactReader.h
     src/jmap/cache/Database.h
     src/jmap/cache/EmailRepository.cpp
     src/jmap/cache/EmailRepository.h
-    src/jmap/cache/MailVault.cpp
     src/jmap/cache/MailVault.h
     src/jmap/cache/MailSearchIndex.cpp
     src/jmap/cache/MailSearchIndex.h
     src/jmap/cache/IdentityRepository.cpp
     src/jmap/cache/IdentityRepository.h
+    src/jmap/cache/IdentityReader.h
     src/jmap/cache/MailboxRepository.cpp
     src/jmap/cache/MailboxRepository.h
     src/jmap/cache/MessageContentTypes.h
     src/jmap/cache/MessageViewService.cpp
     src/jmap/cache/MessageViewService.h
+    src/jmap/cache/MessageViewReader.h
     src/jmap/cache/MimeMessageParser.cpp
     src/jmap/cache/MimeMessageParser.h
     src/jmap/cache/QueryService.cpp
     src/jmap/cache/QueryService.h
-    src/jmap/cache/RawMessageSourceRepository.cpp
+    src/jmap/cache/QueryReader.h
     src/jmap/cache/RawMessageSourceRepository.h
+    src/jmap/cache/RawMessageSourceRepository.cpp
     src/jmap/cache/SessionRepository.cpp
     src/jmap/cache/SessionRepository.h
     src/jmap/cache/SieveRepository.cpp
@@ -696,6 +747,7 @@ target_include_directories(javelin_jmap PUBLIC
 )
 target_link_libraries(javelin_jmap
     PUBLIC
+        javelin_cache_read
         QCoro6::Coro
         Qt::Core
         Qt::Gui
@@ -868,6 +920,8 @@ file(GLOB_RECURSE javelin_gui_boundary_sources CONFIGURE_DEPENDS
 foreach(gui_source IN LISTS javelin_gui_boundary_sources)
     file(READ "${gui_source}" gui_source_contents)
     if(gui_source_contents MATCHES "#include \"jmap/api/(Transport|MethodEnvelope)\\.h\"" OR
+       gui_source_contents MATCHES "#include \"jmap/(cache|calendar)/(AccountRepository|ContactRepository|IdentityRepository|MessageViewService|QueryService|Database|CalendarService)\\.h\"" OR
+       gui_source_contents MATCHES "javelin::jmap::cache::Database(Connection|Transaction|WriteScope)" OR
        gui_source_contents MATCHES "#include \"jmap/contacts/ContactService\\.h\"" OR
        gui_source_contents MATCHES "#include \"jmap/sync/(MailboxRefreshExecutor|MailboxStateRefreshExecutor)\\.h\"" OR
        gui_source_contents MATCHES "AccountSyncConfiguration" OR
@@ -939,6 +993,11 @@ javelin_enable_sanitizers(javelin_calendar_gui)
 target_compile_options(javelin_calendar_gui PRIVATE -fexceptions)
 
 add_library(javelin_application STATIC
+    src/app/AccountApplicationPorts.h
+    src/app/AccountCommandService.cpp
+    src/app/AccountCommandService.h
+    src/app/CacheAccessBarrier.cpp
+    src/app/CacheAccessBarrier.h
     src/app/AccountConnectionProvider.h
     src/app/AccountConnectionSettings.h
     src/app/AddressSuggestionStore.cpp

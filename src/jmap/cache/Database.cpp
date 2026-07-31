@@ -777,6 +777,34 @@ namespace javelin::jmap::cache
         return readDataVersion(m_database);
     }
 
+    DatabaseReadView::DatabaseReadView(const DatabaseConnection& connection)
+        : m_connection(&connection)
+    {
+    }
+
+    DatabaseReadView::DatabaseReadView(const ReadOnlyDatabaseConnection& connection)
+        : m_connection(&connection)
+    {
+    }
+
+    const QSqlDatabase& DatabaseReadView::database() const
+    {
+        return std::visit([](const auto* connection) -> const QSqlDatabase&
+                          { return connection->database(); }, m_connection);
+    }
+
+    std::optional<DatabaseError> DatabaseReadView::validate() const
+    {
+        return std::visit([](const auto* connection) { return connection->validate(); },
+                          m_connection);
+    }
+
+    std::variant<std::uint64_t, DatabaseError> DatabaseReadView::dataVersion() const
+    {
+        return std::visit([](const auto* connection) { return connection->dataVersion(); },
+                          m_connection);
+    }
+
     void ReadOnlyDatabaseConnection::reset()
     {
         if (m_connectionName.isEmpty())

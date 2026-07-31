@@ -9,6 +9,7 @@
 #include <QSqlQuery>
 
 #include <unordered_set>
+#include <utility>
 
 namespace javelin::jmap::cache
 {
@@ -217,8 +218,22 @@ namespace javelin::jmap::cache
         }
     } // namespace
 
-    ContactRepository::ContactRepository(DatabaseConnection& connection) : m_connection(connection)
+    ContactRepository::ContactRepository(DatabaseConnection& connection)
+        : m_connection(connection), m_writeConnection(&connection)
     {
+    }
+
+    ContactRepository::ContactRepository(ReadOnlyDatabaseConnection& connection)
+        : m_connection(connection)
+    {
+    }
+
+    QMetaObject::Connection
+    ContactRepository::connectChanged(QObject* context,
+                                      std::function<void(const QString&)> callback)
+    {
+        return QObject::connect(this, &ContactRepository::contactsChanged, context,
+                                std::move(callback));
     }
 
     std::optional<DatabaseError> ContactRepository::replaceAll(
@@ -226,8 +241,12 @@ namespace javelin::jmap::cache
         const std::vector<javelin::jmap::contacts::ContactSummary>& contacts,
         const std::string_view addressBookState, const std::string_view contactState)
     {
+        if (m_writeConnection == nullptr)
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message = QStringLiteral("Cannot replace contacts on a read-only connection")};
         auto transactionResult =
-            DatabaseTransaction::begin(m_connection, QStringLiteral("Replace contacts"));
+            DatabaseTransaction::begin(*m_writeConnection, QStringLiteral("Replace contacts"));
         if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
             return *error;
         auto transaction = std::get<DatabaseTransaction>(std::move(transactionResult));
@@ -246,12 +265,13 @@ namespace javelin::jmap::cache
         const std::vector<javelin::jmap::contacts::ContactSummary>& contacts,
         const std::string_view addressBookState, const std::string_view contactState)
     {
-        if (!transaction.isActive() || &transaction.connection() != &m_connection)
+        if (m_writeConnection == nullptr || !transaction.isActive() ||
+            &transaction.connection() != m_writeConnection)
             return DatabaseError{
                 .code = DatabaseErrorCode::QueryFailed,
                 .message = QStringLiteral("Contacts replacement requires a matching transaction"),
             };
-        auto& database = m_connection.database();
+        auto& database = m_writeConnection->database();
         QSqlQuery clearCards{database};
         clearCards.prepare(QStringLiteral("DELETE FROM contact_cards WHERE account_id=:account"));
         clearCards.bindValue(QStringLiteral(":account"),
@@ -292,8 +312,12 @@ namespace javelin::jmap::cache
         const std::string_view accountId, const std::vector<javelin::jmap::api::AddressBook>& books,
         const std::string_view state)
     {
+        if (m_writeConnection == nullptr)
+            return DatabaseError{.code = DatabaseErrorCode::QueryFailed,
+                                 .message = QStringLiteral(
+                                     "Cannot replace address books on a read-only connection")};
         auto transactionResult = DatabaseTransaction::begin(
-            m_connection, QStringLiteral("Begin address book replacement"));
+            *m_writeConnection, QStringLiteral("Begin address book replacement"));
         if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
         {
             return *error;
@@ -319,7 +343,8 @@ namespace javelin::jmap::cache
         {
             return error;
         }
-        if (!transaction.isActive() || &transaction.connection() != &m_connection)
+        if (m_writeConnection == nullptr || !transaction.isActive() ||
+            &transaction.connection() != m_writeConnection)
         {
             return DatabaseError{
                 .code = DatabaseErrorCode::QueryFailed,
@@ -328,7 +353,7 @@ namespace javelin::jmap::cache
             };
         }
 
-        auto& database = m_connection.database();
+        auto& database = m_writeConnection->database();
         std::unordered_set<std::string> retainedIds;
         retainedIds.reserve(books.size());
         for (const auto& book : books)
@@ -379,8 +404,12 @@ namespace javelin::jmap::cache
         const std::vector<javelin::jmap::contacts::ContactSummary>& contacts,
         const std::span<const std::string> destroyed, const std::string_view state)
     {
+        if (m_writeConnection == nullptr)
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message = QStringLiteral("Cannot update contacts on a read-only connection")};
         auto transactionResult =
-            DatabaseTransaction::begin(m_connection, QStringLiteral("Begin contact update"));
+            DatabaseTransaction::begin(*m_writeConnection, QStringLiteral("Begin contact update"));
         if (const auto* error = std::get_if<DatabaseError>(&transactionResult))
         {
             return *error;
@@ -407,7 +436,8 @@ namespace javelin::jmap::cache
         {
             return error;
         }
-        if (!transaction.isActive() || &transaction.connection() != &m_connection)
+        if (m_writeConnection == nullptr || !transaction.isActive() ||
+            &transaction.connection() != m_writeConnection)
         {
             return DatabaseError{
                 .code = DatabaseErrorCode::QueryFailed,
@@ -415,7 +445,7 @@ namespace javelin::jmap::cache
             };
         }
 
-        auto& database = m_connection.database();
+        auto& database = m_writeConnection->database();
         if (const auto error = writeContacts(database, accountId, contacts, destroyed))
         {
             return error;
@@ -445,14 +475,15 @@ namespace javelin::jmap::cache
         {
             return error;
         }
-        if (!transaction.isActive() || &transaction.connection() != &m_connection)
+        if (m_writeConnection == nullptr || !transaction.isActive() ||
+            &transaction.connection() != m_writeConnection)
         {
             return DatabaseError{
                 .code = DatabaseErrorCode::QueryFailed,
                 .message = QStringLiteral("Contact projection requires a matching transaction"),
             };
         }
-        return writeContacts(m_connection.database(), accountId, contacts, destroyed);
+        return writeContacts(m_writeConnection->database(), accountId, contacts, destroyed);
     }
 
     void ContactRepository::notifyChanged(const std::string_view accountId)
@@ -520,14 +551,16 @@ namespace javelin::jmap::cache
     std::variant<std::optional<std::string>, DatabaseError>
     ContactRepository::contactState(const std::string_view accountId) const
     {
-        SyncStateRepository states{m_connection};
-        auto found = states.find(
-            {.accountId = std::string{accountId}, .objectType = "ContactCard", .queryKey = {}});
-        if (const auto* error = std::get_if<DatabaseError>(&found))
-            return *error;
-        const auto& record = std::get<std::optional<SyncStateRecord>>(found);
-        return record.has_value() ? std::optional{record->stateToken}
-                                  : std::optional<std::string>{};
+        QSqlQuery query{m_connection.database()};
+        query.prepare(
+            QStringLiteral("SELECT state_token FROM sync_state WHERE account_id=:account AND "
+                           "object_type='ContactCard' AND query_key=''"));
+        query.bindValue(QStringLiteral(":account"), QString::fromStdString(std::string{accountId}));
+        if (!query.exec())
+            return queryError(QStringLiteral("Read ContactCard state"), query);
+        if (!query.next())
+            return std::optional<std::string>{};
+        return std::optional<std::string>{query.value(0).toString().toStdString()};
     }
 
     std::variant<std::vector<ContactAccount>, DatabaseError>

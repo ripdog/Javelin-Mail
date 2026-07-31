@@ -22,7 +22,7 @@ namespace javelin::app
 
 namespace javelin::jmap::cache
 {
-    class ContactRepository;
+    class ContactReader;
 }
 
 namespace javelin::gui::contacts
@@ -69,7 +69,7 @@ namespace javelin::gui::shell
         Q_OBJECT
 
       public:
-        ContactsTabController(javelin::jmap::cache::ContactRepository& contactRepository,
+        ContactsTabController(javelin::jmap::cache::ContactReader& contactRepository,
                               javelin::app::ContactRefreshPort& refreshPort,
                               javelin::app::ContactCommandPort& commandPort,
                               QStackedWidget& contentStack, std::vector<TabState>& tabs,
@@ -100,7 +100,7 @@ namespace javelin::gui::shell
         [[nodiscard]] javelin::gui::contacts::ContactsManagerWidget*
         widgetForTab(const TabState* tab) const;
 
-        javelin::jmap::cache::ContactRepository& m_contactRepository;
+        javelin::jmap::cache::ContactReader& m_contactRepository;
         javelin::app::ContactRefreshPort& m_refreshPort;
         javelin::app::ContactCommandPort& m_commandPort;
         QStackedWidget& m_contentStack;

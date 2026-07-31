@@ -1,10 +1,10 @@
 #include "gui/settings/PreferencesDialog.h"
 
+#include "app/AccountApplicationPorts.h"
 #include "app/ComposePreferences.h"
 #include "gui/mailboxes/MailboxTreeModel.h"
 #include "gui/mailboxes/MailboxTreeView.h"
 #include "jmap/cache/AccountReadRepository.h"
-#include "jmap/cache/AccountRepository.h"
 #include "jmap/cache/MailboxReadRepository.h"
 
 #include <QCheckBox>
@@ -147,12 +147,12 @@ namespace javelin::gui::settings
         }
     } // namespace
 
-    PreferencesDialog::PreferencesDialog(javelin::jmap::cache::AccountRepository& accountRepository,
+    PreferencesDialog::PreferencesDialog(javelin::app::AccountCommandPort& accountCommandPort,
                                          javelin::jmap::cache::AccountReader& accountReader,
                                          javelin::jmap::cache::MailboxReader& mailboxReader,
                                          QWidget* parent)
         : KConfigDialog(parent, QStringLiteral("preferences"), nullptr),
-          m_accountRepository(accountRepository), m_accountReader(accountReader),
+          m_accountCommandPort(accountCommandPort), m_accountReader(accountReader),
           m_mailboxReader(mailboxReader), m_accounts(loadAccounts()),
           m_remoteContentSenders(remoteContentAllowList(QLatin1StringView{allowedSendersKey})),
           m_remoteContentDomains(remoteContentAllowList(QLatin1StringView{allowedDomainsKey})),
@@ -795,7 +795,7 @@ namespace javelin::gui::settings
         }
         for (const auto& account : m_removedAccounts)
         {
-            if (const auto error = m_accountRepository.removeConfiguredAccount(
+            if (const auto error = m_accountCommandPort.removeConfiguredAccount(
                     account.loginEmail, account.sessionUrl, account.cachedAccountIds))
             {
                 QMessageBox::critical(this, QStringLiteral("Could not remove account"),

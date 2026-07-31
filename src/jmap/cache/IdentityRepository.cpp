@@ -78,6 +78,11 @@ namespace javelin::jmap::cache
     } // namespace
 
     IdentityRepository::IdentityRepository(DatabaseConnection& connection)
+        : m_connection(connection), m_writeConnection(&connection)
+    {
+    }
+
+    IdentityRepository::IdentityRepository(ReadOnlyDatabaseConnection& connection)
         : m_connection(connection)
     {
     }
@@ -86,13 +91,20 @@ namespace javelin::jmap::cache
     IdentityRepository::replaceAll(const std::string_view accountId,
                                    const std::vector<javelin::jmap::domain::Identity>& identities)
     {
+        if (m_writeConnection == nullptr)
+        {
+            return DatabaseError{
+                .code = DatabaseErrorCode::QueryFailed,
+                .message = QStringLiteral("Cannot replace identities on a read-only connection"),
+            };
+        }
         if (const auto error = m_connection.validate())
         {
             return error;
         }
 
-        const DatabaseWriteScope writeScope{m_connection};
-        auto& database = m_connection.database();
+        const DatabaseWriteScope writeScope{*m_writeConnection};
+        auto& database = m_writeConnection->database();
         if (!database.transaction())
         {
             return DatabaseError{

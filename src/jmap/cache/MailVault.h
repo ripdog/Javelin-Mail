@@ -32,6 +32,7 @@ namespace javelin::jmap::cache
         explicit MailVault(QString rootPath);
 
         [[nodiscard]] static MailVault forDatabase(const DatabaseConnection& connection);
+        [[nodiscard]] static MailVault forDatabase(const DatabaseReadView& connection);
         [[nodiscard]] const QString& rootPath() const;
         [[nodiscard]] QString searchIndexPath(std::string_view accountId) const;
         [[nodiscard]] std::variant<MailVaultObject, MailVaultError>

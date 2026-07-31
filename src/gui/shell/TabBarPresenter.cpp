@@ -6,7 +6,7 @@
 #include "gui/mailboxes/MailboxIconUtils.h"
 #include "gui/settings/PreferencesDialog.h"
 #include "jmap/cache/AccountReadRepository.h"
-#include "jmap/cache/QueryService.h"
+#include "jmap/cache/QueryReader.h"
 
 #include <QIcon>
 #include <QPalette>
@@ -23,10 +23,10 @@ namespace javelin::gui::shell
 
     TabBarPresenter::TabBarPresenter(QTabBar& tabBar, QWidget& window,
                                      javelin::jmap::cache::AccountReader& accountReader,
-                                     javelin::jmap::cache::QueryService& queryService,
+                                     javelin::jmap::cache::QueryReader& queryReader,
                                      QObject* parent)
         : QObject(parent), m_tabBar(tabBar), m_window(window), m_accountReader(accountReader),
-          m_queryService(queryService)
+          m_queryReader(queryReader)
     {
     }
 
@@ -82,8 +82,8 @@ namespace javelin::gui::shell
         {
             return {};
         }
-        const auto unreadResult = m_queryService.countUnreadMailboxEmails(tab.session->accountId(),
-                                                                          tab.session->mailboxId());
+        const auto unreadResult = m_queryReader.countUnreadMailboxEmails(tab.session->accountId(),
+                                                                         tab.session->mailboxId());
         const auto* unread = std::get_if<std::size_t>(&unreadResult);
         if (unread == nullptr || *unread == 0)
         {

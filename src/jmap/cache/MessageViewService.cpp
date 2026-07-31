@@ -1,8 +1,8 @@
 #include "jmap/cache/MessageViewService.h"
 
-#include "jmap/cache/EmailRepository.h"
+#include "jmap/cache/EmailReadRepository.h"
 #include "jmap/cache/MimeMessageParser.h"
-#include "jmap/cache/RawMessageSourceRepository.h"
+#include "jmap/cache/RawMessageSourceReadRepository.h"
 #include "jmap/render/HtmlMessageDocumentBuilder.h"
 
 #include <QtConcurrentRun>
@@ -14,11 +14,16 @@ namespace javelin::jmap::cache
     {
     }
 
+    MessageViewService::MessageViewService(ReadOnlyDatabaseConnection& connection)
+        : m_connection(connection)
+    {
+    }
+
     MessageViewResult MessageViewService::load(const std::string_view accountId,
                                                const std::string_view emailId) const
     {
-        EmailRepository emailRepository{m_connection};
-        RawMessageSourceRepository sourceRepository{m_connection};
+        EmailReadRepository emailRepository{m_connection};
+        RawMessageSourceReadRepository sourceRepository{m_connection};
 
         const auto emailResult = emailRepository.find(accountId, emailId);
         if (const auto* error = std::get_if<DatabaseError>(&emailResult))
@@ -82,13 +87,13 @@ namespace javelin::jmap::cache
         return QtConcurrent::run(
             [databasePath, accountId = std::move(accountId), emailId = std::move(emailId)]() mutable
             {
-                ThreadConnectionFactory factory{
+                ReadOnlyThreadConnectionFactory factory{
                     {.connectionNamePrefix = QStringLiteral("message-view"),
                      .databasePath = databasePath}};
                 auto opened = factory.openForCurrentThread(accountId);
                 if (const auto* error = std::get_if<DatabaseError>(&opened))
                     return MessageViewResult{*error};
-                auto connection = std::get<DatabaseConnection>(std::move(opened));
+                auto connection = std::get<ReadOnlyDatabaseConnection>(std::move(opened));
                 return MessageViewService{connection}.load(accountId, emailId);
             });
     }

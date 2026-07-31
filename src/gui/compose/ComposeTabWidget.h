@@ -36,7 +36,7 @@ namespace javelin::gui::messageview
 
 namespace javelin::jmap::cache
 {
-    class IdentityRepository;
+    class IdentityReader;
 }
 
 namespace javelin::jmap::contacts
@@ -58,7 +58,7 @@ namespace javelin::gui::compose
 
       public:
         ComposeTabWidget(javelin::app::ComposeService& composeService,
-                         javelin::jmap::cache::IdentityRepository& identityRepository,
+                         javelin::jmap::cache::IdentityReader& identityRepository,
                          javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
                          javelin::jmap::submission::DraftSnapshot snapshot,
                          QWidget* parent = nullptr);
@@ -126,7 +126,7 @@ namespace javelin::gui::compose
         void insertLink();
 
         javelin::app::ComposeService& m_composeService;
-        javelin::jmap::cache::IdentityRepository& m_identityRepository;
+        javelin::jmap::cache::IdentityReader& m_identityRepository;
         javelin::jmap::contacts::ContactIdentityLookup& m_contactIdentityLookup;
         javelin::jmap::submission::DraftSnapshot m_snapshot;
         std::unordered_set<std::string> m_identityLoadsStarted;

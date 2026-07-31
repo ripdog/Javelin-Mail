@@ -1,6 +1,6 @@
 #include "jmap/contacts/ContactIdentityLookup.h"
 
-#include "jmap/cache/ContactRepository.h"
+#include "jmap/cache/ContactReader.h"
 #include "jmap/contacts/ContactTypes.h"
 
 #include <algorithm>
@@ -8,12 +8,11 @@
 
 namespace javelin::jmap::contacts
 {
-    ContactIdentityLookup::ContactIdentityLookup(
-        javelin::jmap::cache::ContactRepository& repository)
+    ContactIdentityLookup::ContactIdentityLookup(javelin::jmap::cache::ContactReader& repository)
         : m_repository(repository)
     {
-        connect(&m_repository, &javelin::jmap::cache::ContactRepository::contactsChanged, this,
-                &ContactIdentityLookup::contactDataChanged);
+        static_cast<void>(m_repository.connectChanged(this, [this](const QString& accountId)
+                                                      { Q_EMIT contactDataChanged(accountId); }));
     }
 
     std::variant<std::optional<ContactIdentity>, javelin::jmap::cache::DatabaseError>

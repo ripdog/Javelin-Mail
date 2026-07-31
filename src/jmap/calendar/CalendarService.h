@@ -2,7 +2,7 @@
 
 #include "jmap/JmapCore.h"
 #include "jmap/api/CalendarMethods.h"
-#include "jmap/cache/CalendarRepository.h"
+#include "jmap/calendar/CalendarReader.h"
 #include "jmap/sync/MutationCommitReceipt.h"
 
 #include <QCoroTask>
@@ -24,12 +24,6 @@ namespace javelin::jmap::api
 
 namespace javelin::jmap::calendar
 {
-    struct VisibleInterval
-    {
-        LocalDateTime start;
-        LocalDateTime end;
-    };
-
     struct RefreshedRange
     {
         VisibleInterval interval;
@@ -99,27 +93,23 @@ namespace javelin::jmap::calendar
         bool removeEvents = true;
     };
 
-    using CalendarLoadResult = std::variant<std::optional<cache::CalendarWindow>, OperationError>;
     using CalendarRefreshResult = std::variant<RefreshedRange, OperationError>;
     using CalendarMutationResult = std::variant<CommittedMutation, OperationError>;
-    using CalendarAccountsResult =
-        std::variant<std::vector<cache::CalendarAccount>, OperationError>;
-    using CalendarListResult = std::variant<std::vector<Calendar>, OperationError>;
     using CalendarPreferenceResult = std::variant<std::monostate, OperationError>;
     using AuthoritativeCalendarEventResult =
         std::variant<AuthoritativeCalendarEvent, OperationError>;
 
-    class CalendarService
+    class CalendarService final : public CalendarReader
     {
       public:
         CalendarService(cache::DatabaseConnection& connection,
                         api::JmapMethodTransport& methodTransport);
 
-        [[nodiscard]] CalendarLoadResult loadCached(std::string_view accountId,
-                                                    const VisibleInterval& interval,
-                                                    const TimeZoneId& displayTimeZone) const;
-        [[nodiscard]] CalendarAccountsResult accounts() const;
-        [[nodiscard]] CalendarListResult calendars(std::string_view accountId) const;
+        [[nodiscard]] CalendarLoadResult
+        loadCached(std::string_view accountId, const VisibleInterval& interval,
+                   const TimeZoneId& displayTimeZone) const override;
+        [[nodiscard]] CalendarAccountsResult accounts() const override;
+        [[nodiscard]] CalendarListResult calendars(std::string_view accountId) const override;
         [[nodiscard]] CalendarPreferenceResult
         setCalendarVisible(std::string_view accountId, std::string_view calendarId, bool visible);
         [[nodiscard]] QCoro::Task<AuthoritativeCalendarEventResult>

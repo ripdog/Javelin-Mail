@@ -3,7 +3,7 @@
 #include "app/ContactApplicationPorts.h"
 #include "gui/contacts/ContactsManagerWidget.h"
 #include "gui/shell/MainWindowStateStore.h"
-#include "jmap/cache/ContactRepository.h"
+#include "jmap/cache/ContactReader.h"
 
 #include <QMenu>
 #include <QStackedWidget>
@@ -15,7 +15,7 @@
 namespace javelin::gui::shell
 {
     ContactsTabController::ContactsTabController(
-        javelin::jmap::cache::ContactRepository& contactRepository,
+        javelin::jmap::cache::ContactReader& contactRepository,
         javelin::app::ContactRefreshPort& refreshPort,
         javelin::app::ContactCommandPort& commandPort, QStackedWidget& contentStack,
         std::vector<TabState>& tabs, QObject* parent)

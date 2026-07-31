@@ -14,7 +14,7 @@ class QWidget;
 namespace javelin::jmap::cache
 {
     class AccountReader;
-    class QueryService;
+    class QueryReader;
 } // namespace javelin::jmap::cache
 
 namespace javelin::gui::shell
@@ -27,8 +27,7 @@ namespace javelin::gui::shell
       public:
         TabBarPresenter(QTabBar& tabBar, QWidget& window,
                         javelin::jmap::cache::AccountReader& accountReader,
-                        javelin::jmap::cache::QueryService& queryService,
-                        QObject* parent = nullptr);
+                        javelin::jmap::cache::QueryReader& queryReader, QObject* parent = nullptr);
 
         void refresh(const std::vector<TabState>& tabs, std::optional<int> activeIndex);
         [[nodiscard]] QString mailboxTitle(const MailboxTabState& tab) const;
@@ -44,7 +43,7 @@ namespace javelin::gui::shell
         QTabBar& m_tabBar;
         QWidget& m_window;
         javelin::jmap::cache::AccountReader& m_accountReader;
-        javelin::jmap::cache::QueryService& m_queryService;
+        javelin::jmap::cache::QueryReader& m_queryReader;
     };
 
 } // namespace javelin::gui::shell

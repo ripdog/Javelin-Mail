@@ -22,7 +22,7 @@ namespace javelin::app
 
 namespace javelin::jmap::cache
 {
-    class IdentityRepository;
+    class IdentityReader;
 }
 
 namespace javelin::jmap::contacts
@@ -45,7 +45,7 @@ namespace javelin::gui::shell
 
       public:
         ComposeTabController(javelin::app::ComposeService& composeService,
-                             javelin::jmap::cache::IdentityRepository& identityRepository,
+                             javelin::jmap::cache::IdentityReader& identityRepository,
                              javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
                              QStackedWidget& contentStack, std::vector<TabState>& tabs,
                              QObject* parent = nullptr);
@@ -83,7 +83,7 @@ namespace javelin::gui::shell
         [[nodiscard]] bool detachWidget(int index);
 
         javelin::app::ComposeService& m_composeService;
-        javelin::jmap::cache::IdentityRepository& m_identityRepository;
+        javelin::jmap::cache::IdentityReader& m_identityRepository;
         javelin::jmap::contacts::ContactIdentityLookup& m_contactIdentityLookup;
         QStackedWidget& m_contentStack;
         std::vector<TabState>& m_tabs;

@@ -2,7 +2,7 @@
 
 #include "app/MailApplicationService.h"
 #include "gui/shell/TabWorkspace.h"
-#include "jmap/cache/QueryService.h"
+#include "jmap/cache/QueryReader.h"
 #include "jmap/query/EmailListSort.h"
 #include "jmap/search/EmailSearch.h"
 #include "jmap/submission/ComposeTypes.h"
@@ -37,6 +37,7 @@ namespace javelin::jmap
 
 namespace javelin::app
 {
+    class AccountCommandPort;
     class ComposeService;
     class ContactCommandPort;
     class MailboxSession;
@@ -57,18 +58,17 @@ namespace javelin::jmap::contacts
 } // namespace javelin::jmap::contacts
 namespace javelin::jmap::calendar
 {
-    class CalendarService;
+    class CalendarReader;
 }
 
 namespace javelin::jmap::cache
 {
     class AccountReader;
-    class AccountRepository;
-    class ContactRepository;
-    class IdentityRepository;
+    class ContactReader;
+    class IdentityReader;
     class MailboxReader;
-    class MessageViewService;
-    class QueryService;
+    class MessageViewReader;
+    class QueryReader;
 } // namespace javelin::jmap::cache
 
 namespace javelin::gui::mailboxes
@@ -124,15 +124,15 @@ namespace javelin::gui::shell
 
       public:
         explicit MainWindow(
-            javelin::jmap::cache::AccountRepository& accountRepository,
+            javelin::app::AccountCommandPort& accountCommandPort,
             javelin::jmap::cache::AccountReader& accountReader,
             javelin::jmap::cache::MailboxReader& mailboxReader,
-            javelin::jmap::cache::ContactRepository& contactRepository,
-            javelin::jmap::calendar::CalendarService& calendarService,
+            javelin::jmap::cache::ContactReader& contactReader,
+            javelin::jmap::calendar::CalendarReader& calendarReader,
             javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
-            javelin::jmap::cache::IdentityRepository& identityRepository,
-            javelin::jmap::cache::MessageViewService& messageViewService,
-            javelin::jmap::cache::QueryService& queryService,
+            javelin::jmap::cache::IdentityReader& identityReader,
+            javelin::jmap::cache::MessageViewReader& messageViewReader,
+            javelin::jmap::cache::QueryReader& queryReader,
             javelin::app::TranslationService& translationService,
             javelin::app::ComposeService& composeService,
             javelin::app::ContactCommandPort& contactCommandPort,
@@ -254,15 +254,15 @@ namespace javelin::gui::shell
         void closeEvent(QCloseEvent* event) override;
         bool eventFilter(QObject* watched, QEvent* event) override;
 
-        javelin::jmap::cache::AccountRepository& m_accountRepository;
+        javelin::app::AccountCommandPort& m_accountCommandPort;
         javelin::jmap::cache::AccountReader& m_accountReader;
         javelin::jmap::cache::MailboxReader& m_mailboxReader;
-        javelin::jmap::cache::ContactRepository& m_contactRepository;
-        javelin::jmap::calendar::CalendarService& m_calendarService;
+        javelin::jmap::cache::ContactReader& m_contactReader;
+        javelin::jmap::calendar::CalendarReader& m_calendarReader;
         javelin::jmap::contacts::ContactIdentityLookup& m_contactIdentityLookup;
-        javelin::jmap::cache::IdentityRepository& m_identityRepository;
-        javelin::jmap::cache::MessageViewService& m_messageViewService;
-        javelin::jmap::cache::QueryService& m_queryService;
+        javelin::jmap::cache::IdentityReader& m_identityReader;
+        javelin::jmap::cache::MessageViewReader& m_messageViewReader;
+        javelin::jmap::cache::QueryReader& m_queryReader;
         javelin::app::TranslationService& m_translationService;
         javelin::app::ComposeService& m_composeService;
         javelin::app::ContactCommandPort& m_contactCommandPort;

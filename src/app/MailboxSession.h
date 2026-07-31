@@ -2,6 +2,7 @@
 
 #include "app/MailApplicationService.h"
 #include "app/MessageListSession.h"
+#include "jmap/cache/QueryReader.h"
 #include "jmap/query/EmailListSort.h"
 
 #include <cstddef>
@@ -21,7 +22,7 @@ namespace javelin::app
       public:
         MailboxSession(std::string accountId, std::string mailboxId, QString title,
                        std::optional<std::string> role, javelin::jmap::query::EmailListSort sort,
-                       javelin::jmap::cache::QueryService& queryService,
+                       javelin::jmap::cache::QueryReader& queryReader,
                        MailApplicationService& mailService, std::size_t pageSize,
                        std::optional<RestoredMailboxState> restored = std::nullopt,
                        QObject* parent = nullptr);
@@ -53,7 +54,7 @@ namespace javelin::app
         QString m_title;
         std::optional<std::string> m_role;
         javelin::jmap::query::EmailListSort m_sort;
-        javelin::jmap::cache::QueryService& m_queryService;
+        javelin::jmap::cache::QueryReader& m_queryReader;
         MailApplicationService& m_mailService;
         std::size_t m_pageSize;
         MessageListPage m_page;

@@ -1,5 +1,6 @@
 #include "app/SearchSession.h"
 
+#include "jmap/cache/QueryService.h"
 #include <QCoroTask>
 
 #include <QFutureWatcher>
@@ -24,7 +25,7 @@ namespace javelin::app
         runLocalSearch(const QString& databasePath, const std::string& accountId,
                        const std::string& text, const javelin::jmap::query::EmailListSort sort)
         {
-            javelin::jmap::cache::ThreadConnectionFactory factory{
+            javelin::jmap::cache::ReadOnlyThreadConnectionFactory factory{
                 {.connectionNamePrefix = QStringLiteral("javelin-local-search"),
                  .databasePath = databasePath}};
             auto connectionResult = factory.openForCurrentThread("snapshot");
@@ -34,8 +35,8 @@ namespace javelin::app
                 return *error;
             }
 
-            auto connection =
-                std::get<javelin::jmap::cache::DatabaseConnection>(std::move(connectionResult));
+            auto connection = std::get<javelin::jmap::cache::ReadOnlyDatabaseConnection>(
+                std::move(connectionResult));
             javelin::jmap::cache::QueryService queryService{connection};
             return queryService.searchAllCachedMessageText(accountId, text, sort);
         }
@@ -44,12 +45,12 @@ namespace javelin::app
     SearchSession::SearchSession(std::string accountId,
                                  javelin::jmap::search::EmailSearchCriteria criteria,
                                  javelin::jmap::query::EmailListSort sort,
-                                 javelin::jmap::cache::QueryService& queryService,
+                                 javelin::jmap::cache::QueryReader& queryReader,
                                  MailApplicationService& mailService, const std::size_t pageSize,
                                  std::optional<RestoredSearchState> restored, QObject* parent)
         : MessageListSession(parent), m_accountId(std::move(accountId)),
           m_query(javelin::jmap::search::displayString(criteria)), m_criteria(std::move(criteria)),
-          m_sort(sort), m_queryService(queryService), m_mailService(mailService),
+          m_sort(sort), m_queryReader(queryReader), m_mailService(mailService),
           m_pageSize(pageSize),
           m_mode(javelin::jmap::search::isBasicTextSearch(m_criteria) ? SearchMode::Local
                                                                       : SearchMode::Online),
@@ -140,8 +141,8 @@ namespace javelin::app
         if (m_page.cacheLoaded && !m_page.stale && !forceReload)
             return;
 
-        const auto result = m_queryService.loadSearchWindow(m_accountId, onlineWindowKey(),
-                                                            m_page.offset, m_pageSize);
+        const auto result = m_queryReader.loadSearchWindow(m_accountId, onlineWindowKey(),
+                                                           m_page.offset, m_pageSize);
         const auto* page =
             std::get_if<std::optional<javelin::jmap::cache::SearchWindowPage>>(&result);
         if (page == nullptr || !page->has_value() ||
@@ -307,7 +308,7 @@ namespace javelin::app
         }
 
         const auto cached =
-            m_queryService.loadSearchWindow(m_accountId, onlineWindowKey(), offset, m_pageSize);
+            m_queryReader.loadSearchWindow(m_accountId, onlineWindowKey(), offset, m_pageSize);
         if (const auto* page =
                 std::get_if<std::optional<javelin::jmap::cache::SearchWindowPage>>(&cached);
             page != nullptr && page->has_value() &&
@@ -502,7 +503,7 @@ namespace javelin::app
                 applyLocalPage();
                 Q_EMIT pageChanged();
             });
-        watcher->setFuture(QtConcurrent::run(runLocalSearch, m_queryService.databasePath(),
+        watcher->setFuture(QtConcurrent::run(runLocalSearch, m_queryReader.databasePath(),
                                              m_accountId, *m_criteria.text, m_sort));
     }
 

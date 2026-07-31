@@ -1,6 +1,6 @@
 #pragma once
 
-#include "jmap/cache/QueryService.h"
+#include "jmap/cache/QueryReader.h"
 
 #include <QAbstractListModel>
 
@@ -44,7 +44,7 @@ namespace javelin::gui::messages
             IsSearchResultRole,
         };
 
-        explicit MessageListModel(javelin::jmap::cache::QueryService& queryService,
+        explicit MessageListModel(javelin::jmap::cache::QueryReader& queryReader,
                                   QObject* parent = nullptr);
         ~MessageListModel() override;
 
@@ -90,7 +90,7 @@ namespace javelin::gui::messages
         void reindexVisibleRows();
         void rebuildVisibleRows();
 
-        javelin::jmap::cache::QueryService& m_queryService;
+        javelin::jmap::cache::QueryReader& m_queryReader;
         std::optional<std::string> m_accountId;
         std::optional<std::string> m_mailboxId;
         std::vector<ThreadEntry> m_threads;

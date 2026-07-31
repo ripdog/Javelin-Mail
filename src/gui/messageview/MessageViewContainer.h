@@ -1,7 +1,7 @@
 #pragma once
 
-#include "jmap/cache/MessageViewService.h"
-#include "jmap/cache/QueryService.h"
+#include "jmap/cache/MessageViewReader.h"
+#include "jmap/cache/QueryReader.h"
 
 #include <QString>
 #include <QWidget>
@@ -47,13 +47,13 @@ namespace javelin::gui::messageview
             QWidget* parent = nullptr);
         ~MessageViewContainer() override;
 
-        void setSelection(javelin::jmap::cache::MessageViewService& messageViewService,
+        void setSelection(javelin::jmap::cache::MessageViewReader& messageViewReader,
                           std::optional<std::string> accountId,
                           std::optional<std::string> mailboxId, std::optional<std::string> emailId);
         void setMultipleSelection(std::optional<std::string> accountId,
                                   std::optional<std::string> mailboxId,
                                   std::vector<javelin::jmap::cache::MessageListItem> messages);
-        void refresh(javelin::jmap::cache::MessageViewService& messageViewService);
+        void refresh(javelin::jmap::cache::MessageViewReader& messageViewReader);
         void setErrorState(const QString& errorMessage);
         void appearanceSettingsChanged();
         void translationSettingsChanged();
@@ -77,7 +77,7 @@ namespace javelin::gui::messageview
         };
 
         void setActiveView(ActiveView view);
-        void startSnapshotLoad(javelin::jmap::cache::MessageViewService& messageViewService,
+        void startSnapshotLoad(javelin::jmap::cache::MessageViewReader& messageViewReader,
                                bool requestContentIfMissing);
         void updatePresentation(bool reloadBody = true);
         void updateSenderRemoteContentPermit();

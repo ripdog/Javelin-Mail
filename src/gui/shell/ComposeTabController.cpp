@@ -5,7 +5,7 @@
 #include "gui/settings/ConnectionSettingsAdapter.h"
 #include "gui/settings/PreferencesDialog.h"
 #include "gui/shell/MainWindowStateStore.h"
-#include "jmap/cache/IdentityRepository.h"
+#include "jmap/cache/IdentityReader.h"
 #include "jmap/contacts/ContactIdentityLookup.h"
 
 #include <QCoroTask>
@@ -21,7 +21,7 @@ namespace javelin::gui::shell
 {
     ComposeTabController::ComposeTabController(
         javelin::app::ComposeService& composeService,
-        javelin::jmap::cache::IdentityRepository& identityRepository,
+        javelin::jmap::cache::IdentityReader& identityRepository,
         javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
         QStackedWidget& contentStack, std::vector<TabState>& tabs, QObject* parent)
         : QObject(parent), m_composeService(composeService),
