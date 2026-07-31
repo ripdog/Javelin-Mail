@@ -17,7 +17,7 @@ namespace javelin::app
 
 namespace javelin::jmap::cache
 {
-    class AccountRepository;
+    class AccountReader;
 }
 
 namespace javelin::gui::shell
@@ -28,7 +28,7 @@ namespace javelin::gui::shell
 
       public:
         AccountRefreshController(javelin::app::MailApplicationService& mailService,
-                                 javelin::jmap::cache::AccountRepository& accountRepository,
+                                 javelin::jmap::cache::AccountReader& accountReader,
                                  QObject* parent = nullptr);
 
         void refreshAccount(std::string accountId);
@@ -44,7 +44,7 @@ namespace javelin::gui::shell
 
       private:
         javelin::app::MailApplicationService& m_mailService;
-        javelin::jmap::cache::AccountRepository& m_accountRepository;
+        javelin::jmap::cache::AccountReader& m_accountReader;
         bool m_refreshInFlight = false;
     };
 } // namespace javelin::gui::shell

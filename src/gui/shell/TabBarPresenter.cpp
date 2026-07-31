@@ -5,7 +5,7 @@
 #include "gui/IconUtils.h"
 #include "gui/mailboxes/MailboxIconUtils.h"
 #include "gui/settings/PreferencesDialog.h"
-#include "jmap/cache/AccountRepository.h"
+#include "jmap/cache/AccountReadRepository.h"
 #include "jmap/cache/QueryService.h"
 
 #include <QIcon>
@@ -22,11 +22,11 @@ namespace javelin::gui::shell
 {
 
     TabBarPresenter::TabBarPresenter(QTabBar& tabBar, QWidget& window,
-                                     javelin::jmap::cache::AccountRepository& accountRepository,
+                                     javelin::jmap::cache::AccountReader& accountReader,
                                      javelin::jmap::cache::QueryService& queryService,
                                      QObject* parent)
-        : QObject(parent), m_tabBar(tabBar), m_window(window),
-          m_accountRepository(accountRepository), m_queryService(queryService)
+        : QObject(parent), m_tabBar(tabBar), m_window(window), m_accountReader(accountReader),
+          m_queryService(queryService)
     {
     }
 
@@ -124,7 +124,7 @@ namespace javelin::gui::shell
         auto accountName = settings.displayName;
         if (accountName.isEmpty())
         {
-            const auto cached = m_accountRepository.listAll();
+            const auto cached = m_accountReader.listAll();
             if (const auto* accounts =
                     std::get_if<std::vector<javelin::jmap::cache::CachedAccount>>(&cached))
             {

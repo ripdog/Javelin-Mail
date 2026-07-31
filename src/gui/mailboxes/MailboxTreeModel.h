@@ -1,6 +1,6 @@
 #pragma once
 
-#include "jmap/cache/AccountRepository.h"
+#include "jmap/cache/AccountReadRepository.h"
 #include "jmap/cache/QueryService.h"
 
 #include <QAbstractItemModel>
@@ -47,10 +47,10 @@ namespace javelin::gui::mailboxes
             AuthenticationPaused,
         };
 
-        explicit MailboxTreeModel(javelin::jmap::cache::AccountRepository& accountRepository,
+        explicit MailboxTreeModel(javelin::jmap::cache::AccountReader& accountReader,
                                   javelin::jmap::cache::QueryService& queryService,
                                   QObject* parent = nullptr);
-        MailboxTreeModel(javelin::jmap::cache::AccountRepository& accountRepository,
+        MailboxTreeModel(javelin::jmap::cache::AccountReader& accountReader,
                          javelin::jmap::cache::QueryService& queryService, Options options,
                          QObject* parent = nullptr);
         ~MailboxTreeModel() override;
@@ -112,7 +112,7 @@ namespace javelin::gui::mailboxes
                                                   const std::unique_ptr<Node>& right);
         void rebuild();
 
-        javelin::jmap::cache::AccountRepository& m_accountRepository;
+        javelin::jmap::cache::AccountReader& m_accountReader;
         javelin::jmap::cache::QueryService& m_queryService;
         Options m_options;
         std::vector<std::unique_ptr<Node>> m_rootNodes;

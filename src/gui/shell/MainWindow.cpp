@@ -45,6 +45,7 @@
 #include "gui/shell/TabBarPresenter.h"
 #include "gui/shell/TabPersistence.h"
 #include "gui/sieve/SieveEditorDialog.h"
+#include "jmap/cache/AccountReadRepository.h"
 #include "jmap/cache/AccountRepository.h"
 #include "jmap/cache/ContactRepository.h"
 #include "jmap/cache/IdentityRepository.h"
@@ -230,6 +231,7 @@ namespace javelin::gui::shell
     } // namespace
 
     MainWindow::MainWindow(javelin::jmap::cache::AccountRepository& accountRepository,
+                           javelin::jmap::cache::AccountReader& accountReader,
                            javelin::jmap::cache::ContactRepository& contactRepository,
                            javelin::jmap::calendar::CalendarService& calendarService,
                            javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
@@ -243,12 +245,13 @@ namespace javelin::gui::shell
                            javelin::app::MessageNavigationCoordinator& messageNavigationCoordinator,
                            javelin::app::undo::UndoManager& undoManager, QWidget* parent)
         : KXmlGuiWindow(parent), m_accountRepository(accountRepository),
-          m_contactRepository(contactRepository), m_calendarService(calendarService),
-          m_contactIdentityLookup(contactIdentityLookup), m_identityRepository(identityRepository),
-          m_messageViewService(messageViewService), m_queryService(queryService),
-          m_translationService(translationService), m_composeService(composeService),
-          m_contactCommandPort(contactCommandPort), m_mailService(mailService),
-          m_messageNavigationCoordinator(messageNavigationCoordinator), m_undoManager(undoManager)
+          m_accountReader(accountReader), m_contactRepository(contactRepository),
+          m_calendarService(calendarService), m_contactIdentityLookup(contactIdentityLookup),
+          m_identityRepository(identityRepository), m_messageViewService(messageViewService),
+          m_queryService(queryService), m_translationService(translationService),
+          m_composeService(composeService), m_contactCommandPort(contactCommandPort),
+          m_mailService(mailService), m_messageNavigationCoordinator(messageNavigationCoordinator),
+          m_undoManager(undoManager)
     {
         m_statusBar = new LayeredStatusBar(this);
         setStatusBar(m_statusBar);
@@ -294,7 +297,7 @@ namespace javelin::gui::shell
         qApp->installEventFilter(this);
         updateUndoRedoActions();
         m_accountRefreshController =
-            new AccountRefreshController(m_mailService, m_accountRepository, this);
+            new AccountRefreshController(m_mailService, m_accountReader, this);
         connect(m_accountRefreshController, &AccountRefreshController::busyChanged, this,
                 [this](const bool busy)
                 {
@@ -1036,8 +1039,8 @@ namespace javelin::gui::shell
     {
         setWindowTitle(QStringLiteral("Javelin Mail"));
 
-        m_mailboxModel = new javelin::gui::mailboxes::MailboxTreeModel(m_accountRepository,
-                                                                       m_queryService, this);
+        m_mailboxModel =
+            new javelin::gui::mailboxes::MailboxTreeModel(m_accountReader, m_queryService, this);
         m_messageModel = new javelin::gui::messages::MessageListModel(m_queryService, this);
 
         m_mailboxSearchEdit = new QLineEdit(this);
@@ -1055,7 +1058,7 @@ namespace javelin::gui::shell
             QStringLiteral("QTabBar::tab { max-width: 220px; min-width: 120px; }"));
         m_tabBar->hide();
         m_tabBarPresenter =
-            new TabBarPresenter(*m_tabBar, *this, m_accountRepository, m_queryService, this);
+            new TabBarPresenter(*m_tabBar, *this, m_accountReader, m_queryService, this);
 
         m_mailboxView = new javelin::gui::mailboxes::MailboxTreeView(this);
         m_mailboxView->setModel(m_mailboxModel);
@@ -2657,7 +2660,8 @@ namespace javelin::gui::shell
 
     void MainWindow::openPreferencesForConnection(const QString& connectionId)
     {
-        javelin::gui::settings::PreferencesDialog dialog{m_accountRepository, m_queryService, this};
+        javelin::gui::settings::PreferencesDialog dialog{m_accountRepository, m_accountReader,
+                                                         m_queryService, this};
         if (!connectionId.isEmpty())
             dialog.selectConfiguredAccount(connectionId);
         if (dialog.exec() == QDialog::Accepted)

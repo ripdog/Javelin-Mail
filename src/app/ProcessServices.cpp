@@ -29,6 +29,7 @@
 #include "jmap/JmapCore.h"
 #include "jmap/api/JmapMethodTransport.h"
 #include "jmap/api/Transport.h"
+#include "jmap/cache/AccountReadRepository.h"
 #include "jmap/cache/AccountRepository.h"
 #include "jmap/cache/ContactRepository.h"
 #include "jmap/cache/IdentityRepository.h"
@@ -80,6 +81,18 @@ namespace javelin::app
 
         m_databaseConnection =
             std::get<javelin::jmap::cache::DatabaseConnection>(std::move(databaseResult));
+        auto guiDatabaseResult = javelin::jmap::cache::GuiDatabaseFactory{
+            javelin::jmap::cache::ReadOnlyThreadConnectionFactoryOptions{
+                .connectionNamePrefix = QStringLiteral("javelin-gui-read"),
+                .databasePath = location.databasePath,
+            }}.openForCurrentThread("main");
+        if (const auto* error =
+                std::get_if<javelin::jmap::cache::DatabaseError>(&guiDatabaseResult))
+        {
+            throw std::runtime_error(error->message.toStdString());
+        }
+        m_guiReadDatabaseConnection = std::get<javelin::jmap::cache::ReadOnlyDatabaseConnection>(
+            std::move(guiDatabaseResult));
         m_workScheduler = std::make_unique<WorkScheduler>(m_databaseConnection);
         m_localMaintenanceService =
             std::make_unique<LocalMaintenanceService>(m_databaseConnection, *m_workScheduler);
@@ -122,6 +135,8 @@ namespace javelin::app
             m_databaseConnection, *m_jmapCore, *m_workScheduler, *m_mailIndexService);
         m_accountRepository =
             std::make_unique<javelin::jmap::cache::AccountRepository>(m_databaseConnection);
+        m_accountReadRepository = std::make_unique<javelin::jmap::cache::AccountReadRepository>(
+            m_guiReadDatabaseConnection);
         m_contactRepository =
             std::make_unique<javelin::jmap::cache::ContactRepository>(m_databaseConnection);
         AddressSuggestionStore::instance().initialize(m_databaseConnection);
@@ -212,6 +227,11 @@ namespace javelin::app
     javelin::jmap::cache::AccountRepository& ProcessServices::accountRepository()
     {
         return *m_accountRepository;
+    }
+
+    javelin::jmap::cache::AccountReader& ProcessServices::accountReader()
+    {
+        return *m_accountReadRepository;
     }
 
     javelin::jmap::cache::DatabaseConnection& ProcessServices::databaseConnection()

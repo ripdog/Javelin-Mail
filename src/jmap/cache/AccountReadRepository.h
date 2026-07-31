@@ -1,0 +1,47 @@
+#pragma once
+
+#include "jmap/cache/Database.h"
+
+#include <string>
+#include <string_view>
+#include <variant>
+#include <vector>
+
+namespace javelin::jmap::cache
+{
+
+    struct CachedAccount
+    {
+        std::string accountId;
+        std::string name;
+        bool isPersonal = false;
+        bool isReadOnly = false;
+        bool isPrimary = false;
+    };
+
+    class AccountReader
+    {
+      public:
+        virtual ~AccountReader() = default;
+
+        [[nodiscard]] virtual std::variant<std::vector<CachedAccount>, DatabaseError>
+        listAll() const = 0;
+        [[nodiscard]] virtual std::variant<std::vector<CachedAccount>, DatabaseError>
+        listOwnedBy(std::string_view ownerAccountId) const = 0;
+    };
+
+    class AccountReadRepository final : public AccountReader
+    {
+      public:
+        explicit AccountReadRepository(ReadOnlyDatabaseConnection& connection);
+
+        [[nodiscard]] std::variant<std::vector<CachedAccount>, DatabaseError>
+        listAll() const override;
+        [[nodiscard]] std::variant<std::vector<CachedAccount>, DatabaseError>
+        listOwnedBy(std::string_view ownerAccountId) const override;
+
+      private:
+        ReadOnlyDatabaseConnection& m_connection;
+    };
+
+} // namespace javelin::jmap::cache

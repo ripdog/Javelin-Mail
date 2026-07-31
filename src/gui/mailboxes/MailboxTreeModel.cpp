@@ -22,18 +22,18 @@ namespace javelin::gui::mailboxes
 
     } // namespace
 
-    MailboxTreeModel::MailboxTreeModel(javelin::jmap::cache::AccountRepository& accountRepository,
+    MailboxTreeModel::MailboxTreeModel(javelin::jmap::cache::AccountReader& accountReader,
                                        javelin::jmap::cache::QueryService& queryService,
                                        QObject* parent)
-        : MailboxTreeModel(accountRepository, queryService, Options{}, parent)
+        : MailboxTreeModel(accountReader, queryService, Options{}, parent)
     {
     }
 
-    MailboxTreeModel::MailboxTreeModel(javelin::jmap::cache::AccountRepository& accountRepository,
+    MailboxTreeModel::MailboxTreeModel(javelin::jmap::cache::AccountReader& accountReader,
                                        javelin::jmap::cache::QueryService& queryService,
                                        Options options, QObject* parent)
-        : QAbstractItemModel(parent), m_accountRepository(accountRepository),
-          m_queryService(queryService), m_options(std::move(options))
+        : QAbstractItemModel(parent), m_accountReader(accountReader), m_queryService(queryService),
+          m_options(std::move(options))
     {
         rebuild();
     }
@@ -474,7 +474,7 @@ namespace javelin::gui::mailboxes
         beginResetModel();
         m_rootNodes.clear();
 
-        const auto accountsResult = m_accountRepository.listAll();
+        const auto accountsResult = m_accountReader.listAll();
         const auto* accounts =
             std::get_if<std::vector<javelin::jmap::cache::CachedAccount>>(&accountsResult);
         if (accounts == nullptr)

@@ -320,6 +320,8 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/api/Transport.h
     src/jmap/cache/AccountRepository.cpp
     src/jmap/cache/AccountRepository.h
+    src/jmap/cache/AccountReadRepository.cpp
+    src/jmap/cache/AccountReadRepository.h
     src/jmap/cache/ComposeSessionRepository.cpp
     src/jmap/cache/ComposeSessionRepository.h
     src/jmap/cache/ContactRepository.cpp
@@ -566,6 +568,8 @@ add_library(javelin_jmap STATIC
     src/jmap/api/Transport.h
     src/jmap/cache/AccountRepository.cpp
     src/jmap/cache/AccountRepository.h
+    src/jmap/cache/AccountReadRepository.cpp
+    src/jmap/cache/AccountReadRepository.h
     src/jmap/cache/ComposeSessionRepository.cpp
     src/jmap/cache/ComposeSessionRepository.h
     src/jmap/cache/ContactRepository.cpp

@@ -68,6 +68,7 @@ add_executable(javelin_jmap_tests
     ${PROJECT_SOURCE_DIR}/src/app/WorkScheduler.cpp
     FixtureReader.cpp
     FixtureReader.h
+    jmap/AccountReadRepositoryTest.cpp
     jmap/AccountRepositoryTest.cpp
     jmap/AuthTest.cpp
     jmap/CancellationTest.cpp

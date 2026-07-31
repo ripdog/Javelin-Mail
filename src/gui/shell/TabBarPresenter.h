@@ -13,7 +13,7 @@ class QWidget;
 
 namespace javelin::jmap::cache
 {
-    class AccountRepository;
+    class AccountReader;
     class QueryService;
 } // namespace javelin::jmap::cache
 
@@ -26,7 +26,7 @@ namespace javelin::gui::shell
 
       public:
         TabBarPresenter(QTabBar& tabBar, QWidget& window,
-                        javelin::jmap::cache::AccountRepository& accountRepository,
+                        javelin::jmap::cache::AccountReader& accountReader,
                         javelin::jmap::cache::QueryService& queryService,
                         QObject* parent = nullptr);
 
@@ -43,7 +43,7 @@ namespace javelin::gui::shell
 
         QTabBar& m_tabBar;
         QWidget& m_window;
-        javelin::jmap::cache::AccountRepository& m_accountRepository;
+        javelin::jmap::cache::AccountReader& m_accountReader;
         javelin::jmap::cache::QueryService& m_queryService;
     };
 

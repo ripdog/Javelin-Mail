@@ -3,7 +3,7 @@
 #include "app/MailApplicationService.h"
 #include "gui/settings/ConnectionSettingsAdapter.h"
 #include "gui/settings/PreferencesDialog.h"
-#include "jmap/cache/AccountRepository.h"
+#include "jmap/cache/AccountReadRepository.h"
 
 #include <QCoroTask>
 
@@ -17,8 +17,8 @@ namespace javelin::gui::shell
 {
     AccountRefreshController::AccountRefreshController(
         javelin::app::MailApplicationService& mailService,
-        javelin::jmap::cache::AccountRepository& accountRepository, QObject* parent)
-        : QObject(parent), m_mailService(mailService), m_accountRepository(accountRepository)
+        javelin::jmap::cache::AccountReader& accountReader, QObject* parent)
+        : QObject(parent), m_mailService(mailService), m_accountReader(accountReader)
     {
     }
 
@@ -80,7 +80,7 @@ namespace javelin::gui::shell
                 const auto summary = std::get<javelin::jmap::LiveRefreshSummary>(std::move(result));
                 javelin::gui::settings::PreferencesDialog::saveResolvedSessionUrl(
                     settings.id, QString::fromStdString(summary.resolvedSessionUrl));
-                const auto ownedAccounts = m_accountRepository.listOwnedBy(summary.accountId);
+                const auto ownedAccounts = m_accountReader.listOwnedBy(summary.accountId);
                 if (const auto* accounts =
                         std::get_if<std::vector<javelin::jmap::cache::CachedAccount>>(
                             &ownedAccounts))

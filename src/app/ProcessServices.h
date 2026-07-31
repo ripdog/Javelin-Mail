@@ -59,6 +59,8 @@ namespace javelin::jmap::api
 
 namespace javelin::jmap::cache
 {
+    class AccountReader;
+    class AccountReadRepository;
     class AccountRepository;
     class ContactRepository;
     class IdentityRepository;
@@ -96,6 +98,7 @@ namespace javelin::app
         ProcessServices& operator=(ProcessServices&&) = delete;
 
         [[nodiscard]] javelin::jmap::cache::AccountRepository& accountRepository();
+        [[nodiscard]] javelin::jmap::cache::AccountReader& accountReader();
         [[nodiscard]] javelin::jmap::cache::DatabaseConnection& databaseConnection();
         [[nodiscard]] javelin::jmap::cache::ContactRepository& contactRepository();
         [[nodiscard]] javelin::jmap::contacts::ContactService& contactService();
@@ -121,6 +124,7 @@ namespace javelin::app
       private:
         std::unique_ptr<javelin::jmap::JmapCore> m_jmapCore;
         javelin::jmap::cache::DatabaseConnection m_databaseConnection;
+        javelin::jmap::cache::ReadOnlyDatabaseConnection m_guiReadDatabaseConnection;
         std::unique_ptr<javelin::app::undo::HistoryRepository> m_historyRepository;
         std::unique_ptr<javelin::app::undo::UndoManager> m_undoManager;
         std::unique_ptr<DeferredSendRepository> m_deferredSendRepository;
@@ -132,6 +136,7 @@ namespace javelin::app
         std::unique_ptr<javelin::jmap::api::PreferredJmapMethodTransport> m_methodTransport;
         std::unique_ptr<InlineMessageSchemeHandler> m_inlineMessageSchemeHandler;
         std::unique_ptr<javelin::jmap::cache::AccountRepository> m_accountRepository;
+        std::unique_ptr<javelin::jmap::cache::AccountReadRepository> m_accountReadRepository;
         std::unique_ptr<javelin::jmap::cache::ContactRepository> m_contactRepository;
         std::unique_ptr<javelin::jmap::contacts::ContactService> m_contactService;
         std::unique_ptr<javelin::jmap::calendar::CalendarService> m_calendarService;

@@ -62,6 +62,7 @@ namespace javelin::jmap::calendar
 
 namespace javelin::jmap::cache
 {
+    class AccountReader;
     class AccountRepository;
     class ContactRepository;
     class IdentityRepository;
@@ -123,6 +124,7 @@ namespace javelin::gui::shell
       public:
         explicit MainWindow(
             javelin::jmap::cache::AccountRepository& accountRepository,
+            javelin::jmap::cache::AccountReader& accountReader,
             javelin::jmap::cache::ContactRepository& contactRepository,
             javelin::jmap::calendar::CalendarService& calendarService,
             javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
@@ -251,6 +253,7 @@ namespace javelin::gui::shell
         bool eventFilter(QObject* watched, QEvent* event) override;
 
         javelin::jmap::cache::AccountRepository& m_accountRepository;
+        javelin::jmap::cache::AccountReader& m_accountReader;
         javelin::jmap::cache::ContactRepository& m_contactRepository;
         javelin::jmap::calendar::CalendarService& m_calendarService;
         javelin::jmap::contacts::ContactIdentityLookup& m_contactIdentityLookup;

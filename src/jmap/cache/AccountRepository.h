@@ -1,6 +1,6 @@
 #pragma once
 
-#include "jmap/cache/Database.h"
+#include "jmap/cache/AccountReadRepository.h"
 
 #include <QStringList>
 #include <string>
@@ -10,23 +10,15 @@
 namespace javelin::jmap::cache
 {
 
-    struct CachedAccount
-    {
-        std::string accountId;
-        std::string name;
-        bool isPersonal = false;
-        bool isReadOnly = false;
-        bool isPrimary = false;
-    };
-
-    class AccountRepository
+    class AccountRepository final : public AccountReader
     {
       public:
         explicit AccountRepository(DatabaseConnection& connection);
 
-        [[nodiscard]] std::variant<std::vector<CachedAccount>, DatabaseError> listAll() const;
         [[nodiscard]] std::variant<std::vector<CachedAccount>, DatabaseError>
-        listOwnedBy(std::string_view ownerAccountId) const;
+        listAll() const override;
+        [[nodiscard]] std::variant<std::vector<CachedAccount>, DatabaseError>
+        listOwnedBy(std::string_view ownerAccountId) const override;
         [[nodiscard]] std::optional<DatabaseError> removeMany(const QStringList& accountIds);
         [[nodiscard]] std::optional<DatabaseError>
         removeConfiguredAccount(const QString& loginEmail, const QString& sessionUrl,
