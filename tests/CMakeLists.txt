@@ -59,6 +59,8 @@ add_executable(javelin_jmap_tests
     ${PROJECT_SOURCE_DIR}/src/app/MessageSelection.cpp
     ${PROJECT_SOURCE_DIR}/src/app/MailboxSyncCoverage.cpp
     ${PROJECT_SOURCE_DIR}/src/app/MessageNavigationCoordinator.cpp
+    ${PROJECT_SOURCE_DIR}/src/app/SettingsRepository.cpp
+    ${PROJECT_SOURCE_DIR}/src/app/SettingsRepository.h
     ${PROJECT_SOURCE_DIR}/src/app/TranslationService.cpp
     ${PROJECT_SOURCE_DIR}/src/app/TranslationService.h
     ${PROJECT_SOURCE_DIR}/src/app/WorkScheduler.cpp
@@ -106,6 +108,7 @@ add_executable(javelin_jmap_tests
     app/MailboxSyncCoverageTest.cpp
     app/MessageNavigationCoordinatorTest.cpp
     app/StateChangePolicyTest.cpp
+    app/SettingsRepositoryTest.cpp
     app/TranslationServiceTest.cpp
     app/WorkSchedulerTest.cpp
     jmap/MailMethodsTest.cpp
@@ -194,6 +197,7 @@ target_link_libraries(javelin_jmap_tests
         QCoro6::Network
         Qt::Network
         Qt::Widgets
+        javelin_protocol
         javelin_jmap
 )
 target_compile_definitions(javelin_jmap_tests

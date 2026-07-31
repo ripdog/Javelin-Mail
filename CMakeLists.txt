@@ -1014,6 +1014,8 @@ add_library(javelin_application STATIC
     src/app/ProcessServices.h
     src/app/SearchSession.cpp
     src/app/SearchSession.h
+    src/app/SettingsRepository.cpp
+    src/app/SettingsRepository.h
     src/app/TranslationService.cpp
     src/app/TranslationService.h
     src/app/WorkScheduler.cpp
@@ -1026,6 +1028,7 @@ target_link_libraries(javelin_application
     PUBLIC
         Qt::Core
         Qt::WebEngineCore
+        javelin_protocol
         javelin_jmap
     PRIVATE
         QCoro6::Network

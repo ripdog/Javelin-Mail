@@ -153,11 +153,66 @@ namespace javelin::protocol
     {
     };
 
+    struct AccountSettings
+    {
+        QString id;
+        std::uint64_t revision = 0;
+        QString displayName;
+        QString sessionUrl;
+        QString loginEmail;
+        QString apiKey;
+        std::vector<QString> cachedAccountIds;
+
+        friend bool operator==(const AccountSettings&, const AccountSettings&) = default;
+    };
+
+    struct MailboxSelectionSettings
+    {
+        QString accountId;
+        std::vector<QString> mailboxIds;
+        bool configured = false;
+
+        friend bool operator==(const MailboxSelectionSettings&,
+                               const MailboxSelectionSettings&) = default;
+    };
+
+    struct TranslationSettings
+    {
+        bool enabled = true;
+        QString apiKeyOverride;
+        QString targetLanguage = QStringLiteral("en");
+        std::vector<QString> autoTranslateSenders;
+        std::vector<QString> autoTranslateDomains;
+
+        friend bool operator==(const TranslationSettings&, const TranslationSettings&) = default;
+    };
+
+    struct AppearanceSettings
+    {
+        std::int32_t messageColorMode = 0;
+
+        friend bool operator==(const AppearanceSettings&, const AppearanceSettings&) = default;
+    };
+
+    struct AttachmentSettings
+    {
+        bool alwaysAsk = true;
+        QString directory;
+
+        friend bool operator==(const AttachmentSettings&, const AttachmentSettings&) = default;
+    };
+
     struct SettingsUpdate
     {
-        std::optional<QString> languageTag;
-        std::optional<bool> notificationsEnabled;
-        std::optional<std::vector<QString>> watchedMailboxIds;
+        std::optional<std::vector<AccountSettings>> accounts;
+        std::optional<std::vector<MailboxSelectionSettings>> syncedMailboxSelections;
+        std::optional<std::vector<MailboxSelectionSettings>> notificationMailboxSelections;
+        std::optional<std::vector<QString>> remoteContentSenders;
+        std::optional<std::vector<QString>> remoteContentDomains;
+        std::optional<TranslationSettings> translation;
+        std::optional<AppearanceSettings> appearance;
+        std::optional<AttachmentSettings> attachments;
+        std::optional<std::int32_t> undoSendDelaySeconds;
     };
 
     struct UpdateSettingsRequest
@@ -195,6 +250,8 @@ namespace javelin::protocol
         CacheUnavailable,
         DaemonShuttingDown,
         IncompatibleBuild,
+        SettingsStorageFailure,
+        SettingsMigrationFailure,
     };
 
     struct BoundaryError
@@ -267,9 +324,17 @@ namespace javelin::protocol
     {
         SettingsRevision revision;
         std::uint32_t schemaVersion = 1;
-        QString languageTag;
-        bool notificationsEnabled = true;
-        std::vector<QString> watchedMailboxIds;
+        std::vector<AccountSettings> accounts;
+        std::vector<MailboxSelectionSettings> syncedMailboxSelections;
+        std::vector<MailboxSelectionSettings> notificationMailboxSelections;
+        std::vector<QString> remoteContentSenders;
+        std::vector<QString> remoteContentDomains;
+        TranslationSettings translation;
+        AppearanceSettings appearance;
+        AttachmentSettings attachments;
+        std::int32_t undoSendDelaySeconds = 10;
+
+        friend bool operator==(const SettingsSnapshot&, const SettingsSnapshot&) = default;
     };
 
     struct SettingsSnapshotReply

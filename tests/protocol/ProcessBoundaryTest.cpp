@@ -45,12 +45,17 @@ namespace
 
         SettingsReadReply handleGetSettings(const GetSettingsRequest&) override
         {
-            return SettingsSnapshotReply{
-                .snapshot = {.revision = {.value = 5},
-                             .schemaVersion = 1,
-                             .languageTag = QStringLiteral("en-NZ"),
-                             .notificationsEnabled = true,
-                             .watchedMailboxIds = {QStringLiteral("inbox")}}};
+            return SettingsSnapshotReply{.snapshot = {.revision = {.value = 5},
+                                                      .schemaVersion = 1,
+                                                      .accounts = {},
+                                                      .syncedMailboxSelections = {},
+                                                      .notificationMailboxSelections = {},
+                                                      .remoteContentSenders = {},
+                                                      .remoteContentDomains = {},
+                                                      .translation = {},
+                                                      .appearance = {},
+                                                      .attachments = {},
+                                                      .undoSendDelaySeconds = 10}};
         }
 
         SettingsUpdateReply handleUpdateSettings(UpdateSettingsRequest request) override
@@ -220,11 +225,24 @@ TEST_CASE("endpoint exposes settings, handshake, lifecycle and events through ty
     CHECK(failure->error.code == BoundaryErrorCode::Busy);
 
     endpoint.detachEventSink(sink);
-    const auto update = endpoint.updateSettings({.baseRevision = {.value = 5},
-                                                 .update = {.languageTag = QStringLiteral("mi-NZ"),
-                                                            .notificationsEnabled = std::nullopt,
-                                                            .watchedMailboxIds = std::nullopt}});
+    const auto update = endpoint.updateSettings(
+        {.baseRevision = {.value = 5},
+         .update = {.accounts = std::nullopt,
+                    .syncedMailboxSelections = std::nullopt,
+                    .notificationMailboxSelections = std::nullopt,
+                    .remoteContentSenders = std::nullopt,
+                    .remoteContentDomains = std::nullopt,
+                    .translation = TranslationSettings{.enabled = true,
+                                                       .apiKeyOverride = {},
+                                                       .targetLanguage = QStringLiteral("mi-NZ"),
+                                                       .autoTranslateSenders = {},
+                                                       .autoTranslateDomains = {}},
+                    .appearance = std::nullopt,
+                    .attachments = std::nullopt,
+                    .undoSendDelaySeconds = std::nullopt}});
     CHECK(std::holds_alternative<SettingsUpdated>(update));
     REQUIRE(handler.receivedSettingsUpdate.has_value());
-    CHECK(handler.receivedSettingsUpdate->update.languageTag == QStringLiteral("mi-NZ"));
+    REQUIRE(handler.receivedSettingsUpdate->update.translation.has_value());
+    CHECK(handler.receivedSettingsUpdate->update.translation->targetLanguage ==
+          QStringLiteral("mi-NZ"));
 }

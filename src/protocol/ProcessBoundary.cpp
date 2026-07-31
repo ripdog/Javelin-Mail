@@ -42,13 +42,17 @@ namespace javelin::protocol
             return std::nullopt;
         }
 
-        [[nodiscard]] std::optional<BoundaryError>
-        optionalStringError(const std::optional<QString>& value, const QString& field,
-                            const BoundaryLimits& limits)
+        [[nodiscard]] std::optional<BoundaryError> optionalStringError(const QString& value,
+                                                                       const QString& field,
+                                                                       const BoundaryLimits& limits)
         {
-            if (!value.has_value())
-                return std::nullopt;
-            return requiredStringError(*value, field, limits);
+            if (isTooLarge(value, limits))
+            {
+                return BoundaryError{.code = BoundaryErrorCode::ValueTooLarge,
+                                     .field = field,
+                                     .detail = QStringLiteral("value exceeds the protocol limit")};
+            }
+            return std::nullopt;
         }
 
         [[nodiscard]] std::optional<BoundaryError> identifierError(const QUuid& value,
@@ -126,25 +130,154 @@ namespace javelin::protocol
         [[nodiscard]] std::optional<BoundaryError>
         validateSettingsUpdate(const UpdateSettingsRequest& request, const BoundaryLimits& limits)
         {
-            if (const auto error = optionalStringError(
-                    request.update.languageTag, QStringLiteral("update.languageTag"), limits))
-                return error;
-
-            if (request.update.watchedMailboxIds.has_value())
+            const auto validateStringList =
+                [&limits](const std::vector<QString>& values,
+                          const QString& field) -> std::optional<BoundaryError>
             {
-                if (request.update.watchedMailboxIds->size() > limits.maximumCollectionItems)
+                if (values.size() > limits.maximumCollectionItems)
                 {
                     return BoundaryError{
                         .code = BoundaryErrorCode::TooManyValues,
-                        .field = QStringLiteral("update.watchedMailboxIds"),
+                        .field = field,
                         .detail = QStringLiteral("collection exceeds the protocol limit")};
                 }
-                for (const auto& mailboxId : *request.update.watchedMailboxIds)
+                for (const auto& value : values)
                 {
-                    if (auto error = requiredStringError(
-                            mailboxId, QStringLiteral("update.watchedMailboxIds"), limits))
+                    if (auto error = requiredStringError(value, field, limits))
                         return error;
                 }
+                return std::nullopt;
+            };
+
+            if (request.update.accounts.has_value())
+            {
+                if (request.update.accounts->size() > limits.maximumCollectionItems)
+                {
+                    return BoundaryError{
+                        .code = BoundaryErrorCode::TooManyValues,
+                        .field = QStringLiteral("update.accounts"),
+                        .detail = QStringLiteral("collection exceeds the protocol limit")};
+                }
+                for (const auto& account : *request.update.accounts)
+                {
+                    if (auto error = requiredStringError(
+                            account.id, QStringLiteral("update.accounts.id"), limits))
+                        return error;
+                    if (auto error = optionalStringError(
+                            account.displayName, QStringLiteral("update.accounts.displayName"),
+                            limits))
+                        return error;
+                    if (auto error = optionalStringError(
+                            account.sessionUrl, QStringLiteral("update.accounts.sessionUrl"),
+                            limits))
+                        return error;
+                    if (auto error = optionalStringError(
+                            account.loginEmail, QStringLiteral("update.accounts.loginEmail"),
+                            limits))
+                        return error;
+                    if (auto error = optionalStringError(
+                            account.apiKey, QStringLiteral("update.accounts.apiKey"), limits))
+                        return error;
+                    if (auto error =
+                            validateStringList(account.cachedAccountIds,
+                                               QStringLiteral("update.accounts.cachedAccountIds")))
+                        return error;
+                }
+            }
+
+            const auto validateSelections =
+                [&validateStringList, &limits](const std::vector<MailboxSelectionSettings>& values,
+                                               const QString& field) -> std::optional<BoundaryError>
+            {
+                if (values.size() > limits.maximumCollectionItems)
+                {
+                    return BoundaryError{
+                        .code = BoundaryErrorCode::TooManyValues,
+                        .field = field,
+                        .detail = QStringLiteral("collection exceeds the protocol limit")};
+                }
+                for (const auto& selection : values)
+                {
+                    if (auto error = requiredStringError(
+                            selection.accountId, field + QStringLiteral(".accountId"), limits))
+                        return error;
+                    if (auto error = validateStringList(selection.mailboxIds,
+                                                        field + QStringLiteral(".mailboxIds")))
+                        return error;
+                }
+                return std::nullopt;
+            };
+
+            if (request.update.syncedMailboxSelections.has_value())
+            {
+                if (auto error =
+                        validateSelections(*request.update.syncedMailboxSelections,
+                                           QStringLiteral("update.syncedMailboxSelections")))
+                    return error;
+            }
+            if (request.update.notificationMailboxSelections.has_value())
+            {
+                if (auto error =
+                        validateSelections(*request.update.notificationMailboxSelections,
+                                           QStringLiteral("update.notificationMailboxSelections")))
+                    return error;
+            }
+            if (request.update.remoteContentSenders.has_value())
+            {
+                if (auto error = validateStringList(*request.update.remoteContentSenders,
+                                                    QStringLiteral("update.remoteContentSenders")))
+                    return error;
+            }
+            if (request.update.remoteContentDomains.has_value())
+            {
+                if (auto error = validateStringList(*request.update.remoteContentDomains,
+                                                    QStringLiteral("update.remoteContentDomains")))
+                    return error;
+            }
+            if (request.update.translation.has_value())
+            {
+                const auto& translation = *request.update.translation;
+                if (auto error = optionalStringError(
+                        translation.apiKeyOverride,
+                        QStringLiteral("update.translation.apiKeyOverride"), limits))
+                    return error;
+                if (auto error = requiredStringError(
+                        translation.targetLanguage,
+                        QStringLiteral("update.translation.targetLanguage"), limits))
+                    return error;
+                if (auto error = validateStringList(
+                        translation.autoTranslateSenders,
+                        QStringLiteral("update.translation.autoTranslateSenders")))
+                    return error;
+                if (auto error = validateStringList(
+                        translation.autoTranslateDomains,
+                        QStringLiteral("update.translation.autoTranslateDomains")))
+                    return error;
+            }
+            if (request.update.appearance.has_value() &&
+                (request.update.appearance->messageColorMode < 0 ||
+                 request.update.appearance->messageColorMode > 2))
+            {
+                return BoundaryError{.code = BoundaryErrorCode::InvalidRequest,
+                                     .field = QStringLiteral("update.appearance.messageColorMode"),
+                                     .detail =
+                                         QStringLiteral("color mode is outside the allowed range")};
+            }
+            if (request.update.attachments.has_value())
+            {
+                if (auto error =
+                        optionalStringError(request.update.attachments->directory,
+                                            QStringLiteral("update.attachments.directory"), limits))
+                    return error;
+            }
+            if (request.update.undoSendDelaySeconds.has_value() &&
+                (*request.update.undoSendDelaySeconds < 1 ||
+                 *request.update.undoSendDelaySeconds > 120))
+            {
+                return BoundaryError{.code = BoundaryErrorCode::InvalidRequest,
+                                     .field = QStringLiteral("update.undoSendDelaySeconds"),
+                                     .detail =
+                                         QStringLiteral("delay is outside the allowed range")};
             }
             return std::nullopt;
         }
@@ -257,13 +390,60 @@ namespace javelin::protocol
                 else if constexpr (std::is_same_v<Request, UpdateSettingsRequest>)
                 {
                     std::size_t size = 24;
-                    if (value.update.languageTag.has_value())
-                        size += stringSize(*value.update.languageTag);
-                    if (value.update.watchedMailboxIds.has_value())
+                    if (value.update.accounts.has_value())
                     {
-                        for (const auto& mailboxId : *value.update.watchedMailboxIds)
-                            size += stringSize(mailboxId);
+                        for (const auto& account : *value.update.accounts)
+                        {
+                            size += stringSize(account.id) + stringSize(account.displayName) +
+                                    stringSize(account.sessionUrl) +
+                                    stringSize(account.loginEmail) + stringSize(account.apiKey);
+                            for (const auto& accountId : account.cachedAccountIds)
+                                size += stringSize(accountId);
+                        }
                     }
+                    if (value.update.syncedMailboxSelections.has_value())
+                    {
+                        for (const auto& selection : *value.update.syncedMailboxSelections)
+                        {
+                            size += stringSize(selection.accountId);
+                            for (const auto& mailboxId : selection.mailboxIds)
+                                size += stringSize(mailboxId);
+                        }
+                    }
+                    if (value.update.notificationMailboxSelections.has_value())
+                    {
+                        for (const auto& selection : *value.update.notificationMailboxSelections)
+                        {
+                            size += stringSize(selection.accountId);
+                            for (const auto& mailboxId : selection.mailboxIds)
+                                size += stringSize(mailboxId);
+                        }
+                    }
+                    const auto addStrings =
+                        [&size](const std::optional<std::vector<QString>>& values)
+                    {
+                        if (!values.has_value())
+                            return;
+                        for (const auto& item : *values)
+                            size += stringSize(item);
+                    };
+                    addStrings(value.update.remoteContentSenders);
+                    addStrings(value.update.remoteContentDomains);
+                    if (value.update.translation.has_value())
+                    {
+                        size += stringSize(value.update.translation->apiKeyOverride) +
+                                stringSize(value.update.translation->targetLanguage);
+                        for (const auto& sender : value.update.translation->autoTranslateSenders)
+                            size += stringSize(sender);
+                        for (const auto& domain : value.update.translation->autoTranslateDomains)
+                            size += stringSize(domain);
+                    }
+                    if (value.update.attachments.has_value())
+                        size += stringSize(value.update.attachments->directory);
+                    if (value.update.appearance.has_value())
+                        size += sizeof(value.update.appearance->messageColorMode);
+                    if (value.update.undoSendDelaySeconds.has_value())
+                        size += sizeof(*value.update.undoSendDelaySeconds);
                     return size;
                 }
                 else if constexpr (std::is_same_v<Request, CancelMaterializationScopeRequest> ||
