@@ -23,17 +23,17 @@ namespace javelin::gui::mailboxes
     } // namespace
 
     MailboxTreeModel::MailboxTreeModel(javelin::jmap::cache::AccountReader& accountReader,
-                                       javelin::jmap::cache::QueryService& queryService,
+                                       javelin::jmap::cache::MailboxReader& mailboxReader,
                                        QObject* parent)
-        : MailboxTreeModel(accountReader, queryService, Options{}, parent)
+        : MailboxTreeModel(accountReader, mailboxReader, Options{}, parent)
     {
     }
 
     MailboxTreeModel::MailboxTreeModel(javelin::jmap::cache::AccountReader& accountReader,
-                                       javelin::jmap::cache::QueryService& queryService,
+                                       javelin::jmap::cache::MailboxReader& mailboxReader,
                                        Options options, QObject* parent)
-        : QAbstractItemModel(parent), m_accountReader(accountReader), m_queryService(queryService),
-          m_options(std::move(options))
+        : QAbstractItemModel(parent), m_accountReader(accountReader),
+          m_mailboxReader(mailboxReader), m_options(std::move(options))
     {
         rebuild();
     }
@@ -329,7 +329,7 @@ namespace javelin::gui::mailboxes
     bool MailboxTreeModel::refreshAccount(const QStringView accountId)
     {
         const auto id = accountId.toString().toStdString();
-        const auto result = m_queryService.listMailboxTree(id);
+        const auto result = m_mailboxReader.listMailboxTree(id);
         const auto* mailboxes =
             std::get_if<std::vector<javelin::jmap::cache::MailboxTreeItem>>(&result);
         if (mailboxes == nullptr)
@@ -501,7 +501,7 @@ namespace javelin::gui::mailboxes
                     : (account.name.empty() ? account.accountId : account.name);
             // mailboxId left empty — this is an account-level node.
 
-            const auto mailboxResult = m_queryService.listMailboxTree(account.accountId);
+            const auto mailboxResult = m_mailboxReader.listMailboxTree(account.accountId);
             const auto* mailboxItems =
                 std::get_if<std::vector<javelin::jmap::cache::MailboxTreeItem>>(&mailboxResult);
 

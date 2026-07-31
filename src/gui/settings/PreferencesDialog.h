@@ -29,7 +29,7 @@ namespace javelin::jmap::cache
 {
     class AccountReader;
     class AccountRepository;
-    class QueryService;
+    class MailboxReader;
 } // namespace javelin::jmap::cache
 
 namespace javelin::gui::settings
@@ -48,7 +48,7 @@ namespace javelin::gui::settings
       public:
         explicit PreferencesDialog(javelin::jmap::cache::AccountRepository& accountRepository,
                                    javelin::jmap::cache::AccountReader& accountReader,
-                                   javelin::jmap::cache::QueryService& queryService,
+                                   javelin::jmap::cache::MailboxReader& mailboxReader,
                                    QWidget* parent = nullptr);
         ~PreferencesDialog() override;
 
@@ -93,7 +93,7 @@ namespace javelin::gui::settings
 
         javelin::jmap::cache::AccountRepository& m_accountRepository;
         javelin::jmap::cache::AccountReader& m_accountReader;
-        javelin::jmap::cache::QueryService& m_queryService;
+        javelin::jmap::cache::MailboxReader& m_mailboxReader;
         std::vector<ConnectionSettings> m_accounts;
         std::vector<ConnectionSettings> m_removedAccounts;
         QStringList m_loadedAccountIds;

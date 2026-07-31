@@ -66,6 +66,7 @@ namespace javelin::jmap::cache
     class AccountRepository;
     class ContactRepository;
     class IdentityRepository;
+    class MailboxReader;
     class MessageViewService;
     class QueryService;
 } // namespace javelin::jmap::cache
@@ -125,6 +126,7 @@ namespace javelin::gui::shell
         explicit MainWindow(
             javelin::jmap::cache::AccountRepository& accountRepository,
             javelin::jmap::cache::AccountReader& accountReader,
+            javelin::jmap::cache::MailboxReader& mailboxReader,
             javelin::jmap::cache::ContactRepository& contactRepository,
             javelin::jmap::calendar::CalendarService& calendarService,
             javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
@@ -254,6 +256,7 @@ namespace javelin::gui::shell
 
         javelin::jmap::cache::AccountRepository& m_accountRepository;
         javelin::jmap::cache::AccountReader& m_accountReader;
+        javelin::jmap::cache::MailboxReader& m_mailboxReader;
         javelin::jmap::cache::ContactRepository& m_contactRepository;
         javelin::jmap::calendar::CalendarService& m_calendarService;
         javelin::jmap::contacts::ContactIdentityLookup& m_contactIdentityLookup;

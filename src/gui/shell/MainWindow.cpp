@@ -49,6 +49,7 @@
 #include "jmap/cache/AccountRepository.h"
 #include "jmap/cache/ContactRepository.h"
 #include "jmap/cache/IdentityRepository.h"
+#include "jmap/cache/MailboxReadRepository.h"
 #include "jmap/cache/MessageViewService.h"
 #include "jmap/cache/QueryService.h"
 #include "jmap/calendar/CalendarService.h"
@@ -176,10 +177,10 @@ namespace javelin::gui::shell
         using javelin::gui::mailboxes::findMailboxIndexForSelection;
 
         [[nodiscard]] std::optional<javelin::jmap::cache::MailboxTreeItem>
-        findMailboxByRole(javelin::jmap::cache::QueryService& queryService,
+        findMailboxByRole(javelin::jmap::cache::MailboxReader& mailboxReader,
                           const std::string_view accountId, const std::string_view role)
         {
-            const auto result = queryService.listMailboxTree(accountId);
+            const auto result = mailboxReader.listMailboxTree(accountId);
             const auto* mailboxes =
                 std::get_if<std::vector<javelin::jmap::cache::MailboxTreeItem>>(&result);
             if (mailboxes == nullptr)
@@ -232,6 +233,7 @@ namespace javelin::gui::shell
 
     MainWindow::MainWindow(javelin::jmap::cache::AccountRepository& accountRepository,
                            javelin::jmap::cache::AccountReader& accountReader,
+                           javelin::jmap::cache::MailboxReader& mailboxReader,
                            javelin::jmap::cache::ContactRepository& contactRepository,
                            javelin::jmap::calendar::CalendarService& calendarService,
                            javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
@@ -245,13 +247,13 @@ namespace javelin::gui::shell
                            javelin::app::MessageNavigationCoordinator& messageNavigationCoordinator,
                            javelin::app::undo::UndoManager& undoManager, QWidget* parent)
         : KXmlGuiWindow(parent), m_accountRepository(accountRepository),
-          m_accountReader(accountReader), m_contactRepository(contactRepository),
-          m_calendarService(calendarService), m_contactIdentityLookup(contactIdentityLookup),
-          m_identityRepository(identityRepository), m_messageViewService(messageViewService),
-          m_queryService(queryService), m_translationService(translationService),
-          m_composeService(composeService), m_contactCommandPort(contactCommandPort),
-          m_mailService(mailService), m_messageNavigationCoordinator(messageNavigationCoordinator),
-          m_undoManager(undoManager)
+          m_accountReader(accountReader), m_mailboxReader(mailboxReader),
+          m_contactRepository(contactRepository), m_calendarService(calendarService),
+          m_contactIdentityLookup(contactIdentityLookup), m_identityRepository(identityRepository),
+          m_messageViewService(messageViewService), m_queryService(queryService),
+          m_translationService(translationService), m_composeService(composeService),
+          m_contactCommandPort(contactCommandPort), m_mailService(mailService),
+          m_messageNavigationCoordinator(messageNavigationCoordinator), m_undoManager(undoManager)
     {
         m_statusBar = new LayeredStatusBar(this);
         setStatusBar(m_statusBar);
@@ -1040,7 +1042,7 @@ namespace javelin::gui::shell
         setWindowTitle(QStringLiteral("Javelin Mail"));
 
         m_mailboxModel =
-            new javelin::gui::mailboxes::MailboxTreeModel(m_accountReader, m_queryService, this);
+            new javelin::gui::mailboxes::MailboxTreeModel(m_accountReader, m_mailboxReader, this);
         m_messageModel = new javelin::gui::messages::MessageListModel(m_queryService, this);
 
         m_mailboxSearchEdit = new QLineEdit(this);
@@ -1092,8 +1094,8 @@ namespace javelin::gui::shell
         m_messageView->installEventFilter(this);
         m_messageView->viewport()->installEventFilter(this);
 
-        m_messageCommandController =
-            new MessageCommandController(m_mailService, m_queryService, *m_messageView, this, this);
+        m_messageCommandController = new MessageCommandController(m_mailService, m_mailboxReader,
+                                                                  *m_messageView, this, this);
         connect(m_messageCommandController, &MessageCommandController::statusMessage, this,
                 [this](const QString& message, const int durationMilliseconds)
                 { m_statusBar->showMessage(message, durationMilliseconds); });
@@ -1583,7 +1585,7 @@ namespace javelin::gui::shell
             return;
         }
 
-        const auto draftsMailbox = findMailboxByRole(m_queryService, *accountId, "drafts");
+        const auto draftsMailbox = findMailboxByRole(m_mailboxReader, *accountId, "drafts");
         if (!activeMailboxId().has_value() || !draftsMailbox.has_value() ||
             draftsMailbox->id != *activeMailboxId())
         {
@@ -2440,7 +2442,7 @@ namespace javelin::gui::shell
         const auto mailboxId = activeMailboxId();
         const auto draftsMailbox =
             accountId.has_value()
-                ? findMailboxByRole(m_queryService, *accountId, "drafts")
+                ? findMailboxByRole(m_mailboxReader, *accountId, "drafts")
                 : std::optional<javelin::jmap::cache::MailboxTreeItem>{std::nullopt};
         const auto* selectionModel = m_messageView->selectionModel();
         const bool hasReadSelection =
@@ -2661,7 +2663,7 @@ namespace javelin::gui::shell
     void MainWindow::openPreferencesForConnection(const QString& connectionId)
     {
         javelin::gui::settings::PreferencesDialog dialog{m_accountRepository, m_accountReader,
-                                                         m_queryService, this};
+                                                         m_mailboxReader, this};
         if (!connectionId.isEmpty())
             dialog.selectConfiguredAccount(connectionId);
         if (dialog.exec() == QDialog::Accepted)
@@ -2828,7 +2830,7 @@ namespace javelin::gui::shell
             propertiesAction, &QAction::triggered, this,
             [this, accountId, mailboxId]
             {
-                const auto result = m_queryService.listMailboxTree(accountId.toStdString());
+                const auto result = m_mailboxReader.listMailboxTree(accountId.toStdString());
                 if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
                 {
                     m_statusBar->showMessage(error->message, 10000);

@@ -4,7 +4,7 @@
 #include "gui/mailboxes/MailboxSort.h"
 #include "gui/messages/MessageActionSelection.h"
 #include "gui/messages/MessageListModel.h"
-#include "jmap/cache/QueryService.h"
+#include "jmap/cache/MailboxReadRepository.h"
 
 #include <QCoroTask>
 
@@ -28,10 +28,10 @@ namespace javelin::gui::shell
     namespace
     {
         [[nodiscard]] std::optional<javelin::jmap::cache::MailboxTreeItem>
-        findMailboxByRole(javelin::jmap::cache::QueryService& queryService,
+        findMailboxByRole(javelin::jmap::cache::MailboxReader& mailboxReader,
                           const std::string_view accountId, const std::string_view role)
         {
-            const auto result = queryService.listMailboxTree(accountId);
+            const auto result = mailboxReader.listMailboxTree(accountId);
             const auto* mailboxes =
                 std::get_if<std::vector<javelin::jmap::cache::MailboxTreeItem>>(&result);
             if (mailboxes == nullptr)
@@ -50,9 +50,9 @@ namespace javelin::gui::shell
 
     MessageCommandController::MessageCommandController(
         javelin::app::MailApplicationService& mailService,
-        javelin::jmap::cache::QueryService& queryService, QListView& messageView,
+        javelin::jmap::cache::MailboxReader& mailboxReader, QListView& messageView,
         QWidget* dialogParent, QObject* parent)
-        : QObject(parent), m_mailService(mailService), m_queryService(queryService),
+        : QObject(parent), m_mailService(mailService), m_mailboxReader(mailboxReader),
           m_messageView(messageView), m_dialogParent(dialogParent)
     {
     }
@@ -102,7 +102,7 @@ namespace javelin::gui::shell
             return;
         }
 
-        const auto trashMailbox = findMailboxByRole(m_queryService, *accountId, "trash");
+        const auto trashMailbox = findMailboxByRole(m_mailboxReader, *accountId, "trash");
         if (trashMailbox.has_value() && trashMailbox->id == *sourceMailboxId)
         {
             if (confirmPermanentDelete(selection.size()))
@@ -176,7 +176,7 @@ namespace javelin::gui::shell
         QMenu* moveMenu, QMenu* copyMenu, std::string accountId,
         std::optional<std::string> sourceMailboxId, javelin::app::MessageSelection selection)
     {
-        const auto mailboxesResult = m_queryService.listMailboxTree(accountId);
+        const auto mailboxesResult = m_mailboxReader.listMailboxTree(accountId);
         const auto* mailboxes =
             std::get_if<std::vector<javelin::jmap::cache::MailboxTreeItem>>(&mailboxesResult);
         if (mailboxes == nullptr)
@@ -425,7 +425,7 @@ namespace javelin::gui::shell
     void MessageCommandController::queueDelete(std::string accountId, std::string sourceMailboxId,
                                                javelin::app::MessageSelection selection)
     {
-        const auto trashMailbox = findMailboxByRole(m_queryService, accountId, "trash");
+        const auto trashMailbox = findMailboxByRole(m_mailboxReader, accountId, "trash");
         if (!trashMailbox.has_value())
         {
             Q_EMIT statusMessage(QStringLiteral("No Trash mailbox is available."), 5000);

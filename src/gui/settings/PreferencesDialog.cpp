@@ -5,7 +5,7 @@
 #include "gui/mailboxes/MailboxTreeView.h"
 #include "jmap/cache/AccountReadRepository.h"
 #include "jmap/cache/AccountRepository.h"
-#include "jmap/cache/QueryService.h"
+#include "jmap/cache/MailboxReadRepository.h"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -149,11 +149,11 @@ namespace javelin::gui::settings
 
     PreferencesDialog::PreferencesDialog(javelin::jmap::cache::AccountRepository& accountRepository,
                                          javelin::jmap::cache::AccountReader& accountReader,
-                                         javelin::jmap::cache::QueryService& queryService,
+                                         javelin::jmap::cache::MailboxReader& mailboxReader,
                                          QWidget* parent)
         : KConfigDialog(parent, QStringLiteral("preferences"), nullptr),
           m_accountRepository(accountRepository), m_accountReader(accountReader),
-          m_queryService(queryService), m_accounts(loadAccounts()),
+          m_mailboxReader(mailboxReader), m_accounts(loadAccounts()),
           m_remoteContentSenders(remoteContentAllowList(QLatin1StringView{allowedSendersKey})),
           m_remoteContentDomains(remoteContentAllowList(QLatin1StringView{allowedDomainsKey})),
           m_translationSettings(javelin::app::TranslationService::loadSettings()),
@@ -222,7 +222,7 @@ namespace javelin::gui::settings
         mailboxSyncLayout->addWidget(m_mailboxSyncAccount);
         m_mailboxSyncList = new javelin::gui::mailboxes::MailboxTreeView(mailboxSyncPage);
         m_mailboxSyncModel =
-            new javelin::gui::mailboxes::MailboxTreeModel(m_accountReader, m_queryService,
+            new javelin::gui::mailboxes::MailboxTreeModel(m_accountReader, m_mailboxReader,
                                                           {.accountId = std::string{},
                                                            .showAccount = false,
                                                            .checkable = true,
@@ -240,7 +240,7 @@ namespace javelin::gui::settings
             new QLabel(QStringLiteral("Show notifications"), mailboxSyncPage));
         m_mailboxNotificationList = new javelin::gui::mailboxes::MailboxTreeView(mailboxSyncPage);
         m_mailboxNotificationModel =
-            new javelin::gui::mailboxes::MailboxTreeModel(m_accountReader, m_queryService,
+            new javelin::gui::mailboxes::MailboxTreeModel(m_accountReader, m_mailboxReader,
                                                           {.accountId = std::string{},
                                                            .showAccount = false,
                                                            .checkable = true,
@@ -905,7 +905,7 @@ namespace javelin::gui::settings
             m_mailboxNotificationModel->setAccountId(std::string{});
             return;
         }
-        const auto result = m_queryService.listMailboxTree(accountId.toStdString());
+        const auto result = m_mailboxReader.listMailboxTree(accountId.toStdString());
         const auto* mailboxes =
             std::get_if<std::vector<javelin::jmap::cache::MailboxTreeItem>>(&result);
         if (mailboxes == nullptr)

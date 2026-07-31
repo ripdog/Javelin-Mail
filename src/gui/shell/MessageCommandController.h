@@ -23,7 +23,7 @@ namespace javelin::app
 
 namespace javelin::jmap::cache
 {
-    class QueryService;
+    class MailboxReader;
 }
 
 namespace javelin::gui::shell
@@ -48,7 +48,7 @@ namespace javelin::gui::shell
 
       public:
         MessageCommandController(javelin::app::MailApplicationService& mailService,
-                                 javelin::jmap::cache::QueryService& queryService,
+                                 javelin::jmap::cache::MailboxReader& mailboxReader,
                                  QListView& messageView, QWidget* dialogParent,
                                  QObject* parent = nullptr);
 
@@ -96,7 +96,7 @@ namespace javelin::gui::shell
         [[nodiscard]] bool confirmPermanentDelete(std::size_t selectionItemCount) const;
 
         javelin::app::MailApplicationService& m_mailService;
-        javelin::jmap::cache::QueryService& m_queryService;
+        javelin::jmap::cache::MailboxReader& m_mailboxReader;
         QListView& m_messageView;
         QPointer<QWidget> m_dialogParent;
     };

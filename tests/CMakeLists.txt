@@ -70,6 +70,7 @@ add_executable(javelin_jmap_tests
     FixtureReader.h
     jmap/AccountReadRepositoryTest.cpp
     jmap/AccountRepositoryTest.cpp
+    jmap/MailboxReadRepositoryTest.cpp
     jmap/AuthTest.cpp
     jmap/CancellationTest.cpp
     jmap/CalendarMethodsTest.cpp

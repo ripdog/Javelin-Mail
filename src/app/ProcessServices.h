@@ -62,6 +62,8 @@ namespace javelin::jmap::cache
     class AccountReader;
     class AccountReadRepository;
     class AccountRepository;
+    class MailboxReader;
+    class MailboxReadRepository;
     class ContactRepository;
     class IdentityRepository;
     class MessageViewService;
@@ -99,6 +101,7 @@ namespace javelin::app
 
         [[nodiscard]] javelin::jmap::cache::AccountRepository& accountRepository();
         [[nodiscard]] javelin::jmap::cache::AccountReader& accountReader();
+        [[nodiscard]] javelin::jmap::cache::MailboxReader& mailboxReader();
         [[nodiscard]] javelin::jmap::cache::DatabaseConnection& databaseConnection();
         [[nodiscard]] javelin::jmap::cache::ContactRepository& contactRepository();
         [[nodiscard]] javelin::jmap::contacts::ContactService& contactService();
@@ -137,6 +140,7 @@ namespace javelin::app
         std::unique_ptr<InlineMessageSchemeHandler> m_inlineMessageSchemeHandler;
         std::unique_ptr<javelin::jmap::cache::AccountRepository> m_accountRepository;
         std::unique_ptr<javelin::jmap::cache::AccountReadRepository> m_accountReadRepository;
+        std::unique_ptr<javelin::jmap::cache::MailboxReadRepository> m_mailboxReadRepository;
         std::unique_ptr<javelin::jmap::cache::ContactRepository> m_contactRepository;
         std::unique_ptr<javelin::jmap::contacts::ContactService> m_contactService;
         std::unique_ptr<javelin::jmap::calendar::CalendarService> m_calendarService;

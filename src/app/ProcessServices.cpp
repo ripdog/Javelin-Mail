@@ -33,6 +33,7 @@
 #include "jmap/cache/AccountRepository.h"
 #include "jmap/cache/ContactRepository.h"
 #include "jmap/cache/IdentityRepository.h"
+#include "jmap/cache/MailboxReadRepository.h"
 #include "jmap/cache/MessageViewService.h"
 #include "jmap/cache/QueryService.h"
 #include "jmap/cache/SubmissionRepository.h"
@@ -137,6 +138,8 @@ namespace javelin::app
             std::make_unique<javelin::jmap::cache::AccountRepository>(m_databaseConnection);
         m_accountReadRepository = std::make_unique<javelin::jmap::cache::AccountReadRepository>(
             m_guiReadDatabaseConnection);
+        m_mailboxReadRepository = std::make_unique<javelin::jmap::cache::MailboxReadRepository>(
+            m_guiReadDatabaseConnection);
         m_contactRepository =
             std::make_unique<javelin::jmap::cache::ContactRepository>(m_databaseConnection);
         AddressSuggestionStore::instance().initialize(m_databaseConnection);
@@ -232,6 +235,11 @@ namespace javelin::app
     javelin::jmap::cache::AccountReader& ProcessServices::accountReader()
     {
         return *m_accountReadRepository;
+    }
+
+    javelin::jmap::cache::MailboxReader& ProcessServices::mailboxReader()
+    {
+        return *m_mailboxReadRepository;
     }
 
     javelin::jmap::cache::DatabaseConnection& ProcessServices::databaseConnection()

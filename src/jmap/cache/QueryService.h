@@ -1,6 +1,7 @@
 #pragma once
 
 #include "jmap/cache/Database.h"
+#include "jmap/cache/MailboxReadRepository.h"
 #include "jmap/cache/QueryWindowCoverage.h"
 #include "jmap/domain/MailEntities.h"
 #include "jmap/query/EmailListSort.h"
@@ -14,22 +15,6 @@
 
 namespace javelin::jmap::cache
 {
-
-    struct MailboxTreeItem
-    {
-        std::string id;
-        std::string name;
-        std::optional<std::string> parentId;
-        std::optional<std::string> role;
-        std::uint64_t sortOrder = 0;
-        std::uint64_t totalEmails = 0;
-        std::uint64_t unreadEmails = 0;
-        std::uint64_t totalThreads = 0;
-        std::uint64_t unreadThreads = 0;
-        bool isSubscribed = false;
-        javelin::jmap::domain::MailboxRights myRights;
-        bool hasChildren = false;
-    };
 
     struct MessageListItem
     {
@@ -80,13 +65,13 @@ namespace javelin::jmap::cache
         bool enumerationComplete = false;
     };
 
-    class QueryService
+    class QueryService : public MailboxReader
     {
       public:
         explicit QueryService(DatabaseConnection& connection);
 
         [[nodiscard]] std::variant<std::vector<MailboxTreeItem>, DatabaseError>
-        listMailboxTree(std::string_view accountId) const;
+        listMailboxTree(std::string_view accountId) const override;
         [[nodiscard]] std::variant<std::vector<MessageListItem>, DatabaseError>
         listMailboxMessages(std::string_view accountId, std::string_view mailboxId,
                             std::size_t limit, std::size_t offset = 0,
