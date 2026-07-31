@@ -924,18 +924,245 @@ content is fetched. Message bodies, attachments, online searches, contact detail
 ranges otherwise use the same commit-then-poke pattern. Data is materialized into SQLite or the vault
 and never returned as an IPC response.
 
-## Account settings and credentials
+## Settings ownership and migration
 
-Account, synchronization, and notification settings that affect daemon behavior are daemon-owned
-state. The GUI records typed update intents and observes the committed configuration afterward.
+The process split makes settings ownership part of the correctness boundary. A setting belongs to
+the process whose behavior it controls; it does not move into shared storage merely because both
+processes can technically read it.
 
-Secrets should not be serialized into the general intent inbox. The GUI stores new or updated
-secrets in the platform credential store and queues only a stable credential reference. The daemon
-resolves that reference under the same user identity. Failed validation creates durable
-user-visible feedback without exposing the secret in cache tables or IPC logs.
+### Classification rule
+
+A setting is daemon-owned when changing it can affect work that must remain correct after the GUI
+exits. Daemon-owned settings are typed durable database state and are changed through durable
+intents. A setting is GUI-owned when it affects only presentation or interactive editing. GUI-owned
+settings remain in a GUI settings store and are never required for background correctness.
+
+Representative ownership is:
+
+| Setting or state | Owner and storage | Reason |
+| --- | --- | --- |
+| configured connection identity, display name, login identifier, enabled state, explicit Session URL, and discovered account association | daemon-owned typed SQLite tables | required to start coordinators, label notifications, and reconnect without a GUI |
+| account credential reference | daemon-owned SQLite reference; secret in platform credential storage | daemon authenticates, but SQLite and IPC must not contain the secret |
+| complete-offline mailbox selection and future background-download policy | daemon-owned typed SQLite tables | controls persistent mirroring and background scheduling |
+| notification mailbox policy, including explicit “none” versus default Inbox behavior | daemon-owned typed SQLite tables | notification eligibility must be identical with or without a GUI |
+| Undo Send delay and other send-dispatch policy | daemon-owned typed SQLite settings | delayed submission must survive GUI exit and restart |
+| per-account pause/disable policy and user-configurable retry constraints | daemon-owned typed SQLite settings | controls background transport and synchronization |
+| authentication-paused revision, migration state, retry state, and applied configuration revision | daemon-owned operational SQLite state, not a preference | recovery and suppression decisions must survive restart |
+| tray behavior that is implemented by the daemon | daemon-owned typed SQLite settings | the tray exists when the GUI does not |
+| window geometry, active tabs, selected object identities, scroll anchors, splitters, and search presentation | GUI-owned settings | presentation state has no daemon semantics |
+| message colors, HTML appearance, calendar color overrides, font and density choices | GUI-owned settings | visual rendering only |
+| remote-content allowlists | GUI-owned settings | consulted only by the message renderer; the daemon does not render HTML |
+| attachment save directory and “always ask” behavior | GUI-owned settings | interactive file selection only |
+| translation enablement, target language, and automatic sender/domain choices | GUI-owned settings while translation remains a view operation | no translation work is required after the GUI exits |
+| translation provider secret override | GUI credential-store entry, not SQLite or plain settings | secret used only by the GUI-owned translation service |
+| composer editor defaults | GUI-owned settings unless they alter daemon send semantics | editor presentation is local; durable submitted content is already in the compose session |
+
+The classification follows behavior rather than current class placement. Moving a class between
+libraries does not change ownership. If a future feature makes a currently visual setting affect
+background processing, that setting must migrate to daemon-owned typed state before the daemon may
+act on it.
+
+### Daemon settings schema
+
+Daemon-owned settings should not use one untyped `settings(key, value)` table. They require typed
+schemas, constraints, explicit defaults, and normal database migrations. Representative logical
+records are:
+
+```text
+configured_connections
+    connection_id
+    revision
+    display_name
+    login_identifier
+    explicit_session_url
+    credential_reference
+    enabled
+
+configured_account_associations
+    connection_id
+    account_id
+
+mailbox_offline_policy
+    account_id
+    mailbox_id
+    mode
+
+mailbox_notification_policy
+    account_id
+    selection_mode
+
+mailbox_notification_members
+    account_id
+    mailbox_id
+
+daemon_preferences
+    revision
+    undo_send_delay_seconds
+    tray_policy
+```
+
+The exact schema remains subject to iteration, but several semantic distinctions are mandatory.
+Notification policy must not infer meaning from a missing settings key: “use the default Inbox,” “use
+this explicit set,” and “notify for no mailboxes” are distinct durable states. Likewise, absence of
+an offline-policy row means online-first; it must not be confused with a mailbox whose full mirror is
+paused, incomplete, or awaiting removal.
+
+Server-derived capabilities, JMAP state tokens, synchronization progress, and transport health are
+not settings even when displayed in Preferences. They remain daemon-owned operational state in
+their existing typed repositories.
+
+### Reading settings
+
+The daemon reads its complete effective configuration from SQLite during startup before opening
+network sessions. It does not require a running GUI or read GUI-owned `QSettings` during ordinary
+operation.
+
+The GUI reads daemon-owned settings from SQLite to populate Preferences. It may retain an editable
+local draft while the dialog is open, but that draft is not authoritative. Database invalidations
+must not overwrite unsaved controls. If the committed settings revision changes while the user is
+editing, the dialog marks the draft as based on an older revision and requires an explicit merge,
+reload, or retry rather than silently replacing either side.
+
+GUI-only settings remain local to the GUI process. They should be stored under a stable GUI
+application identity so restarting only the daemon cannot change their path or defaults.
+
+### Changing settings
+
+The GUI changes daemon-owned settings through typed durable intents, not direct updates to canonical
+settings rows. Examples include:
+
+```text
+UpdateConfiguredConnection
+SetOfflineMailboxPolicy
+SetNotificationMailboxPolicy
+SetUndoSendDelay
+RemoveConfiguredAccount
+```
+
+An intent contains the setting-specific values and the base revision the user edited. The daemon:
+
+1. validates the current committed revision and the typed values;
+2. performs any required credential-reference preparation;
+3. atomically updates the canonical settings, consumes the intent, and advances the settings
+   generation;
+4. commits;
+5. applies the new committed configuration to affected coordinators; and
+6. sends the ordinary database-generation poke.
+
+A stale base revision is not resolved by last-writer-wins. The daemon leaves the newer committed
+configuration intact and records durable conflict feedback. This prevents an old Preferences window
+from silently restoring an account URL, notification selection, or offline policy that changed in
+another GUI session or during recovery.
+
+Related settings that form one user decision are committed together. For example, changing an
+account login identifier, Session URL, credential reference, and revision is one configuration
+transition. Notification selection mode and its member set are one transition. The daemon must not
+briefly run a mixture assembled from several independently committed GUI writes.
+
+Simple syntactic checks may run in the GUI for immediate usability, but daemon validation remains
+authoritative. No correctness-sensitive validation result is carried as an IPC reply; acceptance,
+conflict, or failure is durable database state observed through the normal generation mechanism.
+
+The daemon applies side effects only after the settings transaction commits. If it crashes before
+restarting an account coordinator or scheduling a newly selected offline mailbox, startup reads the
+new canonical settings and performs the missing effect. Conversely, an uncommitted settings edit
+cannot partially reconfigure live background work.
+
+Account removal is not a scalar preference update. It is a destructive durable operation whose
+policy covers credentials, cached account data, pending mutations, delayed sends, notifications,
+history, compose sessions, and recovery. Its database transitions must follow a separately defined
+atomic or staged removal lifecycle.
+
+### Secrets
+
+Secrets never appear in:
+
+- canonical settings tables;
+- the durable intent payload;
+- IPC messages;
+- diagnostic generation events; or
+- ordinary logs.
+
+The GUI writes a new secret to the platform credential store under a stable generated reference and
+queues only that reference. The daemon resolves it under the same user identity. Replacing or
+removing an account eventually removes superseded credential entries according to a recoverable
+cleanup policy.
 
 Interactive authentication may require GUI presentation, but transport ownership and durable account
-activation remain in the daemon.
+activation remain in the daemon. The database can represent an account as requiring credentials or
+interactive reauthentication without storing secret material.
+
+### Settings generations
+
+Daemon-owned settings participate in the same commit-then-poke model as other state. A global
+settings generation and, where useful, per-domain or per-account revisions allow:
+
+- the GUI to refresh only affected Preferences pages;
+- the tray to update labels or policy;
+- coordinators to determine whether their applied configuration is current; and
+- reconnecting processes to detect missed changes without polling.
+
+The poke carries no setting values. The GUI and daemon read the committed typed rows. The daemon does
+not need IPC notification for its own transaction; it schedules post-commit reconfiguration directly
+and verifies the applied revision during startup and recovery.
+
+### Legacy `QSettings` migration
+
+The current monolithic application stores several daemon-owned values in `QSettings`, including
+configured accounts, API keys, cached-account associations, complete-offline mailbox selections,
+notification mailbox selections, Undo Send delay, and authentication-pause revisions. These cannot
+remain split between two independently running processes.
+
+The daemon owns the one-time migration and performs it before advertising `READY` or starting account
+coordinators. The daemon must initialize the same organization and application identity used by the
+legacy process before reading the old settings file.
+
+Migration follows these rules:
+
+1. Apply the normal SQLite schema migration first.
+2. Check a versioned durable legacy-import record in SQLite.
+3. If import is required, read and normalize the complete legacy daemon-owned configuration as one
+   typed snapshot.
+4. Store account secrets in the platform credential store under deterministic or durably recorded
+   references and verify they can be read back.
+5. In one SQLite transaction, insert canonical non-secret settings and credential references,
+   preserve explicit-default distinctions, import operational pause state, and commit the
+   legacy-import version.
+6. Re-read the committed configuration and verify its invariants before daemon readiness.
+7. Remove obsolete daemon-owned legacy keys, especially plaintext secrets, only after the canonical
+   import is proven durable. GUI-owned groups remain untouched.
+
+Credential storage and SQLite cannot share one transaction. Crash safety therefore comes from
+idempotent ordering: write or replace the credential-store entry first using the same stable
+reference, then commit the SQLite reference. A crash before the database commit may leave an
+unreferenced credential entry, which is safe and can be reused or cleaned later. The reverse order is
+forbidden because it could commit a configuration referring to a secret that was never stored.
+
+If legacy daemon-owned configuration exists but cannot be migrated unambiguously or its credentials
+cannot be secured, the daemon enters an explicit migration-failed state. It must not silently start
+with defaults, empty accounts, default-Inbox notification policy, or disabled offline mirroring.
+The GUI reads and presents the durable migration failure.
+
+After the import marker commits, SQLite is the only source of truth for those settings. Neither
+process keeps a fallback reader for the old keys, and later changes to the legacy file are ignored.
+Downgrading to a build that expects the old setting shape is outside this design.
+
+### Database durability consequence
+
+Once configuration lives in SQLite, the main database is not a disposable cache file. It already
+contains non-rebuildable or recovery-critical state such as optimistic mutations, history, delayed
+sends, compose sessions, notification outbox entries, and local user intent; daemon settings make
+that distinction even clearer.
+
+A user-facing “clear cache” or repair operation must delete only rebuildable server materialization
+and vault data. It must preserve configuration, credential references, intents, journals, history,
+compose state, notification state, and settings migrations unless the user explicitly requests a
+full profile reset. Wholesale deletion of the database is account/profile destruction, not cache
+maintenance.
+
+Auxiliary tools must use the same typed configuration repositories and credential references, or
+act through durable intents. They must not continue reading legacy account credentials from
+`QSettings` after migration.
 
 ## Memory and lifetime consequences
 
