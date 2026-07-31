@@ -2,6 +2,7 @@
 
 #include "app/MailApplicationService.h"
 #include "app/MessageListSession.h"
+#include "app/MessageListSessionFactory.h"
 #include "jmap/cache/QueryReader.h"
 #include "jmap/query/EmailListSort.h"
 
@@ -12,11 +13,6 @@
 
 namespace javelin::app
 {
-    struct RestoredMailboxState
-    {
-        MessageListPage page;
-    };
-
     class MailboxSession final : public MessageListSession
     {
       public:

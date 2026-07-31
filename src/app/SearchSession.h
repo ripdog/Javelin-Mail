@@ -1,7 +1,7 @@
 #pragma once
 
-#include "app/MailApplicationService.h"
 #include "app/MessageListSession.h"
+#include "app/MessageListSessionFactory.h"
 #include "jmap/cache/QueryReader.h"
 #include "jmap/query/EmailListSort.h"
 #include "jmap/search/EmailSearch.h"
@@ -18,20 +18,6 @@
 
 namespace javelin::app
 {
-    enum class SearchMode
-    {
-        Local,
-        Promoting,
-        Online,
-    };
-
-    struct RestoredSearchState
-    {
-        MessageListPage page;
-        SearchMode mode = SearchMode::Local;
-        std::string sessionId;
-    };
-
     class SearchSession final : public MessageListSession
     {
       public:

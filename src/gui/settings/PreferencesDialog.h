@@ -1,6 +1,6 @@
 #pragma once
 
-#include "app/TranslationService.h"
+#include "app/TranslationApplicationPorts.h"
 #include "gui/messageview/MessageAppearance.h"
 #include "gui/settings/ConnectionSettings.h"
 

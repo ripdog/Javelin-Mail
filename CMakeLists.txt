@@ -110,6 +110,11 @@ set(JAVELIN_FORMAT_FILES
     src/app/AccountRefreshApplicationPorts.h
     src/app/AccountRefreshCommandService.cpp
     src/app/AccountRefreshCommandService.h
+    src/app/CommandDispatcher.cpp
+    src/app/CommandDispatcher.h
+    src/app/MailApplicationEventsPorts.h
+    src/app/MailApplicationEventsService.cpp
+    src/app/MailApplicationEventsService.h
     src/app/CacheAccessBarrier.cpp
     src/app/CacheAccessBarrier.h
     src/app/ApplicationErrorCoordinator.cpp
@@ -127,9 +132,13 @@ set(JAVELIN_FORMAT_FILES
     src/app/MessageContentApplicationPorts.h
     src/app/MessageContentCommandService.cpp
     src/app/MessageContentCommandService.h
+    src/app/MessageListSessionFactory.h
+    src/app/MessageListSessionFactoryService.cpp
+    src/app/MessageListSessionFactoryService.h
     src/app/SieveApplicationPorts.h
     src/app/SieveCommandService.cpp
     src/app/SieveCommandService.h
+    src/app/TranslationApplicationPorts.h
     src/app/UndoApplicationPorts.h
     src/app/UndoCommandService.cpp
     src/app/UndoCommandService.h
@@ -950,6 +959,8 @@ foreach(gui_source IN LISTS javelin_gui_boundary_sources)
        gui_source_contents MATCHES "javelin::jmap::cache::Database(Connection|Transaction|WriteScope)" OR
        gui_source_contents MATCHES "#include \"jmap/contacts/ContactService\\.h\"" OR
        gui_source_contents MATCHES "#include \"jmap/sync/(MailboxRefreshExecutor|MailboxStateRefreshExecutor)\\.h\"" OR
+       gui_source_contents MATCHES "#include \"app/(MailApplicationService|TranslationService)\\.h\"" OR
+       gui_source_contents MATCHES "javelin::app::(MailApplicationService|TranslationService)" OR
        gui_source_contents MATCHES "AccountSyncConfiguration" OR
        gui_source_contents MATCHES "javelin::jmap::MailboxPage(Result|Summary)" OR
        gui_source_contents MATCHES "javelin::jmap::MessageSearch(Result|Summary)" OR
@@ -1103,6 +1114,11 @@ add_library(javelin_application STATIC
     src/app/AccountRefreshApplicationPorts.h
     src/app/AccountRefreshCommandService.cpp
     src/app/AccountRefreshCommandService.h
+    src/app/CommandDispatcher.cpp
+    src/app/CommandDispatcher.h
+    src/app/MailApplicationEventsPorts.h
+    src/app/MailApplicationEventsService.cpp
+    src/app/MailApplicationEventsService.h
     src/app/CacheAccessBarrier.cpp
     src/app/CacheAccessBarrier.h
     src/app/AccountConnectionProvider.h
@@ -1126,9 +1142,13 @@ add_library(javelin_application STATIC
     src/app/MessageContentApplicationPorts.h
     src/app/MessageContentCommandService.cpp
     src/app/MessageContentCommandService.h
+    src/app/MessageListSessionFactory.h
+    src/app/MessageListSessionFactoryService.cpp
+    src/app/MessageListSessionFactoryService.h
     src/app/SieveApplicationPorts.h
     src/app/SieveCommandService.cpp
     src/app/SieveCommandService.h
+    src/app/TranslationApplicationPorts.h
     src/app/UndoApplicationPorts.h
     src/app/UndoCommandService.cpp
     src/app/UndoCommandService.h

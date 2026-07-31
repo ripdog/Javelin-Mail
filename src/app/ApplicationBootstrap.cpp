@@ -11,7 +11,7 @@
 #include "app/MailIndexService.h"
 #include "app/MessageNavigationCoordinator.h"
 #include "app/ProcessServices.h"
-#include "app/TranslationService.h"
+#include "app/TranslationApplicationPorts.h"
 #include "app/WorkScheduler.h"
 #include "gui/settings/PreferencesDialog.h"
 #include "gui/shell/MainWindow.h"
@@ -229,7 +229,8 @@ namespace javelin::app
             m_processServices->translationService(), m_processServices->composeCommandPort(),
             m_processServices->contactCommandPort(), m_processServices->mailCommandPort(),
             m_processServices->sieveCommandPort(), m_processServices->accountRefreshPort(),
-            m_processServices->messageContentPort(), m_processServices->mailService(),
+            m_processServices->messageContentPort(), m_processServices->messageListSessionFactory(),
+            m_processServices->mailApplicationEvents(),
             m_processServices->messageNavigationCoordinator(),
             m_processServices->undoCommandPort());
 

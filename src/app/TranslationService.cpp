@@ -129,11 +129,12 @@ namespace javelin::app
         QNetworkAccessManager& networkAccessManager,
         javelin::jmap::cache::TranslationCacheRepository& translationCacheRepository)
         : m_networkAccessManager(networkAccessManager),
-          m_translationCacheRepository(translationCacheRepository), m_settings(loadSettings())
+          m_translationCacheRepository(translationCacheRepository),
+          m_settings(loadTranslationSettings())
     {
     }
 
-    TranslationSettings TranslationService::loadSettings()
+    TranslationSettings loadTranslationSettings()
     {
         QSettings settings;
         settings.beginGroup(QLatin1StringView{translationGroup});
@@ -161,7 +162,7 @@ namespace javelin::app
         return value;
     }
 
-    void TranslationService::saveSettings(TranslationSettings settingsValue)
+    void saveTranslationSettings(TranslationSettings settingsValue)
     {
         settingsValue.apiKeyOverride = settingsValue.apiKeyOverride.trimmed();
         settingsValue.targetLanguage = settingsValue.targetLanguage.trimmed().toLower();
@@ -187,7 +188,17 @@ namespace javelin::app
 
     void TranslationService::reloadSettings()
     {
-        m_settings = loadSettings();
+        m_settings = loadTranslationSettings();
+    }
+
+    TranslationSettings TranslationService::loadSettings()
+    {
+        return loadTranslationSettings();
+    }
+
+    void TranslationService::saveSettings(TranslationSettings settingsValue)
+    {
+        saveTranslationSettings(std::move(settingsValue));
     }
 
     const TranslationSettings& TranslationService::settings() const

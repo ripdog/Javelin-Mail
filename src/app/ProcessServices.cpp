@@ -8,6 +8,7 @@
 #include "app/CacheLocationProvider.h"
 #include "app/CalendarCommandService.h"
 #include "app/CalendarNotificationService.h"
+#include "app/CommandDispatcher.h"
 #include "app/ComposeCommandService.h"
 #include "app/ComposeService.h"
 #include "app/ContactCommandService.h"
@@ -16,10 +17,12 @@
 #include "app/FullMailSyncService.h"
 #include "app/InlineMessageSchemeHandler.h"
 #include "app/LocalMaintenanceService.h"
+#include "app/MailApplicationEventsService.h"
 #include "app/MailApplicationService.h"
 #include "app/MailCommandService.h"
 #include "app/MailIndexService.h"
 #include "app/MessageContentCommandService.h"
+#include "app/MessageListSessionFactoryService.h"
 #include "app/MessageNavigationCoordinator.h"
 #include "app/SieveCommandService.h"
 #include "app/TranslationService.h"
@@ -231,6 +234,11 @@ namespace javelin::app
             std::make_unique<AccountRefreshCommandService>(*m_mailService);
         m_messageContentCommandService =
             std::make_unique<MessageContentCommandService>(*m_mailService);
+        m_messageListSessionFactoryService =
+            std::make_unique<MessageListSessionFactoryService>(*m_mailService);
+        m_mailApplicationEventsService =
+            std::make_unique<MailApplicationEventsService>(*m_mailService);
+        m_commandDispatcher = std::make_unique<CommandDispatcher>(*m_accountRefreshCommandService);
         m_calendarCommandService = std::make_unique<CalendarCommandService>(*m_mailService);
         m_deferredSendService = std::make_unique<DeferredSendService>(
             *m_deferredSendRepository, *m_jmapComposeService, *m_mailService, *m_undoManager);
@@ -386,7 +394,7 @@ namespace javelin::app
         return *m_guiQueryService;
     }
 
-    TranslationService& ProcessServices::translationService()
+    TranslationPort& ProcessServices::translationService()
     {
         return *m_translationService;
     }
@@ -419,6 +427,21 @@ namespace javelin::app
     MessageContentPort& ProcessServices::messageContentPort()
     {
         return *m_messageContentCommandService;
+    }
+
+    MessageListSessionFactoryPort& ProcessServices::messageListSessionFactory()
+    {
+        return *m_messageListSessionFactoryService;
+    }
+
+    MailApplicationEventsPort& ProcessServices::mailApplicationEvents()
+    {
+        return *m_mailApplicationEventsService;
+    }
+
+    CommandDispatcher& ProcessServices::commandDispatcher()
+    {
+        return *m_commandDispatcher;
     }
 
     UndoCommandPort& ProcessServices::undoCommandPort()

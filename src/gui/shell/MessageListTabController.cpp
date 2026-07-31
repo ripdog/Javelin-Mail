@@ -1,7 +1,8 @@
 #include "gui/shell/MessageListTabController.h"
 
-#include "app/MailApplicationService.h"
+#include "app/MailboxSession.h"
 #include "app/MessageListSession.h"
+#include "app/SearchSession.h"
 #include "jmap/cache/QueryReader.h"
 #include "jmap/search/EmailSearch.h"
 
@@ -11,9 +12,9 @@ namespace javelin::gui::shell
 {
     MessageListTabController::MessageListTabController(
         javelin::jmap::cache::QueryReader& queryReader,
-        javelin::app::MailApplicationService& mailService, const std::size_t pageSize,
+        javelin::app::MessageListSessionFactoryPort& sessionFactory, const std::size_t pageSize,
         QObject* sessionParent, QObject* parent)
-        : QObject(parent), m_queryReader(queryReader), m_mailService(mailService),
+        : QObject(parent), m_queryReader(queryReader), m_sessionFactory(sessionFactory),
           m_pageSize(pageSize), m_sessionParent(sessionParent)
     {
     }
@@ -63,19 +64,19 @@ namespace javelin::gui::shell
 
     TabState MessageListTabController::createMailboxTab(MailboxTabSessionSpec spec)
     {
-        auto* session = new javelin::app::MailboxSession(
+        auto* session = m_sessionFactory.createMailboxSession(
             std::move(spec.accountId), std::move(spec.mailboxId), std::move(spec.title),
-            std::move(spec.role), spec.sort, m_queryReader, m_mailService, m_pageSize,
-            std::move(spec.restored), m_sessionParent);
+            std::move(spec.role), spec.sort, m_queryReader, m_pageSize, std::move(spec.restored),
+            m_sessionParent);
         bind(*session);
         return {.content = MailboxTabState{.session = session, .selection = {}}};
     }
 
     TabState MessageListTabController::createSearchTab(SearchTabSessionSpec spec)
     {
-        auto* session = new javelin::app::SearchSession(
+        auto* session = m_sessionFactory.createSearchSession(
             std::move(spec.accountId), std::move(spec.criteria), spec.sort, m_queryReader,
-            m_mailService, m_pageSize, std::move(spec.restored), m_sessionParent);
+            m_pageSize, std::move(spec.restored), m_sessionParent);
         bind(*session);
         return {.content = SearchTabState{.session = session, .selection = {}}};
     }

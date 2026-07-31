@@ -25,7 +25,7 @@ class QWidget;
 
 namespace javelin::app
 {
-    class TranslationService;
+    class TranslationPort;
 }
 namespace javelin::jmap::contacts
 {
@@ -42,7 +42,7 @@ namespace javelin::gui::messageview
 
       public:
         explicit MessageViewContainer(
-            javelin::app::TranslationService& translationService,
+            javelin::app::TranslationPort& translationPort,
             javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
             QWidget* parent = nullptr);
         ~MessageViewContainer() override;
@@ -132,7 +132,7 @@ namespace javelin::gui::messageview
         QLabel* m_languageStatusLabel = nullptr;
         QToolButton* m_translateButton = nullptr;
         QToolButton* m_translateOptionsButton = nullptr;
-        javelin::app::TranslationService& m_translationService;
+        javelin::app::TranslationPort& m_translationPort;
         javelin::jmap::contacts::ContactIdentityLookup& m_contactIdentityLookup;
         QWidget* m_bodyControlsWidget = nullptr;
         QStackedWidget* m_bodyStack = nullptr;

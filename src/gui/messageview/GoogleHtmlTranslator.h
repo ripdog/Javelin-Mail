@@ -1,3 +1,3 @@
 #pragma once
 
-// Translation provider and configuration live in app/TranslationService.
+// Translation provider and configuration live behind the application translation port.

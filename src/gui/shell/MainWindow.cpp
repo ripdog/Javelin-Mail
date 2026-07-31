@@ -3,13 +3,14 @@
 #include "app/AccountApplicationPorts.h"
 #include "app/AccountRefreshApplicationPorts.h"
 #include "app/ComposeApplicationPorts.h"
-#include "app/MailApplicationService.h"
+#include "app/MailApplicationEventsPorts.h"
 #include "app/MailboxSession.h"
 #include "app/MessageContentApplicationPorts.h"
 #include "app/MessageListSession.h"
+#include "app/MessageListSessionFactory.h"
 #include "app/MessageNavigationCoordinator.h"
 #include "app/SearchSession.h"
-#include "app/TranslationService.h"
+#include "app/TranslationApplicationPorts.h"
 #include "app/UndoApplicationPorts.h"
 #include "gui/IconUtils.h"
 #include "gui/logging/LogViewerDialog.h"
@@ -243,14 +244,15 @@ namespace javelin::gui::shell
                            javelin::jmap::cache::IdentityReader& identityReader,
                            javelin::jmap::cache::MessageViewReader& messageViewReader,
                            javelin::jmap::cache::QueryReader& queryReader,
-                           javelin::app::TranslationService& translationService,
+                           javelin::app::TranslationPort& translationPort,
                            javelin::app::ComposeCommandPort& composeCommandPort,
                            javelin::app::ContactCommandPort& contactCommandPort,
                            javelin::app::MailCommandPort& mailCommandPort,
                            javelin::app::SieveCommandPort& sieveCommandPort,
                            javelin::app::AccountRefreshPort& accountRefreshPort,
                            javelin::app::MessageContentPort& messageContentPort,
-                           javelin::app::MailApplicationService& mailService,
+                           javelin::app::MessageListSessionFactoryPort& messageListSessionFactory,
+                           javelin::app::MailApplicationEventsPort& mailEvents,
                            javelin::app::MessageNavigationCoordinator& messageNavigationCoordinator,
                            javelin::app::UndoCommandPort& undoCommandPort, QWidget* parent)
         : KXmlGuiWindow(parent), m_accountCommandPort(accountCommandPort),
@@ -259,10 +261,11 @@ namespace javelin::gui::shell
           m_calendarCommandPort(calendarCommandPort),
           m_contactIdentityLookup(contactIdentityLookup), m_identityReader(identityReader),
           m_messageViewReader(messageViewReader), m_queryReader(queryReader),
-          m_translationService(translationService), m_composeCommandPort(composeCommandPort),
+          m_translationPort(translationPort), m_composeCommandPort(composeCommandPort),
           m_contactCommandPort(contactCommandPort), m_mailCommandPort(mailCommandPort),
           m_sieveCommandPort(sieveCommandPort), m_accountRefreshPort(accountRefreshPort),
-          m_messageContentPort(messageContentPort), m_mailService(mailService),
+          m_messageContentPort(messageContentPort),
+          m_messageListSessionFactory(messageListSessionFactory), m_mailEvents(mailEvents),
           m_messageNavigationCoordinator(messageNavigationCoordinator),
           m_undoCommandPort(undoCommandPort)
     {
@@ -432,8 +435,8 @@ namespace javelin::gui::shell
             *m_mailboxModel, *m_mailboxView, *m_mailboxSearchEdit, *m_messageModel, *m_mailboxPane);
         m_messageSelectionController = std::make_unique<MessageSelectionController>(
             *m_mailboxModel, *m_mailboxView, *m_messageModel, *m_messageView);
-        m_messageListTabController =
-            new MessageListTabController(m_queryReader, m_mailService, pageSize, this, this);
+        m_messageListTabController = new MessageListTabController(
+            m_queryReader, m_messageListSessionFactory, pageSize, this, this);
         m_messageNavigationController = std::make_unique<MessageNavigationController>(
             m_messageNavigationCoordinator, *m_messageListTabController);
         m_messageContentController = new MessageContentController(m_messageContentPort, this);
@@ -511,7 +514,7 @@ namespace javelin::gui::shell
                 });
         connect(m_messageListTabController, &MessageListTabController::operationFailed, this,
                 [this](const javelin::jmap::OperationError& error) { presentError(error); });
-        connect(&m_mailService, &javelin::app::MailApplicationService::sessionCapabilitiesChanged,
+        connect(&m_mailEvents, &javelin::app::MailApplicationEventsPort::sessionCapabilitiesChanged,
                 this, [this](const QString&) { reloadAccounts(); });
         createActions();
         setupGUI(KXmlGuiWindow::ToolBar | KXmlGuiWindow::Keys | KXmlGuiWindow::Save |
@@ -526,25 +529,25 @@ namespace javelin::gui::shell
         {
             using Model = javelin::gui::mailboxes::MailboxTreeModel;
             Model::ConnectionStatus modelStatus = Model::ConnectionStatus::Disconnected;
-            if (status == javelin::app::AccountSyncCoordinator::Status::Connecting)
+            if (status == javelin::app::MailAccountStatus::Connecting)
             {
                 modelStatus = Model::ConnectionStatus::Connecting;
             }
-            else if (status == javelin::app::AccountSyncCoordinator::Status::Connected)
+            else if (status == javelin::app::MailAccountStatus::Connected)
             {
                 modelStatus = Model::ConnectionStatus::Connected;
             }
-            else if (status == javelin::app::AccountSyncCoordinator::Status::AuthenticationPaused)
+            else if (status == javelin::app::MailAccountStatus::AuthenticationPaused)
             {
                 modelStatus = Model::ConnectionStatus::AuthenticationPaused;
             }
             m_mailboxModel->setConnectionStatus(accountId, modelStatus);
         };
-        connect(&m_mailService, &javelin::app::MailApplicationService::accountStatusChanged, this,
+        connect(&m_mailEvents, &javelin::app::MailApplicationEventsPort::accountStatusChanged, this,
                 applyAccountStatus);
-        for (const auto& [accountId, status] : m_mailService.accountStatuses())
+        for (const auto& [accountId, status] : m_mailEvents.accountStatuses())
             applyAccountStatus(QString::fromStdString(accountId), status);
-        connect(&m_mailService, &javelin::app::MailApplicationService::cacheCommitted, this,
+        connect(&m_mailEvents, &javelin::app::MailApplicationEventsPort::cacheCommitted, this,
                 [this](const javelin::app::MailCacheChange& change)
                 {
                     if (change.mailboxTreeChanged)
@@ -1245,7 +1248,7 @@ namespace javelin::gui::shell
         messageLayout->addWidget(m_messageView, 1);
 
         m_messageViewContainer = new javelin::gui::messageview::MessageViewContainer(
-            m_translationService, m_contactIdentityLookup, this);
+            m_translationPort, m_contactIdentityLookup, this);
         connect(m_messageViewContainer,
                 &javelin::gui::messageview::MessageViewContainer::saveAttachmentRequested, this,
                 [this](const QString& accountId, const QString& emailId, const QString& partId)
@@ -2679,7 +2682,7 @@ namespace javelin::gui::shell
             dialog.selectConfiguredAccount(connectionId);
         if (dialog.exec() == QDialog::Accepted)
         {
-            m_translationService.reloadSettings();
+            m_translationPort.reloadSettings();
             m_messageViewContainer->appearanceSettingsChanged();
             m_messageViewContainer->translationSettingsChanged();
             m_statusBar->showMessage(QStringLiteral("Saved preferences."), 3000);

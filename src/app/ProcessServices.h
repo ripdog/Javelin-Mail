@@ -20,6 +20,7 @@ namespace javelin::jmap::contacts
 namespace javelin::app
 {
     class WorkScheduler;
+    class CommandDispatcher;
     class CacheAccessBarrier;
     class FullMailSyncService;
     class MailIndexService;
@@ -36,6 +37,10 @@ namespace javelin::app
     class AccountRefreshCommandService;
     class MessageContentPort;
     class MessageContentCommandService;
+    class MessageListSessionFactoryPort;
+    class MessageListSessionFactoryService;
+    class MailApplicationEventsPort;
+    class MailApplicationEventsService;
     class UndoCommandPort;
     class UndoCommandService;
     class DeferredSendRepository;
@@ -51,6 +56,7 @@ namespace javelin::app
     class InlineMessageSchemeHandler;
     class MailApplicationService;
     class TranslationService;
+    class TranslationPort;
 } // namespace javelin::app
 
 namespace javelin::app::undo
@@ -142,13 +148,16 @@ namespace javelin::app
         [[nodiscard]] javelin::jmap::cache::MessageViewReader& messageViewReader();
         [[nodiscard]] javelin::jmap::cache::QueryReader& queryReader();
         [[nodiscard]] javelin::jmap::cache::QueryService& queryService();
-        [[nodiscard]] TranslationService& translationService();
+        [[nodiscard]] TranslationPort& translationService();
         [[nodiscard]] ComposeService& composeService();
         [[nodiscard]] ComposeCommandPort& composeCommandPort();
         [[nodiscard]] MailCommandPort& mailCommandPort();
         [[nodiscard]] SieveCommandPort& sieveCommandPort();
         [[nodiscard]] AccountRefreshPort& accountRefreshPort();
         [[nodiscard]] MessageContentPort& messageContentPort();
+        [[nodiscard]] MessageListSessionFactoryPort& messageListSessionFactory();
+        [[nodiscard]] MailApplicationEventsPort& mailApplicationEvents();
+        [[nodiscard]] CommandDispatcher& commandDispatcher();
         [[nodiscard]] UndoCommandPort& undoCommandPort();
         [[nodiscard]] DeferredSendService& deferredSendService();
         [[nodiscard]] ContactCommandPort& contactCommandPort();
@@ -210,6 +219,9 @@ namespace javelin::app
         std::unique_ptr<SieveCommandService> m_sieveCommandService;
         std::unique_ptr<AccountRefreshCommandService> m_accountRefreshCommandService;
         std::unique_ptr<MessageContentCommandService> m_messageContentCommandService;
+        std::unique_ptr<MessageListSessionFactoryService> m_messageListSessionFactoryService;
+        std::unique_ptr<MailApplicationEventsService> m_mailApplicationEventsService;
+        std::unique_ptr<CommandDispatcher> m_commandDispatcher;
         std::unique_ptr<UndoCommandService> m_undoCommandService;
         std::unique_ptr<javelin::app::undo::MailHistoryExecutor> m_mailHistoryExecutor;
         std::unique_ptr<javelin::app::undo::DraftHistoryExecutor> m_draftHistoryExecutor;

@@ -305,13 +305,19 @@ single process. Follow [Mutations and optimistic consistency](DAEMON_GUI_ARCHITE
 
 ### Implementation status
 
-The in-process migration currently has typed application ports and adapters for mail mutations,
-Undo/Redo, compose and drafts, contacts, calendar, Sieve, account refresh/contact refresh, and
-message content, attachment, and source retrieval. The migrated GUI consumers no longer include or
-accept the concrete application service for those slices, and CMake boundary checks reject those
-direct crossings. The common daemon dispatcher, UUID command identity/admission, closed process
-error taxonomy, and conformance tests remain outstanding; message-list observation and translation
-are also still transitional service crossings pending their ordered slices below.
+Phase 4 is complete for the current in-process composition. Typed application ports and adapters now
+cover mail mutations, Undo/Redo, compose and drafts, contacts, calendar, Sieve, account and contact
+refresh, message content, attachment and source retrieval, message-list session creation, translation,
+and mail observation. Migrated GUI consumers no longer include or accept the concrete application
+services for those slices, and CMake boundary checks reject those direct crossings.
+
+`ProcessServices` owns the shared `CommandDispatcher`. It validates typed protocol requests, preserves
+exact command identity for replay, rejects UUID reuse with a different payload, reports committed
+epochs and affected-key hints, keeps direct rejection separate from later operation failure, and maps
+the current refresh workflow into the process-boundary error taxonomy. Conformance coverage exercises
+acceptance, rejection, same-UUID retry, epoch behavior, and later failure. `RefreshAccountCommand` is
+the reference protocol command for this in-process dispatcher; additional command variants and socket
+transport remain deliberately deferred to the later protocol and executable-split phases.
 
 ### Work common to every command
 
@@ -360,7 +366,9 @@ Migrate one vertical slice at a time and remove its direct path immediately:
 
 - `MainWindow` and GUI controllers receive typed clients and read repositories, not concrete daemon
   application services.
-- No stateful GUI action bypasses the command dispatcher.
+- No migrated stateful GUI action bypasses its typed application command or observation port; the
+  shared process dispatcher provides the common admission and replay semantics for process-boundary
+  commands.
 - Every operation that previously used optimistic consistency still uses the same transaction and
   reconciliation subsystem behind the dispatcher.
 - The GUI observes its own projection from the admission epoch without waiting for a duplicate

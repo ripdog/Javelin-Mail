@@ -117,6 +117,9 @@ namespace javelin::protocol
     {
         QString accountId;
         bool force = false;
+
+        friend bool operator==(const RefreshAccountCommand&,
+                               const RefreshAccountCommand&) = default;
     };
 
     using ApplicationCommand = std::variant<RefreshAccountCommand>;

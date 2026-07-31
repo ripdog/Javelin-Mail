@@ -1,7 +1,6 @@
 #pragma once
 
-#include "app/MailboxSession.h"
-#include "app/SearchSession.h"
+#include "app/MessageListSessionFactory.h"
 #include "gui/shell/MessageListTabPolicy.h"
 #include "gui/shell/TabWorkspace.h"
 #include "jmap/cache/QueryReader.h"
@@ -24,7 +23,7 @@ namespace javelin::jmap
 
 namespace javelin::app
 {
-    class MailApplicationService;
+    class MessageListSessionFactoryPort;
 }
 
 namespace javelin::gui::shell
@@ -59,7 +58,7 @@ namespace javelin::gui::shell
 
       public:
         MessageListTabController(javelin::jmap::cache::QueryReader& queryReader,
-                                 javelin::app::MailApplicationService& mailService,
+                                 javelin::app::MessageListSessionFactoryPort& sessionFactory,
                                  std::size_t pageSize, QObject* sessionParent,
                                  QObject* parent = nullptr);
 
@@ -102,7 +101,7 @@ namespace javelin::gui::shell
         void bind(javelin::app::MessageListSession& session);
 
         javelin::jmap::cache::QueryReader& m_queryReader;
-        javelin::app::MailApplicationService& m_mailService;
+        javelin::app::MessageListSessionFactoryPort& m_sessionFactory;
         std::size_t m_pageSize;
         QObject* m_sessionParent = nullptr;
     };

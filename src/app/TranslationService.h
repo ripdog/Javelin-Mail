@@ -1,12 +1,8 @@
 #pragma once
 
+#include "app/TranslationApplicationPorts.h"
+
 #include <QCoroTask>
-
-#include <QString>
-#include <QStringList>
-#include <QVector>
-
-#include <variant>
 
 class QNetworkAccessManager;
 
@@ -17,26 +13,11 @@ namespace javelin::jmap::cache
 
 namespace javelin::app
 {
-    struct TranslationSettings
-    {
-        bool enabled = true;
-        QString apiKeyOverride;
-        QString targetLanguage = QStringLiteral("en");
-        QStringList autoTranslateSenders;
-        QStringList autoTranslateDomains;
-
-        bool operator==(const TranslationSettings&) const = default;
-    };
-
-    struct TranslationUnavailable
-    {
-    };
-
-    class TranslationService final
+    class TranslationService final : public TranslationPort
     {
       public:
-        using TranslationChunks = QVector<QStringList>;
-        using Result = std::variant<TranslationChunks, TranslationUnavailable, QString>;
+        using TranslationChunks = javelin::app::TranslationChunks;
+        using Result = javelin::app::TranslationResult;
 
         TranslationService(
             QNetworkAccessManager& networkAccessManager,
@@ -45,16 +26,18 @@ namespace javelin::app
         [[nodiscard]] static TranslationSettings loadSettings();
         static void saveSettings(TranslationSettings settings);
 
-        void reloadSettings();
-        [[nodiscard]] const TranslationSettings& settings() const;
-        [[nodiscard]] bool isEnabled() const;
-        [[nodiscard]] QString targetLanguage() const;
-        [[nodiscard]] bool shouldAutoTranslate(const QString& sender, const QString& domain) const;
-        void setAutoTranslateSender(QString sender, bool enabled);
-        void setAutoTranslateDomain(QString domain, bool enabled);
+        void reloadSettings() override;
+        [[nodiscard]] const TranslationSettings& settings() const override;
+        [[nodiscard]] bool isEnabled() const override;
+        [[nodiscard]] QString targetLanguage() const override;
+        [[nodiscard]] bool shouldAutoTranslate(const QString& sender,
+                                               const QString& domain) const override;
+        void setAutoTranslateSender(QString sender, bool enabled) override;
+        void setAutoTranslateDomain(QString domain, bool enabled) override;
 
-        [[nodiscard]] QCoro::Task<Result>
-        translate(TranslationChunks sourceChunks, QString sourceLanguage, bool allowNetwork = true);
+        [[nodiscard]] QCoro::Task<Result> translate(TranslationChunks sourceChunks,
+                                                    QString sourceLanguage,
+                                                    bool allowNetwork = true) override;
 
         struct PendingRequest
         {

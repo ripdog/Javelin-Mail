@@ -1,5 +1,6 @@
 #include "app/SearchSession.h"
 
+#include "app/MailApplicationService.h"
 #include "jmap/cache/QueryService.h"
 #include <QCoroTask>
 

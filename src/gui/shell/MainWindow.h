@@ -1,6 +1,5 @@
 #pragma once
 
-#include "app/MailApplicationService.h"
 #include "gui/shell/TabWorkspace.h"
 #include "jmap/cache/QueryReader.h"
 #include "jmap/query/EmailListSort.h"
@@ -45,12 +44,14 @@ namespace javelin::app
     class SieveCommandPort;
     class AccountRefreshPort;
     class MessageContentPort;
+    class MessageListSessionFactoryPort;
+    class MailApplicationEventsPort;
     class UndoCommandPort;
     class MailboxSession;
     class MessageListSession;
     class MessageNavigationCoordinator;
     class SearchSession;
-    class TranslationService;
+    class TranslationPort;
     struct OpenEmailRoute;
 } // namespace javelin::app
 namespace javelin::app::undo
@@ -139,14 +140,15 @@ namespace javelin::gui::shell
             javelin::jmap::cache::IdentityReader& identityReader,
             javelin::jmap::cache::MessageViewReader& messageViewReader,
             javelin::jmap::cache::QueryReader& queryReader,
-            javelin::app::TranslationService& translationService,
+            javelin::app::TranslationPort& translationPort,
             javelin::app::ComposeCommandPort& composeCommandPort,
             javelin::app::ContactCommandPort& contactCommandPort,
             javelin::app::MailCommandPort& mailCommandPort,
             javelin::app::SieveCommandPort& sieveCommandPort,
             javelin::app::AccountRefreshPort& accountRefreshPort,
             javelin::app::MessageContentPort& messageContentPort,
-            javelin::app::MailApplicationService& mailService,
+            javelin::app::MessageListSessionFactoryPort& messageListSessionFactory,
+            javelin::app::MailApplicationEventsPort& mailEvents,
             javelin::app::MessageNavigationCoordinator& messageNavigationCoordinator,
             javelin::app::UndoCommandPort& undoCommandPort, QWidget* parent = nullptr);
         ~MainWindow() override;
@@ -274,14 +276,15 @@ namespace javelin::gui::shell
         javelin::jmap::cache::IdentityReader& m_identityReader;
         javelin::jmap::cache::MessageViewReader& m_messageViewReader;
         javelin::jmap::cache::QueryReader& m_queryReader;
-        javelin::app::TranslationService& m_translationService;
+        javelin::app::TranslationPort& m_translationPort;
         javelin::app::ComposeCommandPort& m_composeCommandPort;
         javelin::app::ContactCommandPort& m_contactCommandPort;
         javelin::app::MailCommandPort& m_mailCommandPort;
         javelin::app::SieveCommandPort& m_sieveCommandPort;
         javelin::app::AccountRefreshPort& m_accountRefreshPort;
         javelin::app::MessageContentPort& m_messageContentPort;
-        javelin::app::MailApplicationService& m_mailService;
+        javelin::app::MessageListSessionFactoryPort& m_messageListSessionFactory;
+        javelin::app::MailApplicationEventsPort& m_mailEvents;
         javelin::app::MessageNavigationCoordinator& m_messageNavigationCoordinator;
         javelin::app::UndoCommandPort& m_undoCommandPort;
         AccountRefreshController* m_accountRefreshController = nullptr;

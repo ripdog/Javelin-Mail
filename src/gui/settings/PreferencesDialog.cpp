@@ -156,7 +156,7 @@ namespace javelin::gui::settings
           m_mailboxReader(mailboxReader), m_accounts(loadAccounts()),
           m_remoteContentSenders(remoteContentAllowList(QLatin1StringView{allowedSendersKey})),
           m_remoteContentDomains(remoteContentAllowList(QLatin1StringView{allowedDomainsKey})),
-          m_translationSettings(javelin::app::TranslationService::loadSettings()),
+          m_translationSettings(javelin::app::loadTranslationSettings()),
           m_autoTranslateSenders(m_translationSettings.autoTranslateSenders),
           m_autoTranslateDomains(m_translationSettings.autoTranslateDomains),
           m_messageAppearanceSettings(javelin::gui::messageview::loadMessageAppearanceSettings()),
@@ -815,7 +815,7 @@ namespace javelin::gui::settings
             selectedTranslationLanguageCode(*m_translationTargetLanguage);
         m_translationSettings.autoTranslateSenders = m_autoTranslateSenders;
         m_translationSettings.autoTranslateDomains = m_autoTranslateDomains;
-        javelin::app::TranslationService::saveSettings(m_translationSettings);
+        javelin::app::saveTranslationSettings(m_translationSettings);
         javelin::gui::messageview::saveMessageAppearanceSettings(m_messageAppearanceSettings);
         saveAttachmentSaveSettings(m_attachmentSaveSettings);
         javelin::app::ComposePreferences::setUndoSendDelaySeconds(m_undoSendDelaySeconds);
