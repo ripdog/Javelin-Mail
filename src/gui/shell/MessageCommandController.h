@@ -1,5 +1,6 @@
 #pragma once
 
+#include "app/MailApplicationPorts.h"
 #include "app/MessageSelection.h"
 #include "jmap/OperationError.h"
 
@@ -15,11 +16,6 @@
 class QListView;
 class QMenu;
 class QWidget;
-
-namespace javelin::app
-{
-    class MailApplicationService;
-}
 
 namespace javelin::jmap::cache
 {
@@ -47,7 +43,7 @@ namespace javelin::gui::shell
         Q_OBJECT
 
       public:
-        MessageCommandController(javelin::app::MailApplicationService& mailService,
+        MessageCommandController(javelin::app::MailCommandPort& mailCommandPort,
                                  javelin::jmap::cache::MailboxReader& mailboxReader,
                                  QListView& messageView, QWidget* dialogParent,
                                  QObject* parent = nullptr);
@@ -95,7 +91,7 @@ namespace javelin::gui::shell
                                    std::optional<std::string> operationGroupId);
         [[nodiscard]] bool confirmPermanentDelete(std::size_t selectionItemCount) const;
 
-        javelin::app::MailApplicationService& m_mailService;
+        javelin::app::MailCommandPort& m_mailCommandPort;
         javelin::jmap::cache::MailboxReader& m_mailboxReader;
         QListView& m_messageView;
         QPointer<QWidget> m_dialogParent;

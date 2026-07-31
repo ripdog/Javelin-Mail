@@ -1,5 +1,6 @@
 #pragma once
 
+#include "app/ComposeApplicationPorts.h"
 #include "jmap/submission/ComposeTypes.h"
 
 #include <QWidget>
@@ -44,11 +45,6 @@ namespace javelin::jmap::contacts
     class ContactIdentityLookup;
 }
 
-namespace javelin::app
-{
-    class ComposeService;
-}
-
 namespace javelin::gui::compose
 {
 
@@ -57,7 +53,7 @@ namespace javelin::gui::compose
         Q_OBJECT
 
       public:
-        ComposeTabWidget(javelin::app::ComposeService& composeService,
+        ComposeTabWidget(javelin::app::ComposeCommandPort& composeCommandPort,
                          javelin::jmap::cache::IdentityReader& identityRepository,
                          javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
                          javelin::jmap::submission::DraftSnapshot snapshot,
@@ -125,7 +121,7 @@ namespace javelin::gui::compose
         void clearFormatting();
         void insertLink();
 
-        javelin::app::ComposeService& m_composeService;
+        javelin::app::ComposeCommandPort& m_composeCommandPort;
         javelin::jmap::cache::IdentityReader& m_identityRepository;
         javelin::jmap::contacts::ContactIdentityLookup& m_contactIdentityLookup;
         javelin::jmap::submission::DraftSnapshot m_snapshot;

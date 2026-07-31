@@ -38,8 +38,14 @@ namespace javelin::jmap
 namespace javelin::app
 {
     class AccountCommandPort;
-    class ComposeService;
+    class CalendarCommandPort;
+    class ComposeCommandPort;
     class ContactCommandPort;
+    class MailCommandPort;
+    class SieveCommandPort;
+    class AccountRefreshPort;
+    class MessageContentPort;
+    class UndoCommandPort;
     class MailboxSession;
     class MessageListSession;
     class MessageNavigationCoordinator;
@@ -49,7 +55,6 @@ namespace javelin::app
 } // namespace javelin::app
 namespace javelin::app::undo
 {
-    class UndoManager;
     struct HistoryFailure;
 } // namespace javelin::app::undo
 namespace javelin::jmap::contacts
@@ -129,16 +134,21 @@ namespace javelin::gui::shell
             javelin::jmap::cache::MailboxReader& mailboxReader,
             javelin::jmap::cache::ContactReader& contactReader,
             javelin::jmap::calendar::CalendarReader& calendarReader,
+            javelin::app::CalendarCommandPort& calendarCommandPort,
             javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
             javelin::jmap::cache::IdentityReader& identityReader,
             javelin::jmap::cache::MessageViewReader& messageViewReader,
             javelin::jmap::cache::QueryReader& queryReader,
             javelin::app::TranslationService& translationService,
-            javelin::app::ComposeService& composeService,
+            javelin::app::ComposeCommandPort& composeCommandPort,
             javelin::app::ContactCommandPort& contactCommandPort,
+            javelin::app::MailCommandPort& mailCommandPort,
+            javelin::app::SieveCommandPort& sieveCommandPort,
+            javelin::app::AccountRefreshPort& accountRefreshPort,
+            javelin::app::MessageContentPort& messageContentPort,
             javelin::app::MailApplicationService& mailService,
             javelin::app::MessageNavigationCoordinator& messageNavigationCoordinator,
-            javelin::app::undo::UndoManager& undoManager, QWidget* parent = nullptr);
+            javelin::app::UndoCommandPort& undoCommandPort, QWidget* parent = nullptr);
         ~MainWindow() override;
         void openPreferencesForConnection(const QString& connectionId);
         void restoreDraft(const QString& accountId, const QString& draftEmailId,
@@ -259,16 +269,21 @@ namespace javelin::gui::shell
         javelin::jmap::cache::MailboxReader& m_mailboxReader;
         javelin::jmap::cache::ContactReader& m_contactReader;
         javelin::jmap::calendar::CalendarReader& m_calendarReader;
+        javelin::app::CalendarCommandPort& m_calendarCommandPort;
         javelin::jmap::contacts::ContactIdentityLookup& m_contactIdentityLookup;
         javelin::jmap::cache::IdentityReader& m_identityReader;
         javelin::jmap::cache::MessageViewReader& m_messageViewReader;
         javelin::jmap::cache::QueryReader& m_queryReader;
         javelin::app::TranslationService& m_translationService;
-        javelin::app::ComposeService& m_composeService;
+        javelin::app::ComposeCommandPort& m_composeCommandPort;
         javelin::app::ContactCommandPort& m_contactCommandPort;
+        javelin::app::MailCommandPort& m_mailCommandPort;
+        javelin::app::SieveCommandPort& m_sieveCommandPort;
+        javelin::app::AccountRefreshPort& m_accountRefreshPort;
+        javelin::app::MessageContentPort& m_messageContentPort;
         javelin::app::MailApplicationService& m_mailService;
         javelin::app::MessageNavigationCoordinator& m_messageNavigationCoordinator;
-        javelin::app::undo::UndoManager& m_undoManager;
+        javelin::app::UndoCommandPort& m_undoCommandPort;
         AccountRefreshController* m_accountRefreshController = nullptr;
         CalendarTabController* m_calendarTabController = nullptr;
         ContactsTabController* m_contactsTabController = nullptr;

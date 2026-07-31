@@ -1,5 +1,6 @@
 #pragma once
 
+#include "app/ComposeApplicationPorts.h"
 #include "gui/shell/ComposeTabPolicy.h"
 #include "gui/shell/TabWorkspace.h"
 #include "jmap/OperationError.h"
@@ -14,11 +15,6 @@
 
 class QStackedWidget;
 class QWidget;
-
-namespace javelin::app
-{
-    class ComposeService;
-}
 
 namespace javelin::jmap::cache
 {
@@ -44,7 +40,7 @@ namespace javelin::gui::shell
         Q_OBJECT
 
       public:
-        ComposeTabController(javelin::app::ComposeService& composeService,
+        ComposeTabController(javelin::app::ComposeCommandPort& composeCommandPort,
                              javelin::jmap::cache::IdentityReader& identityRepository,
                              javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
                              QStackedWidget& contentStack, std::vector<TabState>& tabs,
@@ -82,7 +78,7 @@ namespace javelin::gui::shell
         composeWidgetForTab(const TabState* tab) const;
         [[nodiscard]] bool detachWidget(int index);
 
-        javelin::app::ComposeService& m_composeService;
+        javelin::app::ComposeCommandPort& m_composeCommandPort;
         javelin::jmap::cache::IdentityReader& m_identityRepository;
         javelin::jmap::contacts::ContactIdentityLookup& m_contactIdentityLookup;
         QStackedWidget& m_contentStack;

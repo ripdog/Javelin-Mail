@@ -1,6 +1,5 @@
 #include "gui/shell/ComposeTabController.h"
 
-#include "app/ComposeService.h"
 #include "gui/compose/ComposeTabWidget.h"
 #include "gui/settings/ConnectionSettingsAdapter.h"
 #include "gui/settings/PreferencesDialog.h"
@@ -20,11 +19,11 @@
 namespace javelin::gui::shell
 {
     ComposeTabController::ComposeTabController(
-        javelin::app::ComposeService& composeService,
+        javelin::app::ComposeCommandPort& composeCommandPort,
         javelin::jmap::cache::IdentityReader& identityRepository,
         javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
         QStackedWidget& contentStack, std::vector<TabState>& tabs, QObject* parent)
-        : QObject(parent), m_composeService(composeService),
+        : QObject(parent), m_composeCommandPort(composeCommandPort),
           m_identityRepository(identityRepository), m_contactIdentityLookup(contactIdentityLookup),
           m_contentStack(contentStack), m_tabs(tabs)
     {
@@ -42,7 +41,7 @@ namespace javelin::gui::shell
             return;
         }
 
-        auto task = m_composeService.open(
+        auto task = m_composeCommandPort.open(
             javelin::gui::settings::toAccountConnectionSettings(settings), std::move(request));
         QCoro::connect(
             std::move(task), this,
@@ -65,7 +64,7 @@ namespace javelin::gui::shell
 
     bool ComposeTabController::restore(const PersistedComposeTab& persisted)
     {
-        const auto draftResult = m_composeService.loadWorkingCopy(persisted.composeSessionId);
+        const auto draftResult = m_composeCommandPort.loadWorkingCopy(persisted.composeSessionId);
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&draftResult))
         {
             Q_EMIT operationFailed(*error);
@@ -106,7 +105,7 @@ namespace javelin::gui::shell
         if (composeTab == nullptr || composeTab->widget == nullptr)
             return false;
 
-        if (const auto error = m_composeService.discard(composeTab->widget->composeSessionId()))
+        if (const auto error = m_composeCommandPort.discard(composeTab->widget->composeSessionId()))
         {
             Q_EMIT operationFailed(*error);
             return false;
@@ -191,8 +190,8 @@ namespace javelin::gui::shell
         });
         const auto index = m_tabs.size() - 1;
         auto* widget = new javelin::gui::compose::ComposeTabWidget(
-            m_composeService, m_identityRepository, m_contactIdentityLookup, std::move(snapshot),
-            &m_contentStack);
+            m_composeCommandPort, m_identityRepository, m_contactIdentityLookup,
+            std::move(snapshot), &m_contentStack);
         attachWidget(widget, index);
         return index;
     }

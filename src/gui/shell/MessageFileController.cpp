@@ -1,6 +1,6 @@
 #include "gui/shell/MessageFileController.h"
 
-#include "app/MailApplicationService.h"
+#include "app/MessageContentApplicationPorts.h"
 #include "gui/settings/PreferencesDialog.h"
 #include "gui/shell/MessageFileUtils.h"
 #include "jmap/cache/MessageViewReader.h"
@@ -18,10 +18,10 @@ namespace javelin::gui::shell
 {
 
     MessageFileController::MessageFileController(
-        javelin::app::MailApplicationService& mailService,
+        javelin::app::MessageContentPort& contentPort,
         javelin::jmap::cache::MessageViewReader& messageViewReader, QWidget* dialogParent,
         QObject* parent)
-        : QObject(parent), m_mailService(mailService), m_messageViewReader(messageViewReader),
+        : QObject(parent), m_contentPort(contentPort), m_messageViewReader(messageViewReader),
           m_dialogParent(dialogParent)
     {
     }
@@ -40,7 +40,7 @@ namespace javelin::gui::shell
         }
 
         Q_EMIT statusMessage(QStringLiteral("Downloading attachment..."), 0);
-        auto task = m_mailService.requestAttachment(std::move(accountId), std::move(emailId),
+        auto task = m_contentPort.requestAttachment(std::move(accountId), std::move(emailId),
                                                     std::move(partId));
         QCoro::connect(
             std::move(task), this,
@@ -136,7 +136,7 @@ namespace javelin::gui::shell
         }
 
         Q_EMIT statusMessage(QStringLiteral("Downloading attachments..."), 0);
-        auto task = downloadAttachments(m_mailService, accountId, emailId, attachments);
+        auto task = downloadAttachments(m_contentPort, accountId, emailId, attachments);
         QCoro::connect(
             std::move(task), this,
             [this, targetDirectory](SaveAllDownloadResult result)
@@ -185,7 +185,7 @@ namespace javelin::gui::shell
         }
 
         Q_EMIT statusMessage(QStringLiteral("Downloading attachment..."), 0);
-        auto task = m_mailService.requestAttachment(std::move(accountId), std::move(emailId),
+        auto task = m_contentPort.requestAttachment(std::move(accountId), std::move(emailId),
                                                     std::move(partId));
         QCoro::connect(
             std::move(task), this,
@@ -240,7 +240,7 @@ namespace javelin::gui::shell
         }
 
         Q_EMIT statusMessage(QStringLiteral("Preparing message source..."), 0);
-        auto task = m_mailService.requestMessageSource(std::move(accountId), std::move(emailId));
+        auto task = m_contentPort.requestMessageSource(std::move(accountId), std::move(emailId));
         QCoro::connect(
             std::move(task), this,
             [this](javelin::jmap::MessageSourceDownloadResult result)

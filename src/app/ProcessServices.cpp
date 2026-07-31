@@ -1,11 +1,14 @@
 #include "app/ProcessServices.h"
 
 #include "app/AccountCommandService.h"
+#include "app/AccountRefreshCommandService.h"
 #include "app/AddressSuggestionStore.h"
 #include "app/ApplicationErrorCoordinator.h"
 #include "app/CacheAccessBarrier.h"
 #include "app/CacheLocationProvider.h"
+#include "app/CalendarCommandService.h"
 #include "app/CalendarNotificationService.h"
+#include "app/ComposeCommandService.h"
 #include "app/ComposeService.h"
 #include "app/ContactCommandService.h"
 #include "app/DeferredSendRepository.h"
@@ -14,9 +17,13 @@
 #include "app/InlineMessageSchemeHandler.h"
 #include "app/LocalMaintenanceService.h"
 #include "app/MailApplicationService.h"
+#include "app/MailCommandService.h"
 #include "app/MailIndexService.h"
+#include "app/MessageContentCommandService.h"
 #include "app/MessageNavigationCoordinator.h"
+#include "app/SieveCommandService.h"
 #include "app/TranslationService.h"
+#include "app/UndoCommandService.h"
 #include "app/WorkScheduler.h"
 #include "app/undo/AddressBookHistoryExecutor.h"
 #include "app/undo/CalendarHistoryExecutor.h"
@@ -135,6 +142,7 @@ namespace javelin::app
         m_historyRepository =
             std::make_unique<javelin::app::undo::HistoryRepository>(m_databaseConnection);
         m_undoManager = std::make_unique<javelin::app::undo::UndoManager>(*m_historyRepository);
+        m_undoCommandService = std::make_unique<UndoCommandService>(*m_undoManager);
         m_deferredSendRepository = std::make_unique<DeferredSendRepository>(m_databaseConnection);
         if (const auto historyError = m_undoManager->load())
             throw std::runtime_error(historyError->message.toStdString());
@@ -217,12 +225,20 @@ namespace javelin::app
             *m_stateChangeNetworkAccessManager, *m_webSocketFailureCooldowns, *m_accountRepository,
             *m_queryService, *m_contactService, *m_calendarService, *m_sieveService,
             *m_errorCoordinator, *m_workScheduler, *m_undoManager);
+        m_mailCommandService = std::make_unique<MailCommandService>(*m_mailService);
+        m_sieveCommandService = std::make_unique<SieveCommandService>(*m_mailService);
+        m_accountRefreshCommandService =
+            std::make_unique<AccountRefreshCommandService>(*m_mailService);
+        m_messageContentCommandService =
+            std::make_unique<MessageContentCommandService>(*m_mailService);
+        m_calendarCommandService = std::make_unique<CalendarCommandService>(*m_mailService);
         m_deferredSendService = std::make_unique<DeferredSendService>(
             *m_deferredSendRepository, *m_jmapComposeService, *m_mailService, *m_undoManager);
         m_undoManager->setExecutor(QStringLiteral("deferred_send"), m_deferredSendService.get());
         m_composeService = std::make_unique<ComposeService>(
             *m_jmapComposeService, *m_errorCoordinator, *m_workScheduler, *m_mailService,
             *m_undoManager, *m_deferredSendService);
+        m_composeCommandService = std::make_unique<ComposeCommandService>(*m_composeService);
         m_draftHistoryExecutor =
             std::make_unique<javelin::app::undo::DraftHistoryExecutor>(*m_composeService);
         m_undoManager->setExecutor(QStringLiteral("draft"), m_draftHistoryExecutor.get());
@@ -330,6 +346,11 @@ namespace javelin::app
         return *m_calendarReadService;
     }
 
+    CalendarCommandPort& ProcessServices::calendarCommandPort()
+    {
+        return *m_calendarCommandService;
+    }
+
     javelin::jmap::contacts::ContactIdentityLookup& ProcessServices::contactIdentityLookup()
     {
         return *m_contactIdentityLookup;
@@ -373,6 +394,36 @@ namespace javelin::app
     ComposeService& ProcessServices::composeService()
     {
         return *m_composeService;
+    }
+
+    ComposeCommandPort& ProcessServices::composeCommandPort()
+    {
+        return *m_composeCommandService;
+    }
+
+    MailCommandPort& ProcessServices::mailCommandPort()
+    {
+        return *m_mailCommandService;
+    }
+
+    SieveCommandPort& ProcessServices::sieveCommandPort()
+    {
+        return *m_sieveCommandService;
+    }
+
+    AccountRefreshPort& ProcessServices::accountRefreshPort()
+    {
+        return *m_accountRefreshCommandService;
+    }
+
+    MessageContentPort& ProcessServices::messageContentPort()
+    {
+        return *m_messageContentCommandService;
+    }
+
+    UndoCommandPort& ProcessServices::undoCommandPort()
+    {
+        return *m_undoCommandService;
     }
 
     DeferredSendService& ProcessServices::deferredSendService()

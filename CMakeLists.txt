@@ -107,13 +107,32 @@ set(JAVELIN_FORMAT_FILES
     src/app/AccountApplicationPorts.h
     src/app/AccountCommandService.cpp
     src/app/AccountCommandService.h
+    src/app/AccountRefreshApplicationPorts.h
+    src/app/AccountRefreshCommandService.cpp
+    src/app/AccountRefreshCommandService.h
     src/app/CacheAccessBarrier.cpp
     src/app/CacheAccessBarrier.h
     src/app/ApplicationErrorCoordinator.cpp
     src/app/ApplicationErrorCoordinator.h
     src/app/CalendarNotificationService.cpp
     src/app/CalendarNotificationService.h
+    src/app/CalendarApplicationPorts.h
+    src/app/CalendarCommandService.cpp
+    src/app/CalendarCommandService.h
     src/app/ContactApplicationPorts.h
+    src/app/MailApplicationTypes.h
+    src/app/MailApplicationPorts.h
+    src/app/MailCommandService.cpp
+    src/app/MailCommandService.h
+    src/app/MessageContentApplicationPorts.h
+    src/app/MessageContentCommandService.cpp
+    src/app/MessageContentCommandService.h
+    src/app/SieveApplicationPorts.h
+    src/app/SieveCommandService.cpp
+    src/app/SieveCommandService.h
+    src/app/UndoApplicationPorts.h
+    src/app/UndoCommandService.cpp
+    src/app/UndoCommandService.h
     src/app/ContactCommandPreparation.cpp
     src/app/ContactCommandPreparation.h
     src/app/ContactCommands.h
@@ -123,6 +142,9 @@ set(JAVELIN_FORMAT_FILES
     src/app/AddressSuggestionStore.h
     src/app/ComposeService.cpp
     src/app/ComposeService.h
+    src/app/ComposeApplicationPorts.h
+    src/app/ComposeCommandService.cpp
+    src/app/ComposeCommandService.h
     src/app/ComposePreferences.cpp
     src/app/ComposePreferences.h
     src/app/DeferredSendRepository.cpp
@@ -328,11 +350,13 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/api/CalendarMethods.cpp
     src/jmap/api/CalendarMethods.h
     src/jmap/calendar/CalendarTypes.h
+    src/jmap/calendar/CalendarCommandTypes.h
     src/jmap/calendar/CalendarEventEditing.cpp
     src/jmap/calendar/CalendarEventEditing.h
     src/jmap/calendar/CalendarService.cpp
     src/jmap/calendar/CalendarService.h
     src/jmap/calendar/CalendarReader.h
+    src/jmap/sieve/SieveCommandTypes.h
     src/jmap/calendar/CalendarReadService.cpp
     src/jmap/calendar/CalendarReadService.h
     src/jmap/api/MailMethods.cpp
@@ -491,6 +515,7 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/submission/DraftMutationJournal.h
     src/jmap/sieve/SieveService.cpp
     src/jmap/sieve/SieveService.h
+    src/jmap/sieve/SieveCommandTypes.h
     src/jmap/sieve/SieveMutationJournal.cpp
     src/jmap/sieve/SieveMutationJournal.h
     src/jmap/sieve/SieveTypes.h
@@ -552,6 +577,7 @@ add_library(javelin_jmap STATIC
     src/jmap/api/CalendarMethods.cpp
     src/jmap/api/CalendarMethods.h
     src/jmap/calendar/CalendarTypes.h
+    src/jmap/calendar/CalendarCommandTypes.h
     src/jmap/calendar/CalendarService.cpp
     src/jmap/calendar/CalendarService.h
     src/jmap/calendar/CalendarReader.h
@@ -948,6 +974,84 @@ foreach(contacts_gui_source IN LISTS javelin_contacts_gui_sources)
     endif()
 endforeach()
 
+set(javelin_mail_command_gui_sources
+    src/gui/shell/MessageCommandController.cpp
+    src/gui/shell/MessageCommandController.h
+)
+foreach(mail_command_gui_source IN LISTS javelin_mail_command_gui_sources)
+    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/${mail_command_gui_source}"
+         mail_command_gui_source_contents)
+    if(mail_command_gui_source_contents MATCHES
+       "javelin::app::MailApplicationService|app/MailApplicationService\\.h")
+        message(FATAL_ERROR
+                "Message command GUI must depend on MailCommandPort: ${mail_command_gui_source}")
+    endif()
+endforeach()
+
+set(javelin_compose_command_gui_sources
+    src/gui/compose/ComposeTabWidget.cpp
+    src/gui/compose/ComposeTabWidget.h
+    src/gui/shell/ComposeTabController.cpp
+    src/gui/shell/ComposeTabController.h
+)
+foreach(compose_command_gui_source IN LISTS javelin_compose_command_gui_sources)
+    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/${compose_command_gui_source}"
+         compose_command_gui_source_contents)
+    if(compose_command_gui_source_contents MATCHES
+       "javelin::app::ComposeService|app/ComposeService\\.h")
+        message(FATAL_ERROR
+                "Compose GUI must depend on ComposeCommandPort: ${compose_command_gui_source}")
+    endif()
+endforeach()
+
+set(javelin_calendar_command_gui_sources
+    src/gui/shell/CalendarTabController.cpp
+    src/gui/shell/CalendarTabController.h
+)
+foreach(calendar_command_gui_source IN LISTS javelin_calendar_command_gui_sources)
+    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/${calendar_command_gui_source}"
+         calendar_command_gui_source_contents)
+    if(calendar_command_gui_source_contents MATCHES
+       "javelin::app::MailApplicationService|app/MailApplicationService\\.h")
+        message(FATAL_ERROR
+                "Calendar GUI must depend on CalendarCommandPort: ${calendar_command_gui_source}")
+    endif()
+endforeach()
+
+set(javelin_sieve_command_gui_sources
+    src/gui/sieve/SieveEditorDialog.cpp
+    src/gui/sieve/SieveEditorDialog.h
+)
+foreach(sieve_command_gui_source IN LISTS javelin_sieve_command_gui_sources)
+    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/${sieve_command_gui_source}"
+         sieve_command_gui_source_contents)
+    if(sieve_command_gui_source_contents MATCHES
+       "javelin::app::MailApplicationService|app/MailApplicationService\.h")
+        message(FATAL_ERROR
+                "Sieve GUI must depend on SieveCommandPort: ${sieve_command_gui_source}")
+    endif()
+endforeach()
+
+set(javelin_refresh_content_gui_sources
+    src/gui/shell/AccountRefreshController.cpp
+    src/gui/shell/AccountRefreshController.h
+    src/gui/shell/MessageContentController.cpp
+    src/gui/shell/MessageContentController.h
+    src/gui/shell/MessageFileController.cpp
+    src/gui/shell/MessageFileController.h
+    src/gui/shell/MessageFileUtils.cpp
+    src/gui/shell/MessageFileUtils.h
+)
+foreach(refresh_content_gui_source IN LISTS javelin_refresh_content_gui_sources)
+    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/${refresh_content_gui_source}"
+         refresh_content_gui_source_contents)
+    if(refresh_content_gui_source_contents MATCHES
+       "javelin::app::MailApplicationService|app/MailApplicationService\.h")
+        message(FATAL_ERROR
+                "Refresh/content GUI must depend on application ports: ${refresh_content_gui_source}")
+    endif()
+endforeach()
+
 target_include_directories(javelin_gui PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
 )
@@ -996,6 +1100,9 @@ add_library(javelin_application STATIC
     src/app/AccountApplicationPorts.h
     src/app/AccountCommandService.cpp
     src/app/AccountCommandService.h
+    src/app/AccountRefreshApplicationPorts.h
+    src/app/AccountRefreshCommandService.cpp
+    src/app/AccountRefreshCommandService.h
     src/app/CacheAccessBarrier.cpp
     src/app/CacheAccessBarrier.h
     src/app/AccountConnectionProvider.h
@@ -1008,9 +1115,28 @@ add_library(javelin_application STATIC
     src/app/CacheLocationProvider.h
     src/app/CalendarNotificationService.cpp
     src/app/CalendarNotificationService.h
+    src/app/CalendarApplicationPorts.h
+    src/app/CalendarCommandService.cpp
+    src/app/CalendarCommandService.h
     src/app/ContactApplicationPorts.h
+    src/app/MailApplicationTypes.h
+    src/app/MailApplicationPorts.h
+    src/app/MailCommandService.cpp
+    src/app/MailCommandService.h
+    src/app/MessageContentApplicationPorts.h
+    src/app/MessageContentCommandService.cpp
+    src/app/MessageContentCommandService.h
+    src/app/SieveApplicationPorts.h
+    src/app/SieveCommandService.cpp
+    src/app/SieveCommandService.h
+    src/app/UndoApplicationPorts.h
+    src/app/UndoCommandService.cpp
+    src/app/UndoCommandService.h
     src/app/ComposeService.cpp
     src/app/ComposeService.h
+    src/app/ComposeApplicationPorts.h
+    src/app/ComposeCommandService.cpp
+    src/app/ComposeCommandService.h
     src/app/ComposePreferences.cpp
     src/app/ComposePreferences.h
     src/app/DeferredSendRepository.cpp

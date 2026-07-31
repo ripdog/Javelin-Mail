@@ -1,6 +1,6 @@
 #pragma once
 
-#include "app/MailApplicationService.h"
+#include "app/AccountRefreshApplicationPorts.h"
 #include "gui/settings/ConnectionSettings.h"
 
 #include <string>

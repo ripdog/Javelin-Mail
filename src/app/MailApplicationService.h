@@ -2,8 +2,11 @@
 
 #include "app/AccountConnectionProvider.h"
 #include "app/AccountConnectionSettings.h"
+#include "app/AccountRefreshApplicationPorts.h"
 #include "app/ContactApplicationPorts.h"
 #include "app/LongPollService.h"
+#include "app/MailApplicationPorts.h"
+#include "app/MailApplicationTypes.h"
 #include "app/MailboxSelectionMutation.h"
 #include "app/undo/CalendarHistoryPort.h"
 #include "app/undo/CalendarPreferencePort.h"
@@ -98,15 +101,6 @@ namespace javelin::app
 
     using SearchWindowResult = std::variant<SearchWindowSummary, javelin::jmap::OperationError>;
 
-    struct CalendarCacheChange
-    {
-        QString ownerAccountId;
-        javelin::jmap::calendar::VisibleInterval interval;
-        javelin::jmap::calendar::TimeZoneId displayTimeZone;
-        std::size_t accountCount = 0;
-        std::size_t eventCount = 0;
-    };
-
     struct AccountSyncConfiguration
     {
         AccountConnectionSettings settings;
@@ -116,35 +110,6 @@ namespace javelin::app
         std::vector<std::string> notificationMailboxIds;
         bool notificationMailboxSelectionConfigured = false;
     };
-
-    struct AccountBootstrapIntent
-    {
-        AccountConnectionSettings settings;
-        std::vector<std::string> mailboxIds;
-    };
-
-    struct QueuedMailboxSelectionMutation
-    {
-        std::string accountId;
-        std::size_t queuedEmailCount = 0;
-        std::size_t skippedEmailCount = 0;
-        std::vector<javelin::jmap::QueuedEmailMutation> queuedMutations;
-        std::optional<QString> historyEntryId;
-    };
-
-    using QueuedMailboxSelectionMutationResult =
-        std::variant<QueuedMailboxSelectionMutation, javelin::jmap::OperationError>;
-
-    struct QueuedMessageSelectionMutation
-    {
-        std::string accountId;
-        std::size_t queuedEmailCount = 0;
-        std::vector<javelin::jmap::QueuedEmailMutation> queuedMutations;
-        std::optional<QString> historyEntryId;
-    };
-
-    using QueuedMessageSelectionMutationResult =
-        std::variant<QueuedMessageSelectionMutation, javelin::jmap::OperationError>;
 
     class MailApplicationService final : public QObject,
                                          public AccountConnectionProvider,

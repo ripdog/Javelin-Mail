@@ -1,6 +1,6 @@
 #include "gui/shell/AccountRefreshController.h"
 
-#include "app/MailApplicationService.h"
+#include "app/AccountRefreshApplicationPorts.h"
 #include "gui/settings/ConnectionSettingsAdapter.h"
 #include "gui/settings/PreferencesDialog.h"
 #include "jmap/cache/AccountReadRepository.h"
@@ -16,15 +16,15 @@
 namespace javelin::gui::shell
 {
     AccountRefreshController::AccountRefreshController(
-        javelin::app::MailApplicationService& mailService,
+        javelin::app::AccountRefreshPort& commandPort,
         javelin::jmap::cache::AccountReader& accountReader, QObject* parent)
-        : QObject(parent), m_mailService(mailService), m_accountReader(accountReader)
+        : QObject(parent), m_commandPort(commandPort), m_accountReader(accountReader)
     {
     }
 
     void AccountRefreshController::refreshAccount(std::string accountId)
     {
-        if (m_mailService.requestAccountSynchronization(accountId))
+        if (m_commandPort.requestAccountSynchronization(accountId))
         {
             Q_EMIT statusMessage(QStringLiteral("Synchronizing account..."), 0);
             return;
@@ -61,7 +61,7 @@ namespace javelin::gui::shell
                 mailboxIds.push_back(mailboxId.toStdString());
         }
 
-        auto task = m_mailService.bootstrapAccount(
+        auto task = m_commandPort.bootstrapAccount(
             javelin::gui::settings::toAccountBootstrapIntent(settings, std::move(mailboxIds)));
         QCoro::connect(
             std::move(task), this,
@@ -98,7 +98,7 @@ namespace javelin::gui::shell
                                   << static_cast<qulonglong>(summary.emailCount);
                 Q_EMIT accountRefreshed(summary);
 
-                auto contactsTask = m_mailService.requestContacts(summary.accountId);
+                auto contactsTask = m_commandPort.requestContacts(summary.accountId);
                 QCoro::connect(
                     std::move(contactsTask), this,
                     [this](javelin::jmap::contacts::ContactRefreshResult contactsResult)

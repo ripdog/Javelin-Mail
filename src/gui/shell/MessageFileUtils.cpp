@@ -155,7 +155,7 @@ namespace javelin::gui::shell
     }
 
     QCoro::Task<SaveAllDownloadResult>
-    downloadAttachments(javelin::app::MailApplicationService& mailService, std::string accountId,
+    downloadAttachments(javelin::app::MessageContentPort& contentPort, std::string accountId,
                         std::string emailId,
                         std::vector<javelin::jmap::cache::MessageAttachment> attachments)
     {
@@ -165,7 +165,7 @@ namespace javelin::gui::shell
         for (const auto& attachment : attachments)
         {
             const auto downloadResult =
-                co_await mailService.requestAttachment(accountId, emailId, attachment.partId);
+                co_await contentPort.requestAttachment(accountId, emailId, attachment.partId);
             if (const auto* error = std::get_if<javelin::jmap::OperationError>(&downloadResult))
             {
                 co_return SaveAllDownloadResult{

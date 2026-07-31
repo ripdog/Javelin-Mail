@@ -1,6 +1,6 @@
 #pragma once
 
-#include "jmap/sieve/SieveService.h"
+#include "jmap/sieve/SieveCommandTypes.h"
 
 #include <QDialog>
 
@@ -19,7 +19,7 @@ namespace KTextEditor
 
 namespace javelin::app
 {
-    class MailApplicationService;
+    class SieveCommandPort;
 }
 
 namespace javelin::gui::sieve
@@ -29,7 +29,7 @@ namespace javelin::gui::sieve
         Q_OBJECT
 
       public:
-        SieveEditorDialog(javelin::app::MailApplicationService& service, std::string ownerAccountId,
+        SieveEditorDialog(javelin::app::SieveCommandPort& commandPort, std::string ownerAccountId,
                           QWidget* parent = nullptr);
 
       private:
@@ -45,7 +45,7 @@ namespace javelin::gui::sieve
         void showError(const javelin::jmap::OperationError& error);
         void updateActions();
 
-        javelin::app::MailApplicationService& m_service;
+        javelin::app::SieveCommandPort& m_commandPort;
         std::string m_ownerAccountId;
         std::vector<javelin::jmap::sieve::SieveScript> m_scripts;
         int m_currentRow = -1;

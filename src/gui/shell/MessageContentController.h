@@ -1,5 +1,6 @@
 #pragma once
 
+#include "app/MessageContentApplicationPorts.h"
 #include "jmap/JmapCore.h"
 #include "jmap/OperationError.h"
 
@@ -11,7 +12,7 @@
 
 namespace javelin::app
 {
-    class MailApplicationService;
+    class MessageContentPort;
 }
 
 namespace javelin::gui::shell
@@ -21,7 +22,7 @@ namespace javelin::gui::shell
         Q_OBJECT
 
       public:
-        explicit MessageContentController(javelin::app::MailApplicationService& mailService,
+        explicit MessageContentController(javelin::app::MessageContentPort& contentPort,
                                           QObject* parent = nullptr);
 
         void request(std::string accountId, std::string emailId);
@@ -39,7 +40,7 @@ namespace javelin::gui::shell
             std::uint64_t token = 0;
         };
 
-        javelin::app::MailApplicationService& m_mailService;
+        javelin::app::MessageContentPort& m_contentPort;
         std::uint64_t m_nextRequestToken = 1;
         std::optional<RequestState> m_requestInFlight;
     };

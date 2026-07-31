@@ -1,0 +1,68 @@
+#pragma once
+
+#include "app/MailboxSelectionMutation.h"
+#include "app/MessageSelection.h"
+#include "jmap/JmapCore.h"
+
+#include <QCoroTask>
+
+#include <QString>
+
+#include <cstddef>
+#include <optional>
+#include <string>
+#include <variant>
+#include <vector>
+
+namespace javelin::app
+{
+
+    struct QueuedMailboxSelectionMutation
+    {
+        std::string accountId;
+        std::size_t queuedEmailCount = 0;
+        std::size_t skippedEmailCount = 0;
+        std::vector<javelin::jmap::QueuedEmailMutation> queuedMutations;
+        std::optional<QString> historyEntryId;
+    };
+
+    using QueuedMailboxSelectionMutationResult =
+        std::variant<QueuedMailboxSelectionMutation, javelin::jmap::OperationError>;
+
+    struct QueuedMessageSelectionMutation
+    {
+        std::string accountId;
+        std::size_t queuedEmailCount = 0;
+        std::vector<javelin::jmap::QueuedEmailMutation> queuedMutations;
+        std::optional<QString> historyEntryId;
+    };
+
+    using QueuedMessageSelectionMutationResult =
+        std::variant<QueuedMessageSelectionMutation, javelin::jmap::OperationError>;
+
+    // The GUI raises mail intents through this port. The implementation owns optimistic
+    // projection, mutation grouping, and remote submission; presentation code only renders the
+    // typed result and never assembles a protocol mutation itself.
+    class MailCommandPort
+    {
+      public:
+        virtual ~MailCommandPort() = default;
+
+        [[nodiscard]] virtual QueuedMailboxSelectionMutationResult
+        queueMailboxSelectionMutation(MailboxSelectionMutationIntent intent) = 0;
+        [[nodiscard]] virtual QueuedMessageSelectionMutationResult
+        queueDestroyMessages(std::string accountId, std::optional<std::string> sourceMailboxId,
+                             MessageSelection selection) = 0;
+        [[nodiscard]] virtual QueuedMessageSelectionMutationResult
+        queueMarkMessagesUnread(std::string accountId, std::optional<std::string> sourceMailboxId,
+                                MessageSelection selection) = 0;
+        [[nodiscard]] virtual QueuedMessageSelectionMutationResult
+        queueMarkEmailRead(std::string accountId, std::string emailId) = 0;
+        [[nodiscard]] virtual QueuedMessageSelectionMutationResult
+        queueSetEmailFlagged(std::string accountId, std::string emailId, bool flagged) = 0;
+        [[nodiscard]] virtual QCoro::Task<javelin::jmap::SubmittedEmailMutationsResult>
+        submitPendingEmailMutations(std::string accountId,
+                                    std::optional<std::string> operationGroupId = std::nullopt) = 0;
+    };
+
+} // namespace javelin::app

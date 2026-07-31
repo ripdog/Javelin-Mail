@@ -1,14 +1,16 @@
 #include "gui/shell/MainWindow.h"
 
 #include "app/AccountApplicationPorts.h"
-#include "app/ComposeService.h"
+#include "app/AccountRefreshApplicationPorts.h"
+#include "app/ComposeApplicationPorts.h"
 #include "app/MailApplicationService.h"
 #include "app/MailboxSession.h"
+#include "app/MessageContentApplicationPorts.h"
 #include "app/MessageListSession.h"
 #include "app/MessageNavigationCoordinator.h"
 #include "app/SearchSession.h"
 #include "app/TranslationService.h"
-#include "app/undo/UndoManager.h"
+#include "app/UndoApplicationPorts.h"
 #include "gui/IconUtils.h"
 #include "gui/logging/LogViewerDialog.h"
 #include "gui/mailboxes/MailboxIconUtils.h"
@@ -236,29 +238,38 @@ namespace javelin::gui::shell
                            javelin::jmap::cache::MailboxReader& mailboxReader,
                            javelin::jmap::cache::ContactReader& contactReader,
                            javelin::jmap::calendar::CalendarReader& calendarReader,
+                           javelin::app::CalendarCommandPort& calendarCommandPort,
                            javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
                            javelin::jmap::cache::IdentityReader& identityReader,
                            javelin::jmap::cache::MessageViewReader& messageViewReader,
                            javelin::jmap::cache::QueryReader& queryReader,
                            javelin::app::TranslationService& translationService,
-                           javelin::app::ComposeService& composeService,
+                           javelin::app::ComposeCommandPort& composeCommandPort,
                            javelin::app::ContactCommandPort& contactCommandPort,
+                           javelin::app::MailCommandPort& mailCommandPort,
+                           javelin::app::SieveCommandPort& sieveCommandPort,
+                           javelin::app::AccountRefreshPort& accountRefreshPort,
+                           javelin::app::MessageContentPort& messageContentPort,
                            javelin::app::MailApplicationService& mailService,
                            javelin::app::MessageNavigationCoordinator& messageNavigationCoordinator,
-                           javelin::app::undo::UndoManager& undoManager, QWidget* parent)
+                           javelin::app::UndoCommandPort& undoCommandPort, QWidget* parent)
         : KXmlGuiWindow(parent), m_accountCommandPort(accountCommandPort),
           m_accountReader(accountReader), m_mailboxReader(mailboxReader),
           m_contactReader(contactReader), m_calendarReader(calendarReader),
+          m_calendarCommandPort(calendarCommandPort),
           m_contactIdentityLookup(contactIdentityLookup), m_identityReader(identityReader),
           m_messageViewReader(messageViewReader), m_queryReader(queryReader),
-          m_translationService(translationService), m_composeService(composeService),
-          m_contactCommandPort(contactCommandPort), m_mailService(mailService),
-          m_messageNavigationCoordinator(messageNavigationCoordinator), m_undoManager(undoManager)
+          m_translationService(translationService), m_composeCommandPort(composeCommandPort),
+          m_contactCommandPort(contactCommandPort), m_mailCommandPort(mailCommandPort),
+          m_sieveCommandPort(sieveCommandPort), m_accountRefreshPort(accountRefreshPort),
+          m_messageContentPort(messageContentPort), m_mailService(mailService),
+          m_messageNavigationCoordinator(messageNavigationCoordinator),
+          m_undoCommandPort(undoCommandPort)
     {
         m_statusBar = new LayeredStatusBar(this);
         setStatusBar(m_statusBar);
         m_messageFileController =
-            new MessageFileController(m_mailService, m_messageViewReader, this, this);
+            new MessageFileController(m_messageContentPort, m_messageViewReader, this, this);
         connect(m_messageFileController, &MessageFileController::statusMessage, this,
                 [this](const QString& message, const int durationMilliseconds)
                 {
@@ -274,14 +285,14 @@ namespace javelin::gui::shell
         setupUi();
         connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged, this,
                 [this] { scheduleApplicationPaletteRefresh(); });
-        connect(&m_undoManager, &javelin::app::undo::UndoManager::historyStateChanged, this,
+        connect(&m_undoCommandPort, &javelin::app::UndoCommandPort::historyStateChanged, this,
                 [this](const javelin::app::undo::HistoryState&) { updateUndoRedoActions(); });
         connect(
-            &m_undoManager, &javelin::app::undo::UndoManager::executionCompleted, this,
+            &m_undoCommandPort, &javelin::app::UndoCommandPort::executionCompleted, this,
             [this](const QString& entryId, const javelin::app::undo::HistoryRefreshScope&)
             {
                 refreshViewsFromCache();
-                const auto& entries = m_undoManager.entries();
+                const auto& entries = m_undoCommandPort.entries();
                 const auto completed =
                     std::ranges::find(entries, entryId, &javelin::app::undo::HistoryEntry::entryId);
                 if (completed == entries.end())
@@ -292,14 +303,14 @@ namespace javelin::gui::shell
                                              completed->label + QStringLiteral("."),
                                          5000);
             });
-        connect(&m_undoManager, &javelin::app::undo::UndoManager::executionFailed, this,
+        connect(&m_undoCommandPort, &javelin::app::UndoCommandPort::executionFailed, this,
                 &MainWindow::presentHistoryFailure);
         connect(qApp, &QApplication::focusChanged, this,
                 [this](QWidget*, QWidget*) { updateUndoRedoActions(); });
         qApp->installEventFilter(this);
         updateUndoRedoActions();
         m_accountRefreshController =
-            new AccountRefreshController(m_mailService, m_accountReader, this);
+            new AccountRefreshController(m_accountRefreshPort, m_accountReader, this);
         connect(m_accountRefreshController, &AccountRefreshController::busyChanged, this,
                 [this](const bool busy)
                 {
@@ -339,7 +350,7 @@ namespace javelin::gui::shell
         connect(m_accountRefreshController, &AccountRefreshController::contactsRefreshed, this,
                 [this](const javelin::jmap::contacts::ContactRefreshSummary&)
                 { reloadAccounts(); });
-        m_calendarTabController = new CalendarTabController(m_calendarReader, m_mailService,
+        m_calendarTabController = new CalendarTabController(m_calendarReader, m_calendarCommandPort,
                                                             *m_contentStack, m_tabs, this);
         connect(m_calendarTabController, &CalendarTabController::tabReady, this,
                 [this](const int index)
@@ -353,8 +364,9 @@ namespace javelin::gui::shell
                 { m_statusBar->showMessage(message, durationMilliseconds); });
         connect(m_calendarTabController, &CalendarTabController::operationFailed, this,
                 [this](const javelin::jmap::OperationError& error) { presentError(error); });
-        m_contactsTabController = new ContactsTabController(
-            m_contactReader, m_mailService, m_contactCommandPort, *m_contentStack, m_tabs, this);
+        m_contactsTabController =
+            new ContactsTabController(m_contactReader, m_accountRefreshPort, m_contactCommandPort,
+                                      *m_contentStack, m_tabs, this);
         connect(m_contactsTabController, &ContactsTabController::tabReady, this,
                 [this](const int index)
                 {
@@ -396,8 +408,8 @@ namespace javelin::gui::shell
                                             true);
                 });
         m_composeTabController =
-            new ComposeTabController(m_composeService, m_identityReader, m_contactIdentityLookup,
-                                     *m_contentStack, m_tabs, this);
+            new ComposeTabController(m_composeCommandPort, m_identityReader,
+                                     m_contactIdentityLookup, *m_contentStack, m_tabs, this);
         connect(m_composeTabController, &ComposeTabController::tabReady, this,
                 [this](const int index)
                 {
@@ -424,7 +436,7 @@ namespace javelin::gui::shell
             new MessageListTabController(m_queryReader, m_mailService, pageSize, this, this);
         m_messageNavigationController = std::make_unique<MessageNavigationController>(
             m_messageNavigationCoordinator, *m_messageListTabController);
-        m_messageContentController = new MessageContentController(m_mailService, this);
+        m_messageContentController = new MessageContentController(m_messageContentPort, this);
         connect(m_messageViewContainer,
                 &javelin::gui::messageview::MessageViewContainer::contentRequired,
                 m_messageContentController,
@@ -973,7 +985,7 @@ namespace javelin::gui::shell
             updateUndoRedoActions();
             return;
         }
-        auto task = m_undoManager.undo();
+        auto task = m_undoCommandPort.undo();
         QCoro::connect(std::move(task), this, [](const bool) {});
     }
 
@@ -985,7 +997,7 @@ namespace javelin::gui::shell
             updateUndoRedoActions();
             return;
         }
-        auto task = m_undoManager.redo();
+        auto task = m_undoCommandPort.redo();
         QCoro::connect(std::move(task), this, [](const bool) {});
     }
 
@@ -998,7 +1010,7 @@ namespace javelin::gui::shell
             FocusedCommandRouter::isNativeCommandAvailable(focus, EditHistoryDirection::Undo);
         const bool nativeRedo =
             FocusedCommandRouter::isNativeCommandAvailable(focus, EditHistoryDirection::Redo);
-        const auto& state = m_undoManager.state();
+        const auto& state = m_undoCommandPort.state();
         m_undoAction->setText(nativeUndo ? QStringLiteral("Undo") : state.undoLabel);
         m_redoAction->setText(nativeRedo ? QStringLiteral("Redo") : state.redoLabel);
         m_undoAction->setEnabled(nativeUndo || state.canUndo);
@@ -1028,11 +1040,11 @@ namespace javelin::gui::shell
         messageBox.exec();
         if (failure.acknowledgeAndRemove)
         {
-            static_cast<void>(m_undoManager.acknowledgeAndRemove(failure.entryId));
+            static_cast<void>(m_undoCommandPort.acknowledgeAndRemove(failure.entryId));
         }
         else if (removeButton != nullptr && messageBox.clickedButton() == removeButton)
         {
-            static_cast<void>(m_undoManager.forget(failure.entryId));
+            static_cast<void>(m_undoCommandPort.forget(failure.entryId));
         }
     }
 
@@ -1093,8 +1105,8 @@ namespace javelin::gui::shell
         m_messageView->installEventFilter(this);
         m_messageView->viewport()->installEventFilter(this);
 
-        m_messageCommandController = new MessageCommandController(m_mailService, m_mailboxReader,
-                                                                  *m_messageView, this, this);
+        m_messageCommandController = new MessageCommandController(
+            m_mailCommandPort, m_mailboxReader, *m_messageView, this, this);
         connect(m_messageCommandController, &MessageCommandController::statusMessage, this,
                 [this](const QString& message, const int durationMilliseconds)
                 { m_statusBar->showMessage(message, durationMilliseconds); });
@@ -1488,7 +1500,7 @@ namespace javelin::gui::shell
                                      5000);
             return;
         }
-        javelin::gui::sieve::SieveEditorDialog dialog{m_mailService, *accountId, this};
+        javelin::gui::sieve::SieveEditorDialog dialog{m_sieveCommandPort, *accountId, this};
         dialog.exec();
     }
 

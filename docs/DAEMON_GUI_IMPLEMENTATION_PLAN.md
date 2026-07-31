@@ -303,6 +303,16 @@ single process. Follow [Mutations and optimistic consistency](DAEMON_GUI_ARCHITE
 [Undo and Redo](DAEMON_GUI_ARCHITECTURE.md#undo-and-redo), and
 [Command identity and retries](DAEMON_GUI_ARCHITECTURE.md#command-identity-and-retries).
 
+### Implementation status
+
+The in-process migration currently has typed application ports and adapters for mail mutations,
+Undo/Redo, compose and drafts, contacts, calendar, Sieve, account refresh/contact refresh, and
+message content, attachment, and source retrieval. The migrated GUI consumers no longer include or
+accept the concrete application service for those slices, and CMake boundary checks reject those
+direct crossings. The common daemon dispatcher, UUID command identity/admission, closed process
+error taxonomy, and conformance tests remain outstanding; message-list observation and translation
+are also still transitional service crossings pending their ordered slices below.
+
 ### Work common to every command
 
 1. Add a daemon command dispatcher over existing application coordination services. It validates the

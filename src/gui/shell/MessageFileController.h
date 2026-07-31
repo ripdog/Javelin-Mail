@@ -1,5 +1,6 @@
 #pragma once
 
+#include "app/MessageContentApplicationPorts.h"
 #include "jmap/OperationError.h"
 
 #include <QObject>
@@ -12,7 +13,7 @@ class QWidget;
 
 namespace javelin::app
 {
-    class MailApplicationService;
+    class MessageContentPort;
 }
 
 namespace javelin::jmap::cache
@@ -28,7 +29,7 @@ namespace javelin::gui::shell
         Q_OBJECT
 
       public:
-        MessageFileController(javelin::app::MailApplicationService& mailService,
+        MessageFileController(javelin::app::MessageContentPort& contentPort,
                               javelin::jmap::cache::MessageViewReader& messageViewReader,
                               QWidget* dialogParent, QObject* parent = nullptr);
 
@@ -43,7 +44,7 @@ namespace javelin::gui::shell
         void userInterventionRequired(QString message);
 
       private:
-        javelin::app::MailApplicationService& m_mailService;
+        javelin::app::MessageContentPort& m_contentPort;
         javelin::jmap::cache::MessageViewReader& m_messageViewReader;
         QPointer<QWidget> m_dialogParent;
         QTemporaryDir m_temporaryDirectory;

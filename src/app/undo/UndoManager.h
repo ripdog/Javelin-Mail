@@ -97,7 +97,3 @@ namespace javelin::app::undo
     };
 
 } // namespace javelin::app::undo
-
-Q_DECLARE_METATYPE(javelin::app::undo::HistoryState)
-Q_DECLARE_METATYPE(javelin::app::undo::HistoryFailure)
-Q_DECLARE_METATYPE(javelin::app::undo::HistoryRefreshScope)

@@ -223,12 +223,15 @@ namespace javelin::app
         m_mainWindow = new javelin::gui::shell::MainWindow(
             m_processServices->accountCommandPort(), m_processServices->accountReader(),
             m_processServices->mailboxReader(), m_processServices->contactReader(),
-            m_processServices->calendarReader(), m_processServices->contactIdentityLookup(),
-            m_processServices->identityReader(), m_processServices->messageViewReader(),
-            m_processServices->queryReader(), m_processServices->translationService(),
-            m_processServices->composeService(), m_processServices->contactCommandPort(),
-            m_processServices->mailService(), m_processServices->messageNavigationCoordinator(),
-            m_processServices->undoManager());
+            m_processServices->calendarReader(), m_processServices->calendarCommandPort(),
+            m_processServices->contactIdentityLookup(), m_processServices->identityReader(),
+            m_processServices->messageViewReader(), m_processServices->queryReader(),
+            m_processServices->translationService(), m_processServices->composeCommandPort(),
+            m_processServices->contactCommandPort(), m_processServices->mailCommandPort(),
+            m_processServices->sieveCommandPort(), m_processServices->accountRefreshPort(),
+            m_processServices->messageContentPort(), m_processServices->mailService(),
+            m_processServices->messageNavigationCoordinator(),
+            m_processServices->undoCommandPort());
 
         m_mainWindow->setAttribute(Qt::WA_DeleteOnClose);
         auto* taskButton = new QToolButton(m_mainWindow);

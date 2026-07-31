@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QDateTime>
+#include <QMetaType>
 #include <QString>
 #include <QStringList>
 
@@ -253,3 +254,6 @@ namespace javelin::app::undo
     [[nodiscard]] std::optional<HistoryDomain> historyDomainFromString(const QString& value);
 
 } // namespace javelin::app::undo
+
+Q_DECLARE_METATYPE(javelin::app::undo::HistoryState)
+Q_DECLARE_METATYPE(javelin::app::undo::HistoryFailure)

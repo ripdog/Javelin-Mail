@@ -1,6 +1,5 @@
 #include "gui/shell/MessageCommandController.h"
 
-#include "app/MailApplicationService.h"
 #include "gui/mailboxes/MailboxSort.h"
 #include "gui/messages/MessageActionSelection.h"
 #include "gui/messages/MessageListModel.h"
@@ -49,10 +48,10 @@ namespace javelin::gui::shell
     } // namespace
 
     MessageCommandController::MessageCommandController(
-        javelin::app::MailApplicationService& mailService,
+        javelin::app::MailCommandPort& mailCommandPort,
         javelin::jmap::cache::MailboxReader& mailboxReader, QListView& messageView,
         QWidget* dialogParent, QObject* parent)
-        : QObject(parent), m_mailService(mailService), m_mailboxReader(mailboxReader),
+        : QObject(parent), m_mailCommandPort(mailCommandPort), m_mailboxReader(mailboxReader),
           m_messageView(messageView), m_dialogParent(dialogParent)
     {
     }
@@ -227,7 +226,7 @@ namespace javelin::gui::shell
         qCInfo(logMessageCommands).noquote()
             << (move ? "move requested" : "copy requested") << selection.size()
             << "selection item(s) to" << QString::fromStdString(destinationMailboxId);
-        const auto result = m_mailService.queueMailboxSelectionMutation(
+        const auto result = m_mailCommandPort.queueMailboxSelectionMutation(
             javelin::app::MailboxSelectionMutationIntent{
                 .accountId = accountId,
                 .selection = std::move(selection),
@@ -281,7 +280,7 @@ namespace javelin::gui::shell
     void MessageCommandController::markEmailRead(std::string accountId, std::string emailId)
     {
         qCInfo(logMessageCommands) << "mark read requested";
-        const auto result = m_mailService.queueMarkEmailRead(accountId, emailId);
+        const auto result = m_mailCommandPort.queueMarkEmailRead(accountId, emailId);
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
         {
             Q_EMIT operationFailed(*error);
@@ -316,7 +315,7 @@ namespace javelin::gui::shell
             index.data(javelin::gui::messages::MessageListModel::IsFlaggedRole).toBool();
         qCInfo(logMessageCommands) << (flagged ? "remove star requested" : "add star requested");
         const auto result =
-            m_mailService.queueSetEmailFlagged(*accountId, emailId.toStdString(), !flagged);
+            m_mailCommandPort.queueSetEmailFlagged(*accountId, emailId.toStdString(), !flagged);
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
         {
             Q_EMIT operationFailed(*error);
@@ -351,7 +350,7 @@ namespace javelin::gui::shell
 
         qCInfo(logMessageCommands)
             << "mark unread requested" << selection.size() << "selection item(s)";
-        const auto result = m_mailService.queueMarkMessagesUnread(
+        const auto result = m_mailCommandPort.queueMarkMessagesUnread(
             *accountId, std::move(sourceMailboxId), std::move(selection));
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
         {
@@ -377,7 +376,7 @@ namespace javelin::gui::shell
                                                 javelin::app::MessageSelection selection)
     {
         const bool searchArchive = !sourceMailboxId.has_value();
-        const auto result = m_mailService.queueMailboxSelectionMutation(
+        const auto result = m_mailCommandPort.queueMailboxSelectionMutation(
             javelin::app::MailboxSelectionMutationIntent{
                 .accountId = accountId,
                 .selection = std::move(selection),
@@ -442,7 +441,7 @@ namespace javelin::gui::shell
     {
         qCInfo(logMessageCommands)
             << "permanently delete requested" << selection.size() << "selection item(s)";
-        const auto result = m_mailService.queueDestroyMessages(
+        const auto result = m_mailCommandPort.queueDestroyMessages(
             accountId, std::move(sourceMailboxId), std::move(selection));
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
         {
@@ -467,7 +466,7 @@ namespace javelin::gui::shell
                                                     std::optional<std::string> operationGroupId)
     {
         auto task =
-            m_mailService.submitPendingEmailMutations(accountId, std::move(operationGroupId));
+            m_mailCommandPort.submitPendingEmailMutations(accountId, std::move(operationGroupId));
         QCoro::connect(std::move(task), this,
                        [this](javelin::jmap::SubmittedEmailMutationsResult submitResult)
                        {

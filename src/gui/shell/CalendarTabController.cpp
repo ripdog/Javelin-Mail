@@ -1,6 +1,5 @@
 #include "gui/shell/CalendarTabController.h"
 
-#include "app/MailApplicationService.h"
 #include "gui/calendar/CalendarPresentation.h"
 #include "gui/calendar/EventDialog.h"
 #include "gui/calendar/MonthCalendarWidget.h"
@@ -33,10 +32,10 @@ namespace javelin::gui::shell
 
     CalendarTabController::CalendarTabController(
         javelin::jmap::calendar::CalendarReader& calendarReader,
-        javelin::app::MailApplicationService& mailService, QStackedWidget& contentStack,
+        javelin::app::CalendarCommandPort& calendarCommandPort, QStackedWidget& contentStack,
         std::vector<TabState>& tabs, QObject* parent)
-        : QObject(parent), m_calendarReader(calendarReader), m_mailService(mailService),
-          m_contentStack(contentStack), m_tabs(tabs)
+        : QObject(parent), m_calendarReader(calendarReader),
+          m_calendarCommandPort(calendarCommandPort), m_contentStack(contentStack), m_tabs(tabs)
     {
     }
 
@@ -128,7 +127,7 @@ namespace javelin::gui::shell
                     const auto separator = displayId.indexOf(QLatin1Char('\n'));
                     if (separator <= 0 || separator == displayId.size() - 1)
                         return;
-                    const auto result = m_mailService.setCalendarVisible(
+                    const auto result = m_calendarCommandPort.setCalendarVisible(
                         displayId.first(separator).toStdString(),
                         displayId.sliced(separator + 1).toStdString(), visible);
                     if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
@@ -149,9 +148,9 @@ namespace javelin::gui::shell
                     accounts, accountId, &javelin::jmap::cache::CalendarAccount::accountId);
                 if (account == accounts.end())
                     return;
-                auto task =
-                    m_mailService.setDefaultCalendar(account->ownerAccountId, accountId,
-                                                     displayId.sliced(separator + 1).toStdString());
+                auto task = m_calendarCommandPort.setDefaultCalendar(
+                    account->ownerAccountId, accountId,
+                    displayId.sliced(separator + 1).toStdString());
                 QCoro::connect(std::move(task), widget,
                                [this, loadVisible,
                                 widget](javelin::jmap::calendar::CalendarMutationResult result)
@@ -174,7 +173,7 @@ namespace javelin::gui::shell
                                       &javelin::jmap::cache::CalendarAccount::accountId);
                 if (account == accounts.end())
                     return;
-                auto task = m_mailService.createCalendar(
+                auto task = m_calendarCommandPort.createCalendar(
                     account->ownerAccountId,
                     {.accountId = account->accountId,
                      .name = name.toStdString(),
@@ -199,7 +198,7 @@ namespace javelin::gui::shell
                         accounts, accountId, &javelin::jmap::cache::CalendarAccount::accountId);
                     if (account == accounts.end())
                         return;
-                    auto task = m_mailService.deleteCalendar(
+                    auto task = m_calendarCommandPort.deleteCalendar(
                         account->ownerAccountId,
                         {.accountId = accountId,
                          .calendarId = displayId.sliced(separator + 1).toStdString(),
@@ -212,7 +211,7 @@ namespace javelin::gui::shell
                                            Q_EMIT operationFailed(*error);
                                    });
                 });
-        connect(&m_mailService, &javelin::app::MailApplicationService::calendarCacheCommitted,
+        connect(&m_calendarCommandPort, &javelin::app::CalendarCommandPort::calendarCacheCommitted,
                 widget,
                 [widget, accounts = *accounts,
                  loadVisible](const javelin::app::CalendarCacheChange& change)
@@ -237,8 +236,8 @@ namespace javelin::gui::shell
             {
                 if (!owners.insert(account.ownerAccountId).second)
                     continue;
-                auto task =
-                    m_mailService.requestCalendarRange(account.ownerAccountId, interval, timeZone);
+                auto task = m_calendarCommandPort.requestCalendarRange(account.ownerAccountId,
+                                                                       interval, timeZone);
                 QCoro::connect(std::move(task), widget,
                                [this](javelin::jmap::calendar::CalendarRefreshResult result)
                                {
@@ -356,12 +355,12 @@ namespace javelin::gui::shell
                                   },
                           }}
                         : std::nullopt;
-                auto task = m_mailService.createCalendarEvent(selectedAccount->ownerAccountId,
-                                                              {.accountId = event.accountId,
-                                                               .event = std::move(event),
-                                                               .operationGroupId = std::nullopt,
-                                                               .ifInState = std::nullopt,
-                                                               .materialization = materialization});
+                auto task = m_calendarCommandPort.createCalendarEvent(
+                    selectedAccount->ownerAccountId, {.accountId = event.accountId,
+                                                      .event = std::move(event),
+                                                      .operationGroupId = std::nullopt,
+                                                      .ifInState = std::nullopt,
+                                                      .materialization = materialization});
                 QCoro::connect(std::move(task), dialog,
                                [dialog](javelin::jmap::calendar::CalendarMutationResult result)
                                {
@@ -513,7 +512,7 @@ namespace javelin::gui::shell
                 auto task =
                     dialogResult == javelin::gui::calendar::EventDialog::DeleteRequested &&
                             !occurrenceEdit
-                        ? m_mailService.deleteCalendarEvent(
+                        ? m_calendarCommandPort.deleteCalendarEvent(
                               account->ownerAccountId,
                               {.accountId = account->accountId,
                                .eventId = editedEvent.id,
@@ -530,7 +529,7 @@ namespace javelin::gui::shell
                                }(),
                                .operationGroupId = std::nullopt,
                                .ifInState = std::nullopt})
-                        : m_mailService.updateCalendarEvent(
+                        : m_calendarCommandPort.updateCalendarEvent(
                               account->ownerAccountId,
                               {.accountId = account->accountId,
                                .event = editedEvent,

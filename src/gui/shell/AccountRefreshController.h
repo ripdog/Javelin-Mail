@@ -1,5 +1,6 @@
 #pragma once
 
+#include "app/AccountRefreshApplicationPorts.h"
 #include "gui/settings/ConnectionSettings.h"
 #include "jmap/JmapCore.h"
 #include "jmap/OperationError.h"
@@ -12,7 +13,7 @@
 
 namespace javelin::app
 {
-    class MailApplicationService;
+    class AccountRefreshPort;
 }
 
 namespace javelin::jmap::cache
@@ -27,7 +28,7 @@ namespace javelin::gui::shell
         Q_OBJECT
 
       public:
-        AccountRefreshController(javelin::app::MailApplicationService& mailService,
+        AccountRefreshController(javelin::app::AccountRefreshPort& commandPort,
                                  javelin::jmap::cache::AccountReader& accountReader,
                                  QObject* parent = nullptr);
 
@@ -43,7 +44,7 @@ namespace javelin::gui::shell
         void contactsRefreshed(const javelin::jmap::contacts::ContactRefreshSummary& summary);
 
       private:
-        javelin::app::MailApplicationService& m_mailService;
+        javelin::app::AccountRefreshPort& m_commandPort;
         javelin::jmap::cache::AccountReader& m_accountReader;
         bool m_refreshInFlight = false;
     };

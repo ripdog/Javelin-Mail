@@ -1,6 +1,6 @@
 #include "gui/shell/MessageContentController.h"
 
-#include "app/MailApplicationService.h"
+#include "app/MessageContentApplicationPorts.h"
 
 #include <QCoroTask>
 
@@ -12,8 +12,8 @@
 namespace javelin::gui::shell
 {
     MessageContentController::MessageContentController(
-        javelin::app::MailApplicationService& mailService, QObject* parent)
-        : QObject(parent), m_mailService(mailService)
+        javelin::app::MessageContentPort& contentPort, QObject* parent)
+        : QObject(parent), m_contentPort(contentPort)
     {
     }
 
@@ -34,7 +34,7 @@ namespace javelin::gui::shell
             .token = requestToken,
         };
 
-        auto task = m_mailService.requestMessageContent(accountId, emailId);
+        auto task = m_contentPort.requestMessageContent(accountId, emailId);
         QCoro::connect(
             std::move(task), this,
             [this, accountId = std::move(accountId), emailId = std::move(emailId),

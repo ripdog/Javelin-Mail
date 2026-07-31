@@ -1,5 +1,6 @@
 #pragma once
 
+#include "app/CalendarApplicationPorts.h"
 #include "gui/shell/TabWorkspace.h"
 #include "jmap/OperationError.h"
 
@@ -13,11 +14,6 @@
 class QMenu;
 class QStackedWidget;
 class QWidget;
-
-namespace javelin::app
-{
-    class MailApplicationService;
-}
 
 namespace javelin::jmap::calendar
 {
@@ -45,7 +41,7 @@ namespace javelin::gui::shell
 
       public:
         CalendarTabController(javelin::jmap::calendar::CalendarReader& calendarReader,
-                              javelin::app::MailApplicationService& mailService,
+                              javelin::app::CalendarCommandPort& calendarCommandPort,
                               QStackedWidget& contentStack, std::vector<TabState>& tabs,
                               QObject* parent = nullptr);
 
@@ -67,7 +63,7 @@ namespace javelin::gui::shell
         widgetForTab(const TabState* tab) const;
 
         javelin::jmap::calendar::CalendarReader& m_calendarReader;
-        javelin::app::MailApplicationService& m_mailService;
+        javelin::app::CalendarCommandPort& m_calendarCommandPort;
         QStackedWidget& m_contentStack;
         std::vector<TabState>& m_tabs;
     };

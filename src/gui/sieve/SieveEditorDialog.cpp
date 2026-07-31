@@ -1,6 +1,6 @@
 #include "gui/sieve/SieveEditorDialog.h"
 
-#include "app/MailApplicationService.h"
+#include "app/SieveApplicationPorts.h"
 
 #include <QCoroTask>
 
@@ -25,9 +25,9 @@
 
 namespace javelin::gui::sieve
 {
-    SieveEditorDialog::SieveEditorDialog(javelin::app::MailApplicationService& service,
+    SieveEditorDialog::SieveEditorDialog(javelin::app::SieveCommandPort& commandPort,
                                          std::string ownerAccountId, QWidget* parent)
-        : QDialog(parent), m_service(service), m_ownerAccountId(std::move(ownerAccountId))
+        : QDialog(parent), m_commandPort(commandPort), m_ownerAccountId(std::move(ownerAccountId))
     {
         setWindowTitle(QStringLiteral("Sieve Rules"));
         resize(960, 640);
@@ -92,7 +92,7 @@ namespace javelin::gui::sieve
         if (m_currentRow >= 0 && m_currentRow < static_cast<int>(m_scripts.size()))
             selectedId = m_scripts[static_cast<std::size_t>(m_currentRow)].id;
         setBusy(true);
-        auto task = m_service.requestSieveScripts(m_ownerAccountId);
+        auto task = m_commandPort.requestSieveScripts(m_ownerAccountId);
         QCoro::connect(
             std::move(task), this,
             [this, selectedId = std::move(selectedId)](javelin::jmap::sieve::SieveListResult result)
@@ -181,8 +181,8 @@ namespace javelin::gui::sieve
         }
         setBusy(true);
         m_statusLabel->setText(QStringLiteral("Loading script…"));
-        auto task = m_service.requestSieveScript(m_ownerAccountId,
-                                                 m_scripts[static_cast<std::size_t>(row)]);
+        auto task = m_commandPort.requestSieveScript(m_ownerAccountId,
+                                                     m_scripts[static_cast<std::size_t>(row)]);
         QCoro::connect(
             std::move(task), this,
             [this, row](javelin::jmap::sieve::SieveContentResult result)
@@ -244,7 +244,7 @@ namespace javelin::gui::sieve
         setBusy(true);
         m_statusLabel->setText(script.isActive ? QStringLiteral("Deactivating and deleting…")
                                                : QStringLiteral("Deleting…"));
-        auto task = m_service.deleteSieveScript(m_ownerAccountId, script);
+        auto task = m_commandPort.deleteSieveScript(m_ownerAccountId, script);
         QCoro::connect(std::move(task), this,
                        [this](javelin::jmap::sieve::SieveDeleteResult result)
                        {
@@ -269,7 +269,7 @@ namespace javelin::gui::sieve
         setBusy(true);
         m_statusLabel->setText(active ? QStringLiteral("Activating…")
                                       : QStringLiteral("Deactivating…"));
-        auto task = m_service.setSieveScriptActive(m_ownerAccountId, script, active);
+        auto task = m_commandPort.setSieveScriptActive(m_ownerAccountId, script, active);
         QCoro::connect(
             std::move(task), this,
             [this, active,
@@ -309,7 +309,8 @@ namespace javelin::gui::sieve
     {
         setBusy(true);
         m_statusLabel->setText(QStringLiteral("Validating…"));
-        auto task = m_service.validateSieveScript(m_ownerAccountId, m_document->text().toUtf8());
+        auto task =
+            m_commandPort.validateSieveScript(m_ownerAccountId, m_document->text().toUtf8());
         QCoro::connect(
             std::move(task), this,
             [this](javelin::jmap::sieve::SieveValidationResult result)
@@ -331,9 +332,9 @@ namespace javelin::gui::sieve
             return;
         setBusy(true);
         m_statusLabel->setText(QStringLiteral("Validating…"));
-        auto task = m_service.saveSieveScript(m_ownerAccountId,
-                                              m_scripts[static_cast<std::size_t>(m_currentRow)],
-                                              m_document->text().toUtf8());
+        auto task = m_commandPort.saveSieveScript(m_ownerAccountId,
+                                                  m_scripts[static_cast<std::size_t>(m_currentRow)],
+                                                  m_document->text().toUtf8());
         QCoro::connect(
             std::move(task), this,
             [this](javelin::jmap::sieve::SieveSaveResult result)

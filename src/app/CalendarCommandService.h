@@ -1,0 +1,48 @@
+#pragma once
+
+#include "app/CalendarApplicationPorts.h"
+
+namespace javelin::app
+{
+    class MailApplicationService;
+
+    class CalendarCommandService final : public CalendarCommandPort
+    {
+      public:
+        explicit CalendarCommandService(MailApplicationService& service, QObject* parent = nullptr);
+
+        [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarRefreshResult>
+        requestCalendarRange(std::string ownerAccountId,
+                             javelin::jmap::calendar::VisibleInterval interval,
+                             javelin::jmap::calendar::TimeZoneId displayTimeZone) override;
+        [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
+        createCalendarEvent(std::string ownerAccountId,
+                            javelin::jmap::calendar::CreateEventCommand command,
+                            undo::CommandOrigin origin = undo::CommandOrigin::User) override;
+        [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
+        updateCalendarEvent(std::string ownerAccountId,
+                            javelin::jmap::calendar::UpdateEventCommand command,
+                            undo::CommandOrigin origin = undo::CommandOrigin::User) override;
+        [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
+        deleteCalendarEvent(std::string ownerAccountId,
+                            javelin::jmap::calendar::DeleteEventCommand command,
+                            undo::CommandOrigin origin = undo::CommandOrigin::User) override;
+        [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
+        setDefaultCalendar(std::string ownerAccountId, std::string accountId,
+                           std::string calendarId,
+                           undo::CommandOrigin origin = undo::CommandOrigin::User) override;
+        [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
+        createCalendar(std::string ownerAccountId,
+                       javelin::jmap::calendar::CreateCalendarCommand command) override;
+        [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
+        deleteCalendar(std::string ownerAccountId,
+                       javelin::jmap::calendar::DeleteCalendarCommand command) override;
+        [[nodiscard]] javelin::jmap::calendar::CalendarPreferenceResult
+        setCalendarVisible(std::string accountId, std::string calendarId, bool visible,
+                           undo::CommandOrigin origin = undo::CommandOrigin::User) override;
+
+      private:
+        MailApplicationService& m_service;
+    };
+
+} // namespace javelin::app

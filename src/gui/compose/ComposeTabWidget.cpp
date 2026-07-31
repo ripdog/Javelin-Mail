@@ -1,6 +1,6 @@
 #include "gui/compose/ComposeTabWidget.h"
 
-#include "app/ComposeService.h"
+#include "app/ComposeApplicationPorts.h"
 #include "gui/messageview/HtmlMessageView.h"
 #include "gui/settings/PreferencesDialog.h"
 #include "gui/widgets/EmailAddressLineEdit.h"
@@ -491,11 +491,11 @@ namespace javelin::gui::compose
     } // namespace
 
     ComposeTabWidget::ComposeTabWidget(
-        javelin::app::ComposeService& composeService,
+        javelin::app::ComposeCommandPort& composeCommandPort,
         javelin::jmap::cache::IdentityReader& identityRepository,
         javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
         javelin::jmap::submission::DraftSnapshot snapshot, QWidget* parent)
-        : QWidget(parent), m_composeService(composeService),
+        : QWidget(parent), m_composeCommandPort(composeCommandPort),
           m_identityRepository(identityRepository), m_contactIdentityLookup(contactIdentityLookup),
           m_snapshot(std::move(snapshot))
     {
@@ -943,7 +943,7 @@ namespace javelin::gui::compose
                     !connection.apiKey.isEmpty())
                 {
                     m_identityLoadsStarted.insert(accountId);
-                    auto task = m_composeService.loadSenderIdentities(
+                    auto task = m_composeCommandPort.loadSenderIdentities(
                         javelin::app::AccountConnectionSettings{
                             .connectionId = connection.id.toStdString(),
                             .revision = connection.revision,
@@ -1133,7 +1133,7 @@ namespace javelin::gui::compose
     void ComposeTabWidget::persistWorkingCopy()
     {
         syncSnapshotFromUi();
-        if (const auto error = m_composeService.storeWorkingCopy(m_snapshot))
+        if (const auto error = m_composeCommandPort.storeWorkingCopy(m_snapshot))
         {
             Q_EMIT statusMessageRequested(error->message, 10000);
             return;
@@ -1357,7 +1357,7 @@ namespace javelin::gui::compose
         {
             m_autosaveTimer->stop();
         }
-        if (const auto error = m_composeService.storeWorkingCopy(m_snapshot))
+        if (const auto error = m_composeCommandPort.storeWorkingCopy(m_snapshot))
         {
             Q_EMIT statusMessageRequested(error->message, 10000);
             return;
@@ -1366,7 +1366,7 @@ namespace javelin::gui::compose
         setBusy(true);
         m_closeAfterSave = closeAfterSave;
         Q_EMIT statusMessageRequested(QStringLiteral("Saving draft..."), 5000);
-        auto task = m_composeService.saveDraft(*settings, m_snapshot);
+        auto task = m_composeCommandPort.saveDraft(*settings, m_snapshot);
         QCoro::connect(
             std::move(task), this,
             [this](std::variant<javelin::jmap::submission::DraftSaveSummary,
@@ -1383,7 +1383,7 @@ namespace javelin::gui::compose
 
                 const auto& summary = std::get<javelin::jmap::submission::DraftSaveSummary>(result);
                 m_snapshot.draftEmailId = summary.draftEmailId;
-                if (const auto error = m_composeService.storeWorkingCopy(m_snapshot))
+                if (const auto error = m_composeCommandPort.storeWorkingCopy(m_snapshot))
                 {
                     Q_EMIT statusMessageRequested(error->message, 10000);
                     m_closeAfterSave = false;
@@ -1394,7 +1394,8 @@ namespace javelin::gui::compose
                 if (m_closeAfterSave)
                 {
                     m_closeAfterSave = false;
-                    if (const auto error = m_composeService.discard(m_snapshot.composeSessionId))
+                    if (const auto error =
+                            m_composeCommandPort.discard(m_snapshot.composeSessionId))
                     {
                         Q_EMIT statusMessageRequested(error->message, 10000);
                         return;
@@ -1431,7 +1432,7 @@ namespace javelin::gui::compose
 
         setBusy(true);
         Q_EMIT statusMessageRequested(QStringLiteral("Sending message..."), 5000);
-        auto task = m_composeService.send(*settings, m_snapshot);
+        auto task = m_composeCommandPort.send(*settings, m_snapshot);
         QCoro::connect(
             std::move(task), this,
             [this](
