@@ -255,14 +255,17 @@ For a stateful user command, the daemon normally:
 1. validates the command against current daemon and cache state;
 2. begins the appropriate mutation, operation-group, history, and projection transaction;
 3. commits the projected local state;
-4. replies that the command was accepted;
-5. publishes the resulting cache invalidation;
+4. advances the volatile invalidation epoch and replies that the command was accepted, including the
+   resulting epoch, changed domains, and bounded affected-key hints;
+5. publishes any separately coalesced cache invalidation required for daemon-originated observers;
 6. dispatches the JMAP request; and
 7. commits acceptance, rejection, or ambiguity through the existing consistency subsystem.
 
 The local acceptance reply means that the daemon accepted responsibility for the command and
 committed the normal local operation state. It is not a claim that the server has accepted it, nor a
-power-loss guarantee stronger than the configured SQLite durability.
+power-loss guarantee stronger than the configured SQLite durability. For the originating GUI, the
+accepted reply is also sufficient to schedule the corresponding cache read; it must not wait for a
+second socket message merely to observe its own committed projection.
 
 Known-invalid commands are rejected directly and do not create a projection.
 
@@ -329,7 +332,8 @@ architecture.
 
 All persisted Javelin settings use daemon-owned `QSettings` as their single source of truth. This
 includes daemon behavior, GUI preferences, and persisted GUI workspace state where Javelin chooses to
-retain it.
+retain it. The GUI deliberately retrieves the complete typed settings snapshot in bulk and does not
+special-case separate storage authorities for operational and presentation settings.
 
 The GUI owns the interactive settings lifecycle:
 
@@ -390,9 +394,12 @@ It carries:
 - bounded progress or telemetry; and
 - operation failures that require GUI presentation.
 
-It does not carry complete mail rows, message bodies, attachments, contact documents, calendar
-ranges, query pages, raw JMAP payloads, or remote service objects. Those remain in SQLite or the
-vault and are read by the GUI.
+It does not carry complete cache query pages, displayed message bodies, attachment byte streams,
+contact documents, calendar ranges, raw JMAP payloads, or remote service objects. Those remain in
+SQLite or the vault and are read by the GUI. A bounded compose save command may carry the complete
+current text or HTML body revision because that content originates in the GUI and must cross the
+process boundary before the daemon can persist it. Large attachments use explicit staging rather
+than ordinary IPC byte payloads.
 
 ### Representative messages
 
@@ -404,16 +411,20 @@ GUI -> daemon
     CANCEL_MATERIALIZATION_SCOPE(scope ID)
     GET_SETTINGS
     UPDATE_SETTINGS(base revision, typed settings update)
+    CACHE_ACCESS_SUSPENDED(cache instance ID)
     GUI_READY_FOR_ACTIVATION
     PING
 
 Daemon -> GUI
-    READY(protocol version, cache schema version, daemon instance ID,
+    READY(protocol version, cache schema version, daemon instance ID, cache instance ID,
           current invalidation epoch, settings revision)
-    COMMAND_ACCEPTED(command ID, optional operation ID)
+    COMMAND_ACCEPTED(command ID, optional operation ID, cache epoch, changed domains,
+                     optional affected keys)
     COMMAND_REJECTED(command ID, typed error)
     OPERATION_FAILED(operation ID, typed error)
     CACHE_CHANGED(epoch, changed domains, optional affected keys)
+    CACHE_ACCESS_SUSPEND(cache instance ID, reason, optional target schema version)
+    CACHE_ACCESS_RESUME(cache instance ID, cache schema version, current epoch)
     SETTINGS_SNAPSHOT(revision, typed settings)
     SETTINGS_UPDATED(revision)
     SETTINGS_REJECTED(revision, typed error)
@@ -425,6 +436,13 @@ Daemon -> GUI
 
 The exact encoding is an implementation choice. It must be framed, versioned, bounded, and reject
 unknown message kinds cleanly.
+
+The connection also has explicit queue and coalescing policy. Command replies, settings replies,
+cache-access barriers, and activation requests are lossless and ordered. Cache invalidations merge
+compatible domains and bounded affected-key sets. Status and progress messages replace older queued
+values for the same subject. Diagnostic telemetry may be dropped. A slow or suspended GUI must never
+cause unbounded daemon memory growth, and coalescing must never discard a command result or a required
+cache-reopen barrier.
 
 ### Command identity and retries
 
@@ -473,7 +491,9 @@ The daemon maintains an in-memory monotonic invalidation epoch and optional per-
 counters need not be written to SQLite.
 
 After a visible cache transaction commits, the daemon increments the appropriate counters and sends a
-coalescible `CACHE_CHANGED` message. Avoiding persistent generation rows reduces write amplification.
+coalescible `CACHE_CHANGED` message, unless the same committed epoch is already carried by the direct
+command reply to the originating GUI. Avoiding persistent generation rows reduces write
+amplification.
 
 The invalidation may name broad domains such as:
 
@@ -495,43 +515,101 @@ These are optimization hints. SQLite remains the source queried for the resultin
 The GUI subscribes before loading the database:
 
 1. connect and complete the handshake;
-2. record the daemon instance ID and current invalidation epoch;
-3. open a fresh read-only SQLite connection;
-4. load the initial visible models;
+2. record the daemon instance ID, cache instance ID, and current invalidation epoch;
+3. establish its small fixed set of thread-owned read-only SQLite connections;
+4. load the initial visible models using short fresh read snapshots;
 5. process any invalidations queued since the handshake; and
 6. repeat affected reads if the epoch advanced while loading.
 
 A commit after the handshake either appears in the GUI's read snapshot or produces a later
 invalidation. The GUI does not need persistent generation rows to close this race.
 
+### Daemon startup and version compatibility
+
+A usable GUI requires a responsive compatible daemon. The GUI does not enter a normal half-working
+mode merely because old cache rows are readable without daemon coordination.
+
+At startup, the GUI connects to the configured local endpoint and completes the version handshake and
+bulk settings snapshot before constructing its operational workspace. If the daemon is absent,
+unresponsive, or protocol-incompatible, the bootstrap path attempts the configured safe start or
+restart mechanism. A version-mismatch restart is graceful: the daemon first stops admitting commands,
+finishes or safely classifies active transactions and dispatched operations, closes the cache, and
+only then exits. The GUI never kills a daemon during a cache transaction merely to accelerate startup.
+
+If recovery fails, the GUI shows one blocking recovery surface with the concrete failure and retry or
+exit actions. It does not expose mailbox commands, editors, or settings backed by an unknown daemon
+state. Notification activation follows the same bootstrap path and preserves its requested route
+until the replacement GUI reports readiness.
+
 ### Reconnection
 
-On any socket disconnect, notification continuity is lost. The GUI may continue displaying its
-already-rendered cached state, but it marks daemon-dependent commands and freshness unavailable.
+On any socket disconnect, notification continuity is lost. An already-running GUI may keep its last
+rendered state visible while it performs daemon recovery, but this is a recovery surface rather than
+a supported interactive read-only operating mode. Daemon-dependent commands, navigation requiring
+materialization, and settings changes remain unavailable until the handshake completes.
 
 After reconnection:
 
-- if the daemon instance ID changed, perform a full active-view refresh;
-- if the cache schema changed, close and reopen all database connections before reading;
-- otherwise a full active-view refresh is still the simple safe default; and
-- reload settings and daemon status.
+- if the cache instance or schema changed, use the cache-access barrier before reopening connections;
+- if the daemon instance changed, refresh active views whose SQLite `data_version` or relevant cache
+  epoch may have advanced;
+- if both the cache data version and relevant epoch are unchanged, retain the existing model and
+  refresh only settings and daemon status; and
+- always reload the canonical bulk settings snapshot.
 
-Because only one GUI process exists, the reconnect path does not need per-client database generation
+Because only one GUI process exists, the reconnect path does not need durable per-client invalidation
 history.
+
+### Cache migration and replacement barrier
+
+The daemon must not migrate, replace, move aside, or reset the cache while GUI connections or read
+workers may still refer to the old database file. File replacement without coordination can leave the
+GUI reading an old inode while the daemon writes a new cache at the same path.
+
+The barrier is:
+
+1. the daemon stops admitting cache-dependent commands and cancels or completes active cache work;
+2. it sends `CACHE_ACCESS_SUSPEND` and stops publishing ordinary cache invalidations;
+3. the GUI cancels outstanding reads, drains their results without installing them, closes every
+   SQLite and search-index connection, and acknowledges `CACHE_ACCESS_SUSPENDED`;
+4. the daemon completes the migration, reset, or file replacement transactionally where applicable;
+5. it opens and validates the resulting cache, assigns a new cache instance ID when the underlying
+   file was replaced, and sends `CACHE_ACCESS_RESUME`; and
+6. the GUI recreates its read connections and reloads active presentation from the new cache.
+
+A socket disconnect alone does not release the GUI process's database handles. If the GUI is
+unresponsive, the daemon must either defer non-essential migration or request termination of the
+verified peer GUI process and wait until its handles are actually released before proceeding. Cache
+recovery must not trade correctness for a shorter startup delay.
 
 ### Read behaviour
 
-GUI read transactions are short-lived and never cross an event-loop suspension. Long database work
-runs off the GUI thread and returns immutable values for model diffing.
+GUI read transactions are short-lived and never cross an event-loop suspension. The GUI uses one
+dedicated database worker or a very small fixed pool of persistent thread-owned read-only
+connections. Each operation opens a fresh SQLite read snapshot on its worker connection; it does not
+open and migrate a new connection for every invalidation.
+
+Every presenter has a monotonically increasing refresh generation and a current scope identity. A
+read result carries the generation, scope, and daemon epoch that caused it. The GUI discards the
+result without touching the model if a newer refresh was scheduled, the view scope changed, cache
+access was suspended, or a newer result was already installed. An older slow query must never roll a
+model back over newer committed state.
 
 A presenter:
 
-1. captures the stable presentation identities it must preserve;
-2. opens a fresh read snapshot on a read worker;
-3. reads the required query windows and object rows;
-4. closes every query and transaction;
-5. diffs or replaces the model on the GUI thread; and
-6. restores selection, current object, viewport, focus, and editing state.
+1. captures the stable presentation identities it must preserve and advances its refresh generation;
+2. reads the required query windows and object rows in a short worker snapshot;
+3. closes every query and transaction;
+4. computes the bounded model patch or replacement values off the GUI thread;
+5. verifies the generation and scope again on the GUI thread;
+6. applies only the required Qt model operations while selection-driven navigation callbacks are
+   suppressed; and
+7. restores selection, current object, viewport anchor and offset, focus, and editing state before
+   publishing one coherent presentation-state change.
+
+A model reset is a last resort. If the selected object was confirmed deleted, the GUI presents an
+explicit unavailable or deleted state rather than silently selecting whichever object inherited its
+former row number.
 
 ## Materialization requests
 
@@ -557,6 +635,38 @@ returned as object payloads over IPC.
 This avoids filling SQLite with transient GUI requests and prevents rapid navigation from creating a
 large durable command backlog.
 
+Vault-backed content has an explicit lifetime contract. Once the GUI has resolved an attachment,
+raw source, or rendered artifact for active use, it obtains either an open handle or a bounded daemon
+lease that prevents eviction until the GUI releases it or disconnects. A database path lookup alone
+must not race daemon eviction or replacement.
+
+## Resource and scheduling policy
+
+The daemon exists partly to release the expensive GUI and WebEngine process, so it must not recreate
+GUI-scale working sets in the background.
+
+The daemon keeps only bounded operational state in memory. In particular:
+
+- disconnecting the GUI cancels undispatched materialization and prefetch scopes;
+- decoded bodies, presentation models, rendered documents, and editor state are never retained by the
+  daemon merely for faster future GUI startup;
+- search sessions, sparse query windows, content leases, and completed operation records have explicit
+  retention limits;
+- per-account network concurrency and queued work are bounded;
+- foreground user commands and visible materialization outrank prefetch, indexing, complete-offline
+  synchronization, and maintenance; and
+- lower-priority work yields at natural correctness-preserving batch boundaries.
+
+Priority changes only admission order. The daemon never interrupts an active SQLite transaction or
+abandons a partially applied consistency transition. A large operation must prepare expensive work
+outside the transaction and divide logically independent commits into bounded batches; it must not
+split one atomic mutation, projection, reconciliation, or state-token transition merely to improve
+latency.
+
+When no effective server, settings, timer, or job state changes, an idle daemon should produce no
+SQLite writes, negligible CPU wake-ups, and bounded steady-state memory. These properties are measured
+with the GUI disconnected as part of implementation acceptance.
+
 ## Pagination and sparse windows
 
 [QUERY_WINDOWS.md](QUERY_WINDOWS.md) remains authoritative.
@@ -581,20 +691,41 @@ user requests position 400
 A result arriving after the user navigated elsewhere becomes useful cached data but cannot activate
 itself.
 
+The GUI tracks the installed window separately from the pending destination. While position 400 is
+loading, retained rows continue to be labelled and paged as the installed window; the mailbox header,
+pager, and accessibility state must not claim that those old rows already represent position 400.
+Retaining rows from a different mailbox or search beneath a newly activated title is misleading and
+is not permitted.
+
 After stable Email IDs have been shown, later refreshes preserve those IDs and the viewport anchor.
 They do not blindly repeat the old numeric position when insertions above it have shifted the result.
 
-If the daemon is absent, the GUI may show an already cached window as a read-only snapshot. It cannot
-fabricate an uncached positional page from partial object membership.
+During recovery from a daemon disconnect, an already-running GUI may keep an installed cached window
+visible but cannot fabricate an uncached positional page from partial object membership. It does not
+present that snapshot as a fully operational daemon-free mode.
 
 ## Compose behaviour
 
 The visible editor buffer belongs to the GUI. Draft persistence belongs to the normal JMAP draft
 workflow owned by the daemon.
 
-The GUI sends typed save and send commands. Each compose session has an increasing revision so the
-daemon can reject an older save arriving after a newer one. A Send command names the revision the
-user intended to send.
+Each compose session has an increasing revision. A debounced save command carries the complete
+bounded compose revision needed by the daemon, including envelope fields and the current text or HTML
+body. The protocol does not require per-keystroke deltas. The daemon rejects an older revision that
+arrives after a newer accepted revision, and a Send command names the exact accepted revision the user
+intended to send.
+
+Admission of a compose save means that the daemon has taken ownership of that revision for the normal
+save workflow. Admission of Send requires that the named revision and attachment manifest are already
+accepted; the daemon must not intentionally send an older body, omit a newly accepted attachment, or
+substitute later GUI state.
+
+Attachments are not streamed as ordinary framed IPC byte arrays. Selection creates a typed staging
+request using a path, platform file handle, or equivalent local transfer token. The daemon copies the
+bytes into its own immutable staging area or completes upload before acknowledging the attachment as
+part of an accepted compose revision. It records enough identity, size, and content metadata to avoid
+sending a different file if the original path is replaced or modified later. Failed or cancelled
+staging never silently leaves a phantom attachment in the accepted manifest.
 
 The system should be robust under ordinary process crashes, but it does not require a separate
 power-loss-proof compose journal. If the GUI or cache is catastrophically lost before the newest
@@ -603,11 +734,8 @@ editor autosave interval and is an accepted trade-off.
 
 Before normal GUI shutdown, the latest revision should at least have been accepted by the daemon for
 saving. Whether the GUI waits for server confirmation is a product and latency decision, not a
-process-boundary invariant.
-
-Attachments selected for a draft should be copied or uploaded before the daemon can no longer access
-them. The exact staging policy belongs to the compose design, but the daemon must not intentionally
-send a different file merely because the original path changed after Send was accepted.
+process-boundary invariant. Shutdown must not discard a revision merely because an older save is still
+in flight; revision ordering and supersession are resolved by the daemon.
 
 ## Settings lifecycle
 
@@ -651,11 +779,24 @@ aside and rebuilt without deleting settings.
 
 SQLite remains in WAL mode.
 
-The daemon is the only writer, so all write scheduling remains in-process. The existing write
-coordinator serializes daemon threads before they ask SQLite for its writer lock.
+The daemon is the only writer, so all write scheduling remains in-process. A priority-aware daemon
+write admission queue orders work before it asks SQLite for the writer lock. Foreground command
+admission, Undo/Redo, compose saves required by Send, and visible materialization outrank prefetch,
+indexing, complete-offline synchronization, and maintenance. The existing write coordinator remains
+the final serialization mechanism once work is admitted; it is not by itself the scheduling policy.
 
-The GUI uses independent read-only connections. Read queries and transactions remain short so WAL
-checkpoints are not pinned indefinitely.
+An active transaction is never pre-empted. Background operations prepare network results, parsing,
+index input, and filesystem work before admission and commit logically independent units in bounded
+transactions. Correctness-critical changes that must be atomic remain one transaction even when they
+are larger than the preferred latency budget. Scheduler priority may reduce queueing latency but may
+never expose a half-projected mutation, mismatched query window, advanced state token without its
+objects, or partially reconciled operation.
+
+The GUI uses independent read-only connections opened through a dedicated read-only factory. GUI
+connections use SQLite read-only mode and `PRAGMA query_only=ON`, never run migrations, and use a short
+contention timeout. Read queries and transactions remain short so WAL checkpoints are not pinned
+indefinitely. Transient contention retains the already-rendered model and schedules a bounded retry;
+it does not blank the view or present a permanent storage failure.
 
 No transaction may span:
 
@@ -668,8 +809,9 @@ No transaction may span:
 - notification publication.
 
 A daemon cache write that fails because of temporary contention is retried according to the owning
-operation. A cache corruption or persistent write failure can trigger a controlled cache reset after
-active operations are stopped.
+operation without reordering dependent consistency transitions. A cache corruption or persistent
+write failure can trigger a controlled cache reset only through the cache-access barrier after active
+operations are stopped or safely classified.
 
 ## SSD write policy
 
@@ -733,8 +875,9 @@ save may be lost. A replacement GUI reconstructs views from SQLite and settings 
 ### Daemon exits normally
 
 The daemon stops admitting new commands, announces shutdown where possible, closes transports, and
-leaves the cache transactionally consistent. The GUI may remain as a cached read-only viewer but must
-disable daemon-dependent actions.
+leaves the cache transactionally consistent. If the GUI remains open, it retains its rendered state
+only as part of the daemon restart or failure surface; it does not continue as a nominally supported
+cached read-only application.
 
 ### Daemon crashes
 
@@ -752,8 +895,10 @@ accepted, it reports uncertainty rather than blindly generating a different comm
 
 ### Cache loss or corruption
 
-The daemon stops active cache users, moves the damaged cache aside where useful for diagnostics,
-creates a new database, and resynchronizes configured accounts using daemon-owned settings.
+The daemon stops admitting cache-dependent commands, invokes the cache-access barrier, safely
+classifies active operations, moves the damaged cache aside where useful for diagnostics, creates and
+validates a new database, and resynchronizes configured accounts using daemon-owned settings. It does
+not replace the cache while GUI readers or daemon transactions still refer to the old file.
 
 Undo history, local projections, delayed-send metadata, and similar incidental state may be lost.
 The GUI tells the user about any meaningful consequence that can be detected. Javelin does not treat
@@ -768,7 +913,15 @@ invalidate JMAP coordinators.
 ### System suspend and resume
 
 The daemon owns transport recovery, delayed-send timer reevaluation, notification scheduling, and
-push-session restart. The GUI merely receives later status and cache invalidations.
+push-session restart. Delayed-send deadlines are persisted absolute UTC instants rather than durations
+that restart after resume; while running, monotonic timers may be used to avoid ordinary wall-clock
+adjustments, with the absolute deadline reevaluated after resume or restart. If a deadline elapsed
+during suspend and the send has not already been
+dispatched or cancelled, the daemon queues that exact accepted compose revision once as soon as the
+required account and network state are usable. Suspend does not silently grant a new Undo Send window,
+and resume recovery must deduplicate against a send dispatched immediately before suspension.
+
+The GUI merely receives later status and cache invalidations.
 
 ## Single GUI instance and activation
 
@@ -838,8 +991,10 @@ Create:
 - `CommandReply` and typed application errors;
 - `MaterializationRequest`;
 - `CacheInvalidation`;
+- cache-access suspend and resume barriers;
+- bounded compose revision and attachment-staging commands;
 - typed settings snapshots and updates; and
-- transient daemon status values.
+- transient daemon status values with explicit queue and coalescing policy.
 
 Route existing GUI commands through an in-process implementation first. Do not start with socket
 serialization.
@@ -847,7 +1002,9 @@ serialization.
 ### 2. Make the daemon side the sole cache writer
 
 Introduce explicit daemon write and GUI read-only database factories. Move all mutating repositories
-and cache transactions behind the daemon-side application interfaces.
+and cache transactions behind the daemon-side application interfaces. Add priority-aware admission in
+front of the existing writer serialization and define bounded background transaction units without
+splitting correctness-critical atomic changes.
 
 Remove direct GUI writes and direct GUI mutation-service calls.
 
@@ -864,18 +1021,22 @@ Remove SQLite settings plans and stop GUI code from opening the canonical settin
 
 ### 5. Add volatile invalidation and transient telemetry interfaces
 
-Replace direct service-to-widget signals with cache invalidations and status values. Keep progress and
-connection health out of SQLite unless they are meaningful durable job checkpoints.
+Replace direct service-to-widget signals with cache invalidations and status values. Add presenter
+refresh generations, off-thread read and diff preparation, guarded model installation, stale-result
+discard, and bounded IPC coalescing. Keep progress and connection health out of SQLite unless they are
+meaningful durable job checkpoints.
 
 ### 6. Introduce the local socket
 
-Serialize the already-tested typed interfaces over a framed, versioned local protocol. Preserve the
-same in-process and out-of-process semantics.
+Serialize the already-tested typed interfaces over a framed, versioned, queue-bounded local protocol.
+Preserve the same in-process and out-of-process semantics, including command-result ordering,
+cache-access barriers, compose frame limits, and graceful protocol-version recovery.
 
 ### 7. Split the executables
 
-Create `javelind` and make `javelin` a GUI-only process. Add daemon startup, reconnection, singleton GUI
-activation, and process-version checks.
+Create `javelind` and make `javelin` a GUI-only process. Add daemon startup, graceful restart,
+reconnection, singleton GUI activation, process-version checks, blocking startup failure UX, and
+notification-route preservation across bootstrap.
 
 ### 8. Move tray and notification ownership
 
@@ -883,43 +1044,88 @@ Run the existing hardened notification logic in the daemon. Implement tray owner
 preferably through direct StatusNotifierItem QtDBus integration if that keeps the process simpler and
 headless.
 
-### 9. Tune cache writes
+### 9. Tune cache writes and daemon resource use
 
-Measure WAL growth and write rates during:
+Measure WAL growth, write rates, foreground admission latency, CPU wake-ups, and daemon memory during:
 
-- idle push operation;
+- idle push operation with no GUI;
 - a large mailbox refresh;
 - complete-offline synchronization;
 - search indexing;
-- rapid pagination; and
-- notification-heavy mail arrival.
+- rapid pagination and navigation cancellation;
+- notification-heavy mail arrival; and
+- GUI disconnect and later restart.
 
-Remove unchanged writes, coalesce transactions, and tune checkpoint policy based on measurements
-rather than adding a second database pre-emptively.
+Remove unchanged writes, coalesce transactions, bound retained working sets, and tune checkpoint and
+batch policy based on measurements rather than adding a second database pre-emptively.
 
 ## Required tests
 
 The split requires deterministic tests for:
 
-- command acceptance and direct rejection;
+- command acceptance carrying the committed cache epoch and direct rejection;
 - stale Undo and Redo head rejection;
 - lost command reply and same-UUID retry;
 - command accepted before GUI exit;
 - daemon crash before and after mutation dispatch;
+- foreground command admission behind queued background work without interrupting an active
+  transaction;
 - startup read versus concurrent invalidation;
-- reconnect with the same and a different daemon instance;
-- cache schema change requiring GUI connection reopen;
-- settings snapshot, update, stale-revision rejection, and migration failure;
-- one-GUI activation routing;
+- two overlapping presenter reads completing out of order, with the stale result discarded;
+- model replacement with selection callbacks suppressed until stable IDs are restored;
+- reconnect with the same and a different daemon instance and with unchanged versus changed SQLite
+  `data_version`;
+- graceful recovery from a protocol-incompatible daemon;
+- cache migration and cache-file replacement while a GUI is connected and actively reading;
+- an unresponsive GUI during a required cache-access barrier;
+- settings bulk snapshot, update, stale-revision rejection, and migration failure;
+- one-GUI activation routing and notification-route preservation during daemon startup;
+- bounded socket output when the GUI stops reading;
 - transient materialization cancellation and supersession;
+- vault eviction blocked by an active content handle or lease;
 - a deep sparse-window jump whose result arrives after navigation elsewhere;
+- retained rows remaining labelled as the installed page while another page is pending;
+- compose revisions arriving out of order;
+- Send rejection for an unaccepted body revision or incomplete attachment manifest;
+- attachment source replacement after successful staging;
+- suspend across a delayed-send deadline without duplicate send or renewed cancellation window;
 - selection and viewport preservation across cache changes;
 - tray and notification failure without sync failure;
 - cache deletion followed by account resynchronization from daemon settings; and
-- bounded idle write activity.
+- bounded idle write activity, CPU wake-ups, memory, and retained work after GUI disconnect.
 
 Tests around optimistic mutations, query windows, Undo/Redo, delayed send, and notification handling
 remain governed by their existing subsystem documents.
+
+## Performance and UX acceptance criteria
+
+The first out-of-process implementation is not complete merely because it is functionally correct. It
+must also demonstrate that the process split does not introduce avoidable interaction latency or
+presentation instability:
+
+- no SQLite query, model diff, body processing, or unbounded collection operation runs on the GUI
+  thread;
+- no stale worker result can replace a newer installed presentation generation;
+- command admission cannot wait behind more than the currently active correctness-critical
+  transaction plus a bounded foreground scheduling interval;
+- background work is divided at safe atomic boundaries so ordinary user commands remain responsive;
+- cache-backed startup and visible cached navigation do not wait for account network availability
+  after the daemon handshake succeeds;
+- daemon absence, hangs, version mismatch, and cache replacement produce one coherent recovery flow,
+  not a partially enabled application;
+- IPC queues, retained materialization scopes, search sessions, and content leases have explicit
+  memory bounds;
+- an idle daemon with unchanged effective state performs no SQLite writes and negligible periodic
+  work;
+- closing the GUI releases WebEngine and presentation-heavy memory, and daemon steady-state memory is
+  measured with representative accounts; and
+- every model update preserves stable user intent or reports explicitly that the referenced object no
+  longer exists.
+
+These criteria never override transactionality, mutation causality, exact state-token advancement,
+compose revision identity, or operation deduplication. When a latency target conflicts with a required
+atomic transition, correctness wins and the transaction is measured and optimized rather than split
+incorrectly.
 
 ## Design constraints on existing subsystems
 
