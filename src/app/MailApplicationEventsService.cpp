@@ -2,6 +2,8 @@
 
 #include "app/MailApplicationService.h"
 
+#include <utility>
+
 namespace javelin::app
 {
     namespace
@@ -25,15 +27,18 @@ namespace javelin::app
 
     MailApplicationEventsService::MailApplicationEventsService(MailApplicationService& service,
                                                                QObject* parent)
-        : MailApplicationEventsPort(parent), m_service(service)
+        : MailApplicationEventsPort(parent), m_service(service), m_invalidationPublisher(this)
     {
         connect(&m_service, &MailApplicationService::accountStatusChanged, this,
                 [this](const QString& accountId, const AccountSyncCoordinator::Status status)
                 { Q_EMIT accountStatusChanged(accountId, mapStatus(status)); });
         connect(&m_service, &MailApplicationService::sessionCapabilitiesChanged, this,
                 &MailApplicationEventsPort::sessionCapabilitiesChanged);
-        connect(&m_service, &MailApplicationService::cacheCommitted, this,
-                &MailApplicationEventsPort::cacheCommitted);
+        connect(&m_service, &MailApplicationService::cacheCommitted, &m_invalidationPublisher,
+                [this](MailCacheChange change)
+                { m_invalidationPublisher.publish(std::move(change)); });
+        connect(&m_invalidationPublisher, &CacheInvalidationPublisher::invalidated, this,
+                &MailApplicationEventsPort::cacheInvalidated);
     }
 
     std::unordered_map<std::string, MailAccountStatus>

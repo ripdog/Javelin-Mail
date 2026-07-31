@@ -63,9 +63,13 @@ namespace javelin::gui::shell
                     input.refreshError = page.refreshError;
                     input.refreshInFlight = page.refreshInFlight;
                     javelin::gui::messages::MessageListPageHeader header{};
+                    const auto presentationPosition =
+                        page.pendingOffset.has_value() && page.installedOffset.has_value()
+                            ? *page.installedOffset
+                            : page.position;
                     header.title = input.title;
-                    header.offset = page.offset;
-                    header.position = page.position;
+                    header.offset = presentationPosition;
+                    header.position = presentationPosition;
                     header.itemCount = page.items.size();
                     header.returnedLimit = page.returnedLimit;
                     header.total = page.total;
@@ -81,9 +85,13 @@ namespace javelin::gui::shell
                     input.refreshInFlight = page.refreshInFlight;
                     input.localSearch = content.session->mode() == javelin::app::SearchMode::Local;
                     javelin::gui::messages::MessageListPageHeader header{};
+                    const auto presentationPosition =
+                        page.pendingOffset.has_value() && page.installedOffset.has_value()
+                            ? *page.installedOffset
+                            : page.position;
                     header.title = input.title;
-                    header.offset = page.offset;
-                    header.position = page.position;
+                    header.offset = presentationPosition;
+                    header.position = presentationPosition;
                     header.itemCount = page.items.size();
                     header.returnedLimit = page.returnedLimit;
                     header.total = page.total;

@@ -1,9 +1,13 @@
 #include "gui/messages/MessageListModel.h"
 
+#include "app/MessageListCacheRead.h"
+
 #include <QDataStream>
+#include <QFutureWatcher>
 #include <QMimeData>
 #include <QString>
 #include <QStringList>
+#include <QtConcurrentRun>
 
 #include <algorithm>
 
@@ -245,6 +249,7 @@ namespace javelin::gui::messages
                                    std::optional<std::string> mailboxId,
                                    std::vector<javelin::jmap::cache::MessageListItem> items)
     {
+        ++m_generation;
         // A disjoint query page is one logical replacement. Publishing it as a long sequence of
         // row removals and insertions makes QItemSelectionModel visit transient row identities.
         const bool pagesAreDisjoint =
@@ -273,6 +278,7 @@ namespace javelin::gui::messages
                     .summary = std::move(item),
                     .members = {},
                     .membersLoaded = false,
+                    .membersLoading = false,
                 });
             }
             m_expandedThreadIds = std::move(survivingExpandedThreadIds);
@@ -318,6 +324,7 @@ namespace javelin::gui::messages
                                      .summary = std::move(items[targetIndex]),
                                      .members = {},
                                      .membersLoaded = false,
+                                     .membersLoading = false,
                                  });
                 m_rows.insert(m_rows.begin() + static_cast<std::ptrdiff_t>(targetIndex),
                               VisibleRow{
@@ -379,9 +386,19 @@ namespace javelin::gui::messages
 
         if (expanded)
         {
-            if (!loadThreadMembers(*threadIndex))
+            m_expandedThreadIds.push_back(std::string{threadId});
+            auto& thread = m_threads[*threadIndex];
+            if (!thread.membersLoaded)
             {
-                return false;
+                startThreadMembersLoad(*threadIndex);
+                const auto summaryRow = visibleSummaryRowForThread(*threadIndex);
+                if (summaryRow.has_value())
+                {
+                    const QModelIndex summaryIndex = index(*summaryRow, 0);
+                    Q_EMIT dataChanged(summaryIndex, summaryIndex,
+                                       {IsExpandedRole, CanExpandRole, ThreadMessageCountRole});
+                }
+                return true;
             }
             const auto summaryRow = visibleSummaryRowForThread(*threadIndex);
             if (!summaryRow.has_value())
@@ -395,7 +412,6 @@ namespace javelin::gui::messages
                 return false;
             }
 
-            m_expandedThreadIds.push_back(std::string{threadId});
             beginInsertRows(QModelIndex{}, *summaryRow + 1, *summaryRow + memberCount);
             for (int memberRow = 0; memberRow < memberCount; ++memberRow)
             {
@@ -540,39 +556,75 @@ namespace javelin::gui::messages
         return std::nullopt;
     }
 
-    bool MessageListModel::loadThreadMembers(const std::size_t threadIndex)
+    void MessageListModel::startThreadMembersLoad(const std::size_t requestedThreadIndex)
     {
-        auto& thread = m_threads[threadIndex];
-        if (thread.membersLoaded || !m_accountId.has_value())
+        auto& thread = m_threads[requestedThreadIndex];
+        if (thread.membersLoaded || thread.membersLoading || !m_accountId.has_value())
         {
-            return thread.membersLoaded;
+            return;
         }
-
-        const auto result =
-            m_mailboxId.has_value()
-                ? m_queryReader.listMailboxThreadMessages(*m_accountId, *m_mailboxId,
-                                                          thread.summary.threadId)
-                : m_queryReader.listThreadMessages(*m_accountId, thread.summary.threadId);
-        const auto* items =
-            std::get_if<std::vector<javelin::jmap::cache::MessageListItem>>(&result);
-        if (items == nullptr)
-        {
-            return false;
-        }
-
-        thread.members.clear();
-        thread.members.reserve(items->size());
-        for (const auto& item : *items)
-        {
-            if (item.emailId == thread.summary.emailId)
+        thread.membersLoading = true;
+        const auto generation = m_generation;
+        const auto threadId = thread.summary.threadId;
+        const auto accountId = *m_accountId;
+        const auto mailboxId = m_mailboxId;
+        auto* watcher = new QFutureWatcher<javelin::app::MessageListThreadMembersResult>(this);
+        connect(
+            watcher, &QFutureWatcher<javelin::app::MessageListThreadMembersResult>::finished, this,
+            [this, watcher, generation, threadId]
             {
-                continue;
-            }
+                auto result = watcher->result();
+                watcher->deleteLater();
+                if (generation != m_generation)
+                    return;
+                const auto resolvedThreadIndex = findThreadIndex(threadId);
+                if (!resolvedThreadIndex.has_value())
+                    return;
+                auto& loadedThread = m_threads[*resolvedThreadIndex];
+                loadedThread.membersLoading = false;
+                const auto* items =
+                    std::get_if<std::vector<javelin::jmap::cache::MessageListItem>>(&result);
+                if (items == nullptr)
+                    return;
 
-            thread.members.push_back(item);
-        }
-        thread.membersLoaded = true;
-        return true;
+                loadedThread.members.clear();
+                loadedThread.members.reserve(items->size());
+                for (const auto& item : *items)
+                {
+                    if (item.emailId != loadedThread.summary.emailId)
+                        loadedThread.members.push_back(item);
+                }
+                loadedThread.membersLoaded = true;
+                if (isThreadExpanded(threadId) && !loadedThread.members.empty())
+                {
+                    const auto summaryRow = visibleSummaryRowForThread(*resolvedThreadIndex);
+                    if (summaryRow.has_value())
+                    {
+                        const auto memberCount = static_cast<int>(loadedThread.members.size());
+                        beginInsertRows(QModelIndex{}, *summaryRow + 1, *summaryRow + memberCount);
+                        for (int memberRow = 0; memberRow < memberCount; ++memberRow)
+                        {
+                            m_rows.insert(m_rows.begin() + (*summaryRow + 1 + memberRow),
+                                          VisibleRow{
+                                              .kind = RowKind::ThreadMember,
+                                              .threadIndex = *resolvedThreadIndex,
+                                              .memberIndex = static_cast<std::size_t>(memberRow),
+                                          });
+                        }
+                        endInsertRows();
+                    }
+                }
+                if (const auto summaryRow = visibleSummaryRowForThread(*resolvedThreadIndex);
+                    summaryRow.has_value())
+                {
+                    const QModelIndex summaryIndex = index(*summaryRow, 0);
+                    Q_EMIT dataChanged(summaryIndex, summaryIndex,
+                                       {IsExpandedRole, CanExpandRole, ThreadMessageCountRole});
+                }
+            });
+        watcher->setFuture(QtConcurrent::run(javelin::app::loadMessageListThreadMembers,
+                                             m_queryReader.databasePath(), accountId, mailboxId,
+                                             threadId));
     }
 
     int MessageListModel::visibleBlockStartForThread(const std::size_t threadIndex) const
@@ -615,8 +667,10 @@ namespace javelin::gui::messages
                 continue;
             }
 
-            if (!loadThreadMembers(threadIndex))
+            auto& thread = m_threads[threadIndex];
+            if (!thread.membersLoaded)
             {
+                startThreadMembersLoad(threadIndex);
                 continue;
             }
 

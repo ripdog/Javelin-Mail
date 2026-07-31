@@ -547,9 +547,10 @@ namespace javelin::gui::shell
                 applyAccountStatus);
         for (const auto& [accountId, status] : m_mailEvents.accountStatuses())
             applyAccountStatus(QString::fromStdString(accountId), status);
-        connect(&m_mailEvents, &javelin::app::MailApplicationEventsPort::cacheCommitted, this,
-                [this](const javelin::app::MailCacheChange& change)
+        connect(&m_mailEvents, &javelin::app::MailApplicationEventsPort::cacheInvalidated, this,
+                [this](const javelin::app::MailCacheInvalidation& invalidation)
                 {
+                    const auto& change = invalidation.change;
                     if (change.mailboxTreeChanged)
                     {
                         QSignalBlocker mailboxSelectionBlocker{m_mailboxView->selectionModel()};
@@ -695,22 +696,13 @@ namespace javelin::gui::shell
                                        QStringLiteral("Contacts"), this);
         connect(m_contactsAction, &QAction::triggered, this, &MainWindow::openContacts);
         actionCollection()->addAction(QStringLiteral("open_contacts"), m_contactsAction);
-        const auto contactAccounts = m_contactReader.listAccounts();
-        m_contactsAction->setEnabled(
-            std::holds_alternative<std::vector<javelin::jmap::cache::ContactAccount>>(
-                contactAccounts) &&
-            !std::get<std::vector<javelin::jmap::cache::ContactAccount>>(contactAccounts).empty());
+        m_contactsAction->setEnabled(true);
 
         m_calendarAction = new QAction(QIcon::fromTheme(QStringLiteral("view-calendar-month")),
                                        QStringLiteral("Calendar"), this);
         connect(m_calendarAction, &QAction::triggered, this, &MainWindow::openCalendar);
         actionCollection()->addAction(QStringLiteral("open_calendar"), m_calendarAction);
-        const auto calendarAccounts = m_calendarReader.accounts();
-        m_calendarAction->setEnabled(
-            std::holds_alternative<std::vector<javelin::jmap::cache::CalendarAccount>>(
-                calendarAccounts) &&
-            !std::get<std::vector<javelin::jmap::cache::CalendarAccount>>(calendarAccounts)
-                 .empty());
+        m_calendarAction->setEnabled(true);
 
         m_sieveAction = new QAction(QIcon::fromTheme(QStringLiteral("document-edit")),
                                     QStringLiteral("Sieve Rules"), this);
@@ -1055,8 +1047,8 @@ namespace javelin::gui::shell
     {
         setWindowTitle(QStringLiteral("Javelin Mail"));
 
-        m_mailboxModel =
-            new javelin::gui::mailboxes::MailboxTreeModel(m_accountReader, m_mailboxReader, this);
+        m_mailboxModel = new javelin::gui::mailboxes::MailboxTreeModel(
+            m_accountReader, m_mailboxReader, m_queryReader.databasePath(), this);
         m_messageModel = new javelin::gui::messages::MessageListModel(m_queryReader, this);
 
         m_mailboxSearchEdit = new QLineEdit(this);
@@ -1073,11 +1065,12 @@ namespace javelin::gui::shell
         m_tabBar->setStyleSheet(
             QStringLiteral("QTabBar::tab { max-width: 220px; min-width: 120px; }"));
         m_tabBar->hide();
-        m_tabBarPresenter =
-            new TabBarPresenter(*m_tabBar, *this, m_accountReader, m_queryReader, this);
+        m_tabBarPresenter = new TabBarPresenter(*m_tabBar, *this, this);
 
         m_mailboxView = new javelin::gui::mailboxes::MailboxTreeView(this);
         m_mailboxView->setModel(m_mailboxModel);
+        connect(m_mailboxModel, &QAbstractItemModel::modelReset, m_mailboxView,
+                &QTreeView::expandAll);
         m_mailboxView->expandAll();
         m_mailboxView->setContextMenuPolicy(Qt::CustomContextMenu);
         m_mailboxView->setAcceptDrops(true);
@@ -1430,6 +1423,8 @@ namespace javelin::gui::shell
 
     void MainWindow::handleCurrentMessageChanged(const QModelIndex& current)
     {
+        if (m_modelUpdateInProgress)
+            return;
         const auto accountId = activeAccountId();
         const auto mailboxId = activeMailboxId();
         const bool allowSearchSelection = activeTabIsSearch() && accountId.has_value();
@@ -1767,6 +1762,8 @@ namespace javelin::gui::shell
                     .page =
                         javelin::app::MessageListPage{
                             .offset = 0,
+                            .installedOffset = std::nullopt,
+                            .pendingOffset = std::nullopt,
                             .position = 0,
                             .returnedLimit = pageSize,
                             .total = total,
@@ -1954,12 +1951,15 @@ namespace javelin::gui::shell
     MainWindow::applyActiveTabPagePreservingSelection(const std::optional<int> previousMessageRow)
     {
         bool autoSelectedFallback = false;
+        const bool wasUpdatingModel = m_modelUpdateInProgress;
+        m_modelUpdateInProgress = true;
         {
             QSignalBlocker messageSelectionBlocker{m_messageView->selectionModel()};
             m_messageListTabBindingPresenter->applyPage(activeTab());
             autoSelectedFallback =
                 m_messageSelectionController->restoreTabSelection(activeTab(), previousMessageRow);
         }
+        m_modelUpdateInProgress = wasUpdatingModel;
         if (autoSelectedFallback)
             handleCurrentMessageChanged(m_messageView->currentIndex());
         else
@@ -2373,20 +2373,6 @@ namespace javelin::gui::shell
     {
         m_mailboxModel->refresh();
         m_mailboxView->expandAll();
-        if (m_contactsAction != nullptr)
-        {
-            const auto result = m_contactReader.listAccounts();
-            const auto* accounts =
-                std::get_if<std::vector<javelin::jmap::cache::ContactAccount>>(&result);
-            m_contactsAction->setEnabled(accounts != nullptr && !accounts->empty());
-        }
-        if (m_calendarAction != nullptr)
-        {
-            const auto result = m_calendarReader.accounts();
-            const auto* accounts =
-                std::get_if<std::vector<javelin::jmap::cache::CalendarAccount>>(&result);
-            m_calendarAction->setEnabled(accounts != nullptr && !accounts->empty());
-        }
     }
 
     void MainWindow::refreshViewsFromCache()

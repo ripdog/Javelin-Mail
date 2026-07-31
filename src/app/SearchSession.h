@@ -2,6 +2,7 @@
 
 #include "app/MessageListSession.h"
 #include "app/MessageListSessionFactory.h"
+#include "app/RefreshGeneration.h"
 #include "jmap/cache/QueryReader.h"
 #include "jmap/query/EmailListSort.h"
 #include "jmap/search/EmailSearch.h"
@@ -18,13 +19,16 @@
 
 namespace javelin::app
 {
+    class MailApplicationEventsPort;
+
     class SearchSession final : public MessageListSession
     {
       public:
         SearchSession(std::string accountId, javelin::jmap::search::EmailSearchCriteria criteria,
                       javelin::jmap::query::EmailListSort sort,
                       javelin::jmap::cache::QueryReader& queryReader,
-                      javelin::app::MailApplicationService& mailService, std::size_t pageSize,
+                      javelin::app::MailApplicationService& mailService,
+                      MailApplicationEventsPort& events, std::size_t pageSize,
                       std::optional<RestoredSearchState> restored = std::nullopt,
                       QObject* parent = nullptr);
 
@@ -52,6 +56,7 @@ namespace javelin::app
         void startLocalSnapshot();
         void applyLocalPage();
         void requestOnlinePage();
+        void reloadProjectedPage();
         void prefetchOnlinePages(std::size_t offset, std::size_t remainingRequests,
                                  std::uint64_t generation, std::string queryState);
         void applyCommittedServerPage();
@@ -64,6 +69,7 @@ namespace javelin::app
         javelin::jmap::query::EmailListSort m_sort;
         javelin::jmap::cache::QueryReader& m_queryReader;
         javelin::app::MailApplicationService& m_mailService;
+        MailApplicationEventsPort& m_events;
         std::size_t m_pageSize;
         MessageListPage m_page;
         SearchMode m_mode = SearchMode::Local;
@@ -75,6 +81,10 @@ namespace javelin::app
         bool m_refreshAfterCurrent = false;
         bool m_closed = false;
         std::uint64_t m_generation = 0;
+        std::uint64_t m_cacheEpoch = 0;
+        RefreshGeneration m_refreshGeneration;
+        bool m_projectedReloadInFlight = false;
+        bool m_projectedReloadPending = false;
     };
 
 } // namespace javelin::app

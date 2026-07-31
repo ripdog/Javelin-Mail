@@ -1,5 +1,6 @@
 #include "app/MailboxSession.h"
 
+#include "app/MailApplicationEventsPorts.h"
 #include "jmap/cache/QueryService.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
 
@@ -45,10 +46,11 @@ namespace javelin::app
                                    javelin::jmap::query::EmailListSort sort,
                                    javelin::jmap::cache::QueryReader& queryReader,
                                    MailApplicationService& mailService, const std::size_t pageSize,
+                                   MailApplicationEventsPort& events,
                                    std::optional<RestoredMailboxState> restored, QObject* parent)
         : MessageListSession(parent), m_accountId(std::move(accountId)),
           m_mailboxId(std::move(mailboxId)), m_title(std::move(title)), m_role(std::move(role)),
-          m_sort(sort), m_queryReader(queryReader), m_mailService(mailService),
+          m_sort(sort), m_queryReader(queryReader), m_mailService(mailService), m_events(events),
           m_pageSize(pageSize),
           m_observation(m_mailService.observeMailbox(m_accountId, m_mailboxId))
     {
@@ -57,18 +59,20 @@ namespace javelin::app
         else
             m_page.returnedLimit = m_pageSize;
 
-        connect(&m_mailService, &MailApplicationService::cacheCommitted, this,
-                [this](const MailCacheChange& change)
+        connect(&m_events, &MailApplicationEventsPort::cacheInvalidated, this,
+                [this](const MailCacheInvalidation& invalidation)
                 {
-                    if (change.accountId.toStdString() != m_accountId || m_page.refreshInFlight)
+                    const auto& change = invalidation.change;
+                    if (change.accountId.toStdString() != m_accountId)
                         return;
+                    m_cacheEpoch = std::max(m_cacheEpoch, invalidation.epoch);
+                    static_cast<void>(m_refreshGeneration.begin(m_cacheEpoch));
                     for (const auto& window : change.queryWindows)
                     {
                         if (window.mailboxId.toStdString() == m_mailboxId &&
                             window.offset == m_page.offset)
                         {
                             reloadProjectedPage();
-                            Q_EMIT pageChanged();
                             return;
                         }
                     }
@@ -120,17 +124,7 @@ namespace javelin::app
     {
         if (m_page.cacheLoaded && !forceReload)
             return;
-        const auto result = m_queryReader.loadMailboxWindow(m_accountId, queryKey(), m_page.offset,
-                                                            m_pageSize, m_sort);
-        const auto* page =
-            std::get_if<std::optional<javelin::jmap::cache::MailboxWindowPage>>(&result);
-        if (page == nullptr || !page->has_value())
-        {
-            m_page.cacheLoaded = false;
-            m_page.stale = true;
-            return;
-        }
-        applyCachedPage(**page);
+        reloadProjectedPage();
     }
 
     void MailboxSession::reloadProjectedPage()
@@ -143,33 +137,44 @@ namespace javelin::app
         m_projectedReloadInFlight = true;
         const auto generation = m_generation;
         const auto offset = m_page.offset;
+        const auto ticket = m_refreshGeneration.begin(m_cacheEpoch);
         auto* watcher = new QFutureWatcher<ProjectedMailboxPageResult>(this);
-        connect(watcher, &QFutureWatcher<ProjectedMailboxPageResult>::finished, this,
-                [this, watcher, generation, offset]
+        connect(
+            watcher, &QFutureWatcher<ProjectedMailboxPageResult>::finished, this,
+            [this, watcher, generation, offset, ticket]
+            {
+                auto result = watcher->result();
+                watcher->deleteLater();
+                m_projectedReloadInFlight = false;
+                if (generation == m_generation && offset == m_page.offset &&
+                    m_refreshGeneration.install(ticket, m_cacheEpoch))
                 {
-                    auto result = watcher->result();
-                    watcher->deleteLater();
-                    m_projectedReloadInFlight = false;
-                    if (generation == m_generation && offset == m_page.offset)
+                    if (const auto* page =
+                            std::get_if<std::optional<javelin::jmap::cache::MailboxWindowPage>>(
+                                &result);
+                        page != nullptr && page->has_value())
                     {
-                        if (const auto* page =
-                                std::get_if<std::optional<javelin::jmap::cache::MailboxWindowPage>>(
-                                    &result);
-                            page != nullptr && page->has_value())
-                        {
-                            applyCachedPage(**page);
-                            Q_EMIT pageChanged();
-                        }
-                        else if (const auto* error =
-                                     std::get_if<javelin::jmap::cache::DatabaseError>(&result))
-                        {
-                            m_page.refreshError = error->message;
-                            Q_EMIT pageChanged();
-                        }
+                        applyCachedPage(**page);
+                        Q_EMIT pageChanged();
                     }
-                    if (std::exchange(m_projectedReloadPending, false))
-                        reloadProjectedPage();
-                });
+                    else if (const auto* missing = std::get_if<
+                                 std::optional<javelin::jmap::cache::MailboxWindowPage>>(&result);
+                             missing != nullptr && !missing->has_value())
+                    {
+                        m_page.cacheLoaded = false;
+                        m_page.stale = true;
+                        Q_EMIT pageChanged();
+                    }
+                    else if (const auto* error =
+                                 std::get_if<javelin::jmap::cache::DatabaseError>(&result))
+                    {
+                        m_page.refreshError = error->message;
+                        Q_EMIT pageChanged();
+                    }
+                }
+                if (std::exchange(m_projectedReloadPending, false))
+                    reloadProjectedPage();
+            });
         watcher->setFuture(QtConcurrent::run(loadProjectedMailboxPage, m_queryReader.databasePath(),
                                              m_accountId, queryKey(), m_page.offset, m_pageSize,
                                              m_sort));
@@ -182,6 +187,8 @@ namespace javelin::app
         m_page.returnedLimit = page.returnedLimit;
         m_page.total = page.total;
         m_page.queryState = std::move(page.queryState);
+        m_page.installedOffset = m_page.offset;
+        m_page.pendingOffset.reset();
         m_page.cacheLoaded =
             javelin::jmap::cache::isDisplayCurrent(page.coverage, page.materialization);
         m_page.stale = !javelin::jmap::cache::isDisplayCurrent(page.coverage, page.materialization);
@@ -242,7 +249,7 @@ namespace javelin::app
                 }
                 m_page.stale = false;
                 m_page.refreshError.clear();
-                loadCachedPage(true);
+                reloadProjectedPage();
                 Q_EMIT pageChanged();
             });
     }
@@ -317,6 +324,8 @@ namespace javelin::app
     void MailboxSession::resetForPageChange()
     {
         ++m_generation;
+        static_cast<void>(m_refreshGeneration.begin(m_cacheEpoch));
+        m_page.pendingOffset = m_page.offset;
         m_page.position = m_page.offset;
         m_page.items.clear();
         m_page.cacheLoaded = false;

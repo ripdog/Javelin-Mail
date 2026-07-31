@@ -18,6 +18,7 @@ namespace javelin::jmap::cache
 namespace javelin::app
 {
     class MailApplicationService;
+    class MailApplicationEventsPort;
     class MailboxSession;
     class SearchSession;
 

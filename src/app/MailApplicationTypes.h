@@ -1,11 +1,13 @@
 #pragma once
 
 #include "jmap/calendar/CalendarReader.h"
+#include "protocol/ProcessBoundary.h"
 
 #include <QString>
 #include <QStringList>
 
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <vector>
 
@@ -37,6 +39,14 @@ namespace javelin::app
         bool mailboxTreeChanged = false;
         bool hasNewMail = false;
         bool optimisticProjection = false;
+    };
+
+    struct MailCacheInvalidation
+    {
+        std::uint64_t epoch = 0;
+        std::vector<javelin::protocol::ChangedDomain> changedDomains;
+        std::vector<QString> affectedKeys;
+        MailCacheChange change;
     };
 
     struct CalendarCacheChange

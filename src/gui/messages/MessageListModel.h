@@ -5,6 +5,7 @@
 #include <QAbstractListModel>
 
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
@@ -71,6 +72,7 @@ namespace javelin::gui::messages
             javelin::jmap::cache::MessageListItem summary;
             std::vector<javelin::jmap::cache::MessageListItem> members;
             bool membersLoaded = false;
+            bool membersLoading = false;
         };
 
         struct VisibleRow
@@ -84,7 +86,7 @@ namespace javelin::gui::messages
         itemForRow(const VisibleRow& row) const;
         [[nodiscard]] std::optional<std::size_t> findThreadIndex(std::string_view threadId) const;
         [[nodiscard]] std::optional<int> visibleSummaryRowForThread(std::size_t threadIndex) const;
-        [[nodiscard]] bool loadThreadMembers(std::size_t threadIndex);
+        void startThreadMembersLoad(std::size_t threadIndex);
         [[nodiscard]] int visibleBlockStartForThread(std::size_t threadIndex) const;
         [[nodiscard]] int visibleBlockSizeForThread(std::size_t threadIndex) const;
         void reindexVisibleRows();
@@ -96,6 +98,7 @@ namespace javelin::gui::messages
         std::vector<ThreadEntry> m_threads;
         std::vector<VisibleRow> m_rows;
         std::vector<std::string> m_expandedThreadIds;
+        std::uint64_t m_generation = 0;
     };
 
 } // namespace javelin::gui::messages

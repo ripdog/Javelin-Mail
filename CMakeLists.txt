@@ -112,6 +112,9 @@ set(JAVELIN_FORMAT_FILES
     src/app/AccountRefreshCommandService.h
     src/app/CommandDispatcher.cpp
     src/app/CommandDispatcher.h
+    src/app/CacheInvalidationPublisher.cpp
+    src/app/CacheInvalidationPublisher.h
+    src/app/RefreshGeneration.h
     src/app/MailApplicationEventsPorts.h
     src/app/MailApplicationEventsService.cpp
     src/app/MailApplicationEventsService.h
@@ -132,6 +135,8 @@ set(JAVELIN_FORMAT_FILES
     src/app/MessageContentApplicationPorts.h
     src/app/MessageContentCommandService.cpp
     src/app/MessageContentCommandService.h
+    src/app/MessageListCacheRead.h
+    src/app/MailboxTreeCacheRead.h
     src/app/MessageListSessionFactory.h
     src/app/MessageListSessionFactoryService.cpp
     src/app/MessageListSessionFactoryService.h
@@ -1116,6 +1121,9 @@ add_library(javelin_application STATIC
     src/app/AccountRefreshCommandService.h
     src/app/CommandDispatcher.cpp
     src/app/CommandDispatcher.h
+    src/app/CacheInvalidationPublisher.cpp
+    src/app/CacheInvalidationPublisher.h
+    src/app/RefreshGeneration.h
     src/app/MailApplicationEventsPorts.h
     src/app/MailApplicationEventsService.cpp
     src/app/MailApplicationEventsService.h
@@ -1142,6 +1150,8 @@ add_library(javelin_application STATIC
     src/app/MessageContentApplicationPorts.h
     src/app/MessageContentCommandService.cpp
     src/app/MessageContentCommandService.h
+    src/app/MessageListCacheRead.h
+    src/app/MailboxTreeCacheRead.h
     src/app/MessageListSessionFactory.h
     src/app/MessageListSessionFactoryService.cpp
     src/app/MessageListSessionFactoryService.h

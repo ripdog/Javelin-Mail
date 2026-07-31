@@ -50,6 +50,8 @@ TEST_CASE("main window state round-trips every tab type")
                         .page =
                             {
                                 .offset = 20,
+                                .installedOffset = std::nullopt,
+                                .pendingOffset = std::nullopt,
                                 .position = 20,
                                 .returnedLimit = 10,
                                 .total = 25,

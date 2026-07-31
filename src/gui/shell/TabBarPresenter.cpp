@@ -5,8 +5,6 @@
 #include "gui/IconUtils.h"
 #include "gui/mailboxes/MailboxIconUtils.h"
 #include "gui/settings/PreferencesDialog.h"
-#include "jmap/cache/AccountReadRepository.h"
-#include "jmap/cache/QueryReader.h"
 
 #include <QIcon>
 #include <QPalette>
@@ -15,18 +13,13 @@
 #include <QToolButton>
 #include <QWidget>
 
-#include <ranges>
 #include <variant>
 
 namespace javelin::gui::shell
 {
 
-    TabBarPresenter::TabBarPresenter(QTabBar& tabBar, QWidget& window,
-                                     javelin::jmap::cache::AccountReader& accountReader,
-                                     javelin::jmap::cache::QueryReader& queryReader,
-                                     QObject* parent)
-        : QObject(parent), m_tabBar(tabBar), m_window(window), m_accountReader(accountReader),
-          m_queryReader(queryReader)
+    TabBarPresenter::TabBarPresenter(QTabBar& tabBar, QWidget& window, QObject* parent)
+        : QObject(parent), m_tabBar(tabBar), m_window(window)
     {
     }
 
@@ -82,16 +75,7 @@ namespace javelin::gui::shell
         {
             return {};
         }
-        const auto unreadResult = m_queryReader.countUnreadMailboxEmails(tab.session->accountId(),
-                                                                         tab.session->mailboxId());
-        const auto* unread = std::get_if<std::size_t>(&unreadResult);
-        if (unread == nullptr || *unread == 0)
-        {
-            return tab.session->title();
-        }
-        return QStringLiteral("%1 (%2)")
-            .arg(tab.session->title())
-            .arg(static_cast<qulonglong>(*unread));
+        return tab.session->title();
     }
 
     QString TabBarPresenter::titleForTab(const TabState& tab) const
@@ -122,20 +106,6 @@ namespace javelin::gui::shell
         const auto settings = javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
             QString::fromStdString(accountId));
         auto accountName = settings.displayName;
-        if (accountName.isEmpty())
-        {
-            const auto cached = m_accountReader.listAll();
-            if (const auto* accounts =
-                    std::get_if<std::vector<javelin::jmap::cache::CachedAccount>>(&cached))
-            {
-                const auto account = std::ranges::find(
-                    *accounts, accountId, &javelin::jmap::cache::CachedAccount::accountId);
-                if (account != accounts->end())
-                {
-                    accountName = QString::fromStdString(account->name);
-                }
-            }
-        }
         if (accountName.isEmpty())
         {
             accountName = settings.loginEmail;

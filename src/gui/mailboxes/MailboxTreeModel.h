@@ -7,6 +7,7 @@
 #include <QStringList>
 #include <QStringView>
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <unordered_map>
@@ -51,8 +52,14 @@ namespace javelin::gui::mailboxes
                                   javelin::jmap::cache::MailboxReader& mailboxReader,
                                   QObject* parent = nullptr);
         MailboxTreeModel(javelin::jmap::cache::AccountReader& accountReader,
+                         javelin::jmap::cache::MailboxReader& mailboxReader, QString databasePath,
+                         QObject* parent = nullptr);
+        MailboxTreeModel(javelin::jmap::cache::AccountReader& accountReader,
                          javelin::jmap::cache::MailboxReader& mailboxReader, Options options,
                          QObject* parent = nullptr);
+        MailboxTreeModel(javelin::jmap::cache::AccountReader& accountReader,
+                         javelin::jmap::cache::MailboxReader& mailboxReader, QString databasePath,
+                         Options options, QObject* parent = nullptr);
         ~MailboxTreeModel() override;
 
         [[nodiscard]] QModelIndex index(int row, int column,
@@ -111,12 +118,22 @@ namespace javelin::gui::mailboxes
         [[nodiscard]] static bool mailboxNameLess(const std::unique_ptr<Node>& left,
                                                   const std::unique_ptr<Node>& right);
         void rebuild();
+        void rebuildFromSnapshot(
+            const std::vector<javelin::jmap::cache::CachedAccount>& accounts,
+            const std::unordered_map<std::string,
+                                     std::vector<javelin::jmap::cache::MailboxTreeItem>>&
+                mailboxesByAccount);
+        void startAsyncRebuild();
 
         javelin::jmap::cache::AccountReader& m_accountReader;
         javelin::jmap::cache::MailboxReader& m_mailboxReader;
+        QString m_databasePath;
         Options m_options;
         std::vector<std::unique_ptr<Node>> m_rootNodes;
         std::unordered_map<std::string, ConnectionStatus> m_connectionStatuses;
+        std::uint64_t m_rebuildGeneration = 0;
+        bool m_rebuildInFlight = false;
+        bool m_rebuildPending = false;
     };
 
 } // namespace javelin::gui::mailboxes

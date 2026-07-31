@@ -33,6 +33,6 @@ namespace javelin::app
       Q_SIGNALS:
         void accountStatusChanged(const QString& accountId, MailAccountStatus status);
         void sessionCapabilitiesChanged(const QString& ownerAccountId);
-        void cacheCommitted(javelin::app::MailCacheChange change);
+        void cacheInvalidated(javelin::app::MailCacheInvalidation invalidation);
     };
 } // namespace javelin::app

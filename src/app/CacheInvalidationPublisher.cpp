@@ -1,0 +1,142 @@
+#include "app/CacheInvalidationPublisher.h"
+
+#include <algorithm>
+#include <ranges>
+#include <utility>
+
+namespace javelin::app
+{
+    namespace
+    {
+        constexpr std::size_t maximumAffectedKeys = 64;
+
+        template <typename Container, typename Value>
+        void appendUniqueBounded(Container& target, Value value)
+        {
+            if (static_cast<std::size_t>(target.size()) >= maximumAffectedKeys ||
+                std::ranges::find(target, value) != target.end())
+                return;
+            target.push_back(std::move(value));
+        }
+
+        void appendMailboxWindowUnique(std::vector<MailboxQueryWindowChange>& target,
+                                       MailboxQueryWindowChange value)
+        {
+            const auto found =
+                std::ranges::find_if(target,
+                                     [&value](const auto& existing)
+                                     {
+                                         return existing.mailboxId == value.mailboxId &&
+                                                existing.offset == value.offset &&
+                                                existing.limit == value.limit;
+                                     });
+            if (found == target.end())
+                target.push_back(std::move(value));
+            else if (value.total.has_value())
+                found->total = value.total;
+        }
+
+        void appendSearchWindowUnique(std::vector<SearchQueryWindowChange>& target,
+                                      SearchQueryWindowChange value)
+        {
+            const auto found =
+                std::ranges::find_if(target,
+                                     [&value](const auto& existing)
+                                     {
+                                         return existing.queryKey == value.queryKey &&
+                                                existing.offset == value.offset &&
+                                                existing.limit == value.limit;
+                                     });
+            if (found == target.end())
+                target.push_back(std::move(value));
+            else if (value.total.has_value())
+                found->total = value.total;
+        }
+    } // namespace
+
+    CacheInvalidationPublisher::CacheInvalidationPublisher(QObject* parent) : QObject(parent)
+    {
+        m_flushTimer.setSingleShot(true);
+        connect(&m_flushTimer, &QTimer::timeout, this, &CacheInvalidationPublisher::flush);
+    }
+
+    void CacheInvalidationPublisher::publish(MailCacheChange change)
+    {
+        if (!m_pending.empty() && m_pending.back().accountId == change.accountId)
+            merge(m_pending.back(), std::move(change));
+        else
+            m_pending.push_back(std::move(change));
+
+        if (!m_flushTimer.isActive())
+            m_flushTimer.start(0);
+    }
+
+    void CacheInvalidationPublisher::flush()
+    {
+        m_flushTimer.stop();
+        while (!m_pending.empty())
+        {
+            auto change = std::move(m_pending.front());
+            m_pending.pop_front();
+            ++m_epoch;
+            Q_EMIT invalidated(MailCacheInvalidation{
+                .epoch = m_epoch,
+                .changedDomains = changedDomains(change),
+                .affectedKeys = affectedKeys(change),
+                .change = std::move(change),
+            });
+        }
+    }
+
+    std::uint64_t CacheInvalidationPublisher::currentEpoch() const
+    {
+        return m_epoch;
+    }
+
+    void CacheInvalidationPublisher::merge(MailCacheChange& target, MailCacheChange source)
+    {
+        if (target.accountId.isEmpty())
+            target.accountId = source.accountId;
+        for (auto& mailboxId : source.mailboxIds)
+        {
+            if (!target.mailboxIds.contains(mailboxId))
+                target.mailboxIds.push_back(std::move(mailboxId));
+        }
+        for (auto& window : source.queryWindows)
+            appendMailboxWindowUnique(target.queryWindows, std::move(window));
+        for (auto& window : source.searchWindows)
+            appendSearchWindowUnique(target.searchWindows, std::move(window));
+        target.mailboxTreeChanged = target.mailboxTreeChanged || source.mailboxTreeChanged;
+        target.hasNewMail = target.hasNewMail || source.hasNewMail;
+        target.optimisticProjection = target.optimisticProjection || source.optimisticProjection;
+    }
+
+    std::vector<javelin::protocol::ChangedDomain>
+    CacheInvalidationPublisher::changedDomains(const MailCacheChange& change)
+    {
+        std::vector<javelin::protocol::ChangedDomain> domains;
+        if (change.mailboxTreeChanged)
+            domains.push_back(javelin::protocol::ChangedDomain::MailboxTree);
+        if (!change.mailboxIds.empty() || !change.queryWindows.empty() ||
+            !change.searchWindows.empty())
+            domains.push_back(javelin::protocol::ChangedDomain::MailQueryWindows);
+        if (change.hasNewMail || change.optimisticProjection)
+            domains.push_back(javelin::protocol::ChangedDomain::MessageMetadata);
+        if (domains.empty())
+            domains.push_back(javelin::protocol::ChangedDomain::MailQueryWindows);
+        return domains;
+    }
+
+    std::vector<QString> CacheInvalidationPublisher::affectedKeys(const MailCacheChange& change)
+    {
+        std::vector<QString> keys;
+        appendUniqueBounded(keys, change.accountId);
+        for (const auto& mailboxId : change.mailboxIds)
+            appendUniqueBounded(keys, mailboxId);
+        for (const auto& window : change.queryWindows)
+            appendUniqueBounded(keys, window.mailboxId);
+        for (const auto& window : change.searchWindows)
+            appendUniqueBounded(keys, window.queryKey);
+        return keys;
+    }
+} // namespace javelin::app

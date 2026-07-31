@@ -412,6 +412,22 @@ rules in [Data changes never clobber user intent](DAEMON_GUI_ARCHITECTURE.md#dat
   selected-object deletion.
 - No database query or unbounded diff runs on the GUI thread.
 
+### Implementation status
+
+Completed for the mail presentation surface. Cache commits now enter the typed
+`MailApplicationEventsPort` as coalesced `MailCacheInvalidation` values with a monotonic volatile
+epoch, typed domains, and bounded affected-key hints. Mailbox and search sessions consume that
+port, use refresh scope/generation fences, and keep installed and pending query-window positions
+separate. Mailbox/search reads, search prefetch checks, thread-member expansion, and mailbox-tree
+rebuilds use short thread-owned read-only snapshots; stale results are discarded before Qt model
+installation. The main message model update path guards selection-driven navigation while stable
+selection is restored, and tab presentation no longer performs cache reads.
+
+Deterministic tests cover invalidation coalescing and key bounds, stale-result rejection, scope
+replacement/closure, and epoch fencing. The phase's remaining groupware-specific read presenters
+continue through their existing typed repository interfaces and are isolated from the mail
+presentation refresh path.
+
 ## Phase 6: compose transfer, vault leases, and priority scheduling
 
 This phase completes the process-sensitive mechanisms described in

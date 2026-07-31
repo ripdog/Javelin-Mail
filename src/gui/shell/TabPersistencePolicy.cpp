@@ -66,6 +66,8 @@ namespace javelin::gui::shell
                     .page =
                         {
                             .offset = tab.offset,
+                            .installedOffset = std::nullopt,
+                            .pendingOffset = std::nullopt,
                             .position = tab.offset,
                             .returnedLimit = pageSize,
                             .total = std::nullopt,

@@ -219,8 +219,8 @@ namespace javelin::app
         std::unique_ptr<SieveCommandService> m_sieveCommandService;
         std::unique_ptr<AccountRefreshCommandService> m_accountRefreshCommandService;
         std::unique_ptr<MessageContentCommandService> m_messageContentCommandService;
-        std::unique_ptr<MessageListSessionFactoryService> m_messageListSessionFactoryService;
         std::unique_ptr<MailApplicationEventsService> m_mailApplicationEventsService;
+        std::unique_ptr<MessageListSessionFactoryService> m_messageListSessionFactoryService;
         std::unique_ptr<CommandDispatcher> m_commandDispatcher;
         std::unique_ptr<UndoCommandService> m_undoCommandService;
         std::unique_ptr<javelin::app::undo::MailHistoryExecutor> m_mailHistoryExecutor;

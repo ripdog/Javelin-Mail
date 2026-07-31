@@ -234,10 +234,10 @@ namespace javelin::app
             std::make_unique<AccountRefreshCommandService>(*m_mailService);
         m_messageContentCommandService =
             std::make_unique<MessageContentCommandService>(*m_mailService);
-        m_messageListSessionFactoryService =
-            std::make_unique<MessageListSessionFactoryService>(*m_mailService);
         m_mailApplicationEventsService =
             std::make_unique<MailApplicationEventsService>(*m_mailService);
+        m_messageListSessionFactoryService = std::make_unique<MessageListSessionFactoryService>(
+            *m_mailService, *m_mailApplicationEventsService);
         m_commandDispatcher = std::make_unique<CommandDispatcher>(*m_accountRefreshCommandService);
         m_calendarCommandService = std::make_unique<CalendarCommandService>(*m_mailService);
         m_deferredSendService = std::make_unique<DeferredSendService>(

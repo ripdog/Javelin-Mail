@@ -1,18 +1,22 @@
 #include "gui/mailboxes/MailboxTreeModel.h"
 
+#include "app/MailboxTreeCacheRead.h"
 #include "gui/mailboxes/MailboxIconUtils.h"
 #include "gui/mailboxes/MailboxSort.h"
 #include "gui/settings/PreferencesDialog.h"
 
 #include <QApplication>
 #include <QDataStream>
+#include <QFutureWatcher>
 #include <QIcon>
 #include <QMimeData>
 #include <QPalette>
 #include <QSize>
+#include <QtConcurrentRun>
 
 #include <algorithm>
 #include <unordered_map>
+#include <utility>
 
 namespace javelin::gui::mailboxes
 {
@@ -31,11 +35,28 @@ namespace javelin::gui::mailboxes
 
     MailboxTreeModel::MailboxTreeModel(javelin::jmap::cache::AccountReader& accountReader,
                                        javelin::jmap::cache::MailboxReader& mailboxReader,
+                                       QString databasePath, QObject* parent)
+        : MailboxTreeModel(accountReader, mailboxReader, std::move(databasePath), Options{}, parent)
+    {
+    }
+
+    MailboxTreeModel::MailboxTreeModel(javelin::jmap::cache::AccountReader& accountReader,
+                                       javelin::jmap::cache::MailboxReader& mailboxReader,
                                        Options options, QObject* parent)
         : QAbstractItemModel(parent), m_accountReader(accountReader),
           m_mailboxReader(mailboxReader), m_options(std::move(options))
     {
-        rebuild();
+        refresh();
+    }
+
+    MailboxTreeModel::MailboxTreeModel(javelin::jmap::cache::AccountReader& accountReader,
+                                       javelin::jmap::cache::MailboxReader& mailboxReader,
+                                       QString databasePath, Options options, QObject* parent)
+        : QAbstractItemModel(parent), m_accountReader(accountReader),
+          m_mailboxReader(mailboxReader), m_databasePath(std::move(databasePath)),
+          m_options(std::move(options))
+    {
+        refresh();
     }
 
     MailboxTreeModel::~MailboxTreeModel() = default;
@@ -323,11 +344,21 @@ namespace javelin::gui::mailboxes
 
     void MailboxTreeModel::refresh()
     {
+        if (!m_databasePath.isEmpty())
+        {
+            startAsyncRebuild();
+            return;
+        }
         rebuild();
     }
 
     bool MailboxTreeModel::refreshAccount(const QStringView accountId)
     {
+        if (!m_databasePath.isEmpty())
+        {
+            refresh();
+            return true;
+        }
         const auto id = accountId.toString().toStdString();
         const auto result = m_mailboxReader.listMailboxTree(id);
         const auto* mailboxes =
@@ -471,19 +502,77 @@ namespace javelin::gui::mailboxes
 
     void MailboxTreeModel::rebuild()
     {
-        beginResetModel();
-        m_rootNodes.clear();
-
         const auto accountsResult = m_accountReader.listAll();
         const auto* accounts =
             std::get_if<std::vector<javelin::jmap::cache::CachedAccount>>(&accountsResult);
         if (accounts == nullptr)
         {
-            endResetModel();
+            rebuildFromSnapshot({}, {});
             return;
         }
 
+        std::unordered_map<std::string, std::vector<javelin::jmap::cache::MailboxTreeItem>>
+            mailboxesByAccount;
         for (const auto& account : *accounts)
+        {
+            if (m_options.accountId.has_value() && account.accountId != *m_options.accountId)
+                continue;
+            const auto mailboxResult = m_mailboxReader.listMailboxTree(account.accountId);
+            if (const auto* mailboxItems =
+                    std::get_if<std::vector<javelin::jmap::cache::MailboxTreeItem>>(&mailboxResult))
+            {
+                mailboxesByAccount.emplace(account.accountId, *mailboxItems);
+            }
+        }
+        rebuildFromSnapshot(*accounts, mailboxesByAccount);
+    }
+
+    void MailboxTreeModel::startAsyncRebuild()
+    {
+        if (m_rebuildInFlight)
+        {
+            m_rebuildPending = true;
+            return;
+        }
+
+        m_rebuildInFlight = true;
+        const auto generation = ++m_rebuildGeneration;
+        const auto accountId = m_options.accountId;
+        auto* watcher = new QFutureWatcher<javelin::app::MailboxTreeCacheReadResult>(this);
+        connect(watcher, &QFutureWatcher<javelin::app::MailboxTreeCacheReadResult>::finished, this,
+                [this, watcher, generation]
+                {
+                    auto result = watcher->result();
+                    watcher->deleteLater();
+                    m_rebuildInFlight = false;
+                    if (generation == m_rebuildGeneration)
+                    {
+                        if (const auto* snapshot =
+                                std::get_if<javelin::app::MailboxTreeCacheSnapshot>(&result))
+                        {
+                            rebuildFromSnapshot(snapshot->accounts, snapshot->mailboxesByAccount);
+                        }
+                        else
+                        {
+                            rebuildFromSnapshot({}, {});
+                        }
+                    }
+                    if (std::exchange(m_rebuildPending, false))
+                        startAsyncRebuild();
+                });
+        watcher->setFuture(
+            QtConcurrent::run(javelin::app::loadMailboxTreeCache, m_databasePath, accountId));
+    }
+
+    void MailboxTreeModel::rebuildFromSnapshot(
+        const std::vector<javelin::jmap::cache::CachedAccount>& accounts,
+        const std::unordered_map<std::string, std::vector<javelin::jmap::cache::MailboxTreeItem>>&
+            mailboxesByAccount)
+    {
+        beginResetModel();
+        m_rootNodes.clear();
+
+        for (const auto& account : accounts)
         {
             if (m_options.accountId.has_value() && account.accountId != *m_options.accountId)
             {
@@ -501,9 +590,9 @@ namespace javelin::gui::mailboxes
                     : (account.name.empty() ? account.accountId : account.name);
             // mailboxId left empty — this is an account-level node.
 
-            const auto mailboxResult = m_mailboxReader.listMailboxTree(account.accountId);
+            const auto mailboxIt = mailboxesByAccount.find(account.accountId);
             const auto* mailboxItems =
-                std::get_if<std::vector<javelin::jmap::cache::MailboxTreeItem>>(&mailboxResult);
+                mailboxIt == mailboxesByAccount.end() ? nullptr : &mailboxIt->second;
 
             if (mailboxItems != nullptr)
             {

@@ -45,6 +45,8 @@ namespace javelin::app
     struct MessageListPage
     {
         std::size_t offset = 0;
+        std::optional<std::size_t> installedOffset;
+        std::optional<std::size_t> pendingOffset;
         std::size_t position = 0;
         std::size_t returnedLimit = 0;
         std::optional<std::size_t> total;

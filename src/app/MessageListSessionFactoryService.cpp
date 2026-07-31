@@ -1,5 +1,6 @@
 #include "app/MessageListSessionFactoryService.h"
 
+#include "app/MailApplicationEventsPorts.h"
 #include "app/MailApplicationService.h"
 #include "app/MailboxSession.h"
 #include "app/SearchSession.h"
@@ -9,8 +10,8 @@
 namespace javelin::app
 {
     MessageListSessionFactoryService::MessageListSessionFactoryService(
-        MailApplicationService& service)
-        : m_service(service)
+        MailApplicationService& service, MailApplicationEventsPort& events)
+        : m_service(service), m_events(events)
     {
     }
 
@@ -21,7 +22,7 @@ namespace javelin::app
         std::optional<RestoredMailboxState> restored, QObject* parent)
     {
         return new MailboxSession(std::move(accountId), std::move(mailboxId), std::move(title),
-                                  std::move(role), sort, queryReader, m_service, pageSize,
+                                  std::move(role), sort, queryReader, m_service, pageSize, m_events,
                                   std::move(restored), parent);
     }
 
@@ -31,6 +32,6 @@ namespace javelin::app
         const std::size_t pageSize, std::optional<RestoredSearchState> restored, QObject* parent)
     {
         return new SearchSession(std::move(accountId), std::move(criteria), sort, queryReader,
-                                 m_service, pageSize, std::move(restored), parent);
+                                 m_service, m_events, pageSize, std::move(restored), parent);
     }
 } // namespace javelin::app

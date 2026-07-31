@@ -182,6 +182,8 @@ namespace javelin::gui::search
                         javelin::app::MessageListPage{
                             .offset = static_cast<std::size_t>(
                                 settings.value(QStringLiteral("offset"), 0).toULongLong()),
+                            .installedOffset = std::nullopt,
+                            .pendingOffset = std::nullopt,
                             .position = static_cast<std::size_t>(
                                 settings.value(QStringLiteral("position"), 0).toULongLong()),
                             .returnedLimit = static_cast<std::size_t>(

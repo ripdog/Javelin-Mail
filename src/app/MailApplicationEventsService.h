@@ -1,5 +1,6 @@
 #pragma once
 
+#include "app/CacheInvalidationPublisher.h"
 #include "app/MailApplicationEventsPorts.h"
 
 namespace javelin::app
@@ -19,5 +20,6 @@ namespace javelin::app
 
       private:
         MailApplicationService& m_service;
+        CacheInvalidationPublisher m_invalidationPublisher;
     };
 } // namespace javelin::app

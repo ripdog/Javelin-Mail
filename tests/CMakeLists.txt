@@ -70,6 +70,8 @@ add_executable(javelin_jmap_tests
     ${PROJECT_SOURCE_DIR}/src/app/TranslationService.cpp
     ${PROJECT_SOURCE_DIR}/src/app/TranslationService.h
     ${PROJECT_SOURCE_DIR}/src/app/WorkScheduler.cpp
+    ${PROJECT_SOURCE_DIR}/src/app/CacheInvalidationPublisher.cpp
+    ${PROJECT_SOURCE_DIR}/src/app/CacheInvalidationPublisher.h
     FixtureReader.cpp
     FixtureReader.h
     jmap/AccountReadRepositoryTest.cpp
@@ -102,6 +104,7 @@ add_executable(javelin_jmap_tests
     jmap/LongPollMailboxObserverTest.cpp
     jmap/LongPollWorkerTest.cpp
     app/ApplicationErrorCoordinatorTest.cpp
+    app/CacheInvalidationPublisherTest.cpp
     app/CommandDispatcherTest.cpp
     app/ContactCommandPreparationTest.cpp
     app/HistoryRepositoryTest.cpp
@@ -174,6 +177,7 @@ add_executable(javelin_jmap_tests
     gui/MessageAppearanceTest.cpp
     gui/MessageViewPresentationTest.cpp
     gui/PaginationTest.cpp
+    gui/RefreshGenerationTest.cpp
     gui/PlainTextLinkifierTest.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/calendar/MonthCalendarLayout.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/calendar/RecurrencePattern.cpp
@@ -207,6 +211,7 @@ target_link_libraries(javelin_jmap_tests
     PRIVATE
         Catch2::Catch2WithMain
         QCoro6::Network
+        Qt::Concurrent
         Qt::Network
         Qt::Widgets
         javelin_protocol

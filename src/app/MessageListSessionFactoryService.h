@@ -5,11 +5,13 @@
 namespace javelin::app
 {
     class MailApplicationService;
+    class MailApplicationEventsPort;
 
     class MessageListSessionFactoryService final : public MessageListSessionFactoryPort
     {
       public:
-        explicit MessageListSessionFactoryService(MailApplicationService& service);
+        MessageListSessionFactoryService(MailApplicationService& service,
+                                         MailApplicationEventsPort& events);
 
         [[nodiscard]] MailboxSession* createMailboxSession(
             std::string accountId, std::string mailboxId, QString title,
@@ -25,5 +27,6 @@ namespace javelin::app
 
       private:
         MailApplicationService& m_service;
+        MailApplicationEventsPort& m_events;
     };
 } // namespace javelin::app

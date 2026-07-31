@@ -1,5 +1,6 @@
 #include "app/SearchSession.h"
 
+#include "app/MailApplicationEventsPorts.h"
 #include "app/MailApplicationService.h"
 #include "jmap/cache/QueryService.h"
 #include <QCoroTask>
@@ -18,6 +19,9 @@ namespace javelin::app
     {
         using LocalSearchResult = std::variant<std::vector<javelin::jmap::cache::MessageListItem>,
                                                javelin::jmap::cache::DatabaseError>;
+        using ProjectedSearchPageResult =
+            std::variant<std::optional<javelin::jmap::cache::SearchWindowPage>,
+                         javelin::jmap::cache::DatabaseError>;
 
         constexpr std::size_t completeManifestThreshold = 2000;
         constexpr std::size_t readAheadPages = 2;
@@ -41,17 +45,38 @@ namespace javelin::app
             javelin::jmap::cache::QueryService queryService{connection};
             return queryService.searchAllCachedMessageText(accountId, text, sort);
         }
+
+        [[nodiscard]] ProjectedSearchPageResult
+        loadProjectedSearchPage(const QString& databasePath, const std::string& accountId,
+                                const std::string& queryKey, const std::size_t offset,
+                                const std::size_t limit)
+        {
+            javelin::jmap::cache::ReadOnlyThreadConnectionFactory factory{
+                {.connectionNamePrefix = QStringLiteral("javelin-projected-search"),
+                 .databasePath = databasePath}};
+            auto connectionResult = factory.openForCurrentThread("snapshot");
+            if (const auto* error =
+                    std::get_if<javelin::jmap::cache::DatabaseError>(&connectionResult))
+            {
+                return *error;
+            }
+            auto connection = std::get<javelin::jmap::cache::ReadOnlyDatabaseConnection>(
+                std::move(connectionResult));
+            javelin::jmap::cache::QueryService queryService{connection};
+            return queryService.loadSearchWindow(accountId, queryKey, offset, limit);
+        }
     } // namespace
 
     SearchSession::SearchSession(std::string accountId,
                                  javelin::jmap::search::EmailSearchCriteria criteria,
                                  javelin::jmap::query::EmailListSort sort,
                                  javelin::jmap::cache::QueryReader& queryReader,
-                                 MailApplicationService& mailService, const std::size_t pageSize,
+                                 MailApplicationService& mailService,
+                                 MailApplicationEventsPort& events, const std::size_t pageSize,
                                  std::optional<RestoredSearchState> restored, QObject* parent)
         : MessageListSession(parent), m_accountId(std::move(accountId)),
           m_query(javelin::jmap::search::displayString(criteria)), m_criteria(std::move(criteria)),
-          m_sort(sort), m_queryReader(queryReader), m_mailService(mailService),
+          m_sort(sort), m_queryReader(queryReader), m_mailService(mailService), m_events(events),
           m_pageSize(pageSize),
           m_mode(javelin::jmap::search::isBasicTextSearch(m_criteria) ? SearchMode::Local
                                                                       : SearchMode::Online),
@@ -65,14 +90,17 @@ namespace javelin::app
                 m_sessionId = std::move(restored->sessionId);
         }
 
-        connect(&m_mailService, &MailApplicationService::cacheCommitted, this,
-                [this](const MailCacheChange& change)
+        connect(&m_events, &MailApplicationEventsPort::cacheInvalidated, this,
+                [this](const MailCacheInvalidation& invalidation)
                 {
+                    const auto& change = invalidation.change;
                     if (m_closed || m_mode != SearchMode::Online ||
                         change.accountId.toStdString() != m_accountId)
                     {
                         return;
                     }
+                    m_cacheEpoch = std::max(m_cacheEpoch, invalidation.epoch);
+                    static_cast<void>(m_refreshGeneration.begin(m_cacheEpoch));
                     const auto key = onlineWindowKey();
                     for (const auto& window : change.searchWindows)
                     {
@@ -81,6 +109,12 @@ namespace javelin::app
                             applyCommittedServerPage();
                             return;
                         }
+                    }
+                    if (change.hasNewMail || change.optimisticProjection ||
+                        !change.mailboxIds.isEmpty())
+                    {
+                        m_page.stale = true;
+                        applyCommittedServerPage();
                     }
                 });
     }
@@ -142,26 +176,7 @@ namespace javelin::app
         if (m_page.cacheLoaded && !m_page.stale && !forceReload)
             return;
 
-        const auto result = m_queryReader.loadSearchWindow(m_accountId, onlineWindowKey(),
-                                                           m_page.offset, m_pageSize);
-        const auto* page =
-            std::get_if<std::optional<javelin::jmap::cache::SearchWindowPage>>(&result);
-        if (page == nullptr || !page->has_value() ||
-            !javelin::jmap::cache::isDisplayCurrent((*page)->coverage, (*page)->materialization) ||
-            (!m_page.queryState.empty() && (*page)->queryState != m_page.queryState))
-        {
-            m_page.cacheLoaded = false;
-            m_page.stale = true;
-            return;
-        }
-
-        m_page.items = (*page)->items;
-        m_page.position = (*page)->position;
-        m_page.returnedLimit = (*page)->returnedLimit;
-        m_page.total = (*page)->total;
-        m_page.queryState = (*page)->queryState;
-        m_page.cacheLoaded = true;
-        m_page.stale = false;
+        reloadProjectedPage();
     }
 
     void SearchSession::refresh()
@@ -183,10 +198,13 @@ namespace javelin::app
             return;
 
         ++m_generation;
+        m_refreshGeneration.replaceScope();
         m_mode = SearchMode::Promoting;
         m_localSearchInFlight = false;
         m_page = MessageListPage{
             .offset = 0,
+            .installedOffset = std::nullopt,
+            .pendingOffset = std::nullopt,
             .position = 0,
             .returnedLimit = m_pageSize,
             .total = std::nullopt,
@@ -308,71 +326,88 @@ namespace javelin::app
             return;
         }
 
-        const auto cached =
-            m_queryReader.loadSearchWindow(m_accountId, onlineWindowKey(), offset, m_pageSize);
-        if (const auto* page =
-                std::get_if<std::optional<javelin::jmap::cache::SearchWindowPage>>(&cached);
-            page != nullptr && page->has_value() &&
-            javelin::jmap::cache::isPaginationAuthoritative((*page)->coverage,
-                                                            (*page)->materialization) &&
-            (*page)->queryState == queryState)
-        {
-            const auto next = (*page)->position + (*page)->items.size();
-            if (next > offset)
-                prefetchOnlinePages(next, remainingRequests - 1, generation, std::move(queryState));
-            return;
-        }
-
         m_prefetchOffsets.insert(offset);
-        auto task = m_mailService.requestSearchWindow(SearchWindowIntent{
-            .accountId = m_accountId,
-            .criteria = m_criteria,
-            .offset = offset,
-            .limit = m_pageSize,
-            .sort = m_sort,
-            .anchor = std::nullopt,
-            .windowKey = onlineWindowKey(),
-        });
-        QCoro::connect(std::move(task), this,
-                       [this, offset, remainingRequests, generation,
-                        queryState = std::move(queryState)](SearchWindowResult result)
-                       {
-                           m_prefetchOffsets.erase(offset);
-                           if (m_closed || generation != m_generation ||
-                               m_mode != SearchMode::Online)
-                               return;
-                           const auto* summary = std::get_if<SearchWindowSummary>(&result);
-                           const bool currentPage = m_page.offset == offset;
-                           if (summary == nullptr || summary->queryState != queryState)
-                           {
-                               if (currentPage)
-                               {
-                                   m_page.refreshInFlight = false;
-                                   m_page.stale = true;
-                                   Q_EMIT pageChanged();
-                                   requestOnlinePage();
-                               }
-                               else if (summary != nullptr)
-                               {
-                                   m_page.stale = true;
-                                   Q_EMIT pageChanged();
-                               }
-                               return;
-                           }
-                           if (currentPage)
-                           {
-                               m_page.refreshInFlight = false;
-                               applyCommittedServerPage();
-                           }
-                           if (summary->representativeCount == 0)
-                               return;
-                           const auto next = summary->position + summary->representativeCount;
-                           if (next > offset)
-                           {
-                               prefetchOnlinePages(next, remainingRequests - 1, generation,
-                                                   std::move(queryState));
-                           }
-                       });
+        auto* watcher = new QFutureWatcher<ProjectedSearchPageResult>(this);
+        connect(
+            watcher, &QFutureWatcher<ProjectedSearchPageResult>::finished, this,
+            [this, watcher, offset, remainingRequests, generation,
+             queryState = std::move(queryState)]
+            {
+                auto cached = watcher->result();
+                watcher->deleteLater();
+                if (m_closed || generation != m_generation || m_mode != SearchMode::Online)
+                {
+                    m_prefetchOffsets.erase(offset);
+                    return;
+                }
+
+                if (const auto* page =
+                        std::get_if<std::optional<javelin::jmap::cache::SearchWindowPage>>(&cached);
+                    page != nullptr && page->has_value() &&
+                    javelin::jmap::cache::isPaginationAuthoritative((*page)->coverage,
+                                                                    (*page)->materialization) &&
+                    (*page)->queryState == queryState)
+                {
+                    m_prefetchOffsets.erase(offset);
+                    const auto next = (*page)->position + (*page)->items.size();
+                    if (next > offset)
+                        prefetchOnlinePages(next, remainingRequests - 1, generation,
+                                            std::move(queryState));
+                    return;
+                }
+
+                auto task = m_mailService.requestSearchWindow(SearchWindowIntent{
+                    .accountId = m_accountId,
+                    .criteria = m_criteria,
+                    .offset = offset,
+                    .limit = m_pageSize,
+                    .sort = m_sort,
+                    .anchor = std::nullopt,
+                    .windowKey = onlineWindowKey(),
+                });
+                QCoro::connect(
+                    std::move(task), this,
+                    [this, offset, remainingRequests, generation,
+                     queryState = std::move(queryState)](SearchWindowResult result)
+                    {
+                        m_prefetchOffsets.erase(offset);
+                        if (m_closed || generation != m_generation || m_mode != SearchMode::Online)
+                            return;
+                        const auto* summary = std::get_if<SearchWindowSummary>(&result);
+                        const bool currentPage = m_page.offset == offset;
+                        if (summary == nullptr || summary->queryState != queryState)
+                        {
+                            if (currentPage)
+                            {
+                                m_page.refreshInFlight = false;
+                                m_page.stale = true;
+                                Q_EMIT pageChanged();
+                                requestOnlinePage();
+                            }
+                            else if (summary != nullptr)
+                            {
+                                m_page.stale = true;
+                                Q_EMIT pageChanged();
+                            }
+                            return;
+                        }
+                        if (currentPage)
+                        {
+                            m_page.refreshInFlight = false;
+                            applyCommittedServerPage();
+                        }
+                        if (summary->representativeCount == 0)
+                            return;
+                        const auto next = summary->position + summary->representativeCount;
+                        if (next > offset)
+                        {
+                            prefetchOnlinePages(next, remainingRequests - 1, generation,
+                                                std::move(queryState));
+                        }
+                    });
+            });
+        watcher->setFuture(QtConcurrent::run(loadProjectedSearchPage, m_queryReader.databasePath(),
+                                             m_accountId, onlineWindowKey(), offset, m_pageSize));
     }
 
     void SearchSession::refreshAfterMutation()
@@ -391,6 +426,7 @@ namespace javelin::app
     {
         m_closed = true;
         ++m_generation;
+        m_refreshGeneration.close();
         if (m_mode == SearchMode::Online)
             m_mailService.retireSearchWindow(m_accountId, onlineWindowKey());
     }
@@ -412,6 +448,7 @@ namespace javelin::app
         }
         m_sort = sort;
         ++m_generation;
+        m_refreshGeneration.replaceScope();
         m_page.offset = 0;
         m_page.position = 0;
         m_page.anchor.reset();
@@ -475,15 +512,17 @@ namespace javelin::app
 
         m_localSearchInFlight = true;
         const auto generation = m_generation;
+        const auto ticket = m_refreshGeneration.begin(m_cacheEpoch);
         auto* watcher = new QFutureWatcher<LocalSearchResult>(this);
         connect(
             watcher, &QFutureWatcher<LocalSearchResult>::finished, this,
-            [this, watcher, generation]
+            [this, watcher, generation, ticket]
             {
                 auto result = watcher->result();
                 watcher->deleteLater();
                 m_localSearchInFlight = false;
-                if (generation != m_generation || m_mode != SearchMode::Local)
+                if (generation != m_generation || m_mode != SearchMode::Local ||
+                    !m_refreshGeneration.install(ticket, m_cacheEpoch))
                 {
                     if (!m_closed && m_mode == SearchMode::Local && !m_localSnapshotLoaded)
                         startLocalSnapshot();
@@ -519,6 +558,8 @@ namespace javelin::app
         m_page.position = begin;
         m_page.returnedLimit = m_pageSize;
         m_page.total = m_localSnapshot.size();
+        m_page.installedOffset = m_page.offset;
+        m_page.pendingOffset.reset();
         m_page.cacheLoaded = true;
         m_page.refreshInFlight = false;
         m_page.stale = false;
@@ -527,11 +568,71 @@ namespace javelin::app
     void SearchSession::applyCommittedServerPage()
     {
         loadCachedPage(true);
-        Q_EMIT pageChanged();
+    }
+
+    void SearchSession::reloadProjectedPage()
+    {
+        if (m_projectedReloadInFlight)
+        {
+            m_projectedReloadPending = true;
+            return;
+        }
+        m_projectedReloadInFlight = true;
+        const auto generation = m_generation;
+        const auto offset = m_page.offset;
+        const auto queryKey = onlineWindowKey();
+        const auto ticket = m_refreshGeneration.begin(m_cacheEpoch);
+        auto* watcher = new QFutureWatcher<ProjectedSearchPageResult>(this);
+        connect(watcher, &QFutureWatcher<ProjectedSearchPageResult>::finished, this,
+                [this, watcher, generation, offset, ticket]
+                {
+                    auto result = watcher->result();
+                    watcher->deleteLater();
+                    m_projectedReloadInFlight = false;
+                    if (m_closed || m_mode != SearchMode::Online || generation != m_generation ||
+                        offset != m_page.offset ||
+                        !m_refreshGeneration.install(ticket, m_cacheEpoch))
+                    {
+                        if (std::exchange(m_projectedReloadPending, false))
+                            reloadProjectedPage();
+                        return;
+                    }
+
+                    const auto* page =
+                        std::get_if<std::optional<javelin::jmap::cache::SearchWindowPage>>(&result);
+                    if (page == nullptr || !page->has_value() ||
+                        !javelin::jmap::cache::isDisplayCurrent((*page)->coverage,
+                                                                (*page)->materialization) ||
+                        (!m_page.queryState.empty() && (*page)->queryState != m_page.queryState))
+                    {
+                        m_page.cacheLoaded = false;
+                        m_page.stale = true;
+                    }
+                    else
+                    {
+                        m_page.items = (*page)->items;
+                        m_page.position = (*page)->position;
+                        m_page.returnedLimit = (*page)->returnedLimit;
+                        m_page.total = (*page)->total;
+                        m_page.queryState = (*page)->queryState;
+                        m_page.cacheLoaded = true;
+                        m_page.stale = false;
+                        m_page.installedOffset = m_page.offset;
+                        m_page.pendingOffset.reset();
+                    }
+                    Q_EMIT pageChanged();
+                    if (std::exchange(m_projectedReloadPending, false))
+                        reloadProjectedPage();
+                });
+        watcher->setFuture(QtConcurrent::run(loadProjectedSearchPage, m_queryReader.databasePath(),
+                                             m_accountId, queryKey, offset, m_pageSize));
     }
 
     void SearchSession::resetForPageChange()
     {
+        ++m_generation;
+        static_cast<void>(m_refreshGeneration.begin(m_cacheEpoch));
+        m_page.pendingOffset = m_page.offset;
         m_page.position = m_page.offset;
         m_page.items.clear();
         m_page.cacheLoaded = false;

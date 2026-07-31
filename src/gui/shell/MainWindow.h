@@ -367,6 +367,7 @@ namespace javelin::gui::shell
         QAction* m_calendarRefreshAction = nullptr;
         javelin::jmap::query::EmailListSort m_emailListSort;
         bool m_paletteRefreshPending = false;
+        bool m_modelUpdateInProgress = false;
         std::optional<int> m_activeTabIndex;
         std::vector<TabState> m_tabs;
     };

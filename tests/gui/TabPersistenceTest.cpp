@@ -42,6 +42,8 @@ TEST_CASE("search tab persistence preserves resumable search state", "[gui][tabs
         .page =
             {
                 .offset = 40,
+                .installedOffset = std::nullopt,
+                .pendingOffset = std::nullopt,
                 .position = 40,
                 .returnedLimit = 20,
                 .total = 63,
@@ -111,6 +113,8 @@ TEST_CASE("search tab restoration transfers persisted session state", "[gui][tab
                         .page =
                             {
                                 .offset = 20,
+                                .installedOffset = std::nullopt,
+                                .pendingOffset = std::nullopt,
                                 .position = 20,
                                 .returnedLimit = 20,
                                 .total = std::nullopt,
