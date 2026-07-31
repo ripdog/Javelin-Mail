@@ -1,0 +1,488 @@
+#pragma once
+
+#include <QString>
+#include <QUuid>
+
+#include <cstddef>
+#include <cstdint>
+#include <optional>
+#include <variant>
+#include <vector>
+
+namespace javelin::protocol
+{
+
+    struct CommandId
+    {
+        QUuid value;
+
+        friend bool operator==(const CommandId&, const CommandId&) = default;
+    };
+
+    struct RequestId
+    {
+        QUuid value;
+
+        friend bool operator==(const RequestId&, const RequestId&) = default;
+    };
+
+    struct ScopeId
+    {
+        QUuid value;
+
+        friend bool operator==(const ScopeId&, const ScopeId&) = default;
+    };
+
+    struct OperationId
+    {
+        QUuid value;
+
+        friend bool operator==(const OperationId&, const OperationId&) = default;
+    };
+
+    struct ProtocolVersion
+    {
+        std::uint16_t major = 1;
+        std::uint16_t minor = 0;
+
+        friend bool operator==(const ProtocolVersion&, const ProtocolVersion&) = default;
+    };
+
+    struct BuildIdentity
+    {
+        QString application;
+        QString revision;
+
+        friend bool operator==(const BuildIdentity&, const BuildIdentity&) = default;
+    };
+
+    struct DaemonInstanceId
+    {
+        QUuid value;
+
+        friend bool operator==(const DaemonInstanceId&, const DaemonInstanceId&) = default;
+    };
+
+    struct CacheInstanceId
+    {
+        QUuid value;
+
+        friend bool operator==(const CacheInstanceId&, const CacheInstanceId&) = default;
+    };
+
+    struct CacheSchemaVersion
+    {
+        std::uint32_t value = 1;
+
+        friend bool operator==(const CacheSchemaVersion&, const CacheSchemaVersion&) = default;
+    };
+
+    struct CacheDataVersion
+    {
+        std::uint64_t value = 0;
+
+        friend bool operator==(const CacheDataVersion&, const CacheDataVersion&) = default;
+    };
+
+    struct InvalidationEpoch
+    {
+        std::uint64_t value = 0;
+
+        friend bool operator==(const InvalidationEpoch&, const InvalidationEpoch&) = default;
+    };
+
+    struct SettingsRevision
+    {
+        std::uint64_t value = 0;
+
+        friend bool operator==(const SettingsRevision&, const SettingsRevision&) = default;
+    };
+
+    struct CacheIdentity
+    {
+        CacheInstanceId instance;
+        CacheSchemaVersion schema;
+        CacheDataVersion dataVersion;
+
+        friend bool operator==(const CacheIdentity&, const CacheIdentity&) = default;
+    };
+
+    struct HelloRequest
+    {
+        ProtocolVersion protocol;
+        BuildIdentity build;
+    };
+
+    struct RefreshAccountCommand
+    {
+        QString accountId;
+        bool force = false;
+    };
+
+    using ApplicationCommand = std::variant<RefreshAccountCommand>;
+
+    struct CommandRequest
+    {
+        CommandId id;
+        ApplicationCommand command;
+    };
+
+    struct MailboxWindowMaterialization
+    {
+        QString accountId;
+        QString mailboxId;
+        std::uint64_t offset = 0;
+        std::uint32_t limit = 0;
+    };
+
+    using Materialization = std::variant<MailboxWindowMaterialization>;
+
+    struct MaterializationRequest
+    {
+        RequestId id;
+        ScopeId scope;
+        Materialization request;
+    };
+
+    struct CancelMaterializationScopeRequest
+    {
+        ScopeId scope;
+    };
+
+    struct GetSettingsRequest
+    {
+    };
+
+    struct SettingsUpdate
+    {
+        std::optional<QString> languageTag;
+        std::optional<bool> notificationsEnabled;
+        std::optional<std::vector<QString>> watchedMailboxIds;
+    };
+
+    struct UpdateSettingsRequest
+    {
+        SettingsRevision baseRevision;
+        SettingsUpdate update;
+    };
+
+    struct CacheAccessSuspendedAcknowledgement
+    {
+        CacheInstanceId instance;
+    };
+
+    struct PingRequest
+    {
+    };
+
+    using ClientRequest =
+        std::variant<HelloRequest, CommandRequest, MaterializationRequest,
+                     CancelMaterializationScopeRequest, GetSettingsRequest, UpdateSettingsRequest,
+                     CacheAccessSuspendedAcknowledgement, PingRequest>;
+
+    enum class BoundaryErrorCode : std::uint8_t
+    {
+        InvalidRequest,
+        InvalidIdentifier,
+        ValueTooLarge,
+        TooManyValues,
+        InvalidProtocol,
+        UnsupportedOperation,
+        Busy,
+        StaleSettingsRevision,
+        MissingObject,
+        NoUsableAccountConfiguration,
+        CacheUnavailable,
+        DaemonShuttingDown,
+        IncompatibleBuild,
+    };
+
+    struct BoundaryError
+    {
+        BoundaryErrorCode code = BoundaryErrorCode::InvalidRequest;
+        QString field;
+        QString detail;
+    };
+
+    struct ReadyReply
+    {
+        ProtocolVersion protocol;
+        DaemonInstanceId daemon;
+        CacheIdentity cache;
+        InvalidationEpoch epoch;
+        SettingsRevision settingsRevision;
+    };
+
+    struct HandshakeRejected
+    {
+        BoundaryError error;
+    };
+
+    using HandshakeReply = std::variant<ReadyReply, HandshakeRejected>;
+
+    enum class ChangedDomain : std::uint8_t
+    {
+        MailboxTree,
+        MailQueryWindows,
+        MessageMetadata,
+        MessageContent,
+        Contacts,
+        Calendars,
+        History,
+        BackgroundJobs,
+        UserVisibleFailures,
+    };
+
+    struct CommandAccepted
+    {
+        CommandId id;
+        std::optional<OperationId> operation;
+        InvalidationEpoch epoch;
+        std::vector<ChangedDomain> changedDomains;
+        std::vector<QString> affectedKeys;
+    };
+
+    struct CommandRejected
+    {
+        CommandId id;
+        BoundaryError error;
+    };
+
+    using CommandReply = std::variant<CommandAccepted, CommandRejected>;
+
+    struct MaterializationAccepted
+    {
+        RequestId id;
+    };
+
+    struct MaterializationRejected
+    {
+        RequestId id;
+        BoundaryError error;
+    };
+
+    using MaterializationReply = std::variant<MaterializationAccepted, MaterializationRejected>;
+
+    struct SettingsSnapshot
+    {
+        SettingsRevision revision;
+        std::uint32_t schemaVersion = 1;
+        QString languageTag;
+        bool notificationsEnabled = true;
+        std::vector<QString> watchedMailboxIds;
+    };
+
+    struct SettingsSnapshotReply
+    {
+        SettingsSnapshot snapshot;
+    };
+
+    struct SettingsReadRejected
+    {
+        BoundaryError error;
+    };
+
+    using SettingsReadReply = std::variant<SettingsSnapshotReply, SettingsReadRejected>;
+
+    struct SettingsUpdated
+    {
+        SettingsRevision revision;
+    };
+
+    struct SettingsUpdateRejected
+    {
+        SettingsRevision currentRevision;
+        BoundaryError error;
+    };
+
+    using SettingsUpdateReply = std::variant<SettingsUpdated, SettingsUpdateRejected>;
+
+    struct OperationFailed
+    {
+        OperationId operation;
+        BoundaryError error;
+    };
+
+    enum class AccountState : std::uint8_t
+    {
+        Unknown,
+        Ready,
+        Synchronizing,
+        AuthenticationRequired,
+        Failed,
+        Paused,
+    };
+
+    struct AccountStatus
+    {
+        QString accountId;
+        AccountState state = AccountState::Unknown;
+        QString detail;
+    };
+
+    enum class DaemonLifecycle : std::uint8_t
+    {
+        Starting,
+        Ready,
+        Recovering,
+        ShuttingDown,
+    };
+
+    struct DaemonStatus
+    {
+        DaemonLifecycle lifecycle = DaemonLifecycle::Starting;
+        std::vector<AccountStatus> accounts;
+    };
+
+    struct OpenMailboxRoute
+    {
+        QString accountId;
+        QString mailboxId;
+    };
+
+    struct OpenMessageRoute
+    {
+        QString accountId;
+        QString emailId;
+    };
+
+    struct OpenComposeRoute
+    {
+        QString composeSessionId;
+    };
+
+    using ActivationRoute = std::variant<OpenMailboxRoute, OpenMessageRoute, OpenComposeRoute>;
+
+    enum class CacheSuspendReason : std::uint8_t
+    {
+        Migration,
+        Replacement,
+        Recovery,
+    };
+
+    struct CacheAccessSuspendRequested
+    {
+        CacheInstanceId instance;
+        CacheSuspendReason reason = CacheSuspendReason::Recovery;
+        std::optional<CacheSchemaVersion> targetSchema;
+    };
+
+    struct CacheAccessResumed
+    {
+        CacheIdentity cache;
+        InvalidationEpoch epoch;
+    };
+
+    struct CacheInvalidation
+    {
+        InvalidationEpoch epoch;
+        std::vector<ChangedDomain> changedDomains;
+        std::vector<QString> affectedKeys;
+    };
+
+    struct ActivationRequested
+    {
+        ActivationRoute route;
+    };
+
+    struct DaemonStatusChanged
+    {
+        DaemonStatus status;
+    };
+
+    using BoundaryEvent =
+        std::variant<CacheInvalidation, OperationFailed, SettingsUpdated, ActivationRequested,
+                     DaemonStatusChanged, CacheAccessSuspendRequested, CacheAccessResumed>;
+
+    struct BoundaryLimits
+    {
+        std::size_t maximumStringBytes = 4096;
+        std::size_t maximumCollectionItems = 256;
+        std::size_t maximumAffectedKeys = 64;
+        std::size_t maximumMaterializationItems = 500;
+        std::size_t maximumFrameBytes = 1024 * 1024;
+    };
+
+    [[nodiscard]] std::optional<BoundaryError> validate(const ClientRequest& request,
+                                                        const BoundaryLimits& limits = {});
+
+    [[nodiscard]] std::size_t estimatedEncodedSize(const ClientRequest& request);
+    [[nodiscard]] std::size_t estimatedEncodedSize(const BoundaryEvent& event);
+
+    class BoundaryEventSink
+    {
+      public:
+        virtual ~BoundaryEventSink() = default;
+        virtual void onBoundaryEvent(const BoundaryEvent& event) = 0;
+    };
+
+    class DaemonRequestHandler
+    {
+      public:
+        virtual ~DaemonRequestHandler() = default;
+
+        [[nodiscard]] virtual HandshakeReply handleHello(const HelloRequest& request) = 0;
+        [[nodiscard]] virtual CommandReply handleCommand(CommandRequest request) = 0;
+        [[nodiscard]] virtual MaterializationReply
+        handleMaterialization(MaterializationRequest request) = 0;
+        virtual void
+        handleCancelMaterializationScope(const CancelMaterializationScopeRequest& request) = 0;
+        [[nodiscard]] virtual SettingsReadReply
+        handleGetSettings(const GetSettingsRequest& request) = 0;
+        [[nodiscard]] virtual SettingsUpdateReply
+        handleUpdateSettings(UpdateSettingsRequest request) = 0;
+        [[nodiscard]] virtual std::optional<BoundaryError>
+        handleCacheAccessSuspended(const CacheAccessSuspendedAcknowledgement& acknowledgement) = 0;
+        [[nodiscard]] virtual std::optional<BoundaryError>
+        handlePing(const PingRequest& request) = 0;
+        [[nodiscard]] virtual std::optional<BoundaryError> handleGuiReadyForActivation() = 0;
+    };
+
+    class CommandClient
+    {
+      public:
+        virtual ~CommandClient() = default;
+        [[nodiscard]] virtual CommandReply submitCommand(CommandRequest request) = 0;
+    };
+
+    class MaterializationClient
+    {
+      public:
+        virtual ~MaterializationClient() = default;
+        [[nodiscard]] virtual MaterializationReply
+        requestMaterialization(MaterializationRequest request) = 0;
+        virtual void cancelMaterializationScope(ScopeId scope) = 0;
+    };
+
+    class SettingsClient
+    {
+      public:
+        virtual ~SettingsClient() = default;
+        [[nodiscard]] virtual SettingsReadReply getSettings() = 0;
+        [[nodiscard]] virtual SettingsUpdateReply updateSettings(UpdateSettingsRequest request) = 0;
+    };
+
+    class DaemonStatusClient
+    {
+      public:
+        virtual ~DaemonStatusClient() = default;
+        [[nodiscard]] virtual HandshakeReply hello(HelloRequest request) = 0;
+        [[nodiscard]] virtual std::optional<BoundaryError> ping() = 0;
+    };
+
+    class ActivationClient
+    {
+      public:
+        virtual ~ActivationClient() = default;
+        [[nodiscard]] virtual std::optional<BoundaryError> readyForActivation() = 0;
+    };
+
+    class CacheAccessClient
+    {
+      public:
+        virtual ~CacheAccessClient() = default;
+        [[nodiscard]] virtual std::optional<BoundaryError>
+        acknowledgeCacheAccessSuspended(CacheAccessSuspendedAcknowledgement acknowledgement) = 0;
+    };
+
+} // namespace javelin::protocol

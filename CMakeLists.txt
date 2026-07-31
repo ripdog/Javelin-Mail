@@ -36,6 +36,20 @@ find_package(KPim6Mime REQUIRED)
 
 qt_standard_project_setup()
 
+add_library(javelin_protocol STATIC
+    src/protocol/InProcessEndpoint.cpp
+    src/protocol/InProcessEndpoint.h
+    src/protocol/ProcessBoundary.cpp
+    src/protocol/ProcessBoundary.h
+)
+target_include_directories(javelin_protocol PUBLIC
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
+)
+target_link_libraries(javelin_protocol PUBLIC Qt::Core)
+javelin_set_project_warnings(javelin_protocol)
+javelin_enable_static_analysis(javelin_protocol)
+javelin_enable_sanitizers(javelin_protocol)
+
 set(JAVELIN_FORMAT_FILES
     src/jmap/sync/PreferredStateChangeSource.cpp
     src/jmap/sync/PreferredStateChangeSource.h

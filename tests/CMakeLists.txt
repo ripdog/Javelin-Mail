@@ -1,3 +1,22 @@
+include(Catch)
+
+add_executable(javelin_protocol_tests
+    protocol/ProcessBoundaryTest.cpp
+)
+target_include_directories(javelin_protocol_tests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/tests
+)
+target_link_libraries(javelin_protocol_tests
+    PRIVATE
+        Catch2::Catch2WithMain
+        javelin_protocol
+)
+javelin_set_project_warnings(javelin_protocol_tests)
+javelin_enable_static_analysis(javelin_protocol_tests)
+javelin_enable_sanitizers(javelin_protocol_tests)
+catch_discover_tests(javelin_protocol_tests)
+
 add_executable(javelin_jmap_tests
     ${PROJECT_SOURCE_DIR}/src/app/ApplicationErrorCoordinator.cpp
     ${PROJECT_SOURCE_DIR}/src/app/ApplicationErrorCoordinator.h
@@ -190,7 +209,6 @@ javelin_enable_sanitizers(javelin_jmap_tests)
 # QCoro's waitFor and fixture loading require exceptions
 target_compile_options(javelin_jmap_tests PRIVATE -fexceptions)
 
-include(Catch)
 catch_discover_tests(javelin_jmap_tests)
 
 add_executable(javelin_contacts_gui_tests
