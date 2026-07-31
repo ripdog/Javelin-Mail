@@ -25,12 +25,19 @@ tabs reuse the same session identity.
 
 Every watched mailbox has a canonical window: offset 0, limit 100, `receivedAt` descending, and
 `collapseThreads: true`. Window validity has two independent axes. Provenance is `server`,
-`locallyProjected`, or `stale`; materialization is `complete` or `partial`. Display requires a
-complete non-stale materialization. Positional pagination additionally requires server provenance.
-This prevents a locally complete mutation projection from being mistaken for a server position,
-and prevents a partially materialized server response from being shown merely because it carries a
-new query state. Background synchronization materializes a missing, partial, or stale canonical
-window. A post-commit cache change names the window so an open view reloads effective SQLite state.
+`locallyProjected`, or `stale`; materialization is `complete` or `partial`. Authoritative current
+presentation requires a complete non-stale materialization. Positional pagination additionally
+requires server provenance. This prevents a locally complete mutation projection from being
+mistaken for a server position, and prevents a partially materialized server response from being
+shown merely because it carries a new query state. Background synchronization materializes a
+missing, partial, or stale canonical window. A post-commit cache change names the window so an open
+view reloads effective SQLite state.
+
+A GUI already presenting a complete window may retain its rows as a continuity snapshot while that
+window is stale and an authoritative replacement is pending. Such a snapshot is not evidence of
+current position, total, or ordered membership and cannot seed positional navigation. It exists only
+to preserve stable selection, detail content, and viewport rather than blanking or replacing the
+user's view. Reconciliation installs the replacement by stable object identity.
 
 An Email or EmailQuery state token is not evidence that this ordered coverage exists. Push-state
 deduplication may skip a background refresh when the state tokens are current and every configured
@@ -48,6 +55,13 @@ from the server-enforced limit and the authoritative total. These jumps do not f
 pages. Unlike anchored next-page navigation, positional jumps identify a result range rather than a
 stable boundary Email, so concurrent insertions or removals may change which conversations occupy
 the requested page before its query executes.
+
+After a positional window has been displayed, refreshing that active sparse view uses a stable
+selected representative or visible-row anchor with an anchor offset that preserves viewport
+placement. Reissuing the old numeric offset would preserve a coordinate rather than the user's
+viewed object and may displace it when rows were inserted above. The server-returned position updates
+the pager after the anchored result commits. A plain positional request remains correct for a new
+explicit jump, including an uncached jump such as position 400.
 
 For a complete offline mailbox, the same controls resolve missing windows directly from effective
 SQLite membership for every supported sort order. The canonical mailbox query state versions these

@@ -190,6 +190,40 @@ Conversely, restarting the GUI must not cause any network request merely because
 reconstructed. It renders the committed cache first and requests missing materialization through a
 durable intent only when required.
 
+### Data changes never clobber user intent
+
+The daemon owns facts; the GUI owns navigation, selection, focus, viewport, and editing intent. A
+cache commit, generation poke, synchronization result, optimistic reconciliation, notification, or
+background materialization must never by itself:
+
+- activate another tab or mailbox;
+- select a newly inserted object;
+- reinterpret a selected row number as a different object;
+- replace the message, contact, or event currently being viewed;
+- move the user's viewport merely because rows were inserted or removed elsewhere;
+- steal focus or alter an editor cursor or selection; or
+- overwrite a newer local compose or edit revision.
+
+All durable and in-memory presentation state uses stable logical identities. Row indexes and query
+positions are transient layout coordinates, not user intent. When a model changes, the GUI
+reconciles around the selected object IDs, current object ID, multi-selection IDs, stable viewport
+anchor, active tab identity, and relevant editor revision.
+
+Precise row insertion, removal, movement, and data-change notifications are preferred over model
+resets. When a reset is unavoidable, the GUI snapshots and restores stable selection, current item,
+scroll anchor, expansion state, focus, and other applicable presentation state. It must not select
+the object that happens to occupy the former row index.
+
+The exact intent can change only through an explicit user action or when it has become impossible to
+honour, such as permanent deletion of the selected object, loss of access, or account removal. Such
+fallback is deterministic and domain-specific: preserve every surviving selected identity, retain
+the current detail where possible, otherwise choose a documented neighbouring object or clear the
+view. Accidental model reconstruction is never a navigation policy.
+
+This invariant is local to the GUI and is not weakened by process separation. The daemon publishes
+committed data changes; it never publishes presentation commands. Notification activation is an
+explicit user navigation request and is therefore distinct from notification arrival.
+
 ## Process responsibilities
 
 ### The daemon
@@ -681,6 +715,18 @@ pruned.
 
 This is a cache presentation concern, not a second synchronization layer.
 
+A refresh coordinator never applies a database generation by replacing user-navigation state. It
+first records the active tab, stable selected and current object IDs, multi-selection, viewport
+anchor, and any editor revision. It then reconciles the affected model and restores those identities
+against the new committed rows. A new message inserted above the viewport may change row numbers and
+mailbox totals, but it does not change the message being read or add that new row to the selection.
+
+If the selected object remains known but temporarily falls outside a newly materialized sparse
+window, the detail view remains attached to that object. The GUI requests an anchored window around
+the selected or visible object rather than silently selecting an object from the new positional
+page. Only confirmed disappearance of the selected object invokes the domain's deterministic
+fallback policy.
+
 ## Process and failure semantics
 
 ### GUI exits normally
@@ -809,20 +855,74 @@ If the GUI exits immediately after its intent commit, every later step is unchan
 
 ## Pagination and content flow
 
-A representative cache miss is:
+An uncached online-first mailbox is represented by sparse authoritative query windows, not by
+applying SQL offsets to whatever Email objects happen to be cached. A direct jump to position 400
+therefore does not fetch positions 0 through 399 and does not fabricate a page from partial mailbox
+membership.
+
+A representative deep jump is:
 
 ```text
-GUI queries requested mailbox page
-    -> authoritative window is present: render immediately
-    -> window is absent or stale: render any valid retained page and append EnsureMailboxWindow
-       intent
-    -> daemon prioritizes and materializes authoritative window
-    -> daemon commits window and generation
-    -> GUI receives poke and re-queries
+user requests position 400
+    -> GUI records position 400 as its current desired window
+    -> GUI queries the matching SQLite query-window key
+    -> window is absent: retain the previous visible page where useful, show foreground loading,
+       and append EnsureMailboxWindow(position=400, limit, sort, collapse policy)
+    -> GUI sends payload-free COMMANDS_AVAILABLE wake-up
+    -> daemon performs a direct positional Email/query
+    -> daemon obtains the returned position, total, queryState, and ordered representative IDs
+    -> daemon materializes every required Email and Thread object
+    -> daemon atomically commits a complete query window and advances its generation
+    -> daemon pokes the GUI
+    -> GUI installs the page only if position 400 is still the current desired window
 ```
 
-Message bodies, attachments, online searches, contact details, and calendar ranges use the same
-pattern. Data is materialized into SQLite or the vault and never returned as an IPC response.
+A result that arrives after the user has navigated elsewhere remains a useful cached window but
+cannot activate itself or replace the current page. The GUI's desired-window identity is
+presentation state, not a daemon operation lifecycle.
+
+The first uncached positional jump can only mean “the server results occupying position 400 when the
+query executes.” If remote changes occur before the server evaluates that request, Javelin cannot
+identify the objects that formerly occupied an uncached position. This is an unavoidable property of
+positional queries. Once the returned stable IDs are known, subsequent data changes must preserve
+those identities rather than preserve their old numeric offsets.
+
+For example, after the page at position 400 is shown, new mail inserted above it may move the
+selected Email from server position 403 to 406. The GUI continues displaying and selecting that
+Email. If the sparse window needs authoritative renewal, the GUI requests an anchored query around
+the selected Email or a stable visible-row anchor, with an anchor offset preserving its viewport
+placement. The server-returned position updates the pager; it does not redefine the selection. A
+plain repeat of positional offset 400 is appropriate only for a fresh explicit jump, not for
+maintaining an already visible view through mailbox changes.
+
+A complete previously displayed window may remain as a continuity snapshot while an anchored
+refresh is pending. Once marked stale it is not proof of current server position, total, or ordered
+membership and cannot be used to infer uncached adjacent pages. It is retained only to avoid a blank
+or disruptive UI. The new authoritative window replaces its data by stable identity when committed.
+
+If no object is selected, the top visible representative is the preferred viewport anchor. If that
+anchor was deleted, the GUI uses the nearest surviving visible identity and then the domain's
+deterministic fallback. Insertions and removals never cause the object inheriting an old row number
+to inherit selection.
+
+The daemon may coalesce duplicate requests for the same account, query identity, position or anchor,
+limit, and sort. Foreground materialization outranks background mirroring and prefetch. Once a JMAP
+request has been dispatched, GUI navigation does not need to cancel it for correctness; an obsolete
+result simply becomes a cached window that the GUI does not install.
+
+If the daemon is unavailable, the GUI may display an already materialized window as a read-only
+snapshot. It cannot satisfy an uncached jump, and it must not simulate position 400 from a partial
+set of cached Email rows.
+
+Complete-offline mailboxes use the same GUI contract, but the daemon resolves the requested window
+from authoritative effective SQLite membership without network access.
+
+List materialization and message-content materialization remain separate. A newly loaded page may
+show cached summary data immediately. Selecting an Email whose body or raw source is absent appends
+an `EnsureMessageContent` intent; the selected identity and list viewport remain unchanged while the
+content is fetched. Message bodies, attachments, online searches, contact details, and calendar
+ranges otherwise use the same commit-then-poke pattern. Data is materialized into SQLite or the vault
+and never returned as an IPC response.
 
 ## Account settings and credentials
 
