@@ -3,7 +3,9 @@
 ## Status
 
 This document describes the prospective process architecture for Javelin. It is a design for
-further review and staged implementation, not a statement that the split already exists.
+further review and staged implementation, not a statement that the split already exists. The ordered
+implementation programme is maintained in
+[DAEMON_GUI_IMPLEMENTATION_PLAN.md](DAEMON_GUI_IMPLEMENTATION_PLAN.md).
 
 The design separates Javelin into two long-lived roles:
 
