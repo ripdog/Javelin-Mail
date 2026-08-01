@@ -1,5 +1,4 @@
 #include "app/InlineMessageSchemeHandler.h"
-#include "app/WebEngineSetup.h"
 
 #include "jmap/cache/MimeMessageParser.h"
 #include "jmap/cache/RawMessageSourceReadRepository.h"

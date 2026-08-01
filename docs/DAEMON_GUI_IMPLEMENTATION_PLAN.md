@@ -20,9 +20,9 @@ intent.
 
 The split is complete when:
 
-- the installed GUI executable contains Widgets and WebEngine presentation but no JMAP transport,
-  synchronization coordinator, write-capable cache repository, mutation executor, notification
-  publisher, tray implementation, or canonical `QSettings` access;
+- the installed GUI executable contains the Widgets presentation and read-only cache surface but no
+  JMAP transport, synchronization coordinator, write-capable cache repository, mutation executor,
+  notification publisher, tray implementation, or canonical `QSettings` access;
 - the installed daemon executable owns every responsibility listed under
   [The daemon is the sole operational authority](DAEMON_GUI_ARCHITECTURE.md#the-daemon-is-the-sole-operational-authority);
 - GUI commands, settings, materialization requests, activation, invalidations, status, and failures
@@ -52,27 +52,16 @@ migration, including while everything still runs in one process.
 
 ## Current migration surface
 
-The current in-process application is assembled by `DaemonBootstrap`, `DaemonServices`,
-`GuiServices`, and the GUI portion of `ApplicationBootstrap`. `DaemonServices` owns the main database
-connection, JMAP transports, synchronization, repositories,
-mutations, history, deferred send, indexing, maintenance, translation, and read services. It also
-installs a WebEngine URL scheme handler. `ApplicationBootstrap` owns the main window, system tray,
-notifications, network reachability, account settings application, and process lifetime.
+The production application is now assembled by the `javelind` daemon root and the `javelin` GUI root.
+`DaemonProcess` and `DaemonServices` own the writable database connection, JMAP transports,
+synchronization, mutations, history, deferred send, indexing, maintenance, notifications, settings,
+and background work. `GuiDaemonSession` owns the GUI socket session, settings snapshot, cache barrier,
+and read-only cache connection. The installed GUI workspace is cache-backed: it renders mailbox and
+message data through the read-only cache target, requests visible mailbox windows over the typed
+socket boundary, and submits account refresh/settings intents to the daemon.
 
-The most important existing direct crossings are:
-
-- `MainWindow` receives concrete repositories and application services;
-- message, compose, contact, calendar, file, refresh, and Undo controllers call concrete daemon-side
-  services;
-- GUI widgets and controllers read or write `QSettings` directly through `PreferencesDialog`,
-  `MainWindowStateStore`, message appearance, calendar colour, search persistence, compose, and file
-  preferences;
-- GUI presentation repositories share the same write-capable `DatabaseConnection` as operational
-  services; and
-- `javelin_daemon_core` is GUI-free; WebEngine scheme handling now belongs to `GuiServices` and
-  the GUI target's read-only cache surface.
-
-These are migration inputs, not exceptions to the target architecture.
+The in-process endpoint remains compiled only into the protocol conformance test target. There is no
+production single-process executable, bootstrap adapter, or GUI-to-daemon implementation linkage.
 
 ## Phase dependency order
 
@@ -528,23 +517,12 @@ This phase prepares the codebase for two executables without yet adding socket t
 
 ### Implementation status
 
-Completed for the temporary in-process composition. `DaemonServices` and the daemon-safe
-`DaemonBootstrap` now own the writable database, transports, synchronization, mutation commands,
-history, deferred send, indexing, maintenance, notifications, and translation cache. `GuiServices`
-owns the GUI-thread read-only database connection and repositories, and registers that connection
-with the shared cache barrier.
-
-`InlineMessageSchemeHandler` and `QWebEngineProfile` installation moved out of daemon core. Inline
-message reads use `DatabaseReadView` and `RawMessageSourceReadRepository`, so GUI media access does
-not receive a write-capable connection. Address completion likewise opens its own read-only worker
-connection.
-
-The CMake graph now exposes `javelin_protocol`, `javelin_cache_read`, `javelin_daemon_core`,
-`javelin_gui`, and the thin `javelin_app` bootstrap. Configure-time checks reject GUI/WebEngine
-links in daemon core, daemon/JMAP transport links in the GUI target, and forbidden daemon includes
-in GUI sources. Task Center and message navigation consume `WorkTaskPort` and
-`MessageNavigationPort`; the single-process executable wires both roots without changing the GUI's
-typed command and read surfaces.
+Phase 7 established the two composition surfaces and Phase 11 removes the temporary host. The
+production graph now exposes `javelin_protocol`, `javelin_cache_read`, `javelin_daemon_core`, and
+`javelin_gui`, with only the `javelin` GUI bootstrap and `javelind` daemon executable at runtime.
+Read-only cache access remains on the GUI side; writable services and settings remain on the daemon
+side. The legacy WebEngine presentation sources are isolated in the non-installed GUI test-support
+target until the richer presentation surface is migrated over the typed boundary.
 
 ## Phase 8: framed local-socket transport
 
@@ -655,10 +633,8 @@ replaced daemon can force the GUI read barrier before reopening its workers. The
 cache barrier if the GUI disconnects after acknowledging a suspend request, preventing a lost GUI from
 leaving daemon writes blocked.
 
-The pre-existing `Javelin-Mail`/`javelin_app` composition remains build-only as the transitional
-presentation and command-port host until Phase 11 removes it; the installed runtime is now the split
-`javelin` and `javelind` pair. This keeps the existing workspace implementation available while the
-remaining GUI command-port migration proceeds.
+The installed runtime is the split `javelin` and `javelind` pair. The GUI opens its read-only cache
+surface after the daemon handshake and keeps recovery state separate from the usable workspace.
 
 ## Phase 10: move tray and notifications into the daemon
 
@@ -699,9 +675,8 @@ Notification and tray activations become typed routes containing the exact mailb
 settings, draft, task-center, and activation-token identity. `DaemonProcess` queues those routes until
 the GUI has completed its activation-ready handshake, starts the configured GUI when no GUI is
 connected, and emits a typed shutdown event before tray Quit stops the daemon. Closing the GUI leaves
-the daemon services running. The old single-process target remains build-only transitional code, but
-it now consumes the same daemon background controller rather than owning a second tray or notification
-implementation.
+the daemon services running. The daemon now consumes the same background controller without a second
+tray or notification implementation in the GUI process.
 
 ## Phase 11: remove transitional architecture
 
@@ -728,6 +703,19 @@ The following searches or equivalent build checks return no production violation
 - daemon references to Widgets, WebEngine, `MainWindow`, or presentation models;
 - direct mutation/cache writes outside the existing consistency subsystem; and
 - old dual bootstrap or fallback paths.
+
+### Implementation status
+
+Phase 11 is complete. The temporary single-process executable, `javelin_app` library, transitional
+bootstrap sources, and unused GUI service adapters have been removed from production. The
+`InProcessEndpoint` remains available only as a protocol test fixture. CMake now builds and installs
+only `javelin` and `javelind`; the production `javelin_gui` target contains the daemon-backed
+workspace, while the legacy full-widget surface is isolated in the non-installed
+`javelin_gui_test_support` target for focused GUI tests. The GUI renders the read-only cache,
+requests selected mailbox windows through the typed socket boundary, and supports daemon-owned
+account settings and refresh. CMake rejects GUI/WebEngine dependencies in daemon targets, rejects
+daemon implementation dependencies in the production GUI target, and packages the split GUI
+executable in the desktop entry.
 
 ## Phase 12: performance, reliability, and release gate
 

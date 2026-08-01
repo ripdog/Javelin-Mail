@@ -37,8 +37,6 @@ find_package(KPim6Mime REQUIRED)
 qt_standard_project_setup()
 
 add_library(javelin_protocol STATIC
-    src/protocol/InProcessEndpoint.cpp
-    src/protocol/InProcessEndpoint.h
     src/protocol/ProcessBoundary.cpp
     src/protocol/ProcessBoundary.h
     src/protocol/SocketTransport.cpp
@@ -57,19 +55,38 @@ add_library(javelin_cache_read STATIC
     src/app/CacheAccessBarrier.h
     src/app/CacheLocationProvider.cpp
     src/app/CacheLocationProvider.h
+    src/app/GuiCacheReader.cpp
+    src/app/GuiCacheReader.h
     src/jmap/cache/Database.cpp
     src/jmap/cache/Database.h
     src/jmap/cache/EmailReadRepository.cpp
     src/jmap/cache/EmailReadRepository.h
+    src/jmap/cache/MessageContentTypes.h
+    src/jmap/cache/MessageViewService.cpp
+    src/jmap/cache/MessageViewService.h
+    src/jmap/cache/MessageViewReader.h
+    src/jmap/cache/MimeMessageParser.cpp
+    src/jmap/cache/MimeMessageParser.h
     src/jmap/cache/MailVault.cpp
     src/jmap/cache/MailVault.h
     src/jmap/cache/RawMessageSourceReadRepository.cpp
     src/jmap/cache/RawMessageSourceReadRepository.h
+    src/jmap/render/HtmlMessageDocumentBuilder.cpp
+    src/jmap/render/HtmlMessageDocumentBuilder.h
+    src/jmap/render/InlineMessageUrl.cpp
+    src/jmap/render/InlineMessageUrl.h
 )
 target_include_directories(javelin_cache_read PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
 )
-target_link_libraries(javelin_cache_read PUBLIC Qt::Core Qt::Gui Qt::Sql)
+target_link_libraries(javelin_cache_read
+    PUBLIC
+        KPim6::Mime
+        Qt::Concurrent
+        Qt::Core
+        Qt::Gui
+        Qt::Sql
+)
 javelin_set_project_warnings(javelin_cache_read)
 javelin_enable_static_analysis(javelin_cache_read)
 javelin_enable_sanitizers(javelin_cache_read)
@@ -100,7 +117,12 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/cache/QueryReader.h
     src/jmap/cache/CalendarReadRepository.cpp
     src/jmap/cache/CalendarReadRepository.h
+    src/jmap/cache/MessageContentTypes.h
+    src/jmap/cache/MessageViewService.cpp
+    src/jmap/cache/MessageViewService.h
     src/jmap/cache/MessageViewReader.h
+    src/jmap/cache/MimeMessageParser.cpp
+    src/jmap/cache/MimeMessageParser.h
     src/jmap/cache/RawMessageSourceReadRepository.cpp
     src/jmap/cache/RawMessageSourceReadRepository.h
     src/jmap/calendar/CalendarReader.h
@@ -174,8 +196,6 @@ set(JAVELIN_FORMAT_FILES
     src/app/DeferredSendRepository.h
     src/app/DeferredSendService.cpp
     src/app/DeferredSendService.h
-    src/app/ApplicationBootstrap.cpp
-    src/app/ApplicationBootstrap.h
     src/app/DesktopNotificationController.cpp
     src/app/DesktopNotificationController.h
     src/app/FullMailSyncService.cpp
@@ -216,6 +236,8 @@ set(JAVELIN_FORMAT_FILES
     src/app/LocalMaintenanceService.h
     src/app/InlineMessageSchemeHandler.cpp
     src/app/InlineMessageSchemeHandler.h
+    src/app/GuiCacheReader.cpp
+    src/app/GuiCacheReader.h
     src/app/LogStore.cpp
     src/app/LogStore.h
     src/app/LongPollService.cpp
@@ -230,14 +252,8 @@ set(JAVELIN_FORMAT_FILES
     src/app/MailboxSyncCoverage.h
     src/app/MessageNavigationCoordinator.cpp
     src/app/MessageNavigationCoordinator.h
-    src/app/WebEngineSetup.h
-    src/app/main.cpp
     src/app/DaemonServices.cpp
     src/app/DaemonServices.h
-    src/app/DaemonBootstrap.cpp
-    src/app/DaemonBootstrap.h
-    src/app/GuiServices.cpp
-    src/app/GuiServices.h
     src/app/MessageNavigationPort.h
     src/app/WorkTaskModel.cpp
     src/app/WorkTaskModel.h
@@ -343,6 +359,8 @@ set(JAVELIN_FORMAT_FILES
     src/gui/shell/LayeredStatusBar.h
     src/gui/shell/MainWindow.cpp
     src/gui/shell/MainWindow.h
+    src/gui/shell/GuiWorkspaceWindow.cpp
+    src/gui/shell/GuiWorkspaceWindow.h
     src/gui/shell/CalendarTabController.cpp
     src/gui/shell/CalendarTabController.h
     src/gui/shell/ContactsTabController.cpp
@@ -832,11 +850,9 @@ javelin_set_project_warnings(javelin_jmap)
 javelin_enable_static_analysis(javelin_jmap)
 javelin_enable_sanitizers(javelin_jmap)
 
-add_library(javelin_gui STATIC
+add_library(javelin_gui_test_support STATIC
     src/app/AddressSuggestionStore.cpp
     src/app/AddressSuggestionStore.h
-    src/app/GuiServices.cpp
-    src/app/GuiServices.h
     src/app/InlineMessageSchemeHandler.cpp
     src/app/InlineMessageSchemeHandler.h
     src/app/WorkTaskModel.cpp
@@ -970,11 +986,11 @@ add_library(javelin_gui STATIC
     src/gui/tasks/TaskCenterDialog.cpp
     src/gui/tasks/TaskCenterDialog.h
 )
-target_sources(javelin_gui PRIVATE
+target_sources(javelin_gui_test_support PRIVATE
     src/gui/messageview/MessageAppearance.cpp
     src/gui/messageview/MessageAppearance.h
 )
-qt_add_resources(javelin_gui "javelin_darkreader"
+qt_add_resources(javelin_gui_test_support "javelin_darkreader"
     PREFIX "/vendor/darkreader"
     BASE "res/vendor/darkreader"
     FILES
@@ -1098,13 +1114,14 @@ foreach(refresh_content_gui_source IN LISTS javelin_refresh_content_gui_sources)
     endif()
 endforeach()
 
-target_include_directories(javelin_gui PUBLIC
+target_include_directories(javelin_gui_test_support PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
 )
-target_link_libraries(javelin_gui
+target_link_libraries(javelin_gui_test_support
     PUBLIC
         Qt::Core
         Qt::Network
+        Qt::Sql
         Qt::Svg
         Qt::Widgets
         Qt::WebEngineWidgets
@@ -1116,11 +1133,30 @@ target_link_libraries(javelin_gui
         Qt::Concurrent
         javelin_cache_read
 )
+javelin_set_project_warnings(javelin_gui_test_support)
+javelin_enable_static_analysis(javelin_gui_test_support)
+javelin_enable_sanitizers(javelin_gui_test_support)
+# QCoro uses exceptions internally
+target_compile_options(javelin_gui_test_support PRIVATE -fexceptions)
+
+add_library(javelin_gui STATIC
+    src/gui/shell/GuiWorkspaceWindow.cpp
+    src/gui/shell/GuiWorkspaceWindow.h
+)
+target_include_directories(javelin_gui PUBLIC
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
+)
+target_link_libraries(javelin_gui
+    PUBLIC
+        Qt::Core
+        Qt::Concurrent
+        Qt::Widgets
+    PRIVATE
+        javelin_cache_read
+)
 javelin_set_project_warnings(javelin_gui)
 javelin_enable_static_analysis(javelin_gui)
 javelin_enable_sanitizers(javelin_gui)
-# QCoro uses exceptions internally
-target_compile_options(javelin_gui PRIVATE -fexceptions)
 
 add_library(javelin_calendar_gui STATIC
     src/gui/calendar/MonthCalendarLayout.cpp
@@ -1259,8 +1295,6 @@ add_library(javelin_daemon_core STATIC
     src/app/MessageNavigationPort.h
     src/app/MessageSelection.cpp
     src/app/MessageSelection.h
-    src/app/DaemonBootstrap.cpp
-    src/app/DaemonBootstrap.h
     src/app/DaemonBackgroundController.cpp
     src/app/DaemonBackgroundController.h
     src/app/DaemonProcess.cpp
@@ -1299,9 +1333,9 @@ javelin_enable_sanitizers(javelin_daemon_core)
 # QCoro and daemon composition use exceptions internally
 target_compile_options(javelin_daemon_core PRIVATE -fexceptions)
 
-# Phase 9 composition checks.  The daemon target is the socket-safe half of
-# the application graph.  The GUI bootstrap below consumes only the typed
-# protocol and read-only cache targets.
+# Phase 11 composition checks.  The daemon target is the socket-safe half of
+# the application graph.  The GUI bootstrap consumes only the typed protocol,
+# read-only cache, and presentation targets.
 get_target_property(javelin_daemon_core_links javelin_daemon_core LINK_LIBRARIES)
 if(javelin_daemon_core_links MATCHES "Qt::(Widgets|Gui)|Qt::WebEngine")
     message(FATAL_ERROR "javelin_daemon_core must not link GUI or WebEngine targets")
@@ -1310,6 +1344,17 @@ get_target_property(javelin_gui_links javelin_gui LINK_LIBRARIES)
 if(javelin_gui_links MATCHES "javelin_daemon_core|javelin_jmap")
     message(FATAL_ERROR "javelin_gui must not link daemon or JMAP transport targets")
 endif()
+get_target_property(javelin_gui_sources javelin_gui SOURCES)
+foreach(gui_production_source IN LISTS javelin_gui_sources)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${gui_production_source}")
+        file(READ "${CMAKE_CURRENT_SOURCE_DIR}/${gui_production_source}"
+             gui_production_source_contents)
+        if(gui_production_source_contents MATCHES "QSettings")
+            message(FATAL_ERROR
+                    "Production GUI source must not access canonical QSettings: ${gui_production_source}")
+        endif()
+    endif()
+endforeach()
 
 get_target_property(javelin_daemon_core_sources javelin_daemon_core SOURCES)
 foreach(daemon_source IN LISTS javelin_daemon_core_sources)
@@ -1320,69 +1365,6 @@ foreach(daemon_source IN LISTS javelin_daemon_core_sources)
         endif()
     endif()
 endforeach()
-
-add_library(javelin_app STATIC
-    src/app/ApplicationBootstrap.cpp
-    src/app/ApplicationBootstrap.h
-    src/app/WebEngineSetup.h
-)
-qt_add_resources(javelin_app "javelin_icons"
-    PREFIX "/icons"
-    BASE "res"
-    FILES
-        "res/icon.svg"
-        "res/thunderbird-icons/arrow-down-12.svg"
-        "res/thunderbird-icons/arrow-right-12.svg"
-        "res/thunderbird-icons/archive.svg"
-        "res/thunderbird-icons/attachment.svg"
-        "res/thunderbird-icons/cloud-download.svg"
-        "res/thunderbird-icons/delete.svg"
-        "res/thunderbird-icons/display-options.svg"
-        "res/thunderbird-icons/draft.svg"
-        "res/thunderbird-icons/filter.svg"
-        "res/thunderbird-icons/folder.svg"
-        "res/thunderbird-icons/forward.svg"
-        "res/thunderbird-icons/inbox.svg"
-        "res/thunderbird-icons/more.svg"
-        "res/thunderbird-icons/nav-left.svg"
-        "res/thunderbird-icons/nav-right.svg"
-        "res/thunderbird-icons/new-mail.svg"
-        "res/thunderbird-icons/remote-blocked.svg"
-        "res/thunderbird-icons/replies.svg"
-        "res/thunderbird-icons/reply-all.svg"
-        "res/thunderbird-icons/reply.svg"
-        "res/thunderbird-icons/search.svg"
-        "res/thunderbird-icons/sent.svg"
-        "res/thunderbird-icons/settings.svg"
-        "res/thunderbird-icons/spam.svg"
-        "res/thunderbird-icons/star.svg"
-        "res/thunderbird-icons/starred.svg"
-        "res/thunderbird-icons/trash.svg"
-        "res/thunderbird-icons/unread.svg"
-)
-target_include_directories(javelin_app PUBLIC
-    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
-)
-target_link_libraries(javelin_app
-    PUBLIC
-        Qt::Core
-        Qt::Widgets
-        Qt::Svg
-        KF6::CoreAddons
-    PRIVATE
-        javelin_gui
-        javelin_daemon_core
-)
-javelin_set_project_warnings(javelin_app)
-javelin_enable_static_analysis(javelin_app)
-javelin_enable_sanitizers(javelin_app)
-# QCoro and daemon bootstrap use exceptions internally
-target_compile_options(javelin_app PRIVATE -fexceptions)
-
-qt_add_executable(Javelin-Mail
-    WIN32 MACOSX_BUNDLE
-    src/app/main.cpp
-)
 
 qt_add_executable(javelind
     src/app/daemon_main.cpp
@@ -1407,6 +1389,7 @@ target_link_libraries(javelin
     PRIVATE
         javelin_protocol
         javelin_cache_read
+        javelin_gui
         Qt::Widgets
 )
 target_compile_definitions(javelin PRIVATE JAVELIN_APP_VERSION="${PROJECT_VERSION}")
@@ -1414,9 +1397,19 @@ target_compile_options(javelin PRIVATE -fexceptions)
 javelin_set_project_warnings(javelin)
 javelin_enable_static_analysis(javelin)
 javelin_enable_sanitizers(javelin)
+
+qt_add_translations(
+    TARGETS javelin
+    TS_FILES Javelin-Mail_en_NZ.ts
+)
+
 get_target_property(javelin_bootstrap_links javelin LINK_LIBRARIES)
 if(javelin_bootstrap_links MATCHES "javelin_daemon_core|javelin_jmap")
     message(FATAL_ERROR "javelin GUI bootstrap must not link daemon or JMAP transport targets")
+endif()
+get_target_property(javelind_links javelind LINK_LIBRARIES)
+if(javelind_links MATCHES "javelin_gui|Qt::(Widgets|WebEngine)")
+    message(FATAL_ERROR "javelind must not link GUI or WebEngine targets")
 endif()
 
 qt_add_executable(jmap-transport-benchmark
@@ -1491,28 +1484,9 @@ if(JAVELIN_ENABLE_LOCAL_DATA_INSTALL)
     add_custom_target(install_data DEPENDS "${_install_data_stamp}")
 endif()
 
-qt_add_translations(
-    TARGETS Javelin-Mail
-    TS_FILES Javelin-Mail_en_NZ.ts
-)
-
-target_link_libraries(Javelin-Mail
-    PRIVATE
-        javelin_app
-        Qt::Svg
-)
-target_compile_definitions(Javelin-Mail
-    PRIVATE
-        JAVELIN_APP_VERSION="${PROJECT_VERSION}"
-        JAVELIN_DATA_DIR="${CMAKE_INSTALL_PREFIX}/${KDE_INSTALL_DATADIR}"
-        JAVELIN_FASTTEXT_LANGUAGE_MODEL_PATH="${CMAKE_INSTALL_PREFIX}/${KDE_INSTALL_DATADIR}/javelinmail/models/fasttext/lid.176.ftz"
-)
 if(JAVELIN_ENABLE_LOCAL_DATA_INSTALL)
-    add_dependencies(Javelin-Mail install_data)
+    add_dependencies(javelin install_data)
 endif()
-javelin_set_project_warnings(Javelin-Mail)
-javelin_enable_static_analysis(Javelin-Mail)
-javelin_enable_sanitizers(Javelin-Mail)
 
 file(GLOB_RECURSE JAVELIN_ALL_FORMAT_FILES CONFIGURE_DEPENDS
     "${PROJECT_SOURCE_DIR}/src/*.cpp"
@@ -1555,7 +1529,7 @@ install(FILES res/icon.svg
 )
 
 qt_generate_deploy_app_script(
-    TARGET Javelin-Mail
+    TARGET javelin
     OUTPUT_SCRIPT deploy_script
     NO_UNSUPPORTED_PLATFORM_ERROR
 )

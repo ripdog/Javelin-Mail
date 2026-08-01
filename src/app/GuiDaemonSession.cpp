@@ -7,6 +7,7 @@
 #include <QProcess>
 #include <QThread>
 #include <QTimer>
+#include <QUuid>
 
 #include <algorithm>
 #include <type_traits>
@@ -116,6 +117,11 @@ namespace javelin::app
 
     void GuiDaemonSession::stop()
     {
+        if (m_materializationScope.has_value() && m_client != nullptr && m_client->isConnected())
+        {
+            m_client->cancelMaterializationScope(*m_materializationScope);
+            m_materializationScope.reset();
+        }
         if (m_client != nullptr)
             m_client->disconnectFromDaemon();
         m_readConnection = javelin::jmap::cache::ReadOnlyDatabaseConnection{};
@@ -144,6 +150,56 @@ namespace javelin::app
         return m_settings;
     }
 
+    std::optional<GuiBootstrapError>
+    GuiDaemonSession::updateSettings(protocol::SettingsUpdate update)
+    {
+        const auto reply = m_client->updateSettings(
+            {.baseRevision = m_settings.revision, .update = std::move(update)});
+        if (const auto* rejected = std::get_if<protocol::SettingsUpdateRejected>(&reply))
+            return mapBoundaryError(rejected->error, GuiBootstrapErrorCode::SettingsUnavailable);
+
+        const auto settingsReply = m_client->getSettings();
+        if (const auto* rejected = std::get_if<protocol::SettingsReadRejected>(&settingsReply))
+            return mapBoundaryError(rejected->error, GuiBootstrapErrorCode::SettingsUnavailable);
+        m_settings = std::get<protocol::SettingsSnapshotReply>(settingsReply).snapshot;
+        Q_EMIT settingsChanged();
+        return std::nullopt;
+    }
+
+    std::optional<protocol::BoundaryError>
+    GuiDaemonSession::requestAccountRefresh(const QString& accountId)
+    {
+        const auto reply = m_client->submitCommand(
+            {.id = protocol::CommandId{.value = QUuid::createUuid()},
+             .command = protocol::RefreshAccountCommand{.accountId = accountId, .force = true}});
+        if (const auto* rejected = std::get_if<protocol::CommandRejected>(&reply))
+            return rejected->error;
+        return std::nullopt;
+    }
+
+    std::optional<protocol::BoundaryError>
+    GuiDaemonSession::requestMailboxWindow(const QString& accountId, const QString& mailboxId,
+                                           const std::uint64_t offset, const std::uint32_t limit)
+    {
+        if (m_materializationScope.has_value())
+        {
+            m_client->cancelMaterializationScope(*m_materializationScope);
+            m_materializationScope.reset();
+        }
+        const auto scope = protocol::ScopeId{.value = QUuid::createUuid()};
+        const auto reply = m_client->requestMaterialization(
+            {.id = protocol::RequestId{.value = QUuid::createUuid()},
+             .scope = scope,
+             .request = protocol::MailboxWindowMaterialization{.accountId = accountId,
+                                                               .mailboxId = mailboxId,
+                                                               .offset = offset,
+                                                               .limit = limit}});
+        if (const auto* rejected = std::get_if<protocol::MaterializationRejected>(&reply))
+            return rejected->error;
+        m_materializationScope = scope;
+        return std::nullopt;
+    }
+
     const QString& GuiDaemonSession::databasePath() const
     {
         return m_databasePath;
@@ -152,16 +208,6 @@ namespace javelin::app
     bool GuiDaemonSession::readConnectionOpen() const
     {
         return !m_readConnection.connectionName().isEmpty();
-    }
-
-    protocol::SocketDaemonClient& GuiDaemonSession::daemonClient()
-    {
-        return *m_client;
-    }
-
-    const protocol::SocketDaemonClient& GuiDaemonSession::daemonClient() const
-    {
-        return *m_client;
     }
 
     void GuiDaemonSession::onBoundaryEvent(const protocol::BoundaryEvent& event)
@@ -198,6 +244,16 @@ namespace javelin::app
                 else if constexpr (std::is_same_v<Event, protocol::ActivationRequested>)
                 {
                     Q_EMIT activationRequested(value.route);
+                }
+                else if constexpr (std::is_same_v<Event, protocol::SettingsUpdated>)
+                {
+                    const auto settings = m_client->getSettings();
+                    if (const auto* snapshot =
+                            std::get_if<protocol::SettingsSnapshotReply>(&settings))
+                    {
+                        m_settings = snapshot->snapshot;
+                        Q_EMIT settingsChanged();
+                    }
                 }
                 else if constexpr (std::is_same_v<Event, protocol::DaemonShutdownRequested>)
                 {

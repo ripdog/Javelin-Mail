@@ -1,6 +1,8 @@
 include(Catch)
 
 add_executable(javelin_protocol_tests
+    ${PROJECT_SOURCE_DIR}/src/protocol/InProcessEndpoint.cpp
+    ${PROJECT_SOURCE_DIR}/src/protocol/InProcessEndpoint.h
     protocol/ProcessBoundaryTest.cpp
 )
 target_include_directories(javelin_protocol_tests
@@ -268,7 +270,7 @@ target_link_libraries(javelin_contacts_gui_tests
     PRIVATE
         Catch2::Catch2
         Qt::Widgets
-        javelin_gui
+        javelin_gui_test_support
         javelin_daemon_core
 )
 javelin_set_project_warnings(javelin_contacts_gui_tests)

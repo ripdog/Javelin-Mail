@@ -1,5 +1,7 @@
 #include "app/GuiDaemonSession.h"
 
+#include "gui/shell/GuiWorkspaceWindow.h"
+
 #include <QApplication>
 #include <QCommandLineOption>
 #include <QCommandLineParser>
@@ -11,6 +13,8 @@
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QWidget>
+
+#include <memory>
 
 #ifndef JAVELIN_APP_VERSION
 #define JAVELIN_APP_VERSION "0.0.0"
@@ -82,58 +86,69 @@ int main(int argc, char* argv[])
          .startTimeoutMilliseconds = 5000,
          .startDaemonIfMissing = true}};
 
-    QMainWindow window;
-    window.setWindowTitle(QStringLiteral("Javelin Mail"));
-    auto* central = new QWidget(&window);
-    auto* layout = new QVBoxLayout(central);
-    auto* status = new QLabel(central);
-    auto* retry = new QPushButton(QStringLiteral("Retry daemon connection"), central);
-    retry->setEnabled(false);
-    layout->addWidget(status);
-    layout->addWidget(retry);
-    window.setCentralWidget(central);
+    QMainWindow recoveryWindow;
+    recoveryWindow.setWindowTitle(QStringLiteral("Javelin Mail — reconnecting"));
+    auto* recoveryCentral = new QWidget(&recoveryWindow);
+    auto* recoveryLayout = new QVBoxLayout(recoveryCentral);
+    auto* recoveryStatus = new QLabel(recoveryCentral);
+    auto* retry = new QPushButton(QStringLiteral("Retry daemon connection"), recoveryCentral);
+    recoveryLayout->addWidget(recoveryStatus);
+    recoveryLayout->addWidget(retry);
+    recoveryWindow.setCentralWidget(recoveryCentral);
+    recoveryWindow.resize(480, 140);
 
-    const auto showRecovery = [&status, retry](const QString& detail)
+    std::unique_ptr<javelin::gui::shell::GuiWorkspaceWindow> workspace;
+    const auto showRecovery = [&recoveryWindow, &recoveryStatus, retry](const QString& detail)
     {
-        status->setText(QStringLiteral("Daemon recovery required: %1").arg(detail));
+        recoveryStatus->setText(QStringLiteral("Daemon recovery required: %1").arg(detail));
         retry->setEnabled(true);
+        recoveryWindow.show();
+        recoveryWindow.raise();
+        recoveryWindow.activateWindow();
     };
-    QObject::connect(&session, &javelin::app::GuiDaemonSession::recoveryStarted, &window,
-                     showRecovery);
-    QObject::connect(&session, &javelin::app::GuiDaemonSession::recoveryFinished, &window,
-                     [&status, retry]
+    const auto showWorkspace = [&]
+    {
+        if (!workspace)
+            workspace = std::make_unique<javelin::gui::shell::GuiWorkspaceWindow>(session);
+        recoveryWindow.hide();
+        workspace->setEnabled(true);
+        workspace->show();
+        workspace->raise();
+        workspace->activateWindow();
+    };
+
+    QObject::connect(&session, &javelin::app::GuiDaemonSession::recoveryStarted, &recoveryWindow,
+                     [&workspace, &showRecovery](const QString& detail)
                      {
-                         status->setText(QStringLiteral("Javelin Mail daemon reconnected"));
-                         retry->setEnabled(false);
+                         if (workspace)
+                             workspace->setEnabled(false);
+                         showRecovery(detail);
                      });
+    QObject::connect(&session, &javelin::app::GuiDaemonSession::recoveryFinished, &recoveryWindow,
+                     showWorkspace);
     QObject::connect(&session, &javelin::app::GuiDaemonSession::daemonShutdownRequested,
                      &application, &QCoreApplication::quit);
-    QObject::connect(&session, &javelin::app::GuiDaemonSession::activationRequested, &window,
-                     [&window, &status](const javelin::protocol::ActivationRoute&)
+    QObject::connect(&session, &javelin::app::GuiDaemonSession::activationRequested,
+                     &recoveryWindow,
+                     [&workspace, &showWorkspace](const javelin::protocol::ActivationRoute&)
                      {
-                         status->setText(QStringLiteral("Activation received"));
-                         window.show();
-                         window.raise();
-                         window.activateWindow();
+                         if (workspace)
+                             workspace->refresh();
+                         showWorkspace();
                      });
-    QObject::connect(retry, &QPushButton::clicked, &window,
-                     [&session, showRecovery]
+    QObject::connect(retry, &QPushButton::clicked, &recoveryWindow,
+                     [&session, &showRecovery, &showWorkspace]
                      {
                          if (const auto error = session.reconnect())
                              showRecovery(error->detail);
+                         else
+                             showWorkspace();
                      });
 
     if (const auto error = session.start())
-    {
         showRecovery(error->detail);
-        retry->setEnabled(true);
-    }
     else
-    {
-        status->setText(QStringLiteral("Javelin Mail daemon connected; cache is read-only"));
-    }
+        showWorkspace();
 
-    window.resize(480, 140);
-    window.show();
     return application.exec();
 }

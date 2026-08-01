@@ -51,9 +51,12 @@ This is the intended structure after the first major refactor:
 │   └── translations/
 ├── src/
 │   ├── app/
-│   │   ├── main.cpp
-│   │   ├── ApplicationBootstrap.cpp
-│   │   ├── ApplicationBootstrap.h
+│   │   ├── daemon_main.cpp
+│   │   ├── gui_main.cpp
+│   │   ├── DaemonProcess.cpp
+│   │   ├── DaemonProcess.h
+│   │   ├── GuiDaemonSession.cpp
+│   │   └── GuiDaemonSession.h
 │   │   ├── DaemonServices.cpp
 │   │   └── DaemonServices.h
 │   ├── jmap/
@@ -397,7 +400,8 @@ Goals:
 Tasks:
 
 - [x] Move the current executable entrypoint into `src/app`.
-- [x] Split targets into at least `javelin_jmap`, `javelin_gui`, and `Javelin-Mail`.
+- [x] Split targets into `javelin_protocol`, `javelin_cache_read`, `javelin_daemon_core`, and
+  `javelin_gui`, with `javelin` and `javelind` composition roots.
 - [x] Add `cmake/Warnings.cmake`, `cmake/StaticAnalysis.cmake`, and `cmake/Sanitizers.cmake`.
 - [x] Add `.clang-format` and `.clang-tidy`.
 - [x] Add CMake presets for debug, ASan, and release.

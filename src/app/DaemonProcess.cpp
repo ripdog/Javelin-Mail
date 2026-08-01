@@ -15,6 +15,8 @@
 #include "app/TranslationApplicationPorts.h"
 #include "app/undo/UndoManager.h"
 
+#include <QCoroTask>
+
 #include <QCoreApplication>
 #include <QDir>
 #include <QMetaObject>
@@ -89,6 +91,31 @@ namespace javelin::app
                     result.push_back({
                         .settings = connectionSettings(account),
                         .accountId = accountId.toStdString(),
+                        .mailboxIds = stringIds(mailboxIds),
+                        .fullSyncMailboxIds = synced == nullptr ? std::vector<std::string>{}
+                                                                : stringIds(synced->mailboxIds),
+                        .notificationMailboxIds = notifications == nullptr
+                                                      ? std::vector<std::string>{}
+                                                      : stringIds(notifications->mailboxIds),
+                        .notificationMailboxSelectionConfigured =
+                            notifications != nullptr && notifications->configured,
+                    });
+                }
+                if (account.cachedAccountIds.empty())
+                {
+                    std::vector<QString> mailboxIds;
+                    if (synced != nullptr)
+                        mailboxIds = synced->mailboxIds;
+                    if (notifications != nullptr)
+                    {
+                        mailboxIds.insert(mailboxIds.end(), notifications->mailboxIds.begin(),
+                                          notifications->mailboxIds.end());
+                    }
+                    std::ranges::sort(mailboxIds);
+                    mailboxIds.erase(std::ranges::unique(mailboxIds).begin(), mailboxIds.end());
+                    result.push_back({
+                        .settings = connectionSettings(account),
+                        .accountId = account.id.toStdString(),
                         .mailboxIds = stringIds(mailboxIds),
                         .fullSyncMailboxIds = synced == nullptr ? std::vector<std::string>{}
                                                                 : stringIds(synced->mailboxIds),
@@ -394,12 +421,42 @@ namespace javelin::app
     protocol::MaterializationReply
     DaemonProcess::handleMaterialization(protocol::MaterializationRequest request)
     {
-        return protocol::MaterializationRejected{
-            .id = request.id,
-            .error = {.code = BoundaryErrorCode::UnsupportedOperation,
-                      .field = QStringLiteral("materialization"),
-                      .detail = QStringLiteral(
-                          "materialization is not available during daemon bootstrap")}};
+        if (!isReady())
+            return protocol::MaterializationRejected{.id = request.id, .error = notReadyError()};
+
+        const auto* mailbox = std::get_if<protocol::MailboxWindowMaterialization>(&request.request);
+        if (mailbox == nullptr)
+            return protocol::MaterializationRejected{
+                .id = request.id,
+                .error = {.code = BoundaryErrorCode::UnsupportedOperation,
+                          .field = QStringLiteral("materialization"),
+                          .detail = QStringLiteral("materialization kind is not supported")}};
+
+        const auto requestId = request.id;
+        auto task = m_services->mailService().requestMailboxWindow({
+            .accountId = mailbox->accountId.toStdString(),
+            .mailboxId = mailbox->mailboxId.toStdString(),
+            .offset = static_cast<std::size_t>(mailbox->offset),
+            .limit = static_cast<std::size_t>(mailbox->limit),
+            .sort = {},
+            .forceRefresh = false,
+            .anchor = std::nullopt,
+            .anchorOffset = 1,
+        });
+        QCoro::connect(
+            std::move(task), this,
+            [this, requestId](MailboxWindowResult result)
+            {
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                {
+                    onBoundaryEvent(protocol::OperationFailed{
+                        .operation = protocol::OperationId{.value = requestId.value},
+                        .error = {.code = protocol::BoundaryErrorCode::TransportUnavailable,
+                                  .field = QStringLiteral("materialization"),
+                                  .detail = error->message}});
+                }
+            });
+        return protocol::MaterializationAccepted{.id = request.id};
     }
 
     void DaemonProcess::handleCancelMaterializationScope(

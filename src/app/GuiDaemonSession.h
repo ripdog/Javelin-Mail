@@ -64,10 +64,15 @@ namespace javelin::app
         [[nodiscard]] bool isInRecovery() const;
         [[nodiscard]] const javelin::protocol::ReadyReply& readyReply() const;
         [[nodiscard]] const javelin::protocol::SettingsSnapshot& settings() const;
+        [[nodiscard]] std::optional<GuiBootstrapError>
+        updateSettings(javelin::protocol::SettingsUpdate update);
+        [[nodiscard]] std::optional<javelin::protocol::BoundaryError>
+        requestAccountRefresh(const QString& accountId);
+        [[nodiscard]] std::optional<javelin::protocol::BoundaryError>
+        requestMailboxWindow(const QString& accountId, const QString& mailboxId,
+                             std::uint64_t offset = 0, std::uint32_t limit = 100);
         [[nodiscard]] const QString& databasePath() const;
         [[nodiscard]] bool readConnectionOpen() const;
-        [[nodiscard]] javelin::protocol::SocketDaemonClient& daemonClient();
-        [[nodiscard]] const javelin::protocol::SocketDaemonClient& daemonClient() const;
 
         void onBoundaryEvent(const javelin::protocol::BoundaryEvent& event) override;
 
@@ -76,6 +81,7 @@ namespace javelin::app
         void recoveryStarted(const QString& detail);
         void recoveryFinished();
         void cacheChanged();
+        void settingsChanged();
         void activationRequested(const javelin::protocol::ActivationRoute& route);
         void daemonShutdownRequested();
 
@@ -102,6 +108,7 @@ namespace javelin::app
         CacheAccessBarrier m_cacheAccessBarrier;
         CacheAccessBarrier::ParticipantId m_cacheParticipant = 0;
         std::uint64_t m_currentEpoch = 0;
+        std::optional<javelin::protocol::ScopeId> m_materializationScope;
         bool m_inRecovery = false;
     };
 } // namespace javelin::app

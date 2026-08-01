@@ -32,4 +32,6 @@ namespace javelin::app
         const javelin::jmap::cache::ReadOnlyDatabaseConnection& m_connection;
     };
 
+    void registerInlineMessageUrlScheme();
+
 } // namespace javelin::app
