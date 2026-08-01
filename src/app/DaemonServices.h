@@ -1,6 +1,8 @@
 #pragma once
 
+#include "app/CacheLocationProvider.h"
 #include "jmap/cache/Database.h"
+#include "protocol/ProcessBoundary.h"
 
 #include <memory>
 
@@ -110,6 +112,7 @@ namespace javelin::app
     {
       public:
         DaemonServices();
+        explicit DaemonServices(CacheLocation location);
         ~DaemonServices();
 
         DaemonServices(const DaemonServices&) = delete;
@@ -121,6 +124,7 @@ namespace javelin::app
         [[nodiscard]] AccountCommandPort& accountCommandPort();
         [[nodiscard]] javelin::jmap::cache::DatabaseConnection& databaseConnection();
         [[nodiscard]] const QString& databasePath() const;
+        [[nodiscard]] javelin::protocol::CacheIdentity cacheIdentity() const;
         [[nodiscard]] CacheAccessBarrier& cacheAccessBarrier();
         [[nodiscard]] javelin::jmap::cache::ContactRepository& contactRepository();
         [[nodiscard]] javelin::jmap::contacts::ContactService& contactService();
@@ -156,6 +160,7 @@ namespace javelin::app
         std::unique_ptr<javelin::jmap::JmapCore> m_jmapCore;
         javelin::jmap::cache::DatabaseConnection m_databaseConnection;
         QString m_databasePath;
+        QUuid m_cacheInstanceId;
         std::unique_ptr<CacheAccessBarrier> m_cacheAccessBarrier;
         std::unique_ptr<javelin::app::undo::HistoryRepository> m_historyRepository;
         std::unique_ptr<javelin::app::undo::UndoManager> m_undoManager;

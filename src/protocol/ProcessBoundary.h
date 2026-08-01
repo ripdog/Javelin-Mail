@@ -421,7 +421,12 @@ namespace javelin::protocol
         QString composeSessionId;
     };
 
-    using ActivationRoute = std::variant<OpenMailboxRoute, OpenMessageRoute, OpenComposeRoute>;
+    struct RaiseGuiRoute
+    {
+    };
+
+    using ActivationRoute =
+        std::variant<OpenMailboxRoute, OpenMessageRoute, OpenComposeRoute, RaiseGuiRoute>;
 
     enum class CacheSuspendReason : std::uint8_t
     {
@@ -506,6 +511,13 @@ namespace javelin::protocol
         [[nodiscard]] virtual std::optional<BoundaryError>
         handlePing(const PingRequest& request) = 0;
         [[nodiscard]] virtual std::optional<BoundaryError> handleGuiReadyForActivation() = 0;
+        [[nodiscard]] virtual std::optional<BoundaryError>
+        handleGuiActivation(const ActivationRoute&)
+        {
+            return BoundaryError{.code = BoundaryErrorCode::UnsupportedOperation,
+                                 .field = QStringLiteral("activation"),
+                                 .detail = QStringLiteral("GUI activation is not supported")};
+        }
     };
 
     class CommandClient

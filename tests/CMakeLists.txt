@@ -236,6 +236,26 @@ target_compile_options(javelin_jmap_tests PRIVATE -fexceptions)
 
 catch_discover_tests(javelin_jmap_tests)
 
+add_executable(javelin_daemon_tests
+    app/DaemonProcessTest.cpp
+)
+target_include_directories(javelin_daemon_tests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/tests
+)
+target_link_libraries(javelin_daemon_tests
+    PRIVATE
+        Catch2::Catch2WithMain
+        Qt::Core
+        Qt::Network
+        javelin_daemon_core
+)
+javelin_set_project_warnings(javelin_daemon_tests)
+javelin_enable_static_analysis(javelin_daemon_tests)
+javelin_enable_sanitizers(javelin_daemon_tests)
+target_compile_options(javelin_daemon_tests PRIVATE -fexceptions)
+catch_discover_tests(javelin_daemon_tests)
+
 add_executable(javelin_contacts_gui_tests
     gui/ContactsGuiTestMain.cpp
     gui/ContactsManagerWidgetTest.cpp

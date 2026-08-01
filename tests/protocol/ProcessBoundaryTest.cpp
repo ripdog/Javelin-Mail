@@ -13,6 +13,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <functional>
+#include <mutex>
 #include <utility>
 
 namespace
@@ -110,11 +111,33 @@ namespace
             return std::nullopt;
         }
 
+        std::optional<BoundaryError> handleGuiActivation(const ActivationRoute& route) override
+        {
+            const std::scoped_lock lock{activationMutex};
+            activatedRoute = route;
+            return activationError;
+        }
+
+        [[nodiscard]] std::optional<ActivationRoute> activatedRouteSnapshot() const
+        {
+            const std::scoped_lock lock{activationMutex};
+            return activatedRoute;
+        }
+
+        void setActivationError(std::optional<BoundaryError> error)
+        {
+            const std::scoped_lock lock{activationMutex};
+            activationError = std::move(error);
+        }
+
         std::optional<CommandRequest> receivedCommand;
         std::optional<MaterializationRequest> receivedMaterialization;
         std::optional<UpdateSettingsRequest> receivedSettingsUpdate;
         std::optional<ScopeId> cancelledScope;
         std::optional<CacheInstanceId> acknowledgedCache;
+        std::optional<ActivationRoute> activatedRoute;
+        std::optional<BoundaryError> activationError;
+        mutable std::mutex activationMutex;
         bool pinged = false;
         bool guiReady = false;
         bool returnInvalidBoundaryError = false;
@@ -304,6 +327,58 @@ namespace
       private:
         QThread m_thread;
         SocketDaemonEndpoint* m_endpoint = nullptr;
+    };
+
+    class SocketActivationEndpointThread final
+    {
+      public:
+        SocketActivationEndpointThread(RecordingHandler& handler, SocketEndpointOptions options)
+            : m_endpoint(new SocketActivationEndpoint(handler, std::move(options)))
+        {
+            m_endpoint->moveToThread(&m_thread);
+            m_thread.start();
+        }
+
+        SocketActivationEndpointThread(const SocketActivationEndpointThread&) = delete;
+        SocketActivationEndpointThread& operator=(const SocketActivationEndpointThread&) = delete;
+
+        ~SocketActivationEndpointThread()
+        {
+            if (m_endpoint != nullptr)
+            {
+                auto* endpoint = m_endpoint;
+                QMetaObject::invokeMethod(
+                    endpoint,
+                    [this, endpoint]
+                    {
+                        endpoint->close();
+                        delete endpoint;
+                        m_endpoint = nullptr;
+                    },
+                    Qt::BlockingQueuedConnection);
+            }
+            m_thread.quit();
+            m_thread.wait();
+        }
+
+        [[nodiscard]] std::optional<SocketTransportError> listen()
+        {
+            std::optional<SocketTransportError> error;
+            QMetaObject::invokeMethod(
+                m_endpoint, [this, &error] { error = m_endpoint->listen(); },
+                Qt::BlockingQueuedConnection);
+            return error;
+        }
+
+        void close()
+        {
+            QMetaObject::invokeMethod(
+                m_endpoint, [this] { m_endpoint->close(); }, Qt::BlockingQueuedConnection);
+        }
+
+      private:
+        QThread m_thread;
+        SocketActivationEndpoint* m_endpoint = nullptr;
     };
 
 } // namespace
@@ -546,6 +621,51 @@ TEST_CASE("socket endpoint runs the transport-neutral typed surface", "[protocol
                       .build = {.application = QStringLiteral("Javelin-Mail"),
                                 .revision = QStringLiteral("test")}})));
     CHECK_FALSE(client.ping().has_value());
+}
+
+TEST_CASE("activation socket carries typed routes to the daemon", "[protocol][socket]")
+{
+    QTemporaryDir runtimeDirectory;
+    REQUIRE(runtimeDirectory.isValid());
+
+    RecordingHandler handler;
+    auto options = socketOptions(runtimeDirectory);
+    options.socketPath += QStringLiteral(".activation");
+    SocketActivationEndpointThread endpoint{handler, options};
+    REQUIRE_FALSE(endpoint.listen().has_value());
+
+    const auto route = ActivationRoute{OpenMessageRoute{.accountId = QStringLiteral("account-1"),
+                                                        .emailId = QStringLiteral("email-1")}};
+    const auto result = SocketActivationClient::request(options, route);
+    REQUIRE(std::holds_alternative<std::optional<BoundaryError>>(result));
+    CHECK_FALSE(std::get<std::optional<BoundaryError>>(result).has_value());
+    const auto activatedRoute = handler.activatedRouteSnapshot();
+    REQUIRE(activatedRoute.has_value());
+    const auto* received = std::get_if<OpenMessageRoute>(&*activatedRoute);
+    REQUIRE(received != nullptr);
+    CHECK(received->accountId == QStringLiteral("account-1"));
+    CHECK(received->emailId == QStringLiteral("email-1"));
+
+    auto incompatibleOptions = options;
+    incompatibleOptions.expectedBuild = BuildIdentity{.application = QStringLiteral("Javelin-Mail"),
+                                                      .revision = QStringLiteral("other-build")};
+    const auto incompatible =
+        SocketActivationClient::request(incompatibleOptions, ActivationRoute{RaiseGuiRoute{}});
+    REQUIRE(std::holds_alternative<std::optional<BoundaryError>>(incompatible));
+    const auto& incompatibleError = std::get<std::optional<BoundaryError>>(incompatible);
+    REQUIRE(incompatibleError.has_value());
+    CHECK(incompatibleError->code == BoundaryErrorCode::IncompatibleBuild);
+
+    handler.setActivationError(BoundaryError{.code = BoundaryErrorCode::Busy,
+                                             .field = QStringLiteral("activation"),
+                                             .detail = QStringLiteral("GUI is already active")});
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+    const auto rejected =
+        SocketActivationClient::request(options, ActivationRoute{RaiseGuiRoute{}});
+    REQUIRE(std::holds_alternative<std::optional<BoundaryError>>(rejected));
+    const auto& error = std::get<std::optional<BoundaryError>>(rejected);
+    REQUIRE(error.has_value());
+    CHECK(error->code == BoundaryErrorCode::Busy);
 }
 
 TEST_CASE("socket endpoint rejects malformed peers and classifies lost replies",

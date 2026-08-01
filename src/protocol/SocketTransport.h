@@ -31,6 +31,7 @@ namespace javelin::protocol
         CacheAccessSuspendedAcknowledgement = 7,
         PingRequest = 8,
         ReadyForActivationRequest = 9,
+        ActivationRequest = 10,
         HelloReply = 32,
         CommandReplyFrame = 33,
         MaterializationReplyFrame = 34,
@@ -40,6 +41,7 @@ namespace javelin::protocol
         CacheAccessSuspendedReply = 38,
         PingReply = 39,
         ReadyForActivationReply = 40,
+        ActivationReply = 41,
         BoundaryEventFrame = 64,
         ProtocolError = 65,
     };
@@ -86,6 +88,16 @@ namespace javelin::protocol
     [[nodiscard]] std::variant<QByteArray, SocketFrameError>
     encodeSocketFrame(SocketFrameKind kind, std::uint64_t correlation, const QByteArray& payload,
                       std::size_t maximumFrameBytes = BoundaryLimits{}.maximumFrameBytes);
+
+    [[nodiscard]] std::variant<QByteArray, SocketFrameError>
+    encodeActivationRoute(const ActivationRoute& route, const BoundaryLimits& limits = {});
+    [[nodiscard]] std::variant<ActivationRoute, SocketFrameError>
+    decodeActivationRoute(const QByteArray& payload, const BoundaryLimits& limits = {});
+    [[nodiscard]] std::variant<QByteArray, SocketFrameError>
+    encodeActivationReply(const std::optional<BoundaryError>& error,
+                          const BoundaryLimits& limits = {});
+    [[nodiscard]] std::variant<std::optional<BoundaryError>, SocketFrameError>
+    decodeActivationReply(const QByteArray& payload, const BoundaryLimits& limits = {});
 
     enum class SocketDisconnectReason : std::uint8_t
     {
@@ -190,6 +202,51 @@ namespace javelin::protocol
         SocketDisconnectReason m_closeReason = SocketDisconnectReason::None;
         QString m_closeDetail;
         std::optional<SocketTransportError> m_lastError;
+    };
+
+    class SocketActivationEndpoint final : public QObject
+    {
+        Q_OBJECT
+
+      public:
+        explicit SocketActivationEndpoint(DaemonRequestHandler& handler,
+                                          SocketEndpointOptions options = {},
+                                          QObject* parent = nullptr);
+        ~SocketActivationEndpoint() override;
+
+        SocketActivationEndpoint(const SocketActivationEndpoint&) = delete;
+        SocketActivationEndpoint& operator=(const SocketActivationEndpoint&) = delete;
+        SocketActivationEndpoint(SocketActivationEndpoint&&) = delete;
+        SocketActivationEndpoint& operator=(SocketActivationEndpoint&&) = delete;
+
+        [[nodiscard]] std::optional<SocketTransportError> listen();
+        void close();
+        [[nodiscard]] bool isListening() const;
+        [[nodiscard]] const QString& socketPath() const;
+
+      private:
+        void acceptConnection();
+        void readSocket();
+        void socketDisconnected();
+        void socketError();
+        void clearSocket();
+        [[nodiscard]] std::optional<SocketTransportError> validatePeer(QLocalSocket& socket) const;
+
+        DaemonRequestHandler& m_handler;
+        SocketEndpointOptions m_options;
+        std::unique_ptr<QLocalServer> m_server;
+        std::unique_ptr<QLocalSocket> m_socket;
+        SocketFrameDecoder m_decoder;
+        std::optional<SocketTransportError> m_lastError;
+    };
+
+    using SocketActivationResult = std::variant<std::optional<BoundaryError>, SocketTransportError>;
+
+    class SocketActivationClient final
+    {
+      public:
+        [[nodiscard]] static SocketActivationResult request(const SocketClientOptions& options,
+                                                            ActivationRoute route);
     };
 
     class SocketDaemonClient final : public QObject,

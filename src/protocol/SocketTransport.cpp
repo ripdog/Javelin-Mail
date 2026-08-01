@@ -1239,8 +1239,10 @@ namespace javelin::protocol
                         return writer.string(value.accountId) && writer.string(value.mailboxId);
                     else if constexpr (std::is_same_v<Route, OpenMessageRoute>)
                         return writer.string(value.accountId) && writer.string(value.emailId);
-                    else
+                    else if constexpr (std::is_same_v<Route, OpenComposeRoute>)
                         return writer.string(value.composeSessionId);
+                    else
+                        return true;
                 },
                 route);
         }
@@ -1274,7 +1276,45 @@ namespace javelin::protocol
                 route = std::move(value);
                 return true;
             }
+            if (kind == 3)
+            {
+                route = RaiseGuiRoute{};
+                return true;
+            }
             return reader.fail(QStringLiteral("activation route variant is invalid"));
+        }
+
+        struct DecodedActivationRequest
+        {
+            ProtocolVersion protocol;
+            BuildIdentity build;
+            ActivationRoute route;
+        };
+
+        EncodedPayloadResult encodeActivationRequest(const SocketEndpointOptions& options,
+                                                     const ActivationRoute& route)
+        {
+            const auto build = options.expectedBuild.value_or(BuildIdentity{});
+            return makePayload(SocketFrameKind::ActivationRequest, options.limits,
+                               [&options, &build, &route](PayloadWriter& writer)
+                               {
+                                   return writeProtocol(writer, options.protocol) &&
+                                          writeBuild(writer, build) &&
+                                          writeActivationRoute(writer, route);
+                               });
+        }
+
+        std::variant<DecodedActivationRequest, SocketFrameError>
+        decodeActivationRequest(const QByteArray& payload, const BoundaryLimits& limits)
+        {
+            PayloadReader reader{payload, limits};
+            DecodedActivationRequest request;
+            if (!readProtocol(reader, request.protocol) || !readBuild(reader, request.build) ||
+                !readActivationRoute(reader, request.route))
+                return malformed(QStringLiteral("invalid activation request"));
+            if (const auto error = reader.finish())
+                return *error;
+            return request;
         }
 
         EncodedPayloadResult encodeBoundaryEvent(const BoundaryEvent& event,
@@ -1638,6 +1678,7 @@ namespace javelin::protocol
         case SocketFrameKind::CacheAccessSuspendedAcknowledgement:
         case SocketFrameKind::PingRequest:
         case SocketFrameKind::ReadyForActivationRequest:
+        case SocketFrameKind::ActivationRequest:
         case SocketFrameKind::HelloReply:
         case SocketFrameKind::CommandReplyFrame:
         case SocketFrameKind::MaterializationReplyFrame:
@@ -1647,6 +1688,7 @@ namespace javelin::protocol
         case SocketFrameKind::CacheAccessSuspendedReply:
         case SocketFrameKind::PingReply:
         case SocketFrameKind::ReadyForActivationReply:
+        case SocketFrameKind::ActivationReply:
         case SocketFrameKind::BoundaryEventFrame:
         case SocketFrameKind::ProtocolError:
             return true;
@@ -1677,6 +1719,122 @@ namespace javelin::protocol
         writeU64(frame.data() + 16, correlation);
         frame.append(payload);
         return frame;
+    }
+
+    std::variant<QByteArray, SocketFrameError> encodeActivationRoute(const ActivationRoute& route,
+                                                                     const BoundaryLimits& limits)
+    {
+        const auto encoded = makePayload(
+            SocketFrameKind::ActivationRequest, limits,
+            [&route](PayloadWriter& writer)
+            {
+                return std::visit(
+                    [&writer](const auto& value)
+                    {
+                        using Route = std::decay_t<decltype(value)>;
+                        if constexpr (std::is_same_v<Route, OpenMailboxRoute>)
+                        {
+                            return writer.byte(0) && writer.string(value.accountId) &&
+                                   writer.string(value.mailboxId);
+                        }
+                        else if constexpr (std::is_same_v<Route, OpenMessageRoute>)
+                        {
+                            return writer.byte(1) && writer.string(value.accountId) &&
+                                   writer.string(value.emailId);
+                        }
+                        else if constexpr (std::is_same_v<Route, OpenComposeRoute>)
+                        {
+                            return writer.byte(2) && writer.string(value.composeSessionId);
+                        }
+                        else
+                        {
+                            return writer.byte(3);
+                        }
+                    },
+                    route);
+            });
+        if (const auto* error = std::get_if<SocketFrameError>(&encoded))
+            return *error;
+        return std::get<EncodedPayload>(encoded).payload;
+    }
+
+    std::variant<ActivationRoute, SocketFrameError>
+    decodeActivationRoute(const QByteArray& payload, const BoundaryLimits& limits)
+    {
+        PayloadReader reader{payload, limits};
+        quint8 routeIndex = 0;
+        if (!reader.byte(routeIndex))
+            return malformed(QStringLiteral("invalid activation route"));
+        if (routeIndex == 0)
+        {
+            OpenMailboxRoute route;
+            if (!reader.string(route.accountId) || !reader.string(route.mailboxId))
+                return malformed(QStringLiteral("invalid mailbox activation route"));
+            if (const auto error = reader.finish())
+                return *error;
+            return ActivationRoute{std::move(route)};
+        }
+        if (routeIndex == 1)
+        {
+            OpenMessageRoute route;
+            if (!reader.string(route.accountId) || !reader.string(route.emailId))
+                return malformed(QStringLiteral("invalid message activation route"));
+            if (const auto error = reader.finish())
+                return *error;
+            return ActivationRoute{std::move(route)};
+        }
+        if (routeIndex == 2)
+        {
+            OpenComposeRoute route;
+            if (!reader.string(route.composeSessionId))
+                return malformed(QStringLiteral("invalid compose activation route"));
+            if (const auto error = reader.finish())
+                return *error;
+            return ActivationRoute{std::move(route)};
+        }
+        if (routeIndex == 3)
+        {
+            if (const auto error = reader.finish())
+                return *error;
+            return ActivationRoute{RaiseGuiRoute{}};
+        }
+        return malformed(QStringLiteral("unknown activation route variant"));
+    }
+
+    std::variant<QByteArray, SocketFrameError>
+    encodeActivationReply(const std::optional<BoundaryError>& error, const BoundaryLimits& limits)
+    {
+        const auto encoded =
+            makePayload(SocketFrameKind::ActivationReply, limits,
+                        [&error](PayloadWriter& writer)
+                        {
+                            return writer.boolean(error.has_value()) &&
+                                   (!error.has_value() || writeBoundaryError(writer, *error));
+                        });
+        if (const auto* frameError = std::get_if<SocketFrameError>(&encoded))
+            return *frameError;
+        return std::get<EncodedPayload>(encoded).payload;
+    }
+
+    std::variant<std::optional<BoundaryError>, SocketFrameError>
+    decodeActivationReply(const QByteArray& payload, const BoundaryLimits& limits)
+    {
+        PayloadReader reader{payload, limits};
+        bool hasError = false;
+        if (!reader.boolean(hasError))
+            return malformed(QStringLiteral("invalid activation reply"));
+        if (!hasError)
+        {
+            if (const auto error = reader.finish())
+                return *error;
+            return std::optional<BoundaryError>{};
+        }
+        BoundaryError error;
+        if (!readBoundaryError(reader, error))
+            return malformed(QStringLiteral("invalid activation error"));
+        if (const auto streamError = reader.finish())
+            return *streamError;
+        return std::optional<BoundaryError>{std::move(error)};
     }
 
     SocketDaemonEndpoint::SocketDaemonEndpoint(DaemonRequestHandler& handler,
@@ -2304,6 +2462,289 @@ namespace javelin::protocol
     SocketDaemonEndpoint::validatePeer(QLocalSocket& socket) const
     {
         return validatePeerCredentials(socket, m_options.enforcePeerCredentials);
+    }
+
+    SocketActivationEndpoint::SocketActivationEndpoint(DaemonRequestHandler& handler,
+                                                       SocketEndpointOptions options,
+                                                       QObject* parent)
+        : QObject(parent), m_handler(handler), m_options(std::move(options)),
+          m_decoder(m_options.limits)
+    {
+    }
+
+    SocketActivationEndpoint::~SocketActivationEndpoint()
+    {
+        close();
+    }
+
+    std::optional<SocketTransportError> SocketActivationEndpoint::listen()
+    {
+        if (const auto error = validateRuntimeDirectory(m_options))
+        {
+            m_lastError = error;
+            return error;
+        }
+        if (m_server == nullptr)
+        {
+            m_server = std::make_unique<QLocalServer>();
+            m_server->setSocketOptions(QLocalServer::UserAccessOption);
+            connect(m_server.get(), &QLocalServer::newConnection, this,
+                    &SocketActivationEndpoint::acceptConnection);
+        }
+        if (m_server->isListening())
+            return std::nullopt;
+        if (!m_server->listen(m_options.socketPath))
+        {
+            if (m_server->serverError() != QAbstractSocket::AddressInUseError)
+            {
+                m_lastError = SocketTransportError{
+                    .reason = SocketDisconnectReason::TransportFailure,
+                    .detail = m_server->errorString(),
+                };
+                return m_lastError;
+            }
+            QLocalSocket probe;
+            probe.connectToServer(m_options.socketPath);
+            if (probe.waitForConnected(100))
+            {
+                m_lastError = SocketTransportError{
+                    .reason = SocketDisconnectReason::TransportFailure,
+                    .detail = QStringLiteral("activation socket path is already in use"),
+                };
+                return m_lastError;
+            }
+            QLocalServer::removeServer(m_options.socketPath);
+            if (!m_server->listen(m_options.socketPath))
+            {
+                m_lastError = SocketTransportError{
+                    .reason = SocketDisconnectReason::TransportFailure,
+                    .detail = m_server->errorString(),
+                };
+                return m_lastError;
+            }
+        }
+        m_lastError.reset();
+        return std::nullopt;
+    }
+
+    void SocketActivationEndpoint::close()
+    {
+        clearSocket();
+        if (m_server != nullptr)
+        {
+            m_server->close();
+            if (!m_options.socketPath.isEmpty())
+                QLocalServer::removeServer(m_options.socketPath);
+        }
+    }
+
+    bool SocketActivationEndpoint::isListening() const
+    {
+        return m_server != nullptr && m_server->isListening();
+    }
+
+    const QString& SocketActivationEndpoint::socketPath() const
+    {
+        return m_options.socketPath;
+    }
+
+    void SocketActivationEndpoint::acceptConnection()
+    {
+        while (m_server != nullptr && m_server->hasPendingConnections())
+        {
+            auto* candidate = m_server->nextPendingConnection();
+            if (candidate == nullptr)
+                continue;
+            if (m_socket != nullptr)
+            {
+                candidate->disconnectFromServer();
+                candidate->deleteLater();
+                continue;
+            }
+            if (const auto error = validatePeer(*candidate))
+            {
+                m_lastError = error;
+                candidate->disconnectFromServer();
+                candidate->deleteLater();
+                continue;
+            }
+            candidate->setReadBufferSize(static_cast<qint64>(m_options.limits.maximumFrameBytes));
+            m_socket.reset(candidate);
+            connect(m_socket.get(), &QLocalSocket::readyRead, this,
+                    &SocketActivationEndpoint::readSocket);
+            connect(m_socket.get(), &QLocalSocket::disconnected, this,
+                    &SocketActivationEndpoint::socketDisconnected);
+            connect(m_socket.get(), &QLocalSocket::errorOccurred, this,
+                    &SocketActivationEndpoint::socketError);
+        }
+    }
+
+    void SocketActivationEndpoint::readSocket()
+    {
+        if (m_socket == nullptr)
+            return;
+        if (const auto error = m_decoder.append(m_socket->readAll()))
+        {
+            m_lastError = SocketTransportError{.reason = SocketDisconnectReason::ProtocolViolation,
+                                               .detail = error->detail};
+            clearSocket();
+            return;
+        }
+        auto decoded = m_decoder.takeFrame();
+        if (auto* error = std::get_if<SocketFrameError>(&decoded))
+        {
+            m_lastError = SocketTransportError{.reason = SocketDisconnectReason::ProtocolViolation,
+                                               .detail = error->detail};
+            clearSocket();
+            return;
+        }
+        const auto& frame = std::get<std::optional<SocketFrame>>(decoded);
+        if (!frame.has_value())
+            return;
+        if (frame->kind != SocketFrameKind::ActivationRequest || frame->correlation == 0)
+        {
+            m_lastError = SocketTransportError{
+                .reason = SocketDisconnectReason::ProtocolViolation,
+                .detail = QStringLiteral("invalid activation request frame"),
+            };
+            clearSocket();
+            return;
+        }
+        const auto request = decodeActivationRequest(frame->payload, m_options.limits);
+        if (auto* error = std::get_if<SocketFrameError>(&request))
+        {
+            m_lastError = SocketTransportError{.reason = SocketDisconnectReason::ProtocolViolation,
+                                               .detail = error->detail};
+            clearSocket();
+            return;
+        }
+        const auto& requestValue = std::get<DecodedActivationRequest>(request);
+        std::optional<BoundaryError> activationError;
+        if (requestValue.protocol.major != m_options.protocol.major ||
+            requestValue.protocol.minor > m_options.protocol.minor)
+        {
+            activationError = BoundaryError{
+                .code = BoundaryErrorCode::InvalidProtocol,
+                .field = QStringLiteral("activation.protocol"),
+                .detail = QStringLiteral("daemon protocol is incompatible"),
+            };
+        }
+        else if (m_options.expectedBuild.has_value() &&
+                 requestValue.build != *m_options.expectedBuild)
+        {
+            activationError = BoundaryError{
+                .code = BoundaryErrorCode::IncompatibleBuild,
+                .field = QStringLiteral("activation.build"),
+                .detail = QStringLiteral("daemon build identity is incompatible"),
+            };
+        }
+        else
+        {
+            activationError = m_handler.handleGuiActivation(requestValue.route);
+        }
+        const auto payload = encodeActivationReply(activationError, m_options.limits);
+        if (auto* error = std::get_if<SocketFrameError>(&payload))
+        {
+            m_lastError = SocketTransportError{.reason = SocketDisconnectReason::ProtocolViolation,
+                                               .detail = error->detail};
+            clearSocket();
+            return;
+        }
+        const auto encoded =
+            encodeSocketFrame(SocketFrameKind::ActivationReply, frame->correlation,
+                              std::get<QByteArray>(payload), m_options.limits.maximumFrameBytes);
+        if (auto* error = std::get_if<SocketFrameError>(&encoded))
+        {
+            m_lastError = SocketTransportError{.reason = SocketDisconnectReason::ProtocolViolation,
+                                               .detail = error->detail};
+            clearSocket();
+            return;
+        }
+        m_socket->write(std::get<QByteArray>(encoded));
+        m_socket->flush();
+    }
+
+    void SocketActivationEndpoint::socketDisconnected()
+    {
+        clearSocket();
+    }
+
+    void SocketActivationEndpoint::socketError()
+    {
+        if (m_socket != nullptr)
+        {
+            m_lastError = SocketTransportError{.reason = SocketDisconnectReason::TransportFailure,
+                                               .detail = m_socket->errorString()};
+            clearSocket();
+        }
+    }
+
+    void SocketActivationEndpoint::clearSocket()
+    {
+        auto* socket = m_socket.release();
+        m_decoder.clear();
+        if (socket == nullptr)
+            return;
+        QSignalBlocker blocker{socket};
+        socket->abort();
+        socket->deleteLater();
+    }
+
+    std::optional<SocketTransportError>
+    SocketActivationEndpoint::validatePeer(QLocalSocket& socket) const
+    {
+        return validatePeerCredentials(socket, m_options.enforcePeerCredentials);
+    }
+
+    SocketActivationResult SocketActivationClient::request(const SocketClientOptions& options,
+                                                           ActivationRoute route)
+    {
+        if (const auto error = validateRuntimeDirectory(options))
+            return *error;
+        QLocalSocket socket;
+        socket.connectToServer(options.socketPath);
+        if (!socket.waitForConnected(options.responseTimeoutMilliseconds))
+            return SocketTransportError{.reason = SocketDisconnectReason::TransportFailure,
+                                        .detail = socket.errorString()};
+        if (const auto error = validatePeerCredentials(socket, options.enforcePeerCredentials))
+            return *error;
+        const auto payload = encodeActivationRequest(options, route);
+        if (auto* error = std::get_if<SocketFrameError>(&payload))
+            return SocketTransportError{.reason = SocketDisconnectReason::ProtocolViolation,
+                                        .detail = error->detail};
+        const auto frame = encodeSocketFrame(SocketFrameKind::ActivationRequest, 1,
+                                             std::get<EncodedPayload>(payload).payload,
+                                             options.limits.maximumFrameBytes);
+        if (auto* error = std::get_if<SocketFrameError>(&frame))
+            return SocketTransportError{.reason = SocketDisconnectReason::ProtocolViolation,
+                                        .detail = error->detail};
+        const auto bytes = std::get<QByteArray>(frame);
+        if (socket.write(bytes) != bytes.size() ||
+            !socket.waitForBytesWritten(options.responseTimeoutMilliseconds) ||
+            !socket.waitForReadyRead(options.responseTimeoutMilliseconds))
+            return SocketTransportError{
+                .reason = SocketDisconnectReason::TransportFailure,
+                .detail = socket.errorString().isEmpty()
+                              ? QStringLiteral("activation reply was not received")
+                              : socket.errorString()};
+        SocketFrameDecoder decoder{options.limits};
+        if (const auto error = decoder.append(socket.readAll()))
+            return SocketTransportError{.reason = SocketDisconnectReason::ProtocolViolation,
+                                        .detail = error->detail};
+        const auto decoded = decoder.takeFrame();
+        if (auto* error = std::get_if<SocketFrameError>(&decoded))
+            return SocketTransportError{.reason = SocketDisconnectReason::ProtocolViolation,
+                                        .detail = error->detail};
+        const auto& response = std::get<std::optional<SocketFrame>>(decoded);
+        if (!response.has_value() || response->kind != SocketFrameKind::ActivationReply ||
+            response->correlation != 1)
+            return SocketTransportError{.reason = SocketDisconnectReason::ProtocolViolation,
+                                        .detail = QStringLiteral("invalid activation reply")};
+        const auto reply = decodeActivationReply(response->payload, options.limits);
+        if (auto* error = std::get_if<SocketFrameError>(&reply))
+            return SocketTransportError{.reason = SocketDisconnectReason::ProtocolViolation,
+                                        .detail = error->detail};
+        return std::get<std::optional<BoundaryError>>(reply);
     }
 
     SocketDaemonClient::SocketDaemonClient(SocketClientOptions options, QObject* parent)

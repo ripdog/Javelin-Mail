@@ -1,0 +1,564 @@
+#include "app/DaemonProcess.h"
+
+#include "app/CacheAccessBarrier.h"
+#include "app/CalendarNotificationService.h"
+#include "app/CommandDispatcher.h"
+#include "app/DaemonServices.h"
+#include "app/DeferredSendService.h"
+#include "app/FullMailSyncService.h"
+#include "app/LocalMaintenanceService.h"
+#include "app/MailApplicationEventsPorts.h"
+#include "app/MailApplicationService.h"
+#include "app/MailIndexService.h"
+#include "app/SettingsRepository.h"
+#include "app/TranslationApplicationPorts.h"
+#include "app/undo/UndoManager.h"
+
+#include <QMetaObject>
+#include <QSettings>
+
+#include <algorithm>
+#include <exception>
+#include <ranges>
+#include <stdexcept>
+#include <utility>
+
+namespace javelin::app
+{
+    namespace
+    {
+        using namespace javelin::protocol;
+
+        [[nodiscard]] AccountConnectionSettings connectionSettings(const AccountSettings& settings)
+        {
+            return {.connectionId = settings.id.toStdString(),
+                    .revision = settings.revision,
+                    .sessionUrl = settings.sessionUrl.toStdString(),
+                    .loginEmail = settings.loginEmail.toStdString(),
+                    .apiKey = settings.apiKey.toStdString()};
+        }
+
+        [[nodiscard]] const MailboxSelectionSettings*
+        findSelection(const std::vector<MailboxSelectionSettings>& selections,
+                      const QString& accountId)
+        {
+            const auto found =
+                std::ranges::find(selections, accountId, &MailboxSelectionSettings::accountId);
+            return found == selections.end() ? nullptr : &*found;
+        }
+
+        [[nodiscard]] std::vector<std::string> stringIds(const std::vector<QString>& ids)
+        {
+            std::vector<std::string> result;
+            result.reserve(ids.size());
+            for (const auto& id : ids)
+                result.push_back(id.toStdString());
+            return result;
+        }
+
+        [[nodiscard]] std::vector<AccountSyncConfiguration>
+        accountConfigurations(const SettingsSnapshot& snapshot)
+        {
+            std::vector<AccountSyncConfiguration> result;
+            for (const auto& account : snapshot.accounts)
+            {
+                if (account.loginEmail.isEmpty() || account.apiKey.isEmpty())
+                    continue;
+
+                const auto* synced = findSelection(snapshot.syncedMailboxSelections, account.id);
+                const auto* notifications =
+                    findSelection(snapshot.notificationMailboxSelections, account.id);
+                for (const auto& accountId : account.cachedAccountIds)
+                {
+                    std::vector<QString> mailboxIds;
+                    if (synced != nullptr)
+                        mailboxIds = synced->mailboxIds;
+                    if (notifications != nullptr)
+                    {
+                        mailboxIds.insert(mailboxIds.end(), notifications->mailboxIds.begin(),
+                                          notifications->mailboxIds.end());
+                    }
+                    std::ranges::sort(mailboxIds);
+                    mailboxIds.erase(std::ranges::unique(mailboxIds).begin(), mailboxIds.end());
+
+                    result.push_back({
+                        .settings = connectionSettings(account),
+                        .accountId = accountId.toStdString(),
+                        .mailboxIds = stringIds(mailboxIds),
+                        .fullSyncMailboxIds = synced == nullptr ? std::vector<std::string>{}
+                                                                : stringIds(synced->mailboxIds),
+                        .notificationMailboxIds = notifications == nullptr
+                                                      ? std::vector<std::string>{}
+                                                      : stringIds(notifications->mailboxIds),
+                        .notificationMailboxSelectionConfigured =
+                            notifications != nullptr && notifications->configured,
+                    });
+                }
+            }
+            return result;
+        }
+
+        [[nodiscard]] std::optional<BoundaryError>
+        settingsError(const SettingsRepositoryError& error)
+        {
+            BoundaryErrorCode code = BoundaryErrorCode::SettingsStorageFailure;
+            if (error.code == SettingsRepositoryErrorCode::MigrationFailed ||
+                error.code == SettingsRepositoryErrorCode::UnsupportedSchema)
+                code = BoundaryErrorCode::SettingsMigrationFailure;
+            return BoundaryError{.code = code, .field = error.key, .detail = error.detail};
+        }
+
+        [[nodiscard]] AccountState accountState(const MailAccountStatus status)
+        {
+            switch (status)
+            {
+            case MailAccountStatus::Disconnected:
+                return AccountState::Paused;
+            case MailAccountStatus::Connecting:
+                return AccountState::Synchronizing;
+            case MailAccountStatus::Connected:
+                return AccountState::Ready;
+            case MailAccountStatus::AuthenticationPaused:
+                return AccountState::AuthenticationRequired;
+            }
+            return AccountState::Unknown;
+        }
+
+        [[nodiscard]] QString startupDetail(const std::exception& exception)
+        {
+            return QString::fromUtf8(exception.what());
+        }
+    } // namespace
+
+    DaemonProcess::DaemonProcess(DaemonProcessOptions options, QObject* parent)
+        : QObject(parent), m_options(std::move(options))
+    {
+        if (!m_options.socket.expectedBuild.has_value())
+            m_options.socket.expectedBuild = m_options.build;
+        m_options.socket.protocol = m_options.protocol;
+    }
+
+    DaemonProcess::~DaemonProcess()
+    {
+        stop();
+    }
+
+    std::optional<DaemonStartupError> DaemonProcess::start()
+    {
+        if (m_lifecycle == DaemonLifecycle::Ready)
+            return std::nullopt;
+        if (m_lifecycle == DaemonLifecycle::ShuttingDown)
+            return fail(DaemonStartupErrorCode::SocketListen,
+                        QStringLiteral("daemon has already been stopped"));
+
+        m_settingsRepository =
+            m_options.settingsPath.isEmpty()
+                ? std::make_unique<SettingsRepository>()
+                : std::make_unique<SettingsRepository>(
+                      std::make_unique<QSettings>(m_options.settingsPath, QSettings::IniFormat));
+        const auto settingsResult = m_settingsRepository->load();
+        if (const auto* error = std::get_if<SettingsRepositoryError>(&settingsResult))
+            return fail(DaemonStartupErrorCode::SettingsMigration, error->detail);
+        m_settingsSnapshot = std::get<SettingsSnapshot>(settingsResult);
+
+        const auto locationResult =
+            (m_options.cacheRootPath.isEmpty() ? CacheLocationProvider::forApplication()
+                                               : CacheLocationProvider{m_options.cacheRootPath})
+                .loadOrCreate();
+        if (const auto* error = std::get_if<CacheLocationError>(&locationResult))
+            return fail(DaemonStartupErrorCode::CacheLocation, error->detail);
+
+        try
+        {
+            m_services = std::make_unique<DaemonServices>(std::get<CacheLocation>(locationResult));
+            applySettings();
+            m_services->translationService().reloadSettings();
+            m_services->deferredSendService().start();
+            m_services->calendarNotificationService().start();
+            m_services->localMaintenanceService().requestReplay();
+        }
+        catch (const std::exception& exception)
+        {
+            return fail(DaemonStartupErrorCode::CacheOpen, startupDetail(exception));
+        }
+
+        m_endpoint =
+            std::make_unique<protocol::SocketDaemonEndpoint>(*this, m_options.socket, this);
+        connect(m_endpoint.get(), &protocol::SocketDaemonEndpoint::connectionOpened, this,
+                [this]
+                {
+                    m_guiConnected = true;
+                    m_guiReady = false;
+                    Q_EMIT guiConnected();
+                });
+        connect(m_endpoint.get(), &protocol::SocketDaemonEndpoint::connectionClosed, this,
+                &DaemonProcess::onSocketConnectionClosed);
+
+        m_services->commandDispatcher().setEventSink(this);
+        connectOperationalEvents();
+        if (const auto error = m_endpoint->listen())
+            return fail(DaemonStartupErrorCode::SocketListen, error->detail);
+
+        auto activationOptions = m_options.socket;
+        activationOptions.socketPath += QStringLiteral(".activation");
+        m_activationEndpoint = std::make_unique<protocol::SocketActivationEndpoint>(
+            *this, std::move(activationOptions), this);
+        if (const auto error = m_activationEndpoint->listen())
+            return fail(DaemonStartupErrorCode::SocketListen, error->detail);
+
+        m_lifecycle = DaemonLifecycle::Ready;
+        publishStatus();
+        Q_EMIT ready();
+        return std::nullopt;
+    }
+
+    void DaemonProcess::stop()
+    {
+        if (m_lifecycle == DaemonLifecycle::ShuttingDown)
+            return;
+        m_lifecycle = DaemonLifecycle::ShuttingDown;
+        if (m_cacheAccessAcknowledged && m_services != nullptr)
+        {
+            if (const auto error = m_services->cacheAccessBarrier().resume())
+                qWarning().noquote()
+                    << QStringLiteral("Cache barrier resume during daemon stop:") << error->message;
+        }
+        m_cacheSuspend.reset();
+        m_cacheAccessAcknowledged = false;
+        if (m_endpoint != nullptr)
+        {
+            publishStatus();
+            m_endpoint->close();
+        }
+        if (m_activationEndpoint != nullptr)
+            m_activationEndpoint->close();
+        if (m_services != nullptr)
+            m_services->commandDispatcher().setEventSink(nullptr);
+        m_endpoint.reset();
+        m_services.reset();
+        m_settingsRepository.reset();
+        m_guiConnected = false;
+        m_guiReady = false;
+    }
+
+    bool DaemonProcess::isReady() const
+    {
+        return m_lifecycle == DaemonLifecycle::Ready;
+    }
+
+    bool DaemonProcess::hasGuiConnection() const
+    {
+        return m_guiConnected;
+    }
+
+    const QString& DaemonProcess::databasePath() const
+    {
+        static const QString empty;
+        return m_services == nullptr ? empty : m_services->databasePath();
+    }
+
+    const protocol::SettingsSnapshot& DaemonProcess::settings() const
+    {
+        return m_settingsSnapshot;
+    }
+
+    const protocol::DaemonInstanceId& DaemonProcess::instanceId() const
+    {
+        return m_instanceId;
+    }
+
+    protocol::CacheIdentity DaemonProcess::cacheIdentity() const
+    {
+        if (m_services == nullptr)
+            throw std::logic_error("daemon cache is not open");
+        return m_services->cacheIdentity();
+    }
+
+    protocol::InvalidationEpoch DaemonProcess::currentEpoch() const
+    {
+        return m_services == nullptr ? protocol::InvalidationEpoch{}
+                                     : m_services->commandDispatcher().currentEpoch();
+    }
+
+    std::optional<protocol::BoundaryError> DaemonProcess::requestCacheAccessSuspend(
+        const protocol::CacheSuspendReason reason,
+        const std::optional<protocol::CacheSchemaVersion> targetSchema)
+    {
+        if (!isReady())
+            return notReadyError();
+        if (!m_guiConnected || !m_guiReady)
+            return BoundaryError{.code = BoundaryErrorCode::Busy,
+                                 .field = QStringLiteral("cache"),
+                                 .detail =
+                                     QStringLiteral("GUI is not ready to release cache access")};
+        if (m_cacheSuspend.has_value())
+            return BoundaryError{.code = BoundaryErrorCode::Busy,
+                                 .field = QStringLiteral("cache"),
+                                 .detail =
+                                     QStringLiteral("cache access suspension is already pending")};
+
+        m_cacheSuspend = CacheAccessSuspendRequested{
+            .instance = cacheIdentity().instance, .reason = reason, .targetSchema = targetSchema};
+        m_cacheAccessAcknowledged = false;
+        onBoundaryEvent(*m_cacheSuspend);
+        return std::nullopt;
+    }
+
+    std::optional<protocol::BoundaryError> DaemonProcess::completeCacheAccessResume()
+    {
+        if (!m_cacheSuspend.has_value() || !m_cacheAccessAcknowledged || m_services == nullptr)
+            return BoundaryError{.code = BoundaryErrorCode::InvalidRequest,
+                                 .field = QStringLiteral("cache"),
+                                 .detail = QStringLiteral(
+                                     "cache access cannot resume before the GUI acknowledgement")};
+        if (const auto error = m_services->cacheAccessBarrier().resume())
+        {
+            return BoundaryError{.code = BoundaryErrorCode::CacheUnavailable,
+                                 .field = QStringLiteral("cache"),
+                                 .detail = error->message};
+        }
+        m_cacheSuspend.reset();
+        m_cacheAccessAcknowledged = false;
+        onBoundaryEvent(CacheAccessResumed{.cache = cacheIdentity(), .epoch = currentEpoch()});
+        return std::nullopt;
+    }
+
+    protocol::HandshakeReply DaemonProcess::handleHello(const protocol::HelloRequest& request)
+    {
+        if (!isReady())
+            return HandshakeRejected{.error = notReadyError()};
+        if (request.protocol.major != m_options.protocol.major ||
+            request.protocol.minor > m_options.protocol.minor)
+        {
+            return HandshakeRejected{
+                .error = {.code = BoundaryErrorCode::InvalidProtocol,
+                          .field = QStringLiteral("hello.protocol"),
+                          .detail = QStringLiteral("daemon protocol is incompatible")}};
+        }
+        if (request.build != m_options.build)
+        {
+            return HandshakeRejected{
+                .error = {.code = BoundaryErrorCode::IncompatibleBuild,
+                          .field = QStringLiteral("hello.build"),
+                          .detail = QStringLiteral("daemon build identity is incompatible")}};
+        }
+        return ReadyReply{.protocol = m_options.protocol,
+                          .daemon = m_instanceId,
+                          .cache = cacheIdentity(),
+                          .epoch = currentEpoch(),
+                          .settingsRevision = m_settingsSnapshot.revision};
+    }
+
+    protocol::CommandReply DaemonProcess::handleCommand(protocol::CommandRequest request)
+    {
+        if (!isReady())
+            return protocol::CommandRejected{.id = request.id, .error = notReadyError()};
+        return m_services->commandDispatcher().dispatch(std::move(request));
+    }
+
+    protocol::MaterializationReply
+    DaemonProcess::handleMaterialization(protocol::MaterializationRequest request)
+    {
+        return protocol::MaterializationRejected{
+            .id = request.id,
+            .error = {.code = BoundaryErrorCode::UnsupportedOperation,
+                      .field = QStringLiteral("materialization"),
+                      .detail = QStringLiteral(
+                          "materialization is not available during daemon bootstrap")}};
+    }
+
+    void DaemonProcess::handleCancelMaterializationScope(
+        const protocol::CancelMaterializationScopeRequest&)
+    {
+    }
+
+    protocol::SettingsReadReply
+    DaemonProcess::handleGetSettings(const protocol::GetSettingsRequest&)
+    {
+        if (!isReady())
+            return protocol::SettingsReadRejected{.error = notReadyError()};
+        return protocol::SettingsSnapshotReply{.snapshot = m_settingsSnapshot};
+    }
+
+    protocol::SettingsUpdateReply
+    DaemonProcess::handleUpdateSettings(protocol::UpdateSettingsRequest request)
+    {
+        if (!isReady())
+            return protocol::SettingsUpdateRejected{.currentRevision = m_settingsSnapshot.revision,
+                                                    .error = notReadyError()};
+        const auto reply = m_settingsRepository->update(std::move(request));
+        if (const auto* updated = std::get_if<protocol::SettingsUpdated>(&reply))
+        {
+            const auto loaded = m_settingsRepository->load();
+            if (const auto* error = std::get_if<SettingsRepositoryError>(&loaded))
+            {
+                return protocol::SettingsUpdateRejected{.currentRevision =
+                                                            m_settingsSnapshot.revision,
+                                                        .error = *settingsError(*error)};
+            }
+            m_settingsSnapshot = std::get<protocol::SettingsSnapshot>(loaded);
+            applySettings();
+            onBoundaryEvent(*updated);
+        }
+        return reply;
+    }
+
+    std::optional<protocol::BoundaryError> DaemonProcess::handleCacheAccessSuspended(
+        const protocol::CacheAccessSuspendedAcknowledgement& acknowledgement)
+    {
+        if (!m_cacheSuspend.has_value())
+            return BoundaryError{.code = BoundaryErrorCode::InvalidRequest,
+                                 .field = QStringLiteral("cache.instance"),
+                                 .detail = QStringLiteral("no cache suspension is pending")};
+        if (acknowledgement.instance != m_cacheSuspend->instance)
+            return BoundaryError{.code = BoundaryErrorCode::InvalidIdentifier,
+                                 .field = QStringLiteral("cache.instance"),
+                                 .detail =
+                                     QStringLiteral("cache instance acknowledgement is stale")};
+
+        if (const auto error = m_services->cacheAccessBarrier().suspend())
+        {
+            m_cacheSuspend.reset();
+            return BoundaryError{.code = BoundaryErrorCode::CacheUnavailable,
+                                 .field = QStringLiteral("cache"),
+                                 .detail = error->message};
+        }
+        m_cacheAccessAcknowledged = true;
+        return std::nullopt;
+    }
+
+    std::optional<protocol::BoundaryError> DaemonProcess::handlePing(const protocol::PingRequest&)
+    {
+        return isReady() ? std::optional<protocol::BoundaryError>{}
+                         : std::optional<protocol::BoundaryError>{notReadyError()};
+    }
+
+    std::optional<protocol::BoundaryError> DaemonProcess::handleGuiReadyForActivation()
+    {
+        if (!isReady())
+            return notReadyError();
+        if (m_guiReady)
+            return BoundaryError{.code = BoundaryErrorCode::Busy,
+                                 .field = QStringLiteral("gui"),
+                                 .detail =
+                                     QStringLiteral("GUI activation was already acknowledged")};
+        m_guiReady = true;
+        publishStatus();
+        return std::nullopt;
+    }
+
+    std::optional<protocol::BoundaryError>
+    DaemonProcess::handleGuiActivation(const protocol::ActivationRoute& route)
+    {
+        if (!isReady() || !m_guiConnected || !m_guiReady)
+            return BoundaryError{.code = BoundaryErrorCode::Busy,
+                                 .field = QStringLiteral("gui"),
+                                 .detail = QStringLiteral("no ready GUI is available to activate")};
+        onBoundaryEvent(ActivationRequested{.route = route});
+        return std::nullopt;
+    }
+
+    void DaemonProcess::onBoundaryEvent(const protocol::BoundaryEvent& event)
+    {
+        if (m_endpoint != nullptr)
+            m_endpoint->publishEvent(event);
+    }
+
+    std::optional<DaemonStartupError> DaemonProcess::fail(const DaemonStartupErrorCode code,
+                                                          QString detail)
+    {
+        m_lifecycle = DaemonLifecycle::Recovering;
+        return DaemonStartupError{.code = code, .detail = std::move(detail)};
+    }
+
+    protocol::BoundaryError DaemonProcess::notReadyError() const
+    {
+        const auto detail = m_lifecycle == protocol::DaemonLifecycle::ShuttingDown
+                                ? QStringLiteral("daemon is shutting down")
+                                : QStringLiteral("daemon is not ready");
+        return {.code = m_lifecycle == protocol::DaemonLifecycle::ShuttingDown
+                            ? BoundaryErrorCode::DaemonShuttingDown
+                            : BoundaryErrorCode::CacheUnavailable,
+                .field = QStringLiteral("daemon"),
+                .detail = detail};
+    }
+
+    protocol::DaemonStatus DaemonProcess::daemonStatus() const
+    {
+        protocol::DaemonStatus status{.lifecycle = m_lifecycle, .accounts = {}};
+        if (m_services == nullptr)
+            return status;
+        for (const auto& [accountId, accountStatus] :
+             m_services->mailApplicationEvents().accountStatuses())
+        {
+            status.accounts.push_back({.accountId = QString::fromStdString(accountId),
+                                       .state = accountState(accountStatus),
+                                       .detail = {}});
+        }
+        std::ranges::sort(status.accounts, [](const auto& left, const auto& right)
+                          { return left.accountId < right.accountId; });
+        return status;
+    }
+
+    void DaemonProcess::publishStatus()
+    {
+        onBoundaryEvent(DaemonStatusChanged{.status = daemonStatus()});
+    }
+
+    void DaemonProcess::applySettings()
+    {
+        const auto configurations = accountConfigurations(m_settingsSnapshot);
+        std::vector<FullSyncAccountConfiguration> fullSync;
+        std::vector<std::string> accountIds;
+        fullSync.reserve(configurations.size());
+        accountIds.reserve(configurations.size());
+        for (const auto& configuration : configurations)
+        {
+            fullSync.push_back({.settings = configuration.settings,
+                                .accountId = configuration.accountId,
+                                .mailboxIds = configuration.fullSyncMailboxIds});
+            accountIds.push_back(configuration.accountId);
+        }
+        m_services->mailService().applySettings(configurations);
+        m_services->fullMailSyncService().applySettings(std::move(fullSync));
+        m_services->mailIndexService().applyAccounts(std::move(accountIds));
+        m_services->localMaintenanceService().requestReplay();
+    }
+
+    void DaemonProcess::connectOperationalEvents()
+    {
+        auto& events = m_services->mailApplicationEvents();
+        connect(&events, &MailApplicationEventsPort::cacheInvalidated, this,
+                [this](MailCacheInvalidation invalidation)
+                {
+                    onBoundaryEvent(CacheInvalidation{
+                        .epoch = {.value = invalidation.epoch},
+                        .changedDomains = std::move(invalidation.changedDomains),
+                        .affectedKeys = std::move(invalidation.affectedKeys),
+                    });
+                });
+        connect(&events, &MailApplicationEventsPort::accountStatusChanged, this,
+                [this](const QString&, MailAccountStatus) { publishStatus(); });
+    }
+
+    void DaemonProcess::onSocketConnectionClosed(const protocol::SocketDisconnectReason,
+                                                 const QString&)
+    {
+        const bool wasConnected = m_guiConnected;
+        if (m_cacheAccessAcknowledged && m_services != nullptr)
+        {
+            if (const auto error = m_services->cacheAccessBarrier().resume())
+                qWarning().noquote() << QStringLiteral("Cache barrier resume after GUI disconnect:")
+                                     << error->message;
+        }
+        m_guiConnected = false;
+        m_guiReady = false;
+        m_cacheSuspend.reset();
+        m_cacheAccessAcknowledged = false;
+        if (wasConnected)
+        {
+            Q_EMIT guiDisconnected();
+            publishStatus();
+        }
+    }
+} // namespace javelin::app

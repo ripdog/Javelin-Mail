@@ -1,0 +1,342 @@
+#include "app/GuiDaemonSession.h"
+
+#include <QCoreApplication>
+#include <QDir>
+#include <QElapsedTimer>
+#include <QEventLoop>
+#include <QProcess>
+#include <QThread>
+#include <QTimer>
+
+#include <algorithm>
+#include <type_traits>
+#include <utility>
+
+namespace javelin::app
+{
+    namespace
+    {
+        [[nodiscard]] GuiBootstrapError transportError(const protocol::SocketTransportError& error)
+        {
+            return {.code = GuiBootstrapErrorCode::DaemonUnavailable, .detail = error.detail};
+        }
+
+        [[nodiscard]] GuiBootstrapError detailError(const GuiBootstrapErrorCode code,
+                                                    QString detail)
+        {
+            return {.code = code, .detail = std::move(detail)};
+        }
+    } // namespace
+
+    GuiDaemonSession::GuiDaemonSession(GuiDaemonSessionOptions options, QObject* parent)
+        : QObject(parent), m_options(std::move(options))
+    {
+        protocol::SocketClientOptions socketOptions{
+            .runtimeDirectory = m_options.runtimeDirectory,
+            .socketPath = m_options.socketPath,
+            .limits = {},
+            .protocol = m_options.protocol,
+            .expectedBuild = m_options.build,
+            .maximumQueuedFrames = 128,
+            .maximumQueuedBytes = 4 * 1024 * 1024,
+            .responseTimeoutMilliseconds = 5000,
+            .enforcePeerCredentials = true,
+        };
+        m_client = std::make_unique<protocol::SocketDaemonClient>(std::move(socketOptions), this);
+        static_cast<void>(m_client->attachEventSink(*this));
+        connect(m_client.get(), &protocol::SocketDaemonClient::connectionClosed, this,
+                &GuiDaemonSession::onDaemonDisconnected);
+
+        m_cacheParticipant = m_cacheAccessBarrier.registerParticipant({
+            .name = QStringLiteral("GUI read connections"),
+            .suspend = [this]() -> std::optional<javelin::jmap::cache::DatabaseError>
+            {
+                m_readConnection = javelin::jmap::cache::ReadOnlyDatabaseConnection{};
+                return std::nullopt;
+            },
+            .resume = [this]() -> std::optional<javelin::jmap::cache::DatabaseError>
+            {
+                if (const auto error = openReadConnection())
+                    return javelin::jmap::cache::DatabaseError{
+                        .code = javelin::jmap::cache::DatabaseErrorCode::OpenFailed,
+                        .message = error->detail};
+                return std::nullopt;
+            },
+        });
+    }
+
+    GuiDaemonSession::~GuiDaemonSession()
+    {
+        stop();
+        if (m_cacheParticipant != 0)
+            m_cacheAccessBarrier.unregisterParticipant(m_cacheParticipant);
+    }
+
+    std::optional<GuiBootstrapError> GuiDaemonSession::start()
+    {
+        if (m_readyReply.has_value())
+            return std::nullopt;
+        if (const auto error = connectAndHandshake(true))
+            return error;
+        if (const auto error = loadSettingsAndCache())
+        {
+            m_client->disconnectFromDaemon();
+            return error;
+        }
+        if (const auto error = m_client->readyForActivation())
+        {
+            m_client->disconnectFromDaemon();
+            return mapBoundaryError(*error, GuiBootstrapErrorCode::DaemonUnavailable);
+        }
+        m_inRecovery = false;
+        Q_EMIT ready();
+        return std::nullopt;
+    }
+
+    std::optional<GuiBootstrapError> GuiDaemonSession::reconnect()
+    {
+        const auto oldReady = m_readyReply;
+        if (const auto error = connectAndHandshake(false))
+            return error;
+        if (const auto error = loadSettingsAndCache())
+            return error;
+
+        if (oldReady.has_value() && (oldReady->cache.instance != m_readyReply->cache.instance ||
+                                     oldReady->cache.schema != m_readyReply->cache.schema))
+        {
+            if (const auto error = suspendReadAccess())
+                return error;
+            if (const auto error = resumeReadAccess())
+                return error;
+        }
+        m_inRecovery = false;
+        Q_EMIT recoveryFinished();
+        return std::nullopt;
+    }
+
+    void GuiDaemonSession::stop()
+    {
+        if (m_client != nullptr)
+            m_client->disconnectFromDaemon();
+        m_readConnection = javelin::jmap::cache::ReadOnlyDatabaseConnection{};
+        m_readyReply.reset();
+        m_inRecovery = false;
+    }
+
+    bool GuiDaemonSession::isReady() const
+    {
+        return m_readyReply.has_value() && !m_inRecovery && m_client->isConnected();
+    }
+
+    bool GuiDaemonSession::isInRecovery() const
+    {
+        return m_inRecovery;
+    }
+
+    const protocol::ReadyReply& GuiDaemonSession::readyReply() const
+    {
+        Q_ASSERT(m_readyReply.has_value());
+        return *m_readyReply;
+    }
+
+    const protocol::SettingsSnapshot& GuiDaemonSession::settings() const
+    {
+        return m_settings;
+    }
+
+    const QString& GuiDaemonSession::databasePath() const
+    {
+        return m_databasePath;
+    }
+
+    bool GuiDaemonSession::readConnectionOpen() const
+    {
+        return !m_readConnection.connectionName().isEmpty();
+    }
+
+    protocol::SocketDaemonClient& GuiDaemonSession::daemonClient()
+    {
+        return *m_client;
+    }
+
+    const protocol::SocketDaemonClient& GuiDaemonSession::daemonClient() const
+    {
+        return *m_client;
+    }
+
+    void GuiDaemonSession::onBoundaryEvent(const protocol::BoundaryEvent& event)
+    {
+        std::visit(
+            [this](const auto& value)
+            {
+                using Event = std::decay_t<decltype(value)>;
+                if constexpr (std::is_same_v<Event, protocol::CacheInvalidation>)
+                {
+                    m_currentEpoch = std::max(m_currentEpoch, value.epoch.value);
+                    Q_EMIT cacheChanged();
+                }
+                else if constexpr (std::is_same_v<Event, protocol::CacheAccessSuspendRequested>)
+                {
+                    QTimer::singleShot(0, this, [this, request = value]
+                                       { acknowledgeCacheSuspend(request); });
+                }
+                else if constexpr (std::is_same_v<Event, protocol::CacheAccessResumed>)
+                {
+                    m_currentEpoch = std::max(m_currentEpoch, value.epoch.value);
+                    if (const auto error = resumeReadAccess())
+                    {
+                        m_inRecovery = true;
+                        Q_EMIT recoveryStarted(error->detail);
+                    }
+                    else
+                    {
+                        if (m_readyReply.has_value())
+                            m_readyReply->cache = value.cache;
+                        Q_EMIT cacheChanged();
+                    }
+                }
+                else if constexpr (std::is_same_v<Event, protocol::ActivationRequested>)
+                {
+                    Q_EMIT activationRequested(value.route);
+                }
+            },
+            event);
+    }
+
+    std::optional<GuiBootstrapError> GuiDaemonSession::connectAndHandshake(const bool allowStart)
+    {
+        if (!m_client->isConnected())
+        {
+            if (const auto error = m_client->connectToDaemon())
+            {
+                if (!allowStart || !m_options.startDaemonIfMissing)
+                    return transportError(*error);
+
+                const auto executable = m_options.daemonExecutable.isEmpty()
+                                            ? QDir{QCoreApplication::applicationDirPath()}.filePath(
+                                                  QStringLiteral("javelind"))
+                                            : m_options.daemonExecutable;
+                const QStringList arguments{QStringLiteral("--runtime-directory"),
+                                            m_options.runtimeDirectory, QStringLiteral("--socket"),
+                                            m_options.socketPath};
+                if (!QProcess::startDetached(executable, arguments))
+                    return detailError(
+                        GuiBootstrapErrorCode::DaemonStartFailed,
+                        QStringLiteral("could not start javelind: %1").arg(executable));
+
+                QElapsedTimer timer;
+                timer.start();
+                while (!m_client->isConnected() &&
+                       timer.elapsed() < m_options.startTimeoutMilliseconds)
+                {
+                    QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+                    QThread::msleep(20);
+                    if (m_client->connectToDaemon().has_value())
+                        continue;
+                }
+                if (!m_client->isConnected())
+                    return detailError(GuiBootstrapErrorCode::DaemonUnavailable,
+                                       QStringLiteral("javelind did not become available"));
+            }
+        }
+
+        const auto handshake =
+            m_client->hello({.protocol = m_options.protocol, .build = m_options.build});
+        if (const auto* rejected = std::get_if<protocol::HandshakeRejected>(&handshake))
+        {
+            m_client->disconnectFromDaemon();
+            const auto code = rejected->error.code == protocol::BoundaryErrorCode::IncompatibleBuild
+                                  ? GuiBootstrapErrorCode::IncompatibleDaemon
+                                  : GuiBootstrapErrorCode::DaemonUnavailable;
+            return detailError(code, rejected->error.detail);
+        }
+        m_readyReply = std::get<protocol::ReadyReply>(handshake);
+        m_currentEpoch = m_readyReply->epoch.value;
+        return std::nullopt;
+    }
+
+    std::optional<GuiBootstrapError> GuiDaemonSession::loadSettingsAndCache()
+    {
+        const auto settings = m_client->getSettings();
+        if (const auto* rejected = std::get_if<protocol::SettingsReadRejected>(&settings))
+            return mapBoundaryError(rejected->error, GuiBootstrapErrorCode::SettingsUnavailable);
+        m_settings = std::get<protocol::SettingsSnapshotReply>(settings).snapshot;
+
+        const auto location = CacheLocationProvider::forApplication().loadOrCreate();
+        if (const auto* error = std::get_if<CacheLocationError>(&location))
+            return detailError(GuiBootstrapErrorCode::CacheUnavailable, error->detail);
+        m_cacheLocation = std::get<CacheLocation>(location);
+        if (m_readyReply.has_value() &&
+            m_cacheLocation.instanceId != m_readyReply->cache.instance.value)
+            return detailError(GuiBootstrapErrorCode::CacheUnavailable,
+                               QStringLiteral("daemon and GUI selected different cache instances"));
+        m_databasePath = m_cacheLocation.databasePath;
+        return openReadConnection();
+    }
+
+    std::optional<GuiBootstrapError> GuiDaemonSession::openReadConnection()
+    {
+        if (m_databasePath.isEmpty())
+            return detailError(GuiBootstrapErrorCode::CacheUnavailable,
+                               QStringLiteral("daemon did not provide a cache path"));
+        if (readConnectionOpen())
+            return std::nullopt;
+        auto opened = javelin::jmap::cache::GuiDatabaseFactory{
+            javelin::jmap::cache::ReadOnlyThreadConnectionFactoryOptions{
+                .connectionNamePrefix = QStringLiteral("javelin-gui-read"),
+                .databasePath = m_databasePath,
+            }}.openForCurrentThread("bootstrap");
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&opened))
+            return detailError(GuiBootstrapErrorCode::CacheUnavailable, error->message);
+        m_readConnection =
+            std::get<javelin::jmap::cache::ReadOnlyDatabaseConnection>(std::move(opened));
+        return std::nullopt;
+    }
+
+    std::optional<GuiBootstrapError> GuiDaemonSession::suspendReadAccess()
+    {
+        if (const auto error = m_cacheAccessBarrier.suspend())
+            return detailError(GuiBootstrapErrorCode::CacheBarrierFailed, error->message);
+        return std::nullopt;
+    }
+
+    std::optional<GuiBootstrapError> GuiDaemonSession::resumeReadAccess()
+    {
+        if (const auto error = m_cacheAccessBarrier.resume())
+            return detailError(GuiBootstrapErrorCode::CacheBarrierFailed, error->message);
+        return std::nullopt;
+    }
+
+    std::optional<GuiBootstrapError>
+    GuiDaemonSession::mapBoundaryError(const protocol::BoundaryError& error,
+                                       const GuiBootstrapErrorCode fallback) const
+    {
+        return detailError(fallback, error.detail);
+    }
+
+    void GuiDaemonSession::onDaemonDisconnected(const protocol::SocketDisconnectReason,
+                                                const QString& detail)
+    {
+        if (m_inRecovery)
+            return;
+        m_inRecovery = true;
+        Q_EMIT recoveryStarted(detail);
+    }
+
+    void GuiDaemonSession::acknowledgeCacheSuspend(protocol::CacheAccessSuspendRequested request)
+    {
+        if (const auto error = suspendReadAccess())
+        {
+            m_inRecovery = true;
+            Q_EMIT recoveryStarted(error->detail);
+            return;
+        }
+        if (const auto error = m_client->acknowledgeCacheAccessSuspended({
+                .instance = request.instance,
+            }))
+        {
+            m_inRecovery = true;
+            Q_EMIT recoveryStarted(error->detail);
+        }
+    }
+} // namespace javelin::app

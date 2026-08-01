@@ -639,6 +639,27 @@ migration or corruption recovery with a connected GUI.
 - A second GUI invocation activates the existing GUI or becomes the sole GUI if none exists.
 - Cache migration/replacement cannot occur while GUI handles remain open.
 
+### Implementation status
+
+Phase 9 is complete for the split process composition and lifecycle boundary. `javelind` now performs
+canonical settings migration before cache/service construction, recovers the existing mutation and
+history state through `DaemonServices`, starts the daemon-owned coordinators, publishes readiness, and
+hosts the private command and activation sockets without requiring a GUI connection. `javelin` now
+starts or reconnects to that daemon, negotiates the typed protocol/build identity, loads the bulk
+settings snapshot, opens a read-only cache connection, exposes a bounded recovery surface, and closes
+its read connection during the cache suspend/acknowledge/resume barrier.
+
+Singleton activation uses an explicit typed raise route on the sibling activation socket. Cache
+identity, schema, invalidation epoch, and SQLite `data_version` are returned by the handshake so a
+replaced daemon can force the GUI read barrier before reopening its workers. The daemon resumes its
+cache barrier if the GUI disconnects after acknowledging a suspend request, preventing a lost GUI from
+leaving daemon writes blocked.
+
+The pre-existing `Javelin-Mail`/`javelin_app` composition remains build-only as the transitional
+presentation and command-port host until Phase 11 removes it; the installed runtime is now the split
+`javelin` and `javelind` pair. This keeps the existing workspace implementation available while the
+remaining GUI command-port migration proceeds.
+
 ## Phase 10: move tray and notifications into the daemon
 
 This phase implements [Notifications and tray icon](DAEMON_GUI_ARCHITECTURE.md#notifications-and-tray-icon)

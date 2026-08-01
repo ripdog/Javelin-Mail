@@ -55,6 +55,8 @@ javelin_enable_sanitizers(javelin_protocol)
 add_library(javelin_cache_read STATIC
     src/app/CacheAccessBarrier.cpp
     src/app/CacheAccessBarrier.h
+    src/app/CacheLocationProvider.cpp
+    src/app/CacheLocationProvider.h
     src/jmap/cache/Database.cpp
     src/jmap/cache/Database.h
     src/jmap/cache/EmailReadRepository.cpp
@@ -1160,8 +1162,6 @@ add_library(javelin_daemon_core STATIC
     src/app/AccountConnectionSettings.h
     src/app/ApplicationErrorCoordinator.cpp
     src/app/ApplicationErrorCoordinator.h
-    src/app/CacheLocationProvider.cpp
-    src/app/CacheLocationProvider.h
     src/app/CalendarNotificationService.cpp
     src/app/CalendarNotificationService.h
     src/app/CalendarApplicationPorts.h
@@ -1261,6 +1261,8 @@ add_library(javelin_daemon_core STATIC
     src/app/MessageSelection.h
     src/app/DaemonBootstrap.cpp
     src/app/DaemonBootstrap.h
+    src/app/DaemonProcess.cpp
+    src/app/DaemonProcess.h
     src/app/DaemonServices.cpp
     src/app/DaemonServices.h
     src/app/SearchSession.cpp
@@ -1293,9 +1295,9 @@ javelin_enable_sanitizers(javelin_daemon_core)
 # QCoro and daemon composition use exceptions internally
 target_compile_options(javelin_daemon_core PRIVATE -fexceptions)
 
-# Phase 7 composition checks.  The daemon target is the socket-safe half of
-# the application graph; GUI support is linked only by the thin in-process
-# bootstrap target below.
+# Phase 9 composition checks.  The daemon target is the socket-safe half of
+# the application graph.  The GUI bootstrap below consumes only the typed
+# protocol and read-only cache targets.
 get_target_property(javelin_daemon_core_links javelin_daemon_core LINK_LIBRARIES)
 if(javelin_daemon_core_links MATCHES "Qt::(Widgets|Gui)|Qt::WebEngine")
     message(FATAL_ERROR "javelin_daemon_core must not link GUI or WebEngine targets")
@@ -1377,6 +1379,41 @@ qt_add_executable(Javelin-Mail
     WIN32 MACOSX_BUNDLE
     src/app/main.cpp
 )
+
+qt_add_executable(javelind
+    src/app/daemon_main.cpp
+)
+target_link_libraries(javelind
+    PRIVATE
+        javelin_daemon_core
+        Qt::Core
+)
+target_compile_definitions(javelind PRIVATE JAVELIN_APP_VERSION="${PROJECT_VERSION}")
+target_compile_options(javelind PRIVATE -fexceptions)
+javelin_set_project_warnings(javelind)
+javelin_enable_static_analysis(javelind)
+javelin_enable_sanitizers(javelind)
+
+qt_add_executable(javelin
+    src/app/GuiDaemonSession.cpp
+    src/app/GuiDaemonSession.h
+    src/app/gui_main.cpp
+)
+target_link_libraries(javelin
+    PRIVATE
+        javelin_protocol
+        javelin_cache_read
+        Qt::Widgets
+)
+target_compile_definitions(javelin PRIVATE JAVELIN_APP_VERSION="${PROJECT_VERSION}")
+target_compile_options(javelin PRIVATE -fexceptions)
+javelin_set_project_warnings(javelin)
+javelin_enable_static_analysis(javelin)
+javelin_enable_sanitizers(javelin)
+get_target_property(javelin_bootstrap_links javelin LINK_LIBRARIES)
+if(javelin_bootstrap_links MATCHES "javelin_daemon_core|javelin_jmap")
+    message(FATAL_ERROR "javelin GUI bootstrap must not link daemon or JMAP transport targets")
+endif()
 
 qt_add_executable(jmap-transport-benchmark
     src/tools/JmapTransportBenchmark.cpp
@@ -1487,7 +1524,7 @@ if(BUILD_TESTING)
     add_subdirectory(tests)
 endif()
 
-install(TARGETS Javelin-Mail
+install(TARGETS javelin javelind
     BUNDLE DESTINATION .
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}

@@ -52,6 +52,7 @@
 #include "jmap/submission/ComposeService.h"
 #include "jmap/sync/MutationJournal.h"
 
+#include <cstdint>
 #include <memory>
 #include <stdexcept>
 
@@ -71,12 +72,15 @@ namespace javelin::app
 
     } // namespace
 
-    DaemonServices::DaemonServices()
+    DaemonServices::DaemonServices() : DaemonServices(cacheLocation())
     {
-        const auto location = cacheLocation();
+    }
+
+    DaemonServices::DaemonServices(CacheLocation location)
+    {
         auto databaseResult = javelin::jmap::cache::DaemonDatabaseFactory{
             javelin::jmap::cache::DatabaseConnectionOptions{
-                .connectionName = QStringLiteral("javelin-gui-main"),
+                .connectionName = QStringLiteral("javelin-daemon-main"),
                 .databasePath = location.databasePath,
             }}.open();
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&databaseResult))
@@ -87,6 +91,7 @@ namespace javelin::app
         m_databaseConnection =
             std::get<javelin::jmap::cache::DatabaseConnection>(std::move(databaseResult));
         m_databasePath = location.databasePath;
+        m_cacheInstanceId = location.instanceId;
         m_cacheAccessBarrier = std::make_unique<CacheAccessBarrier>();
         m_workScheduler = std::make_unique<WorkScheduler>(m_databaseConnection);
         m_localMaintenanceService =
@@ -236,6 +241,17 @@ namespace javelin::app
     const QString& DaemonServices::databasePath() const
     {
         return m_databasePath;
+    }
+
+    javelin::protocol::CacheIdentity DaemonServices::cacheIdentity() const
+    {
+        const auto dataVersion = m_databaseConnection.dataVersion();
+        if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&dataVersion))
+            throw std::runtime_error(error->message.toStdString());
+        return {
+            .instance = {.value = m_cacheInstanceId},
+            .schema = {.value = static_cast<std::uint32_t>(m_databaseConnection.schemaVersion())},
+            .dataVersion = {.value = std::get<std::uint64_t>(dataVersion)}};
     }
 
     CacheAccessBarrier& DaemonServices::cacheAccessBarrier()
