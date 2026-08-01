@@ -3087,8 +3087,17 @@ namespace javelin::protocol
                 clearSocket(SocketDisconnectReason::ProtocolViolation, error->detail);
                 return;
             }
-            if (m_eventSink != nullptr)
-                m_eventSink->onBoundaryEvent(std::get<BoundaryEvent>(event));
+            // Boundary handlers may issue synchronous follow-up requests. Deliver outside the
+            // socket read callback so their replies can be processed normally.
+            auto boundaryEvent = std::get<BoundaryEvent>(std::move(event));
+            QMetaObject::invokeMethod(
+                this,
+                [this, boundaryEvent = std::move(boundaryEvent)]
+                {
+                    if (m_eventSink != nullptr)
+                        m_eventSink->onBoundaryEvent(boundaryEvent);
+                },
+                Qt::QueuedConnection);
             return;
         }
         if (frame.kind == SocketFrameKind::ProtocolError)

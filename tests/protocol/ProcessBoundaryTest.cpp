@@ -166,6 +166,26 @@ namespace
         std::optional<BoundaryEvent> received;
     };
 
+    class ReentrantRequestSink final : public BoundaryEventSink
+    {
+      public:
+        explicit ReentrantRequestSink(SocketDaemonClient& client) : m_client(client)
+        {
+        }
+
+        void onBoundaryEvent(const BoundaryEvent& event) override
+        {
+            received = event;
+            settings = m_client.getSettings();
+        }
+
+        std::optional<BoundaryEvent> received;
+        std::optional<SettingsReadReply> settings;
+
+      private:
+        SocketDaemonClient& m_client;
+    };
+
     [[nodiscard]] CommandRequest refreshRequest()
     {
         return {.id = {.value = QUuid::createUuid()},
@@ -662,6 +682,36 @@ TEST_CASE("socket endpoint runs the transport-neutral typed surface", "[protocol
                       .build = {.application = QStringLiteral("Javelin-Mail"),
                                 .revision = QStringLiteral("test")}})));
     CHECK_FALSE(client.ping().has_value());
+}
+
+TEST_CASE("socket boundary events permit synchronous follow-up requests", "[protocol][socket]")
+{
+    QTemporaryDir runtimeDirectory;
+    REQUIRE(runtimeDirectory.isValid());
+
+    RecordingHandler handler;
+    auto options = socketOptions(runtimeDirectory);
+    options.responseTimeoutMilliseconds = 100;
+    SocketEndpointThread endpoint{handler, options};
+    REQUIRE_FALSE(endpoint.listen().has_value());
+
+    SocketDaemonClient client{options};
+    ReentrantRequestSink sink{client};
+    REQUIRE_FALSE(client.attachEventSink(sink).has_value());
+    REQUIRE_FALSE(client.connectToDaemon().has_value());
+    REQUIRE(std::holds_alternative<ReadyReply>(
+        client.hello({.protocol = {.major = 1, .minor = 0},
+                      .build = {.application = QStringLiteral("Javelin-Mail"),
+                                .revision = QStringLiteral("test")}})));
+
+    endpoint.publishEvent(CacheInvalidation{
+        .epoch = {.value = 13}, .changedDomains = {ChangedDomain::History}, .affectedKeys = {}});
+    processUntil([&sink] { return sink.settings.has_value(); });
+
+    REQUIRE(sink.received.has_value());
+    REQUIRE(sink.settings.has_value());
+    CHECK(std::holds_alternative<SettingsSnapshotReply>(*sink.settings));
+    CHECK(client.isConnected());
 }
 
 TEST_CASE("socket command admission does not block the client event loop", "[protocol][socket]")
