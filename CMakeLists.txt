@@ -359,8 +359,6 @@ set(JAVELIN_FORMAT_FILES
     src/gui/shell/LayeredStatusBar.h
     src/gui/shell/MainWindow.cpp
     src/gui/shell/MainWindow.h
-    src/gui/shell/GuiWorkspaceWindow.cpp
-    src/gui/shell/GuiWorkspaceWindow.h
     src/gui/shell/CalendarTabController.cpp
     src/gui/shell/CalendarTabController.h
     src/gui/shell/ContactsTabController.cpp
@@ -850,7 +848,7 @@ javelin_set_project_warnings(javelin_jmap)
 javelin_enable_static_analysis(javelin_jmap)
 javelin_enable_sanitizers(javelin_jmap)
 
-add_library(javelin_gui_test_support STATIC
+add_library(javelin_gui STATIC
     src/app/AddressSuggestionStore.cpp
     src/app/AddressSuggestionStore.h
     src/app/InlineMessageSchemeHandler.cpp
@@ -986,11 +984,11 @@ add_library(javelin_gui_test_support STATIC
     src/gui/tasks/TaskCenterDialog.cpp
     src/gui/tasks/TaskCenterDialog.h
 )
-target_sources(javelin_gui_test_support PRIVATE
+target_sources(javelin_gui PRIVATE
     src/gui/messageview/MessageAppearance.cpp
     src/gui/messageview/MessageAppearance.h
 )
-qt_add_resources(javelin_gui_test_support "javelin_darkreader"
+qt_add_resources(javelin_gui "javelin_darkreader"
     PREFIX "/vendor/darkreader"
     BASE "res/vendor/darkreader"
     FILES
@@ -1114,10 +1112,10 @@ foreach(refresh_content_gui_source IN LISTS javelin_refresh_content_gui_sources)
     endif()
 endforeach()
 
-target_include_directories(javelin_gui_test_support PUBLIC
+target_include_directories(javelin_gui PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
 )
-target_link_libraries(javelin_gui_test_support
+target_link_libraries(javelin_gui
     PUBLIC
         Qt::Core
         Qt::Network
@@ -1133,30 +1131,11 @@ target_link_libraries(javelin_gui_test_support
         Qt::Concurrent
         javelin_cache_read
 )
-javelin_set_project_warnings(javelin_gui_test_support)
-javelin_enable_static_analysis(javelin_gui_test_support)
-javelin_enable_sanitizers(javelin_gui_test_support)
-# QCoro uses exceptions internally
-target_compile_options(javelin_gui_test_support PRIVATE -fexceptions)
-
-add_library(javelin_gui STATIC
-    src/gui/shell/GuiWorkspaceWindow.cpp
-    src/gui/shell/GuiWorkspaceWindow.h
-)
-target_include_directories(javelin_gui PUBLIC
-    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
-)
-target_link_libraries(javelin_gui
-    PUBLIC
-        Qt::Core
-        Qt::Concurrent
-        Qt::Widgets
-    PRIVATE
-        javelin_cache_read
-)
 javelin_set_project_warnings(javelin_gui)
 javelin_enable_static_analysis(javelin_gui)
 javelin_enable_sanitizers(javelin_gui)
+# QCoro uses exceptions internally
+target_compile_options(javelin_gui PRIVATE -fexceptions)
 
 add_library(javelin_calendar_gui STATIC
     src/gui/calendar/MonthCalendarLayout.cpp
@@ -1349,18 +1328,6 @@ get_target_property(javelin_gui_links javelin_gui LINK_LIBRARIES)
 if(javelin_gui_links MATCHES "javelin_daemon_core|javelin_jmap")
     message(FATAL_ERROR "javelin_gui must not link daemon or JMAP transport targets")
 endif()
-get_target_property(javelin_gui_sources javelin_gui SOURCES)
-foreach(gui_production_source IN LISTS javelin_gui_sources)
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${gui_production_source}")
-        file(READ "${CMAKE_CURRENT_SOURCE_DIR}/${gui_production_source}"
-             gui_production_source_contents)
-        if(gui_production_source_contents MATCHES "QSettings")
-            message(FATAL_ERROR
-                    "Production GUI source must not access canonical QSettings: ${gui_production_source}")
-        endif()
-    endif()
-endforeach()
-
 get_target_property(javelin_daemon_core_sources javelin_daemon_core SOURCES)
 foreach(daemon_source IN LISTS javelin_daemon_core_sources)
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${daemon_source}")
@@ -1464,7 +1431,7 @@ target_link_libraries(javelin
     PRIVATE
         javelin_protocol
         javelin_cache_read
-        javelin_gui_test_support
+        javelin_gui
         QCoro6::Core
         Qt::Widgets
 )

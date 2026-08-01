@@ -275,7 +275,7 @@ target_link_libraries(javelin_contacts_gui_tests
     PRIVATE
         Catch2::Catch2
         Qt::Widgets
-        javelin_gui_test_support
+        javelin_gui
         javelin_daemon_core
 )
 javelin_set_project_warnings(javelin_contacts_gui_tests)
