@@ -396,47 +396,47 @@ namespace javelin::app
     {
     }
 
-    QueuedMailboxSelectionMutationResult
+    QCoro::Task<QueuedMailboxSelectionMutationResult>
     RemoteMailCommandPort::queueMailboxSelectionMutation(MailboxSelectionMutationIntent intent)
     {
-        return callImmediate<QueuedMailboxSelectionMutationResult>(
+        return call<QueuedMailboxSelectionMutationResult>(
             m_client, javelin::protocol::RemoteActionKind::MailQueueMailboxMutation,
             std::move(intent));
     }
 
-    QueuedMessageSelectionMutationResult
+    QCoro::Task<QueuedMessageSelectionMutationResult>
     RemoteMailCommandPort::queueDestroyMessages(std::string accountId,
                                                 std::optional<std::string> sourceMailboxId,
                                                 MessageSelection selection)
     {
-        return callImmediate<QueuedMessageSelectionMutationResult>(
+        return call<QueuedMessageSelectionMutationResult>(
             m_client, javelin::protocol::RemoteActionKind::MailQueueDestroy, std::move(accountId),
             std::move(sourceMailboxId), std::move(selection));
     }
 
-    QueuedMessageSelectionMutationResult
+    QCoro::Task<QueuedMessageSelectionMutationResult>
     RemoteMailCommandPort::queueMarkMessagesUnread(std::string accountId,
                                                    std::optional<std::string> sourceMailboxId,
                                                    MessageSelection selection)
     {
-        return callImmediate<QueuedMessageSelectionMutationResult>(
+        return call<QueuedMessageSelectionMutationResult>(
             m_client, javelin::protocol::RemoteActionKind::MailQueueMarkUnread,
             std::move(accountId), std::move(sourceMailboxId), std::move(selection));
     }
 
-    QueuedMessageSelectionMutationResult
+    QCoro::Task<QueuedMessageSelectionMutationResult>
     RemoteMailCommandPort::queueMarkEmailRead(std::string accountId, std::string emailId)
     {
-        return callImmediate<QueuedMessageSelectionMutationResult>(
+        return call<QueuedMessageSelectionMutationResult>(
             m_client, javelin::protocol::RemoteActionKind::MailQueueMarkRead, std::move(accountId),
             std::move(emailId));
     }
 
-    QueuedMessageSelectionMutationResult
+    QCoro::Task<QueuedMessageSelectionMutationResult>
     RemoteMailCommandPort::queueSetEmailFlagged(std::string accountId, std::string emailId,
                                                 const bool flagged)
     {
-        return callImmediate<QueuedMessageSelectionMutationResult>(
+        return call<QueuedMessageSelectionMutationResult>(
             m_client, javelin::protocol::RemoteActionKind::MailQueueSetFlagged,
             std::move(accountId), std::move(emailId), flagged);
     }
@@ -546,16 +546,16 @@ namespace javelin::app
                                                                   std::string mailboxId)
     {
         const auto observationId = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        const auto result = m_client.callImmediate<std::monostate>(
-            javelin::protocol::RemoteActionKind::MailboxObserve, observationId, accountId,
-            mailboxId);
-        if (std::holds_alternative<RemoteCallError>(result))
-            return {};
+        auto observe = m_client.callDiscardingResult(
+            javelin::protocol::RemoteActionKind::MailboxObserve, observationId,
+            std::move(accountId), std::move(mailboxId));
+        QCoro::connect(std::move(observe), &m_client, [](bool) {});
         return MailboxObservationLease{
             [this, observationId]
             {
-                static_cast<void>(m_client.callImmediate<std::monostate>(
-                    javelin::protocol::RemoteActionKind::MailboxUnobserve, observationId));
+                auto unobserve = m_client.callDiscardingResult(
+                    javelin::protocol::RemoteActionKind::MailboxUnobserve, observationId);
+                QCoro::connect(std::move(unobserve), &m_client, [](bool) {});
             }};
     }
 
@@ -576,9 +576,9 @@ namespace javelin::app
     void RemoteMessageListMaterializationPort::retireSearchWindow(std::string accountId,
                                                                   std::string windowKey)
     {
-        static_cast<void>(m_client.callImmediate<std::monostate>(
-            javelin::protocol::RemoteActionKind::SearchRetire, std::move(accountId),
-            std::move(windowKey)));
+        auto task = m_client.callDiscardingResult(javelin::protocol::RemoteActionKind::SearchRetire,
+                                                  std::move(accountId), std::move(windowKey));
+        QCoro::connect(std::move(task), &m_client, [](bool) {});
     }
 
     RemoteMessageContentPort::RemoteMessageContentPort(RemoteActionClient& client)

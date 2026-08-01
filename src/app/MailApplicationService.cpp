@@ -14,6 +14,7 @@
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/cache/SyncStateRepository.h"
 #include "jmap/contacts/ContactService.h"
+#include "jmap/sync/EmailMutationJournal.h"
 #include "jmap/sync/MailboxQueryDescriptor.h"
 
 #include <QCoroTask>
@@ -34,6 +35,44 @@ namespace javelin::app
 {
     namespace
     {
+        constexpr std::size_t pendingEmailMutationBatchSize = 25;
+
+        [[nodiscard]] QStringList
+        affectedMailboxIdsForPendingMutations(javelin::jmap::cache::DatabaseConnection& connection,
+                                              const std::string_view accountId,
+                                              const std::optional<std::string>& operationGroupId)
+        {
+            javelin::jmap::sync::EmailMutationJournal journal{connection};
+            auto recordsResult =
+                operationGroupId.has_value()
+                    ? journal.listForOperationGroup(accountId, *operationGroupId)
+                    : journal.listByStatus(accountId, javelin::jmap::sync::MutationStatus::Pending,
+                                           pendingEmailMutationBatchSize);
+            const auto* records =
+                std::get_if<std::vector<javelin::jmap::sync::EmailMutationRecord>>(&recordsResult);
+            if (records == nullptr)
+                return {};
+
+            QStringList mailboxIds;
+            const auto append = [&mailboxIds](const std::vector<std::string>& values)
+            {
+                for (const auto& value : values)
+                {
+                    const auto mailboxId = QString::fromStdString(value);
+                    if (!mailboxIds.contains(mailboxId))
+                        mailboxIds.push_back(mailboxId);
+                }
+            };
+            for (const auto& record : *records)
+            {
+                append(record.patch.addMailboxIds);
+                append(record.patch.removeMailboxIds);
+                if (record.baseMailboxIds.has_value())
+                    append(*record.baseMailboxIds);
+            }
+            return mailboxIds;
+        }
+
         class ForegroundWorkScope final
         {
           public:
@@ -310,8 +349,8 @@ namespace javelin::app
         m_networkAccessManager.clearConnectionCache();
         for (const auto& [accountId, coordinator] : m_coordinators)
         {
-            static_cast<void>(accountId);
             coordinator->networkBecameReachable();
+            schedulePendingEmailMutationReplay(accountId);
         }
     }
 
@@ -402,6 +441,47 @@ namespace javelin::app
                 }
                 Q_EMIT sessionCapabilitiesChanged(QString::fromStdString(ownerAccountId));
                 m_workScheduler.endForegroundWork();
+                schedulePendingEmailMutationReplay(ownerAccountId);
+            });
+    }
+
+    void MailApplicationService::schedulePendingEmailMutationReplay(std::string accountId)
+    {
+        if (!m_configurations.contains(accountId) ||
+            !m_pendingMutationReplaysInFlight.insert(accountId).second)
+        {
+            return;
+        }
+
+        QTimer::singleShot(
+            0, this,
+            [this, accountId = std::move(accountId)]
+            {
+                auto task = submitPendingEmailMutations(accountId);
+                QCoro::connect(
+                    std::move(task), this,
+                    [this, accountId](javelin::jmap::SubmittedEmailMutationsResult result)
+                    {
+                        m_pendingMutationReplaysInFlight.erase(accountId);
+                        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                        {
+                            qWarning().noquote()
+                                << "Queued mail replay failed" << QString::fromStdString(accountId)
+                                << error->message;
+                            return;
+                        }
+
+                        const auto& summary =
+                            std::get<javelin::jmap::SubmittedEmailMutations>(result);
+                        if (summary.attemptedEmailCount == 0)
+                            return;
+                        qInfo().noquote()
+                            << "Queued mail replay submitted" << QString::fromStdString(accountId)
+                            << summary.updatedEmailCount << "updated" << summary.failedEmailCount
+                            << "failed";
+                        if (m_configurations.contains(accountId))
+                            schedulePendingEmailMutationReplay(accountId);
+                    });
             });
     }
 
@@ -1317,6 +1397,8 @@ namespace javelin::app
             co_return javelin::jmap::OperationError{
                 .message = QStringLiteral("Account synchronization is not configured."),
             };
+        auto affectedMailboxIds = affectedMailboxIdsForPendingMutations(
+            m_databaseConnection, accountId, operationGroupId);
         auto result = co_await m_jmapCore.submitPendingEmailMutations(
             toLiveConnectionSettings(configuration->second.settings), accountId, operationGroupId);
 
@@ -1376,8 +1458,23 @@ namespace javelin::app
             }
         }
 
-        co_return observeResult(m_errorCoordinator, configuration->second.settings, accountId,
-                                QStringLiteral("Submit pending mail changes"), std::move(result));
+        auto observed =
+            observeResult(m_errorCoordinator, configuration->second.settings, accountId,
+                          QStringLiteral("Submit pending mail changes"), std::move(result));
+        if (const auto* submitted = std::get_if<javelin::jmap::SubmittedEmailMutations>(&observed);
+            submitted != nullptr && submitted->attemptedEmailCount > 0)
+        {
+            Q_EMIT cacheCommitted(MailCacheChange{
+                .accountId = QString::fromStdString(accountId),
+                .mailboxIds = std::move(affectedMailboxIds),
+                .queryWindows = {},
+                .searchWindows = {},
+                .mailboxTreeChanged = false,
+                .hasNewMail = false,
+                .optimisticProjection = true,
+            });
+        }
+        co_return observed;
     }
 
     QCoro::Task<javelin::jmap::AuthoritativeEmailsResult>

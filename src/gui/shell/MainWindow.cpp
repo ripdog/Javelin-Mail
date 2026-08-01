@@ -1148,6 +1148,8 @@ namespace javelin::gui::shell
                     }
                     if (summary.updatedEmailCount == 0)
                         return;
+                    markTabsStaleForAccount(summary.accountId);
+                    refreshActiveTabFromServer();
                 });
 
         connect(m_mailboxModel, &javelin::gui::mailboxes::MailboxTreeModel::emailsDropped, this,
@@ -2001,8 +2003,8 @@ namespace javelin::gui::shell
                 << "slow cached tab activation cacheMs" << cacheMilliseconds << "applyMs"
                 << applyMilliseconds;
         }
-        if (refreshRemote &&
-            (tabKind(*tab) == TabKind::Mailbox || m_messageListTabController->pageStale(*tab)))
+        if (m_messageListTabController->pageStale(*tab) ||
+            (refreshRemote && tabKind(*tab) == TabKind::Mailbox))
         {
             static_cast<void>(m_messageListTabController->refresh(*tab));
         }

@@ -63,6 +63,7 @@ namespace javelin::app
         [[nodiscard]] bool isInRecovery() const;
         [[nodiscard]] const javelin::protocol::ReadyReply& readyReply() const;
         [[nodiscard]] const javelin::protocol::SettingsSnapshot& settings() const;
+        [[nodiscard]] const std::optional<javelin::protocol::DaemonStatus>& daemonStatus() const;
         [[nodiscard]] std::optional<GuiBootstrapError>
         updateSettings(javelin::protocol::SettingsUpdate update);
         [[nodiscard]] std::optional<javelin::protocol::BoundaryError>
@@ -70,6 +71,9 @@ namespace javelin::app
         [[nodiscard]] javelin::protocol::CommandReply
         submitRemoteAction(javelin::protocol::RemoteActionKind kind, QByteArray payload,
                            javelin::protocol::CommandId id = {.value = QUuid::createUuid()});
+        [[nodiscard]] QFuture<javelin::protocol::CommandReply>
+        submitRemoteActionAsync(javelin::protocol::RemoteActionKind kind, QByteArray payload,
+                                javelin::protocol::CommandId id = {.value = QUuid::createUuid()});
         [[nodiscard]] CacheAccessBarrier::ParticipantId
         registerCacheParticipant(CacheAccessBarrier::Participant participant);
         void unregisterCacheParticipant(CacheAccessBarrier::ParticipantId participant);
@@ -113,6 +117,7 @@ namespace javelin::app
         std::unique_ptr<javelin::protocol::SocketDaemonClient> m_client;
         std::optional<javelin::protocol::ReadyReply> m_readyReply;
         javelin::protocol::SettingsSnapshot m_settings;
+        std::optional<javelin::protocol::DaemonStatus> m_daemonStatus;
         QString m_databasePath;
         javelin::jmap::cache::ReadOnlyDatabaseConnection m_readConnection;
         CacheAccessBarrier m_cacheAccessBarrier;

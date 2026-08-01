@@ -2,6 +2,7 @@
 
 #include "app/GuiDaemonSession.h"
 
+#include <QFutureWatcher>
 #include <QUuid>
 
 #include <utility>
@@ -53,28 +54,38 @@ namespace javelin::app
         const auto pendingKey = key(commandId.value);
         m_pending.emplace(pendingKey, std::move(pending));
 
-        const auto reply = m_session.submitRemoteAction(kind, std::move(payload), commandId);
-        if (const auto* rejected = std::get_if<javelin::protocol::CommandRejected>(&reply))
-        {
-            fail(javelin::protocol::OperationId{.value = commandId.value}, rejected->error);
-            return future;
-        }
+        auto* watcher = new QFutureWatcher<javelin::protocol::CommandReply>(this);
+        connect(
+            watcher, &QFutureWatcherBase::finished, this,
+            [this, watcher, commandId]
+            {
+                const auto reply = watcher->result();
+                watcher->deleteLater();
+                if (!m_pending.contains(key(commandId.value)))
+                    return;
+                if (const auto* rejected = std::get_if<javelin::protocol::CommandRejected>(&reply))
+                {
+                    fail(javelin::protocol::OperationId{.value = commandId.value}, rejected->error);
+                    return;
+                }
 
-        const auto& accepted = std::get<javelin::protocol::CommandAccepted>(reply);
-        if (accepted.immediateResult.has_value())
-        {
-            complete(javelin::protocol::OperationId{.value = commandId.value},
-                     *accepted.immediateResult);
-            return future;
-        }
-        if (!accepted.operation.has_value() || accepted.operation->value != commandId.value)
-        {
-            fail(
-                javelin::protocol::OperationId{.value = commandId.value},
-                {.code = javelin::protocol::BoundaryErrorCode::ProtocolViolation,
-                 .field = QStringLiteral("command.operation"),
-                 .detail = QStringLiteral("The daemon returned an invalid operation identifier.")});
-        }
+                const auto& accepted = std::get<javelin::protocol::CommandAccepted>(reply);
+                if (accepted.immediateResult.has_value())
+                {
+                    complete(javelin::protocol::OperationId{.value = commandId.value},
+                             *accepted.immediateResult);
+                    return;
+                }
+                if (!accepted.operation.has_value() || accepted.operation->value != commandId.value)
+                {
+                    fail(javelin::protocol::OperationId{.value = commandId.value},
+                         {.code = javelin::protocol::BoundaryErrorCode::ProtocolViolation,
+                          .field = QStringLiteral("command.operation"),
+                          .detail = QStringLiteral(
+                              "The daemon returned an invalid operation identifier.")});
+                }
+            });
+        watcher->setFuture(m_session.submitRemoteActionAsync(kind, std::move(payload), commandId));
         return future;
     }
 

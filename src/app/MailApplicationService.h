@@ -251,6 +251,7 @@ namespace javelin::app
         void refreshConfiguredSessions();
         void startSessionRefresh(const std::string& ownerAccountId,
                                  const AccountConnectionSettings& settings);
+        void schedulePendingEmailMutationReplay(std::string accountId);
         void releaseMailboxObservation(
             javelin::jmap::sync::MailboxInterestRegistry::ObservationId observationId);
         [[nodiscard]] bool beginSearchWindowRequest(const std::string& leaseKey);
@@ -279,6 +280,7 @@ namespace javelin::app
         std::unordered_map<std::string, std::unique_ptr<AccountSyncCoordinator>> m_coordinators;
         std::unordered_map<std::string, AccountSyncConfiguration> m_configurations;
         std::unordered_set<std::string> m_sessionRefreshesInFlight;
+        std::unordered_set<std::string> m_pendingMutationReplaysInFlight;
         std::unordered_set<std::string> m_pendingContactRefreshes;
         std::unordered_set<std::string> m_runningContactRefreshes;
         struct SearchWindowRequestState

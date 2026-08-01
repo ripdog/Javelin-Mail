@@ -48,17 +48,17 @@ namespace javelin::app
       public:
         virtual ~MailCommandPort() = default;
 
-        [[nodiscard]] virtual QueuedMailboxSelectionMutationResult
+        [[nodiscard]] virtual QCoro::Task<QueuedMailboxSelectionMutationResult>
         queueMailboxSelectionMutation(MailboxSelectionMutationIntent intent) = 0;
-        [[nodiscard]] virtual QueuedMessageSelectionMutationResult
+        [[nodiscard]] virtual QCoro::Task<QueuedMessageSelectionMutationResult>
         queueDestroyMessages(std::string accountId, std::optional<std::string> sourceMailboxId,
                              MessageSelection selection) = 0;
-        [[nodiscard]] virtual QueuedMessageSelectionMutationResult
+        [[nodiscard]] virtual QCoro::Task<QueuedMessageSelectionMutationResult>
         queueMarkMessagesUnread(std::string accountId, std::optional<std::string> sourceMailboxId,
                                 MessageSelection selection) = 0;
-        [[nodiscard]] virtual QueuedMessageSelectionMutationResult
+        [[nodiscard]] virtual QCoro::Task<QueuedMessageSelectionMutationResult>
         queueMarkEmailRead(std::string accountId, std::string emailId) = 0;
-        [[nodiscard]] virtual QueuedMessageSelectionMutationResult
+        [[nodiscard]] virtual QCoro::Task<QueuedMessageSelectionMutationResult>
         queueSetEmailFlagged(std::string accountId, std::string emailId, bool flagged) = 0;
         [[nodiscard]] virtual QCoro::Task<javelin::jmap::SubmittedEmailMutationsResult>
         submitPendingEmailMutations(std::string accountId,

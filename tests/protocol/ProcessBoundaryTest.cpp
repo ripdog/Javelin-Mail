@@ -664,6 +664,68 @@ TEST_CASE("socket endpoint runs the transport-neutral typed surface", "[protocol
     CHECK_FALSE(client.ping().has_value());
 }
 
+TEST_CASE("socket command admission does not block the client event loop", "[protocol][socket]")
+{
+    QTemporaryDir runtimeDirectory;
+    REQUIRE(runtimeDirectory.isValid());
+
+    RecordingHandler handler;
+    const auto options = socketOptions(runtimeDirectory);
+    SocketEndpointThread endpoint{handler, options};
+    REQUIRE_FALSE(endpoint.listen().has_value());
+
+    SocketDaemonClient client{options};
+    REQUIRE_FALSE(client.connectToDaemon().has_value());
+    REQUIRE(std::holds_alternative<ReadyReply>(
+        client.hello({.protocol = {.major = 1, .minor = 0},
+                      .build = {.application = QStringLiteral("Javelin-Mail"),
+                                .revision = QStringLiteral("test")}})));
+
+    handler.onCommand = [] { QThread::msleep(150); };
+    QElapsedTimer elapsed;
+    elapsed.start();
+    auto future = client.submitCommandAsync(refreshRequest());
+    CHECK(elapsed.elapsed() < 50);
+    CHECK_FALSE(future.isFinished());
+
+    processUntil([&future] { return future.isFinished(); });
+    REQUIRE(future.isFinished());
+    CHECK(std::holds_alternative<CommandAccepted>(future.result()));
+}
+
+TEST_CASE("socket async command admission bounds outstanding replies", "[protocol][socket]")
+{
+    QTemporaryDir runtimeDirectory;
+    REQUIRE(runtimeDirectory.isValid());
+
+    RecordingHandler handler;
+    auto options = socketOptions(runtimeDirectory);
+    options.maximumQueuedFrames = 1;
+    SocketEndpointThread endpoint{handler, options};
+    REQUIRE_FALSE(endpoint.listen().has_value());
+
+    SocketDaemonClient client{options};
+    REQUIRE_FALSE(client.connectToDaemon().has_value());
+    REQUIRE(std::holds_alternative<ReadyReply>(
+        client.hello({.protocol = {.major = 1, .minor = 0},
+                      .build = {.application = QStringLiteral("Javelin-Mail"),
+                                .revision = QStringLiteral("test")}})));
+
+    handler.onCommand = [] { QThread::msleep(150); };
+    auto first = client.submitCommandAsync(refreshRequest());
+    auto second = client.submitCommandAsync(refreshRequest());
+    processUntil([&second] { return second.isFinished(); });
+    REQUIRE(second.isFinished());
+    const auto secondResult = second.result();
+    const auto* rejected = std::get_if<CommandRejected>(&secondResult);
+    REQUIRE(rejected != nullptr);
+    CHECK(rejected->error.code == BoundaryErrorCode::Busy);
+
+    processUntil([&first] { return first.isFinished(); });
+    REQUIRE(first.isFinished());
+    CHECK(std::holds_alternative<CommandAccepted>(first.result()));
+}
+
 TEST_CASE("activation socket carries typed routes to the daemon", "[protocol][socket]")
 {
     QTemporaryDir runtimeDirectory;

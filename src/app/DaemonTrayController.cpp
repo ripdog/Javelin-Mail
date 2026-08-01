@@ -379,7 +379,7 @@ namespace javelin::app
 
     QString DaemonTrayController::iconThemePath() const
     {
-        return {};
+        return QStringLiteral(JAVELIN_ICON_THEME_PATH);
     }
 
     QDBusObjectPath DaemonTrayController::menu() const
@@ -426,8 +426,7 @@ namespace javelin::app
         const auto summary = m_workScheduler.summary();
         const auto title = summary.isEmpty() ? QStringLiteral("Javelin Mail")
                                              : QStringLiteral("Javelin Mail — %1").arg(summary);
-        const auto status =
-            summary.isEmpty() ? QStringLiteral("Passive") : QStringLiteral("Active");
+        const auto status = QStringLiteral("Active");
         if (m_title != title)
         {
             m_title = title;

@@ -17,6 +17,8 @@
 
 #include <QCoroTask>
 
+#include <QTimer>
+
 #include <type_traits>
 #include <utility>
 
@@ -112,15 +114,20 @@ namespace javelin::app
                                 QCoro::Task<Result> task) -> javelin::protocol::CommandReply
         {
             const javelin::protocol::OperationId operation{.value = id.value};
-            QCoro::connect(std::move(task), this,
-                           [this, operation](Result result)
-                           {
-                               const auto encoded = encodeResult(result);
-                               if (const auto* error = std::get_if<QString>(&encoded))
-                                   fail(operation, *error);
-                               else
-                                   complete(operation, std::get<QByteArray>(encoded));
-                           });
+            QTimer::singleShot(0, this,
+                               [this, operation, task = std::move(task)]() mutable
+                               {
+                                   QCoro::connect(
+                                       std::move(task), this,
+                                       [this, operation](Result result)
+                                       {
+                                           const auto encoded = encodeResult(result);
+                                           if (const auto* error = std::get_if<QString>(&encoded))
+                                               fail(operation, *error);
+                                           else
+                                               complete(operation, std::get<QByteArray>(encoded));
+                                       });
+                               });
             return acceptAsync(id, operation);
         };
         const auto invalidPayload = [this, &id](const QString& detail)
@@ -487,7 +494,7 @@ namespace javelin::app
                 return invalidPayload(*error);
             auto [intent] =
                 std::get<std::tuple<MailboxSelectionMutationIntent>>(std::move(arguments));
-            return immediate(
+            return launch(
                 m_services.mailCommandPort().queueMailboxSelectionMutation(std::move(intent)));
         }
         case Kind::MailQueueDestroy:
@@ -502,9 +509,9 @@ namespace javelin::app
                 std::get<std::tuple<std::string, std::optional<std::string>, MessageSelection>>(
                     std::move(arguments));
             if (command.kind == Kind::MailQueueDestroy)
-                return immediate(m_services.mailCommandPort().queueDestroyMessages(
+                return launch(m_services.mailCommandPort().queueDestroyMessages(
                     std::move(accountId), std::move(mailboxId), std::move(selection)));
-            return immediate(m_services.mailCommandPort().queueMarkMessagesUnread(
+            return launch(m_services.mailCommandPort().queueMarkMessagesUnread(
                 std::move(accountId), std::move(mailboxId), std::move(selection)));
         }
         case Kind::MailQueueMarkRead:
@@ -514,8 +521,8 @@ namespace javelin::app
                 return invalidPayload(*error);
             auto [accountId, emailId] =
                 std::get<std::tuple<std::string, std::string>>(std::move(arguments));
-            return immediate(m_services.mailCommandPort().queueMarkEmailRead(std::move(accountId),
-                                                                             std::move(emailId)));
+            return launch(m_services.mailCommandPort().queueMarkEmailRead(std::move(accountId),
+                                                                          std::move(emailId)));
         }
         case Kind::MailQueueSetFlagged:
         {
@@ -524,7 +531,7 @@ namespace javelin::app
                 return invalidPayload(*error);
             auto [accountId, emailId, flagged] =
                 std::get<std::tuple<std::string, std::string, bool>>(std::move(arguments));
-            return immediate(m_services.mailCommandPort().queueSetEmailFlagged(
+            return launch(m_services.mailCommandPort().queueSetEmailFlagged(
                 std::move(accountId), std::move(emailId), flagged));
         }
         case Kind::MailSubmitPending:

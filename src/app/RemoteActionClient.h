@@ -79,6 +79,19 @@ namespace javelin::app
             co_return std::get<Result>(std::move(decoded));
         }
 
+        template <typename... Arguments>
+        [[nodiscard]] QCoro::Task<bool>
+        callDiscardingResult(const javelin::protocol::RemoteActionKind kind,
+                             const Arguments&... arguments)
+        {
+            auto encoded = remote::encode(arguments...);
+            if (std::holds_alternative<remote::CodecError>(encoded))
+                co_return false;
+            auto future = invoke(kind, std::get<QByteArray>(std::move(encoded)));
+            auto raw = co_await qCoro(future).takeResult();
+            co_return std::holds_alternative<QByteArray>(raw);
+        }
+
       private:
         struct PendingCall
         {

@@ -1543,6 +1543,9 @@ javelin_enable_sanitizers(javelin-undo-live-check)
 if(NOT KDE_INSTALL_KXMLGUIDIR)
     set(KDE_INSTALL_KXMLGUIDIR "${KDE_INSTALL_DATAROOTDIR}/kxmlgui5")
 endif()
+if(NOT KDE_INSTALL_ICONDIR)
+    set(KDE_INSTALL_ICONDIR "${KDE_INSTALL_DATAROOTDIR}/icons")
+endif()
 
 # Install data files (KXMLGUI .rc, etc.) into the local install prefix so
 # KXmlGuiWindow can find them at runtime.  We copy only our own files
@@ -1551,6 +1554,10 @@ endif()
 set(_local_kxmlgui_dir "${CMAKE_INSTALL_PREFIX}/${KDE_INSTALL_KXMLGUIDIR}/javelinmail")
 set(_local_kxmlgui_runtime_dir
     "${CMAKE_INSTALL_PREFIX}/${KDE_INSTALL_DATADIR}/kxmlgui/javelinmail")
+set(_local_icon_theme_dir "${CMAKE_INSTALL_PREFIX}/${KDE_INSTALL_ICONDIR}")
+target_compile_definitions(javelin_daemon_core
+    PRIVATE JAVELIN_ICON_THEME_PATH="${_local_icon_theme_dir}"
+)
 if(JAVELIN_ENABLE_LOCAL_DATA_INSTALL)
     set(_install_data_stamp "${CMAKE_CURRENT_BINARY_DIR}/install_data.stamp")
     add_custom_command(
@@ -1568,6 +1575,11 @@ if(JAVELIN_ENABLE_LOCAL_DATA_INSTALL)
             "${PROJECT_SOURCE_DIR}/res/javelinmailui.rc"
             "${_local_kxmlgui_runtime_dir}/javelinmailui.rc"
         COMMAND ${CMAKE_COMMAND} -E make_directory
+            "${_local_icon_theme_dir}/hicolor/scalable/apps"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${PROJECT_SOURCE_DIR}/res/icon.svg"
+            "${_local_icon_theme_dir}/hicolor/scalable/apps/javelinmail.svg"
+        COMMAND ${CMAKE_COMMAND} -E make_directory
             "${CMAKE_INSTALL_PREFIX}/${KDE_INSTALL_DATADIR}/javelinmail/models/fasttext"
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${PROJECT_SOURCE_DIR}/res/models/fasttext"
@@ -1575,6 +1587,7 @@ if(JAVELIN_ENABLE_LOCAL_DATA_INSTALL)
         COMMAND ${CMAKE_COMMAND} -E touch "${_install_data_stamp}"
         DEPENDS
             "${PROJECT_SOURCE_DIR}/res/javelinmailui.rc"
+            "${PROJECT_SOURCE_DIR}/res/icon.svg"
             "${PROJECT_SOURCE_DIR}/res/models/fasttext/LICENSE"
             "${PROJECT_SOURCE_DIR}/res/models/fasttext/lid.176.ftz"
             "${PROJECT_SOURCE_DIR}/res/models/fasttext/README.md"
@@ -1586,6 +1599,7 @@ endif()
 
 if(JAVELIN_ENABLE_LOCAL_DATA_INSTALL)
     add_dependencies(javelin install_data)
+    add_dependencies(javelind install_data)
 endif()
 
 file(GLOB_RECURSE JAVELIN_ALL_FORMAT_FILES CONFIGURE_DEPENDS

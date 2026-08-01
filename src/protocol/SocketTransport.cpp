@@ -6,10 +6,12 @@
 #include <QElapsedTimer>
 #include <QFileDevice>
 #include <QFileInfo>
+#include <QFutureWatcher>
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QScopedValueRollback>
 #include <QSignalBlocker>
+#include <QTimer>
 
 #include <algorithm>
 #include <cstring>
@@ -1678,9 +1680,11 @@ namespace javelin::protocol
 
         [[nodiscard]] BoundaryError makeBoundaryError(const SocketTransportError& error)
         {
-            const auto code = error.reason == SocketDisconnectReason::ProtocolViolation
-                                  ? BoundaryErrorCode::ProtocolViolation
-                                  : BoundaryErrorCode::TransportUnavailable;
+            auto code = BoundaryErrorCode::TransportUnavailable;
+            if (error.reason == SocketDisconnectReason::ProtocolViolation)
+                code = BoundaryErrorCode::ProtocolViolation;
+            else if (error.reason == SocketDisconnectReason::QueueOverflow)
+                code = BoundaryErrorCode::Busy;
             return {.code = code, .field = QStringLiteral("socket"), .detail = error.detail};
         }
 
@@ -3111,13 +3115,29 @@ namespace javelin::protocol
                         QStringLiteral("reply correlation is zero"));
             return;
         }
+        if (const auto pending = m_asyncReplies.find(frame.correlation);
+            pending != m_asyncReplies.end())
+        {
+            if (frame.kind != pending->second->expectedKind)
+            {
+                clearSocket(SocketDisconnectReason::ProtocolViolation,
+                            QStringLiteral("socket reply kind is unexpected"));
+                return;
+            }
+            auto reply = std::move(pending->second);
+            m_asyncReplies.erase(pending);
+            reply->promise.addResult(
+                AsyncFrameResult{ReceivedFrame{.kind = frame.kind, .payload = frame.payload}});
+            reply->promise.finish();
+            return;
+        }
         if (m_receivedReplies.contains(frame.correlation))
         {
             clearSocket(SocketDisconnectReason::ProtocolViolation,
                         QStringLiteral("duplicate socket reply correlation"));
             return;
         }
-        if (m_receivedReplies.size() >= m_options.maximumQueuedFrames ||
+        if (m_receivedReplies.size() + m_asyncReplies.size() >= m_options.maximumQueuedFrames ||
             m_receivedBytes + static_cast<std::size_t>(frame.payload.size()) >
                 m_options.maximumQueuedBytes)
         {
@@ -3199,10 +3219,18 @@ namespace javelin::protocol
         m_pendingWrites.clear();
         m_currentWrite.reset();
         m_receivedReplies.clear();
+        auto asyncReplies = std::move(m_asyncReplies);
+        m_asyncReplies.clear();
         m_queuedBytes = 0;
         m_receivedBytes = 0;
         m_clearScheduled = false;
         m_lastError = SocketTransportError{.reason = reason, .detail = std::move(detail)};
+        for (auto& [correlation, reply] : asyncReplies)
+        {
+            Q_UNUSED(correlation)
+            reply->promise.addResult(AsyncFrameResult{*m_lastError});
+            reply->promise.finish();
+        }
         if (wasConnected)
             Q_EMIT connectionClosed(reason, m_lastError->detail);
     }
@@ -3240,6 +3268,79 @@ namespace javelin::protocol
                                         .detail =
                                             QStringLiteral("socket reply kind is unexpected")};
         return reply;
+    }
+
+    QFuture<SocketDaemonClient::AsyncFrameResult>
+    SocketDaemonClient::requestAsync(const SocketFrameKind requestKind, const QByteArray& payload,
+                                     const SocketFrameKind replyKind)
+    {
+        auto pending = std::make_unique<PendingAsyncReply>();
+        pending->expectedKind = replyKind;
+        pending->promise.start();
+        auto future = pending->promise.future();
+        const auto failImmediately = [&pending](SocketTransportError error)
+        {
+            pending->promise.addResult(AsyncFrameResult{std::move(error)});
+            pending->promise.finish();
+        };
+
+        if (const auto error = ensureConnected())
+        {
+            failImmediately(*error);
+            return future;
+        }
+        if (m_asyncReplies.size() + m_receivedReplies.size() >= m_options.maximumQueuedFrames)
+        {
+            failImmediately({.reason = SocketDisconnectReason::QueueOverflow,
+                             .detail = QStringLiteral("too many socket replies are pending")});
+            return future;
+        }
+        const auto correlation = m_nextCorrelation;
+        ++m_nextCorrelation;
+        if (m_nextCorrelation == 0)
+            ++m_nextCorrelation;
+        const auto frameData = encodeSocketFrame(requestKind, correlation, payload,
+                                                 m_options.limits.maximumFrameBytes);
+        if (auto* error = std::get_if<SocketFrameError>(&frameData))
+        {
+            failImmediately(
+                {.reason = SocketDisconnectReason::ProtocolViolation, .detail = error->detail});
+            return future;
+        }
+        m_asyncReplies.emplace(correlation, std::move(pending));
+        if (const auto error = enqueue(PendingFrame{.data = std::get<QByteArray>(frameData),
+                                                    .kind = requestKind,
+                                                    .correlation = correlation}))
+        {
+            if (const auto found = m_asyncReplies.find(correlation); found != m_asyncReplies.end())
+            {
+                auto failed = std::move(found->second);
+                m_asyncReplies.erase(found);
+                failed->promise.addResult(AsyncFrameResult{*error});
+                failed->promise.finish();
+            }
+            return future;
+        }
+        QTimer::singleShot(m_options.responseTimeoutMilliseconds, this,
+                           [this, correlation] { timeoutAsyncReply(correlation); });
+        return future;
+    }
+
+    void SocketDaemonClient::timeoutAsyncReply(const std::uint64_t correlation)
+    {
+        const auto found = m_asyncReplies.find(correlation);
+        if (found == m_asyncReplies.end())
+            return;
+        auto reply = std::move(found->second);
+        m_asyncReplies.erase(found);
+        const SocketTransportError error{
+            .reason = SocketDisconnectReason::TransportFailure,
+            .detail = QStringLiteral("timed out waiting for a socket reply"),
+        };
+        reply->promise.addResult(AsyncFrameResult{error});
+        reply->promise.finish();
+        if (isConnected())
+            clearSocket(error.reason, error.detail);
     }
 
     std::optional<SocketTransportError>
@@ -3312,6 +3413,58 @@ namespace javelin::protocol
                 .error = boundaryError(SocketTransportError{
                     .reason = SocketDisconnectReason::ProtocolViolation, .detail = error->detail})};
         return std::get<CommandReply>(reply);
+    }
+
+    QFuture<CommandReply> SocketDaemonClient::submitCommandAsync(CommandRequest request)
+    {
+        const auto id = request.id;
+        auto promise = std::make_shared<QPromise<CommandReply>>();
+        promise->start();
+        auto future = promise->future();
+        const auto complete = [promise](CommandReply reply)
+        {
+            promise->addResult(std::move(reply));
+            promise->finish();
+        };
+
+        const auto encoded = encodeClientRequest(ClientRequest{request}, m_options.limits);
+        if (auto* error = std::get_if<SocketFrameError>(&encoded))
+        {
+            complete(CommandRejected{.id = id,
+                                     .error = boundaryError(SocketTransportError{
+                                         .reason = SocketDisconnectReason::ProtocolViolation,
+                                         .detail = error->detail})});
+            return future;
+        }
+
+        auto* watcher = new QFutureWatcher<AsyncFrameResult>(this);
+        connect(watcher, &QFutureWatcherBase::finished, this,
+                [this, watcher, id, complete]
+                {
+                    const auto result = watcher->result();
+                    watcher->deleteLater();
+                    if (const auto* error = std::get_if<SocketTransportError>(&result))
+                    {
+                        complete(CommandRejected{.id = id, .error = boundaryError(*error)});
+                        return;
+                    }
+                    const auto reply = decodeCommandReply(std::get<ReceivedFrame>(result).payload,
+                                                          m_options.limits);
+                    if (const auto* error = std::get_if<SocketFrameError>(&reply))
+                    {
+                        complete(
+                            CommandRejected{.id = id,
+                                            .error = boundaryError(SocketTransportError{
+                                                .reason = SocketDisconnectReason::ProtocolViolation,
+                                                .detail = error->detail})});
+                        return;
+                    }
+                    complete(std::get<CommandReply>(reply));
+                });
+        watcher->setFuture(requestAsync(std::get<EncodedPayload>(encoded).kind,
+                                        std::get<EncodedPayload>(encoded).payload,
+                                        SocketFrameKind::CommandReplyFrame));
+        return future;
     }
 
     MaterializationReply SocketDaemonClient::requestMaterialization(MaterializationRequest request)

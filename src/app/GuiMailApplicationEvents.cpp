@@ -42,6 +42,14 @@ namespace javelin::app
                 &GuiMailApplicationEvents::publishInvalidation);
         connect(&m_session, &GuiDaemonSession::daemonStatusChanged, this,
                 &GuiMailApplicationEvents::applyStatus);
+        connect(&m_session, &GuiDaemonSession::recoveryStarted, this,
+                [this](const QString&)
+                {
+                    applyStatus({.lifecycle = javelin::protocol::DaemonLifecycle::Recovering,
+                                 .accounts = {}});
+                });
+        if (m_session.daemonStatus().has_value())
+            applyStatus(*m_session.daemonStatus());
     }
 
     std::unordered_map<std::string, MailAccountStatus>

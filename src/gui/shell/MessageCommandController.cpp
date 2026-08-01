@@ -14,6 +14,7 @@
 #include <QLoggingCategory>
 #include <QMenu>
 #include <QMessageBox>
+#include <QPersistentModelIndex>
 
 #include <ranges>
 #include <utility>
@@ -226,7 +227,7 @@ namespace javelin::gui::shell
         qCInfo(logMessageCommands).noquote()
             << (move ? "move requested" : "copy requested") << selection.size()
             << "selection item(s) to" << QString::fromStdString(destinationMailboxId);
-        const auto result = m_mailCommandPort.queueMailboxSelectionMutation(
+        auto task = m_mailCommandPort.queueMailboxSelectionMutation(
             javelin::app::MailboxSelectionMutationIntent{
                 .accountId = accountId,
                 .selection = std::move(selection),
@@ -235,65 +236,80 @@ namespace javelin::gui::shell
                 .sourceMailboxId = std::move(sourceMailboxId),
                 .destinationMailboxId = std::move(destinationMailboxId),
             });
-        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
-        {
-            Q_EMIT operationFailed(*error);
-            return;
-        }
-
-        const auto& summary = std::get<javelin::app::QueuedMailboxSelectionMutation>(result);
-        if (summary.queuedEmailCount == 0)
-        {
-            Q_EMIT statusMessage(QStringLiteral("The selected messages are already there."), 5000);
-            return;
-        }
-
-        Q_EMIT mailboxMembershipChanged(QString::fromStdString(accountId));
-        if (summary.skippedEmailCount > 0)
-        {
-            Q_EMIT statusMessage(
-                QStringLiteral("Queued %1 for %2 messages; skipped %3 already there.")
-                    .arg(move ? QStringLiteral("move") : QStringLiteral("copy"))
-                    .arg(summary.queuedEmailCount)
-                    .arg(summary.skippedEmailCount),
-                5000);
-        }
-        else if (summary.queuedEmailCount > 1)
-        {
-            if (successMessage.endsWith(QLatin1Char('.')))
+        QCoro::connect(
+            std::move(task), this,
+            [this, accountId = std::move(accountId), move,
+             successMessage = std::move(successMessage)](
+                javelin::app::QueuedMailboxSelectionMutationResult result)
             {
-                successMessage.chop(1);
-            }
-            Q_EMIT statusMessage(QStringLiteral("%1 for %2 messages.")
-                                     .arg(successMessage)
-                                     .arg(summary.queuedEmailCount),
-                                 5000);
-        }
-        else
-        {
-            Q_EMIT statusMessage(std::move(successMessage), 5000);
-        }
-        submitQueuedMutations(std::move(accountId),
-                              summary.queuedMutations.front().patch.operationGroupId);
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                {
+                    Q_EMIT operationFailed(*error);
+                    return;
+                }
+
+                const auto& summary =
+                    std::get<javelin::app::QueuedMailboxSelectionMutation>(result);
+                if (summary.queuedEmailCount == 0)
+                {
+                    Q_EMIT statusMessage(QStringLiteral("The selected messages are already there."),
+                                         5000);
+                    return;
+                }
+
+                Q_EMIT mailboxMembershipChanged(QString::fromStdString(accountId));
+                if (summary.skippedEmailCount > 0)
+                {
+                    Q_EMIT statusMessage(
+                        QStringLiteral("Queued %1 for %2 messages; skipped %3 already there.")
+                            .arg(move ? QStringLiteral("move") : QStringLiteral("copy"))
+                            .arg(summary.queuedEmailCount)
+                            .arg(summary.skippedEmailCount),
+                        5000);
+                }
+                else if (summary.queuedEmailCount > 1)
+                {
+                    auto message = successMessage;
+                    if (message.endsWith(QLatin1Char('.')))
+                        message.chop(1);
+                    Q_EMIT statusMessage(QStringLiteral("%1 for %2 messages.")
+                                             .arg(message)
+                                             .arg(summary.queuedEmailCount),
+                                         5000);
+                }
+                else
+                {
+                    Q_EMIT statusMessage(successMessage, 5000);
+                }
+                submitQueuedMutations(accountId,
+                                      summary.queuedMutations.front().patch.operationGroupId);
+            });
     }
 
     void MessageCommandController::markEmailRead(std::string accountId, std::string emailId)
     {
         qCInfo(logMessageCommands) << "mark read requested";
-        const auto result = m_mailCommandPort.queueMarkEmailRead(accountId, emailId);
-        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
-        {
-            Q_EMIT operationFailed(*error);
-            return;
-        }
+        auto task = m_mailCommandPort.queueMarkEmailRead(accountId, emailId);
+        QCoro::connect(
+            std::move(task), this,
+            [this, accountId = std::move(accountId), emailId = std::move(emailId)](
+                javelin::app::QueuedMessageSelectionMutationResult result)
+            {
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                {
+                    Q_EMIT operationFailed(*error);
+                    return;
+                }
 
-        const auto& summary = std::get<javelin::app::QueuedMessageSelectionMutation>(result);
-        if (summary.queuedEmailCount == 0)
-            return;
-        const auto account = QString::fromStdString(accountId);
-        Q_EMIT emailMarkedRead(account, QString::fromStdString(emailId));
-        submitQueuedMutations(std::move(accountId),
-                              summary.queuedMutations.front().patch.operationGroupId);
+                const auto& summary =
+                    std::get<javelin::app::QueuedMessageSelectionMutation>(result);
+                if (summary.queuedEmailCount == 0)
+                    return;
+                Q_EMIT emailMarkedRead(QString::fromStdString(accountId),
+                                       QString::fromStdString(emailId));
+                submitQueuedMutations(accountId,
+                                      summary.queuedMutations.front().patch.operationGroupId);
+            });
     }
 
     void MessageCommandController::toggleFlagged(std::optional<std::string> accountId,
@@ -314,23 +330,32 @@ namespace javelin::gui::shell
         const bool flagged =
             index.data(javelin::gui::messages::MessageListModel::IsFlaggedRole).toBool();
         qCInfo(logMessageCommands) << (flagged ? "remove star requested" : "add star requested");
-        const auto result =
+        auto task =
             m_mailCommandPort.queueSetEmailFlagged(*accountId, emailId.toStdString(), !flagged);
-        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
-        {
-            Q_EMIT operationFailed(*error);
-            return;
-        }
+        QCoro::connect(
+            std::move(task), this,
+            [this, accountId = std::move(*accountId), index = QPersistentModelIndex{index},
+             flagged](javelin::app::QueuedMessageSelectionMutationResult result)
+            {
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                {
+                    Q_EMIT operationFailed(*error);
+                    return;
+                }
 
-        const auto& summary = std::get<javelin::app::QueuedMessageSelectionMutation>(result);
-        if (summary.queuedEmailCount == 0)
-            return;
-        m_messageView.setCurrentIndex(index);
-        const auto account = QString::fromStdString(*accountId);
-        Q_EMIT messageMetadataChanged(account);
-        Q_EMIT statusMessage(
-            flagged ? QStringLiteral("Removed star.") : QStringLiteral("Added star."), 5000);
-        submitQueuedMutations(*accountId, summary.queuedMutations.front().patch.operationGroupId);
+                const auto& summary =
+                    std::get<javelin::app::QueuedMessageSelectionMutation>(result);
+                if (summary.queuedEmailCount == 0)
+                    return;
+                if (index.isValid())
+                    m_messageView.setCurrentIndex(index);
+                Q_EMIT messageMetadataChanged(QString::fromStdString(accountId));
+                Q_EMIT statusMessage(flagged ? QStringLiteral("Removed star.")
+                                             : QStringLiteral("Added star."),
+                                     5000);
+                submitQueuedMutations(accountId,
+                                      summary.queuedMutations.front().patch.operationGroupId);
+            });
     }
 
     void MessageCommandController::markSelectionUnread(std::optional<std::string> accountId,
@@ -350,25 +375,33 @@ namespace javelin::gui::shell
 
         qCInfo(logMessageCommands)
             << "mark unread requested" << selection.size() << "selection item(s)";
-        const auto result = m_mailCommandPort.queueMarkMessagesUnread(
+        auto task = m_mailCommandPort.queueMarkMessagesUnread(
             *accountId, std::move(sourceMailboxId), std::move(selection));
-        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
-        {
-            Q_EMIT operationFailed(*error);
-            return;
-        }
+        QCoro::connect(
+            std::move(task), this,
+            [this, accountId = std::move(*accountId)](
+                javelin::app::QueuedMessageSelectionMutationResult result)
+            {
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                {
+                    Q_EMIT operationFailed(*error);
+                    return;
+                }
 
-        const auto& summary = std::get<javelin::app::QueuedMessageSelectionMutation>(result);
-        const auto markedCount = summary.queuedEmailCount;
-        if (markedCount == 0)
-            return;
-        const auto account = QString::fromStdString(*accountId);
-        Q_EMIT messageMetadataChanged(account);
-        Q_EMIT statusMessage(markedCount == 1
-                                 ? QStringLiteral("Marked unread.")
-                                 : QStringLiteral("Marked %1 messages unread.").arg(markedCount),
-                             5000);
-        submitQueuedMutations(*accountId, summary.queuedMutations.front().patch.operationGroupId);
+                const auto& summary =
+                    std::get<javelin::app::QueuedMessageSelectionMutation>(result);
+                const auto markedCount = summary.queuedEmailCount;
+                if (markedCount == 0)
+                    return;
+                Q_EMIT messageMetadataChanged(QString::fromStdString(accountId));
+                Q_EMIT statusMessage(
+                    markedCount == 1
+                        ? QStringLiteral("Marked unread.")
+                        : QStringLiteral("Marked %1 messages unread.").arg(markedCount),
+                    5000);
+                submitQueuedMutations(accountId,
+                                      summary.queuedMutations.front().patch.operationGroupId);
+            });
     }
 
     void MessageCommandController::queueArchive(std::string accountId,
@@ -376,7 +409,7 @@ namespace javelin::gui::shell
                                                 javelin::app::MessageSelection selection)
     {
         const bool searchArchive = !sourceMailboxId.has_value();
-        const auto result = m_mailCommandPort.queueMailboxSelectionMutation(
+        auto task = m_mailCommandPort.queueMailboxSelectionMutation(
             javelin::app::MailboxSelectionMutationIntent{
                 .accountId = accountId,
                 .selection = std::move(selection),
@@ -384,41 +417,49 @@ namespace javelin::gui::shell
                 .sourceMailboxId = std::move(sourceMailboxId),
                 .destinationMailboxId = std::nullopt,
             });
-        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
-        {
-            Q_EMIT operationFailed(*error);
-            return;
-        }
+        QCoro::connect(
+            std::move(task), this,
+            [this, accountId = std::move(accountId),
+             searchArchive](javelin::app::QueuedMailboxSelectionMutationResult result)
+            {
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                {
+                    Q_EMIT operationFailed(*error);
+                    return;
+                }
 
-        const auto& summary = std::get<javelin::app::QueuedMailboxSelectionMutation>(result);
-        if (summary.queuedEmailCount == 0)
-        {
-            Q_EMIT statusMessage(
-                searchArchive ? QStringLiteral("The selected messages are not in Inbox.")
-                              : QStringLiteral("The selected messages are already archived."),
-                5000);
-            return;
-        }
+                const auto& summary =
+                    std::get<javelin::app::QueuedMailboxSelectionMutation>(result);
+                if (summary.queuedEmailCount == 0)
+                {
+                    Q_EMIT statusMessage(
+                        searchArchive
+                            ? QStringLiteral("The selected messages are not in Inbox.")
+                            : QStringLiteral("The selected messages are already archived."),
+                        5000);
+                    return;
+                }
 
-        Q_EMIT mailboxMembershipChanged(QString::fromStdString(accountId));
-        if (summary.skippedEmailCount > 0)
-        {
-            Q_EMIT statusMessage(
-                QStringLiteral("Queued archive for %1 messages; skipped %2 not in Inbox.")
-                    .arg(summary.queuedEmailCount)
-                    .arg(summary.skippedEmailCount),
-                5000);
-        }
-        else
-        {
-            Q_EMIT statusMessage(summary.queuedEmailCount == 1
-                                     ? QStringLiteral("Queued archive.")
-                                     : QStringLiteral("Queued archive for %1 messages.")
-                                           .arg(summary.queuedEmailCount),
-                                 5000);
-        }
-        submitQueuedMutations(std::move(accountId),
-                              summary.queuedMutations.front().patch.operationGroupId);
+                Q_EMIT mailboxMembershipChanged(QString::fromStdString(accountId));
+                if (summary.skippedEmailCount > 0)
+                {
+                    Q_EMIT statusMessage(
+                        QStringLiteral("Queued archive for %1 messages; skipped %2 not in Inbox.")
+                            .arg(summary.queuedEmailCount)
+                            .arg(summary.skippedEmailCount),
+                        5000);
+                }
+                else
+                {
+                    Q_EMIT statusMessage(summary.queuedEmailCount == 1
+                                             ? QStringLiteral("Queued archive.")
+                                             : QStringLiteral("Queued archive for %1 messages.")
+                                                   .arg(summary.queuedEmailCount),
+                                         5000);
+                }
+                submitQueuedMutations(accountId,
+                                      summary.queuedMutations.front().patch.operationGroupId);
+            });
     }
 
     void MessageCommandController::queueDelete(std::string accountId, std::string sourceMailboxId,
@@ -441,24 +482,34 @@ namespace javelin::gui::shell
     {
         qCInfo(logMessageCommands)
             << "permanently delete requested" << selection.size() << "selection item(s)";
-        const auto result = m_mailCommandPort.queueDestroyMessages(
-            accountId, std::move(sourceMailboxId), std::move(selection));
-        if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
-        {
-            Q_EMIT operationFailed(*error);
-            return;
-        }
+        auto task = m_mailCommandPort.queueDestroyMessages(accountId, std::move(sourceMailboxId),
+                                                           std::move(selection));
+        QCoro::connect(
+            std::move(task), this,
+            [this, accountId = std::move(accountId)](
+                javelin::app::QueuedMessageSelectionMutationResult result)
+            {
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
+                {
+                    Q_EMIT operationFailed(*error);
+                    return;
+                }
 
-        const auto& summary = std::get<javelin::app::QueuedMessageSelectionMutation>(result);
-        const auto selectedCount = summary.queuedEmailCount;
-        Q_EMIT mailboxMembershipChanged(QString::fromStdString(accountId));
-        Q_EMIT statusMessage(
-            selectedCount == 1
-                ? QStringLiteral("Queued permanent deletion.")
-                : QStringLiteral("Queued permanent deletion for %1 messages.").arg(selectedCount),
-            5000);
-        submitQueuedMutations(std::move(accountId),
-                              summary.queuedMutations.front().patch.operationGroupId);
+                const auto& summary =
+                    std::get<javelin::app::QueuedMessageSelectionMutation>(result);
+                const auto selectedCount = summary.queuedEmailCount;
+                if (selectedCount == 0 || summary.queuedMutations.empty())
+                    return;
+                Q_EMIT mailboxMembershipChanged(QString::fromStdString(accountId));
+                Q_EMIT statusMessage(
+                    selectedCount == 1
+                        ? QStringLiteral("Queued permanent deletion.")
+                        : QStringLiteral("Queued permanent deletion for %1 messages.")
+                              .arg(selectedCount),
+                    5000);
+                submitQueuedMutations(accountId,
+                                      summary.queuedMutations.front().patch.operationGroupId);
+            });
     }
 
     void

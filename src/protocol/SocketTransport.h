@@ -3,7 +3,9 @@
 #include "protocol/ProcessBoundary.h"
 
 #include <QByteArray>
+#include <QFuture>
 #include <QObject>
+#include <QPromise>
 
 #include <cstddef>
 #include <cstdint>
@@ -277,6 +279,7 @@ namespace javelin::protocol
         void detachEventSink(BoundaryEventSink& sink);
 
         [[nodiscard]] CommandReply submitCommand(CommandRequest request) override;
+        [[nodiscard]] QFuture<CommandReply> submitCommandAsync(CommandRequest request);
         [[nodiscard]] MaterializationReply
         requestMaterialization(MaterializationRequest request) override;
         void cancelMaterializationScope(ScopeId scope) override;
@@ -306,6 +309,14 @@ namespace javelin::protocol
             QByteArray payload;
         };
 
+        using AsyncFrameResult = std::variant<ReceivedFrame, SocketTransportError>;
+
+        struct PendingAsyncReply
+        {
+            SocketFrameKind expectedKind = SocketFrameKind::ProtocolError;
+            QPromise<AsyncFrameResult> promise;
+        };
+
         [[nodiscard]] std::optional<SocketTransportError> ensureConnected();
         [[nodiscard]] std::optional<SocketTransportError> enqueue(PendingFrame frame);
         void readSocket();
@@ -317,6 +328,10 @@ namespace javelin::protocol
         void clearSocket(SocketDisconnectReason reason, QString detail);
         [[nodiscard]] std::variant<ReceivedFrame, SocketTransportError>
         request(SocketFrameKind requestKind, const QByteArray& payload, SocketFrameKind replyKind);
+        [[nodiscard]] QFuture<AsyncFrameResult> requestAsync(SocketFrameKind requestKind,
+                                                             const QByteArray& payload,
+                                                             SocketFrameKind replyKind);
+        void timeoutAsyncReply(std::uint64_t correlation);
         [[nodiscard]] std::optional<SocketTransportError> waitForReply(std::uint64_t correlation,
                                                                        SocketFrameKind replyKind);
         [[nodiscard]] BoundaryError boundaryError(const SocketTransportError& error) const;
@@ -328,6 +343,7 @@ namespace javelin::protocol
         std::deque<PendingFrame> m_pendingWrites;
         std::optional<PendingFrame> m_currentWrite;
         std::map<std::uint64_t, ReceivedFrame> m_receivedReplies;
+        std::map<std::uint64_t, std::unique_ptr<PendingAsyncReply>> m_asyncReplies;
         std::size_t m_queuedBytes = 0;
         std::size_t m_receivedBytes = 0;
         std::uint64_t m_nextCorrelation = 1;

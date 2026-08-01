@@ -11,17 +11,17 @@ namespace javelin::app
       public:
         explicit MailCommandService(MailApplicationService& service);
 
-        [[nodiscard]] QueuedMailboxSelectionMutationResult
+        [[nodiscard]] QCoro::Task<QueuedMailboxSelectionMutationResult>
         queueMailboxSelectionMutation(MailboxSelectionMutationIntent intent) override;
-        [[nodiscard]] QueuedMessageSelectionMutationResult
+        [[nodiscard]] QCoro::Task<QueuedMessageSelectionMutationResult>
         queueDestroyMessages(std::string accountId, std::optional<std::string> sourceMailboxId,
                              MessageSelection selection) override;
-        [[nodiscard]] QueuedMessageSelectionMutationResult
+        [[nodiscard]] QCoro::Task<QueuedMessageSelectionMutationResult>
         queueMarkMessagesUnread(std::string accountId, std::optional<std::string> sourceMailboxId,
                                 MessageSelection selection) override;
-        [[nodiscard]] QueuedMessageSelectionMutationResult
+        [[nodiscard]] QCoro::Task<QueuedMessageSelectionMutationResult>
         queueMarkEmailRead(std::string accountId, std::string emailId) override;
-        [[nodiscard]] QueuedMessageSelectionMutationResult
+        [[nodiscard]] QCoro::Task<QueuedMessageSelectionMutationResult>
         queueSetEmailFlagged(std::string accountId, std::string emailId, bool flagged) override;
         [[nodiscard]] QCoro::Task<javelin::jmap::SubmittedEmailMutationsResult>
         submitPendingEmailMutations(

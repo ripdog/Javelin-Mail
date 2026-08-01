@@ -154,6 +154,11 @@ namespace javelin::app
         return m_settings;
     }
 
+    const std::optional<protocol::DaemonStatus>& GuiDaemonSession::daemonStatus() const
+    {
+        return m_daemonStatus;
+    }
+
     std::optional<GuiBootstrapError>
     GuiDaemonSession::updateSettings(protocol::SettingsUpdate update)
     {
@@ -186,6 +191,16 @@ namespace javelin::app
                                          const protocol::CommandId id)
     {
         return m_client->submitCommand({
+            .id = id,
+            .command = protocol::RemoteActionCommand{.kind = kind, .payload = std::move(payload)},
+        });
+    }
+
+    QFuture<protocol::CommandReply>
+    GuiDaemonSession::submitRemoteActionAsync(const protocol::RemoteActionKind kind,
+                                              QByteArray payload, const protocol::CommandId id)
+    {
+        return m_client->submitCommandAsync({
             .id = id,
             .command = protocol::RemoteActionCommand{.kind = kind, .payload = std::move(payload)},
         });
@@ -286,6 +301,7 @@ namespace javelin::app
                 }
                 else if constexpr (std::is_same_v<Event, protocol::DaemonStatusChanged>)
                 {
+                    m_daemonStatus = value.status;
                     Q_EMIT daemonStatusChanged(value.status);
                 }
                 else if constexpr (std::is_same_v<Event, protocol::SettingsUpdated>)
