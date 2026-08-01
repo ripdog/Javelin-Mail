@@ -683,43 +683,26 @@ namespace javelin::app
             .enabled = value.enabled,
             .apiKeyOverride = value.apiKeyOverride,
             .targetLanguage = value.targetLanguage,
-            .autoTranslateSenders = {},
-            .autoTranslateDomains = {},
+            .autoTranslateSenders = {value.autoTranslateSenders.begin(),
+                                     value.autoTranslateSenders.end()},
+            .autoTranslateDomains = {value.autoTranslateDomains.begin(),
+                                     value.autoTranslateDomains.end()},
         };
-        for (const auto& sender : value.autoTranslateSenders)
-            m_settings.autoTranslateSenders.push_back(sender);
-        for (const auto& domain : value.autoTranslateDomains)
-            m_settings.autoTranslateDomains.push_back(domain);
     }
 
     void RemoteTranslationPort::persist()
     {
-        javelin::protocol::TranslationSettings value{
+        javelin::protocol::SettingsUpdate update;
+        update.translation = javelin::protocol::TranslationSettings{
             .enabled = m_settings.enabled,
             .apiKeyOverride = m_settings.apiKeyOverride,
             .targetLanguage = m_settings.targetLanguage,
-            .autoTranslateSenders = {},
-            .autoTranslateDomains = {},
+            .autoTranslateSenders = {m_settings.autoTranslateSenders.begin(),
+                                     m_settings.autoTranslateSenders.end()},
+            .autoTranslateDomains = {m_settings.autoTranslateDomains.begin(),
+                                     m_settings.autoTranslateDomains.end()},
         };
-        value.autoTranslateSenders.reserve(
-            static_cast<std::size_t>(m_settings.autoTranslateSenders.size()));
-        for (const auto& sender : m_settings.autoTranslateSenders)
-            value.autoTranslateSenders.push_back(sender);
-        value.autoTranslateDomains.reserve(
-            static_cast<std::size_t>(m_settings.autoTranslateDomains.size()));
-        for (const auto& domain : m_settings.autoTranslateDomains)
-            value.autoTranslateDomains.push_back(domain);
-        static_cast<void>(m_session.updateSettings({
-            .accounts = std::nullopt,
-            .syncedMailboxSelections = std::nullopt,
-            .notificationMailboxSelections = std::nullopt,
-            .remoteContentSenders = std::nullopt,
-            .remoteContentDomains = std::nullopt,
-            .translation = std::move(value),
-            .appearance = std::nullopt,
-            .attachments = std::nullopt,
-            .undoSendDelaySeconds = std::nullopt,
-        }));
+        static_cast<void>(m_session.updateSettings(std::move(update)));
     }
 
     RemoteUndoCommandPort::RemoteUndoCommandPort(GuiDaemonSession& session,
