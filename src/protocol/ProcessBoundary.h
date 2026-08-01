@@ -178,8 +178,6 @@ namespace javelin::protocol
         MailboxWindow,
         SearchWindow,
         SearchRetire,
-        TranslationSetAutoSender,
-        TranslationSetAutoDomain,
         TranslationTranslate,
         Undo,
         Redo,

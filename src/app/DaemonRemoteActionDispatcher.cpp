@@ -590,24 +590,6 @@ namespace javelin::app
                                                                 std::move(windowKey));
                     return empty();
                 });
-        case Kind::TranslationSetAutoSender:
-        case Kind::TranslationSetAutoDomain:
-            return decodeAndApply<QString, bool>(
-                command.payload, invalidPayload,
-                [&](QString value, const bool enabled)
-                {
-                    if (command.kind == Kind::TranslationSetAutoSender)
-                    {
-                        m_services.translationService().setAutoTranslateSender(std::move(value),
-                                                                               enabled);
-                    }
-                    else
-                    {
-                        m_services.translationService().setAutoTranslateDomain(std::move(value),
-                                                                               enabled);
-                    }
-                    return empty();
-                });
         case Kind::TranslationTranslate:
             return decodeAndApply<TranslationChunks, QString, bool>(
                 command.payload, invalidPayload,
