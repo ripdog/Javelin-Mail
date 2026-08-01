@@ -301,8 +301,6 @@ set(JAVELIN_FORMAT_FILES
     src/gui/messages/MessageActionSelection.h
     src/gui/messages/MessageSelectionRestoration.cpp
     src/gui/messages/MessageSelectionRestoration.h
-    src/gui/messageview/GoogleHtmlTranslator.cpp
-    src/gui/messageview/GoogleHtmlTranslator.h
     src/gui/messageview/HtmlMessageView.cpp
     src/gui/messageview/HtmlMessageView.h
     src/gui/messageview/MessageAppearance.cpp
