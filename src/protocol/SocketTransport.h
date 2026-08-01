@@ -182,7 +182,6 @@ namespace javelin::protocol
         void pumpWrites();
         void disconnect(SocketDisconnectReason reason, QString detail);
         void clearSocket();
-        [[nodiscard]] std::optional<SocketTransportError> validatePeer(QLocalSocket& socket) const;
 
         DaemonRequestHandler& m_handler;
         SocketEndpointOptions m_options;
@@ -227,7 +226,6 @@ namespace javelin::protocol
         void socketDisconnected();
         void socketError();
         void clearSocket();
-        [[nodiscard]] std::optional<SocketTransportError> validatePeer(QLocalSocket& socket) const;
 
         DaemonRequestHandler& m_handler;
         SocketEndpointOptions m_options;
@@ -330,7 +328,6 @@ namespace javelin::protocol
         [[nodiscard]] std::optional<SocketTransportError> waitForReply(std::uint64_t correlation,
                                                                        SocketFrameKind replyKind);
         [[nodiscard]] BoundaryError boundaryError(const SocketTransportError& error) const;
-        [[nodiscard]] std::optional<SocketTransportError> validatePeer(QLocalSocket& socket) const;
 
         SocketClientOptions m_options;
         std::unique_ptr<QLocalSocket> m_socket;

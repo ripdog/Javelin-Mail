@@ -1641,6 +1641,52 @@ namespace javelin::protocol
         }
 
         [[nodiscard]] std::optional<SocketTransportError>
+        listenOnLocalServer(QLocalServer& server, const SocketEndpointOptions& options,
+                            QString addressInUseDetail)
+        {
+            if (const auto error = validateRuntimeDirectory(options))
+                return error;
+            if (server.isListening())
+                return std::nullopt;
+            if (server.listen(options.socketPath))
+                return std::nullopt;
+            if (server.serverError() != QAbstractSocket::AddressInUseError)
+            {
+                return SocketTransportError{
+                    .reason = SocketDisconnectReason::TransportFailure,
+                    .detail = server.errorString(),
+                };
+            }
+
+            QLocalSocket probe;
+            probe.connectToServer(options.socketPath);
+            if (probe.waitForConnected(100))
+            {
+                return SocketTransportError{
+                    .reason = SocketDisconnectReason::TransportFailure,
+                    .detail = std::move(addressInUseDetail),
+                };
+            }
+
+            QLocalServer::removeServer(options.socketPath);
+            if (server.listen(options.socketPath))
+                return std::nullopt;
+            return SocketTransportError{
+                .reason = SocketDisconnectReason::TransportFailure,
+                .detail = server.errorString(),
+            };
+        }
+
+        void closeLocalServer(QLocalServer* server, const QString& socketPath)
+        {
+            if (server == nullptr)
+                return;
+            server->close();
+            if (!socketPath.isEmpty())
+                QLocalServer::removeServer(socketPath);
+        }
+
+        [[nodiscard]] std::optional<SocketTransportError>
         validatePeerCredentials(QLocalSocket& socket, const bool enforce)
         {
             if (!enforce)
@@ -2019,11 +2065,6 @@ namespace javelin::protocol
 
     std::optional<SocketTransportError> SocketDaemonEndpoint::listen()
     {
-        if (const auto error = validateRuntimeDirectory(m_options))
-        {
-            m_lastError = error;
-            return error;
-        }
         if (m_server == nullptr)
         {
             m_server = std::make_unique<QLocalServer>();
@@ -2031,43 +2072,9 @@ namespace javelin::protocol
             connect(m_server.get(), &QLocalServer::newConnection, this,
                     &SocketDaemonEndpoint::acceptConnection);
         }
-        if (m_server->isListening())
-            return std::nullopt;
-        if (!m_server->listen(m_options.socketPath))
-        {
-            if (m_server->serverError() != QAbstractSocket::AddressInUseError)
-            {
-                const auto error = SocketTransportError{
-                    .reason = SocketDisconnectReason::TransportFailure,
-                    .detail = m_server->errorString(),
-                };
-                m_lastError = error;
-                return error;
-            }
-            QLocalSocket probe;
-            probe.connectToServer(m_options.socketPath);
-            if (probe.waitForConnected(100))
-            {
-                const auto error = SocketTransportError{
-                    .reason = SocketDisconnectReason::TransportFailure,
-                    .detail = QStringLiteral("socket path is already in use"),
-                };
-                m_lastError = error;
-                return error;
-            }
-            QLocalServer::removeServer(m_options.socketPath);
-            if (!m_server->listen(m_options.socketPath))
-            {
-                const auto error = SocketTransportError{
-                    .reason = SocketDisconnectReason::TransportFailure,
-                    .detail = m_server->errorString(),
-                };
-                m_lastError = error;
-                return error;
-            }
-        }
-        m_lastError.reset();
-        return std::nullopt;
+        m_lastError = listenOnLocalServer(*m_server, m_options,
+                                          QStringLiteral("socket path is already in use"));
+        return m_lastError;
     }
 
     void SocketDaemonEndpoint::close()
@@ -2075,12 +2082,7 @@ namespace javelin::protocol
         if (m_socket != nullptr)
             disconnect(SocketDisconnectReason::ServerShutdown,
                        QStringLiteral("socket endpoint is shutting down"));
-        if (m_server != nullptr)
-        {
-            m_server->close();
-            if (!m_options.socketPath.isEmpty())
-                QLocalServer::removeServer(m_options.socketPath);
-        }
+        closeLocalServer(m_server.get(), m_options.socketPath);
     }
 
     std::optional<SocketTransportError> SocketDaemonEndpoint::lastError() const
@@ -2110,7 +2112,8 @@ namespace javelin::protocol
                 candidate->deleteLater();
                 continue;
             }
-            if (const auto error = validatePeer(*candidate))
+            if (const auto error =
+                    validatePeerCredentials(*candidate, m_options.enforcePeerCredentials))
             {
                 candidate->disconnectFromServer();
                 candidate->deleteLater();
@@ -2616,12 +2619,6 @@ namespace javelin::protocol
         m_closeDetail.clear();
     }
 
-    std::optional<SocketTransportError>
-    SocketDaemonEndpoint::validatePeer(QLocalSocket& socket) const
-    {
-        return validatePeerCredentials(socket, m_options.enforcePeerCredentials);
-    }
-
     SocketActivationEndpoint::SocketActivationEndpoint(DaemonRequestHandler& handler,
                                                        SocketEndpointOptions options,
                                                        QObject* parent)
@@ -2637,11 +2634,6 @@ namespace javelin::protocol
 
     std::optional<SocketTransportError> SocketActivationEndpoint::listen()
     {
-        if (const auto error = validateRuntimeDirectory(m_options))
-        {
-            m_lastError = error;
-            return error;
-        }
         if (m_server == nullptr)
         {
             m_server = std::make_unique<QLocalServer>();
@@ -2649,51 +2641,15 @@ namespace javelin::protocol
             connect(m_server.get(), &QLocalServer::newConnection, this,
                     &SocketActivationEndpoint::acceptConnection);
         }
-        if (m_server->isListening())
-            return std::nullopt;
-        if (!m_server->listen(m_options.socketPath))
-        {
-            if (m_server->serverError() != QAbstractSocket::AddressInUseError)
-            {
-                m_lastError = SocketTransportError{
-                    .reason = SocketDisconnectReason::TransportFailure,
-                    .detail = m_server->errorString(),
-                };
-                return m_lastError;
-            }
-            QLocalSocket probe;
-            probe.connectToServer(m_options.socketPath);
-            if (probe.waitForConnected(100))
-            {
-                m_lastError = SocketTransportError{
-                    .reason = SocketDisconnectReason::TransportFailure,
-                    .detail = QStringLiteral("activation socket path is already in use"),
-                };
-                return m_lastError;
-            }
-            QLocalServer::removeServer(m_options.socketPath);
-            if (!m_server->listen(m_options.socketPath))
-            {
-                m_lastError = SocketTransportError{
-                    .reason = SocketDisconnectReason::TransportFailure,
-                    .detail = m_server->errorString(),
-                };
-                return m_lastError;
-            }
-        }
-        m_lastError.reset();
-        return std::nullopt;
+        m_lastError = listenOnLocalServer(
+            *m_server, m_options, QStringLiteral("activation socket path is already in use"));
+        return m_lastError;
     }
 
     void SocketActivationEndpoint::close()
     {
         clearSocket();
-        if (m_server != nullptr)
-        {
-            m_server->close();
-            if (!m_options.socketPath.isEmpty())
-                QLocalServer::removeServer(m_options.socketPath);
-        }
+        closeLocalServer(m_server.get(), m_options.socketPath);
     }
 
     void SocketActivationEndpoint::acceptConnection()
@@ -2709,7 +2665,8 @@ namespace javelin::protocol
                 candidate->deleteLater();
                 continue;
             }
-            if (const auto error = validatePeer(*candidate))
+            if (const auto error =
+                    validatePeerCredentials(*candidate, m_options.enforcePeerCredentials))
             {
                 m_lastError = error;
                 candidate->disconnectFromServer();
@@ -2838,12 +2795,6 @@ namespace javelin::protocol
         socket->deleteLater();
     }
 
-    std::optional<SocketTransportError>
-    SocketActivationEndpoint::validatePeer(QLocalSocket& socket) const
-    {
-        return validatePeerCredentials(socket, m_options.enforcePeerCredentials);
-    }
-
     SocketActivationResult SocketActivationClient::request(const SocketClientOptions& options,
                                                            ActivationRoute route)
     {
@@ -2932,7 +2883,8 @@ namespace javelin::protocol
             clearSocket(error.reason, error.detail);
             return error;
         }
-        if (const auto error = validatePeer(*m_socket))
+        if (const auto error =
+                validatePeerCredentials(*m_socket, m_options.enforcePeerCredentials))
         {
             clearSocket(error->reason, error->detail);
             return error;
@@ -3370,10 +3322,6 @@ namespace javelin::protocol
         return makeBoundaryError(error);
     }
 
-    std::optional<SocketTransportError> SocketDaemonClient::validatePeer(QLocalSocket& socket) const
-    {
-        return validatePeerCredentials(socket, m_options.enforcePeerCredentials);
-    }
 
     CommandReply SocketDaemonClient::submitCommand(CommandRequest request)
     {
