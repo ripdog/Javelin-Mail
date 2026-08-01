@@ -22,6 +22,9 @@ namespace javelin::app
 
       public:
         explicit DaemonBackgroundController(DaemonServices& services, QObject* parent = nullptr);
+        DaemonBackgroundController(DaemonServices& services,
+                                   std::unique_ptr<DesktopNotificationController> notifications,
+                                   QObject* parent = nullptr);
         ~DaemonBackgroundController() override;
 
         DaemonBackgroundController(const DaemonBackgroundController&) = delete;

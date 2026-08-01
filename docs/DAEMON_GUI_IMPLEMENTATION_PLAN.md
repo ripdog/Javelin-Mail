@@ -66,9 +66,10 @@ The framed socket is protocol version 2 because it now carries bounded typed rem
 immediate typed results, and asynchronous completion values in addition to the original boundary
 families. The in-process endpoint remains compiled only into the protocol conformance test target.
 There is no production single-process executable or GUI linkage to daemon/JMAP transport targets.
-Legacy GUI settings helpers still write the canonical profile before requesting a daemon reload; moving
-those remaining settings editors behind revisioned daemon updates is tracked below as unfinished
-Phase 11 work.
+Operational GUI settings now come from the handshake snapshot and are updated through revisioned daemon
+IPC, including accounts, credentials, mailbox synchronization and notifications, translation, remote
+content permissions, message appearance, attachment behavior, and undo-send delay. Window, tab, search,
+and calendar-colour presentation state remains GUI-local and is the remaining Phase 11 settings scope.
 
 ## Phase dependency order
 
@@ -713,9 +714,10 @@ The following searches or equivalent build checks return no production violation
 
 ### Implementation status
 
-Phase 11 is complete for executable composition and application-command routing, but not yet for the
-last canonical-settings access in the GUI. The temporary single-process executable, `javelin_app`
-library, transitional bootstrap sources, and production use of `InProcessEndpoint` have been removed.
+Phase 11 is complete for executable composition, application-command routing, and operational settings
+authority, but not yet for GUI workspace-state persistence. The temporary single-process executable,
+`javelin_app` library, transitional bootstrap sources, and production use of `InProcessEndpoint` have
+been removed.
 CMake builds and installs only `javelin` and `javelind`. The production `javelin` executable now links
 the complete existing `MainWindow`/Widgets surface and supplies it with remote application-port
 adapters; it no longer links raw `CalendarMethods`/`MailMethods`, JMAP transports, daemon-core
@@ -723,12 +725,12 @@ implementations, or write-capable cache services. The daemon owns all applicatio
 calendar reads, notification/tray behavior, synchronization, and network diagnostics. Singleton
 activation and daemon-first startup have been exercised against a copied real profile.
 
-The remaining Phase 11 exception is settings persistence: `PreferencesDialog`, workspace persistence,
-and several presentation preferences still use the legacy canonical `QSettings` helpers, followed by
-a typed daemon reload request. This preserves the existing full GUI without inventing a second settings
-shape, but it does not satisfy the final daemon-only settings-authority gate. The next settings-focused
-change should convert those editors to revisioned `SettingsSnapshot` updates and then remove
-`GuiLegacyTranslationSettings` and the remaining GUI storage helpers.
+`PreferencesDialog` and the operational consumers now use a `SettingsSnapshot`-backed GUI service and
+submit one revision-checked `SettingsUpdate`; a stale dialog is rejected before it can overwrite a newer
+snapshot. A CMake boundary check prevents canonical `QSettings` access from returning to production GUI
+sources outside an explicit presentation-local allowlist. The remaining Phase 11 exception is window,
+tab, search-session, and calendar-colour persistence, which still uses GUI-local `QSettings` and should
+move into the daemon-owned workspace-state portion of the settings schema.
 
 ## Phase 12: performance, reliability, and release gate
 

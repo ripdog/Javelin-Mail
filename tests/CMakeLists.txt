@@ -247,6 +247,7 @@ add_executable(javelin_daemon_tests
     ${PROJECT_SOURCE_DIR}/src/app/GuiDaemonSession.cpp
     ${PROJECT_SOURCE_DIR}/src/app/GuiMailApplicationEvents.cpp
     app/DaemonProcessTest.cpp
+    app/DesktopNotificationControllerTest.cpp
     app/GuiMailApplicationEventsTest.cpp
 )
 target_include_directories(javelin_daemon_tests

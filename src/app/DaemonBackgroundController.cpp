@@ -21,10 +21,39 @@ namespace javelin::app
 {
     DaemonBackgroundController::DaemonBackgroundController(DaemonServices& services,
                                                            QObject* parent)
-        : QObject(parent), m_services(services),
-          m_notifications(std::make_unique<DesktopNotificationController>(this)),
+        : DaemonBackgroundController(services, std::make_unique<DesktopNotificationController>(),
+                                     parent)
+    {
+    }
+
+    DaemonBackgroundController::DaemonBackgroundController(
+        DaemonServices& services, std::unique_ptr<DesktopNotificationController> notifications,
+        QObject* parent)
+        : QObject(parent), m_services(services), m_notifications(std::move(notifications)),
           m_tray(std::make_unique<DaemonTrayController>(services.workScheduler(), this))
     {
+        m_notifications->setParent(this);
+        connect(m_notifications.get(), &DesktopNotificationController::notificationActivated, this,
+                [this](const QString& accountId, const QString& mailboxId, const QString& threadId,
+                       const QString& emailId, const QString& activationToken)
+                {
+                    Q_EMIT activationRequested(protocol::OpenMessageRoute{
+                        .accountId = accountId,
+                        .mailboxId = mailboxId,
+                        .threadId = threadId,
+                        .emailId = emailId,
+                        .activationToken = activationToken,
+                    });
+                });
+        connect(m_notifications.get(), &DesktopNotificationController::errorNotificationActivated,
+                this,
+                [this](const QString& connectionId, const QString& activationToken)
+                {
+                    Q_EMIT activationRequested(protocol::OpenSettingsRoute{
+                        .connectionId = connectionId,
+                        .activationToken = activationToken,
+                    });
+                });
         m_notificationRetryTimer.setSingleShot(true);
         m_notificationRetryTimer.setInterval(60000);
         connect(&m_notificationRetryTimer, &QTimer::timeout, this,
@@ -81,27 +110,6 @@ namespace javelin::app
                 {
                     m_notifications->notifyError(connectionId, title, message, persistent,
                                                  opensSettings);
-                });
-        connect(m_notifications.get(), &DesktopNotificationController::notificationActivated, this,
-                [this](const QString& accountId, const QString& mailboxId, const QString& threadId,
-                       const QString& emailId, const QString& activationToken)
-                {
-                    Q_EMIT activationRequested(protocol::OpenMessageRoute{
-                        .accountId = accountId,
-                        .mailboxId = mailboxId,
-                        .threadId = threadId,
-                        .emailId = emailId,
-                        .activationToken = activationToken,
-                    });
-                });
-        connect(m_notifications.get(), &DesktopNotificationController::errorNotificationActivated,
-                this,
-                [this](const QString& connectionId, const QString& activationToken)
-                {
-                    Q_EMIT activationRequested(protocol::OpenSettingsRoute{
-                        .connectionId = connectionId,
-                        .activationToken = activationToken,
-                    });
                 });
         connect(&m_services.calendarNotificationService(),
                 &CalendarNotificationService::reminderDue, this,

@@ -3,10 +3,11 @@
 #include <QCoreApplication>
 #include <QDBusConnection>
 #include <QDBusInterface>
-#include <QDBusMessage>
 #include <QDBusReply>
 #include <QDebug>
 #include <QVariantMap>
+
+#include <utility>
 
 namespace javelin::app
 {
@@ -23,10 +24,56 @@ namespace javelin::app
         constexpr auto urgencyNormal = 1;
         constexpr auto urgencyCritical = 2;
         constexpr auto dismissedByUserReason = 2U;
+
+        class FreedesktopNotificationTransport final : public DesktopNotificationTransport
+        {
+          public:
+            std::variant<uint, QString> send(const QString& icon, const QString& summary,
+                                             const QString& message, const QStringList& actions,
+                                             const QVariantMap& hints, const int timeoutMs) override
+            {
+                QDBusInterface notifications{QString::fromLatin1(notificationsService),
+                                             QString::fromLatin1(notificationsPath),
+                                             QString::fromLatin1(notificationsInterface),
+                                             QDBusConnection::sessionBus()};
+                if (!notifications.isValid())
+                    return QStringLiteral(
+                        "Desktop notifications are unavailable on the session bus");
+
+                const QDBusReply<uint> reply{notifications.call(
+                    QStringLiteral("Notify"), QStringLiteral("Javelin Mail"), static_cast<uint>(0),
+                    icon, summary, message, actions, hints, timeoutMs)};
+                if (!reply.isValid())
+                    return reply.error().message();
+                return reply.value();
+            }
+
+            void close(const uint notificationId) override
+            {
+                QDBusInterface notifications{QString::fromLatin1(notificationsService),
+                                             QString::fromLatin1(notificationsPath),
+                                             QString::fromLatin1(notificationsInterface),
+                                             QDBusConnection::sessionBus()};
+                if (notifications.isValid())
+                    static_cast<void>(
+                        notifications.call(QStringLiteral("CloseNotification"), notificationId));
+            }
+        };
     } // namespace
 
-    DesktopNotificationController::DesktopNotificationController(QObject* parent) : QObject(parent)
+    DesktopNotificationController::DesktopNotificationController(QObject* parent)
+        : DesktopNotificationController(std::make_unique<FreedesktopNotificationTransport>(), true,
+                                        parent)
     {
+    }
+
+    DesktopNotificationController::DesktopNotificationController(
+        std::unique_ptr<DesktopNotificationTransport> transport, const bool connectSignals,
+        QObject* parent)
+        : QObject(parent), m_transport(std::move(transport))
+    {
+        if (!connectSignals)
+            return;
         connectSignal("ActionInvoked", SLOT(onActionInvoked(uint, QString)));
         connectSignal("ActivationToken", SLOT(onActivationToken(uint, QString)));
         connectSignal("NotificationClosed", SLOT(onNotificationClosed(uint, uint)));
@@ -39,33 +86,21 @@ namespace javelin::app
                                                       const QString& mailboxName,
                                                       const QString& title, const QString& message)
     {
-        QDBusInterface notifications{
-            QString::fromLatin1(notificationsService), QString::fromLatin1(notificationsPath),
-            QString::fromLatin1(notificationsInterface), QDBusConnection::sessionBus()};
-        if (!notifications.isValid())
-        {
-            qWarning() << "Desktop notifications are unavailable on the session bus";
-            return false;
-        }
-
         const QString summary = mailboxName.isEmpty() ? title : QStringLiteral("%1").arg(title);
         const QStringList actions = {
             QString::fromLatin1(defaultActionKey),
             QStringLiteral("Open"),
         };
-        const auto reply = notifications.call(
-            QStringLiteral("Notify"), QStringLiteral("Javelin Mail"), static_cast<uint>(0),
-            QString::fromLatin1(notificationIconName), summary, message, actions,
-            notificationHints(urgencyNormal), defaultTimeoutMs);
-        const QDBusReply<uint> notificationReply{reply};
-        if (!notificationReply.isValid())
+        const auto sent =
+            m_transport->send(QString::fromLatin1(notificationIconName), summary, message, actions,
+                              notificationHints(urgencyNormal), defaultTimeoutMs);
+        if (const auto* error = std::get_if<QString>(&sent))
         {
-            qWarning().noquote() << "Failed to send desktop notification"
-                                 << notificationReply.error().message();
+            qWarning().noquote() << "Failed to send desktop notification" << *error;
             return false;
         }
 
-        const auto notificationId = notificationReply.value();
+        const auto notificationId = std::get<uint>(sent);
         m_trackedNotifications.insert_or_assign(notificationId, TrackedNotification{
                                                                     .accountId = accountId,
                                                                     .mailboxId = mailboxId,
@@ -84,69 +119,46 @@ namespace javelin::app
                                                     const QString& title, const QString& message,
                                                     const bool persistent, const bool opensSettings)
     {
-        QDBusInterface notifications{
-            QString::fromLatin1(notificationsService), QString::fromLatin1(notificationsPath),
-            QString::fromLatin1(notificationsInterface), QDBusConnection::sessionBus()};
-        if (!notifications.isValid())
-        {
-            qWarning() << "Desktop notifications are unavailable on the session bus";
-            return;
-        }
-
         const QStringList actions = opensSettings
                                         ? QStringList{QString::fromLatin1(defaultActionKey),
                                                       QStringLiteral("Open Settings")}
                                         : QStringList{};
-        const auto reply = notifications.call(
-            QStringLiteral("Notify"), QStringLiteral("Javelin Mail"), static_cast<uint>(0),
-            QStringLiteral("dialog-warning"), title, message, actions,
-            notificationHints(persistent ? urgencyCritical : urgencyNormal),
-            persistent ? 0 : defaultTimeoutMs);
-        const QDBusReply<uint> notificationReply{reply};
-        if (!notificationReply.isValid())
+        const auto sent =
+            m_transport->send(QStringLiteral("dialog-warning"), title, message, actions,
+                              notificationHints(persistent ? urgencyCritical : urgencyNormal),
+                              persistent ? 0 : defaultTimeoutMs);
+        if (const auto* error = std::get_if<QString>(&sent))
         {
-            qWarning().noquote() << "Failed to send error notification"
-                                 << notificationReply.error().message();
+            qWarning().noquote() << "Failed to send error notification" << *error;
             return;
         }
 
         m_trackedNotifications.insert_or_assign(
-            notificationReply.value(), TrackedNotification{.accountId = {},
-                                                           .mailboxId = {},
-                                                           .threadId = {},
-                                                           .emailId = {},
-                                                           .activationToken = {},
-                                                           .connectionId = connectionId,
-                                                           .calendarNotificationKey = {},
-                                                           .sendId = {},
-                                                           .opensSettings = opensSettings});
+            std::get<uint>(sent), TrackedNotification{.accountId = {},
+                                                      .mailboxId = {},
+                                                      .threadId = {},
+                                                      .emailId = {},
+                                                      .activationToken = {},
+                                                      .connectionId = connectionId,
+                                                      .calendarNotificationKey = {},
+                                                      .sendId = {},
+                                                      .opensSettings = opensSettings});
     }
 
     bool DesktopNotificationController::notifyCalendarEvent(const QString& key,
                                                             const QString& title,
                                                             const QString& message)
     {
-        QDBusInterface notifications{
-            QString::fromLatin1(notificationsService), QString::fromLatin1(notificationsPath),
-            QString::fromLatin1(notificationsInterface), QDBusConnection::sessionBus()};
-        if (!notifications.isValid())
-        {
-            qWarning() << "Desktop notifications are unavailable on the session bus";
-            return false;
-        }
         const QStringList actions = {QStringLiteral("dismiss"), QStringLiteral("Dismiss"),
                                      QStringLiteral("snooze"), QStringLiteral("Snooze 5 min")};
-        const QDBusReply<uint> reply{
-            notifications.call(QStringLiteral("Notify"), QStringLiteral("Javelin Mail"),
-                               static_cast<uint>(0), QStringLiteral("x-office-calendar"), title,
-                               message, actions, notificationHints(urgencyNormal, false), 0)};
-        if (!reply.isValid())
+        const auto sent = m_transport->send(QStringLiteral("x-office-calendar"), title, message,
+                                            actions, notificationHints(urgencyNormal, false), 0);
+        if (const auto* error = std::get_if<QString>(&sent))
         {
-            qWarning().noquote() << "Failed to send calendar notification"
-                                 << reply.error().message();
+            qWarning().noquote() << "Failed to send calendar notification" << *error;
             return false;
         }
-        m_trackedNotifications.insert_or_assign(reply.value(),
+        m_trackedNotifications.insert_or_assign(std::get<uint>(sent),
                                                 TrackedNotification{.accountId = {},
                                                                     .mailboxId = {},
                                                                     .threadId = {},
@@ -165,19 +177,12 @@ namespace javelin::app
                                                            const int timeoutMs)
     {
         closeUndoableSendNotification(sendId);
-        QDBusInterface notifications{
-            QString::fromLatin1(notificationsService), QString::fromLatin1(notificationsPath),
-            QString::fromLatin1(notificationsInterface), QDBusConnection::sessionBus()};
-        if (!notifications.isValid())
-            return;
         const QStringList actions = {QStringLiteral("undo-send"), QStringLiteral("Undo Send")};
-        const QDBusReply<uint> reply{
-            notifications.call(QStringLiteral("Notify"), QStringLiteral("Javelin Mail"),
-                               static_cast<uint>(0), QStringLiteral("mail-send"), title, message,
-                               actions, notificationHints(urgencyNormal), timeoutMs)};
-        if (!reply.isValid())
+        const auto sent = m_transport->send(QStringLiteral("mail-send"), title, message, actions,
+                                            notificationHints(urgencyNormal), timeoutMs);
+        if (std::holds_alternative<QString>(sent))
             return;
-        const auto notificationId = reply.value();
+        const auto notificationId = std::get<uint>(sent);
         m_sendNotificationIds.insert(sendId, notificationId);
         m_trackedNotifications.insert_or_assign(notificationId,
                                                 TrackedNotification{.accountId = {},
@@ -196,12 +201,7 @@ namespace javelin::app
         const auto found = m_sendNotificationIds.find(sendId);
         if (found == m_sendNotificationIds.end())
             return;
-        QDBusInterface notifications{
-            QString::fromLatin1(notificationsService), QString::fromLatin1(notificationsPath),
-            QString::fromLatin1(notificationsInterface), QDBusConnection::sessionBus()};
-        if (notifications.isValid())
-            static_cast<void>(
-                notifications.call(QStringLiteral("CloseNotification"), found.value()));
+        m_transport->close(found.value());
         untrackNotification(found.value());
     }
 
