@@ -36,6 +36,17 @@ namespace javelin::app
         return settings;
     }
 
+    void setTranslationListValue(QStringList& values, QString value, const bool enabled)
+    {
+        value = value.trimmed().toLower();
+        if (value.isEmpty())
+            return;
+        values.removeAll(value);
+        if (enabled)
+            values.push_back(std::move(value));
+        values.sort(Qt::CaseInsensitive);
+    }
+
     TranslationSettings loadTranslationSettings()
     {
         QSettings settings;

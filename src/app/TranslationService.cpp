@@ -163,12 +163,12 @@ namespace javelin::app
 
     void TranslationService::setAutoTranslateSender(QString sender, const bool enabled)
     {
-        setListValue(m_settings.autoTranslateSenders, std::move(sender), enabled);
+        setTranslationListValue(m_settings.autoTranslateSenders, std::move(sender), enabled);
     }
 
     void TranslationService::setAutoTranslateDomain(QString domain, const bool enabled)
     {
-        setListValue(m_settings.autoTranslateDomains, std::move(domain), enabled);
+        setTranslationListValue(m_settings.autoTranslateDomains, std::move(domain), enabled);
     }
 
     QCoro::Task<TranslationService::Result>
@@ -456,24 +456,6 @@ namespace javelin::app
         }
 
         return output;
-    }
-
-    QString TranslationService::normalizedListValue(QString value)
-    {
-        return value.trimmed().toLower();
-    }
-
-    void TranslationService::setListValue(QStringList& values, QString value, const bool enabled)
-    {
-        value = normalizedListValue(std::move(value));
-        if (value.isEmpty())
-        {
-            return;
-        }
-        values.removeAll(value);
-        if (enabled)
-            values.push_back(value);
-        values.sort(Qt::CaseInsensitive);
     }
 
 } // namespace javelin::app

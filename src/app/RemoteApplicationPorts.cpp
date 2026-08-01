@@ -95,19 +95,6 @@ namespace javelin::app
             return unwrap(client.callImmediate<Result>(kind, arguments...));
         }
 
-        void setListValue(QStringList& values, QString value, const bool enabled)
-        {
-            value = value.trimmed();
-            if (value.isEmpty())
-                return;
-            const auto found =
-                std::ranges::find_if(values, [&value](const QString& item)
-                                     { return item.compare(value, Qt::CaseInsensitive) == 0; });
-            if (enabled && found == values.end())
-                values.push_back(std::move(value));
-            else if (!enabled && found != values.end())
-                values.erase(found);
-        }
     } // namespace
 
     RemoteAccountCommandPort::RemoteAccountCommandPort(RemoteActionClient& client)
@@ -657,13 +644,13 @@ namespace javelin::app
 
     void RemoteTranslationPort::setAutoTranslateSender(QString sender, const bool enabled)
     {
-        setListValue(m_settings.autoTranslateSenders, std::move(sender), enabled);
+        setTranslationListValue(m_settings.autoTranslateSenders, std::move(sender), enabled);
         persist();
     }
 
     void RemoteTranslationPort::setAutoTranslateDomain(QString domain, const bool enabled)
     {
-        setListValue(m_settings.autoTranslateDomains, std::move(domain), enabled);
+        setTranslationListValue(m_settings.autoTranslateDomains, std::move(domain), enabled);
         persist();
     }
 

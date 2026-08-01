@@ -52,8 +52,6 @@ namespace javelin::app
         makeRequestBatches(const TranslationChunks& sourceChunks);
         [[nodiscard]] static QString transformRequest(const QStringList& sourceArray);
         [[nodiscard]] static QStringList transformResponse(QString result);
-        [[nodiscard]] static QString normalizedListValue(QString value);
-        static void setListValue(QStringList& values, QString value, bool enabled);
 
         QNetworkAccessManager& m_networkAccessManager;
         javelin::jmap::cache::TranslationCacheRepository& m_translationCacheRepository;
