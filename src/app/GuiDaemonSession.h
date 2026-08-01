@@ -60,8 +60,6 @@ namespace javelin::app
         void stop();
 
         [[nodiscard]] bool isReady() const;
-        [[nodiscard]] bool isInRecovery() const;
-        [[nodiscard]] const javelin::protocol::ReadyReply& readyReply() const;
         [[nodiscard]] const javelin::protocol::SettingsSnapshot& settings() const;
         [[nodiscard]] const std::optional<javelin::protocol::DaemonStatus>& daemonStatus() const;
         [[nodiscard]] std::optional<GuiBootstrapError>

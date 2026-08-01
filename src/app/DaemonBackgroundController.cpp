@@ -190,11 +190,6 @@ namespace javelin::app
         m_started = false;
     }
 
-    bool DaemonBackgroundController::trayAvailable() const
-    {
-        return m_tray->isAvailable();
-    }
-
     void DaemonBackgroundController::setupNetworkReachability()
     {
         if (!QNetworkInformation::loadDefaultBackend())

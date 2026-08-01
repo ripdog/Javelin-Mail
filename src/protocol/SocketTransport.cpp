@@ -1774,11 +1774,6 @@ namespace javelin::protocol
         return frame;
     }
 
-    std::size_t SocketFrameDecoder::bufferedBytes() const
-    {
-        return static_cast<std::size_t>(m_buffer.size());
-    }
-
     void SocketFrameDecoder::clear()
     {
         m_buffer.clear();
@@ -2086,16 +2081,6 @@ namespace javelin::protocol
             if (!m_options.socketPath.isEmpty())
                 QLocalServer::removeServer(m_options.socketPath);
         }
-    }
-
-    bool SocketDaemonEndpoint::isListening() const
-    {
-        return m_server != nullptr && m_server->isListening();
-    }
-
-    const QString& SocketDaemonEndpoint::socketPath() const
-    {
-        return m_options.socketPath;
     }
 
     std::optional<SocketTransportError> SocketDaemonEndpoint::lastError() const
@@ -2709,16 +2694,6 @@ namespace javelin::protocol
             if (!m_options.socketPath.isEmpty())
                 QLocalServer::removeServer(m_options.socketPath);
         }
-    }
-
-    bool SocketActivationEndpoint::isListening() const
-    {
-        return m_server != nullptr && m_server->isListening();
-    }
-
-    const QString& SocketActivationEndpoint::socketPath() const
-    {
-        return m_options.socketPath;
     }
 
     void SocketActivationEndpoint::acceptConnection()

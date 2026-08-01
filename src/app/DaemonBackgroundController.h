@@ -31,7 +31,6 @@ namespace javelin::app
 
         void start();
         void stop();
-        [[nodiscard]] bool trayAvailable() const;
 
       Q_SIGNALS:
         void activationRequested(javelin::protocol::ActivationRoute route);

@@ -77,7 +77,6 @@ namespace javelin::protocol
 
         [[nodiscard]] std::optional<SocketFrameError> append(const QByteArray& bytes);
         [[nodiscard]] std::variant<std::optional<SocketFrame>, SocketFrameError> takeFrame();
-        [[nodiscard]] std::size_t bufferedBytes() const;
         void clear();
 
       private:
@@ -152,8 +151,6 @@ namespace javelin::protocol
 
         [[nodiscard]] std::optional<SocketTransportError> listen();
         void close();
-        [[nodiscard]] bool isListening() const;
-        [[nodiscard]] const QString& socketPath() const;
         [[nodiscard]] std::optional<SocketTransportError> lastError() const;
 
         void publishEvent(const BoundaryEvent& event);
@@ -223,8 +220,6 @@ namespace javelin::protocol
 
         [[nodiscard]] std::optional<SocketTransportError> listen();
         void close();
-        [[nodiscard]] bool isListening() const;
-        [[nodiscard]] const QString& socketPath() const;
 
       private:
         void acceptConnection();

@@ -138,17 +138,6 @@ namespace javelin::app
         return m_readyReply.has_value() && !m_inRecovery && m_client->isConnected();
     }
 
-    bool GuiDaemonSession::isInRecovery() const
-    {
-        return m_inRecovery;
-    }
-
-    const protocol::ReadyReply& GuiDaemonSession::readyReply() const
-    {
-        Q_ASSERT(m_readyReply.has_value());
-        return *m_readyReply;
-    }
-
     const protocol::SettingsSnapshot& GuiDaemonSession::settings() const
     {
         return m_settings;
