@@ -1313,6 +1313,7 @@ add_library(javelin_daemon_core STATIC
     src/app/SettingsRepository.h
     src/app/TranslationService.cpp
     src/app/TranslationService.h
+    src/app/TranslationSettings.cpp
     src/app/WorkScheduler.cpp
     src/app/WorkScheduler.h
     src/app/WorkTaskPort.h
@@ -1394,7 +1395,7 @@ qt_add_executable(javelin
     src/app/UndoApplicationPorts.h
     src/app/GuiDaemonSession.cpp
     src/app/GuiDaemonSession.h
-    src/app/GuiLegacyTranslationSettings.cpp
+    src/app/TranslationSettings.cpp
     src/app/GuiMailApplicationEvents.cpp
     src/app/GuiMailApplicationEvents.h
     src/app/GuiServices.cpp

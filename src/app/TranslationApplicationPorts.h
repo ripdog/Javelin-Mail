@@ -28,6 +28,7 @@ namespace javelin::app
     using TranslationChunks = QVector<QStringList>;
     using TranslationResult = std::variant<TranslationChunks, TranslationUnavailable, QString>;
 
+    [[nodiscard]] TranslationSettings normalizeTranslationSettings(TranslationSettings settings);
     [[nodiscard]] TranslationSettings loadTranslationSettings();
     void saveTranslationSettings(TranslationSettings settings);
 

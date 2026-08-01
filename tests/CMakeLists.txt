@@ -73,6 +73,7 @@ add_executable(javelin_jmap_tests
     ${PROJECT_SOURCE_DIR}/src/app/SettingsRepository.h
     ${PROJECT_SOURCE_DIR}/src/app/TranslationService.cpp
     ${PROJECT_SOURCE_DIR}/src/app/TranslationService.h
+    ${PROJECT_SOURCE_DIR}/src/app/TranslationSettings.cpp
     ${PROJECT_SOURCE_DIR}/src/app/WorkScheduler.cpp
     ${PROJECT_SOURCE_DIR}/src/app/WorkScheduler.h
     ${PROJECT_SOURCE_DIR}/src/app/WorkTaskPort.h

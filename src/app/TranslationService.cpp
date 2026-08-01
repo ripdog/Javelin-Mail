@@ -19,7 +19,6 @@
 #include <QNetworkRequest>
 #include <QRegularExpression>
 #include <QScopeGuard>
-#include <QSettings>
 #include <QUrl>
 
 #include <algorithm>
@@ -29,12 +28,6 @@ namespace javelin::app
 {
     namespace
     {
-        constexpr auto translationGroup = "translation";
-        constexpr auto enabledKey = "enabled";
-        constexpr auto apiKeyOverrideKey = "apiKeyOverride";
-        constexpr auto targetLanguageKey = "targetLanguage";
-        constexpr auto autoTranslateSendersKey = "autoTranslateSenders";
-        constexpr auto autoTranslateDomainsKey = "autoTranslateDomains";
         constexpr qsizetype maximumBatchCharacters = 800;
         constexpr int requestTimeoutMs = 30000;
 
@@ -113,16 +106,6 @@ namespace javelin::app
             return translations;
         }
 
-        void normalizeSettingsList(QStringList& values)
-        {
-            for (auto& value : values)
-            {
-                value = value.trimmed().toLower();
-            }
-            values.removeAll(QString{});
-            values.removeDuplicates();
-            values.sort(Qt::CaseInsensitive);
-        }
     } // namespace
 
     TranslationService::TranslationService(
@@ -134,67 +117,9 @@ namespace javelin::app
     {
     }
 
-    TranslationSettings loadTranslationSettings()
-    {
-        QSettings settings;
-        settings.beginGroup(QLatin1StringView{translationGroup});
-        TranslationSettings value{
-            .enabled = settings.value(QLatin1StringView{enabledKey}, true).toBool(),
-            .apiKeyOverride =
-                settings.value(QLatin1StringView{apiKeyOverrideKey}).toString().trimmed(),
-            .targetLanguage =
-                settings.value(QLatin1StringView{targetLanguageKey}, QStringLiteral("en"))
-                    .toString()
-                    .trimmed()
-                    .toLower(),
-            .autoTranslateSenders =
-                settings.value(QLatin1StringView{autoTranslateSendersKey}).toStringList(),
-            .autoTranslateDomains =
-                settings.value(QLatin1StringView{autoTranslateDomainsKey}).toStringList(),
-        };
-        settings.endGroup();
-        if (value.targetLanguage.isEmpty())
-        {
-            value.targetLanguage = QStringLiteral("en");
-        }
-        normalizeSettingsList(value.autoTranslateSenders);
-        normalizeSettingsList(value.autoTranslateDomains);
-        return value;
-    }
-
-    void saveTranslationSettings(TranslationSettings settingsValue)
-    {
-        settingsValue.apiKeyOverride = settingsValue.apiKeyOverride.trimmed();
-        settingsValue.targetLanguage = settingsValue.targetLanguage.trimmed().toLower();
-        if (settingsValue.targetLanguage.isEmpty())
-        {
-            settingsValue.targetLanguage = QStringLiteral("en");
-        }
-        normalizeSettingsList(settingsValue.autoTranslateSenders);
-        normalizeSettingsList(settingsValue.autoTranslateDomains);
-
-        QSettings settings;
-        settings.beginGroup(QLatin1StringView{translationGroup});
-        settings.setValue(QLatin1StringView{enabledKey}, settingsValue.enabled);
-        settings.setValue(QLatin1StringView{apiKeyOverrideKey}, settingsValue.apiKeyOverride);
-        settings.setValue(QLatin1StringView{targetLanguageKey}, settingsValue.targetLanguage);
-        settings.setValue(QLatin1StringView{autoTranslateSendersKey},
-                          settingsValue.autoTranslateSenders);
-        settings.setValue(QLatin1StringView{autoTranslateDomainsKey},
-                          settingsValue.autoTranslateDomains);
-        settings.endGroup();
-        settings.sync();
-    }
-
     void TranslationService::applySettings(TranslationSettings settings)
     {
-        settings.apiKeyOverride = settings.apiKeyOverride.trimmed();
-        settings.targetLanguage = settings.targetLanguage.trimmed().toLower();
-        if (settings.targetLanguage.isEmpty())
-            settings.targetLanguage = QStringLiteral("en");
-        normalizeSettingsList(settings.autoTranslateSenders);
-        normalizeSettingsList(settings.autoTranslateDomains);
-        m_settings = std::move(settings);
+        m_settings = normalizeTranslationSettings(std::move(settings));
     }
 
     void TranslationService::reloadSettings()
@@ -547,10 +472,8 @@ namespace javelin::app
         }
         values.removeAll(value);
         if (enabled)
-        {
             values.push_back(value);
-        }
-        normalizeSettingsList(values);
+        values.sort(Qt::CaseInsensitive);
     }
 
 } // namespace javelin::app
