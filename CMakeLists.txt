@@ -124,8 +124,6 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/cache/RawMessageSourceReadRepository.cpp
     src/jmap/cache/RawMessageSourceReadRepository.h
     src/jmap/calendar/CalendarReader.h
-    src/jmap/calendar/CalendarReadService.cpp
-    src/jmap/calendar/CalendarReadService.h
     src/jmap/cache/CalendarNotificationRepository.cpp
     src/jmap/cache/CalendarNotificationRepository.h
     src/jmap/sync/StateChangeSource.h
@@ -400,8 +398,6 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/calendar/CalendarService.h
     src/jmap/calendar/CalendarReader.h
     src/jmap/sieve/SieveCommandTypes.h
-    src/jmap/calendar/CalendarReadService.cpp
-    src/jmap/calendar/CalendarReadService.h
     src/jmap/api/MailMethods.cpp
     src/jmap/api/MailMethods.h
     src/jmap/api/MethodCaller.cpp
@@ -625,8 +621,6 @@ add_library(javelin_jmap STATIC
     src/jmap/calendar/CalendarService.cpp
     src/jmap/calendar/CalendarService.h
     src/jmap/calendar/CalendarReader.h
-    src/jmap/calendar/CalendarReadService.cpp
-    src/jmap/calendar/CalendarReadService.h
     src/jmap/calendar/CalendarEventEditing.cpp
     src/jmap/calendar/CalendarEventEditing.h
     src/jmap/cache/CalendarReadRepository.cpp
