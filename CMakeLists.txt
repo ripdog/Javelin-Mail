@@ -55,8 +55,6 @@ add_library(javelin_cache_read STATIC
     src/app/CacheAccessBarrier.h
     src/app/CacheLocationProvider.cpp
     src/app/CacheLocationProvider.h
-    src/app/GuiCacheReader.cpp
-    src/app/GuiCacheReader.h
     src/jmap/cache/Database.cpp
     src/jmap/cache/Database.h
     src/jmap/cache/EmailReadRepository.cpp
@@ -236,8 +234,6 @@ set(JAVELIN_FORMAT_FILES
     src/app/LocalMaintenanceService.h
     src/app/InlineMessageSchemeHandler.cpp
     src/app/InlineMessageSchemeHandler.h
-    src/app/GuiCacheReader.cpp
-    src/app/GuiCacheReader.h
     src/app/LogStore.cpp
     src/app/LogStore.h
     src/app/LongPollService.cpp
