@@ -69,11 +69,7 @@ namespace javelin::app
 
         [[nodiscard]] QStringList stringList(const std::vector<QString>& values)
         {
-            QStringList result;
-            result.reserve(static_cast<qsizetype>(values.size()));
-            for (const auto& value : values)
-                result.push_back(value);
-            return result;
+            return {values.begin(), values.end()};
         }
 
         [[nodiscard]] std::vector<AccountSyncConfiguration>
@@ -122,8 +118,7 @@ namespace javelin::app
             return result;
         }
 
-        [[nodiscard]] std::optional<BoundaryError>
-        settingsError(const SettingsRepositoryError& error)
+        [[nodiscard]] BoundaryError settingsError(const SettingsRepositoryError& error)
         {
             BoundaryErrorCode code = BoundaryErrorCode::SettingsStorageFailure;
             if (error.code == SettingsRepositoryErrorCode::MigrationFailed ||
@@ -483,9 +478,8 @@ namespace javelin::app
             const auto loaded = m_settingsRepository->load();
             if (const auto* error = std::get_if<SettingsRepositoryError>(&loaded))
             {
-                return protocol::SettingsUpdateRejected{.currentRevision =
-                                                            m_settingsSnapshot.revision,
-                                                        .error = *settingsError(*error)};
+                return protocol::SettingsUpdateRejected{
+                    .currentRevision = m_settingsSnapshot.revision, .error = settingsError(*error)};
             }
             m_settingsSnapshot = std::get<protocol::SettingsSnapshot>(loaded);
             applySettings();
