@@ -3,9 +3,11 @@
 #include "app/GuiDaemonSession.h"
 
 #include <QFutureWatcher>
+#include <QTimer>
 #include <QUuid>
 
 #include <utility>
+#include <vector>
 
 namespace javelin::app
 {
@@ -15,8 +17,8 @@ namespace javelin::app
         connect(&m_session, &GuiDaemonSession::operationCompleted, this,
                 &RemoteActionClient::complete);
         connect(&m_session, &GuiDaemonSession::operationFailed, this, &RemoteActionClient::fail);
-        connect(&m_session, &GuiDaemonSession::recoveryStarted, this,
-                [this](const QString& detail) { failAll(detail); });
+        connect(&m_session, &GuiDaemonSession::recoveryFinished, this,
+                &RemoteActionClient::retryPending);
         connect(&m_session, &GuiDaemonSession::daemonShutdownRequested, this,
                 [this] { failAll(QStringLiteral("The Javelin daemon is shutting down.")); });
     }
@@ -51,20 +53,61 @@ namespace javelin::app
         auto pending = std::make_unique<PendingCall>();
         pending->promise.start();
         auto future = pending->promise.future();
+        pending->commandId = commandId;
+        pending->kind = kind;
+        pending->payload = std::move(payload);
+        pending->daemon = m_session.daemonInstance();
         const auto pendingKey = key(commandId.value);
         m_pending.emplace(pendingKey, std::move(pending));
+        submitPending(pendingKey);
+        return future;
+    }
 
+    void RemoteActionClient::submitPending(const QString& pendingKey)
+    {
+        const auto found = m_pending.find(pendingKey);
+        if (found == m_pending.end() || found->second->submissionInFlight || !m_session.isReady())
+            return;
+
+        auto& pending = *found->second;
+        const auto daemon = m_session.daemonInstance();
+        if (pending.daemon.has_value() && daemon.has_value() && *pending.daemon != *daemon)
+        {
+            fail(javelin::protocol::OperationId{.value = pending.commandId.value},
+                 {.code = javelin::protocol::BoundaryErrorCode::TransportUnavailable,
+                  .field = QStringLiteral("daemon.instance"),
+                  .detail = QStringLiteral("The daemon restarted before the command result was "
+                                           "known; the command was not "
+                                           "repeated automatically.")});
+            return;
+        }
+        if (!pending.daemon.has_value())
+            pending.daemon = daemon;
+
+        pending.submissionInFlight = true;
+        const auto commandId = pending.commandId;
         auto* watcher = new QFutureWatcher<javelin::protocol::CommandReply>(this);
         connect(
             watcher, &QFutureWatcherBase::finished, this,
-            [this, watcher, commandId]
+            [this, watcher, pendingKey, commandId]
             {
                 const auto reply = watcher->result();
                 watcher->deleteLater();
-                if (!m_pending.contains(key(commandId.value)))
+                const auto pendingCall = m_pending.find(pendingKey);
+                if (pendingCall == m_pending.end())
                     return;
+                pendingCall->second->submissionInFlight = false;
+
                 if (const auto* rejected = std::get_if<javelin::protocol::CommandRejected>(&reply))
                 {
+                    if (rejected->error.code ==
+                        javelin::protocol::BoundaryErrorCode::TransportUnavailable)
+                    {
+                        if (m_session.isReady())
+                            QTimer::singleShot(0, this,
+                                               [this, pendingKey] { submitPending(pendingKey); });
+                        return;
+                    }
                     fail(javelin::protocol::OperationId{.value = commandId.value}, rejected->error);
                     return;
                 }
@@ -85,8 +128,21 @@ namespace javelin::app
                               "The daemon returned an invalid operation identifier.")});
                 }
             });
-        watcher->setFuture(m_session.submitRemoteActionAsync(kind, std::move(payload), commandId));
-        return future;
+        watcher->setFuture(
+            m_session.submitRemoteActionAsync(pending.kind, pending.payload, pending.commandId));
+    }
+
+    void RemoteActionClient::retryPending()
+    {
+        std::vector<QString> keys;
+        keys.reserve(m_pending.size());
+        for (const auto& [pendingKey, pending] : m_pending)
+        {
+            Q_UNUSED(pending)
+            keys.push_back(pendingKey);
+        }
+        for (const auto& pendingKey : keys)
+            submitPending(pendingKey);
     }
 
     void RemoteActionClient::complete(const javelin::protocol::OperationId& operation,

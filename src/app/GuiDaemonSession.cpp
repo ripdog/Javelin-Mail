@@ -144,6 +144,13 @@ namespace javelin::app
         return m_daemonStatus;
     }
 
+    std::optional<protocol::DaemonInstanceId> GuiDaemonSession::daemonInstance() const
+    {
+        if (!m_readyReply.has_value())
+            return std::nullopt;
+        return m_readyReply->daemon;
+    }
+
     std::optional<GuiBootstrapError>
     GuiDaemonSession::updateSettings(protocol::SettingsUpdate update)
     {

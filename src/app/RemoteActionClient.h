@@ -96,8 +96,15 @@ namespace javelin::app
         struct PendingCall
         {
             QPromise<RawResult> promise;
+            javelin::protocol::CommandId commandId;
+            javelin::protocol::RemoteActionKind kind;
+            QByteArray payload;
+            std::optional<javelin::protocol::DaemonInstanceId> daemon;
+            bool submissionInFlight = false;
         };
 
+        void submitPending(const QString& pendingKey);
+        void retryPending();
         void complete(const javelin::protocol::OperationId& operation, QByteArray result);
         void fail(const javelin::protocol::OperationId& operation,
                   const javelin::protocol::BoundaryError& error);

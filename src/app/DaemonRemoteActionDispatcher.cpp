@@ -77,7 +77,6 @@ namespace javelin::app
     void DaemonRemoteActionDispatcher::releaseGuiResources()
     {
         m_mailboxObservations.clear();
-        m_replays.clear();
     }
 
     javelin::protocol::CommandReply
@@ -99,7 +98,14 @@ namespace javelin::app
         }
 
         auto reply = dispatchRemote(id, *remoteCommand);
-        m_replays.emplace(key, ReplayEntry{.command = *remoteCommand, .reply = reply});
+        const bool pending =
+            std::holds_alternative<javelin::protocol::CommandAccepted>(reply) &&
+            std::get<javelin::protocol::CommandAccepted>(reply).operation.has_value() &&
+            !std::get<javelin::protocol::CommandAccepted>(reply).immediateResult.has_value();
+        m_replays.emplace(
+            key, ReplayEntry{.command = *remoteCommand, .reply = reply, .pending = pending});
+        m_replayOrder.push_back(key);
+        trimReplays();
         return reply;
     }
 
@@ -709,6 +715,20 @@ namespace javelin::app
     void DaemonRemoteActionDispatcher::complete(const javelin::protocol::OperationId& operation,
                                                 QByteArray result)
     {
+        const auto replay = m_replays.find(replayKey({.value = operation.value}));
+        if (replay != m_replays.end())
+        {
+            replay->second.reply = javelin::protocol::CommandAccepted{
+                .id = {.value = operation.value},
+                .operation = std::nullopt,
+                .epoch = {},
+                .changedDomains = {},
+                .affectedKeys = {},
+                .immediateResult = result,
+            };
+            replay->second.pending = false;
+            trimReplays();
+        }
         m_eventSink.onBoundaryEvent(javelin::protocol::OperationCompleted{
             .operation = operation,
             .result = std::move(result),
@@ -718,12 +738,46 @@ namespace javelin::app
     void DaemonRemoteActionDispatcher::fail(const javelin::protocol::OperationId& operation,
                                             QString detail)
     {
+        const javelin::protocol::BoundaryError error{
+            .code = javelin::protocol::BoundaryErrorCode::ProtocolViolation,
+            .field = QStringLiteral("command.remote.result"),
+            .detail = std::move(detail),
+        };
+        const auto replay = m_replays.find(replayKey({.value = operation.value}));
+        if (replay != m_replays.end())
+        {
+            replay->second.reply = javelin::protocol::CommandRejected{
+                .id = {.value = operation.value},
+                .error = error,
+            };
+            replay->second.pending = false;
+            trimReplays();
+        }
         m_eventSink.onBoundaryEvent(javelin::protocol::OperationFailed{
             .operation = operation,
-            .error = {.code = javelin::protocol::BoundaryErrorCode::ProtocolViolation,
-                      .field = QStringLiteral("command.remote.result"),
-                      .detail = std::move(detail)},
+            .error = error,
         });
+    }
+
+    void DaemonRemoteActionDispatcher::trimReplays()
+    {
+        constexpr std::size_t maximumReplayEntries = 4096;
+        while (m_replays.size() > maximumReplayEntries && !m_replayOrder.empty())
+        {
+            const auto key = std::move(m_replayOrder.front());
+            m_replayOrder.pop_front();
+            const auto replay = m_replays.find(key);
+            if (replay == m_replays.end())
+                continue;
+            if (replay->second.pending)
+            {
+                m_replayOrder.push_back(std::move(key));
+                if (m_replayOrder.size() == m_replays.size())
+                    break;
+                continue;
+            }
+            m_replays.erase(replay);
+        }
     }
 
     QString DaemonRemoteActionDispatcher::replayKey(const javelin::protocol::CommandId& id)

@@ -1,8 +1,10 @@
 #include "app/DaemonProcess.h"
 #include "app/CacheLocationProvider.h"
+#include "app/DaemonRemoteActionDispatcher.h"
 #include "app/DaemonServices.h"
 #include "app/MailApplicationService.h"
 #include "app/MessageListMaterializationPort.h"
+#include "app/RemoteCodec.h"
 #include "jmap/cache/Database.h"
 
 #include <QCoroTask>
@@ -14,6 +16,7 @@
 #include <QSettings>
 #include <QSqlQuery>
 #include <QTemporaryDir>
+#include <QThread>
 #include <QUuid>
 
 #include <memory>
@@ -395,4 +398,103 @@ TEST_CASE("daemon rejects requests after shutdown without pretending to be offli
     const auto* rejected = std::get_if<javelin::protocol::CommandRejected>(&reply);
     REQUIRE(rejected != nullptr);
     CHECK(rejected->error.code == javelin::protocol::BoundaryErrorCode::DaemonShuttingDown);
+}
+
+TEST_CASE("daemon replays completed remote action results", "[app][daemon][ipc][replay]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir temporaryDirectory;
+    REQUIRE(temporaryDirectory.isValid());
+    const auto runtimeDirectory = temporaryDirectory.filePath(QStringLiteral("runtime"));
+    const auto cacheRoot = temporaryDirectory.filePath(QStringLiteral("cache"));
+    REQUIRE(QDir{}.mkpath(runtimeDirectory));
+    REQUIRE(QDir{}.mkpath(cacheRoot));
+    REQUIRE(QFile::setPermissions(runtimeDirectory, QFileDevice::ReadOwner |
+                                                        QFileDevice::WriteOwner |
+                                                        QFileDevice::ExeOwner));
+
+    javelin::app::DaemonProcess process{optionsFor(
+        runtimeDirectory, cacheRoot, temporaryDirectory.filePath(QStringLiteral("settings.ini")))};
+    REQUIRE_FALSE(process.start().has_value());
+
+    const auto encoded = javelin::app::remote::encode(std::string{"missing-owner"});
+    REQUIRE(std::holds_alternative<QByteArray>(encoded));
+    const javelin::protocol::CommandRequest request{
+        .id = {.value = QUuid::createUuid()},
+        .command =
+            javelin::protocol::RemoteActionCommand{
+                .kind = javelin::protocol::RemoteActionKind::ContactRequestRefresh,
+                .payload = std::get<QByteArray>(encoded),
+            },
+    };
+    const auto admitted = process.handleCommand(request);
+    const auto* accepted = std::get_if<javelin::protocol::CommandAccepted>(&admitted);
+    REQUIRE(accepted != nullptr);
+    REQUIRE(accepted->operation.has_value());
+    CHECK_FALSE(accepted->immediateResult.has_value());
+
+    std::optional<javelin::protocol::CommandAccepted> completed;
+    for (int attempt = 0; attempt < 100 && !completed.has_value(); ++attempt)
+    {
+        QCoreApplication::processEvents();
+        const auto replay = process.handleCommand(request);
+        const auto* replayed = std::get_if<javelin::protocol::CommandAccepted>(&replay);
+        REQUIRE(replayed != nullptr);
+        if (replayed->immediateResult.has_value())
+            completed = *replayed;
+        else
+            QThread::msleep(1);
+    }
+    REQUIRE(completed.has_value());
+    CHECK_FALSE(completed->operation.has_value());
+}
+
+TEST_CASE("daemon retains command UUID replay protection after GUI resources are released",
+          "[app][daemon][ipc][replay]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir temporaryDirectory;
+    REQUIRE(temporaryDirectory.isValid());
+    const auto cacheRoot = temporaryDirectory.filePath(QStringLiteral("cache"));
+    REQUIRE(QDir{}.mkpath(cacheRoot));
+
+    auto locationResult = javelin::app::CacheLocationProvider{cacheRoot}.loadOrCreate();
+    REQUIRE(std::holds_alternative<javelin::app::CacheLocation>(locationResult));
+    javelin::app::DaemonServices services{
+        std::get<javelin::app::CacheLocation>(std::move(locationResult))};
+    struct EventSink final : javelin::protocol::BoundaryEventSink
+    {
+        void onBoundaryEvent(const javelin::protocol::BoundaryEvent&) override
+        {
+        }
+    } eventSink;
+    javelin::app::DaemonRemoteActionDispatcher dispatcher{
+        services, eventSink,
+        []() -> std::optional<javelin::protocol::BoundaryError> { return std::nullopt; }};
+
+    const javelin::protocol::CommandId commandId{.value = QUuid::createUuid()};
+    const auto first = dispatcher.dispatch({
+        .id = commandId,
+        .command =
+            javelin::protocol::RemoteActionCommand{
+                .kind = javelin::protocol::RemoteActionKind::WorkSummary,
+                .payload = {},
+            },
+    });
+    REQUIRE(std::holds_alternative<javelin::protocol::CommandAccepted>(first));
+
+    dispatcher.releaseGuiResources();
+    const auto reused = dispatcher.dispatch({
+        .id = commandId,
+        .command =
+            javelin::protocol::RemoteActionCommand{
+                .kind = javelin::protocol::RemoteActionKind::WorkList,
+                .payload = {},
+            },
+    });
+    const auto* rejected = std::get_if<javelin::protocol::CommandRejected>(&reused);
+    REQUIRE(rejected != nullptr);
+    CHECK(rejected->error.code == javelin::protocol::BoundaryErrorCode::InvalidRequest);
 }

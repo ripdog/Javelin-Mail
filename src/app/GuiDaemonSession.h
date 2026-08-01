@@ -62,6 +62,7 @@ namespace javelin::app
         [[nodiscard]] bool isReady() const;
         [[nodiscard]] const javelin::protocol::SettingsSnapshot& settings() const;
         [[nodiscard]] const std::optional<javelin::protocol::DaemonStatus>& daemonStatus() const;
+        [[nodiscard]] std::optional<javelin::protocol::DaemonInstanceId> daemonInstance() const;
         [[nodiscard]] std::optional<GuiBootstrapError>
         updateSettings(javelin::protocol::SettingsUpdate update);
         [[nodiscard]] std::optional<javelin::protocol::BoundaryError>

@@ -7,6 +7,7 @@
 
 #include <QObject>
 
+#include <deque>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -37,6 +38,7 @@ namespace javelin::app
         {
             javelin::protocol::RemoteActionCommand command;
             javelin::protocol::CommandReply reply;
+            bool pending = false;
         };
 
         [[nodiscard]] javelin::protocol::CommandReply
@@ -54,6 +56,7 @@ namespace javelin::app
         [[nodiscard]] QCoro::Task<RemoteUndoExecutionResult> performUndo(bool redo);
         void complete(const javelin::protocol::OperationId& operation, QByteArray result);
         void fail(const javelin::protocol::OperationId& operation, QString detail);
+        void trimReplays();
 
         [[nodiscard]] static QString replayKey(const javelin::protocol::CommandId& id);
 
@@ -61,6 +64,7 @@ namespace javelin::app
         javelin::protocol::BoundaryEventSink& m_eventSink;
         std::function<std::optional<javelin::protocol::BoundaryError>()> m_reloadSettings;
         std::unordered_map<QString, ReplayEntry> m_replays;
+        std::deque<QString> m_replayOrder;
         std::unordered_map<QString, std::unique_ptr<MailboxObservation>> m_mailboxObservations;
     };
 } // namespace javelin::app
