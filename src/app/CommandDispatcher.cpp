@@ -55,6 +55,7 @@ namespace javelin::app
                                protocol::ChangedDomain::MailQueryWindows,
                                protocol::ChangedDomain::MessageMetadata},
             .affectedKeys = {refresh->accountId},
+            .immediateResult = std::nullopt,
         };
         m_replays.emplace(key, ReplayEntry{.request = std::move(request), .reply = reply});
         return reply;

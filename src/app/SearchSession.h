@@ -1,5 +1,6 @@
 #pragma once
 
+#include "app/MessageListMaterializationPort.h"
 #include "app/MessageListSession.h"
 #include "app/MessageListSessionFactory.h"
 #include "app/RefreshGeneration.h"
@@ -27,7 +28,7 @@ namespace javelin::app
         SearchSession(std::string accountId, javelin::jmap::search::EmailSearchCriteria criteria,
                       javelin::jmap::query::EmailListSort sort,
                       javelin::jmap::cache::QueryReader& queryReader,
-                      javelin::app::MailApplicationService& mailService,
+                      javelin::app::MessageListMaterializationPort& materializationPort,
                       MailApplicationEventsPort& events, std::size_t pageSize,
                       std::optional<RestoredSearchState> restored = std::nullopt,
                       QObject* parent = nullptr);
@@ -68,7 +69,7 @@ namespace javelin::app
         javelin::jmap::search::EmailSearchCriteria m_criteria;
         javelin::jmap::query::EmailListSort m_sort;
         javelin::jmap::cache::QueryReader& m_queryReader;
-        javelin::app::MailApplicationService& m_mailService;
+        javelin::app::MessageListMaterializationPort& m_materializationPort;
         MailApplicationEventsPort& m_events;
         std::size_t m_pageSize;
         MessageListPage m_page;

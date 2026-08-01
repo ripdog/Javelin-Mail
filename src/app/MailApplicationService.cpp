@@ -452,6 +452,15 @@ namespace javelin::app
         return MailboxObservation{*this, observationId};
     }
 
+    MailboxObservationLease MailApplicationService::beginMailboxObservation(std::string accountId,
+                                                                            std::string mailboxId)
+    {
+        auto observation = std::make_shared<MailboxObservation>(
+            observeMailbox(std::move(accountId), std::move(mailboxId)));
+        return MailboxObservationLease{[observation = std::move(observation)]() mutable
+                                       { observation.reset(); }};
+    }
+
     void MailApplicationService::releaseMailboxObservation(
         const javelin::jmap::sync::MailboxInterestRegistry::ObservationId observationId)
     {

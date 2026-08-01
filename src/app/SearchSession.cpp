@@ -71,13 +71,13 @@ namespace javelin::app
                                  javelin::jmap::search::EmailSearchCriteria criteria,
                                  javelin::jmap::query::EmailListSort sort,
                                  javelin::jmap::cache::QueryReader& queryReader,
-                                 MailApplicationService& mailService,
+                                 MessageListMaterializationPort& materializationPort,
                                  MailApplicationEventsPort& events, const std::size_t pageSize,
                                  std::optional<RestoredSearchState> restored, QObject* parent)
         : MessageListSession(parent), m_accountId(std::move(accountId)),
           m_query(javelin::jmap::search::displayString(criteria)), m_criteria(std::move(criteria)),
-          m_sort(sort), m_queryReader(queryReader), m_mailService(mailService), m_events(events),
-          m_pageSize(pageSize),
+          m_sort(sort), m_queryReader(queryReader), m_materializationPort(materializationPort),
+          m_events(events), m_pageSize(pageSize),
           m_mode(javelin::jmap::search::isBasicTextSearch(m_criteria) ? SearchMode::Local
                                                                       : SearchMode::Online),
           m_sessionId(QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString())
@@ -237,7 +237,7 @@ namespace javelin::app
         Q_EMIT pageChanged();
         const auto requestedOffset = m_page.offset;
         const auto generation = m_generation;
-        auto task = m_mailService.requestSearchWindow(SearchWindowIntent{
+        auto task = m_materializationPort.requestSearchWindow(SearchWindowIntent{
             .accountId = m_accountId,
             .criteria = m_criteria,
             .offset = requestedOffset,
@@ -356,7 +356,7 @@ namespace javelin::app
                     return;
                 }
 
-                auto task = m_mailService.requestSearchWindow(SearchWindowIntent{
+                auto task = m_materializationPort.requestSearchWindow(SearchWindowIntent{
                     .accountId = m_accountId,
                     .criteria = m_criteria,
                     .offset = offset,
@@ -428,7 +428,7 @@ namespace javelin::app
         ++m_generation;
         m_refreshGeneration.close();
         if (m_mode == SearchMode::Online)
-            m_mailService.retireSearchWindow(m_accountId, onlineWindowKey());
+            m_materializationPort.retireSearchWindow(m_accountId, onlineWindowKey());
     }
 
     void SearchSession::markStale()
@@ -443,7 +443,7 @@ namespace javelin::app
             return;
         if (m_mode == SearchMode::Online)
         {
-            m_mailService.retireSearchWindow(m_accountId, onlineWindowKey());
+            m_materializationPort.retireSearchWindow(m_accountId, onlineWindowKey());
             m_sessionId = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
         }
         m_sort = sort;

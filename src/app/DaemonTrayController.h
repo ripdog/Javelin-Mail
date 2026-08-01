@@ -71,6 +71,7 @@ namespace javelin::app
         WorkScheduler& m_workScheduler;
         std::unique_ptr<Menu> m_menu;
         QString m_activationToken;
+        QString m_serviceName;
         QString m_title = QStringLiteral("Javelin Mail");
         QString m_status = QStringLiteral("Passive");
         bool m_available = false;

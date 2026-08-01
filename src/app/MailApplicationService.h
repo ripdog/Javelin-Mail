@@ -8,6 +8,7 @@
 #include "app/MailApplicationPorts.h"
 #include "app/MailApplicationTypes.h"
 #include "app/MailboxSelectionMutation.h"
+#include "app/MessageListMaterializationPort.h"
 #include "app/undo/CalendarHistoryPort.h"
 #include "app/undo/CalendarPreferencePort.h"
 #include "app/undo/HistoryTypes.h"
@@ -48,59 +49,6 @@ namespace javelin::app
 
     class MailboxObservation;
 
-    struct MailboxWindowIntent
-    {
-        std::string accountId;
-        std::string mailboxId;
-        std::size_t offset = 0;
-        std::size_t limit = 0;
-        javelin::jmap::query::EmailListSort sort;
-        bool forceRefresh = false;
-        std::optional<std::string> anchor;
-        std::int64_t anchorOffset = 1;
-    };
-
-    struct SearchWindowIntent
-    {
-        std::string accountId;
-        javelin::jmap::search::EmailSearchCriteria criteria;
-        std::size_t offset = 0;
-        std::size_t limit = 0;
-        javelin::jmap::query::EmailListSort sort;
-        std::optional<std::string> anchor;
-        std::string windowKey;
-    };
-
-    struct MailboxWindowSummary
-    {
-        std::string accountId;
-        std::string mailboxId;
-        std::size_t offset = 0;
-        std::size_t limit = 0;
-        std::size_t position = 0;
-        std::size_t returnedLimit = 0;
-        std::size_t representativeCount = 0;
-        std::optional<std::size_t> total;
-        std::string queryState;
-    };
-
-    using MailboxWindowResult = std::variant<MailboxWindowSummary, javelin::jmap::OperationError>;
-
-    struct SearchWindowSummary
-    {
-        std::string accountId;
-        std::string queryKey;
-        std::size_t offset = 0;
-        std::size_t limit = 0;
-        std::size_t position = 0;
-        std::size_t returnedLimit = 0;
-        std::size_t representativeCount = 0;
-        std::optional<std::size_t> total;
-        std::string queryState;
-    };
-
-    using SearchWindowResult = std::variant<SearchWindowSummary, javelin::jmap::OperationError>;
-
     struct AccountSyncConfiguration
     {
         AccountConnectionSettings settings;
@@ -112,6 +60,7 @@ namespace javelin::app
     };
 
     class MailApplicationService final : public QObject,
+                                         public MessageListMaterializationPort,
                                          public AccountConnectionProvider,
                                          public ContactRefreshPort,
                                          public javelin::app::undo::MailHistoryPort,
@@ -145,6 +94,8 @@ namespace javelin::app
         connectionSettingsFor(std::string_view ownerAccountId) const override;
         [[nodiscard]] MailboxObservation observeMailbox(std::string accountId,
                                                         std::string mailboxId);
+        [[nodiscard]] MailboxObservationLease
+        beginMailboxObservation(std::string accountId, std::string mailboxId) override;
         [[nodiscard]] bool requestAccountSynchronization(std::string_view accountId);
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError>
         markMailNotificationsDelivered(std::string_view accountId, std::string_view mailboxId,
@@ -156,10 +107,10 @@ namespace javelin::app
         void publishMailboxWindowCommitted(QString accountId, QString mailboxId, std::size_t offset,
                                            std::size_t limit);
         [[nodiscard]] QCoro::Task<MailboxWindowResult>
-        requestMailboxWindow(MailboxWindowIntent intent);
+        requestMailboxWindow(MailboxWindowIntent intent) override;
         [[nodiscard]] QCoro::Task<SearchWindowResult>
-        requestSearchWindow(SearchWindowIntent intent);
-        void retireSearchWindow(std::string accountId, std::string windowKey);
+        requestSearchWindow(SearchWindowIntent intent) override;
+        void retireSearchWindow(std::string accountId, std::string windowKey) override;
         [[nodiscard]] QueuedMailboxSelectionMutationResult
         queueMailboxSelectionMutation(MailboxSelectionMutationIntent intent);
         [[nodiscard]] QueuedMessageSelectionMutationResult

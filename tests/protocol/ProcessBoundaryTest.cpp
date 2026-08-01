@@ -36,6 +36,7 @@ namespace
                               .cache = {.instance = {.value = QUuid::createUuid()},
                                         .schema = {.value = 3},
                                         .dataVersion = {.value = 7}},
+                              .cacheDatabasePath = QStringLiteral("/tmp/javelin/cache.sqlite3"),
                               .epoch = {.value = 12},
                               .settingsRevision = {.value = 5}};
         }
@@ -52,11 +53,21 @@ namespace
                                                  .field = QStringLiteral("command"),
                                                  .detail = QStringLiteral("invalid test enum")}};
             }
+            if (const auto* remote = std::get_if<RemoteActionCommand>(&receivedCommand->command))
+            {
+                return CommandAccepted{.id = receivedCommand->id,
+                                       .operation = std::nullopt,
+                                       .epoch = {.value = 12},
+                                       .changedDomains = {},
+                                       .affectedKeys = {},
+                                       .immediateResult = remote->payload};
+            }
             return CommandAccepted{.id = receivedCommand->id,
                                    .operation = std::nullopt,
                                    .epoch = {.value = 12},
                                    .changedDomains = {ChangedDomain::MailQueryWindows},
-                                   .affectedKeys = {QStringLiteral("account-1")}};
+                                   .affectedKeys = {QStringLiteral("account-1")},
+                                   .immediateResult = std::nullopt};
         }
 
         MaterializationReply handleMaterialization(MaterializationRequest request) override
@@ -183,6 +194,19 @@ namespace
             return;
         CHECK(accepted->id == command.id);
         REQUIRE(handler.receivedCommand.has_value());
+
+        const CommandRequest remoteCommand{.id = {.value = QUuid::createUuid()},
+                                           .command = RemoteActionCommand{
+                                               .kind = RemoteActionKind::WorkSummary,
+                                               .payload = QByteArray{"remote\0payload", 14},
+                                           }};
+        const auto remoteReply = commandClient.submitCommand(remoteCommand);
+        const auto* remoteAccepted = std::get_if<CommandAccepted>(&remoteReply);
+        REQUIRE(remoteAccepted != nullptr);
+        REQUIRE(remoteAccepted->immediateResult.has_value());
+        CHECK(*remoteAccepted->immediateResult == QByteArray{"remote\0payload", 14});
+        REQUIRE(handler.receivedCommand.has_value());
+        CHECK(handler.receivedCommand->command == remoteCommand.command);
 
         const MaterializationRequest materialization{
             .id = {.value = QUuid::createUuid()},
@@ -502,6 +526,17 @@ TEST_CASE("endpoint exposes settings, handshake, lifecycle and events through ty
     const auto* failure = std::get_if<OperationFailed>(&*sink.received);
     REQUIRE(failure != nullptr);
     CHECK(failure->error.code == BoundaryErrorCode::Busy);
+
+    const OperationCompleted completion{
+        .operation = {.value = QUuid::createUuid()},
+        .result = QByteArray{"result\0bytes", 12},
+    };
+    endpoint.publishEvent(completion);
+    REQUIRE(sink.received.has_value());
+    const auto* completed = std::get_if<OperationCompleted>(&*sink.received);
+    REQUIRE(completed != nullptr);
+    CHECK(completed->operation == completion.operation);
+    CHECK(completed->result == completion.result);
 
     endpoint.detachEventSink(sink);
     const auto update = endpoint.updateSettings(

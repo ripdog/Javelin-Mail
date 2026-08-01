@@ -13,6 +13,7 @@ namespace javelin::app
 {
     class DaemonServices;
     class DaemonBackgroundController;
+    class DaemonRemoteActionDispatcher;
     class SettingsRepository;
 
     struct DaemonProcessOptions
@@ -111,6 +112,7 @@ namespace javelin::app
         [[nodiscard]] javelin::protocol::DaemonStatus daemonStatus() const;
         void publishStatus();
         void applySettings();
+        [[nodiscard]] std::optional<javelin::protocol::BoundaryError> reloadSettings();
         void connectOperationalEvents();
         void flushPendingActivations();
         void launchGuiIfNeeded();
@@ -121,6 +123,7 @@ namespace javelin::app
         DaemonProcessOptions m_options;
         std::unique_ptr<SettingsRepository> m_settingsRepository;
         std::unique_ptr<DaemonServices> m_services;
+        std::unique_ptr<DaemonRemoteActionDispatcher> m_remoteActions;
         std::unique_ptr<DaemonBackgroundController> m_background;
         std::unique_ptr<javelin::protocol::SocketDaemonEndpoint> m_endpoint;
         std::unique_ptr<javelin::protocol::SocketActivationEndpoint> m_activationEndpoint;

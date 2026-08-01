@@ -54,14 +54,21 @@ migration, including while everything still runs in one process.
 
 The production application is now assembled by the `javelind` daemon root and the `javelin` GUI root.
 `DaemonProcess` and `DaemonServices` own the writable database connection, JMAP transports,
-synchronization, mutations, history, deferred send, indexing, maintenance, notifications, settings,
-and background work. `GuiDaemonSession` owns the GUI socket session, settings snapshot, cache barrier,
-and read-only cache connection. The installed GUI workspace is cache-backed: it renders mailbox and
-message data through the read-only cache target, requests visible mailbox windows over the typed
-socket boundary, and submits account refresh/settings intents to the daemon.
+synchronization, mutations, history, deferred send, indexing, maintenance, notifications, and
+background work. `GuiDaemonSession` owns the GUI socket session, settings snapshot, cache barrier, and
+read-only cache connection. The installed GUI is the complete `MainWindow` workspace rather than the
+reduced migration shell. Its existing controllers consume daemon-backed application ports for mail,
+compose, contacts, calendars, Sieve, translation, Undo/Redo, task control, message content, and
+message-list materialization. Account, mailbox, contact, identity, message-view, and query presentation
+remain read-only cache clients; calendar presentation uses the typed daemon reader boundary.
 
-The in-process endpoint remains compiled only into the protocol conformance test target. There is no
-production single-process executable, bootstrap adapter, or GUI-to-daemon implementation linkage.
+The framed socket is protocol version 2 because it now carries bounded typed remote-action payloads,
+immediate typed results, and asynchronous completion values in addition to the original boundary
+families. The in-process endpoint remains compiled only into the protocol conformance test target.
+There is no production single-process executable or GUI linkage to daemon/JMAP transport targets.
+Legacy GUI settings helpers still write the canonical profile before requesting a daemon reload; moving
+those remaining settings editors behind revisioned daemon updates is tracked below as unfinished
+Phase 11 work.
 
 ## Phase dependency order
 
@@ -706,16 +713,22 @@ The following searches or equivalent build checks return no production violation
 
 ### Implementation status
 
-Phase 11 is complete. The temporary single-process executable, `javelin_app` library, transitional
-bootstrap sources, and unused GUI service adapters have been removed from production. The
-`InProcessEndpoint` remains available only as a protocol test fixture. CMake now builds and installs
-only `javelin` and `javelind`; the production `javelin_gui` target contains the daemon-backed
-workspace, while the legacy full-widget surface is isolated in the non-installed
-`javelin_gui_test_support` target for focused GUI tests. The GUI renders the read-only cache,
-requests selected mailbox windows through the typed socket boundary, and supports daemon-owned
-account settings and refresh. CMake rejects GUI/WebEngine dependencies in daemon targets, rejects
-daemon implementation dependencies in the production GUI target, and packages the split GUI
-executable in the desktop entry.
+Phase 11 is complete for executable composition and application-command routing, but not yet for the
+last canonical-settings access in the GUI. The temporary single-process executable, `javelin_app`
+library, transitional bootstrap sources, and production use of `InProcessEndpoint` have been removed.
+CMake builds and installs only `javelin` and `javelind`. The production `javelin` executable now links
+the complete existing `MainWindow`/Widgets surface and supplies it with remote application-port
+adapters; it no longer links raw `CalendarMethods`/`MailMethods`, JMAP transports, daemon-core
+implementations, or write-capable cache services. The daemon owns all application command execution,
+calendar reads, notification/tray behavior, synchronization, and network diagnostics. Singleton
+activation and daemon-first startup have been exercised against a copied real profile.
+
+The remaining Phase 11 exception is settings persistence: `PreferencesDialog`, workspace persistence,
+and several presentation preferences still use the legacy canonical `QSettings` helpers, followed by
+a typed daemon reload request. This preserves the existing full GUI without inventing a second settings
+shape, but it does not satisfy the final daemon-only settings-authority gate. The next settings-focused
+change should convert those editors to revisioned `SettingsSnapshot` updates and then remove
+`GuiLegacyTranslationSettings` and the remaining GUI storage helpers.
 
 ## Phase 12: performance, reliability, and release gate
 
@@ -753,6 +766,18 @@ as the authoritative checklist.
 5. Investigate regressions rather than loosening correctness or UX criteria. Optimise preparation,
    batching, indexes, invalidation detail, and model patches before considering any architectural
    exception.
+
+### Current validation status
+
+As of 2026-08-01, the complete Debug build and all 514 discovered tests pass, and the C++
+`format-check` target is clean. An isolated smoke run against a reflinked copy of the real profile
+loaded both configured accounts, restored the full workspace, performed mailbox and calendar network
+work in `javelind`, kept the GUI alive, and accepted a second-launch activation with exit status 0. A
+follow-up disconnect test terminated that GUI, confirmed the daemon remained operational, reconnected
+a new GUI, and activated it from a third invocation. A separate session-bus smoke test verified the
+daemon-owned StatusNotifierItem icon and all four DBusMenu actions. The broader performance
+measurements, crash/reconnect matrix, optimized/sanitizer runs, and final daemon-only settings migration
+remain release-gate work.
 
 ### Final release gate
 

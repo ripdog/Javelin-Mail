@@ -45,14 +45,14 @@ namespace javelin::app
                                    std::optional<std::string> role,
                                    javelin::jmap::query::EmailListSort sort,
                                    javelin::jmap::cache::QueryReader& queryReader,
-                                   MailApplicationService& mailService, const std::size_t pageSize,
-                                   MailApplicationEventsPort& events,
+                                   MessageListMaterializationPort& materializationPort,
+                                   const std::size_t pageSize, MailApplicationEventsPort& events,
                                    std::optional<RestoredMailboxState> restored, QObject* parent)
         : MessageListSession(parent), m_accountId(std::move(accountId)),
           m_mailboxId(std::move(mailboxId)), m_title(std::move(title)), m_role(std::move(role)),
-          m_sort(sort), m_queryReader(queryReader), m_mailService(mailService), m_events(events),
-          m_pageSize(pageSize),
-          m_observation(m_mailService.observeMailbox(m_accountId, m_mailboxId))
+          m_sort(sort), m_queryReader(queryReader), m_materializationPort(materializationPort),
+          m_events(events), m_pageSize(pageSize),
+          m_observation(m_materializationPort.beginMailboxObservation(m_accountId, m_mailboxId))
     {
         if (restored.has_value())
             m_page = std::move(restored->page);
@@ -203,7 +203,7 @@ namespace javelin::app
         Q_EMIT pageChanged();
         const auto offset = m_page.offset;
         const auto generation = m_generation;
-        auto task = m_mailService.requestMailboxWindow(MailboxWindowIntent{
+        auto task = m_materializationPort.requestMailboxWindow(MailboxWindowIntent{
             .accountId = m_accountId,
             .mailboxId = m_mailboxId,
             .offset = offset,

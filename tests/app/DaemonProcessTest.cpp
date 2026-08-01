@@ -126,11 +126,11 @@ TEST_CASE("daemon process migrates settings before exposing readiness", "[app][d
         .activationToken = QStringLiteral("notification-token"),
     });
     CHECK(process.pendingActivationCount() == 1);
-    CHECK_FALSE(process
-                    .handleGuiActivation(javelin::protocol::RaiseGuiRoute{
-                        .activationToken = QStringLiteral("raise-token")})
-                    .has_value());
-    CHECK(process.pendingActivationCount() == 2);
+    const auto activationError = process.handleGuiActivation(
+        javelin::protocol::RaiseGuiRoute{.activationToken = QStringLiteral("raise-token")});
+    REQUIRE(activationError.has_value());
+    CHECK(activationError->code == javelin::protocol::BoundaryErrorCode::Busy);
+    CHECK(process.pendingActivationCount() == 1);
     process.stop();
     CHECK_FALSE(process.isReady());
 }

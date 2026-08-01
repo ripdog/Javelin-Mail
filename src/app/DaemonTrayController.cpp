@@ -2,6 +2,7 @@
 
 #include "app/WorkScheduler.h"
 
+#include <QCoreApplication>
 #include <QDBusArgument>
 #include <QDBusConnection>
 #include <QDBusInterface>
@@ -19,8 +20,7 @@ namespace javelin::app
 {
     namespace
     {
-        constexpr auto trayService = "org.javelin.JavelinMail";
-        constexpr auto trayPath = "/org/javelin/JavelinMail/StatusNotifierItem";
+        constexpr auto trayPath = "/StatusNotifierItem";
         constexpr auto menuPath = "/org/javelin/JavelinMail/Menu";
         constexpr auto watcherService = "org.kde.StatusNotifierWatcher";
         constexpr auto watcherPath = "/StatusNotifierWatcher";
@@ -278,10 +278,17 @@ namespace javelin::app
                 "StatusNotifier tray unavailable: session bus is not connected");
             return false;
         }
-        if (!bus.registerService(QString::fromLatin1(trayService)))
+        m_serviceName = QStringLiteral("org.kde.StatusNotifierItem-%1-1")
+                            .arg(QCoreApplication::applicationPid());
+        if (!bus.registerService(m_serviceName))
         {
-            qWarning().noquote() << QStringLiteral("StatusNotifier tray service unavailable:")
-                                 << bus.lastError().message();
+            const auto detail = bus.lastError().message();
+            qWarning().noquote() << QStringLiteral(
+                                        "StatusNotifier tray service %1 could not be registered%2")
+                                        .arg(m_serviceName,
+                                             detail.isEmpty() ? QString{}
+                                                              : QStringLiteral(": %1").arg(detail));
+            m_serviceName.clear();
             return false;
         }
 
@@ -295,7 +302,8 @@ namespace javelin::app
             qWarning() << QStringLiteral("StatusNotifier tray objects could not be registered");
             bus.unregisterObject(QString::fromLatin1(trayPath));
             bus.unregisterObject(QString::fromLatin1(menuPath));
-            bus.unregisterService(QString::fromLatin1(trayService));
+            bus.unregisterService(m_serviceName);
+            m_serviceName.clear();
             m_menu.reset();
             return false;
         }
@@ -313,8 +321,8 @@ namespace javelin::app
         }
         else
         {
-            const auto reply = watcher.call(QStringLiteral("RegisterStatusNotifierItem"),
-                                            QString::fromLatin1(trayService));
+            const auto reply =
+                watcher.call(QStringLiteral("RegisterStatusNotifierItem"), m_serviceName);
             if (reply.type() == QDBusMessage::ErrorMessage)
                 qWarning().noquote() << QStringLiteral("StatusNotifier item registration failed:")
                                      << reply.errorMessage();
@@ -331,8 +339,10 @@ namespace javelin::app
         {
             bus.unregisterObject(QString::fromLatin1(trayPath));
             bus.unregisterObject(QString::fromLatin1(menuPath));
-            bus.unregisterService(QString::fromLatin1(trayService));
+            if (!m_serviceName.isEmpty())
+                bus.unregisterService(m_serviceName);
         }
+        m_serviceName.clear();
         m_menu.reset();
         m_available = false;
     }
@@ -384,7 +394,7 @@ namespace javelin::app
 
     QString DaemonTrayController::iconName() const
     {
-        return QStringLiteral("mail-unread");
+        return QStringLiteral("javelinmail");
     }
 
     void DaemonTrayController::Activate(const int, const int)

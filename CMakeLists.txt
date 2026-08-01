@@ -1299,6 +1299,10 @@ add_library(javelin_daemon_core STATIC
     src/app/DaemonBackgroundController.h
     src/app/DaemonProcess.cpp
     src/app/DaemonProcess.h
+    src/app/DaemonRemoteActionDispatcher.cpp
+    src/app/DaemonRemoteActionDispatcher.h
+    src/app/RemoteActionTypes.h
+    src/app/RemoteCodec.h
     src/app/DaemonServices.cpp
     src/app/DaemonServices.h
     src/app/DaemonTrayController.cpp
@@ -1381,18 +1385,114 @@ javelin_enable_static_analysis(javelind)
 javelin_enable_sanitizers(javelind)
 
 qt_add_executable(javelin
+    src/app/CalendarApplicationPorts.h
+    src/app/ComposePreferences.cpp
+    src/app/ComposePreferences.h
+    src/app/LogStore.cpp
+    src/app/LogStore.h
+    src/app/MailApplicationEventsPorts.h
+    src/app/UndoApplicationPorts.h
     src/app/GuiDaemonSession.cpp
     src/app/GuiDaemonSession.h
+    src/app/GuiLegacyTranslationSettings.cpp
+    src/app/GuiMailApplicationEvents.cpp
+    src/app/GuiMailApplicationEvents.h
+    src/app/GuiServices.cpp
+    src/app/GuiServices.h
+    src/app/MailboxSession.cpp
+    src/app/MailboxSession.h
+    src/app/MessageListMaterializationPort.h
+    src/app/MessageListSession.h
+    src/app/MessageListSessionFactoryService.cpp
+    src/app/MessageListSessionFactoryService.h
+    src/app/MessageNavigationCoordinator.cpp
+    src/app/MessageNavigationCoordinator.h
+    src/app/MessageNavigationPort.h
+    src/app/RemoteActionClient.cpp
+    src/app/RemoteActionClient.h
+    src/app/RemoteActionTypes.h
+    src/app/RemoteApplicationPorts.cpp
+    src/app/RemoteApplicationPorts.h
+    src/app/RemoteCodec.h
+    src/app/SearchSession.cpp
+    src/app/SearchSession.h
+    src/jmap/cache/AccountReadRepository.cpp
+    src/jmap/cache/AccountReadRepository.h
+    src/jmap/cache/ContactRepository.cpp
+    src/jmap/cache/ContactRepository.h
+    src/jmap/cache/IdentityRepository.cpp
+    src/jmap/cache/IdentityRepository.h
+    src/jmap/cache/MailSearchIndex.cpp
+    src/jmap/cache/MailSearchIndex.h
+    src/jmap/cache/MailboxReadRepository.cpp
+    src/jmap/cache/MailboxReadRepository.h
+    src/jmap/cache/MailboxRepository.cpp
+    src/jmap/cache/MailboxRepository.h
+    src/jmap/cache/MailboxWindowRepository.cpp
+    src/jmap/cache/MailboxWindowRepository.h
+    src/jmap/cache/QueryService.cpp
+    src/jmap/cache/QueryService.h
+    src/jmap/cache/SearchWindowRepository.cpp
+    src/jmap/cache/SearchWindowRepository.h
+    src/jmap/cache/SyncStateRepository.cpp
+    src/jmap/cache/SyncStateRepository.h
+    src/jmap/api/PatchObject.cpp
+    src/jmap/api/PatchObject.h
+    src/jmap/calendar/CalendarEventEditing.cpp
+    src/jmap/calendar/CalendarEventEditing.h
+    src/jmap/contacts/ContactIdentityLookup.cpp
+    src/jmap/contacts/ContactIdentityLookup.h
+    src/jmap/contacts/ContactInterchange.cpp
+    src/jmap/contacts/ContactInterchange.h
+    src/jmap/contacts/ContactTypes.cpp
+    src/jmap/contacts/ContactTypes.h
+    src/jmap/domain/MailEntityParsers.cpp
+    src/jmap/domain/MailEntityParsers.h
+    src/jmap/domain/MailEntities.h
+    src/jmap/language/FastTextLanguageDetector.cpp
+    src/jmap/language/FastTextLanguageDetector.h
+    src/jmap/language/LanguageDetection.cpp
+    src/jmap/language/LanguageDetection.h
+    src/jmap/search/EmailSearch.cpp
+    src/jmap/search/EmailSearch.h
+    src/jmap/sync/MailboxQueryDescriptor.cpp
+    src/jmap/sync/MailboxQueryDescriptor.h
     src/app/gui_main.cpp
 )
 target_link_libraries(javelin
     PRIVATE
         javelin_protocol
         javelin_cache_read
-        javelin_gui
+        javelin_gui_test_support
+        QCoro6::Core
         Qt::Widgets
 )
+file(GLOB javelin_runtime_icon_resources CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/res/thunderbird-icons/*.svg"
+)
+qt_add_resources(javelin "javelin_runtime_icons"
+    PREFIX "/icons"
+    BASE "${CMAKE_CURRENT_SOURCE_DIR}/res"
+    FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/res/icon.svg"
+        ${javelin_runtime_icon_resources}
+)
+qt_add_resources(javelin "javelin_runtime_darkreader"
+    PREFIX "/vendor/darkreader"
+    BASE "${CMAKE_CURRENT_SOURCE_DIR}/res/vendor/darkreader"
+    FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/res/vendor/darkreader/darkreader.js"
+)
 target_compile_definitions(javelin PRIVATE JAVELIN_APP_VERSION="${PROJECT_VERSION}")
+if(JAVELIN_ENABLE_FASTTEXT_LANGUAGE_DETECTION)
+    target_link_libraries(javelin PRIVATE fasttext_javelin)
+    target_compile_definitions(javelin PRIVATE
+        JAVELIN_ENABLE_FASTTEXT_LANGUAGE_DETECTION=1
+        JAVELIN_FASTTEXT_LANGUAGE_MODEL_PATH="${CMAKE_INSTALL_PREFIX}/${KDE_INSTALL_DATADIR}/javelinmail/models/fasttext/lid.176.ftz"
+    )
+else()
+    target_compile_definitions(javelin PRIVATE JAVELIN_ENABLE_FASTTEXT_LANGUAGE_DETECTION=0)
+endif()
 target_compile_options(javelin PRIVATE -fexceptions)
 javelin_set_project_warnings(javelin)
 javelin_enable_static_analysis(javelin)

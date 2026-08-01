@@ -126,6 +126,7 @@ add_executable(javelin_jmap_tests
     app/MailboxSelectionMutationTest.cpp
     app/MailboxSyncCoverageTest.cpp
     app/MessageNavigationCoordinatorTest.cpp
+    app/RemoteCodecTest.cpp
     app/StateChangePolicyTest.cpp
     app/SettingsRepositoryTest.cpp
     app/TranslationServiceTest.cpp

@@ -1,4 +1,5 @@
 #include "app/DaemonProcess.h"
+#include "app/LogStore.h"
 
 #include <QCommandLineOption>
 #include <QCommandLineParser>
@@ -31,7 +32,8 @@ namespace
 int main(int argc, char* argv[])
 {
     QCoreApplication application{argc, argv};
-    QCoreApplication::setOrganizationName(QStringLiteral("Javelin"));
+    javelin::app::LogStore::install();
+    QCoreApplication::setOrganizationName(QStringLiteral("Javelin Mail"));
     QCoreApplication::setOrganizationDomain(QStringLiteral("javelin.app"));
     QCoreApplication::setApplicationName(QStringLiteral("Javelin Mail"));
     QCoreApplication::setApplicationVersion(QStringLiteral(JAVELIN_APP_VERSION));
@@ -58,23 +60,29 @@ int main(int argc, char* argv[])
     const auto socketPath = parser.isSet(socketOption)
                                 ? parser.value(socketOption)
                                 : QDir{runtime}.filePath(QStringLiteral("javelind.sock"));
+    const QSettings legacySettings{QSettings::NativeFormat, QSettings::UserScope,
+                                   QStringLiteral("Javelin Mail"), QStringLiteral("javelinmail")};
     const javelin::app::DaemonProcessOptions options{
         .socket = {.runtimeDirectory = runtime,
                    .socketPath = socketPath,
-                   .limits = {},
-                   .protocol = {.major = 1, .minor = 0},
+                   .limits = {.maximumStringBytes = 4096,
+                              .maximumCollectionItems = 256,
+                              .maximumAffectedKeys = 64,
+                              .maximumMaterializationItems = 500,
+                              .maximumFrameBytes = 64 * 1024 * 1024},
+                   .protocol = {.major = 2, .minor = 0},
                    .expectedBuild = std::nullopt,
                    .maximumQueuedFrames = 128,
-                   .maximumQueuedBytes = 4 * 1024 * 1024,
+                   .maximumQueuedBytes = 128 * 1024 * 1024,
                    .responseTimeoutMilliseconds = 5000,
                    .enforcePeerCredentials = true},
-        .protocol = {.major = 1, .minor = 0},
+        .protocol = {.major = 2, .minor = 0},
         .build = {.application = QStringLiteral("Javelin-Mail"),
                   .revision = QStringLiteral(JAVELIN_APP_VERSION)},
         .guiExecutable =
             QDir{QCoreApplication::applicationDirPath()}.filePath(QStringLiteral("javelin")),
         .cacheRootPath = {},
-        .settingsPath = {},
+        .settingsPath = legacySettings.fileName(),
     };
 
     try

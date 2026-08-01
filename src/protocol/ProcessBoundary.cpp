@@ -86,6 +86,25 @@ namespace javelin::protocol
                     using Command = std::decay_t<decltype(command)>;
                     if constexpr (std::is_same_v<Command, RefreshAccountCommand>)
                         return validateRefreshAccount(command, limits);
+                    else
+                    {
+                        if (command.kind > RemoteActionKind::WorkSummary)
+                        {
+                            return BoundaryError{
+                                .code = BoundaryErrorCode::InvalidRequest,
+                                .field = QStringLiteral("command.remote.kind"),
+                                .detail = QStringLiteral("remote action kind is invalid")};
+                        }
+                        if (static_cast<std::size_t>(command.payload.size()) >
+                            limits.maximumFrameBytes)
+                        {
+                            return BoundaryError{
+                                .code = BoundaryErrorCode::ValueTooLarge,
+                                .field = QStringLiteral("command.remote.payload"),
+                                .detail = QStringLiteral("remote action payload is too large")};
+                        }
+                        return std::nullopt;
+                    }
                 },
                 request.command);
         }
@@ -336,6 +355,9 @@ namespace javelin::protocol
                                 using Command = std::decay_t<decltype(command)>;
                                 if constexpr (std::is_same_v<Command, RefreshAccountCommand>)
                                     return stringSize(command.accountId) + 1;
+                                else
+                                    return sizeof(command.kind) +
+                                           static_cast<std::size_t>(command.payload.size());
                             },
                             request.command);
         }
@@ -470,6 +492,8 @@ namespace javelin::protocol
                 }
                 else if constexpr (std::is_same_v<Event, OperationFailed>)
                     return 48 + stringSize(value.error.field) + stringSize(value.error.detail);
+                else if constexpr (std::is_same_v<Event, OperationCompleted>)
+                    return 32 + static_cast<std::size_t>(value.result.size());
                 else if constexpr (std::is_same_v<Event, SettingsUpdated>)
                     return 16;
                 else if constexpr (std::is_same_v<Event, ActivationRequested>)

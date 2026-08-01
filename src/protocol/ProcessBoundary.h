@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QByteArray>
 #include <QString>
 #include <QUuid>
 
@@ -42,7 +43,7 @@ namespace javelin::protocol
 
     struct ProtocolVersion
     {
-        std::uint16_t major = 1;
+        std::uint16_t major = 2;
         std::uint16_t minor = 0;
 
         friend bool operator==(const ProtocolVersion&, const ProtocolVersion&) = default;
@@ -122,7 +123,86 @@ namespace javelin::protocol
                                const RefreshAccountCommand&) = default;
     };
 
-    using ApplicationCommand = std::variant<RefreshAccountCommand>;
+    enum class RemoteActionKind : std::uint16_t
+    {
+        RemoveConfiguredAccount,
+        CalendarReadCached,
+        CalendarReadAccounts,
+        CalendarReadCalendars,
+        CalendarRequestRange,
+        CalendarCreateEvent,
+        CalendarUpdateEvent,
+        CalendarDeleteEvent,
+        CalendarSetDefault,
+        CalendarCreate,
+        CalendarDelete,
+        CalendarSetVisible,
+        ComposeOpen,
+        ComposeLoadSenderIdentities,
+        ComposeSaveDraft,
+        ComposeSend,
+        ComposeLoadWorkingCopy,
+        ComposeStoreWorkingCopy,
+        ComposeDiscard,
+        ContactRequestRefresh,
+        ContactMutateAddressBook,
+        ContactSave,
+        ContactSetStarred,
+        ContactDelete,
+        ContactCreateGroup,
+        ContactDeleteGroup,
+        ContactSetGroupMembership,
+        ContactCopy,
+        ContactImport,
+        ContactMerge,
+        ContactUploadMedia,
+        ContactDownloadMedia,
+        MailQueueMailboxMutation,
+        MailQueueDestroy,
+        MailQueueMarkUnread,
+        MailQueueMarkRead,
+        MailQueueSetFlagged,
+        MailSubmitPending,
+        SieveList,
+        SieveGet,
+        SieveValidate,
+        SieveSave,
+        SieveDelete,
+        SieveActivate,
+        AccountBootstrap,
+        MessageContent,
+        AttachmentDownload,
+        MessageSource,
+        MailboxObserve,
+        MailboxUnobserve,
+        MailboxWindow,
+        SearchWindow,
+        SearchRetire,
+        TranslationSetAutoSender,
+        TranslationSetAutoDomain,
+        TranslationTranslate,
+        Undo,
+        Redo,
+        UndoAcknowledgeRemove,
+        UndoForget,
+        UndoSnapshot,
+        ReloadSettings,
+        WorkPause,
+        WorkResume,
+        WorkRetry,
+        WorkList,
+        WorkSummary,
+    };
+
+    struct RemoteActionCommand
+    {
+        RemoteActionKind kind = RemoteActionKind::RemoveConfiguredAccount;
+        QByteArray payload;
+
+        friend bool operator==(const RemoteActionCommand&, const RemoteActionCommand&) = default;
+    };
+
+    using ApplicationCommand = std::variant<RefreshAccountCommand, RemoteActionCommand>;
 
     struct CommandRequest
     {
@@ -271,6 +351,7 @@ namespace javelin::protocol
         ProtocolVersion protocol;
         DaemonInstanceId daemon;
         CacheIdentity cache;
+        QString cacheDatabasePath;
         InvalidationEpoch epoch;
         SettingsRevision settingsRevision;
     };
@@ -302,6 +383,7 @@ namespace javelin::protocol
         InvalidationEpoch epoch;
         std::vector<ChangedDomain> changedDomains;
         std::vector<QString> affectedKeys;
+        std::optional<QByteArray> immediateResult;
     };
 
     struct CommandRejected
@@ -371,6 +453,12 @@ namespace javelin::protocol
     {
         OperationId operation;
         BoundaryError error;
+    };
+
+    struct OperationCompleted
+    {
+        OperationId operation;
+        QByteArray result;
     };
 
     enum class AccountState : std::uint8_t
@@ -471,6 +559,7 @@ namespace javelin::protocol
     struct CacheAccessResumed
     {
         CacheIdentity cache;
+        QString cacheDatabasePath;
         InvalidationEpoch epoch;
     };
 
@@ -496,9 +585,9 @@ namespace javelin::protocol
     };
 
     using BoundaryEvent =
-        std::variant<CacheInvalidation, OperationFailed, SettingsUpdated, ActivationRequested,
-                     DaemonStatusChanged, CacheAccessSuspendRequested, CacheAccessResumed,
-                     DaemonShutdownRequested>;
+        std::variant<CacheInvalidation, OperationFailed, OperationCompleted, SettingsUpdated,
+                     ActivationRequested, DaemonStatusChanged, CacheAccessSuspendRequested,
+                     CacheAccessResumed, DaemonShutdownRequested>;
 
     struct BoundaryLimits
     {

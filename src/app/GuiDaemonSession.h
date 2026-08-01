@@ -1,7 +1,6 @@
 #pragma once
 
 #include "app/CacheAccessBarrier.h"
-#include "app/CacheLocationProvider.h"
 #include "jmap/cache/Database.h"
 #include "protocol/SocketTransport.h"
 
@@ -68,6 +67,12 @@ namespace javelin::app
         updateSettings(javelin::protocol::SettingsUpdate update);
         [[nodiscard]] std::optional<javelin::protocol::BoundaryError>
         requestAccountRefresh(const QString& accountId);
+        [[nodiscard]] javelin::protocol::CommandReply
+        submitRemoteAction(javelin::protocol::RemoteActionKind kind, QByteArray payload,
+                           javelin::protocol::CommandId id = {.value = QUuid::createUuid()});
+        [[nodiscard]] CacheAccessBarrier::ParticipantId
+        registerCacheParticipant(CacheAccessBarrier::Participant participant);
+        void unregisterCacheParticipant(CacheAccessBarrier::ParticipantId participant);
         [[nodiscard]] std::optional<javelin::protocol::BoundaryError>
         requestMailboxWindow(const QString& accountId, const QString& mailboxId,
                              std::uint64_t offset = 0, std::uint32_t limit = 100);
@@ -81,6 +86,12 @@ namespace javelin::app
         void recoveryStarted(const QString& detail);
         void recoveryFinished();
         void cacheChanged();
+        void cacheInvalidated(const javelin::protocol::CacheInvalidation& invalidation);
+        void operationCompleted(const javelin::protocol::OperationId& operation,
+                                const QByteArray& result);
+        void operationFailed(const javelin::protocol::OperationId& operation,
+                             const javelin::protocol::BoundaryError& error);
+        void daemonStatusChanged(const javelin::protocol::DaemonStatus& status);
         void settingsChanged();
         void activationRequested(const javelin::protocol::ActivationRoute& route);
         void daemonShutdownRequested();
@@ -102,7 +113,6 @@ namespace javelin::app
         std::unique_ptr<javelin::protocol::SocketDaemonClient> m_client;
         std::optional<javelin::protocol::ReadyReply> m_readyReply;
         javelin::protocol::SettingsSnapshot m_settings;
-        CacheLocation m_cacheLocation;
         QString m_databasePath;
         javelin::jmap::cache::ReadOnlyDatabaseConnection m_readConnection;
         CacheAccessBarrier m_cacheAccessBarrier;

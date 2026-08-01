@@ -1,16 +1,16 @@
 #pragma once
 
+#include "app/MessageListMaterializationPort.h"
 #include "app/MessageListSessionFactory.h"
 
 namespace javelin::app
 {
-    class MailApplicationService;
     class MailApplicationEventsPort;
 
     class MessageListSessionFactoryService final : public MessageListSessionFactoryPort
     {
       public:
-        MessageListSessionFactoryService(MailApplicationService& service,
+        MessageListSessionFactoryService(MessageListMaterializationPort& materializationPort,
                                          MailApplicationEventsPort& events);
 
         [[nodiscard]] MailboxSession* createMailboxSession(
@@ -26,7 +26,7 @@ namespace javelin::app
                             std::optional<RestoredSearchState> restored, QObject* parent) override;
 
       private:
-        MailApplicationService& m_service;
+        MessageListMaterializationPort& m_materializationPort;
         MailApplicationEventsPort& m_events;
     };
 } // namespace javelin::app

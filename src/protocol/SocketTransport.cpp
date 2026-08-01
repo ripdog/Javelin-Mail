@@ -153,6 +153,16 @@ namespace javelin::protocol
                 return checkStream();
             }
 
+            bool bytes(const QByteArray& value)
+            {
+                if (static_cast<std::size_t>(value.size()) > m_limits.maximumFrameBytes)
+                    return fail(QStringLiteral("byte array exceeds the protocol limit"));
+                if (m_error.has_value())
+                    return false;
+                m_stream << value;
+                return checkStream();
+            }
+
             bool count(const std::size_t value, const std::size_t maximum, const QString& field)
             {
                 if (value > maximum || value > std::numeric_limits<quint32>::max())
@@ -264,6 +274,16 @@ namespace javelin::protocol
                     return false;
                 if (static_cast<std::size_t>(value.toUtf8().size()) > m_limits.maximumStringBytes)
                     return fail(QStringLiteral("string exceeds the protocol limit"));
+                return true;
+            }
+
+            bool bytes(QByteArray& value)
+            {
+                m_stream >> value;
+                if (!checkStream())
+                    return false;
+                if (static_cast<std::size_t>(value.size()) > m_limits.maximumFrameBytes)
+                    return fail(QStringLiteral("byte array exceeds the protocol limit"));
                 return true;
             }
 
@@ -813,6 +833,10 @@ namespace javelin::protocol
                                                                      RefreshAccountCommand>)
                                             return writer.string(command.accountId) &&
                                                    writer.boolean(command.force);
+                                        else
+                                            return writer.word(
+                                                       static_cast<quint16>(command.kind)) &&
+                                                   writer.bytes(command.payload);
                                     },
                                     value.command);
                             });
@@ -905,13 +929,28 @@ namespace javelin::protocol
             {
                 CommandRequest request;
                 quint8 commandIndex = 0;
-                if (!reader.uuid(request.id.value) || !reader.byte(commandIndex) ||
-                    commandIndex != 0)
+                if (!reader.uuid(request.id.value) || !reader.byte(commandIndex))
                     return malformed(QStringLiteral("invalid command variant"));
-                RefreshAccountCommand command;
-                if (!reader.string(command.accountId) || !reader.boolean(command.force))
-                    return malformed(QStringLiteral("invalid command payload"));
-                request.command = std::move(command);
+                if (commandIndex == 0)
+                {
+                    RefreshAccountCommand command;
+                    if (!reader.string(command.accountId) || !reader.boolean(command.force))
+                        return malformed(QStringLiteral("invalid command payload"));
+                    request.command = std::move(command);
+                }
+                else if (commandIndex == 1)
+                {
+                    RemoteActionCommand command;
+                    quint16 actionKind = 0;
+                    if (!reader.word(actionKind) ||
+                        actionKind > static_cast<quint16>(RemoteActionKind::WorkSummary) ||
+                        !reader.bytes(command.payload))
+                        return malformed(QStringLiteral("invalid remote action payload"));
+                    command.kind = static_cast<RemoteActionKind>(actionKind);
+                    request.command = std::move(command);
+                }
+                else
+                    return malformed(QStringLiteral("invalid command variant"));
                 return finishRequest(reader, ClientRequest{std::move(request)});
             }
             case SocketFrameKind::MaterializationRequest:
@@ -972,6 +1011,7 @@ namespace javelin::protocol
                                               writeProtocol(writer, ready->protocol) &&
                                               writer.uuid(ready->daemon.value) &&
                                               writeCacheIdentity(writer, ready->cache) &&
+                                              writer.string(ready->cacheDatabasePath) &&
                                               writer.qword(ready->epoch.value) &&
                                               writer.qword(ready->settingsRevision.value);
                                    }
@@ -998,7 +1038,10 @@ namespace javelin::protocol
                             return false;
                         return writer.qword(accepted->epoch.value) &&
                                writeChangedDomains(writer, accepted->changedDomains, limits) &&
-                               writeAffectedKeys(writer, accepted->affectedKeys, limits);
+                               writeAffectedKeys(writer, accepted->affectedKeys, limits) &&
+                               writer.boolean(accepted->immediateResult.has_value()) &&
+                               (!accepted->immediateResult.has_value() ||
+                                writer.bytes(*accepted->immediateResult));
                     }
                     const auto& rejected = std::get<CommandRejected>(reply);
                     return writer.byte(1) && writer.uuid(rejected.id.value) &&
@@ -1088,7 +1131,8 @@ namespace javelin::protocol
             {
                 ReadyReply ready;
                 if (!readProtocol(reader, ready.protocol) || !reader.uuid(ready.daemon.value) ||
-                    !readCacheIdentity(reader, ready.cache) || !reader.qword(ready.epoch.value) ||
+                    !readCacheIdentity(reader, ready.cache) ||
+                    !reader.string(ready.cacheDatabasePath) || !reader.qword(ready.epoch.value) ||
                     !reader.qword(ready.settingsRevision.value))
                     return malformed(QStringLiteral("invalid READY reply"));
                 return finishReply(reader, HandshakeReply{std::move(ready)});
@@ -1122,10 +1166,18 @@ namespace javelin::protocol
                     if (!reader.uuid(accepted.operation->value))
                         return malformed(QStringLiteral("invalid command operation"));
                 }
+                bool hasImmediateResult = false;
                 if (!reader.qword(accepted.epoch.value) ||
                     !readChangedDomains(reader, accepted.changedDomains, limits) ||
-                    !readAffectedKeys(reader, accepted.affectedKeys, limits))
+                    !readAffectedKeys(reader, accepted.affectedKeys, limits) ||
+                    !reader.boolean(hasImmediateResult))
                     return malformed(QStringLiteral("invalid accepted command payload"));
+                if (hasImmediateResult)
+                {
+                    accepted.immediateResult.emplace();
+                    if (!reader.bytes(*accepted.immediateResult))
+                        return malformed(QStringLiteral("invalid immediate command result"));
+                }
                 return finishReply(reader, CommandReply{std::move(accepted)});
             }
             if (kind == 1)
@@ -1384,6 +1436,9 @@ namespace javelin::protocol
                             else if constexpr (std::is_same_v<Event, OperationFailed>)
                                 return writer.uuid(value.operation.value) &&
                                        writeBoundaryError(writer, value.error);
+                            else if constexpr (std::is_same_v<Event, OperationCompleted>)
+                                return writer.uuid(value.operation.value) &&
+                                       writer.bytes(value.result);
                             else if constexpr (std::is_same_v<Event, SettingsUpdated>)
                                 return writer.qword(value.revision.value);
                             else if constexpr (std::is_same_v<Event, ActivationRequested>)
@@ -1413,6 +1468,7 @@ namespace javelin::protocol
                                 return true;
                             else
                                 return writeCacheIdentity(writer, value.cache) &&
+                                       writer.string(value.cacheDatabasePath) &&
                                        writer.qword(value.epoch.value);
                         },
                         event);
@@ -1444,19 +1500,26 @@ namespace javelin::protocol
             }
             if (kind == 2)
             {
+                OperationCompleted event;
+                if (!reader.uuid(event.operation.value) || !reader.bytes(event.result))
+                    return malformed(QStringLiteral("invalid operation completion"));
+                return finishReply(reader, BoundaryEvent{std::move(event)});
+            }
+            if (kind == 3)
+            {
                 SettingsUpdated event;
                 if (!reader.qword(event.revision.value))
                     return malformed(QStringLiteral("invalid settings event"));
                 return finishReply(reader, BoundaryEvent{std::move(event)});
             }
-            if (kind == 3)
+            if (kind == 4)
             {
                 ActivationRequested event;
                 if (!readActivationRoute(reader, event.route))
                     return malformed(QStringLiteral("invalid activation event"));
                 return finishReply(reader, BoundaryEvent{std::move(event)});
             }
-            if (kind == 4)
+            if (kind == 5)
             {
                 DaemonStatusChanged event;
                 if (!readEnum(reader, event.status.lifecycle,
@@ -1473,7 +1536,7 @@ namespace javelin::protocol
                     return malformed(QStringLiteral("invalid daemon status event"));
                 return finishReply(reader, BoundaryEvent{std::move(event)});
             }
-            if (kind == 5)
+            if (kind == 6)
             {
                 CacheAccessSuspendRequested event;
                 bool hasSchema = false;
@@ -1490,14 +1553,15 @@ namespace javelin::protocol
                 }
                 return finishReply(reader, BoundaryEvent{std::move(event)});
             }
-            if (kind == 6)
+            if (kind == 7)
             {
                 CacheAccessResumed event;
-                if (!readCacheIdentity(reader, event.cache) || !reader.qword(event.epoch.value))
+                if (!readCacheIdentity(reader, event.cache) ||
+                    !reader.string(event.cacheDatabasePath) || !reader.qword(event.epoch.value))
                     return malformed(QStringLiteral("invalid cache resume event"));
                 return finishReply(reader, BoundaryEvent{std::move(event)});
             }
-            if (kind == 7)
+            if (kind == 8)
                 return finishReply(reader, BoundaryEvent{DaemonShutdownRequested{}});
             return malformed(QStringLiteral("unknown boundary event variant"));
         }

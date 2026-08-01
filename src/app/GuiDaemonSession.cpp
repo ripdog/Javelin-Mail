@@ -35,11 +35,15 @@ namespace javelin::app
         protocol::SocketClientOptions socketOptions{
             .runtimeDirectory = m_options.runtimeDirectory,
             .socketPath = m_options.socketPath,
-            .limits = {},
+            .limits = {.maximumStringBytes = 4096,
+                       .maximumCollectionItems = 256,
+                       .maximumAffectedKeys = 64,
+                       .maximumMaterializationItems = 500,
+                       .maximumFrameBytes = 64 * 1024 * 1024},
             .protocol = m_options.protocol,
             .expectedBuild = m_options.build,
             .maximumQueuedFrames = 128,
-            .maximumQueuedBytes = 4 * 1024 * 1024,
+            .maximumQueuedBytes = 128 * 1024 * 1024,
             .responseTimeoutMilliseconds = 5000,
             .enforcePeerCredentials = true,
         };
@@ -177,6 +181,28 @@ namespace javelin::app
         return std::nullopt;
     }
 
+    protocol::CommandReply
+    GuiDaemonSession::submitRemoteAction(const protocol::RemoteActionKind kind, QByteArray payload,
+                                         const protocol::CommandId id)
+    {
+        return m_client->submitCommand({
+            .id = id,
+            .command = protocol::RemoteActionCommand{.kind = kind, .payload = std::move(payload)},
+        });
+    }
+
+    CacheAccessBarrier::ParticipantId
+    GuiDaemonSession::registerCacheParticipant(CacheAccessBarrier::Participant participant)
+    {
+        return m_cacheAccessBarrier.registerParticipant(std::move(participant));
+    }
+
+    void GuiDaemonSession::unregisterCacheParticipant(
+        const CacheAccessBarrier::ParticipantId participant)
+    {
+        m_cacheAccessBarrier.unregisterParticipant(participant);
+    }
+
     std::optional<protocol::BoundaryError>
     GuiDaemonSession::requestMailboxWindow(const QString& accountId, const QString& mailboxId,
                                            const std::uint64_t offset, const std::uint32_t limit)
@@ -219,7 +245,16 @@ namespace javelin::app
                 if constexpr (std::is_same_v<Event, protocol::CacheInvalidation>)
                 {
                     m_currentEpoch = std::max(m_currentEpoch, value.epoch.value);
+                    Q_EMIT cacheInvalidated(value);
                     Q_EMIT cacheChanged();
+                }
+                else if constexpr (std::is_same_v<Event, protocol::OperationCompleted>)
+                {
+                    Q_EMIT operationCompleted(value.operation, value.result);
+                }
+                else if constexpr (std::is_same_v<Event, protocol::OperationFailed>)
+                {
+                    Q_EMIT operationFailed(value.operation, value.error);
                 }
                 else if constexpr (std::is_same_v<Event, protocol::CacheAccessSuspendRequested>)
                 {
@@ -229,6 +264,7 @@ namespace javelin::app
                 else if constexpr (std::is_same_v<Event, protocol::CacheAccessResumed>)
                 {
                     m_currentEpoch = std::max(m_currentEpoch, value.epoch.value);
+                    m_databasePath = value.cacheDatabasePath;
                     if (const auto error = resumeReadAccess())
                     {
                         m_inRecovery = true;
@@ -237,13 +273,20 @@ namespace javelin::app
                     else
                     {
                         if (m_readyReply.has_value())
+                        {
                             m_readyReply->cache = value.cache;
+                            m_readyReply->cacheDatabasePath = value.cacheDatabasePath;
+                        }
                         Q_EMIT cacheChanged();
                     }
                 }
                 else if constexpr (std::is_same_v<Event, protocol::ActivationRequested>)
                 {
                     Q_EMIT activationRequested(value.route);
+                }
+                else if constexpr (std::is_same_v<Event, protocol::DaemonStatusChanged>)
+                {
+                    Q_EMIT daemonStatusChanged(value.status);
                 }
                 else if constexpr (std::is_same_v<Event, protocol::SettingsUpdated>)
                 {
@@ -322,15 +365,10 @@ namespace javelin::app
             return mapBoundaryError(rejected->error, GuiBootstrapErrorCode::SettingsUnavailable);
         m_settings = std::get<protocol::SettingsSnapshotReply>(settings).snapshot;
 
-        const auto location = CacheLocationProvider::forApplication().loadOrCreate();
-        if (const auto* error = std::get_if<CacheLocationError>(&location))
-            return detailError(GuiBootstrapErrorCode::CacheUnavailable, error->detail);
-        m_cacheLocation = std::get<CacheLocation>(location);
-        if (m_readyReply.has_value() &&
-            m_cacheLocation.instanceId != m_readyReply->cache.instance.value)
+        if (!m_readyReply.has_value() || m_readyReply->cacheDatabasePath.isEmpty())
             return detailError(GuiBootstrapErrorCode::CacheUnavailable,
-                               QStringLiteral("daemon and GUI selected different cache instances"));
-        m_databasePath = m_cacheLocation.databasePath;
+                               QStringLiteral("daemon did not provide a cache path"));
+        m_databasePath = m_readyReply->cacheDatabasePath;
         return openReadConnection();
     }
 

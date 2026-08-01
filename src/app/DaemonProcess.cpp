@@ -4,6 +4,7 @@
 #include "app/CalendarNotificationService.h"
 #include "app/CommandDispatcher.h"
 #include "app/DaemonBackgroundController.h"
+#include "app/DaemonRemoteActionDispatcher.h"
 #include "app/DaemonServices.h"
 #include "app/DeferredSendService.h"
 #include "app/FullMailSyncService.h"
@@ -13,6 +14,8 @@
 #include "app/MailIndexService.h"
 #include "app/SettingsRepository.h"
 #include "app/TranslationApplicationPorts.h"
+#include "app/UndoApplicationPorts.h"
+#include "app/WorkScheduler.h"
 #include "app/undo/UndoManager.h"
 
 #include <QCoroTask>
@@ -203,6 +206,8 @@ namespace javelin::app
         try
         {
             m_services = std::make_unique<DaemonServices>(std::get<CacheLocation>(locationResult));
+            m_remoteActions = std::make_unique<DaemonRemoteActionDispatcher>(
+                *m_services, *this, [this] { return reloadSettings(); }, this);
             applySettings();
             m_services->translationService().reloadSettings();
             m_background = std::make_unique<DaemonBackgroundController>(*m_services, this);
@@ -271,6 +276,7 @@ namespace javelin::app
         if (m_services != nullptr)
             m_services->commandDispatcher().setEventSink(nullptr);
         m_endpoint.reset();
+        m_remoteActions.reset();
         m_services.reset();
         m_settingsRepository.reset();
         m_guiConnected = false;
@@ -381,7 +387,9 @@ namespace javelin::app
         }
         m_cacheSuspend.reset();
         m_cacheAccessAcknowledged = false;
-        onBoundaryEvent(CacheAccessResumed{.cache = cacheIdentity(), .epoch = currentEpoch()});
+        onBoundaryEvent(CacheAccessResumed{.cache = cacheIdentity(),
+                                           .cacheDatabasePath = databasePath(),
+                                           .epoch = currentEpoch()});
         return std::nullopt;
     }
 
@@ -407,6 +415,7 @@ namespace javelin::app
         return ReadyReply{.protocol = m_options.protocol,
                           .daemon = m_instanceId,
                           .cache = cacheIdentity(),
+                          .cacheDatabasePath = databasePath(),
                           .epoch = currentEpoch(),
                           .settingsRevision = m_settingsSnapshot.revision};
     }
@@ -415,6 +424,8 @@ namespace javelin::app
     {
         if (!isReady())
             return protocol::CommandRejected{.id = request.id, .error = notReadyError()};
+        if (std::holds_alternative<protocol::RemoteActionCommand>(request.command))
+            return m_remoteActions->dispatch(std::move(request));
         return m_services->commandDispatcher().dispatch(std::move(request));
     }
 
@@ -490,6 +501,7 @@ namespace javelin::app
             }
             m_settingsSnapshot = std::get<protocol::SettingsSnapshot>(loaded);
             applySettings();
+            m_services->translationService().reloadSettings();
             onBoundaryEvent(*updated);
         }
         return reply;
@@ -557,8 +569,11 @@ namespace javelin::app
             enqueueActivation(route);
             return std::nullopt;
         }
-        enqueueActivation(route);
-        return std::nullopt;
+        return BoundaryError{
+            .code = BoundaryErrorCode::Busy,
+            .field = QStringLiteral("gui"),
+            .detail = QStringLiteral("no GUI process is currently connected"),
+        };
     }
 
     void DaemonProcess::onBoundaryEvent(const protocol::BoundaryEvent& event)
@@ -610,6 +625,15 @@ namespace javelin::app
 
     void DaemonProcess::applySettings()
     {
+        const auto completeSettings = std::ranges::count_if(
+            m_settingsSnapshot.accounts, [](const auto& account)
+            { return !account.loginEmail.isEmpty() && !account.apiKey.isEmpty(); });
+        qInfo().noquote() << QStringLiteral(
+                                 "Loaded %1 configured connection%2 (%3 with credentials)")
+                                 .arg(m_settingsSnapshot.accounts.size())
+                                 .arg(m_settingsSnapshot.accounts.size() == 1 ? QString{}
+                                                                              : QStringLiteral("s"))
+                                 .arg(completeSettings);
         const auto configurations = accountConfigurations(m_settingsSnapshot);
         std::vector<FullSyncAccountConfiguration> fullSync;
         std::vector<std::string> accountIds;
@@ -622,10 +646,32 @@ namespace javelin::app
                                 .mailboxIds = configuration.fullSyncMailboxIds});
             accountIds.push_back(configuration.accountId);
         }
+        QStringList configuredAccountIds;
+        configuredAccountIds.reserve(static_cast<qsizetype>(configurations.size()));
+        for (const auto& configuration : configurations)
+            configuredAccountIds.push_back(QString::fromStdString(configuration.accountId));
+        qInfo().noquote() << QStringLiteral("Configured %1 JMAP account%2: %3")
+                                 .arg(configurations.size())
+                                 .arg(configurations.size() == 1 ? QString{} : QStringLiteral("s"),
+                                      configuredAccountIds.join(QStringLiteral(", ")));
         m_services->mailService().applySettings(configurations);
         m_services->fullMailSyncService().applySettings(std::move(fullSync));
         m_services->mailIndexService().applyAccounts(std::move(accountIds));
         m_services->localMaintenanceService().requestReplay();
+    }
+
+    std::optional<protocol::BoundaryError> DaemonProcess::reloadSettings()
+    {
+        if (!isReady() || m_settingsRepository == nullptr || m_services == nullptr)
+            return notReadyError();
+        const auto loaded = m_settingsRepository->load();
+        if (const auto* error = std::get_if<SettingsRepositoryError>(&loaded))
+            return settingsError(*error);
+        m_settingsSnapshot = std::get<protocol::SettingsSnapshot>(loaded);
+        applySettings();
+        m_services->translationService().reloadSettings();
+        onBoundaryEvent(protocol::SettingsUpdated{.revision = m_settingsSnapshot.revision});
+        return std::nullopt;
     }
 
     void DaemonProcess::connectOperationalEvents()
@@ -642,6 +688,24 @@ namespace javelin::app
                 });
         connect(&events, &MailApplicationEventsPort::accountStatusChanged, this,
                 [this](const QString&, MailAccountStatus) { publishStatus(); });
+        connect(&m_services->undoCommandPort(), &UndoCommandPort::historyStateChanged, this,
+                [this](const undo::HistoryState&)
+                {
+                    onBoundaryEvent(CacheInvalidation{
+                        .epoch = currentEpoch(),
+                        .changedDomains = {ChangedDomain::History},
+                        .affectedKeys = {},
+                    });
+                });
+        connect(&m_services->workScheduler(), &WorkScheduler::jobsChanged, this,
+                [this]
+                {
+                    onBoundaryEvent(CacheInvalidation{
+                        .epoch = currentEpoch(),
+                        .changedDomains = {ChangedDomain::BackgroundJobs},
+                        .affectedKeys = {},
+                    });
+                });
         connect(m_background.get(), &DaemonBackgroundController::activationRequested, this,
                 &DaemonProcess::enqueueActivation);
         connect(m_background.get(), &DaemonBackgroundController::shutdownRequested, this,
@@ -658,6 +722,8 @@ namespace javelin::app
                 qWarning().noquote() << QStringLiteral("Cache barrier resume after GUI disconnect:")
                                      << error->message;
         }
+        if (m_remoteActions != nullptr)
+            m_remoteActions->releaseGuiResources();
         m_guiConnected = false;
         m_guiReady = false;
         m_guiLaunchRequested = false;
