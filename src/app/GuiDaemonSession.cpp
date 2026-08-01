@@ -91,7 +91,7 @@ namespace javelin::app
         if (const auto error = m_client->readyForActivation())
         {
             m_client->disconnectFromDaemon();
-            return mapBoundaryError(*error, GuiBootstrapErrorCode::DaemonUnavailable);
+            return detailError(GuiBootstrapErrorCode::DaemonUnavailable, error->detail);
         }
         m_inRecovery = false;
         Q_EMIT ready();
@@ -121,11 +121,7 @@ namespace javelin::app
 
     void GuiDaemonSession::stop()
     {
-        if (m_materializationScope.has_value() && m_client != nullptr && m_client->isConnected())
-        {
-            m_client->cancelMaterializationScope(*m_materializationScope);
-            m_materializationScope.reset();
-        }
+        cancelMaterializationScope();
         if (m_client != nullptr)
             m_client->disconnectFromDaemon();
         m_readConnection = javelin::jmap::cache::ReadOnlyDatabaseConnection{};
@@ -154,12 +150,12 @@ namespace javelin::app
         const auto reply = m_client->updateSettings(
             {.baseRevision = m_settings.revision, .update = std::move(update)});
         if (const auto* rejected = std::get_if<protocol::SettingsUpdateRejected>(&reply))
-            return mapBoundaryError(rejected->error, GuiBootstrapErrorCode::SettingsUnavailable);
+        {
+            return detailError(GuiBootstrapErrorCode::SettingsUnavailable, rejected->error.detail);
+        }
 
-        const auto settingsReply = m_client->getSettings();
-        if (const auto* rejected = std::get_if<protocol::SettingsReadRejected>(&settingsReply))
-            return mapBoundaryError(rejected->error, GuiBootstrapErrorCode::SettingsUnavailable);
-        m_settings = std::get<protocol::SettingsSnapshotReply>(settingsReply).snapshot;
+        if (const auto error = refreshSettings())
+            return error;
         Q_EMIT settingsChanged();
         return std::nullopt;
     }
@@ -211,11 +207,7 @@ namespace javelin::app
     GuiDaemonSession::requestMailboxWindow(const QString& accountId, const QString& mailboxId,
                                            const std::uint64_t offset, const std::uint32_t limit)
     {
-        if (m_materializationScope.has_value())
-        {
-            m_client->cancelMaterializationScope(*m_materializationScope);
-            m_materializationScope.reset();
-        }
+        cancelMaterializationScope();
         const auto scope = protocol::ScopeId{.value = QUuid::createUuid()};
         const auto reply = m_client->requestMaterialization(
             {.id = protocol::RequestId{.value = QUuid::createUuid()},
@@ -271,8 +263,7 @@ namespace javelin::app
                     m_databasePath = value.cacheDatabasePath;
                     if (const auto error = resumeReadAccess())
                     {
-                        m_inRecovery = true;
-                        Q_EMIT recoveryStarted(error->detail);
+                        beginRecovery(error->detail);
                     }
                     else
                     {
@@ -295,13 +286,8 @@ namespace javelin::app
                 }
                 else if constexpr (std::is_same_v<Event, protocol::SettingsUpdated>)
                 {
-                    const auto settings = m_client->getSettings();
-                    if (const auto* snapshot =
-                            std::get_if<protocol::SettingsSnapshotReply>(&settings))
-                    {
-                        m_settings = snapshot->snapshot;
+                    if (!refreshSettings().has_value())
                         Q_EMIT settingsChanged();
-                    }
                 }
                 else if constexpr (std::is_same_v<Event, protocol::DaemonShutdownRequested>)
                 {
@@ -363,12 +349,19 @@ namespace javelin::app
         return std::nullopt;
     }
 
+    std::optional<GuiBootstrapError> GuiDaemonSession::refreshSettings()
+    {
+        const auto reply = m_client->getSettings();
+        if (const auto* rejected = std::get_if<protocol::SettingsReadRejected>(&reply))
+            return detailError(GuiBootstrapErrorCode::SettingsUnavailable, rejected->error.detail);
+        m_settings = std::get<protocol::SettingsSnapshotReply>(reply).snapshot;
+        return std::nullopt;
+    }
+
     std::optional<GuiBootstrapError> GuiDaemonSession::loadSettingsAndCache()
     {
-        const auto settings = m_client->getSettings();
-        if (const auto* rejected = std::get_if<protocol::SettingsReadRejected>(&settings))
-            return mapBoundaryError(rejected->error, GuiBootstrapErrorCode::SettingsUnavailable);
-        m_settings = std::get<protocol::SettingsSnapshotReply>(settings).snapshot;
+        if (const auto error = refreshSettings())
+            return error;
 
         if (!m_readyReply.has_value() || m_readyReply->cacheDatabasePath.isEmpty())
             return detailError(GuiBootstrapErrorCode::CacheUnavailable,
@@ -410,11 +403,19 @@ namespace javelin::app
         return std::nullopt;
     }
 
-    std::optional<GuiBootstrapError>
-    GuiDaemonSession::mapBoundaryError(const protocol::BoundaryError& error,
-                                       const GuiBootstrapErrorCode fallback) const
+    void GuiDaemonSession::cancelMaterializationScope()
     {
-        return detailError(fallback, error.detail);
+        if (!m_materializationScope.has_value())
+            return;
+        if (m_client != nullptr && m_client->isConnected())
+            m_client->cancelMaterializationScope(*m_materializationScope);
+        m_materializationScope.reset();
+    }
+
+    void GuiDaemonSession::beginRecovery(const QString& detail)
+    {
+        m_inRecovery = true;
+        Q_EMIT recoveryStarted(detail);
     }
 
     void GuiDaemonSession::onDaemonDisconnected(const protocol::SocketDisconnectReason,
@@ -422,24 +423,21 @@ namespace javelin::app
     {
         if (m_inRecovery)
             return;
-        m_inRecovery = true;
-        Q_EMIT recoveryStarted(detail);
+        beginRecovery(detail);
     }
 
     void GuiDaemonSession::acknowledgeCacheSuspend(protocol::CacheAccessSuspendRequested request)
     {
         if (const auto error = suspendReadAccess())
         {
-            m_inRecovery = true;
-            Q_EMIT recoveryStarted(error->detail);
+            beginRecovery(error->detail);
             return;
         }
         if (const auto error = m_client->acknowledgeCacheAccessSuspended({
                 .instance = request.instance,
             }))
         {
-            m_inRecovery = true;
-            Q_EMIT recoveryStarted(error->detail);
+            beginRecovery(error->detail);
         }
     }
 } // namespace javelin::app

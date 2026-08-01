@@ -100,13 +100,13 @@ namespace javelin::app
 
       private:
         [[nodiscard]] std::optional<GuiBootstrapError> connectAndHandshake(bool allowStart);
+        [[nodiscard]] std::optional<GuiBootstrapError> refreshSettings();
         [[nodiscard]] std::optional<GuiBootstrapError> loadSettingsAndCache();
         [[nodiscard]] std::optional<GuiBootstrapError> openReadConnection();
         [[nodiscard]] std::optional<GuiBootstrapError> suspendReadAccess();
         [[nodiscard]] std::optional<GuiBootstrapError> resumeReadAccess();
-        [[nodiscard]] std::optional<GuiBootstrapError>
-        mapBoundaryError(const javelin::protocol::BoundaryError& error,
-                         GuiBootstrapErrorCode fallback) const;
+        void cancelMaterializationScope();
+        void beginRecovery(const QString& detail);
         void onDaemonDisconnected(javelin::protocol::SocketDisconnectReason reason,
                                   const QString& detail);
         void acknowledgeCacheSuspend(javelin::protocol::CacheAccessSuspendRequested request);
