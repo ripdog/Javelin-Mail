@@ -113,8 +113,6 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/cache/EmailReadRepository.h
     src/jmap/cache/IdentityReader.h
     src/jmap/cache/QueryReader.h
-    src/jmap/cache/CalendarReadRepository.cpp
-    src/jmap/cache/CalendarReadRepository.h
     src/jmap/cache/MessageContentTypes.h
     src/jmap/cache/MessageViewService.cpp
     src/jmap/cache/MessageViewService.h
@@ -440,8 +438,6 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/cache/IdentityRepository.cpp
     src/jmap/cache/IdentityRepository.h
     src/jmap/cache/IdentityReader.h
-    src/jmap/cache/CalendarReadRepository.cpp
-    src/jmap/cache/CalendarReadRepository.h
     src/jmap/cache/MailboxRepository.cpp
     src/jmap/cache/MailboxRepository.h
     src/jmap/cache/MessageContentTypes.h
@@ -621,8 +617,6 @@ add_library(javelin_jmap STATIC
     src/jmap/calendar/CalendarReader.h
     src/jmap/calendar/CalendarEventEditing.cpp
     src/jmap/calendar/CalendarEventEditing.h
-    src/jmap/cache/CalendarReadRepository.cpp
-    src/jmap/cache/CalendarReadRepository.h
     src/jmap/cache/CalendarRepository.cpp
     src/jmap/cache/CalendarRepository.h
     src/jmap/sync/PreferredStateChangeSource.cpp
