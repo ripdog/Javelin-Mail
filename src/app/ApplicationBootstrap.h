@@ -8,7 +8,7 @@ class QApplication;
 namespace javelin::app
 {
     class DaemonBootstrap;
-    class DesktopNotificationController;
+    class DaemonBackgroundController;
     class DaemonServices;
     class GuiServices;
 } // namespace javelin::app
@@ -21,9 +21,6 @@ namespace javelin::gui::tasks
 {
     class TaskCenterDialog;
 }
-
-class QSystemTrayIcon;
-class QMenu;
 
 namespace javelin::app
 {
@@ -45,20 +42,16 @@ namespace javelin::app
         [[nodiscard]] DaemonServices& daemonServices();
         [[nodiscard]] GuiServices& guiServices();
         void restoreMainWindow(const QString& activationToken = {});
-        void toggleMainWindow();
         void createMainWindow();
         void reloadAccountSynchronizationSettings();
-        void setupNetworkReachability();
-        void setupSystemTray();
+        void setupBackgroundActivation();
         void showTaskCenter();
 
         QApplication& m_application;
         std::unique_ptr<DaemonBootstrap> m_daemonBootstrap;
         std::unique_ptr<GuiServices> m_guiServices;
-        std::unique_ptr<DesktopNotificationController> m_notificationController;
+        std::unique_ptr<DaemonBackgroundController> m_backgroundController;
         QPointer<javelin::gui::shell::MainWindow> m_mainWindow;
-        std::unique_ptr<QSystemTrayIcon> m_trayIcon;
-        std::unique_ptr<QMenu> m_trayMenu;
         QPointer<javelin::gui::tasks::TaskCenterDialog> m_taskCenter;
     };
 

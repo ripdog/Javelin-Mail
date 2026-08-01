@@ -77,6 +77,7 @@ namespace javelin::app
         void recoveryFinished();
         void cacheChanged();
         void activationRequested(const javelin::protocol::ActivationRoute& route);
+        void daemonShutdownRequested();
 
       private:
         [[nodiscard]] std::optional<GuiBootstrapError> connectAndHandshake(bool allowStart);

@@ -1236,13 +1236,29 @@ namespace javelin::protocol
                 {
                     using Route = std::decay_t<decltype(value)>;
                     if constexpr (std::is_same_v<Route, OpenMailboxRoute>)
-                        return writer.string(value.accountId) && writer.string(value.mailboxId);
+                        return writer.string(value.accountId) && writer.string(value.mailboxId) &&
+                               writer.string(value.activationToken);
                     else if constexpr (std::is_same_v<Route, OpenMessageRoute>)
-                        return writer.string(value.accountId) && writer.string(value.emailId);
+                        return writer.string(value.accountId) && writer.string(value.mailboxId) &&
+                               writer.string(value.threadId) && writer.string(value.emailId) &&
+                               writer.string(value.activationToken);
                     else if constexpr (std::is_same_v<Route, OpenComposeRoute>)
-                        return writer.string(value.composeSessionId);
+                        return writer.string(value.composeSessionId) &&
+                               writer.string(value.activationToken);
+                    else if constexpr (std::is_same_v<Route, RaiseGuiRoute>)
+                        return writer.string(value.activationToken);
+                    else if constexpr (std::is_same_v<Route, OpenSettingsRoute>)
+                        return writer.string(value.connectionId) &&
+                               writer.string(value.activationToken);
+                    else if constexpr (std::is_same_v<Route, RestoreDraftRoute>)
+                        return writer.string(value.accountId) &&
+                               writer.string(value.draftEmailId) &&
+                               writer.string(value.composeSessionId) &&
+                               writer.string(value.activationToken);
+                    else if constexpr (std::is_same_v<Route, OpenTaskCenterRoute>)
+                        return writer.string(value.activationToken);
                     else
-                        return true;
+                        return false;
                 },
                 route);
         }
@@ -1255,7 +1271,8 @@ namespace javelin::protocol
             if (kind == 0)
             {
                 OpenMailboxRoute value;
-                if (!reader.string(value.accountId) || !reader.string(value.mailboxId))
+                if (!reader.string(value.accountId) || !reader.string(value.mailboxId) ||
+                    !reader.string(value.activationToken))
                     return false;
                 route = std::move(value);
                 return true;
@@ -1263,7 +1280,9 @@ namespace javelin::protocol
             if (kind == 1)
             {
                 OpenMessageRoute value;
-                if (!reader.string(value.accountId) || !reader.string(value.emailId))
+                if (!reader.string(value.accountId) || !reader.string(value.mailboxId) ||
+                    !reader.string(value.threadId) || !reader.string(value.emailId) ||
+                    !reader.string(value.activationToken))
                     return false;
                 route = std::move(value);
                 return true;
@@ -1271,14 +1290,42 @@ namespace javelin::protocol
             if (kind == 2)
             {
                 OpenComposeRoute value;
-                if (!reader.string(value.composeSessionId))
+                if (!reader.string(value.composeSessionId) || !reader.string(value.activationToken))
                     return false;
                 route = std::move(value);
                 return true;
             }
             if (kind == 3)
             {
-                route = RaiseGuiRoute{};
+                RaiseGuiRoute value;
+                if (!reader.string(value.activationToken))
+                    return false;
+                route = std::move(value);
+                return true;
+            }
+            if (kind == 4)
+            {
+                OpenSettingsRoute value;
+                if (!reader.string(value.connectionId) || !reader.string(value.activationToken))
+                    return false;
+                route = std::move(value);
+                return true;
+            }
+            if (kind == 5)
+            {
+                RestoreDraftRoute value;
+                if (!reader.string(value.accountId) || !reader.string(value.draftEmailId) ||
+                    !reader.string(value.composeSessionId) || !reader.string(value.activationToken))
+                    return false;
+                route = std::move(value);
+                return true;
+            }
+            if (kind == 6)
+            {
+                OpenTaskCenterRoute value;
+                if (!reader.string(value.activationToken))
+                    return false;
+                route = std::move(value);
                 return true;
             }
             return reader.fail(QStringLiteral("activation route variant is invalid"));
@@ -1362,6 +1409,8 @@ namespace javelin::protocol
                                        (!value.targetSchema.has_value() ||
                                         writer.dword(value.targetSchema->value));
                             }
+                            else if constexpr (std::is_same_v<Event, DaemonShutdownRequested>)
+                                return true;
                             else
                                 return writeCacheIdentity(writer, value.cache) &&
                                        writer.qword(value.epoch.value);
@@ -1448,6 +1497,8 @@ namespace javelin::protocol
                     return malformed(QStringLiteral("invalid cache resume event"));
                 return finishReply(reader, BoundaryEvent{std::move(event)});
             }
+            if (kind == 7)
+                return finishReply(reader, BoundaryEvent{DaemonShutdownRequested{}});
             return malformed(QStringLiteral("unknown boundary event variant"));
         }
 
@@ -1735,20 +1786,40 @@ namespace javelin::protocol
                         if constexpr (std::is_same_v<Route, OpenMailboxRoute>)
                         {
                             return writer.byte(0) && writer.string(value.accountId) &&
-                                   writer.string(value.mailboxId);
+                                   writer.string(value.mailboxId) &&
+                                   writer.string(value.activationToken);
                         }
                         else if constexpr (std::is_same_v<Route, OpenMessageRoute>)
                         {
                             return writer.byte(1) && writer.string(value.accountId) &&
-                                   writer.string(value.emailId);
+                                   writer.string(value.mailboxId) &&
+                                   writer.string(value.threadId) && writer.string(value.emailId) &&
+                                   writer.string(value.activationToken);
                         }
                         else if constexpr (std::is_same_v<Route, OpenComposeRoute>)
+                            return writer.byte(2) && writer.string(value.composeSessionId) &&
+                                   writer.string(value.activationToken);
+                        else if constexpr (std::is_same_v<Route, RaiseGuiRoute>)
                         {
-                            return writer.byte(2) && writer.string(value.composeSessionId);
+                            return writer.byte(3) && writer.string(value.activationToken);
                         }
+                        else if constexpr (std::is_same_v<Route, OpenSettingsRoute>)
+                        {
+                            return writer.byte(4) && writer.string(value.connectionId) &&
+                                   writer.string(value.activationToken);
+                        }
+                        else if constexpr (std::is_same_v<Route, RestoreDraftRoute>)
+                        {
+                            return writer.byte(5) && writer.string(value.accountId) &&
+                                   writer.string(value.draftEmailId) &&
+                                   writer.string(value.composeSessionId) &&
+                                   writer.string(value.activationToken);
+                        }
+                        else if constexpr (std::is_same_v<Route, OpenTaskCenterRoute>)
+                            return writer.byte(6) && writer.string(value.activationToken);
                         else
                         {
-                            return writer.byte(3);
+                            return false;
                         }
                     },
                     route);
@@ -1768,7 +1839,8 @@ namespace javelin::protocol
         if (routeIndex == 0)
         {
             OpenMailboxRoute route;
-            if (!reader.string(route.accountId) || !reader.string(route.mailboxId))
+            if (!reader.string(route.accountId) || !reader.string(route.mailboxId) ||
+                !reader.string(route.activationToken))
                 return malformed(QStringLiteral("invalid mailbox activation route"));
             if (const auto error = reader.finish())
                 return *error;
@@ -1777,7 +1849,9 @@ namespace javelin::protocol
         if (routeIndex == 1)
         {
             OpenMessageRoute route;
-            if (!reader.string(route.accountId) || !reader.string(route.emailId))
+            if (!reader.string(route.accountId) || !reader.string(route.mailboxId) ||
+                !reader.string(route.threadId) || !reader.string(route.emailId) ||
+                !reader.string(route.activationToken))
                 return malformed(QStringLiteral("invalid message activation route"));
             if (const auto error = reader.finish())
                 return *error;
@@ -1786,7 +1860,7 @@ namespace javelin::protocol
         if (routeIndex == 2)
         {
             OpenComposeRoute route;
-            if (!reader.string(route.composeSessionId))
+            if (!reader.string(route.composeSessionId) || !reader.string(route.activationToken))
                 return malformed(QStringLiteral("invalid compose activation route"));
             if (const auto error = reader.finish())
                 return *error;
@@ -1794,9 +1868,40 @@ namespace javelin::protocol
         }
         if (routeIndex == 3)
         {
+            RaiseGuiRoute route;
+            if (!reader.string(route.activationToken))
+                return malformed(QStringLiteral("invalid raise activation route"));
             if (const auto error = reader.finish())
                 return *error;
-            return ActivationRoute{RaiseGuiRoute{}};
+            return ActivationRoute{std::move(route)};
+        }
+        if (routeIndex == 4)
+        {
+            OpenSettingsRoute route;
+            if (!reader.string(route.connectionId) || !reader.string(route.activationToken))
+                return malformed(QStringLiteral("invalid settings activation route"));
+            if (const auto error = reader.finish())
+                return *error;
+            return ActivationRoute{std::move(route)};
+        }
+        if (routeIndex == 5)
+        {
+            RestoreDraftRoute route;
+            if (!reader.string(route.accountId) || !reader.string(route.draftEmailId) ||
+                !reader.string(route.composeSessionId) || !reader.string(route.activationToken))
+                return malformed(QStringLiteral("invalid draft activation route"));
+            if (const auto error = reader.finish())
+                return *error;
+            return ActivationRoute{std::move(route)};
+        }
+        if (routeIndex == 6)
+        {
+            OpenTaskCenterRoute route;
+            if (!reader.string(route.activationToken))
+                return malformed(QStringLiteral("invalid task center activation route"));
+            if (const auto error = reader.finish())
+                return *error;
+            return ActivationRoute{std::move(route)};
         }
         return malformed(QStringLiteral("unknown activation route variant"));
     }

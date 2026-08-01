@@ -71,6 +71,8 @@ int main(int argc, char* argv[])
         .protocol = {.major = 1, .minor = 0},
         .build = {.application = QStringLiteral("Javelin-Mail"),
                   .revision = QStringLiteral(JAVELIN_APP_VERSION)},
+        .guiExecutable =
+            QDir{QCoreApplication::applicationDirPath()}.filePath(QStringLiteral("javelin")),
         .cacheRootPath = {},
         .settingsPath = {},
     };
@@ -78,6 +80,8 @@ int main(int argc, char* argv[])
     try
     {
         javelin::app::DaemonProcess process{std::move(options)};
+        QObject::connect(&process, &javelin::app::DaemonProcess::shutdownRequested, &application,
+                         &QCoreApplication::quit);
         if (const auto error = process.start())
             return fail(error->detail);
         return application.exec();

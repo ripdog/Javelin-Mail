@@ -4,12 +4,15 @@
 
 #include <QObject>
 
+#include <cstddef>
+#include <deque>
 #include <memory>
 #include <optional>
 
 namespace javelin::app
 {
     class DaemonServices;
+    class DaemonBackgroundController;
     class SettingsRepository;
 
     struct DaemonProcessOptions
@@ -17,6 +20,7 @@ namespace javelin::app
         javelin::protocol::SocketEndpointOptions socket;
         javelin::protocol::ProtocolVersion protocol;
         javelin::protocol::BuildIdentity build;
+        QString guiExecutable;
         QString cacheRootPath;
         QString settingsPath;
     };
@@ -55,6 +59,8 @@ namespace javelin::app
 
         [[nodiscard]] bool isReady() const;
         [[nodiscard]] bool hasGuiConnection() const;
+        void enqueueActivation(javelin::protocol::ActivationRoute route);
+        [[nodiscard]] std::size_t pendingActivationCount() const;
         [[nodiscard]] const QString& databasePath() const;
         [[nodiscard]] const javelin::protocol::SettingsSnapshot& settings() const;
         [[nodiscard]] const javelin::protocol::DaemonInstanceId& instanceId() const;
@@ -96,6 +102,7 @@ namespace javelin::app
         void ready();
         void guiConnected();
         void guiDisconnected();
+        void shutdownRequested();
 
       private:
         [[nodiscard]] std::optional<DaemonStartupError> fail(DaemonStartupErrorCode code,
@@ -105,12 +112,16 @@ namespace javelin::app
         void publishStatus();
         void applySettings();
         void connectOperationalEvents();
+        void flushPendingActivations();
+        void launchGuiIfNeeded();
+        void requestShutdown();
         void onSocketConnectionClosed(javelin::protocol::SocketDisconnectReason reason,
                                       const QString& detail);
 
         DaemonProcessOptions m_options;
         std::unique_ptr<SettingsRepository> m_settingsRepository;
         std::unique_ptr<DaemonServices> m_services;
+        std::unique_ptr<DaemonBackgroundController> m_background;
         std::unique_ptr<javelin::protocol::SocketDaemonEndpoint> m_endpoint;
         std::unique_ptr<javelin::protocol::SocketActivationEndpoint> m_activationEndpoint;
         javelin::protocol::SettingsSnapshot m_settingsSnapshot;
@@ -121,5 +132,7 @@ namespace javelin::app
             javelin::protocol::DaemonLifecycle::Starting;
         bool m_guiConnected = false;
         bool m_guiReady = false;
+        bool m_guiLaunchRequested = false;
+        std::deque<javelin::protocol::ActivationRoute> m_pendingActivations;
     };
 } // namespace javelin::app

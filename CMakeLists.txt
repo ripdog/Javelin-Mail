@@ -1261,10 +1261,14 @@ add_library(javelin_daemon_core STATIC
     src/app/MessageSelection.h
     src/app/DaemonBootstrap.cpp
     src/app/DaemonBootstrap.h
+    src/app/DaemonBackgroundController.cpp
+    src/app/DaemonBackgroundController.h
     src/app/DaemonProcess.cpp
     src/app/DaemonProcess.h
     src/app/DaemonServices.cpp
     src/app/DaemonServices.h
+    src/app/DaemonTrayController.cpp
+    src/app/DaemonTrayController.h
     src/app/SearchSession.cpp
     src/app/SearchSession.h
     src/app/SettingsRepository.cpp

@@ -686,6 +686,23 @@ and [Move tray and notification ownership](DAEMON_GUI_ARCHITECTURE.md#8-move-tra
 - Notification activation preserves exact target identity and does not alter current GUI state until
   treated as an explicit navigation request.
 
+### Implementation status
+
+Phase 10 is complete. `DaemonBackgroundController` is now the composition boundary for desktop mail
+notifications, calendar reminders, delayed-send actions, notification dispatch recovery and retry,
+cache-maintenance follow-up, network reachability recovery, and the daemon-owned tray. The Linux tray
+uses a direct QtDBus StatusNotifierItem with a DBusMenu containing GUI activation, Task Center,
+account refresh, and daemon Quit actions. Tray and notification startup failures are reported and
+isolated from synchronization.
+
+Notification and tray activations become typed routes containing the exact mailbox, thread, message,
+settings, draft, task-center, and activation-token identity. `DaemonProcess` queues those routes until
+the GUI has completed its activation-ready handshake, starts the configured GUI when no GUI is
+connected, and emits a typed shutdown event before tray Quit stops the daemon. Closing the GUI leaves
+the daemon services running. The old single-process target remains build-only transitional code, but
+it now consumes the same daemon background controller rather than owning a second tray or notification
+implementation.
+
 ## Phase 11: remove transitional architecture
 
 ### Work

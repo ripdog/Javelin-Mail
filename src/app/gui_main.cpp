@@ -1,6 +1,8 @@
 #include "app/GuiDaemonSession.h"
 
 #include <QApplication>
+#include <QCommandLineOption>
+#include <QCommandLineParser>
 #include <QDir>
 #include <QLabel>
 #include <QMainWindow>
@@ -30,11 +32,25 @@ int main(int argc, char* argv[])
     QCoreApplication::setApplicationName(QStringLiteral("Javelin Mail"));
     QCoreApplication::setApplicationVersion(QStringLiteral(JAVELIN_APP_VERSION));
 
-    const auto runtime = runtimeDirectory();
+    QCommandLineParser parser;
+    parser.addHelpOption();
+    const QCommandLineOption runtimeOption{QStringLiteral("runtime-directory"),
+                                           QStringLiteral("Private runtime directory."),
+                                           QStringLiteral("directory")};
+    const QCommandLineOption socketOption{
+        QStringLiteral("socket"), QStringLiteral("Daemon socket path."), QStringLiteral("path")};
+    parser.addOption(runtimeOption);
+    parser.addOption(socketOption);
+    parser.process(application);
+
+    const auto runtime =
+        parser.isSet(runtimeOption) ? parser.value(runtimeOption) : runtimeDirectory();
     if (runtime.isEmpty())
         return 1;
 
-    const auto socketPath = QDir{runtime}.filePath(QStringLiteral("javelind.sock"));
+    const auto socketPath = parser.isSet(socketOption)
+                                ? parser.value(socketOption)
+                                : QDir{runtime}.filePath(QStringLiteral("javelind.sock"));
     auto activationOptions = javelin::protocol::SocketClientOptions{
         .runtimeDirectory = runtime,
         .socketPath = socketPath + QStringLiteral(".activation"),
@@ -90,6 +106,8 @@ int main(int argc, char* argv[])
                          status->setText(QStringLiteral("Javelin Mail daemon reconnected"));
                          retry->setEnabled(false);
                      });
+    QObject::connect(&session, &javelin::app::GuiDaemonSession::daemonShutdownRequested,
+                     &application, &QCoreApplication::quit);
     QObject::connect(&session, &javelin::app::GuiDaemonSession::activationRequested, &window,
                      [&window, &status](const javelin::protocol::ActivationRoute&)
                      {

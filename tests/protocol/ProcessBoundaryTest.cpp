@@ -605,6 +605,12 @@ TEST_CASE("socket endpoint runs the transport-neutral typed surface", "[protocol
     REQUIRE(invalidation != nullptr);
     CHECK(invalidation->epoch.value == 13);
 
+    sink.received.reset();
+    endpoint.publishEvent(DaemonShutdownRequested{});
+    processUntil([&sink] { return sink.received.has_value(); });
+    REQUIRE(sink.received.has_value());
+    CHECK(std::holds_alternative<DaemonShutdownRequested>(*sink.received));
+
     for (int index = 0; index < 100; ++index)
     {
         endpoint.publishEvent(
@@ -632,10 +638,15 @@ TEST_CASE("activation socket carries typed routes to the daemon", "[protocol][so
     auto options = socketOptions(runtimeDirectory);
     options.socketPath += QStringLiteral(".activation");
     SocketActivationEndpointThread endpoint{handler, options};
-    REQUIRE_FALSE(endpoint.listen().has_value());
+    const auto listenError = endpoint.listen();
+    REQUIRE_FALSE(listenError.has_value());
 
-    const auto route = ActivationRoute{OpenMessageRoute{.accountId = QStringLiteral("account-1"),
-                                                        .emailId = QStringLiteral("email-1")}};
+    const auto route =
+        ActivationRoute{OpenMessageRoute{.accountId = QStringLiteral("account-1"),
+                                         .mailboxId = QStringLiteral("mailbox-1"),
+                                         .threadId = QStringLiteral("thread-1"),
+                                         .emailId = QStringLiteral("email-1"),
+                                         .activationToken = QStringLiteral("token-1")}};
     const auto result = SocketActivationClient::request(options, route);
     REQUIRE(std::holds_alternative<std::optional<BoundaryError>>(result));
     CHECK_FALSE(std::get<std::optional<BoundaryError>>(result).has_value());
@@ -644,7 +655,10 @@ TEST_CASE("activation socket carries typed routes to the daemon", "[protocol][so
     const auto* received = std::get_if<OpenMessageRoute>(&*activatedRoute);
     REQUIRE(received != nullptr);
     CHECK(received->accountId == QStringLiteral("account-1"));
+    CHECK(received->mailboxId == QStringLiteral("mailbox-1"));
+    CHECK(received->threadId == QStringLiteral("thread-1"));
     CHECK(received->emailId == QStringLiteral("email-1"));
+    CHECK(received->activationToken == QStringLiteral("token-1"));
 
     auto incompatibleOptions = options;
     incompatibleOptions.expectedBuild = BuildIdentity{.application = QStringLiteral("Javelin-Mail"),

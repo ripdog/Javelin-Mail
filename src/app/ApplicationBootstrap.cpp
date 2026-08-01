@@ -1,12 +1,9 @@
 #include "app/ApplicationBootstrap.h"
 
 #include "app/AddressSuggestionStore.h"
-#include "app/ApplicationErrorCoordinator.h"
-#include "app/CalendarNotificationService.h"
+#include "app/DaemonBackgroundController.h"
 #include "app/DaemonBootstrap.h"
 #include "app/DaemonServices.h"
-#include "app/DeferredSendService.h"
-#include "app/DesktopNotificationController.h"
 #include "app/FullMailSyncService.h"
 #include "app/GuiServices.h"
 #include "app/LocalMaintenanceService.h"
@@ -18,19 +15,18 @@
 #include "gui/settings/PreferencesDialog.h"
 #include "gui/shell/MainWindow.h"
 #include "gui/tasks/TaskCenterDialog.h"
+#include "protocol/ProcessBoundary.h"
 
 #include <KAboutData>
-#include <QAction>
 #include <QApplication>
 #include <QByteArray>
 #include <QGuiApplication>
 #include <QIcon>
-#include <QMenu>
-#include <QNetworkInformation>
 #include <QStatusBar>
-#include <QSystemTrayIcon>
-#include <QTimer>
 #include <QToolButton>
+
+#include <type_traits>
+#include <variant>
 
 namespace javelin::app
 {
@@ -156,7 +152,8 @@ namespace javelin::app
               std::make_unique<GuiServices>(m_daemonBootstrap->services().databasePath(),
                                             m_daemonBootstrap->services().cacheAccessBarrier(),
                                             m_daemonBootstrap->services().contactRepository())),
-          m_notificationController(std::make_unique<DesktopNotificationController>())
+          m_backgroundController(
+              std::make_unique<DaemonBackgroundController>(m_daemonBootstrap->services()))
     {
     }
 
@@ -198,9 +195,10 @@ namespace javelin::app
         }
 
         reloadAccountSynchronizationSettings();
-        setupNetworkReachability();
-        setupSystemTray();
-        daemonServices().deferredSendService().start();
+        setupBackgroundActivation();
+        QObject::connect(&daemonServices().mailService(), &MailApplicationService::cacheCommitted,
+                         &guiServices().addressSuggestionStore(), &AddressSuggestionStore::refresh);
+        m_backgroundController->start();
         createMainWindow();
 
         return m_application.exec();
@@ -289,217 +287,58 @@ namespace javelin::app
         daemonServices().localMaintenanceService().requestReplay();
     }
 
-    void ApplicationBootstrap::setupNetworkReachability()
+    void ApplicationBootstrap::setupBackgroundActivation()
     {
-        if (!QNetworkInformation::loadDefaultBackend())
-        {
-            qWarning() << QStringLiteral(
-                "Network reachability backend unavailable; resume watchdog remains active");
-            return;
-        }
-
-        auto* networkInformation = QNetworkInformation::instance();
-        if (networkInformation == nullptr)
-            return;
-
-        QObject::connect(networkInformation, &QNetworkInformation::reachabilityChanged,
-                         &m_application,
-                         [this](const QNetworkInformation::Reachability reachability)
-                         {
-                             if (reachability != QNetworkInformation::Reachability::Online)
-                                 return;
-                             qInfo() << QStringLiteral(
-                                 "Network became reachable; reconnecting account synchronization");
-                             daemonServices().mailService().networkBecameReachable();
-                         });
-    }
-
-    void ApplicationBootstrap::toggleMainWindow()
-    {
-        if (m_mainWindow)
-        {
-            m_mainWindow->close();
-        }
-        else
-        {
-            restoreMainWindow();
-        }
-    }
-
-    void ApplicationBootstrap::setupSystemTray()
-    {
-        m_trayIcon = std::make_unique<QSystemTrayIcon>(QIcon(QStringLiteral(":/icons/icon.svg")));
-        m_trayMenu = std::make_unique<QMenu>();
-
-        auto* toggleAction = m_trayMenu->addAction(QStringLiteral("Toggle Javelin"));
-        QObject::connect(toggleAction, &QAction::triggered, [&]() { toggleMainWindow(); });
-
-        auto* taskCenterAction = m_trayMenu->addAction(QStringLiteral("Task Center…"));
-        QObject::connect(taskCenterAction, &QAction::triggered, [this]() { showTaskCenter(); });
-
-        m_trayMenu->addSeparator();
-
-        auto* quitAction = m_trayMenu->addAction(QStringLiteral("Quit"));
-        QObject::connect(quitAction, &QAction::triggered, [&]() { m_application.quit(); });
-
-        m_trayIcon->setContextMenu(m_trayMenu.get());
         QObject::connect(
-            &daemonServices().workScheduler(), &WorkScheduler::jobsChanged, &m_application,
-            [this]()
-            {
-                const QString summary = daemonServices().workScheduler().summary();
-                m_trayIcon->setToolTip(summary.isEmpty()
-                                           ? QStringLiteral("Javelin Mail")
-                                           : QStringLiteral("Javelin Mail — %1").arg(summary));
-            });
-
-        if (const auto error = daemonServices().mailService().recoverMailNotificationDispatches())
-            qWarning().noquote() << "Recover mail notification delivery:" << error->message;
-        QObject::connect(
-            &daemonServices().mailService(), &MailApplicationService::notificationRaised,
-            m_notificationController.get(),
-            [this](const QString& accountId, const QString& mailboxId, const QString& threadId,
-                   const QString& emailId, const QString& mailboxName, const QString& title,
-                   const QString& message, const QStringList& deliveredEmailIds)
-            {
-                if (m_notificationController->notifyNewMail(accountId, mailboxId, threadId, emailId,
-                                                            mailboxName, title, message))
-                {
-                    if (const auto error =
-                            daemonServices().mailService().markMailNotificationsDelivered(
-                                accountId.toStdString(), mailboxId.toStdString(),
-                                deliveredEmailIds))
-                        qWarning().noquote()
-                            << "Record mail notification delivery:" << error->message;
-                    return;
-                }
-                if (const auto error =
-                        daemonServices().mailService().releaseMailNotificationDispatches(
-                            accountId.toStdString(), deliveredEmailIds))
-                    qWarning().noquote() << "Release mail notification delivery:" << error->message;
-                QTimer::singleShot(
-                    60000, &m_application,
-                    [this, accountId]()
-                    {
-                        static_cast<void>(
-                            daemonServices().mailService().requestAccountSynchronization(
-                                accountId.toStdString()));
-                    });
-            });
-        QObject::connect(&daemonServices().mailService(), &MailApplicationService::cacheCommitted,
-                         &guiServices().addressSuggestionStore(), &AddressSuggestionStore::refresh);
-        QObject::connect(&daemonServices().mailService(), &MailApplicationService::cacheCommitted,
-                         &m_application,
-                         [this](const MailCacheChange& change)
-                         {
-                             daemonServices().localMaintenanceService().requestReplay();
-                             if (!change.optimisticProjection)
-                             {
-                                 daemonServices().fullMailSyncService().requestCatchUp(
-                                     change.accountId.toStdString());
-                             }
-                             if (change.hasNewMail)
-                             {
-                                 daemonServices().mailIndexService().requestIndex(
-                                     change.accountId.toStdString());
-                             }
-                         });
-        QObject::connect(
-            &daemonServices().errorCoordinator(), &ApplicationErrorCoordinator::incidentRaised,
-            m_notificationController.get(),
-            [this](const QString& connectionId, const QString&, const QString& title,
-                   const QString& message, const bool persistent, const bool opensSettings)
-            {
-                m_notificationController->notifyError(connectionId, title, message, persistent,
-                                                      opensSettings);
-            });
-        QObject::connect(
-            m_notificationController.get(), &DesktopNotificationController::notificationActivated,
+            m_backgroundController.get(), &DaemonBackgroundController::activationRequested,
             &m_application,
-            [this](const QString& accountId, const QString& mailboxId, const QString& threadId,
-                   const QString& emailId, const QString& activationToken)
+            [this](protocol::ActivationRoute route)
             {
-                restoreMainWindow(activationToken);
-                const auto thread = threadId.isEmpty()
-                                        ? std::optional<std::string>{std::nullopt}
-                                        : std::optional<std::string>{threadId.toStdString()};
-                static_cast<void>(daemonServices().messageNavigationPort().openEmail(
-                    accountId.toStdString(), mailboxId.toStdString(), thread,
-                    emailId.toStdString()));
+                std::visit(
+                    [this](const auto& activation)
+                    {
+                        using Route = std::decay_t<decltype(activation)>;
+                        if constexpr (std::is_same_v<Route, protocol::OpenMessageRoute>)
+                        {
+                            restoreMainWindow(activation.activationToken);
+                            const auto thread =
+                                activation.threadId.isEmpty()
+                                    ? std::optional<std::string>{std::nullopt}
+                                    : std::optional<std::string>{activation.threadId.toStdString()};
+                            static_cast<void>(daemonServices().messageNavigationPort().openEmail(
+                                activation.accountId.toStdString(),
+                                activation.mailboxId.toStdString(), thread,
+                                activation.emailId.toStdString()));
+                        }
+                        else if constexpr (std::is_same_v<Route, protocol::OpenSettingsRoute>)
+                        {
+                            restoreMainWindow(activation.activationToken);
+                            if (m_mainWindow != nullptr)
+                                m_mainWindow->openPreferencesForConnection(activation.connectionId);
+                        }
+                        else if constexpr (std::is_same_v<Route, protocol::RestoreDraftRoute>)
+                        {
+                            restoreMainWindow(activation.activationToken);
+                            if (m_mainWindow != nullptr)
+                                m_mainWindow->restoreDraft(activation.accountId,
+                                                           activation.draftEmailId,
+                                                           activation.composeSessionId);
+                        }
+                        else if constexpr (std::is_same_v<Route, protocol::OpenTaskCenterRoute>)
+                        {
+                            restoreMainWindow(activation.activationToken);
+                            showTaskCenter();
+                        }
+                        else if constexpr (requires { activation.activationToken; })
+                            restoreMainWindow(activation.activationToken);
+                        else
+                            restoreMainWindow();
+                    },
+                    route);
             });
-        QObject::connect(&daemonServices().calendarNotificationService(),
-                         &CalendarNotificationService::reminderDue, m_notificationController.get(),
-                         [this](const QString& key, const QString& title, const QString& message)
-                         {
-                             if (m_notificationController->notifyCalendarEvent(key, title, message))
-                                 daemonServices().calendarNotificationService().deliveryAccepted(
-                                     key);
-                             else
-                                 daemonServices().calendarNotificationService().deliveryFailed(key);
-                         });
-        QObject::connect(m_notificationController.get(),
-                         &DesktopNotificationController::calendarNotificationAction, &m_application,
-                         [this](const QString& key, const bool snooze)
-                         {
-                             if (snooze)
-                                 daemonServices().calendarNotificationService().snooze(key);
-                             else
-                                 daemonServices().calendarNotificationService().dismiss(key);
-                         });
-        daemonServices().calendarNotificationService().start();
-        QObject::connect(m_notificationController.get(),
-                         &DesktopNotificationController::errorNotificationActivated, &m_application,
-                         [this](const QString& connectionId, const QString& activationToken)
-                         {
-                             restoreMainWindow(activationToken);
-                             if (m_mainWindow != nullptr)
-                                 m_mainWindow->openPreferencesForConnection(connectionId);
-                         });
-        QObject::connect(
-            &daemonServices().deferredSendService(), &DeferredSendService::undoableSendScheduled,
-            m_notificationController.get(), &DesktopNotificationController::notifyUndoableSend);
-        QObject::connect(
-            &daemonServices().deferredSendService(), &DeferredSendService::undoableSendWaiting,
-            m_notificationController.get(),
-            [this](const QString& sendId, const QString& title, const QString& message)
-            { m_notificationController->notifyUndoableSend(sendId, title, message, 0); });
-        QObject::connect(&daemonServices().deferredSendService(),
-                         &DeferredSendService::undoableSendClosed, m_notificationController.get(),
-                         &DesktopNotificationController::closeUndoableSendNotification);
-        QObject::connect(
-            m_notificationController.get(), &DesktopNotificationController::undoSendRequested,
-            &m_application, [this](const QString& sendId)
-            { static_cast<void>(daemonServices().deferredSendService().cancelTargeted(sendId)); });
-        QObject::connect(&daemonServices().deferredSendService(),
-                         &DeferredSendService::draftRestoreRequested, &m_application,
-                         [this](const QString& accountId, const QString& draftEmailId,
-                                const QString& composeSessionId)
-                         {
-                             restoreMainWindow({});
-                             if (m_mainWindow != nullptr)
-                                 m_mainWindow->restoreDraft(accountId, draftEmailId,
-                                                            composeSessionId);
-                         });
-        QObject::connect(&daemonServices().deferredSendService(), &DeferredSendService::sendFailed,
-                         m_notificationController.get(),
-                         [this](const QString&, const QString& message)
-                         {
-                             m_notificationController->notifyError(
-                                 {}, QStringLiteral("Unable to send message"), message, true,
-                                 false);
-                         });
-
-        QObject::connect(m_trayIcon.get(), &QSystemTrayIcon::activated,
-                         [&](QSystemTrayIcon::ActivationReason reason)
-                         {
-                             if (reason == QSystemTrayIcon::Trigger ||
-                                 reason == QSystemTrayIcon::DoubleClick)
-                             {
-                                 toggleMainWindow();
-                             }
-                         });
-
-        m_trayIcon->show();
+        QObject::connect(m_backgroundController.get(),
+                         &DaemonBackgroundController::shutdownRequested, &m_application,
+                         [this]() { m_application.quit(); });
     }
 
     void ApplicationBootstrap::showTaskCenter()

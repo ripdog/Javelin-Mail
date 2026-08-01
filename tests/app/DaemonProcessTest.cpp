@@ -48,6 +48,7 @@ namespace
             .protocol = {.major = 1, .minor = 0},
             .build = {.application = QStringLiteral("Javelin-Mail"),
                       .revision = QStringLiteral("daemon-test")},
+            .guiExecutable = {},
             .cacheRootPath = cacheRoot,
             .settingsPath = settingsPath,
         };
@@ -117,6 +118,19 @@ TEST_CASE("daemon process migrates settings before exposing readiness", "[app][d
     CHECK(updated->revision.value == 1);
 
     CHECK_FALSE(process.handlePing({}).has_value());
+    process.enqueueActivation(javelin::protocol::OpenMessageRoute{
+        .accountId = QStringLiteral("account-1"),
+        .mailboxId = QStringLiteral("mailbox-1"),
+        .threadId = QStringLiteral("thread-1"),
+        .emailId = QStringLiteral("email-1"),
+        .activationToken = QStringLiteral("notification-token"),
+    });
+    CHECK(process.pendingActivationCount() == 1);
+    CHECK_FALSE(process
+                    .handleGuiActivation(javelin::protocol::RaiseGuiRoute{
+                        .activationToken = QStringLiteral("raise-token")})
+                    .has_value());
+    CHECK(process.pendingActivationCount() == 2);
     process.stop();
     CHECK_FALSE(process.isReady());
 }

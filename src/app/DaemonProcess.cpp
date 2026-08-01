@@ -3,6 +3,7 @@
 #include "app/CacheAccessBarrier.h"
 #include "app/CalendarNotificationService.h"
 #include "app/CommandDispatcher.h"
+#include "app/DaemonBackgroundController.h"
 #include "app/DaemonServices.h"
 #include "app/DeferredSendService.h"
 #include "app/FullMailSyncService.h"
@@ -14,8 +15,12 @@
 #include "app/TranslationApplicationPorts.h"
 #include "app/undo/UndoManager.h"
 
+#include <QCoreApplication>
+#include <QDir>
 #include <QMetaObject>
+#include <QProcess>
 #include <QSettings>
+#include <QTimer>
 
 #include <algorithm>
 #include <exception>
@@ -173,9 +178,10 @@ namespace javelin::app
             m_services = std::make_unique<DaemonServices>(std::get<CacheLocation>(locationResult));
             applySettings();
             m_services->translationService().reloadSettings();
-            m_services->deferredSendService().start();
-            m_services->calendarNotificationService().start();
-            m_services->localMaintenanceService().requestReplay();
+            m_background = std::make_unique<DaemonBackgroundController>(*m_services, this);
+            m_services->commandDispatcher().setEventSink(this);
+            connectOperationalEvents();
+            m_background->start();
         }
         catch (const std::exception& exception)
         {
@@ -194,8 +200,6 @@ namespace javelin::app
         connect(m_endpoint.get(), &protocol::SocketDaemonEndpoint::connectionClosed, this,
                 &DaemonProcess::onSocketConnectionClosed);
 
-        m_services->commandDispatcher().setEventSink(this);
-        connectOperationalEvents();
         if (const auto error = m_endpoint->listen())
             return fail(DaemonStartupErrorCode::SocketListen, error->detail);
 
@@ -217,6 +221,11 @@ namespace javelin::app
         if (m_lifecycle == DaemonLifecycle::ShuttingDown)
             return;
         m_lifecycle = DaemonLifecycle::ShuttingDown;
+        if (m_background != nullptr)
+        {
+            m_background->stop();
+            m_background.reset();
+        }
         if (m_cacheAccessAcknowledged && m_services != nullptr)
         {
             if (const auto error = m_services->cacheAccessBarrier().resume())
@@ -239,6 +248,8 @@ namespace javelin::app
         m_settingsRepository.reset();
         m_guiConnected = false;
         m_guiReady = false;
+        m_guiLaunchRequested = false;
+        m_pendingActivations.clear();
     }
 
     bool DaemonProcess::isReady() const
@@ -249,6 +260,30 @@ namespace javelin::app
     bool DaemonProcess::hasGuiConnection() const
     {
         return m_guiConnected;
+    }
+
+    void DaemonProcess::enqueueActivation(protocol::ActivationRoute route)
+    {
+        if (m_guiConnected && m_guiReady)
+        {
+            onBoundaryEvent(protocol::ActivationRequested{.route = std::move(route)});
+            return;
+        }
+
+        constexpr std::size_t maximumPendingActivations = 64;
+        if (m_pendingActivations.size() >= maximumPendingActivations)
+        {
+            qWarning() << QStringLiteral("Activation queue is full; dropping the oldest route");
+            m_pendingActivations.pop_front();
+        }
+        m_pendingActivations.push_back(std::move(route));
+        if (!m_guiConnected)
+            launchGuiIfNeeded();
+    }
+
+    std::size_t DaemonProcess::pendingActivationCount() const
+    {
+        return m_pendingActivations.size();
     }
 
     const QString& DaemonProcess::databasePath() const
@@ -443,6 +478,7 @@ namespace javelin::app
                                  .detail =
                                      QStringLiteral("GUI activation was already acknowledged")};
         m_guiReady = true;
+        flushPendingActivations();
         publishStatus();
         return std::nullopt;
     }
@@ -450,11 +486,21 @@ namespace javelin::app
     std::optional<protocol::BoundaryError>
     DaemonProcess::handleGuiActivation(const protocol::ActivationRoute& route)
     {
-        if (!isReady() || !m_guiConnected || !m_guiReady)
+        if (!isReady())
             return BoundaryError{.code = BoundaryErrorCode::Busy,
                                  .field = QStringLiteral("gui"),
-                                 .detail = QStringLiteral("no ready GUI is available to activate")};
-        onBoundaryEvent(ActivationRequested{.route = route});
+                                 .detail = QStringLiteral("daemon is not ready to activate GUI")};
+        if (m_guiConnected && m_guiReady)
+        {
+            onBoundaryEvent(ActivationRequested{.route = route});
+            return std::nullopt;
+        }
+        if (m_guiConnected)
+        {
+            enqueueActivation(route);
+            return std::nullopt;
+        }
+        enqueueActivation(route);
         return std::nullopt;
     }
 
@@ -539,6 +585,10 @@ namespace javelin::app
                 });
         connect(&events, &MailApplicationEventsPort::accountStatusChanged, this,
                 [this](const QString&, MailAccountStatus) { publishStatus(); });
+        connect(m_background.get(), &DaemonBackgroundController::activationRequested, this,
+                &DaemonProcess::enqueueActivation);
+        connect(m_background.get(), &DaemonBackgroundController::shutdownRequested, this,
+                &DaemonProcess::requestShutdown);
     }
 
     void DaemonProcess::onSocketConnectionClosed(const protocol::SocketDisconnectReason,
@@ -553,12 +603,57 @@ namespace javelin::app
         }
         m_guiConnected = false;
         m_guiReady = false;
+        m_guiLaunchRequested = false;
         m_cacheSuspend.reset();
         m_cacheAccessAcknowledged = false;
+        if (!m_pendingActivations.empty())
+            QTimer::singleShot(0, this, &DaemonProcess::launchGuiIfNeeded);
         if (wasConnected)
         {
             Q_EMIT guiDisconnected();
             publishStatus();
         }
+    }
+
+    void DaemonProcess::flushPendingActivations()
+    {
+        if (!m_guiConnected || !m_guiReady)
+            return;
+        while (!m_pendingActivations.empty())
+        {
+            onBoundaryEvent(
+                protocol::ActivationRequested{.route = std::move(m_pendingActivations.front())});
+            m_pendingActivations.pop_front();
+        }
+    }
+
+    void DaemonProcess::launchGuiIfNeeded()
+    {
+        if (m_guiConnected || m_guiLaunchRequested || m_pendingActivations.empty())
+            return;
+        if (m_options.guiExecutable.isEmpty())
+        {
+            qWarning() << QStringLiteral(
+                "Activation is queued but no GUI executable was configured");
+            return;
+        }
+        const QStringList arguments{QStringLiteral("--runtime-directory"),
+                                    m_options.socket.runtimeDirectory, QStringLiteral("--socket"),
+                                    m_options.socket.socketPath};
+        if (!QProcess::startDetached(m_options.guiExecutable, arguments))
+        {
+            qWarning().noquote() << QStringLiteral("Could not start GUI for activation:")
+                                 << m_options.guiExecutable;
+            return;
+        }
+        m_guiLaunchRequested = true;
+    }
+
+    void DaemonProcess::requestShutdown()
+    {
+        if (!isReady())
+            return;
+        onBoundaryEvent(protocol::DaemonShutdownRequested{});
+        Q_EMIT shutdownRequested();
     }
 } // namespace javelin::app

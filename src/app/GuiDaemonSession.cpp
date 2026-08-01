@@ -199,6 +199,10 @@ namespace javelin::app
                 {
                     Q_EMIT activationRequested(value.route);
                 }
+                else if constexpr (std::is_same_v<Event, protocol::DaemonShutdownRequested>)
+                {
+                    Q_EMIT daemonShutdownRequested();
+                }
             },
             event);
     }

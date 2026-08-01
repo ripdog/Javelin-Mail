@@ -408,25 +408,51 @@ namespace javelin::protocol
     {
         QString accountId;
         QString mailboxId;
+        QString activationToken;
     };
 
     struct OpenMessageRoute
     {
         QString accountId;
+        QString mailboxId;
+        QString threadId;
         QString emailId;
+        QString activationToken;
     };
 
     struct OpenComposeRoute
     {
         QString composeSessionId;
+        QString activationToken;
+    };
+
+    struct OpenSettingsRoute
+    {
+        QString connectionId;
+        QString activationToken;
+    };
+
+    struct RestoreDraftRoute
+    {
+        QString accountId;
+        QString draftEmailId;
+        QString composeSessionId;
+        QString activationToken;
+    };
+
+    struct OpenTaskCenterRoute
+    {
+        QString activationToken;
     };
 
     struct RaiseGuiRoute
     {
+        QString activationToken;
     };
 
     using ActivationRoute =
-        std::variant<OpenMailboxRoute, OpenMessageRoute, OpenComposeRoute, RaiseGuiRoute>;
+        std::variant<OpenMailboxRoute, OpenMessageRoute, OpenComposeRoute, RaiseGuiRoute,
+                     OpenSettingsRoute, RestoreDraftRoute, OpenTaskCenterRoute>;
 
     enum class CacheSuspendReason : std::uint8_t
     {
@@ -448,6 +474,10 @@ namespace javelin::protocol
         InvalidationEpoch epoch;
     };
 
+    struct DaemonShutdownRequested
+    {
+    };
+
     struct CacheInvalidation
     {
         InvalidationEpoch epoch;
@@ -467,7 +497,8 @@ namespace javelin::protocol
 
     using BoundaryEvent =
         std::variant<CacheInvalidation, OperationFailed, SettingsUpdated, ActivationRequested,
-                     DaemonStatusChanged, CacheAccessSuspendRequested, CacheAccessResumed>;
+                     DaemonStatusChanged, CacheAccessSuspendRequested, CacheAccessResumed,
+                     DaemonShutdownRequested>;
 
     struct BoundaryLimits
     {
