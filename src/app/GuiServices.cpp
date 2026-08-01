@@ -30,7 +30,7 @@ namespace javelin::app
 {
     GuiServices::GuiServices(GuiDaemonSession& session,
                              const bool installInlineMessageSchemeHandler)
-        : m_session(session), m_databasePath(session.databasePath())
+        : m_session(session)
     {
         if (const auto error = openReadConnection())
             throw std::runtime_error(error->message.toStdString());
@@ -59,7 +59,7 @@ namespace javelin::app
             std::make_unique<javelin::jmap::cache::MessageViewService>(m_databaseConnection);
         m_queryService = std::make_unique<javelin::jmap::cache::QueryService>(m_databaseConnection);
 
-        AddressSuggestionStore::instance().initialize(m_databasePath);
+        AddressSuggestionStore::instance().initialize(m_session.databasePath());
         m_cacheInvalidationConnection =
             QObject::connect(&m_session, &GuiDaemonSession::cacheInvalidated, &m_session,
                              [this](const javelin::protocol::CacheInvalidation& invalidation)
@@ -111,7 +111,7 @@ namespace javelin::app
         auto opened = javelin::jmap::cache::GuiDatabaseFactory{
             javelin::jmap::cache::ReadOnlyThreadConnectionFactoryOptions{
                 .connectionNamePrefix = QStringLiteral("javelin-gui-read"),
-                .databasePath = m_databasePath,
+                .databasePath = m_session.databasePath(),
             }}.openForCurrentThread("main");
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&opened))
             return *error;

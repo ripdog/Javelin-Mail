@@ -112,7 +112,6 @@ namespace javelin::app
         void notifyCacheReaders(const javelin::protocol::CacheInvalidation& invalidation);
 
         GuiDaemonSession& m_session;
-        QString m_databasePath;
         javelin::jmap::cache::ReadOnlyDatabaseConnection m_databaseConnection;
         CacheAccessBarrier::ParticipantId m_cacheParticipant = 0;
         QMetaObject::Connection m_cacheInvalidationConnection;
