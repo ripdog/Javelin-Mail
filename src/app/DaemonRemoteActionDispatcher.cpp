@@ -61,14 +61,114 @@ namespace javelin::app
         {
             return encodeResult(std::monostate{});
         }
+
+        [[nodiscard]] std::vector<javelin::protocol::ChangedDomain>
+        admissionDomains(const javelin::protocol::RemoteActionKind kind)
+        {
+            using Domain = javelin::protocol::ChangedDomain;
+            using Kind = javelin::protocol::RemoteActionKind;
+            switch (kind)
+            {
+            case Kind::RemoveConfiguredAccount:
+                return {Domain::MailboxTree,    Domain::MailQueryWindows, Domain::MessageMetadata,
+                        Domain::MessageContent, Domain::Contacts,         Domain::Calendars,
+                        Domain::History,        Domain::BackgroundJobs};
+            case Kind::CalendarRequestRange:
+                return {Domain::Calendars};
+            case Kind::CalendarCreateEvent:
+            case Kind::CalendarUpdateEvent:
+            case Kind::CalendarDeleteEvent:
+            case Kind::CalendarSetDefault:
+            case Kind::CalendarCreate:
+            case Kind::CalendarDelete:
+            case Kind::CalendarSetVisible:
+                return {Domain::Calendars, Domain::History};
+            case Kind::ComposeOpen:
+            case Kind::ComposeStoreWorkingCopy:
+            case Kind::ComposeDiscard:
+                return {Domain::MessageContent};
+            case Kind::ComposeSaveDraft:
+            case Kind::ComposeSend:
+                return {Domain::MailQueryWindows, Domain::MessageMetadata, Domain::MessageContent,
+                        Domain::History};
+            case Kind::ContactRequestRefresh:
+                return {Domain::Contacts};
+            case Kind::ContactMutateAddressBook:
+            case Kind::ContactSave:
+            case Kind::ContactSetStarred:
+            case Kind::ContactDelete:
+            case Kind::ContactCreateGroup:
+            case Kind::ContactDeleteGroup:
+            case Kind::ContactSetGroupMembership:
+            case Kind::ContactCopy:
+            case Kind::ContactImport:
+            case Kind::ContactMerge:
+                return {Domain::Contacts, Domain::History};
+            case Kind::MailQueueMailboxMutation:
+            case Kind::MailQueueDestroy:
+            case Kind::MailQueueMarkUnread:
+            case Kind::MailQueueMarkRead:
+            case Kind::MailQueueSetFlagged:
+            case Kind::MailSubmitPending:
+                return {Domain::MailQueryWindows, Domain::MessageMetadata, Domain::History};
+            case Kind::SieveSave:
+            case Kind::SieveDelete:
+            case Kind::SieveActivate:
+                return {Domain::History};
+            case Kind::AccountBootstrap:
+                return {Domain::MailboxTree, Domain::MailQueryWindows, Domain::MessageMetadata,
+                        Domain::Contacts, Domain::Calendars};
+            case Kind::MessageContent:
+            case Kind::AttachmentDownload:
+            case Kind::MessageSource:
+                return {Domain::MessageContent};
+            case Kind::MailboxWindow:
+            case Kind::SearchWindow:
+            case Kind::SearchRetire:
+                return {Domain::MailQueryWindows, Domain::MessageMetadata};
+            case Kind::Undo:
+            case Kind::Redo:
+                return {Domain::MailboxTree,    Domain::MailQueryWindows, Domain::MessageMetadata,
+                        Domain::MessageContent, Domain::Contacts,         Domain::Calendars,
+                        Domain::History};
+            case Kind::UndoAcknowledgeRemove:
+            case Kind::UndoForget:
+                return {Domain::History};
+            case Kind::ReloadSettings:
+                return {Domain::MailboxTree, Domain::BackgroundJobs};
+            case Kind::WorkPause:
+            case Kind::WorkResume:
+            case Kind::WorkRetry:
+                return {Domain::BackgroundJobs};
+            case Kind::CalendarReadCached:
+            case Kind::CalendarReadAccounts:
+            case Kind::CalendarReadCalendars:
+            case Kind::ComposeLoadSenderIdentities:
+            case Kind::ComposeLoadWorkingCopy:
+            case Kind::ContactUploadMedia:
+            case Kind::ContactDownloadMedia:
+            case Kind::SieveList:
+            case Kind::SieveGet:
+            case Kind::SieveValidate:
+            case Kind::MailboxObserve:
+            case Kind::MailboxUnobserve:
+            case Kind::TranslationTranslate:
+            case Kind::UndoSnapshot:
+            case Kind::WorkList:
+            case Kind::WorkSummary:
+                return {};
+            }
+            return {};
+        }
     } // namespace
 
     DaemonRemoteActionDispatcher::DaemonRemoteActionDispatcher(
         DaemonServices& services, javelin::protocol::BoundaryEventSink& eventSink,
+        std::function<javelin::protocol::InvalidationEpoch()> currentEpoch,
         std::function<std::optional<javelin::protocol::BoundaryError>()> reloadSettings,
         QObject* parent)
         : QObject(parent), m_services(services), m_eventSink(eventSink),
-          m_reloadSettings(std::move(reloadSettings))
+          m_currentEpoch(std::move(currentEpoch)), m_reloadSettings(std::move(reloadSettings))
     {
     }
 
@@ -113,22 +213,22 @@ namespace javelin::app
         const javelin::protocol::CommandId& id,
         const javelin::protocol::RemoteActionCommand& command)
     {
-        const auto immediate =
-            [this, &id]<typename Value>(Value&& value) -> javelin::protocol::CommandReply
+        const auto immediate = [this, &id, kind = command.kind]<typename Value>(
+                                   Value&& value) -> javelin::protocol::CommandReply
         {
             const auto encoded = encodeResult(value);
             if (const auto* error = std::get_if<QString>(&encoded))
                 return reject(id, *error);
-            return acceptImmediate(id, std::get<QByteArray>(encoded));
+            return acceptImmediate(id, kind, std::get<QByteArray>(encoded));
         };
-        const auto empty = [this, &id]() -> javelin::protocol::CommandReply
+        const auto empty = [this, &id, kind = command.kind]() -> javelin::protocol::CommandReply
         {
             const auto encoded = encodeEmptyResult();
             if (const auto* error = std::get_if<QString>(&encoded))
                 return reject(id, *error);
-            return acceptImmediate(id, std::get<QByteArray>(encoded));
+            return acceptImmediate(id, kind, std::get<QByteArray>(encoded));
         };
-        const auto launch = [this, &id]<typename Result>(
+        const auto launch = [this, &id, kind = command.kind]<typename Result>(
                                 QCoro::Task<Result> task) -> javelin::protocol::CommandReply
         {
             const javelin::protocol::OperationId operation{.value = id.value};
@@ -146,7 +246,7 @@ namespace javelin::app
                                                complete(operation, std::get<QByteArray>(encoded));
                                        });
                                });
-            return acceptAsync(id, operation);
+            return acceptAsync(id, kind, operation);
         };
         const auto invalidPayload = [this, &id](const QString& detail)
         { return reject(id, detail); };
@@ -666,13 +766,14 @@ namespace javelin::app
 
     javelin::protocol::CommandReply
     DaemonRemoteActionDispatcher::acceptImmediate(const javelin::protocol::CommandId& id,
+                                                  const javelin::protocol::RemoteActionKind kind,
                                                   QByteArray result) const
     {
         return javelin::protocol::CommandAccepted{
             .id = id,
             .operation = std::nullopt,
-            .epoch = {},
-            .changedDomains = {},
+            .epoch = m_currentEpoch(),
+            .changedDomains = admissionDomains(kind),
             .affectedKeys = {},
             .immediateResult = std::move(result),
         };
@@ -680,13 +781,14 @@ namespace javelin::app
 
     javelin::protocol::CommandReply
     DaemonRemoteActionDispatcher::acceptAsync(const javelin::protocol::CommandId& id,
+                                              const javelin::protocol::RemoteActionKind kind,
                                               const javelin::protocol::OperationId& operation) const
     {
         return javelin::protocol::CommandAccepted{
             .id = id,
             .operation = operation,
-            .epoch = {},
-            .changedDomains = {},
+            .epoch = m_currentEpoch(),
+            .changedDomains = admissionDomains(kind),
             .affectedKeys = {},
             .immediateResult = std::nullopt,
         };
@@ -718,14 +820,14 @@ namespace javelin::app
         const auto replay = m_replays.find(replayKey({.value = operation.value}));
         if (replay != m_replays.end())
         {
-            replay->second.reply = javelin::protocol::CommandAccepted{
-                .id = {.value = operation.value},
-                .operation = std::nullopt,
-                .epoch = {},
-                .changedDomains = {},
-                .affectedKeys = {},
-                .immediateResult = result,
-            };
+            if (auto* accepted =
+                    std::get_if<javelin::protocol::CommandAccepted>(&replay->second.reply))
+            {
+                accepted->operation = std::nullopt;
+                accepted->epoch = m_currentEpoch();
+                accepted->changedDomains = admissionDomains(replay->second.command.kind);
+                accepted->immediateResult = result;
+            }
             replay->second.pending = false;
             trimReplays();
         }

@@ -432,6 +432,8 @@ TEST_CASE("daemon replays completed remote action results", "[app][daemon][ipc][
     const auto* accepted = std::get_if<javelin::protocol::CommandAccepted>(&admitted);
     REQUIRE(accepted != nullptr);
     REQUIRE(accepted->operation.has_value());
+    CHECK(accepted->epoch == process.currentEpoch());
+    CHECK(accepted->changedDomains == std::vector{javelin::protocol::ChangedDomain::Contacts});
     CHECK_FALSE(accepted->immediateResult.has_value());
 
     std::optional<javelin::protocol::CommandAccepted> completed;
@@ -448,6 +450,8 @@ TEST_CASE("daemon replays completed remote action results", "[app][daemon][ipc][
     }
     REQUIRE(completed.has_value());
     CHECK_FALSE(completed->operation.has_value());
+    CHECK(completed->epoch == process.currentEpoch());
+    CHECK(completed->changedDomains == std::vector{javelin::protocol::ChangedDomain::Contacts});
 }
 
 TEST_CASE("daemon retains command UUID replay protection after GUI resources are released",
@@ -464,6 +468,8 @@ TEST_CASE("daemon retains command UUID replay protection after GUI resources are
     REQUIRE(std::holds_alternative<javelin::app::CacheLocation>(locationResult));
     javelin::app::DaemonServices services{
         std::get<javelin::app::CacheLocation>(std::move(locationResult))};
+    const javelin::protocol::InvalidationEpoch epoch{.value = 42};
+
     struct EventSink final : javelin::protocol::BoundaryEventSink
     {
         void onBoundaryEvent(const javelin::protocol::BoundaryEvent&) override
@@ -471,7 +477,7 @@ TEST_CASE("daemon retains command UUID replay protection after GUI resources are
         }
     } eventSink;
     javelin::app::DaemonRemoteActionDispatcher dispatcher{
-        services, eventSink,
+        services, eventSink, [epoch] { return epoch; },
         []() -> std::optional<javelin::protocol::BoundaryError> { return std::nullopt; }};
 
     const javelin::protocol::CommandId commandId{.value = QUuid::createUuid()};
@@ -483,7 +489,26 @@ TEST_CASE("daemon retains command UUID replay protection after GUI resources are
                 .payload = {},
             },
     });
-    REQUIRE(std::holds_alternative<javelin::protocol::CommandAccepted>(first));
+    const auto* summaryAccepted = std::get_if<javelin::protocol::CommandAccepted>(&first);
+    REQUIRE(summaryAccepted != nullptr);
+    CHECK(summaryAccepted->epoch == epoch);
+    CHECK(summaryAccepted->changedDomains.empty());
+
+    const auto jobId = javelin::app::remote::encode(std::string{"missing-job"});
+    REQUIRE(std::holds_alternative<QByteArray>(jobId));
+    const auto workMutation = dispatcher.dispatch({
+        .id = {.value = QUuid::createUuid()},
+        .command =
+            javelin::protocol::RemoteActionCommand{
+                .kind = javelin::protocol::RemoteActionKind::WorkRetry,
+                .payload = std::get<QByteArray>(jobId),
+            },
+    });
+    const auto* workAccepted = std::get_if<javelin::protocol::CommandAccepted>(&workMutation);
+    REQUIRE(workAccepted != nullptr);
+    CHECK(workAccepted->epoch == epoch);
+    CHECK(workAccepted->changedDomains ==
+          std::vector{javelin::protocol::ChangedDomain::BackgroundJobs});
 
     dispatcher.releaseGuiResources();
     const auto reused = dispatcher.dispatch({

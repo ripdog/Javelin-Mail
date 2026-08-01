@@ -191,7 +191,8 @@ namespace javelin::app
         {
             m_services = std::make_unique<DaemonServices>(std::get<CacheLocation>(locationResult));
             m_remoteActions = std::make_unique<DaemonRemoteActionDispatcher>(
-                *m_services, *this, [this] { return reloadSettings(); }, this);
+                *m_services, *this, [this] { return currentEpoch(); },
+                [this] { return reloadSettings(); }, this);
             applySettings();
             m_background = std::make_unique<DaemonBackgroundController>(*m_services, this);
             m_services->commandDispatcher().setEventSink(this);
@@ -327,8 +328,7 @@ namespace javelin::app
 
     protocol::InvalidationEpoch DaemonProcess::currentEpoch() const
     {
-        return m_services == nullptr ? protocol::InvalidationEpoch{}
-                                     : m_services->commandDispatcher().currentEpoch();
+        return m_epoch;
     }
 
     std::optional<protocol::BoundaryError> DaemonProcess::requestCacheAccessSuspend(
@@ -409,7 +409,11 @@ namespace javelin::app
             return protocol::CommandRejected{.id = request.id, .error = notReadyError()};
         if (std::holds_alternative<protocol::RemoteActionCommand>(request.command))
             return m_remoteActions->dispatch(std::move(request));
-        return m_services->commandDispatcher().dispatch(std::move(request));
+
+        auto reply = m_services->commandDispatcher().dispatch(std::move(request));
+        if (auto* accepted = std::get_if<protocol::CommandAccepted>(&reply))
+            accepted->epoch = currentEpoch();
+        return reply;
     }
 
     protocol::MaterializationReply
@@ -668,8 +672,9 @@ namespace javelin::app
         connect(&events, &MailApplicationEventsPort::cacheInvalidated, this,
                 [this](MailCacheInvalidation invalidation)
                 {
+                    ++m_epoch.value;
                     onBoundaryEvent(CacheInvalidation{
-                        .epoch = {.value = invalidation.epoch},
+                        .epoch = currentEpoch(),
                         .changedDomains = std::move(invalidation.changedDomains),
                         .affectedKeys = std::move(invalidation.affectedKeys),
                     });
@@ -679,6 +684,7 @@ namespace javelin::app
         connect(&m_services->undoCommandPort(), &UndoCommandPort::historyStateChanged, this,
                 [this](const undo::HistoryState&)
                 {
+                    ++m_epoch.value;
                     onBoundaryEvent(CacheInvalidation{
                         .epoch = currentEpoch(),
                         .changedDomains = {ChangedDomain::History},
@@ -688,6 +694,7 @@ namespace javelin::app
         connect(&m_services->workScheduler(), &WorkScheduler::jobsChanged, this,
                 [this]
                 {
+                    ++m_epoch.value;
                     onBoundaryEvent(CacheInvalidation{
                         .epoch = currentEpoch(),
                         .changedDomains = {ChangedDomain::BackgroundJobs},

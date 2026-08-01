@@ -25,6 +25,7 @@ namespace javelin::app
       public:
         DaemonRemoteActionDispatcher(
             DaemonServices& services, javelin::protocol::BoundaryEventSink& eventSink,
+            std::function<javelin::protocol::InvalidationEpoch()> currentEpoch,
             std::function<std::optional<javelin::protocol::BoundaryError>()> reloadSettings,
             QObject* parent = nullptr);
         ~DaemonRemoteActionDispatcher() override;
@@ -49,9 +50,11 @@ namespace javelin::app
                javelin::protocol::BoundaryErrorCode code =
                    javelin::protocol::BoundaryErrorCode::InvalidRequest) const;
         [[nodiscard]] javelin::protocol::CommandReply
-        acceptImmediate(const javelin::protocol::CommandId& id, QByteArray result) const;
+        acceptImmediate(const javelin::protocol::CommandId& id,
+                        javelin::protocol::RemoteActionKind kind, QByteArray result) const;
         [[nodiscard]] javelin::protocol::CommandReply
         acceptAsync(const javelin::protocol::CommandId& id,
+                    javelin::protocol::RemoteActionKind kind,
                     const javelin::protocol::OperationId& operation) const;
         [[nodiscard]] QCoro::Task<RemoteUndoExecutionResult> performUndo(bool redo);
         void complete(const javelin::protocol::OperationId& operation, QByteArray result);
@@ -62,6 +65,7 @@ namespace javelin::app
 
         DaemonServices& m_services;
         javelin::protocol::BoundaryEventSink& m_eventSink;
+        std::function<javelin::protocol::InvalidationEpoch()> m_currentEpoch;
         std::function<std::optional<javelin::protocol::BoundaryError>()> m_reloadSettings;
         std::unordered_map<QString, ReplayEntry> m_replays;
         std::deque<QString> m_replayOrder;

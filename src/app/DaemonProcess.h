@@ -129,6 +129,7 @@ namespace javelin::app
         std::unique_ptr<javelin::protocol::SocketActivationEndpoint> m_activationEndpoint;
         javelin::protocol::SettingsSnapshot m_settingsSnapshot;
         javelin::protocol::DaemonInstanceId m_instanceId{.value = QUuid::createUuid()};
+        javelin::protocol::InvalidationEpoch m_epoch;
         std::optional<javelin::protocol::CacheAccessSuspendRequested> m_cacheSuspend;
         bool m_cacheAccessAcknowledged = false;
         javelin::protocol::DaemonLifecycle m_lifecycle =
