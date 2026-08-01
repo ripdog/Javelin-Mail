@@ -8,6 +8,11 @@
 
 #include <memory>
 
+namespace javelin::gui::settings
+{
+    class GuiSettings;
+}
+
 namespace javelin::jmap::cache
 {
     class AccountReader;
@@ -105,7 +110,7 @@ namespace javelin::app
         [[nodiscard]] UndoCommandPort& undoCommandPort();
         [[nodiscard]] TranslationPort& translationPort();
         [[nodiscard]] WorkTaskPort& workTaskPort();
-        [[nodiscard]] std::optional<javelin::protocol::BoundaryError> reloadDaemonSettings();
+        [[nodiscard]] javelin::gui::settings::GuiSettings& settings();
 
       private:
         [[nodiscard]] std::optional<javelin::jmap::cache::DatabaseError> openReadConnection();
@@ -126,6 +131,7 @@ namespace javelin::app
         std::unique_ptr<javelin::jmap::cache::QueryService> m_queryService;
         std::unique_ptr<InlineMessageSchemeHandler> m_inlineMessageSchemeHandler;
 
+        std::unique_ptr<javelin::gui::settings::GuiSettings> m_settings;
         std::unique_ptr<RemoteActionClient> m_remoteClient;
         std::unique_ptr<RemoteAccountCommandPort> m_accountCommands;
         std::unique_ptr<RemoteCalendarCommandPort> m_calendarCommands;

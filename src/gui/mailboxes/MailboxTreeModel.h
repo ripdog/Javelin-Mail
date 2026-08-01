@@ -8,6 +8,7 @@
 #include <QStringView>
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <unordered_map>
@@ -28,6 +29,7 @@ namespace javelin::gui::mailboxes
             bool showAccount = true;
             bool checkable = false;
             QStringList checkedMailboxIds;
+            std::function<QString(QStringView)> accountDisplayName;
         };
 
         enum Roles

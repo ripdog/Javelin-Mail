@@ -4,7 +4,7 @@
 #include "gui/messageview/HtmlMessageView.h"
 #include "gui/messageview/MessageViewPresentation.h"
 #include "gui/messageview/PlainTextLinkifier.h"
-#include "gui/settings/PreferencesDialog.h"
+#include "gui/settings/GuiSettings.h"
 #include "jmap/contacts/ContactIdentityLookup.h"
 #include "jmap/language/LanguageDetection.h"
 
@@ -27,7 +27,6 @@
 #include <QMouseEvent>
 #include <QProgressBar>
 #include <QScrollArea>
-#include <QSettings>
 #include <QSignalBlocker>
 #include <QSizePolicy>
 #include <QStackedWidget>
@@ -48,9 +47,6 @@ namespace javelin::gui::messageview
 {
     namespace
     {
-        constexpr auto remoteContentGroup = "remoteContent";
-        constexpr auto allowedSendersKey = "allowedSenders";
-        constexpr auto allowedDomainsKey = "allowedDomains";
         constexpr auto automaticSourceLanguage = "auto";
 
         [[nodiscard]] std::string defaultLanguageModelPath()
@@ -190,47 +186,6 @@ namespace javelin::gui::messageview
             label->setTextInteractionFlags(Qt::TextSelectableByMouse);
             label->setCursor(Qt::IBeamCursor);
             label->setFocusPolicy(Qt::NoFocus);
-        }
-
-        [[nodiscard]] QStringList remoteContentAllowList(const QLatin1StringView key)
-        {
-            QSettings settings;
-            settings.beginGroup(QLatin1StringView{remoteContentGroup});
-            auto values = settings.value(key).toStringList();
-            settings.endGroup();
-            values.removeAll(QString{});
-            values.removeDuplicates();
-            values.sort(Qt::CaseInsensitive);
-            return values;
-        }
-
-        void saveRemoteContentAllowList(const QLatin1StringView key, QStringList values)
-        {
-            values.removeAll(QString{});
-            values.removeDuplicates();
-            values.sort(Qt::CaseInsensitive);
-
-            QSettings settings;
-            settings.beginGroup(QLatin1StringView{remoteContentGroup});
-            settings.setValue(key, values);
-            settings.endGroup();
-            settings.sync();
-        }
-
-        void addRemoteContentAllowListValue(const QLatin1StringView key, QString value)
-        {
-            value = value.trimmed().toLower();
-            if (value.isEmpty())
-            {
-                return;
-            }
-
-            auto values = remoteContentAllowList(key);
-            if (!values.contains(value, Qt::CaseInsensitive))
-            {
-                values.push_back(value);
-                saveRemoteContentAllowList(key, values);
-            }
         }
 
         [[nodiscard]] QIcon
@@ -445,9 +400,10 @@ namespace javelin::gui::messageview
     } // namespace
 
     MessageViewContainer::MessageViewContainer(
+        javelin::gui::settings::GuiSettings& settings,
         javelin::app::TranslationPort& translationPort,
         javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup, QWidget* parent)
-        : QWidget(parent), m_translationPort(translationPort),
+        : QWidget(parent), m_settings(settings), m_translationPort(translationPort),
           m_contactIdentityLookup(contactIdentityLookup)
     {
         auto* layout = new QVBoxLayout(this);
@@ -671,7 +627,7 @@ namespace javelin::gui::messageview
         m_multipleSelectionLayout->setSpacing(0);
         m_multipleSelectionScrollArea->setWidget(m_multipleSelectionWidget);
 
-        m_htmlView = new HtmlMessageView(this);
+        m_htmlView = new HtmlMessageView(m_settings.messageAppearanceSettings(), this);
         m_htmlView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
         connect(m_htmlView, &HtmlMessageView::viewSourceRequested, this,
                 &MessageViewContainer::viewSourceRequested);
@@ -978,7 +934,7 @@ namespace javelin::gui::messageview
 
     void MessageViewContainer::appearanceSettingsChanged()
     {
-        m_htmlView->reloadAppearanceSettings();
+        m_htmlView->setAppearanceSettings(m_settings.messageAppearanceSettings());
     }
 
     void MessageViewContainer::updateSenderRemoteContentPermit()
@@ -986,11 +942,11 @@ namespace javelin::gui::messageview
         const auto sender = currentSenderAddress();
         const auto domain = currentSenderDomain();
         const bool permittedSender =
-            !sender.isEmpty() && remoteContentAllowList(QLatin1StringView{allowedSendersKey})
-                                     .contains(sender, Qt::CaseInsensitive);
+            !sender.isEmpty() &&
+            m_settings.remoteContentSenders().contains(sender, Qt::CaseInsensitive);
         const bool permittedDomain =
-            !domain.isEmpty() && remoteContentAllowList(QLatin1StringView{allowedDomainsKey})
-                                     .contains(domain, Qt::CaseInsensitive);
+            !domain.isEmpty() &&
+            m_settings.remoteContentDomains().contains(domain, Qt::CaseInsensitive);
         const bool shouldAllow = permittedSender || permittedDomain;
         if (m_htmlView->remoteContentEnabled() != shouldAllow)
         {
@@ -1541,17 +1497,39 @@ namespace javelin::gui::messageview
 
     void MessageViewContainer::permitRemoteContentForCurrentSender()
     {
-        addRemoteContentAllowListValue(QLatin1StringView{allowedSendersKey},
-                                       currentSenderAddress());
+        addRemoteContentPermit(true, currentSenderAddress());
         updateSenderRemoteContentPermit();
         updateRemoteContentButton();
     }
 
     void MessageViewContainer::permitRemoteContentForCurrentDomain()
     {
-        addRemoteContentAllowListValue(QLatin1StringView{allowedDomainsKey}, currentSenderDomain());
+        addRemoteContentPermit(false, currentSenderDomain());
         updateSenderRemoteContentPermit();
         updateRemoteContentButton();
+    }
+
+    void MessageViewContainer::addRemoteContentPermit(const bool sender, QString value)
+    {
+        value = value.trimmed().toLower();
+        if (value.isEmpty())
+            return;
+
+        auto values =
+            sender ? m_settings.remoteContentSenders() : m_settings.remoteContentDomains();
+        if (values.contains(value, Qt::CaseInsensitive))
+            return;
+        values.push_back(std::move(value));
+        values.removeDuplicates();
+        values.sort(Qt::CaseInsensitive);
+
+        javelin::protocol::SettingsUpdate update;
+        if (sender)
+            update.remoteContentSenders = {values.begin(), values.end()};
+        else
+            update.remoteContentDomains = {values.begin(), values.end()};
+        if (const auto error = m_settings.update(std::move(update)))
+            qWarning().noquote() << "Could not save remote-content permission" << error->detail;
     }
 
     QString MessageViewContainer::contactAwareSenderLabel() const
@@ -1627,8 +1605,7 @@ namespace javelin::gui::messageview
         constexpr int tileSpacing = 6;
         std::vector<AttachmentTile*> tiles;
         tiles.reserve(attachments.size());
-        const auto attachmentSaveSettings =
-            javelin::gui::settings::PreferencesDialog::loadAttachmentSaveSettings();
+        const auto attachmentSaveSettings = m_settings.attachmentSaveSettings();
 
         for (std::size_t index = 0; index < attachments.size(); ++index)
         {

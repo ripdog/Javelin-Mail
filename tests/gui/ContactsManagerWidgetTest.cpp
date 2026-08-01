@@ -1,5 +1,6 @@
 #include "gui/contacts/ContactsManagerWidget.h"
 
+#include "gui/settings/GuiSettings.h"
 #include "jmap/cache/ContactRepository.h"
 #include "jmap/cache/SessionRepository.h"
 
@@ -210,7 +211,9 @@ TEST_CASE("Contacts refresh merges rows without disturbing selection or editor d
 
     RefreshPort refresh;
     CommandPort commands;
-    javelin::gui::contacts::ContactsManagerWidget widget{repository, refresh, commands, "a1"};
+    javelin::gui::settings::GuiSettings settings{javelin::protocol::SettingsSnapshot{}};
+    javelin::gui::contacts::ContactsManagerWidget widget{settings, repository, refresh, commands,
+                                                         "a1"};
     auto* books = widget.findChild<QComboBox*>(QStringLiteral("contactsAddressBookCombo"));
     auto* groups = widget.findChild<QListWidget*>(QStringLiteral("contactsGroupList"));
     auto* contacts = widget.findChild<QListWidget*>(QStringLiteral("contactsContactList"));

@@ -2,7 +2,7 @@
 
 #include "app/AccountRefreshApplicationPorts.h"
 #include "gui/settings/ConnectionSettingsAdapter.h"
-#include "gui/settings/PreferencesDialog.h"
+#include "gui/settings/GuiSettings.h"
 #include "jmap/cache/AccountReadRepository.h"
 
 #include <QCoroTask>
@@ -16,9 +16,11 @@
 namespace javelin::gui::shell
 {
     AccountRefreshController::AccountRefreshController(
+        javelin::gui::settings::GuiSettings& settings,
         javelin::app::AccountRefreshPort& commandPort,
         javelin::jmap::cache::AccountReader& accountReader, QObject* parent)
-        : QObject(parent), m_commandPort(commandPort), m_accountReader(accountReader)
+        : QObject(parent), m_settings(settings), m_commandPort(commandPort),
+          m_accountReader(accountReader)
     {
     }
 
@@ -30,8 +32,7 @@ namespace javelin::gui::shell
             return;
         }
 
-        refreshConnection(javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
-            QString::fromStdString(accountId)));
+        refreshConnection(m_settings.accountForCachedId(QString::fromStdString(accountId)));
     }
 
     void
@@ -55,8 +56,7 @@ namespace javelin::gui::shell
         std::vector<std::string> mailboxIds;
         for (const auto& accountId : settings.cachedAccountIds)
         {
-            const auto syncedMailboxIds =
-                javelin::gui::settings::PreferencesDialog::syncedMailboxIds(accountId);
+            const auto syncedMailboxIds = m_settings.syncedMailboxIds(accountId);
             for (const auto& mailboxId : syncedMailboxIds)
                 mailboxIds.push_back(mailboxId.toStdString());
         }
@@ -78,8 +78,9 @@ namespace javelin::gui::shell
                 }
 
                 const auto summary = std::get<javelin::jmap::LiveRefreshSummary>(std::move(result));
-                javelin::gui::settings::PreferencesDialog::saveResolvedSessionUrl(
-                    settings.id, QString::fromStdString(summary.resolvedSessionUrl));
+                if (const auto error = m_settings.saveResolvedSessionUrl(
+                        settings.id, QString::fromStdString(summary.resolvedSessionUrl)))
+                    Q_EMIT userInterventionRequired(error->detail);
                 const auto ownedAccounts = m_accountReader.listOwnedBy(summary.accountId);
                 if (const auto* accounts =
                         std::get_if<std::vector<javelin::jmap::cache::CachedAccount>>(
@@ -87,8 +88,9 @@ namespace javelin::gui::shell
                 {
                     for (const auto& account : *accounts)
                     {
-                        javelin::gui::settings::PreferencesDialog::associateCachedAccount(
-                            settings.id, QString::fromStdString(account.accountId));
+                        if (const auto error = m_settings.associateCachedAccount(
+                                settings.id, QString::fromStdString(account.accountId)))
+                            Q_EMIT userInterventionRequired(error->detail);
                     }
                 }
 

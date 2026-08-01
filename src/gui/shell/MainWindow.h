@@ -84,8 +84,9 @@ namespace javelin::gui::mailboxes
 
 namespace javelin::gui::settings
 {
+    class GuiSettings;
     struct ConnectionSettings;
-}
+} // namespace javelin::gui::settings
 
 namespace javelin::gui::shell
 {
@@ -129,7 +130,8 @@ namespace javelin::gui::shell
         Q_OBJECT
 
       public:
-        explicit MainWindow(javelin::app::AccountCommandPort& accountCommandPort,
+        explicit MainWindow(javelin::gui::settings::GuiSettings& settings,
+                            javelin::app::AccountCommandPort& accountCommandPort,
                             javelin::jmap::cache::AccountReader& accountReader,
                             javelin::jmap::cache::MailboxReader& mailboxReader,
                             javelin::jmap::cache::ContactReader& contactReader,
@@ -155,9 +157,6 @@ namespace javelin::gui::shell
         void openPreferencesForConnection(const QString& connectionId);
         void restoreDraft(const QString& accountId, const QString& draftEmailId,
                           const QString& composeSessionId);
-
-      Q_SIGNALS:
-        void accountSettingsChanged();
 
       protected Q_SLOTS:
         void saveNewToolbarConfig() override;
@@ -266,6 +265,7 @@ namespace javelin::gui::shell
         void closeEvent(QCloseEvent* event) override;
         bool eventFilter(QObject* watched, QEvent* event) override;
 
+        javelin::gui::settings::GuiSettings& m_settings;
         javelin::app::AccountCommandPort& m_accountCommandPort;
         javelin::jmap::cache::AccountReader& m_accountReader;
         javelin::jmap::cache::MailboxReader& m_mailboxReader;

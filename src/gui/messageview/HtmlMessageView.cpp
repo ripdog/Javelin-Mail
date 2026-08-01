@@ -250,7 +250,12 @@ namespace javelin::gui::messageview
     } // namespace
 
     HtmlMessageView::HtmlMessageView(QWidget* parent)
-        : QWidget(parent), m_appearanceSettings(loadMessageAppearanceSettings())
+        : HtmlMessageView(MessageAppearanceSettings{}, parent)
+    {
+    }
+
+    HtmlMessageView::HtmlMessageView(MessageAppearanceSettings appearanceSettings, QWidget* parent)
+        : QWidget(parent), m_appearanceSettings(appearanceSettings)
     {
         initializeDarkReaderResource();
         auto* layout = new QVBoxLayout(this);
@@ -396,9 +401,9 @@ namespace javelin::gui::messageview
         return m_remoteContentEnabled;
     }
 
-    void HtmlMessageView::reloadAppearanceSettings()
+    void HtmlMessageView::setAppearanceSettings(MessageAppearanceSettings appearanceSettings)
     {
-        m_appearanceSettings = loadMessageAppearanceSettings();
+        m_appearanceSettings = appearanceSettings;
         m_darkModeOverride.reset();
         updatePageBackground();
         applyDarkModePolicy();

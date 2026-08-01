@@ -74,6 +74,7 @@ add_executable(javelin_jmap_tests
     ${PROJECT_SOURCE_DIR}/src/app/TranslationService.cpp
     ${PROJECT_SOURCE_DIR}/src/app/TranslationService.h
     ${PROJECT_SOURCE_DIR}/src/app/TranslationSettings.cpp
+    ${PROJECT_SOURCE_DIR}/src/app/TranslationSettingsPolicy.cpp
     ${PROJECT_SOURCE_DIR}/src/app/WorkScheduler.cpp
     ${PROJECT_SOURCE_DIR}/src/app/WorkScheduler.h
     ${PROJECT_SOURCE_DIR}/src/app/WorkTaskPort.h
@@ -168,6 +169,7 @@ add_executable(javelin_jmap_tests
     app/CacheLocationProviderTest.cpp
     app/CacheAccessBarrierTest.cpp
     gui/ConnectionSettingsAdapterTest.cpp
+    gui/GuiSettingsTest.cpp
     gui/ComposeTabPolicyTest.cpp
     gui/MailboxSelectionTest.cpp
     gui/MailboxSortTest.cpp
@@ -191,6 +193,7 @@ add_executable(javelin_jmap_tests
     ${PROJECT_SOURCE_DIR}/src/gui/calendar/MonthCalendarLayout.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/calendar/RecurrencePattern.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/settings/ConnectionSettingsAdapter.cpp
+    ${PROJECT_SOURCE_DIR}/src/gui/settings/GuiSettings.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/shell/FocusedCommandRouter.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/shell/ComposeTabPolicy.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/mailboxes/MailboxSelection.cpp

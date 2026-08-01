@@ -30,6 +30,10 @@ namespace javelin::gui::compose
 {
     class ComposeTabWidget;
 }
+namespace javelin::gui::settings
+{
+    class GuiSettings;
+}
 
 namespace javelin::gui::shell
 {
@@ -40,7 +44,8 @@ namespace javelin::gui::shell
         Q_OBJECT
 
       public:
-        ComposeTabController(javelin::app::ComposeCommandPort& composeCommandPort,
+        ComposeTabController(javelin::gui::settings::GuiSettings& settings,
+                             javelin::app::ComposeCommandPort& composeCommandPort,
                              javelin::jmap::cache::IdentityReader& identityRepository,
                              javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
                              QStackedWidget& contentStack, std::vector<TabState>& tabs,
@@ -78,6 +83,7 @@ namespace javelin::gui::shell
         composeWidgetForTab(const TabState* tab) const;
         [[nodiscard]] bool detachWidget(int index);
 
+        javelin::gui::settings::GuiSettings& m_settings;
         javelin::app::ComposeCommandPort& m_composeCommandPort;
         javelin::jmap::cache::IdentityReader& m_identityRepository;
         javelin::jmap::contacts::ContactIdentityLookup& m_contactIdentityLookup;

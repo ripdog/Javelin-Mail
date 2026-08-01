@@ -19,6 +19,8 @@
 #include "jmap/contacts/ContactIdentityLookup.h"
 #include "jmap/render/InlineMessageUrl.h"
 
+#include "gui/settings/GuiSettings.h"
+
 #include <QWebEngineProfile>
 
 #include <algorithm>
@@ -74,6 +76,7 @@ namespace javelin::app
                 m_inlineMessageSchemeHandler.get());
         }
 
+        m_settings = std::make_unique<javelin::gui::settings::GuiSettings>(m_session);
         m_remoteClient = std::make_unique<RemoteActionClient>(m_session);
         m_calendarReader = std::make_unique<RemoteCalendarReader>(*m_remoteClient);
         m_accountCommands = std::make_unique<RemoteAccountCommandPort>(*m_remoteClient);
@@ -222,18 +225,8 @@ namespace javelin::app
         return *m_workTasks;
     }
 
-    std::optional<javelin::protocol::BoundaryError> GuiServices::reloadDaemonSettings()
+    javelin::gui::settings::GuiSettings& GuiServices::settings()
     {
-        const auto result = m_remoteClient->callImmediate<std::monostate>(
-            javelin::protocol::RemoteActionKind::ReloadSettings);
-        if (const auto* error = std::get_if<RemoteCallError>(&result))
-        {
-            return javelin::protocol::BoundaryError{
-                .code = error->code,
-                .field = QStringLiteral("settings"),
-                .detail = error->detail,
-            };
-        }
-        return std::nullopt;
+        return *m_settings;
     }
 } // namespace javelin::app

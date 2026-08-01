@@ -11,6 +11,11 @@
 
 class QWidget;
 
+namespace javelin::gui::settings
+{
+    class GuiSettings;
+}
+
 namespace javelin::app
 {
     class MessageContentPort;
@@ -29,7 +34,8 @@ namespace javelin::gui::shell
         Q_OBJECT
 
       public:
-        MessageFileController(javelin::app::MessageContentPort& contentPort,
+        MessageFileController(javelin::gui::settings::GuiSettings& settings,
+                              javelin::app::MessageContentPort& contentPort,
                               javelin::jmap::cache::MessageViewReader& messageViewReader,
                               QWidget* dialogParent, QObject* parent = nullptr);
 
@@ -44,6 +50,7 @@ namespace javelin::gui::shell
         void userInterventionRequired(QString message);
 
       private:
+        javelin::gui::settings::GuiSettings& m_settings;
         javelin::app::MessageContentPort& m_contentPort;
         javelin::jmap::cache::MessageViewReader& m_messageViewReader;
         QPointer<QWidget> m_dialogParent;

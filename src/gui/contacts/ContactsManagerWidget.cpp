@@ -2,7 +2,7 @@
 #include "gui/widgets/EmailAddressLineEdit.h"
 
 #include "gui/IconUtils.h"
-#include "gui/settings/PreferencesDialog.h"
+#include "gui/settings/GuiSettings.h"
 #include "jmap/contacts/ContactInterchange.h"
 #include "jmap/contacts/ContactResults.h"
 
@@ -573,10 +573,11 @@ namespace javelin::gui::contacts
             QTableWidget* m_table = nullptr;
         };
 
-        [[nodiscard]] QString accountLabel(const javelin::jmap::cache::ContactAccount& account)
+        [[nodiscard]] QString accountLabel(const javelin::gui::settings::GuiSettings& guiSettings,
+                                           const javelin::jmap::cache::ContactAccount& account)
         {
-            const auto settings = javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
-                QString::fromStdString(account.accountId));
+            const auto settings =
+                guiSettings.accountForCachedId(QString::fromStdString(account.accountId));
             if (!settings.displayName.isEmpty())
                 return settings.displayName;
             return account.name.empty() ? QString::fromStdString(account.accountId)
@@ -585,12 +586,14 @@ namespace javelin::gui::contacts
 
     } // namespace
 
-    ContactsManagerWidget::ContactsManagerWidget(javelin::jmap::cache::ContactReader& repository,
+    ContactsManagerWidget::ContactsManagerWidget(javelin::gui::settings::GuiSettings& settings,
+                                                 javelin::jmap::cache::ContactReader& repository,
                                                  javelin::app::ContactRefreshPort& refreshPort,
                                                  javelin::app::ContactCommandPort& commandPort,
                                                  std::string ownerAccountId, QWidget* parent)
-        : QWidget(parent), m_repository(repository), m_refreshPort(refreshPort),
-          m_commandPort(commandPort), m_ownerAccountId(std::move(ownerAccountId))
+        : QWidget(parent), m_settings(settings), m_repository(repository),
+          m_refreshPort(refreshPort), m_commandPort(commandPort),
+          m_ownerAccountId(std::move(ownerAccountId))
     {
         static_cast<void>(m_repository.connectChanged(this,
                                                       [this](const QString& accountId)
@@ -1147,8 +1150,8 @@ namespace javelin::gui::contacts
         std::vector<ComboEntry> entries;
         entries.reserve(m_accounts.size());
         for (const auto& account : m_accounts)
-            entries.push_back(
-                {.label = accountLabel(account), .id = QString::fromStdString(account.accountId)});
+            entries.push_back({.label = accountLabel(m_settings, account),
+                               .id = QString::fromStdString(account.accountId)});
         mergeComboEntries(*m_accountCombo, entries, selected);
         reloadAddressBooks();
     }
@@ -1992,7 +1995,7 @@ namespace javelin::gui::contacts
                     continue;
                 auto* item = new QListWidgetItem(
                     QStringLiteral("%1 — %2").arg(QString::fromStdString(candidate.displayName),
-                                                  accountLabel(account)),
+                                                  accountLabel(m_settings, account)),
                     m_membersEdit);
                 item->setData(Qt::UserRole, QString::fromStdString(candidate.uid));
                 item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
@@ -2342,7 +2345,7 @@ namespace javelin::gui::contacts
                                  [](const auto& book) { return book.myRights.mayWrite; });
             if (destination.books.empty())
                 continue;
-            accountLabels.push_back(accountLabel(account));
+            accountLabels.push_back(accountLabel(m_settings, account));
             destinations.push_back(std::move(destination));
         }
         if (destinations.empty())
@@ -2903,7 +2906,8 @@ namespace javelin::gui::contacts
         auto* layout = new QVBoxLayout(&dialog);
         auto* account = new QComboBox(&dialog);
         for (const auto& value : m_accounts)
-            account->addItem(accountLabel(value), QString::fromStdString(value.accountId));
+            account->addItem(accountLabel(m_settings, value),
+                             QString::fromStdString(value.accountId));
         if (const auto current = currentAccountId(); current.has_value())
         {
             const int index = account->findData(QString::fromStdString(*current));

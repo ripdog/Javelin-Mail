@@ -11,6 +11,11 @@
 
 #include <string>
 
+namespace javelin::gui::settings
+{
+    class GuiSettings;
+}
+
 namespace javelin::app
 {
     class AccountRefreshPort;
@@ -28,7 +33,8 @@ namespace javelin::gui::shell
         Q_OBJECT
 
       public:
-        AccountRefreshController(javelin::app::AccountRefreshPort& commandPort,
+        AccountRefreshController(javelin::gui::settings::GuiSettings& settings,
+                                 javelin::app::AccountRefreshPort& commandPort,
                                  javelin::jmap::cache::AccountReader& accountReader,
                                  QObject* parent = nullptr);
 
@@ -44,6 +50,7 @@ namespace javelin::gui::shell
         void contactsRefreshed(const javelin::jmap::contacts::ContactRefreshSummary& summary);
 
       private:
+        javelin::gui::settings::GuiSettings& m_settings;
         javelin::app::AccountRefreshPort& m_commandPort;
         javelin::jmap::cache::AccountReader& m_accountReader;
         bool m_refreshInFlight = false;

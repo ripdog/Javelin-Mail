@@ -2,7 +2,7 @@
 
 #include "app/ComposeApplicationPorts.h"
 #include "gui/messageview/HtmlMessageView.h"
-#include "gui/settings/PreferencesDialog.h"
+#include "gui/settings/GuiSettings.h"
 #include "gui/widgets/EmailAddressLineEdit.h"
 #include "jmap/cache/IdentityReader.h"
 #include "jmap/contacts/ContactIdentityLookup.h"
@@ -464,10 +464,11 @@ namespace javelin::gui::compose
         }
 
         [[nodiscard]] std::optional<javelin::app::AccountConnectionSettings>
-        liveSettings(const std::string_view accountId, QString* errorMessage = nullptr)
+        liveSettings(const javelin::gui::settings::GuiSettings& guiSettings,
+                     const std::string_view accountId, QString* errorMessage = nullptr)
         {
-            const auto settings = javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
-                QString::fromStdString(std::string{accountId}));
+            const auto settings =
+                guiSettings.accountForCachedId(QString::fromStdString(std::string{accountId}));
             if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
                 settings.apiKey.isEmpty())
             {
@@ -491,11 +492,12 @@ namespace javelin::gui::compose
     } // namespace
 
     ComposeTabWidget::ComposeTabWidget(
+        javelin::gui::settings::GuiSettings& settings,
         javelin::app::ComposeCommandPort& composeCommandPort,
         javelin::jmap::cache::IdentityReader& identityRepository,
         javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
         javelin::jmap::submission::DraftSnapshot snapshot, QWidget* parent)
-        : QWidget(parent), m_composeCommandPort(composeCommandPort),
+        : QWidget(parent), m_settings(settings), m_composeCommandPort(composeCommandPort),
           m_identityRepository(identityRepository), m_contactIdentityLookup(contactIdentityLookup),
           m_snapshot(std::move(snapshot))
     {
@@ -789,7 +791,8 @@ namespace javelin::gui::compose
         m_htmlSourceDocument->setHighlightingMode(QStringLiteral("HTML"));
         m_htmlSourceView = m_htmlSourceDocument->createView(m_editorTabs);
         m_htmlSourceView->setAcceptDrops(false);
-        m_previewView = new javelin::gui::messageview::HtmlMessageView(m_editorTabs);
+        m_previewView = new javelin::gui::messageview::HtmlMessageView(
+            m_settings.messageAppearanceSettings(), m_editorTabs);
         m_previewView->setAcceptDrops(false);
         m_previewView->setRemoteContentEnabled(false);
         m_editorTabs->addTab(m_richTextEdit, QStringLiteral("Compose"));
@@ -879,7 +882,7 @@ namespace javelin::gui::compose
         int optionCount = 0;
 
         m_fromCombo->clear();
-        for (const auto& connection : javelin::gui::settings::PreferencesDialog::loadAccounts())
+        for (const auto& connection : m_settings.accounts())
         {
             const auto accountDisplayName =
                 connection.displayName.isEmpty() ? connection.loginEmail : connection.displayName;
@@ -1347,7 +1350,7 @@ namespace javelin::gui::compose
 
         syncSnapshotFromUi();
         QString errorMessage;
-        const auto settings = liveSettings(m_snapshot.accountId, &errorMessage);
+        const auto settings = liveSettings(m_settings, m_snapshot.accountId, &errorMessage);
         if (!settings.has_value())
         {
             Q_EMIT statusMessageRequested(errorMessage, 10000);
@@ -1418,7 +1421,7 @@ namespace javelin::gui::compose
 
         syncSnapshotFromUi();
         QString errorMessage;
-        const auto settings = liveSettings(m_snapshot.accountId, &errorMessage);
+        const auto settings = liveSettings(m_settings, m_snapshot.accountId, &errorMessage);
         if (!settings.has_value())
         {
             Q_EMIT statusMessageRequested(errorMessage, 10000);

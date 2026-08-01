@@ -2,6 +2,7 @@
 
 #include "app/ContactApplicationPorts.h"
 #include "gui/contacts/ContactsManagerWidget.h"
+#include "gui/settings/GuiSettings.h"
 #include "gui/shell/MainWindowStateStore.h"
 #include "jmap/cache/ContactReader.h"
 
@@ -15,12 +16,14 @@
 namespace javelin::gui::shell
 {
     ContactsTabController::ContactsTabController(
+        javelin::gui::settings::GuiSettings& settings,
         javelin::jmap::cache::ContactReader& contactRepository,
         javelin::app::ContactRefreshPort& refreshPort,
         javelin::app::ContactCommandPort& commandPort, QStackedWidget& contentStack,
         std::vector<TabState>& tabs, QObject* parent)
-        : QObject(parent), m_contactRepository(contactRepository), m_refreshPort(refreshPort),
-          m_commandPort(commandPort), m_contentStack(contentStack), m_tabs(tabs)
+        : QObject(parent), m_settings(settings), m_contactRepository(contactRepository),
+          m_refreshPort(refreshPort), m_commandPort(commandPort), m_contentStack(contentStack),
+          m_tabs(tabs)
     {
     }
 
@@ -210,7 +213,8 @@ namespace javelin::gui::shell
             return nullptr;
 
         auto* widget = new javelin::gui::contacts::ContactsManagerWidget(
-            m_contactRepository, m_refreshPort, m_commandPort, ownerAccountId, &m_contentStack);
+            m_settings, m_contactRepository, m_refreshPort, m_commandPort, ownerAccountId,
+            &m_contentStack);
         connect(widget, &javelin::gui::contacts::ContactsManagerWidget::statusMessageRequested,
                 this, &ContactsTabController::statusMessage);
         connect(widget, &javelin::gui::contacts::ContactsManagerWidget::userInterventionRequired,

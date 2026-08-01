@@ -151,20 +151,31 @@ namespace javelin::app
         return m_readyReply->daemon;
     }
 
-    std::optional<GuiBootstrapError>
-    GuiDaemonSession::updateSettings(protocol::SettingsUpdate update)
+    std::optional<protocol::BoundaryError>
+    GuiDaemonSession::updateSettings(const protocol::SettingsRevision baseRevision,
+                                     protocol::SettingsUpdate update)
     {
-        const auto reply = m_client->updateSettings(
-            {.baseRevision = m_settings.revision, .update = std::move(update)});
+        const auto reply =
+            m_client->updateSettings({.baseRevision = baseRevision, .update = std::move(update)});
         if (const auto* rejected = std::get_if<protocol::SettingsUpdateRejected>(&reply))
-        {
-            return detailError(GuiBootstrapErrorCode::SettingsUnavailable, rejected->error.detail);
-        }
+            return rejected->error;
 
         if (const auto error = refreshSettings())
-            return error;
+        {
+            return protocol::BoundaryError{
+                .code = protocol::BoundaryErrorCode::SettingsStorageFailure,
+                .field = QStringLiteral("settings"),
+                .detail = error->detail,
+            };
+        }
         Q_EMIT settingsChanged();
         return std::nullopt;
+    }
+
+    QMetaObject::Connection GuiDaemonSession::connectSettingsChanged(QObject* context,
+                                                                     std::function<void()> callback)
+    {
+        return connect(this, &GuiDaemonSession::settingsChanged, context, std::move(callback));
     }
 
     std::optional<protocol::BoundaryError>

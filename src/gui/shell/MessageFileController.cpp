@@ -1,7 +1,7 @@
 #include "gui/shell/MessageFileController.h"
 
 #include "app/MessageContentApplicationPorts.h"
-#include "gui/settings/PreferencesDialog.h"
+#include "gui/settings/GuiSettings.h"
 #include "gui/shell/MessageFileUtils.h"
 #include "jmap/cache/MessageViewReader.h"
 
@@ -18,19 +18,19 @@ namespace javelin::gui::shell
 {
 
     MessageFileController::MessageFileController(
+        javelin::gui::settings::GuiSettings& settings,
         javelin::app::MessageContentPort& contentPort,
         javelin::jmap::cache::MessageViewReader& messageViewReader, QWidget* dialogParent,
         QObject* parent)
-        : QObject(parent), m_contentPort(contentPort), m_messageViewReader(messageViewReader),
-          m_dialogParent(dialogParent)
+        : QObject(parent), m_settings(settings), m_contentPort(contentPort),
+          m_messageViewReader(messageViewReader), m_dialogParent(dialogParent)
     {
     }
 
     void MessageFileController::saveAttachment(std::string accountId, std::string emailId,
                                                std::string partId)
     {
-        const auto attachmentSettings =
-            javelin::gui::settings::PreferencesDialog::loadAttachmentSaveSettings();
+        const auto attachmentSettings = m_settings.attachmentSaveSettings();
         if (!attachmentSettings.alwaysAsk && (attachmentSettings.directory.isEmpty() ||
                                               !QDir{attachmentSettings.directory}.exists()))
         {
@@ -116,8 +116,7 @@ namespace javelin::gui::shell
             return;
         }
 
-        const auto attachmentSettings =
-            javelin::gui::settings::PreferencesDialog::loadAttachmentSaveSettings();
+        const auto attachmentSettings = m_settings.attachmentSaveSettings();
         const QString targetDirectory =
             attachmentSettings.alwaysAsk
                 ? QFileDialog::getExistingDirectory(

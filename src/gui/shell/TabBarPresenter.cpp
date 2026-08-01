@@ -4,7 +4,7 @@
 #include "app/SearchSession.h"
 #include "gui/IconUtils.h"
 #include "gui/mailboxes/MailboxIconUtils.h"
-#include "gui/settings/PreferencesDialog.h"
+#include "gui/settings/GuiSettings.h"
 
 #include <QIcon>
 #include <QPalette>
@@ -18,8 +18,9 @@
 namespace javelin::gui::shell
 {
 
-    TabBarPresenter::TabBarPresenter(QTabBar& tabBar, QWidget& window, QObject* parent)
-        : QObject(parent), m_tabBar(tabBar), m_window(window)
+    TabBarPresenter::TabBarPresenter(javelin::gui::settings::GuiSettings& settings, QTabBar& tabBar,
+                                     QWidget& window, QObject* parent)
+        : QObject(parent), m_settings(settings), m_tabBar(tabBar), m_window(window)
     {
     }
 
@@ -103,8 +104,7 @@ namespace javelin::gui::shell
             title = std::get<ComposeTabState>(tab.content).title;
         }
 
-        const auto settings = javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
-            QString::fromStdString(accountId));
+        const auto settings = m_settings.accountForCachedId(QString::fromStdString(accountId));
         auto accountName = settings.displayName;
         if (accountName.isEmpty())
         {

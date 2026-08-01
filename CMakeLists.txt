@@ -967,8 +967,12 @@ add_library(javelin_gui STATIC
     src/gui/tasks/TaskCenterDialog.h
 )
 target_sources(javelin_gui PRIVATE
+    src/app/SettingsApplicationPorts.h
+    src/app/TranslationSettingsPolicy.cpp
     src/gui/messageview/MessageAppearance.cpp
     src/gui/messageview/MessageAppearance.h
+    src/gui/settings/GuiSettings.cpp
+    src/gui/settings/GuiSettings.h
 )
 qt_add_resources(javelin_gui "javelin_darkreader"
     PREFIX "/vendor/darkreader"
@@ -1275,6 +1279,7 @@ add_library(javelin_daemon_core STATIC
     src/app/TranslationService.cpp
     src/app/TranslationService.h
     src/app/TranslationSettings.cpp
+    src/app/TranslationSettingsPolicy.cpp
     src/app/WorkScheduler.cpp
     src/app/WorkScheduler.h
     src/app/WorkTaskPort.h
@@ -1336,15 +1341,12 @@ javelin_enable_sanitizers(javelind)
 
 qt_add_executable(javelin
     src/app/CalendarApplicationPorts.h
-    src/app/ComposePreferences.cpp
-    src/app/ComposePreferences.h
     src/app/LogStore.cpp
     src/app/LogStore.h
     src/app/MailApplicationEventsPorts.h
     src/app/UndoApplicationPorts.h
     src/app/GuiDaemonSession.cpp
     src/app/GuiDaemonSession.h
-    src/app/TranslationSettings.cpp
     src/app/GuiMailApplicationEvents.cpp
     src/app/GuiMailApplicationEvents.h
     src/app/GuiServices.cpp
@@ -1461,6 +1463,40 @@ get_target_property(javelind_links javelind LINK_LIBRARIES)
 if(javelind_links MATCHES "javelin_gui|Qt::(Widgets|WebEngine)")
     message(FATAL_ERROR "javelind must not link GUI or WebEngine targets")
 endif()
+
+function(javelin_assert_gui_settings_boundary target)
+    set(local_settings_sources
+        "src/gui/calendar/MonthCalendarWidget.cpp"
+        "src/gui/search/SearchSessionPersistence.cpp"
+        "src/gui/search/SearchSessionPersistence.h"
+        "src/gui/shell/MainWindowStateStore.cpp"
+        "src/gui/shell/MainWindowStateStore.h"
+    )
+    get_target_property(target_sources ${target} SOURCES)
+    foreach(source IN LISTS target_sources)
+        if(IS_ABSOLUTE "${source}")
+            set(source_path "${source}")
+        else()
+            set(source_path "${CMAKE_CURRENT_SOURCE_DIR}/${source}")
+        endif()
+        if(NOT EXISTS "${source_path}")
+            continue()
+        endif()
+        file(RELATIVE_PATH relative_source "${CMAKE_CURRENT_SOURCE_DIR}" "${source_path}")
+        list(FIND local_settings_sources "${relative_source}" local_settings_index)
+        if(local_settings_index GREATER_EQUAL 0)
+            continue()
+        endif()
+        file(READ "${source_path}" source_contents)
+        if(source_contents MATCHES "QSettings")
+            message(FATAL_ERROR
+                    "Production GUI source accesses canonical QSettings: ${relative_source}")
+        endif()
+    endforeach()
+endfunction()
+
+javelin_assert_gui_settings_boundary(javelin_gui)
+javelin_assert_gui_settings_boundary(javelin)
 
 qt_add_executable(jmap-transport-benchmark
     src/tools/JmapTransportBenchmark.cpp

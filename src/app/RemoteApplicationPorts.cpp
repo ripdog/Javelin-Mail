@@ -689,7 +689,8 @@ namespace javelin::app
             .autoTranslateDomains = {m_settings.autoTranslateDomains.begin(),
                                      m_settings.autoTranslateDomains.end()},
         };
-        static_cast<void>(m_session.updateSettings(std::move(update)));
+        static_cast<void>(
+            m_session.updateSettings(m_session.settings().revision, std::move(update)));
     }
 
     RemoteUndoCommandPort::RemoteUndoCommandPort(GuiDaemonSession& session,

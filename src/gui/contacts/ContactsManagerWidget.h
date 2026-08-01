@@ -24,6 +24,11 @@ class QToolButton;
 class QPushButton;
 class QStackedWidget;
 
+namespace javelin::gui::settings
+{
+    class GuiSettings;
+}
+
 namespace javelin::gui::contacts
 {
     class ContactFieldEditor;
@@ -33,7 +38,8 @@ namespace javelin::gui::contacts
         Q_OBJECT
 
       public:
-        ContactsManagerWidget(javelin::jmap::cache::ContactReader& repository,
+        ContactsManagerWidget(javelin::gui::settings::GuiSettings& settings,
+                              javelin::jmap::cache::ContactReader& repository,
                               javelin::app::ContactRefreshPort& refreshPort,
                               javelin::app::ContactCommandPort& commandPort,
                               std::string ownerAccountId, QWidget* parent = nullptr);
@@ -115,6 +121,7 @@ namespace javelin::gui::contacts
         groupIsWritable(const javelin::jmap::contacts::ContactSummary& group) const;
         void populateContactCards(const javelin::jmap::contacts::ContactSummary& contact);
 
+        javelin::gui::settings::GuiSettings& m_settings;
         javelin::jmap::cache::ContactReader& m_repository;
         javelin::app::ContactRefreshPort& m_refreshPort;
         javelin::app::ContactCommandPort& m_commandPort;

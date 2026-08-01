@@ -3,6 +3,7 @@
 #include "app/TranslationApplicationPorts.h"
 #include "gui/messageview/MessageAppearance.h"
 #include "gui/settings/ConnectionSettings.h"
+#include "gui/settings/GuiSettings.h"
 
 #include <KConfigDialog>
 #include <QHash>
@@ -39,36 +40,19 @@ namespace javelin::app
 namespace javelin::gui::settings
 {
 
-    struct AttachmentSaveSettings
-    {
-        bool alwaysAsk = true;
-        QString directory;
-    };
-
     class PreferencesDialog : public KConfigDialog
     {
         Q_OBJECT
 
       public:
-        explicit PreferencesDialog(javelin::app::AccountCommandPort& accountCommandPort,
+        explicit PreferencesDialog(GuiSettings& settings,
+                                   javelin::app::AccountCommandPort& accountCommandPort,
                                    javelin::jmap::cache::AccountReader& accountReader,
                                    javelin::jmap::cache::MailboxReader& mailboxReader,
                                    QWidget* parent = nullptr);
         ~PreferencesDialog() override;
 
         void selectConfiguredAccount(const QString& connectionId);
-
-        [[nodiscard]] static std::vector<ConnectionSettings> loadAccounts();
-        [[nodiscard]] static ConnectionSettings loadSettingsForAccount(QStringView accountId);
-        [[nodiscard]] static AttachmentSaveSettings loadAttachmentSaveSettings();
-        [[nodiscard]] static QStringList syncedMailboxIds(QStringView accountId);
-        [[nodiscard]] static QStringList notificationMailboxIds(QStringView accountId);
-        [[nodiscard]] static bool hasNotificationMailboxSelection(QStringView accountId);
-        static void saveAccounts(const std::vector<ConnectionSettings>& accounts);
-        static void associateCachedAccount(const QString& configuredAccountId,
-                                           const QString& cachedAccountId);
-        static void saveResolvedSessionUrl(const QString& configuredAccountId,
-                                           const QString& sessionUrl);
 
       private:
         void updateSettings() override;
@@ -79,7 +63,7 @@ namespace javelin::gui::settings
         void selectAccount(int row);
         void noteUnsavedChanges();
         void noteConnectionSettingsChanged();
-        void saveCurrentSettings();
+        [[nodiscard]] bool saveCurrentSettings();
         void storeCurrentEdits();
         void refreshAccountList();
         void refreshRemoteContentList();
@@ -95,6 +79,8 @@ namespace javelin::gui::settings
         void storeMailboxSyncSelection();
         void storeMailboxNotificationSelection();
 
+        GuiSettings& m_settings;
+        javelin::protocol::SettingsRevision m_baseRevision;
         javelin::app::AccountCommandPort& m_accountCommandPort;
         javelin::jmap::cache::AccountReader& m_accountReader;
         javelin::jmap::cache::MailboxReader& m_mailboxReader;

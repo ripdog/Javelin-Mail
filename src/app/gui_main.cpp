@@ -216,15 +216,15 @@ int main(int argc, char* argv[])
             services = std::make_unique<javelin::app::GuiServices>(session);
 
         mainWindow = new javelin::gui::shell::MainWindow(
-            services->accountCommandPort(), services->accountReader(), services->mailboxReader(),
-            services->contactReader(), services->calendarReader(), services->calendarCommandPort(),
-            services->contactIdentityLookup(), services->identityReader(),
-            services->messageViewReader(), services->queryReader(), services->translationPort(),
-            services->composeCommandPort(), services->contactCommandPort(),
-            services->mailCommandPort(), services->sieveCommandPort(),
-            services->accountRefreshPort(), services->messageContentPort(),
-            services->messageListSessionFactory(), services->mailEvents(),
-            services->messageNavigationPort(), services->undoCommandPort());
+            services->settings(), services->accountCommandPort(), services->accountReader(),
+            services->mailboxReader(), services->contactReader(), services->calendarReader(),
+            services->calendarCommandPort(), services->contactIdentityLookup(),
+            services->identityReader(), services->messageViewReader(), services->queryReader(),
+            services->translationPort(), services->composeCommandPort(),
+            services->contactCommandPort(), services->mailCommandPort(),
+            services->sieveCommandPort(), services->accountRefreshPort(),
+            services->messageContentPort(), services->messageListSessionFactory(),
+            services->mailEvents(), services->messageNavigationPort(), services->undoCommandPort());
         mainWindow->setAttribute(Qt::WA_DeleteOnClose);
 
         auto* taskButton = new QToolButton(mainWindow);
@@ -246,20 +246,6 @@ int main(int argc, char* argv[])
         static_cast<void>(services->workTaskPort().connectChanged(mainWindow, updateTaskButton));
         updateTaskButton();
 
-        QObject::connect(
-            mainWindow, &javelin::gui::shell::MainWindow::accountSettingsChanged, mainWindow,
-            [&services, &mainWindow]
-            {
-                if (!services || mainWindow == nullptr)
-                    return;
-                if (const auto error = services->reloadDaemonSettings())
-                {
-                    QMessageBox::critical(
-                        mainWindow, QStringLiteral("Settings update failed"),
-                        QStringLiteral("The daemon could not apply the updated settings: %1")
-                            .arg(error->detail));
-                }
-            });
         QObject::connect(mainWindow, &QObject::destroyed, &application,
                          [&application, &mainWindow]
                          {

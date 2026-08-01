@@ -26,13 +26,14 @@ namespace javelin::gui::messageview
 
       public:
         explicit HtmlMessageView(QWidget* parent = nullptr);
+        HtmlMessageView(MessageAppearanceSettings appearanceSettings, QWidget* parent);
         ~HtmlMessageView() override;
 
         void setDocumentHtml(std::string_view html, std::string_view documentId = {});
         void clearDocument();
         void setRemoteContentEnabled(bool enabled);
         [[nodiscard]] bool remoteContentEnabled() const;
-        void reloadAppearanceSettings();
+        void setAppearanceSettings(MessageAppearanceSettings appearanceSettings);
         void collectTranslationChunks(std::function<void(QVector<QStringList>)> callback);
         void applyTranslationChunks(const QVector<QStringList>& translatedChunks);
         void restoreOriginalText();

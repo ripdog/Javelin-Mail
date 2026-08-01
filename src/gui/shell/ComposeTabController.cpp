@@ -2,7 +2,7 @@
 
 #include "gui/compose/ComposeTabWidget.h"
 #include "gui/settings/ConnectionSettingsAdapter.h"
-#include "gui/settings/PreferencesDialog.h"
+#include "gui/settings/GuiSettings.h"
 #include "gui/shell/MainWindowStateStore.h"
 #include "jmap/cache/IdentityReader.h"
 #include "jmap/contacts/ContactIdentityLookup.h"
@@ -19,11 +19,12 @@
 namespace javelin::gui::shell
 {
     ComposeTabController::ComposeTabController(
+        javelin::gui::settings::GuiSettings& settings,
         javelin::app::ComposeCommandPort& composeCommandPort,
         javelin::jmap::cache::IdentityReader& identityRepository,
         javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
         QStackedWidget& contentStack, std::vector<TabState>& tabs, QObject* parent)
-        : QObject(parent), m_composeCommandPort(composeCommandPort),
+        : QObject(parent), m_settings(settings), m_composeCommandPort(composeCommandPort),
           m_identityRepository(identityRepository), m_contactIdentityLookup(contactIdentityLookup),
           m_contentStack(contentStack), m_tabs(tabs)
     {
@@ -31,8 +32,8 @@ namespace javelin::gui::shell
 
     void ComposeTabController::open(javelin::jmap::submission::OpenComposeRequest request)
     {
-        const auto settings = javelin::gui::settings::PreferencesDialog::loadSettingsForAccount(
-            QString::fromStdString(request.accountId));
+        const auto settings =
+            m_settings.accountForCachedId(QString::fromStdString(request.accountId));
         if (settings.sessionUrl.isEmpty() || settings.loginEmail.isEmpty() ||
             settings.apiKey.isEmpty())
         {
@@ -190,7 +191,7 @@ namespace javelin::gui::shell
         });
         const auto index = m_tabs.size() - 1;
         auto* widget = new javelin::gui::compose::ComposeTabWidget(
-            m_composeCommandPort, m_identityRepository, m_contactIdentityLookup,
+            m_settings, m_composeCommandPort, m_identityRepository, m_contactIdentityLookup,
             std::move(snapshot), &m_contentStack);
         attachWidget(widget, index);
         return index;

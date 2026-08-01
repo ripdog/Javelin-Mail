@@ -25,6 +25,7 @@
 #include "gui/messages/MessageListPanePresenter.h"
 #include "gui/messageview/MessageViewContainer.h"
 #include "gui/search/AdvancedSearchDialog.h"
+#include "gui/settings/GuiSettings.h"
 #include "gui/settings/PreferencesDialog.h"
 #include "gui/shell/AccountRefreshController.h"
 #include "gui/shell/CalendarTabController.h"
@@ -234,7 +235,8 @@ namespace javelin::gui::shell
 
     } // namespace
 
-    MainWindow::MainWindow(javelin::app::AccountCommandPort& accountCommandPort,
+    MainWindow::MainWindow(javelin::gui::settings::GuiSettings& settings,
+                           javelin::app::AccountCommandPort& accountCommandPort,
                            javelin::jmap::cache::AccountReader& accountReader,
                            javelin::jmap::cache::MailboxReader& mailboxReader,
                            javelin::jmap::cache::ContactReader& contactReader,
@@ -255,7 +257,7 @@ namespace javelin::gui::shell
                            javelin::app::MailApplicationEventsPort& mailEvents,
                            javelin::app::MessageNavigationPort& messageNavigationPort,
                            javelin::app::UndoCommandPort& undoCommandPort, QWidget* parent)
-        : KXmlGuiWindow(parent), m_accountCommandPort(accountCommandPort),
+        : KXmlGuiWindow(parent), m_settings(settings), m_accountCommandPort(accountCommandPort),
           m_accountReader(accountReader), m_mailboxReader(mailboxReader),
           m_contactReader(contactReader), m_calendarReader(calendarReader),
           m_calendarCommandPort(calendarCommandPort),
@@ -270,8 +272,8 @@ namespace javelin::gui::shell
     {
         m_statusBar = new LayeredStatusBar(this);
         setStatusBar(m_statusBar);
-        m_messageFileController =
-            new MessageFileController(m_messageContentPort, m_messageViewReader, this, this);
+        m_messageFileController = new MessageFileController(m_settings, m_messageContentPort,
+                                                            m_messageViewReader, this, this);
         connect(m_messageFileController, &MessageFileController::statusMessage, this,
                 [this](const QString& message, const int durationMilliseconds)
                 {
@@ -312,7 +314,7 @@ namespace javelin::gui::shell
         qApp->installEventFilter(this);
         updateUndoRedoActions();
         m_accountRefreshController =
-            new AccountRefreshController(m_accountRefreshPort, m_accountReader, this);
+            new AccountRefreshController(m_settings, m_accountRefreshPort, m_accountReader, this);
         connect(m_accountRefreshController, &AccountRefreshController::busyChanged, this,
                 [this](const bool busy)
                 {
@@ -347,7 +349,6 @@ namespace javelin::gui::shell
                             .arg(summary.emailCount)
                             .arg(QString::fromStdString(summary.accountId)),
                         10000);
-                    Q_EMIT accountSettingsChanged();
                 });
         connect(m_accountRefreshController, &AccountRefreshController::contactsRefreshed, this,
                 [this](const javelin::jmap::contacts::ContactRefreshSummary&)
@@ -367,8 +368,8 @@ namespace javelin::gui::shell
         connect(m_calendarTabController, &CalendarTabController::operationFailed, this,
                 [this](const javelin::jmap::OperationError& error) { presentError(error); });
         m_contactsTabController =
-            new ContactsTabController(m_contactReader, m_accountRefreshPort, m_contactCommandPort,
-                                      *m_contentStack, m_tabs, this);
+            new ContactsTabController(m_settings, m_contactReader, m_accountRefreshPort,
+                                      m_contactCommandPort, *m_contentStack, m_tabs, this);
         connect(m_contactsTabController, &ContactsTabController::tabReady, this,
                 [this](const int index)
                 {
@@ -410,7 +411,7 @@ namespace javelin::gui::shell
                                             true);
                 });
         m_composeTabController =
-            new ComposeTabController(m_composeCommandPort, m_identityReader,
+            new ComposeTabController(m_settings, m_composeCommandPort, m_identityReader,
                                      m_contactIdentityLookup, *m_contentStack, m_tabs, this);
         connect(m_composeTabController, &ComposeTabController::tabReady, this,
                 [this](const int index)
@@ -1046,7 +1047,14 @@ namespace javelin::gui::shell
         setWindowTitle(QStringLiteral("Javelin Mail"));
 
         m_mailboxModel = new javelin::gui::mailboxes::MailboxTreeModel(
-            m_accountReader, m_mailboxReader, m_queryReader.databasePath(), this);
+            m_accountReader, m_mailboxReader, m_queryReader.databasePath(),
+            {.accountId = std::nullopt,
+             .showAccount = true,
+             .checkable = false,
+             .checkedMailboxIds = {},
+             .accountDisplayName = [this](const QStringView accountId)
+             { return m_settings.accountForCachedId(accountId).displayName; }},
+            this);
         m_messageModel = new javelin::gui::messages::MessageListModel(m_queryReader, this);
 
         m_mailboxSearchEdit = new QLineEdit(this);
@@ -1063,7 +1071,7 @@ namespace javelin::gui::shell
         m_tabBar->setStyleSheet(
             QStringLiteral("QTabBar::tab { max-width: 220px; min-width: 120px; }"));
         m_tabBar->hide();
-        m_tabBarPresenter = new TabBarPresenter(*m_tabBar, *this, this);
+        m_tabBarPresenter = new TabBarPresenter(m_settings, *m_tabBar, *this, this);
 
         m_mailboxView = new javelin::gui::mailboxes::MailboxTreeView(this);
         m_mailboxView->setModel(m_mailboxModel);
@@ -1241,7 +1249,7 @@ namespace javelin::gui::shell
         messageLayout->addWidget(m_messageView, 1);
 
         m_messageViewContainer = new javelin::gui::messageview::MessageViewContainer(
-            m_translationPort, m_contactIdentityLookup, this);
+            m_settings, m_translationPort, m_contactIdentityLookup, this);
         connect(m_messageViewContainer,
                 &javelin::gui::messageview::MessageViewContainer::saveAttachmentRequested, this,
                 [this](const QString& accountId, const QString& emailId, const QString& partId)
@@ -2662,8 +2670,8 @@ namespace javelin::gui::shell
 
     void MainWindow::openPreferencesForConnection(const QString& connectionId)
     {
-        javelin::gui::settings::PreferencesDialog dialog{m_accountCommandPort, m_accountReader,
-                                                         m_mailboxReader, this};
+        javelin::gui::settings::PreferencesDialog dialog{m_settings, m_accountCommandPort,
+                                                         m_accountReader, m_mailboxReader, this};
         if (!connectionId.isEmpty())
             dialog.selectConfiguredAccount(connectionId);
         if (dialog.exec() == QDialog::Accepted)
@@ -2672,7 +2680,6 @@ namespace javelin::gui::shell
             m_messageViewContainer->appearanceSettingsChanged();
             m_messageViewContainer->translationSettingsChanged();
             m_statusBar->showMessage(QStringLiteral("Saved preferences."), 3000);
-            Q_EMIT accountSettingsChanged();
             m_mailboxModel->refresh();
             const auto accountId = activeAccountId().has_value() ? activeAccountId()
                                                                  : currentAccountId(*m_mailboxView);

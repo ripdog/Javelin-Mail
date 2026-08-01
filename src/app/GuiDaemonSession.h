@@ -1,6 +1,7 @@
 #pragma once
 
 #include "app/CacheAccessBarrier.h"
+#include "app/SettingsApplicationPorts.h"
 #include "jmap/cache/Database.h"
 #include "protocol/SocketTransport.h"
 
@@ -42,7 +43,9 @@ namespace javelin::app
         bool startDaemonIfMissing = true;
     };
 
-    class GuiDaemonSession final : public QObject, public javelin::protocol::BoundaryEventSink
+    class GuiDaemonSession final : public QObject,
+                                   public javelin::protocol::BoundaryEventSink,
+                                   public SettingsPort
     {
         Q_OBJECT
 
@@ -60,11 +63,14 @@ namespace javelin::app
         void stop();
 
         [[nodiscard]] bool isReady() const;
-        [[nodiscard]] const javelin::protocol::SettingsSnapshot& settings() const;
+        [[nodiscard]] const javelin::protocol::SettingsSnapshot& settings() const override;
         [[nodiscard]] const std::optional<javelin::protocol::DaemonStatus>& daemonStatus() const;
         [[nodiscard]] std::optional<javelin::protocol::DaemonInstanceId> daemonInstance() const;
-        [[nodiscard]] std::optional<GuiBootstrapError>
-        updateSettings(javelin::protocol::SettingsUpdate update);
+        [[nodiscard]] std::optional<javelin::protocol::BoundaryError>
+        updateSettings(javelin::protocol::SettingsRevision baseRevision,
+                       javelin::protocol::SettingsUpdate update) override;
+        [[nodiscard]] QMetaObject::Connection
+        connectSettingsChanged(QObject* context, std::function<void()> callback) override;
         [[nodiscard]] std::optional<javelin::protocol::BoundaryError>
         requestAccountRefresh(const QString& accountId);
         [[nodiscard]] javelin::protocol::CommandReply

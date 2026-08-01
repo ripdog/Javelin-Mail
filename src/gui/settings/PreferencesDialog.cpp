@@ -1,7 +1,6 @@
 #include "gui/settings/PreferencesDialog.h"
 
 #include "app/AccountApplicationPorts.h"
-#include "app/ComposePreferences.h"
 #include "gui/mailboxes/MailboxTreeModel.h"
 #include "gui/mailboxes/MailboxTreeView.h"
 #include "jmap/cache/AccountReadRepository.h"
@@ -20,7 +19,6 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QRadioButton>
-#include <QSettings>
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QSplitter>
@@ -34,24 +32,6 @@ namespace javelin::gui::settings
 {
     namespace
     {
-        constexpr auto accountsGroup = "accounts";
-        constexpr auto sizeKey = "size";
-        constexpr auto idKey = "id";
-        constexpr auto revisionKey = "revision";
-        constexpr auto displayNameKey = "displayName";
-        constexpr auto sessionUrlKey = "sessionUrl";
-        constexpr auto loginEmailKey = "loginEmail";
-        constexpr auto apiKeyKey = "apiKey";
-        constexpr auto cachedAccountIdsKey = "cachedAccountIds";
-        constexpr auto remoteContentGroup = "remoteContent";
-        constexpr auto allowedSendersKey = "allowedSenders";
-        constexpr auto allowedDomainsKey = "allowedDomains";
-        constexpr auto attachmentsGroup = "attachments";
-        constexpr auto alwaysAskKey = "alwaysAsk";
-        constexpr auto directoryKey = "directory";
-        constexpr auto mailboxSyncGroup = "mailboxSync";
-        constexpr auto mailboxNotificationGroup = "mailboxNotifications";
-        constexpr auto mailboxIdsKey = "mailboxIds";
         constexpr int remoteContentKindRole = Qt::UserRole + 1;
         constexpr int remoteContentValueRole = Qt::UserRole + 2;
         constexpr int autoTranslateKindRole = Qt::UserRole + 1;
@@ -97,31 +77,6 @@ namespace javelin::gui::settings
                                                 : account.loginEmail;
         }
 
-        [[nodiscard]] QStringList remoteContentAllowList(const QLatin1StringView key)
-        {
-            QSettings settings;
-            settings.beginGroup(QLatin1StringView{remoteContentGroup});
-            auto values = settings.value(key).toStringList();
-            settings.endGroup();
-            values.removeAll(QString{});
-            values.removeDuplicates();
-            values.sort(Qt::CaseInsensitive);
-            return values;
-        }
-
-        void saveRemoteContentAllowList(const QLatin1StringView key, QStringList values)
-        {
-            values.removeAll(QString{});
-            values.removeDuplicates();
-            values.sort(Qt::CaseInsensitive);
-
-            QSettings settings;
-            settings.beginGroup(QLatin1StringView{remoteContentGroup});
-            settings.setValue(key, values);
-            settings.endGroup();
-            settings.sync();
-        }
-
         [[nodiscard]] QString selectedTranslationLanguageCode(const QComboBox& comboBox)
         {
             const int index = comboBox.currentIndex();
@@ -136,32 +91,25 @@ namespace javelin::gui::settings
             return comboBox.currentText().trimmed();
         }
 
-        void saveAttachmentSaveSettings(const AttachmentSaveSettings& value)
-        {
-            QSettings settings;
-            settings.beginGroup(QLatin1StringView{attachmentsGroup});
-            settings.setValue(QLatin1StringView{alwaysAskKey}, value.alwaysAsk);
-            settings.setValue(QLatin1StringView{directoryKey}, value.directory);
-            settings.endGroup();
-            settings.sync();
-        }
     } // namespace
 
-    PreferencesDialog::PreferencesDialog(javelin::app::AccountCommandPort& accountCommandPort,
+    PreferencesDialog::PreferencesDialog(GuiSettings& settings,
+                                         javelin::app::AccountCommandPort& accountCommandPort,
                                          javelin::jmap::cache::AccountReader& accountReader,
                                          javelin::jmap::cache::MailboxReader& mailboxReader,
                                          QWidget* parent)
-        : KConfigDialog(parent, QStringLiteral("preferences"), nullptr),
-          m_accountCommandPort(accountCommandPort), m_accountReader(accountReader),
-          m_mailboxReader(mailboxReader), m_accounts(loadAccounts()),
-          m_remoteContentSenders(remoteContentAllowList(QLatin1StringView{allowedSendersKey})),
-          m_remoteContentDomains(remoteContentAllowList(QLatin1StringView{allowedDomainsKey})),
-          m_translationSettings(javelin::app::loadTranslationSettings()),
+        : KConfigDialog(parent, QStringLiteral("preferences"), nullptr), m_settings(settings),
+          m_baseRevision(m_settings.snapshot().revision), m_accountCommandPort(accountCommandPort),
+          m_accountReader(accountReader), m_mailboxReader(mailboxReader),
+          m_accounts(m_settings.accounts()),
+          m_remoteContentSenders(m_settings.remoteContentSenders()),
+          m_remoteContentDomains(m_settings.remoteContentDomains()),
+          m_translationSettings(m_settings.translationSettings()),
           m_autoTranslateSenders(m_translationSettings.autoTranslateSenders),
           m_autoTranslateDomains(m_translationSettings.autoTranslateDomains),
-          m_messageAppearanceSettings(javelin::gui::messageview::loadMessageAppearanceSettings()),
-          m_attachmentSaveSettings(loadAttachmentSaveSettings()),
-          m_undoSendDelaySeconds(javelin::app::ComposePreferences::undoSendDelaySeconds())
+          m_messageAppearanceSettings(m_settings.messageAppearanceSettings()),
+          m_attachmentSaveSettings(m_settings.attachmentSaveSettings()),
+          m_undoSendDelaySeconds(m_settings.undoSendDelaySeconds())
     {
         setWindowTitle(QStringLiteral("Preferences"));
         resize(760, 420);
@@ -221,13 +169,15 @@ namespace javelin::gui::settings
         m_mailboxSyncAccount = new QComboBox(mailboxSyncPage);
         mailboxSyncLayout->addWidget(m_mailboxSyncAccount);
         m_mailboxSyncList = new javelin::gui::mailboxes::MailboxTreeView(mailboxSyncPage);
-        m_mailboxSyncModel =
-            new javelin::gui::mailboxes::MailboxTreeModel(m_accountReader, m_mailboxReader,
-                                                          {.accountId = std::string{},
-                                                           .showAccount = false,
-                                                           .checkable = true,
-                                                           .checkedMailboxIds = {}},
-                                                          m_mailboxSyncList);
+        m_mailboxSyncModel = new javelin::gui::mailboxes::MailboxTreeModel(
+            m_accountReader, m_mailboxReader,
+            {.accountId = std::string{},
+             .showAccount = false,
+             .checkable = true,
+             .checkedMailboxIds = {},
+             .accountDisplayName = [this](const QStringView accountId)
+             { return m_settings.accountForCachedId(accountId).displayName; }},
+            m_mailboxSyncList);
         m_mailboxSyncList->setModel(m_mailboxSyncModel);
         auto* mailboxLists = new QHBoxLayout();
         auto* syncListLayout = new QVBoxLayout();
@@ -239,13 +189,15 @@ namespace javelin::gui::settings
         notificationListLayout->addWidget(
             new QLabel(QStringLiteral("Show notifications"), mailboxSyncPage));
         m_mailboxNotificationList = new javelin::gui::mailboxes::MailboxTreeView(mailboxSyncPage);
-        m_mailboxNotificationModel =
-            new javelin::gui::mailboxes::MailboxTreeModel(m_accountReader, m_mailboxReader,
-                                                          {.accountId = std::string{},
-                                                           .showAccount = false,
-                                                           .checkable = true,
-                                                           .checkedMailboxIds = {}},
-                                                          m_mailboxNotificationList);
+        m_mailboxNotificationModel = new javelin::gui::mailboxes::MailboxTreeModel(
+            m_accountReader, m_mailboxReader,
+            {.accountId = std::string{},
+             .showAccount = false,
+             .checkable = true,
+             .checkedMailboxIds = {},
+             .accountDisplayName = [this](const QStringView accountId)
+             { return m_settings.accountForCachedId(accountId).displayName; }},
+            m_mailboxNotificationList);
         m_mailboxNotificationList->setModel(m_mailboxNotificationModel);
         notificationListLayout->addWidget(m_mailboxNotificationList, 1);
         mailboxLists->addLayout(notificationListLayout, 1);
@@ -521,8 +473,8 @@ namespace javelin::gui::settings
             return;
         }
 
-        saveCurrentSettings();
-        KConfigDialog::updateSettings();
+        if (saveCurrentSettings())
+            KConfigDialog::updateSettings();
     }
 
     bool PreferencesDialog::hasChanged()
@@ -536,149 +488,6 @@ namespace javelin::gui::settings
         if (found == m_accounts.end())
             return;
         m_accountList->setCurrentRow(static_cast<int>(std::distance(m_accounts.begin(), found)));
-    }
-
-    std::vector<ConnectionSettings> PreferencesDialog::loadAccounts()
-    {
-        QSettings settings;
-        settings.beginGroup(QLatin1StringView{accountsGroup});
-        const int count = settings.beginReadArray(QLatin1StringView{sizeKey});
-        std::vector<ConnectionSettings> accounts;
-        accounts.reserve(static_cast<std::size_t>(count));
-        for (int index = 0; index < count; ++index)
-        {
-            settings.setArrayIndex(index);
-            const auto loginEmail =
-                settings.value(QLatin1StringView{loginEmailKey}).toString().trimmed();
-            auto displayName =
-                settings.value(QLatin1StringView{displayNameKey}).toString().trimmed();
-            if (displayName.isEmpty())
-            {
-                displayName = loginEmail;
-            }
-            accounts.push_back(ConnectionSettings{
-                .id = settings.value(QLatin1StringView{idKey}).toString(),
-                .revision = settings.value(QLatin1StringView{revisionKey}).toULongLong(),
-                .displayName = displayName,
-                .sessionUrl = settings.value(QLatin1StringView{sessionUrlKey}).toString().trimmed(),
-                .loginEmail = loginEmail,
-                .apiKey = settings.value(QLatin1StringView{apiKeyKey}).toString().trimmed(),
-                .cachedAccountIds =
-                    settings.value(QLatin1StringView{cachedAccountIdsKey}).toStringList(),
-            });
-        }
-        settings.endArray();
-        settings.endGroup();
-        return accounts;
-    }
-
-    ConnectionSettings PreferencesDialog::loadSettingsForAccount(const QStringView accountId)
-    {
-        const auto accounts = loadAccounts();
-        const auto found = std::ranges::find_if(
-            accounts, [accountId](const auto& account)
-            { return account.cachedAccountIds.contains(accountId.toString()); });
-        return found == accounts.end() ? ConnectionSettings{} : *found;
-    }
-
-    AttachmentSaveSettings PreferencesDialog::loadAttachmentSaveSettings()
-    {
-        QSettings settings;
-        settings.beginGroup(QLatin1StringView{attachmentsGroup});
-        const AttachmentSaveSettings value{
-            .alwaysAsk = settings.value(QLatin1StringView{alwaysAskKey}, true).toBool(),
-            .directory = settings.value(QLatin1StringView{directoryKey}).toString(),
-        };
-        settings.endGroup();
-        return value;
-    }
-
-    QStringList PreferencesDialog::syncedMailboxIds(const QStringView accountId)
-    {
-        QSettings settings;
-        settings.beginGroup(QLatin1StringView{mailboxSyncGroup});
-        const auto ids =
-            settings
-                .value(accountId.toString() + QLatin1Char('/') + QLatin1StringView{mailboxIdsKey})
-                .toStringList();
-        settings.endGroup();
-        return ids;
-    }
-
-    QStringList PreferencesDialog::notificationMailboxIds(const QStringView accountId)
-    {
-        QSettings settings;
-        settings.beginGroup(QLatin1StringView{mailboxNotificationGroup});
-        const auto ids =
-            settings
-                .value(accountId.toString() + QLatin1Char('/') + QLatin1StringView{mailboxIdsKey})
-                .toStringList();
-        settings.endGroup();
-        return ids;
-    }
-
-    bool PreferencesDialog::hasNotificationMailboxSelection(const QStringView accountId)
-    {
-        QSettings settings;
-        settings.beginGroup(QLatin1StringView{mailboxNotificationGroup});
-        const bool configured = settings.contains(accountId.toString() + QLatin1Char('/') +
-                                                  QLatin1StringView{mailboxIdsKey});
-        settings.endGroup();
-        return configured;
-    }
-
-    void PreferencesDialog::saveAccounts(const std::vector<ConnectionSettings>& accounts)
-    {
-        QSettings settings;
-        settings.beginGroup(QLatin1StringView{accountsGroup});
-        settings.beginWriteArray(QLatin1StringView{sizeKey}, static_cast<int>(accounts.size()));
-        for (int index = 0; index < static_cast<int>(accounts.size()); ++index)
-        {
-            settings.setArrayIndex(index);
-            const auto& account = accounts[static_cast<std::size_t>(index)];
-            settings.setValue(QLatin1StringView{idKey}, account.id);
-            settings.setValue(QLatin1StringView{revisionKey},
-                              static_cast<qulonglong>(account.revision));
-            settings.setValue(QLatin1StringView{displayNameKey}, account.displayName);
-            settings.setValue(QLatin1StringView{sessionUrlKey}, account.sessionUrl);
-            settings.setValue(QLatin1StringView{loginEmailKey}, account.loginEmail);
-            settings.setValue(QLatin1StringView{apiKeyKey}, account.apiKey);
-            settings.setValue(QLatin1StringView{cachedAccountIdsKey}, account.cachedAccountIds);
-        }
-        settings.endArray();
-        settings.endGroup();
-        settings.sync();
-    }
-
-    void PreferencesDialog::associateCachedAccount(const QString& configuredAccountId,
-                                                   const QString& cachedAccountId)
-    {
-        auto accounts = loadAccounts();
-        const auto found =
-            std::ranges::find(accounts, configuredAccountId, &ConnectionSettings::id);
-        if (found == accounts.end())
-        {
-            return;
-        }
-        if (!found->cachedAccountIds.contains(cachedAccountId))
-        {
-            found->cachedAccountIds.push_back(cachedAccountId);
-            saveAccounts(accounts);
-        }
-    }
-
-    void PreferencesDialog::saveResolvedSessionUrl(const QString& configuredAccountId,
-                                                   const QString& sessionUrl)
-    {
-        auto accounts = loadAccounts();
-        const auto found =
-            std::ranges::find(accounts, configuredAccountId, &ConnectionSettings::id);
-        if (found == accounts.end() || sessionUrl.isEmpty())
-        {
-            return;
-        }
-        found->sessionUrl = sessionUrl;
-        saveAccounts(accounts);
     }
 
     void PreferencesDialog::addAccount()
@@ -785,67 +594,93 @@ namespace javelin::gui::settings
         noteUnsavedChanges();
     }
 
-    void PreferencesDialog::saveCurrentSettings()
+    bool PreferencesDialog::saveCurrentSettings()
     {
         storeCurrentEdits();
+        storeMailboxSyncSelection();
         for (auto& account : m_accounts)
         {
             if (m_dirtyConnectionIds.contains(account.id))
                 ++account.revision;
         }
-        for (const auto& account : m_removedAccounts)
-        {
-            if (const auto error = m_accountCommandPort.removeConfiguredAccount(
-                    account.loginEmail, account.sessionUrl, account.cachedAccountIds))
-            {
-                QMessageBox::critical(this, QStringLiteral("Could not remove account"),
-                                      error->message);
-                return;
-            }
-        }
-        m_removedAccounts.clear();
-        m_dirtyConnectionIds.clear();
 
-        saveAccounts(m_accounts);
-        saveRemoteContentAllowList(QLatin1StringView{allowedSendersKey}, m_remoteContentSenders);
-        saveRemoteContentAllowList(QLatin1StringView{allowedDomainsKey}, m_remoteContentDomains);
+        m_remoteContentSenders.removeAll(QString{});
+        m_remoteContentSenders.removeDuplicates();
+        m_remoteContentSenders.sort(Qt::CaseInsensitive);
+        m_remoteContentDomains.removeAll(QString{});
+        m_remoteContentDomains.removeDuplicates();
+        m_remoteContentDomains.sort(Qt::CaseInsensitive);
         m_translationSettings.enabled = m_translationEnabledCheckBox->isChecked();
         m_translationSettings.apiKeyOverride = m_translationApiKeyEdit->text();
         m_translationSettings.targetLanguage =
             selectedTranslationLanguageCode(*m_translationTargetLanguage);
         m_translationSettings.autoTranslateSenders = m_autoTranslateSenders;
         m_translationSettings.autoTranslateDomains = m_autoTranslateDomains;
-        javelin::app::saveTranslationSettings(m_translationSettings);
-        javelin::gui::messageview::saveMessageAppearanceSettings(m_messageAppearanceSettings);
-        saveAttachmentSaveSettings(m_attachmentSaveSettings);
-        javelin::app::ComposePreferences::setUndoSendDelaySeconds(m_undoSendDelaySeconds);
-        storeMailboxSyncSelection();
-        QSettings mailboxSettings;
-        mailboxSettings.beginGroup(QLatin1StringView{mailboxSyncGroup});
-        for (auto it = m_syncedMailboxIds.cbegin(); it != m_syncedMailboxIds.cend(); ++it)
-        {
-            mailboxSettings.setValue(it.key() + QLatin1Char('/') + QLatin1StringView{mailboxIdsKey},
-                                     it.value());
-        }
-        mailboxSettings.endGroup();
-        mailboxSettings.sync();
-        QSettings notificationSettings;
-        notificationSettings.beginGroup(QLatin1StringView{mailboxNotificationGroup});
-        for (auto it = m_notificationMailboxIds.cbegin(); it != m_notificationMailboxIds.cend();
-             ++it)
-        {
-            notificationSettings.setValue(
-                it.key() + QLatin1Char('/') + QLatin1StringView{mailboxIdsKey}, it.value());
-        }
-        notificationSettings.endGroup();
-        notificationSettings.sync();
 
+        const auto selections =
+            [](const QHash<QString, QStringList>& values, const QSet<QString>* configured)
+        {
+            std::vector<javelin::protocol::MailboxSelectionSettings> result;
+            result.reserve(static_cast<std::size_t>(values.size()));
+            for (auto it = values.cbegin(); it != values.cend(); ++it)
+            {
+                result.push_back({
+                    .accountId = it.key(),
+                    .mailboxIds = {it.value().begin(), it.value().end()},
+                    .configured = configured == nullptr || configured->contains(it.key()),
+                });
+            }
+            return result;
+        };
+
+        javelin::protocol::SettingsUpdate update;
+        update.accounts = GuiSettings::protocolAccounts(m_accounts);
+        update.syncedMailboxSelections = selections(m_syncedMailboxIds, nullptr);
+        update.notificationMailboxSelections =
+            selections(m_notificationMailboxIds, &m_configuredNotificationAccounts);
+        update.remoteContentSenders =
+            std::vector<QString>{m_remoteContentSenders.begin(), m_remoteContentSenders.end()};
+        update.remoteContentDomains =
+            std::vector<QString>{m_remoteContentDomains.begin(), m_remoteContentDomains.end()};
+        update.translation = {
+            .enabled = m_translationSettings.enabled,
+            .apiKeyOverride = m_translationSettings.apiKeyOverride,
+            .targetLanguage = m_translationSettings.targetLanguage,
+            .autoTranslateSenders = {m_autoTranslateSenders.begin(), m_autoTranslateSenders.end()},
+            .autoTranslateDomains = {m_autoTranslateDomains.begin(), m_autoTranslateDomains.end()},
+        };
+        update.appearance = {
+            .messageColorMode = static_cast<std::int32_t>(m_messageAppearanceSettings.colorMode),
+        };
+        update.attachments = {
+            .alwaysAsk = m_attachmentSaveSettings.alwaysAsk,
+            .directory = m_attachmentSaveSettings.directory,
+        };
+        update.undoSendDelaySeconds = m_undoSendDelaySeconds;
+        if (const auto error = m_settings.update(m_baseRevision, std::move(update)))
+        {
+            QMessageBox::critical(this, QStringLiteral("Could not save preferences"),
+                                  error->detail);
+            return false;
+        }
+
+        for (const auto& account : m_removedAccounts)
+        {
+            if (const auto error = m_accountCommandPort.removeConfiguredAccount(
+                    account.loginEmail, account.sessionUrl, account.cachedAccountIds))
+            {
+                QMessageBox::critical(this, QStringLiteral("Could not remove account cache"),
+                                      error->message);
+            }
+        }
+        m_baseRevision = m_settings.snapshot().revision;
+        m_removedAccounts.clear();
+        m_dirtyConnectionIds.clear();
         m_loadedAccountIds.clear();
         for (const auto& account : m_accounts)
-        {
             m_loadedAccountIds.push_back(account.id);
-        }
         m_hasPendingChanges = false;
+        return true;
     }
 
     void PreferencesDialog::refreshAccountList()
@@ -872,23 +707,18 @@ namespace javelin::gui::settings
         for (const auto& account : *accounts)
         {
             const auto accountId = QString::fromStdString(account.accountId);
-            const auto configuredAccount = loadSettingsForAccount(accountId);
+            const auto configuredAccount = m_settings.accountForCachedId(accountId);
             const auto accountName =
                 !configuredAccount.displayName.isEmpty()
                     ? configuredAccount.displayName
                     : QString::fromStdString(account.name.empty() ? account.accountId
                                                                   : account.name);
             m_mailboxSyncAccount->addItem(accountName, accountId);
-            m_syncedMailboxIds.insert(accountId, syncedMailboxIds(accountId));
-            m_notificationMailboxIds.insert(accountId, notificationMailboxIds(accountId));
-            QSettings notificationSettings;
-            notificationSettings.beginGroup(QLatin1StringView{mailboxNotificationGroup});
-            if (notificationSettings.contains(accountId + QLatin1Char('/') +
-                                              QLatin1StringView{mailboxIdsKey}))
-            {
+            m_syncedMailboxIds.insert(accountId, m_settings.syncedMailboxIds(accountId));
+            m_notificationMailboxIds.insert(accountId,
+                                            m_settings.notificationMailboxIds(accountId));
+            if (m_settings.hasNotificationMailboxSelection(accountId))
                 m_configuredNotificationAccounts.insert(accountId);
-            }
-            notificationSettings.endGroup();
         }
         m_mailboxSyncCurrentAccountId = m_mailboxSyncAccount->currentData().toString();
         refreshMailboxSyncList();

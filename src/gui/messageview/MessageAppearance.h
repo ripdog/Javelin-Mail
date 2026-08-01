@@ -28,8 +28,6 @@ namespace javelin::gui::messageview
         QString border;
     };
 
-    [[nodiscard]] MessageAppearanceSettings loadMessageAppearanceSettings();
-    void saveMessageAppearanceSettings(const MessageAppearanceSettings& settings);
     [[nodiscard]] DarkReaderThemeColors darkReaderThemeColors(const QPalette& palette);
 
     [[nodiscard]] constexpr MessageColorMode messageColorModeFromStorage(const int value)

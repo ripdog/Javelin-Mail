@@ -31,6 +31,10 @@ namespace javelin::jmap::contacts
 {
     class ContactIdentityLookup;
 }
+namespace javelin::gui::settings
+{
+    class GuiSettings;
+}
 
 namespace javelin::gui::messageview
 {
@@ -42,6 +46,7 @@ namespace javelin::gui::messageview
 
       public:
         explicit MessageViewContainer(
+            javelin::gui::settings::GuiSettings& settings,
             javelin::app::TranslationPort& translationPort,
             javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
             QWidget* parent = nullptr);
@@ -96,6 +101,7 @@ namespace javelin::gui::messageview
         void rebuildMultipleSelectionRows();
         void permitRemoteContentForCurrentSender();
         void permitRemoteContentForCurrentDomain();
+        void addRemoteContentPermit(bool sender, QString value);
         [[nodiscard]] QString attachmentStatusText() const;
         [[nodiscard]] QString currentSenderAddress() const;
         [[nodiscard]] QString currentSenderDomain() const;
@@ -132,6 +138,7 @@ namespace javelin::gui::messageview
         QLabel* m_languageStatusLabel = nullptr;
         QToolButton* m_translateButton = nullptr;
         QToolButton* m_translateOptionsButton = nullptr;
+        javelin::gui::settings::GuiSettings& m_settings;
         javelin::app::TranslationPort& m_translationPort;
         javelin::jmap::contacts::ContactIdentityLookup& m_contactIdentityLookup;
         QWidget* m_bodyControlsWidget = nullptr;

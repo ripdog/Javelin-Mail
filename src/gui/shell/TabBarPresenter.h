@@ -11,6 +11,11 @@ class QIcon;
 class QTabBar;
 class QWidget;
 
+namespace javelin::gui::settings
+{
+    class GuiSettings;
+}
+
 namespace javelin::gui::shell
 {
 
@@ -19,7 +24,8 @@ namespace javelin::gui::shell
         Q_OBJECT
 
       public:
-        TabBarPresenter(QTabBar& tabBar, QWidget& window, QObject* parent = nullptr);
+        TabBarPresenter(javelin::gui::settings::GuiSettings& settings, QTabBar& tabBar,
+                        QWidget& window, QObject* parent = nullptr);
 
         void refresh(const std::vector<TabState>& tabs, std::optional<int> activeIndex);
         [[nodiscard]] QString mailboxTitle(const MailboxTabState& tab) const;
@@ -32,6 +38,7 @@ namespace javelin::gui::shell
         [[nodiscard]] QIcon iconForTab(const TabState& tab) const;
         void ensureCloseButton(const std::vector<TabState>& tabs, int index);
 
+        javelin::gui::settings::GuiSettings& m_settings;
         QTabBar& m_tabBar;
         QWidget& m_window;
     };
