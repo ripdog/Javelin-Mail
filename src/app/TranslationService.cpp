@@ -186,9 +186,20 @@ namespace javelin::app
         settings.sync();
     }
 
+    void TranslationService::applySettings(TranslationSettings settings)
+    {
+        settings.apiKeyOverride = settings.apiKeyOverride.trimmed();
+        settings.targetLanguage = settings.targetLanguage.trimmed().toLower();
+        if (settings.targetLanguage.isEmpty())
+            settings.targetLanguage = QStringLiteral("en");
+        normalizeSettingsList(settings.autoTranslateSenders);
+        normalizeSettingsList(settings.autoTranslateDomains);
+        m_settings = std::move(settings);
+    }
+
     void TranslationService::reloadSettings()
     {
-        m_settings = loadTranslationSettings();
+        applySettings(loadTranslationSettings());
     }
 
     TranslationSettings TranslationService::loadSettings()
@@ -228,13 +239,11 @@ namespace javelin::app
     void TranslationService::setAutoTranslateSender(QString sender, const bool enabled)
     {
         setListValue(m_settings.autoTranslateSenders, std::move(sender), enabled);
-        saveSettings(m_settings);
     }
 
     void TranslationService::setAutoTranslateDomain(QString domain, const bool enabled)
     {
         setListValue(m_settings.autoTranslateDomains, std::move(domain), enabled);
-        saveSettings(m_settings);
     }
 
     QCoro::Task<TranslationService::Result>

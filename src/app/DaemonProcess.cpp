@@ -14,6 +14,7 @@
 #include "app/MailIndexService.h"
 #include "app/SettingsRepository.h"
 #include "app/TranslationApplicationPorts.h"
+#include "app/TranslationService.h"
 #include "app/UndoApplicationPorts.h"
 #include "app/WorkScheduler.h"
 #include "app/undo/UndoManager.h"
@@ -66,6 +67,15 @@ namespace javelin::app
             return result;
         }
 
+        [[nodiscard]] QStringList stringList(const std::vector<QString>& values)
+        {
+            QStringList result;
+            result.reserve(static_cast<qsizetype>(values.size()));
+            for (const auto& value : values)
+                result.push_back(value);
+            return result;
+        }
+
         [[nodiscard]] std::vector<AccountSyncConfiguration>
         accountConfigurations(const SettingsSnapshot& snapshot)
         {
@@ -75,11 +85,11 @@ namespace javelin::app
                 if (account.loginEmail.isEmpty() || account.apiKey.isEmpty())
                     continue;
 
-                const auto* synced = findSelection(snapshot.syncedMailboxSelections, account.id);
-                const auto* notifications =
-                    findSelection(snapshot.notificationMailboxSelections, account.id);
-                for (const auto& accountId : account.cachedAccountIds)
+                const auto appendConfiguration = [&](const QString& accountId)
                 {
+                    const auto* synced = findSelection(snapshot.syncedMailboxSelections, accountId);
+                    const auto* notifications =
+                        findSelection(snapshot.notificationMailboxSelections, accountId);
                     std::vector<QString> mailboxIds;
                     if (synced != nullptr)
                         mailboxIds = synced->mailboxIds;
@@ -103,32 +113,11 @@ namespace javelin::app
                         .notificationMailboxSelectionConfigured =
                             notifications != nullptr && notifications->configured,
                     });
-                }
+                };
+                for (const auto& accountId : account.cachedAccountIds)
+                    appendConfiguration(accountId);
                 if (account.cachedAccountIds.empty())
-                {
-                    std::vector<QString> mailboxIds;
-                    if (synced != nullptr)
-                        mailboxIds = synced->mailboxIds;
-                    if (notifications != nullptr)
-                    {
-                        mailboxIds.insert(mailboxIds.end(), notifications->mailboxIds.begin(),
-                                          notifications->mailboxIds.end());
-                    }
-                    std::ranges::sort(mailboxIds);
-                    mailboxIds.erase(std::ranges::unique(mailboxIds).begin(), mailboxIds.end());
-                    result.push_back({
-                        .settings = connectionSettings(account),
-                        .accountId = account.id.toStdString(),
-                        .mailboxIds = stringIds(mailboxIds),
-                        .fullSyncMailboxIds = synced == nullptr ? std::vector<std::string>{}
-                                                                : stringIds(synced->mailboxIds),
-                        .notificationMailboxIds = notifications == nullptr
-                                                      ? std::vector<std::string>{}
-                                                      : stringIds(notifications->mailboxIds),
-                        .notificationMailboxSelectionConfigured =
-                            notifications != nullptr && notifications->configured,
-                    });
-                }
+                    appendConfiguration(account.id);
             }
             return result;
         }
@@ -209,7 +198,6 @@ namespace javelin::app
             m_remoteActions = std::make_unique<DaemonRemoteActionDispatcher>(
                 *m_services, *this, [this] { return reloadSettings(); }, this);
             applySettings();
-            m_services->translationService().reloadSettings();
             m_background = std::make_unique<DaemonBackgroundController>(*m_services, this);
             m_services->commandDispatcher().setEventSink(this);
             connectOperationalEvents();
@@ -501,7 +489,6 @@ namespace javelin::app
             }
             m_settingsSnapshot = std::get<protocol::SettingsSnapshot>(loaded);
             applySettings();
-            m_services->translationService().reloadSettings();
             onBoundaryEvent(*updated);
         }
         return reply;
@@ -654,6 +641,14 @@ namespace javelin::app
                                  .arg(configurations.size())
                                  .arg(configurations.size() == 1 ? QString{} : QStringLiteral("s"),
                                       configuredAccountIds.join(QStringLiteral(", ")));
+        const auto& translation = m_settingsSnapshot.translation;
+        m_services->translationService().applySettings({
+            .enabled = translation.enabled,
+            .apiKeyOverride = translation.apiKeyOverride,
+            .targetLanguage = translation.targetLanguage,
+            .autoTranslateSenders = stringList(translation.autoTranslateSenders),
+            .autoTranslateDomains = stringList(translation.autoTranslateDomains),
+        });
         m_services->mailService().applySettings(configurations);
         m_services->fullMailSyncService().applySettings(std::move(fullSync));
         m_services->mailIndexService().applyAccounts(std::move(accountIds));
@@ -669,7 +664,6 @@ namespace javelin::app
             return settingsError(*error);
         m_settingsSnapshot = std::get<protocol::SettingsSnapshot>(loaded);
         applySettings();
-        m_services->translationService().reloadSettings();
         onBoundaryEvent(protocol::SettingsUpdated{.revision = m_settingsSnapshot.revision});
         return std::nullopt;
     }

@@ -324,3 +324,65 @@ TEST_CASE("work scheduler bounds durable queued work", "[app][work-scheduler][qu
                        .checkpointJson = QStringLiteral("{}")})
               .has_value());
 }
+
+TEST_CASE("work scheduler summary exposes progress and blocked work", "[app][work-scheduler][ui]")
+{
+    if (QCoreApplication::instance() == nullptr)
+    {
+        static int argc = 1;
+        static char name[] = "work-scheduler-summary-test";
+        static char* argv[]{name, nullptr};
+        static const auto application = std::make_unique<QCoreApplication>(argc, argv);
+        Q_UNUSED(application);
+    }
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("work-scheduler-summary-test"),
+        .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    javelin::app::WorkScheduler scheduler{connection, nullptr, std::chrono::milliseconds{0}};
+
+    REQUIRE_FALSE(scheduler
+                      .ensure({.jobId = "archive-download",
+                               .parentJobId = std::nullopt,
+                               .accountId = "account-1",
+                               .kind = javelin::app::WorkKind::FullMailSync,
+                               .priority = javelin::app::WorkPriority::Bulk,
+                               .title = QStringLiteral("Download all mail in Archive"),
+                               .checkpointJson = QStringLiteral("{}")})
+                      .has_value());
+    REQUIRE_FALSE(scheduler
+                      .update("archive-download", javelin::app::WorkStatus::Running,
+                              {.completedUnits = 125,
+                               .totalUnits = 1000,
+                               .completedBytes = 0,
+                               .totalBytes = std::nullopt,
+                               .detail = QStringLiteral("Reading mailbox contents")})
+                      .has_value());
+    CHECK(scheduler.summary().contains(QStringLiteral("Download all mail in Archive")));
+    CHECK(scheduler.summary().contains(QStringLiteral("125 / 1000")));
+
+    REQUIRE_FALSE(scheduler
+                      .update("archive-download", javelin::app::WorkStatus::WaitingForNetwork,
+                              {.completedUnits = 0,
+                               .totalUnits = std::nullopt,
+                               .completedBytes = 0,
+                               .totalBytes = std::nullopt,
+                               .detail = QStringLiteral("Waiting for network")})
+                      .has_value());
+    CHECK(scheduler.summary() == QStringLiteral("1 background task waiting"));
+
+    REQUIRE_FALSE(scheduler
+                      .update("archive-download", javelin::app::WorkStatus::Failed,
+                              {.completedUnits = 0,
+                               .totalUnits = std::nullopt,
+                               .completedBytes = 0,
+                               .totalBytes = std::nullopt,
+                               .detail = QStringLiteral("")},
+                              QStringLiteral("{}"), QStringLiteral("network failed"))
+                      .has_value());
+    CHECK(scheduler.summary() == QStringLiteral("1 background task failed"));
+}

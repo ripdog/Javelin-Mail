@@ -432,13 +432,57 @@ namespace javelin::app
         const auto* values = std::get_if<std::vector<WorkRecord>>(&records);
         if (values == nullptr)
             return {};
-        const auto active = std::ranges::count_if(
-            *values, [](const WorkRecord& item)
-            { return item.status == WorkStatus::Running || item.status == WorkStatus::Queued; });
-        return active == 0 ? QString{}
-                           : QStringLiteral("%1 background task%2")
-                                 .arg(active)
-                                 .arg(active == 1 ? QString{} : QStringLiteral("s"));
+
+        const auto countStatus = [values](const WorkStatus status)
+        {
+            return std::ranges::count_if(*values, [status](const WorkRecord& item)
+                                         { return item.status == status; });
+        };
+        const auto failed = countStatus(WorkStatus::Failed);
+        if (failed > 0)
+        {
+            return QStringLiteral("%1 background task%2 failed")
+                .arg(failed)
+                .arg(failed == 1 ? QString{} : QStringLiteral("s"));
+        }
+
+        const auto waiting = countStatus(WorkStatus::WaitingForSpace) +
+                             countStatus(WorkStatus::WaitingForNetwork) +
+                             countStatus(WorkStatus::WaitingForAuth);
+        if (waiting > 0)
+        {
+            return QStringLiteral("%1 background task%2 waiting")
+                .arg(waiting)
+                .arg(waiting == 1 ? QString{} : QStringLiteral("s"));
+        }
+
+        const auto running = countStatus(WorkStatus::Running);
+        const auto queued = countStatus(WorkStatus::Queued);
+        const auto active = running + queued;
+        if (active == 0)
+            return {};
+        if (active == 1 && running == 1)
+        {
+            const auto current =
+                std::ranges::find(*values, WorkStatus::Running, &WorkRecord::status);
+            if (current != values->end())
+            {
+                QString detail = current->progress.detail;
+                if (current->progress.totalUnits.has_value() && *current->progress.totalUnits > 0)
+                {
+                    const auto progress = QStringLiteral("%1 / %2")
+                                              .arg(current->progress.completedUnits)
+                                              .arg(*current->progress.totalUnits);
+                    detail = detail.isEmpty() ? progress
+                                              : QStringLiteral("%1 — %2").arg(detail, progress);
+                }
+                return detail.isEmpty() ? current->title
+                                        : QStringLiteral("%1 — %2").arg(current->title, detail);
+            }
+        }
+        return QStringLiteral("%1 background task%2")
+            .arg(active)
+            .arg(active == 1 ? QString{} : QStringLiteral("s"));
     }
 
     QMetaObject::Connection WorkScheduler::connectChanged(QObject* context,

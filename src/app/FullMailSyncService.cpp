@@ -399,13 +399,28 @@ namespace javelin::app
                     .accountId = configuration.accountId, .mailboxId = mailboxId, .jobId = id};
                 m_scopes.insert_or_assign(id, scope);
 
+                bool wasDisabled = false;
+                QSqlQuery previous{m_connection.database()};
+                previous.prepare(QStringLiteral(
+                    "SELECT desired FROM offline_mailbox_scopes WHERE account_id=:account AND "
+                    "mailbox_id=:mailbox"));
+                previous.bindValue(QStringLiteral(":account"),
+                                   QString::fromStdString(configuration.accountId));
+                previous.bindValue(QStringLiteral(":mailbox"), QString::fromStdString(mailboxId));
+                if (!previous.exec())
+                    logDatabaseFailure(QStringLiteral("Inspect full mailbox scope"), previous);
+                else if (previous.next())
+                    wasDisabled = !previous.value(0).toBool();
+                previous.finish();
+
                 QSqlQuery upsert{m_connection.database()};
                 upsert.prepare(QStringLiteral(
                     "INSERT INTO offline_mailbox_scopes(account_id,mailbox_id,desired,status) "
                     "VALUES(:account,:mailbox,1,'pending') ON CONFLICT(account_id,mailbox_id) DO "
-                    "UPDATE SET desired=1,status=CASE WHEN status='paused' AND "
-                    "completed_generation "
-                    "IS NULL THEN 'paused' ELSE status END,updated_at=CURRENT_TIMESTAMP"));
+                    "UPDATE SET desired=1,status=CASE WHEN offline_mailbox_scopes.desired=0 AND "
+                    "offline_mailbox_scopes.completed_generation IS NOT NULL THEN 'complete' WHEN "
+                    "offline_mailbox_scopes.desired=0 THEN 'pending' ELSE "
+                    "offline_mailbox_scopes.status END,updated_at=CURRENT_TIMESTAMP"));
                 upsert.bindValue(QStringLiteral(":account"),
                                  QString::fromStdString(configuration.accountId));
                 upsert.bindValue(QStringLiteral(":mailbox"), QString::fromStdString(mailboxId));
@@ -436,6 +451,8 @@ namespace javelin::app
                                                          mailboxId)),
                     .checkpointJson = QStringLiteral("{}"),
                 }));
+                if (wasDisabled)
+                    static_cast<void>(m_scheduler.resume(id));
             }
         }
 

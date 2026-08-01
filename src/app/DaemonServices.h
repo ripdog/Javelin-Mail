@@ -133,7 +133,7 @@ namespace javelin::app
         [[nodiscard]] javelin::jmap::cache::IdentityRepository& identityRepository();
         [[nodiscard]] javelin::jmap::cache::MessageViewService& messageViewService();
         [[nodiscard]] javelin::jmap::cache::QueryService& queryService();
-        [[nodiscard]] TranslationPort& translationService();
+        [[nodiscard]] TranslationService& translationService();
         [[nodiscard]] ComposeService& composeService();
         [[nodiscard]] ComposeCommandPort& composeCommandPort();
         [[nodiscard]] MailCommandPort& mailCommandPort();

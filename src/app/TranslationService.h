@@ -26,6 +26,7 @@ namespace javelin::app
         [[nodiscard]] static TranslationSettings loadSettings();
         static void saveSettings(TranslationSettings settings);
 
+        void applySettings(TranslationSettings settings);
         void reloadSettings() override;
         [[nodiscard]] const TranslationSettings& settings() const override;
         [[nodiscard]] bool isEnabled() const override;

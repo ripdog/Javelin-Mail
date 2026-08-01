@@ -229,6 +229,7 @@ int main(int argc, char* argv[])
 
         auto* taskButton = new QToolButton(mainWindow);
         taskButton->setAutoRaise(true);
+        taskButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
         taskButton->setToolTip(QStringLiteral("Open Task Center"));
         mainWindow->statusBar()->addPermanentWidget(taskButton);
         const auto updateTaskButton = [&, taskButton]
@@ -237,6 +238,7 @@ int main(int argc, char* argv[])
                 return;
             const QString summary = services->workTaskPort().summary();
             taskButton->setText(summary);
+            taskButton->setAccessibleName(summary);
             taskButton->setVisible(!summary.isEmpty());
         };
         QObject::connect(taskButton, &QToolButton::clicked, mainWindow,

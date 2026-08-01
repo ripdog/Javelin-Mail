@@ -657,18 +657,12 @@ namespace javelin::app
 
     void RemoteTranslationPort::setAutoTranslateSender(QString sender, const bool enabled)
     {
-        static_cast<void>(callImmediate<std::monostate>(
-            m_client, javelin::protocol::RemoteActionKind::TranslationSetAutoSender, sender,
-            enabled));
         setListValue(m_settings.autoTranslateSenders, std::move(sender), enabled);
         persist();
     }
 
     void RemoteTranslationPort::setAutoTranslateDomain(QString domain, const bool enabled)
     {
-        static_cast<void>(callImmediate<std::monostate>(
-            m_client, javelin::protocol::RemoteActionKind::TranslationSetAutoDomain, domain,
-            enabled));
         setListValue(m_settings.autoTranslateDomains, std::move(domain), enabled);
         persist();
     }

@@ -164,6 +164,51 @@ TEST_CASE("translation service uses the configured target-language cache before 
     CHECK(std::get<QString>(disabled).contains(QStringLiteral("disabled"), Qt::CaseInsensitive));
 }
 
+TEST_CASE("translation service accepts daemon-owned settings without consulting QSettings",
+          "[app][translation][settings]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir settingsDirectory;
+    QTemporaryDir cacheDirectory;
+    REQUIRE(settingsDirectory.isValid());
+    REQUIRE(cacheDirectory.isValid());
+    useTemporarySettings(settingsDirectory);
+    javelin::app::TranslationService::saveSettings({
+        .enabled = false,
+        .apiKeyOverride = {},
+        .targetLanguage = QStringLiteral("en"),
+        .autoTranslateSenders = {},
+        .autoTranslateDomains = {},
+    });
+
+    auto connectionResult = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = makeConnectionName(),
+        .databasePath = cacheDirectory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(connectionResult));
+    auto connection =
+        std::get<javelin::jmap::cache::DatabaseConnection>(std::move(connectionResult));
+    javelin::jmap::cache::TranslationCacheRepository repository{connection};
+    QNetworkAccessManager networkAccessManager;
+    javelin::app::TranslationService service{networkAccessManager, repository};
+    REQUIRE_FALSE(service.isEnabled());
+
+    service.applySettings({
+        .enabled = true,
+        .apiKeyOverride = QStringLiteral(" override "),
+        .targetLanguage = QStringLiteral("JA"),
+        .autoTranslateSenders = {QStringLiteral(" Sender@Example.test ")},
+        .autoTranslateDomains = {QStringLiteral(" Example.test ")},
+    });
+
+    CHECK(service.isEnabled());
+    CHECK(service.targetLanguage() == QStringLiteral("ja"));
+    CHECK(service.settings().apiKeyOverride == QStringLiteral("override"));
+    CHECK(service.shouldAutoTranslate(QStringLiteral("sender@example.test"), QString{}));
+    CHECK(service.shouldAutoTranslate(QString{}, QStringLiteral("example.test")));
+}
+
 TEST_CASE("translation service reloads settings after the application identity is finalized",
           "[app][translation][settings]")
 {

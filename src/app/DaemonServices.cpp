@@ -294,7 +294,7 @@ namespace javelin::app
         return *m_queryService;
     }
 
-    TranslationPort& DaemonServices::translationService()
+    TranslationService& DaemonServices::translationService()
     {
         return *m_translationService;
     }

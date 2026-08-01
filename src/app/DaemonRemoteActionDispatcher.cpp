@@ -12,6 +12,7 @@
 #include "app/RemoteCodec.h"
 #include "app/SieveApplicationPorts.h"
 #include "app/TranslationApplicationPorts.h"
+#include "app/TranslationService.h"
 #include "app/UndoApplicationPorts.h"
 #include "app/WorkScheduler.h"
 
