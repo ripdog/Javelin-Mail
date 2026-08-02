@@ -589,15 +589,19 @@ namespace javelin::gui::shell
 
         reloadAccounts();
         QString mailboxTitle = mailboxId;
+        if (route.mailboxName.has_value() && !route.mailboxName->empty())
+            mailboxTitle = QString::fromStdString(*route.mailboxName);
         std::optional<std::string> mailboxRole;
         std::optional<std::size_t> totalThreads;
         const auto mailboxIndex = findMailboxIndexForSelection(*m_mailboxModel, accountId,
                                                                std::optional<QString>{mailboxId});
         if (mailboxIndex.isValid())
         {
-            mailboxTitle =
+            const auto cachedMailboxTitle =
                 mailboxIndex.data(javelin::gui::mailboxes::MailboxTreeModel::MailboxNameRole)
                     .toString();
+            if (!cachedMailboxTitle.isEmpty())
+                mailboxTitle = cachedMailboxTitle;
             const auto role =
                 mailboxIndex.data(javelin::gui::mailboxes::MailboxTreeModel::MailboxRoleRole)
                     .toString();

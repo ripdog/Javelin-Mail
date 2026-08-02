@@ -501,6 +501,7 @@ namespace javelin::protocol
     {
         QString accountId;
         QString mailboxId;
+        QString mailboxName;
         QString threadId;
         QString emailId;
         QString activationToken;

@@ -74,7 +74,7 @@ namespace
     };
 } // namespace
 
-TEST_CASE("mail notification activation preserves the exact message route",
+TEST_CASE("mail notification activation preserves the message route and mailbox name",
           "[app][daemon][notification][activation]")
 {
     ApplicationGuard application;
@@ -102,12 +102,12 @@ TEST_CASE("mail notification activation preserves the exact message route",
                      { activatedRoute = std::move(route); });
 
     REQUIRE(notificationController->notifyNewMail(
-        QStringLiteral("account-1"), QStringLiteral("inbox"), QStringLiteral("thread-8"),
-        QStringLiteral("email-13"), QStringLiteral("Inbox"), QStringLiteral("New mail in Inbox"),
-        QStringLiteral("Test subject")));
+        QStringLiteral("account-1"), QStringLiteral("projects"), QStringLiteral("thread-8"),
+        QStringLiteral("email-13"), QStringLiteral("Projects"),
+        QStringLiteral("New mail in Projects"), QStringLiteral("Test subject")));
     REQUIRE(transportObserver->request.has_value());
     CHECK(transportObserver->request->icon == QStringLiteral("mail-unread"));
-    CHECK(transportObserver->request->summary == QStringLiteral("New mail in Inbox"));
+    CHECK(transportObserver->request->summary == QStringLiteral("New mail in Projects"));
     CHECK(transportObserver->request->message == QStringLiteral("Test subject"));
     CHECK(transportObserver->request->actions ==
           QStringList{QStringLiteral("default"), QStringLiteral("Open")});
@@ -126,7 +126,8 @@ TEST_CASE("mail notification activation preserves the exact message route",
     const auto* messageRoute = std::get_if<javelin::protocol::OpenMessageRoute>(&*activatedRoute);
     REQUIRE(messageRoute != nullptr);
     CHECK(messageRoute->accountId == QStringLiteral("account-1"));
-    CHECK(messageRoute->mailboxId == QStringLiteral("inbox"));
+    CHECK(messageRoute->mailboxId == QStringLiteral("projects"));
+    CHECK(messageRoute->mailboxName == QStringLiteral("Projects"));
     CHECK(messageRoute->threadId == QStringLiteral("thread-8"));
     CHECK(messageRoute->emailId == QStringLiteral("email-13"));
     CHECK(messageRoute->activationToken == QStringLiteral("token-21"));

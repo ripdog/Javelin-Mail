@@ -13,13 +13,15 @@ namespace javelin::app
     std::uint64_t MessageNavigationCoordinator::openEmail(std::string accountId,
                                                           std::string mailboxId,
                                                           std::optional<std::string> threadId,
-                                                          std::string emailId)
+                                                          std::string emailId,
+                                                          std::optional<std::string> mailboxName)
     {
         const auto routeId = m_nextRouteId++;
         m_currentRoute = OpenEmailRoute{
             .id = routeId,
             .accountId = std::move(accountId),
             .mailboxId = std::move(mailboxId),
+            .mailboxName = std::move(mailboxName),
             .threadId = std::move(threadId),
             .emailId = std::move(emailId),
         };

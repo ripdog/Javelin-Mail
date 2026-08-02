@@ -131,6 +131,7 @@ TEST_CASE("daemon process migrates settings before exposing readiness", "[app][d
     process.enqueueActivation(javelin::protocol::OpenMessageRoute{
         .accountId = QStringLiteral("account-1"),
         .mailboxId = QStringLiteral("mailbox-1"),
+        .mailboxName = QStringLiteral("Projects"),
         .threadId = QStringLiteral("thread-1"),
         .emailId = QStringLiteral("email-1"),
         .activationToken = QStringLiteral("notification-token"),

@@ -298,10 +298,14 @@ int main(int argc, char* argv[])
                         activationRoute.threadId.isEmpty()
                             ? std::optional<std::string>{}
                             : std::optional<std::string>{activationRoute.threadId.toStdString()};
+                    const auto mailboxName =
+                        activationRoute.mailboxName.isEmpty()
+                            ? std::optional<std::string>{}
+                            : std::optional<std::string>{activationRoute.mailboxName.toStdString()};
                     static_cast<void>(services->messageNavigationPort().openEmail(
                         activationRoute.accountId.toStdString(),
                         activationRoute.mailboxId.toStdString(), thread,
-                        activationRoute.emailId.toStdString()));
+                        activationRoute.emailId.toStdString(), mailboxName));
                 }
                 else if constexpr (std::is_same_v<Route, javelin::protocol::OpenSettingsRoute>)
                 {

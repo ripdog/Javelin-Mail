@@ -104,6 +104,7 @@ namespace javelin::app
         m_trackedNotifications.insert_or_assign(notificationId, TrackedNotification{
                                                                     .accountId = accountId,
                                                                     .mailboxId = mailboxId,
+                                                                    .mailboxName = mailboxName,
                                                                     .threadId = threadId,
                                                                     .emailId = emailId,
                                                                     .activationToken = {},
@@ -136,6 +137,7 @@ namespace javelin::app
         m_trackedNotifications.insert_or_assign(
             std::get<uint>(sent), TrackedNotification{.accountId = {},
                                                       .mailboxId = {},
+                                                      .mailboxName = {},
                                                       .threadId = {},
                                                       .emailId = {},
                                                       .activationToken = {},
@@ -161,6 +163,7 @@ namespace javelin::app
         m_trackedNotifications.insert_or_assign(std::get<uint>(sent),
                                                 TrackedNotification{.accountId = {},
                                                                     .mailboxId = {},
+                                                                    .mailboxName = {},
                                                                     .threadId = {},
                                                                     .emailId = {},
                                                                     .activationToken = {},
@@ -187,6 +190,7 @@ namespace javelin::app
         m_trackedNotifications.insert_or_assign(notificationId,
                                                 TrackedNotification{.accountId = {},
                                                                     .mailboxId = {},
+                                                                    .mailboxName = {},
                                                                     .threadId = {},
                                                                     .emailId = {},
                                                                     .activationToken = {},
@@ -239,8 +243,8 @@ namespace javelin::app
         }
 
         Q_EMIT notificationActivated(it->second.accountId, it->second.mailboxId,
-                                     it->second.threadId, it->second.emailId,
-                                     it->second.activationToken);
+                                     it->second.mailboxName, it->second.threadId,
+                                     it->second.emailId, it->second.activationToken);
     }
 
     void DesktopNotificationController::onActivationToken(const uint notificationId,

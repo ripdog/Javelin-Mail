@@ -12,9 +12,10 @@ namespace javelin::app
       public:
         explicit MessageNavigationCoordinator(QObject* parent = nullptr);
 
-        [[nodiscard]] std::uint64_t openEmail(std::string accountId, std::string mailboxId,
-                                              std::optional<std::string> threadId,
-                                              std::string emailId) override;
+        [[nodiscard]] std::uint64_t
+        openEmail(std::string accountId, std::string mailboxId, std::optional<std::string> threadId,
+                  std::string emailId,
+                  std::optional<std::string> mailboxName = std::nullopt) override;
         [[nodiscard]] const std::optional<OpenEmailRoute>& currentRoute() const override;
         [[nodiscard]] bool isCurrent(std::uint64_t routeId) const override;
         void complete(std::uint64_t routeId) override;

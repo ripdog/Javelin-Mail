@@ -791,6 +791,7 @@ TEST_CASE("activation socket carries typed routes to the daemon", "[protocol][so
     const auto route =
         ActivationRoute{OpenMessageRoute{.accountId = QStringLiteral("account-1"),
                                          .mailboxId = QStringLiteral("mailbox-1"),
+                                         .mailboxName = QStringLiteral("Projects"),
                                          .threadId = QStringLiteral("thread-1"),
                                          .emailId = QStringLiteral("email-1"),
                                          .activationToken = QStringLiteral("token-1")}};
@@ -803,6 +804,7 @@ TEST_CASE("activation socket carries typed routes to the daemon", "[protocol][so
     REQUIRE(received != nullptr);
     CHECK(received->accountId == QStringLiteral("account-1"));
     CHECK(received->mailboxId == QStringLiteral("mailbox-1"));
+    CHECK(received->mailboxName == QStringLiteral("Projects"));
     CHECK(received->threadId == QStringLiteral("thread-1"));
     CHECK(received->emailId == QStringLiteral("email-1"));
     CHECK(received->activationToken == QStringLiteral("token-1"));

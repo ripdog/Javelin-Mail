@@ -6,10 +6,13 @@ TEST_CASE("message navigation routes are superseded and cleared by identity", "[
 {
     javelin::app::MessageNavigationCoordinator coordinator;
 
-    const auto first = coordinator.openEmail("account-1", "mailbox-1", "thread-1", "email-1");
+    const auto first =
+        coordinator.openEmail("account-1", "mailbox-1", "thread-1", "email-1", "Projects");
     REQUIRE(coordinator.currentRoute().has_value());
     CHECK(coordinator.currentRoute()->id == first);
     CHECK(coordinator.currentRoute()->emailId == "email-1");
+    REQUIRE(coordinator.currentRoute()->mailboxName.has_value());
+    CHECK(*coordinator.currentRoute()->mailboxName == "Projects");
 
     const auto second = coordinator.openEmail("account-1", "mailbox-2", std::nullopt, "email-2");
     REQUIRE(coordinator.currentRoute().has_value());

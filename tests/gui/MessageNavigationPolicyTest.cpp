@@ -13,6 +13,7 @@ namespace
         .id = 7,
         .accountId = "account",
         .mailboxId = "inbox",
+        .mailboxName = std::nullopt,
         .threadId = "thread",
         .emailId = "email",
     };

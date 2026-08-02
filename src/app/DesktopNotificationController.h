@@ -47,8 +47,8 @@ namespace javelin::app
 
       Q_SIGNALS:
         void notificationActivated(const QString& accountId, const QString& mailboxId,
-                                   const QString& threadId, const QString& emailId,
-                                   const QString& activationToken);
+                                   const QString& mailboxName, const QString& threadId,
+                                   const QString& emailId, const QString& activationToken);
         void errorNotificationActivated(const QString& connectionId,
                                         const QString& activationToken);
         void calendarNotificationAction(const QString& key, bool snooze);
@@ -64,6 +64,7 @@ namespace javelin::app
         {
             QString accountId;
             QString mailboxId;
+            QString mailboxName;
             QString threadId;
             QString emailId;
             QString activationToken;

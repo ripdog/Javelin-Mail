@@ -34,12 +34,14 @@ namespace javelin::app
     {
         m_notifications->setParent(this);
         connect(m_notifications.get(), &DesktopNotificationController::notificationActivated, this,
-                [this](const QString& accountId, const QString& mailboxId, const QString& threadId,
-                       const QString& emailId, const QString& activationToken)
+                [this](const QString& accountId, const QString& mailboxId,
+                       const QString& mailboxName, const QString& threadId, const QString& emailId,
+                       const QString& activationToken)
                 {
                     Q_EMIT activationRequested(protocol::OpenMessageRoute{
                         .accountId = accountId,
                         .mailboxId = mailboxId,
+                        .mailboxName = mailboxName,
                         .threadId = threadId,
                         .emailId = emailId,
                         .activationToken = activationToken,

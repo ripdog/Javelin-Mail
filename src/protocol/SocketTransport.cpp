@@ -1294,8 +1294,8 @@ namespace javelin::protocol
                                writer.string(value.activationToken);
                     else if constexpr (std::is_same_v<Route, OpenMessageRoute>)
                         return writer.string(value.accountId) && writer.string(value.mailboxId) &&
-                               writer.string(value.threadId) && writer.string(value.emailId) &&
-                               writer.string(value.activationToken);
+                               writer.string(value.mailboxName) && writer.string(value.threadId) &&
+                               writer.string(value.emailId) && writer.string(value.activationToken);
                     else if constexpr (std::is_same_v<Route, OpenComposeRoute>)
                         return writer.string(value.composeSessionId) &&
                                writer.string(value.activationToken);
@@ -1335,8 +1335,8 @@ namespace javelin::protocol
             {
                 OpenMessageRoute value;
                 if (!reader.string(value.accountId) || !reader.string(value.mailboxId) ||
-                    !reader.string(value.threadId) || !reader.string(value.emailId) ||
-                    !reader.string(value.activationToken))
+                    !reader.string(value.mailboxName) || !reader.string(value.threadId) ||
+                    !reader.string(value.emailId) || !reader.string(value.activationToken))
                     return false;
                 route = std::move(value);
                 return true;
@@ -1902,6 +1902,7 @@ namespace javelin::protocol
                         {
                             return writer.byte(1) && writer.string(value.accountId) &&
                                    writer.string(value.mailboxId) &&
+                                   writer.string(value.mailboxName) &&
                                    writer.string(value.threadId) && writer.string(value.emailId) &&
                                    writer.string(value.activationToken);
                         }
@@ -1959,8 +1960,8 @@ namespace javelin::protocol
         {
             OpenMessageRoute route;
             if (!reader.string(route.accountId) || !reader.string(route.mailboxId) ||
-                !reader.string(route.threadId) || !reader.string(route.emailId) ||
-                !reader.string(route.activationToken))
+                !reader.string(route.mailboxName) || !reader.string(route.threadId) ||
+                !reader.string(route.emailId) || !reader.string(route.activationToken))
                 return malformed(QStringLiteral("invalid message activation route"));
             if (const auto error = reader.finish())
                 return *error;
@@ -2883,8 +2884,7 @@ namespace javelin::protocol
             clearSocket(error.reason, error.detail);
             return error;
         }
-        if (const auto error =
-                validatePeerCredentials(*m_socket, m_options.enforcePeerCredentials))
+        if (const auto error = validatePeerCredentials(*m_socket, m_options.enforcePeerCredentials))
         {
             clearSocket(error->reason, error->detail);
             return error;
@@ -3321,7 +3321,6 @@ namespace javelin::protocol
     {
         return makeBoundaryError(error);
     }
-
 
     CommandReply SocketDaemonClient::submitCommand(CommandRequest request)
     {
