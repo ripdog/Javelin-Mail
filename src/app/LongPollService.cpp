@@ -144,6 +144,8 @@ namespace javelin::app
                 const bool notificationMailboxesChanged =
                     m_runContext->configuration.notificationMailboxIds !=
                     updatedConfiguration->notificationMailboxIds;
+                auto newlyAddedMailboxIds = newlyWatchedMailboxIds(
+                    m_runContext->configuration.mailboxes, updatedConfiguration->mailboxes);
                 m_runContext->configuration.mailboxes = updatedConfiguration->mailboxes;
                 m_runContext->configuration.notificationMailboxIds =
                     updatedConfiguration->notificationMailboxIds;
@@ -151,14 +153,18 @@ namespace javelin::app
                 {
                     return;
                 }
-                QStringList mailboxNames;
-                for (const auto& mailbox : updatedConfiguration->mailboxes)
+                if (watchedMailboxesChanged)
                 {
-                    mailboxNames.push_back(QString::fromStdString(mailbox.second));
+                    QStringList mailboxNames;
+                    for (const auto& mailbox : updatedConfiguration->mailboxes)
+                    {
+                        mailboxNames.push_back(QString::fromStdString(mailbox.second));
+                    }
+                    qInfo().noquote()
+                        << "Update watched mailboxes to" << mailboxNames.join(QStringLiteral(", "));
                 }
-                qInfo().noquote() << "Update watched mailboxes to"
-                                  << mailboxNames.join(QStringLiteral(", "));
-                scheduleDebouncedRefresh(true);
+                if (!newlyAddedMailboxIds.empty())
+                    scheduleDebouncedRefresh(false, std::move(newlyAddedMailboxIds));
                 return;
             }
         }
@@ -469,7 +475,7 @@ namespace javelin::app
             co_return;
         }
 
-        if (!demand.emailState && !refreshEveryMailbox)
+        if (!demand.emailState && !refreshEveryMailbox && demand.mailboxIds.empty())
         {
             if (mailboxStateChanged)
             {
@@ -493,7 +499,7 @@ namespace javelin::app
         for (const auto& [mailboxId, mailboxName] : watchedMailboxes)
         {
             if (!shouldRefreshMailboxWindow(refreshEveryMailbox, queryAffectedMailboxIds,
-                                            mailboxId))
+                                            demand.mailboxIds, mailboxId))
                 continue;
             const auto refreshResult = co_await mailboxRefreshExecutor.refreshCollapsedMailbox(
                 runContext->configuration.accountId, mailboxId, {}, false,
@@ -622,7 +628,10 @@ namespace javelin::app
             std::get<javelin::jmap::sync::MailboxStateRefreshSummary>(refreshResult);
         if (summary.superseded)
         {
-            m_queuedRefreshDemand.merge({.mailboxState = true});
+            m_queuedRefreshDemand.merge(MailRefreshDemand{.mailboxState = true,
+                                                          .emailState = false,
+                                                          .allMailboxes = false,
+                                                          .mailboxIds = {}});
             co_return false;
         }
         co_return summary.changed;
@@ -646,7 +655,8 @@ namespace javelin::app
         restartForCatchUp();
     }
 
-    void AccountSyncCoordinator::scheduleDebouncedRefresh(const bool forceEmailRefresh)
+    void AccountSyncCoordinator::scheduleDebouncedRefresh(const bool forceEmailRefresh,
+                                                          std::vector<std::string> mailboxIds)
     {
         if (!hasValidSettings() || m_runContext == nullptr)
         {
@@ -655,6 +665,11 @@ namespace javelin::app
 
         if (forceEmailRefresh)
             m_debouncedRefreshDemand.merge(MailRefreshDemand::full());
+        else if (!mailboxIds.empty())
+            m_debouncedRefreshDemand.merge(MailRefreshDemand{.mailboxState = false,
+                                                             .emailState = false,
+                                                             .allMailboxes = false,
+                                                             .mailboxIds = std::move(mailboxIds)});
         m_refreshDebounceTimer.start();
     }
 

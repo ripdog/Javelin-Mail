@@ -21,6 +21,7 @@
 #include <deque>
 #include <memory>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -112,22 +113,38 @@ namespace javelin::app
             bool mailboxState = false;
             bool emailState = false;
             bool allMailboxes = false;
+            std::vector<std::string> mailboxIds;
 
             [[nodiscard]] bool empty() const
             {
-                return !mailboxState && !emailState && !allMailboxes;
+                return !mailboxState && !emailState && !allMailboxes && mailboxIds.empty();
             }
 
             void merge(const MailRefreshDemand& other)
             {
                 mailboxState = mailboxState || other.mailboxState;
                 emailState = emailState || other.emailState;
-                allMailboxes = allMailboxes || other.allMailboxes;
+                if (other.allMailboxes)
+                {
+                    allMailboxes = true;
+                    mailboxIds.clear();
+                    return;
+                }
+                if (allMailboxes)
+                    return;
+                for (const auto& mailboxId : other.mailboxIds)
+                {
+                    if (std::ranges::find(mailboxIds, mailboxId) == mailboxIds.end())
+                        mailboxIds.push_back(mailboxId);
+                }
             }
 
             [[nodiscard]] static MailRefreshDemand full()
             {
-                return {.mailboxState = true, .emailState = true, .allMailboxes = true};
+                return {.mailboxState = true,
+                        .emailState = true,
+                        .allMailboxes = true,
+                        .mailboxIds = {}};
             }
         };
 
@@ -140,7 +157,8 @@ namespace javelin::app
         [[nodiscard]] QCoro::Task<bool>
         refreshMailboxStateOnce(std::shared_ptr<RunContext> runContext);
         void handleResumeWatchdogTimeout();
-        void scheduleDebouncedRefresh(bool forceEmailRefresh = false);
+        void scheduleDebouncedRefresh(bool forceEmailRefresh = false,
+                                      std::vector<std::string> mailboxIds = {});
         void scheduleCatchUpRefresh();
         void processGroupwareStateChanges();
         [[nodiscard]] bool domainHasActiveMutation(std::string_view accountId,

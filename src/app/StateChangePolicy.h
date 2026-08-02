@@ -57,10 +57,39 @@ namespace javelin::app
     [[nodiscard]] inline bool
     shouldRefreshMailboxWindow(const bool refreshEveryMailbox,
                                const std::span<const std::string> queryAffectedMailboxIds,
+                               const std::span<const std::string> explicitlyRequestedMailboxIds,
                                const std::string_view mailboxId)
     {
-        return refreshEveryMailbox || std::ranges::find(queryAffectedMailboxIds, mailboxId) !=
-                                          queryAffectedMailboxIds.end();
+        return refreshEveryMailbox ||
+               std::ranges::find(queryAffectedMailboxIds, mailboxId) !=
+                   queryAffectedMailboxIds.end() ||
+               std::ranges::find(explicitlyRequestedMailboxIds, mailboxId) !=
+                   explicitlyRequestedMailboxIds.end();
+    }
+
+    [[nodiscard]] inline bool
+    shouldRefreshMailboxWindow(const bool refreshEveryMailbox,
+                               const std::span<const std::string> queryAffectedMailboxIds,
+                               const std::string_view mailboxId)
+    {
+        return shouldRefreshMailboxWindow(refreshEveryMailbox, queryAffectedMailboxIds,
+                                          std::span<const std::string>{}, mailboxId);
+    }
+
+    [[nodiscard]] inline std::vector<std::string> newlyWatchedMailboxIds(
+        const std::span<const std::pair<std::string, std::string>> previousMailboxes,
+        const std::span<const std::pair<std::string, std::string>> updatedMailboxes)
+    {
+        std::vector<std::string> result;
+        for (const auto& mailbox : updatedMailboxes)
+        {
+            if (std::ranges::none_of(previousMailboxes, [&mailbox](const auto& previousMailbox)
+                                     { return previousMailbox.first == mailbox.first; }))
+            {
+                result.push_back(mailbox.first);
+            }
+        }
+        return result;
     }
 
     [[nodiscard]] inline RoutedStateChanges
