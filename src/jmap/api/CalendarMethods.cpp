@@ -1,10 +1,10 @@
 #include "jmap/api/CalendarMethods.h"
+#include "jmap/api/PatchObject.h"
 
 #include <glaze/glaze.hpp>
 
 #include <algorithm>
 #include <utility>
-#include <variant>
 
 namespace javelin::jmap::api::detail
 {
@@ -222,37 +222,19 @@ namespace javelin::jmap::api::detail
         std::unordered_map<std::string, bool> calendarIds;
         std::string title;
         std::optional<std::string> description;
-        std::unordered_map<std::string, RawLocation> locations;
+        std::optional<std::unordered_map<std::string, RawLocation>> locations;
         std::string start;
         std::string duration;
         std::optional<std::string> timeZone;
         bool showWithoutTime = false;
         bool isDraft = false;
         bool useDefaultAlerts = false;
-        std::unordered_map<std::string, RawAlert> alerts;
-        std::optional<RawRecurrenceRule> recurrenceRule;
-        std::unordered_map<std::string, RawOverride> recurrenceOverrides;
-        std::unordered_map<std::string, RawParticipant> participants;
-
-        bool operator==(const RawEventWrite&) const = default;
-    };
-
-    struct RawEventPatch
-    {
-        std::optional<std::unordered_map<std::string, bool>> calendarIds;
-        std::optional<std::string> title;
-        std::optional<std::variant<std::nullptr_t, std::string>> description;
-        std::optional<std::unordered_map<std::string, RawLocation>> locations;
-        std::optional<std::string> start;
-        std::optional<std::string> duration;
-        std::optional<std::variant<std::nullptr_t, std::string>> timeZone;
-        std::optional<bool> showWithoutTime;
-        std::optional<bool> isDraft;
-        std::optional<bool> useDefaultAlerts;
         std::optional<std::unordered_map<std::string, RawAlert>> alerts;
-        std::optional<std::variant<std::nullptr_t, RawRecurrenceRule>> recurrenceRule;
+        std::optional<RawRecurrenceRule> recurrenceRule;
         std::optional<std::unordered_map<std::string, RawOverride>> recurrenceOverrides;
         std::optional<std::unordered_map<std::string, RawParticipant>> participants;
+
+        bool operator==(const RawEventWrite&) const = default;
     };
 
     struct RawEventGetResponse
@@ -309,7 +291,7 @@ namespace javelin::jmap::api::detail
         std::string accountId;
         std::optional<std::string> ifInState;
         std::unordered_map<std::string, RawEventWrite> create;
-        std::unordered_map<std::string, RawEventPatch> update;
+        std::unordered_map<std::string, glz::raw_json> update;
         std::vector<std::string> destroy;
         bool sendSchedulingMessages = true;
     };
@@ -396,12 +378,6 @@ JAVELIN_GLZ_META(RawEventWrite, "@type", &T::type, "uid", &T::uid, "calendarIds"
                  "showWithoutTime", &T::showWithoutTime, "isDraft", &T::isDraft, "recurrenceRule",
                  &T::recurrenceRule, "recurrenceOverrides", &T::recurrenceOverrides, "participants",
                  &T::participants, "useDefaultAlerts", &T::useDefaultAlerts, "alerts", &T::alerts);
-JAVELIN_GLZ_META(RawEventPatch, "calendarIds", &T::calendarIds, "title", &T::title, "description",
-                 &T::description, "locations", &T::locations, "start", &T::start, "duration",
-                 &T::duration, "timeZone", &T::timeZone, "showWithoutTime", &T::showWithoutTime,
-                 "isDraft", &T::isDraft, "useDefaultAlerts", &T::useDefaultAlerts, "alerts",
-                 &T::alerts, "recurrenceRule", &T::recurrenceRule, "recurrenceOverrides",
-                 &T::recurrenceOverrides, "participants", &T::participants);
 JAVELIN_GLZ_META(RawEventGetResponse, "accountId", &T::accountId, "state", &T::state, "list",
                  &T::list, "notFound", &T::notFound);
 JAVELIN_GLZ_META(RawSetError, "type", &T::type, "description", &T::description, "properties",
@@ -703,62 +679,42 @@ namespace javelin::jmap::api
             return raw;
         }
 
-        detail::RawEventWrite rawEventWrite(const calendar::CalendarEvent& value)
+        detail::RawEventWrite rawEventWrite(const calendar::CalendarEvent& value,
+                                            const bool includeUid)
         {
             const auto raw = rawEvent(value);
             return {.type = raw.type,
-                    .uid = raw.uid.empty() ? std::nullopt : std::optional{raw.uid},
+                    .uid = includeUid && !raw.uid.empty() ? std::optional{raw.uid} : std::nullopt,
                     .calendarIds = raw.calendarIds,
                     .title = raw.title,
                     .description = raw.description,
-                    .locations = raw.locations,
+                    .locations =
+                        raw.locations.empty() ? std::nullopt : std::optional{raw.locations},
                     .start = raw.start,
                     .duration = raw.duration,
                     .timeZone = raw.timeZone,
                     .showWithoutTime = raw.showWithoutTime,
                     .isDraft = raw.isDraft,
                     .useDefaultAlerts = raw.useDefaultAlerts,
-                    .alerts = raw.alerts,
+                    .alerts = raw.alerts.empty() ? std::nullopt : std::optional{raw.alerts},
                     .recurrenceRule = raw.recurrenceRule,
-                    .recurrenceOverrides = raw.recurrenceOverrides,
-                    .participants = raw.participants};
+                    .recurrenceOverrides = raw.recurrenceOverrides.empty()
+                                               ? std::nullopt
+                                               : std::optional{raw.recurrenceOverrides},
+                    .participants =
+                        raw.participants.empty() ? std::nullopt : std::optional{raw.participants}};
         }
 
-        template <typename T> std::optional<T> changed(const T& previous, const T& current)
+        std::optional<std::string> rawEventPatch(const calendar::CalendarEvent& previous,
+                                                 const calendar::CalendarEvent& current)
         {
-            return previous == current ? std::nullopt : std::optional{current};
-        }
-
-        template <typename T>
-        std::optional<std::variant<std::nullptr_t, T>>
-        changedNullable(const std::optional<T>& previous, const std::optional<T>& current)
-        {
-            if (previous == current)
+            const auto before = serialize(rawEventWrite(previous, false));
+            const auto after = serialize(rawEventWrite(current, false));
+            if (!before || !after)
                 return std::nullopt;
-            return current ? std::variant<std::nullptr_t, T>{*current}
-                           : std::variant<std::nullptr_t, T>{nullptr};
-        }
-
-        detail::RawEventPatch rawEventPatch(const calendar::CalendarEvent& previous,
-                                            const calendar::CalendarEvent& current)
-        {
-            const auto before = rawEventWrite(previous);
-            const auto after = rawEventWrite(current);
-            return {.calendarIds = changed(before.calendarIds, after.calendarIds),
-                    .title = changed(before.title, after.title),
-                    .description = changedNullable(before.description, after.description),
-                    .locations = changed(before.locations, after.locations),
-                    .start = changed(before.start, after.start),
-                    .duration = changed(before.duration, after.duration),
-                    .timeZone = changedNullable(before.timeZone, after.timeZone),
-                    .showWithoutTime = changed(before.showWithoutTime, after.showWithoutTime),
-                    .isDraft = changed(before.isDraft, after.isDraft),
-                    .useDefaultAlerts = changed(before.useDefaultAlerts, after.useDefaultAlerts),
-                    .alerts = changed(before.alerts, after.alerts),
-                    .recurrenceRule = changedNullable(before.recurrenceRule, after.recurrenceRule),
-                    .recurrenceOverrides =
-                        changed(before.recurrenceOverrides, after.recurrenceOverrides),
-                    .participants = changed(before.participants, after.participants)};
+            const auto patch = makePatchObject(*before, *after);
+            const auto* patchJson = std::get_if<std::string>(&patch);
+            return patchJson ? std::optional{*patchJson} : std::nullopt;
         }
 
         calendar::CalendarEvent event(const std::string& accountId, const detail::RawEvent& raw)
@@ -1032,9 +988,14 @@ namespace javelin::jmap::api
                                   .destroy = request.destroy,
                                   .sendSchedulingMessages = request.sendSchedulingMessages};
         for (const auto& [id, value] : request.create)
-            raw.create.emplace(id, rawEventWrite(value));
+            raw.create.emplace(id, rawEventWrite(value, true));
         for (const auto& [id, value] : request.update)
-            raw.update.emplace(id, rawEventPatch(value.previous, value.event));
+        {
+            const auto patch = rawEventPatch(value.previous, value.event);
+            if (!patch)
+                return std::nullopt;
+            raw.update.emplace(id, *patch);
+        }
         const auto arguments = serialize(raw);
         return arguments ? std::optional{MethodRequest<CalendarEventSetResponse>{
                                .name = "CalendarEvent/set", .arguments = *arguments}}
@@ -1223,7 +1184,7 @@ namespace javelin::jmap::api
     bool calendarEventWritablePropertiesEqual(const calendar::CalendarEvent& left,
                                               const calendar::CalendarEvent& right)
     {
-        return rawEventWrite(left) == rawEventWrite(right);
+        return rawEventWrite(left, true) == rawEventWrite(right, true);
     }
 
     ParsedEnvelope<calendar::CalendarEvent>

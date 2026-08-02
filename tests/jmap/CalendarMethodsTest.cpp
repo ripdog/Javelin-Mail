@@ -342,6 +342,83 @@ TEST_CASE("calendar set omits server-set event properties", "[jmap][calendar]")
     CHECK(method->arguments.find(R"("utcEnd")") == std::string::npos);
 }
 
+TEST_CASE("calendar alert acknowledgements use exact patch paths", "[jmap][calendar][alerts]")
+{
+    javelin::jmap::calendar::CalendarEvent previous{
+        .accountId = "a1",
+        .id = "e1",
+        .baseEventId = std::nullopt,
+        .recurrenceId = std::nullopt,
+        .uid = "uid-1",
+        .calendarIds = {{"work", true}},
+        .title = "Planning",
+        .description = std::nullopt,
+        .location = std::nullopt,
+        .start = {.value = "2026-03-03T09:00:00"},
+        .duration = {.value = "PT1H"},
+        .timeZone = javelin::jmap::calendar::TimeZoneId{.value = "Pacific/Auckland"},
+        .showWithoutTime = false,
+        .isDraft = false,
+        .isOrigin = true,
+        .useDefaultAlerts = false,
+        .alerts = {{"alert-1",
+                    {.id = "alert-1",
+                     .action = "display",
+                     .triggerKind = javelin::jmap::calendar::AlertTriggerKind::Offset,
+                     .relativeTo = "start",
+                     .offset = javelin::jmap::calendar::Duration{.value = "-PT10M"},
+                     .when = std::nullopt,
+                     .acknowledged = std::nullopt}}},
+        .utcStart = std::nullopt,
+        .utcEnd = std::nullopt,
+        .recurrenceRule = std::nullopt,
+        .recurrenceOverrides = {},
+        .attendees = {}};
+
+    auto current = previous;
+    current.alerts.at("alert-1").acknowledged =
+        javelin::jmap::calendar::UtcInstant{.value = "2026-03-03T08:50:00.000Z"};
+    const auto method = javelin::jmap::api::calendarEventSet(
+        {.accountId = "a1",
+         .ifInState = "event-state-1",
+         .create = {},
+         .update = {{"e1", {.previous = previous, .event = current}}},
+         .destroy = {},
+         .sendSchedulingMessages = true});
+
+    REQUIRE(method.has_value());
+    CHECK(method->arguments.find(R"("alerts/alert-1/acknowledged":")") != std::string::npos);
+    CHECK(method->arguments.find(R"("alerts":{"alert-1")") == std::string::npos);
+    CHECK(method->arguments.find(R"("uid")") == std::string::npos);
+
+    auto defaultPrevious = previous;
+    defaultPrevious.useDefaultAlerts = true;
+    defaultPrevious.alerts.clear();
+    auto defaultCurrent = defaultPrevious;
+    defaultCurrent.alerts.emplace(
+        "default-alert", javelin::jmap::calendar::Alert{
+                             .id = "default-alert",
+                             .action = "display",
+                             .triggerKind = javelin::jmap::calendar::AlertTriggerKind::Offset,
+                             .relativeTo = "start",
+                             .offset = javelin::jmap::calendar::Duration{.value = "-PT10M"},
+                             .when = std::nullopt,
+                             .acknowledged = javelin::jmap::calendar::UtcInstant{
+                                 .value = "2026-03-03T08:50:00.000Z"}});
+    const auto defaultMethod = javelin::jmap::api::calendarEventSet(
+        {.accountId = "a1",
+         .ifInState = "event-state-1",
+         .create = {},
+         .update = {{"e1", {.previous = defaultPrevious, .event = defaultCurrent}}},
+         .destroy = {},
+         .sendSchedulingMessages = true});
+
+    REQUIRE(defaultMethod.has_value());
+    CHECK(defaultMethod->arguments.find(R"("alerts":{"default-alert")") != std::string::npos);
+    CHECK(defaultMethod->arguments.find(R"("alerts/default-alert")") == std::string::npos);
+    CHECK(defaultMethod->arguments.find(R"("uid")") == std::string::npos);
+}
+
 TEST_CASE("calendar set serializes occurrence edits as base-series overrides",
           "[jmap][calendar][recurrence]")
 {
