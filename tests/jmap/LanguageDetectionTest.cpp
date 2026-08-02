@@ -64,13 +64,15 @@ TEST_CASE("language detection service ignores short snippets", "[jmap][language]
     CHECK_FALSE(service.detect("Bonjour").has_value());
 }
 
-TEST_CASE("language detection recognizes Japanese notification text", "[jmap][language]")
+TEST_CASE("language detection recognizes Japanese body text", "[jmap][language]")
 {
     javelin::jmap::language::LanguageDetectionService service{JAVELIN_FASTTEXT_LANGUAGE_MODEL_PATH};
     const auto detection = service.detect(
-        "【Ci-en】 新着記事のお知らせ [2026/07/30] fuwafuwataimu様 4件の新着記事があります "
-        "フォロー中のクリエイター whisp 🌟新作RPG体験版公開中🌟 しつけあい！"
-        "発売カウントダウンイラスト 2026年07月29日");
+        "クリエイター新着記事のお知らせ2026年07月30日版fuwafuwataimu様4件の新着記事があります"
+        "フォロー中のクリエイターwhisp新作RPG体験版公開中しつけあいあと3日発売カウントダウン"
+        "イラスト2026年07月29日本日発売新作朧里之巫女小悪魔妹巫女と汗だくエクササイズで"
+        "すっきり爽やかリフレッシュ線消しイラスト川の妖精たちと川辺で遊ぶこのメールは"
+        "お知らせメール機能をご利用の登録ユーザー様にお送りしていますお知らせ設定をご利用ください");
 
     REQUIRE(detection.has_value());
     CHECK(detection->languageCode == "ja");

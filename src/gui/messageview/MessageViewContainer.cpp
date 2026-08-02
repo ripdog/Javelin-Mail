@@ -61,50 +61,23 @@ namespace javelin::gui::messageview
         [[nodiscard]] std::string
         detectionText(const javelin::jmap::cache::MessageViewSnapshot& snapshot)
         {
-            const bool hasCompletePlainText = snapshot.plainTextBody.has_value() &&
-                                              !snapshot.plainTextBody->isTruncated &&
-                                              !snapshot.plainTextBody->partId.empty();
+            const bool hasCompletePlainText =
+                snapshot.plainTextBody.has_value() && !snapshot.plainTextBody->isTruncated;
             const bool hasCompleteHtml =
                 snapshot.htmlBody.has_value() && !snapshot.htmlBody->isTruncated;
-            if (!hasCompletePlainText && !hasCompleteHtml)
-            {
-                return {};
-            }
-
-            std::string text;
-            const auto append = [&text](const std::string& value)
-            {
-                if (value.empty())
-                {
-                    return;
-                }
-                if (!text.empty())
-                {
-                    text.push_back('\n');
-                }
-                text += value;
-            };
-
-            if (snapshot.email.subject.has_value())
-            {
-                append(*snapshot.email.subject);
-            }
-            if (snapshot.email.preview.has_value())
-            {
-                append(*snapshot.email.preview);
-            }
             if (hasCompletePlainText)
             {
-                append(snapshot.plainTextBody->value);
+                return snapshot.plainTextBody->value;
             }
+
             if (hasCompleteHtml)
             {
                 QTextDocument document;
                 document.setHtml(QString::fromStdString(snapshot.htmlBody->value));
-                append(document.toPlainText().toUtf8().toStdString());
+                return document.toPlainText().toUtf8().toStdString();
             }
 
-            return text;
+            return {};
         }
 
         [[nodiscard]] std::optional<javelin::jmap::language::LanguageDetectionResult>

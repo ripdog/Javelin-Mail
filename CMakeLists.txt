@@ -36,6 +36,9 @@ find_package(KPim6Mime REQUIRED)
 
 qt_standard_project_setup()
 
+set(JAVELIN_FASTTEXT_LANGUAGE_MODEL_PATH
+    "${CMAKE_INSTALL_PREFIX}/${KDE_INSTALL_DATADIR}/javelinmail/models/fasttext/lid.176.ftz")
+
 add_library(javelin_protocol STATIC
     src/protocol/ProcessBoundary.cpp
     src/protocol/ProcessBoundary.h
@@ -822,7 +825,7 @@ if(JAVELIN_ENABLE_FASTTEXT_LANGUAGE_DETECTION)
     target_compile_definitions(javelin_jmap
         PUBLIC
             JAVELIN_ENABLE_FASTTEXT_LANGUAGE_DETECTION=1
-            JAVELIN_FASTTEXT_LANGUAGE_MODEL_PATH="${CMAKE_INSTALL_PREFIX}/${KDE_INSTALL_DATADIR}/javelinmail/models/fasttext/lid.176.ftz"
+            JAVELIN_FASTTEXT_LANGUAGE_MODEL_PATH="${JAVELIN_FASTTEXT_LANGUAGE_MODEL_PATH}"
     )
     target_compile_options(javelin_jmap PRIVATE -fexceptions)
 endif()
@@ -1122,6 +1125,10 @@ javelin_enable_static_analysis(javelin_gui)
 javelin_enable_sanitizers(javelin_gui)
 # QCoro uses exceptions internally
 target_compile_options(javelin_gui PRIVATE -fexceptions)
+if(JAVELIN_ENABLE_FASTTEXT_LANGUAGE_DETECTION)
+    target_compile_definitions(javelin_gui PRIVATE
+        JAVELIN_FASTTEXT_LANGUAGE_MODEL_PATH="${JAVELIN_FASTTEXT_LANGUAGE_MODEL_PATH}")
+endif()
 
 add_library(javelin_calendar_gui STATIC
     src/gui/calendar/MonthCalendarLayout.cpp
@@ -1440,7 +1447,7 @@ if(JAVELIN_ENABLE_FASTTEXT_LANGUAGE_DETECTION)
     target_link_libraries(javelin PRIVATE fasttext_javelin)
     target_compile_definitions(javelin PRIVATE
         JAVELIN_ENABLE_FASTTEXT_LANGUAGE_DETECTION=1
-        JAVELIN_FASTTEXT_LANGUAGE_MODEL_PATH="${CMAKE_INSTALL_PREFIX}/${KDE_INSTALL_DATADIR}/javelinmail/models/fasttext/lid.176.ftz"
+        JAVELIN_FASTTEXT_LANGUAGE_MODEL_PATH="${JAVELIN_FASTTEXT_LANGUAGE_MODEL_PATH}"
     )
 else()
     target_compile_definitions(javelin PRIVATE JAVELIN_ENABLE_FASTTEXT_LANGUAGE_DETECTION=0)
