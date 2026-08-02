@@ -89,6 +89,12 @@ TEST_CASE("daemon process migrates settings before exposing readiness", "[app][d
     CHECK_FALSE(process.hasGuiConnection());
     CHECK_FALSE(process.databasePath().isEmpty());
 
+    javelin::app::DaemonProcess duplicate{optionsFor(runtimeDirectory, cacheRoot, settingsPath)};
+    const auto duplicateError = duplicate.start();
+    REQUIRE(duplicateError.has_value());
+    CHECK(duplicateError->code == javelin::app::DaemonStartupErrorCode::InstanceAlreadyRunning);
+    CHECK(process.isReady());
+
     const auto hello = process.handleHello({.protocol = {.major = 1, .minor = 0},
                                             .build = {.application = QStringLiteral("Javelin-Mail"),
                                                       .revision = QStringLiteral("daemon-test")}});

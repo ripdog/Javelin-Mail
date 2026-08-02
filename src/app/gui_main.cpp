@@ -15,16 +15,19 @@
 #include <QCommandLineOption>
 #include <QCommandLineParser>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QEvent>
 #include <QIcon>
 #include <QLabel>
 #include <QLocale>
+#include <QLockFile>
 #include <QMainWindow>
 #include <QMessageBox>
 #include <QPointer>
 #include <QPushButton>
 #include <QStandardPaths>
 #include <QStatusBar>
+#include <QThread>
 #include <QTimer>
 #include <QToolButton>
 #include <QTranslator>
@@ -159,8 +162,55 @@ int main(int argc, char* argv[])
         .responseTimeoutMilliseconds = 100,
         .enforcePeerCredentials = true,
     };
-    const auto activation = javelin::protocol::SocketActivationClient::request(
-        activationOptions, javelin::protocol::RaiseGuiRoute{});
+
+    QLockFile guiInstanceLock{QDir{runtime}.filePath(QStringLiteral("javelin.lock"))};
+    guiInstanceLock.setStaleLockTime(0);
+    const auto requestRaiseGui = [&activationOptions]
+    {
+        return javelin::protocol::SocketActivationClient::request(
+            activationOptions, javelin::protocol::RaiseGuiRoute{});
+    };
+
+    if (!guiInstanceLock.tryLock(0))
+    {
+        if (guiInstanceLock.error() != QLockFile::LockFailedError)
+        {
+            qCritical().noquote() << QStringLiteral("Could not acquire GUI instance lock:")
+                                  << static_cast<int>(guiInstanceLock.error());
+            return 1;
+        }
+
+        QElapsedTimer activationWait;
+        activationWait.start();
+        constexpr qint64 activationWaitTimeoutMilliseconds = 5000;
+        for (;;)
+        {
+            const auto activation = requestRaiseGui();
+            if (const auto* activationReply =
+                    std::get_if<std::optional<javelin::protocol::BoundaryError>>(&activation);
+                activationReply != nullptr && !activationReply->has_value())
+            {
+                return 0;
+            }
+
+            if (guiInstanceLock.tryLock(0))
+                break;
+            if (activationWait.elapsed() >= activationWaitTimeoutMilliseconds)
+            {
+                qint64 pid = 0;
+                QString hostname;
+                QString applicationName;
+                auto detail = QStringLiteral("another Javelin GUI instance is already running");
+                if (guiInstanceLock.getLockInfo(&pid, &hostname, &applicationName))
+                    detail += QStringLiteral(" (pid %1)").arg(pid);
+                qCritical().noquote() << detail;
+                return 1;
+            }
+            QThread::msleep(50);
+        }
+    }
+
+    const auto activation = requestRaiseGui();
     if (const auto* activationReply =
             std::get_if<std::optional<javelin::protocol::BoundaryError>>(&activation);
         activationReply != nullptr && !activationReply->has_value())

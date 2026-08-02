@@ -1681,8 +1681,9 @@ namespace javelin::protocol
         {
             if (server == nullptr)
                 return;
+            const bool wasListening = server->isListening();
             server->close();
-            if (!socketPath.isEmpty())
+            if (wasListening && !socketPath.isEmpty())
                 QLocalServer::removeServer(socketPath);
         }
 

@@ -23,6 +23,7 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QLockFile>
 #include <QMetaObject>
 #include <QProcess>
 #include <QSettings>
@@ -170,6 +171,29 @@ namespace javelin::app
             return fail(DaemonStartupErrorCode::SocketListen,
                         QStringLiteral("daemon has already been stopped"));
 
+        if (m_options.socket.runtimeDirectory.isEmpty())
+            return fail(DaemonStartupErrorCode::SocketListen,
+                        QStringLiteral("runtime directory is required"));
+
+        m_instanceLock = std::make_unique<QLockFile>(
+            QDir{m_options.socket.runtimeDirectory}.filePath(QStringLiteral("javelind.lock")));
+        m_instanceLock->setStaleLockTime(0);
+        if (!m_instanceLock->tryLock(0))
+        {
+            if (m_instanceLock->error() != QLockFile::LockFailedError)
+                return fail(DaemonStartupErrorCode::SocketListen,
+                            QStringLiteral("could not acquire daemon instance lock: %1")
+                                .arg(static_cast<int>(m_instanceLock->error())));
+
+            qint64 pid = 0;
+            QString hostname;
+            QString applicationName;
+            auto detail = QStringLiteral("another javelind instance is already running");
+            if (m_instanceLock->getLockInfo(&pid, &hostname, &applicationName))
+                detail += QStringLiteral(" (pid %1)").arg(pid);
+            return fail(DaemonStartupErrorCode::InstanceAlreadyRunning, std::move(detail));
+        }
+
         m_settingsRepository =
             m_options.settingsPath.isEmpty()
                 ? std::make_unique<SettingsRepository>()
@@ -267,6 +291,11 @@ namespace javelin::app
         m_guiReady = false;
         m_guiLaunchRequested = false;
         m_pendingActivations.clear();
+        if (m_instanceLock != nullptr)
+        {
+            m_instanceLock->unlock();
+            m_instanceLock.reset();
+        }
     }
 
     bool DaemonProcess::isReady() const

@@ -9,6 +9,8 @@
 #include <memory>
 #include <optional>
 
+class QLockFile;
+
 namespace javelin::app
 {
     class DaemonServices;
@@ -28,6 +30,7 @@ namespace javelin::app
 
     enum class DaemonStartupErrorCode
     {
+        InstanceAlreadyRunning,
         SettingsMigration,
         CacheLocation,
         CacheOpen,
@@ -121,6 +124,7 @@ namespace javelin::app
                                       const QString& detail);
 
         DaemonProcessOptions m_options;
+        std::unique_ptr<QLockFile> m_instanceLock;
         std::unique_ptr<SettingsRepository> m_settingsRepository;
         std::unique_ptr<DaemonServices> m_services;
         std::unique_ptr<DaemonRemoteActionDispatcher> m_remoteActions;
