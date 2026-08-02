@@ -8,6 +8,7 @@
 #include "jmap/OperationError.h"
 #include "jmap/api/CalendarMethods.h"
 #include "jmap/cache/CalendarRepository.h"
+#include "jmap/cache/ContactRepository.h"
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/MailboxWindowRepository.h"
 #include "jmap/cache/NotificationRepository.h"
@@ -256,6 +257,7 @@ namespace javelin::app
         javelin::jmap::api::WebSocketFailureCooldowns& cooldowns,
         javelin::jmap::cache::AccountRepository& accountRepository,
         javelin::jmap::cache::QueryService& queryService,
+        javelin::jmap::cache::ContactRepository& contactRepository,
         javelin::jmap::contacts::ContactService& contactService,
         javelin::jmap::calendar::CalendarService& calendarService,
         javelin::jmap::sieve::SieveService& sieveService,
@@ -269,6 +271,20 @@ namespace javelin::app
           m_errorCoordinator(errorCoordinator), m_workScheduler(workScheduler),
           m_undoManager(undoManager)
     {
+        connect(&contactRepository, &javelin::jmap::cache::ContactRepository::contactsChanged, this,
+                [this](const QString& accountId)
+                {
+                    Q_EMIT cacheCommitted(MailCacheChange{
+                        .accountId = accountId,
+                        .mailboxIds = {},
+                        .queryWindows = {},
+                        .searchWindows = {},
+                        .mailboxTreeChanged = false,
+                        .hasNewMail = false,
+                        .optimisticProjection = false,
+                        .contactsChanged = true,
+                    });
+                });
         connect(&m_workScheduler, &WorkScheduler::jobsChanged, this,
                 [this]() { scheduleContactRefreshPump(); });
         connect(&m_workScheduler, &WorkScheduler::foregroundAvailabilityChanged, this,

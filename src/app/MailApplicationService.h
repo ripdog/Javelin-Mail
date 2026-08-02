@@ -37,6 +37,11 @@ namespace javelin::jmap::contacts
     class ContactService;
 }
 
+namespace javelin::jmap::cache
+{
+    class ContactRepository;
+}
+
 namespace javelin::app::undo
 {
     class UndoManager;
@@ -78,6 +83,7 @@ namespace javelin::app
                                javelin::jmap::api::WebSocketFailureCooldowns& cooldowns,
                                javelin::jmap::cache::AccountRepository& accountRepository,
                                javelin::jmap::cache::QueryService& queryService,
+                               javelin::jmap::cache::ContactRepository& contactRepository,
                                javelin::jmap::contacts::ContactService& contactService,
                                javelin::jmap::calendar::CalendarService& calendarService,
                                javelin::jmap::sieve::SieveService& sieveService,

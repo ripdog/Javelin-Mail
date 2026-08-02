@@ -99,6 +99,8 @@ namespace javelin::app
         change.hasNewMail = hasDomain(invalidation.changedDomains,
                                       javelin::protocol::ChangedDomain::MessageMetadata);
         change.optimisticProjection = change.hasNewMail;
+        change.contactsChanged =
+            hasDomain(invalidation.changedDomains, javelin::protocol::ChangedDomain::Contacts);
         Q_EMIT cacheInvalidated({
             .epoch = invalidation.epoch.value,
             .changedDomains = invalidation.changedDomains,

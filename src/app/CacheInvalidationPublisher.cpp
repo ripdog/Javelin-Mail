@@ -109,6 +109,7 @@ namespace javelin::app
         target.mailboxTreeChanged = target.mailboxTreeChanged || source.mailboxTreeChanged;
         target.hasNewMail = target.hasNewMail || source.hasNewMail;
         target.optimisticProjection = target.optimisticProjection || source.optimisticProjection;
+        target.contactsChanged = target.contactsChanged || source.contactsChanged;
     }
 
     std::vector<javelin::protocol::ChangedDomain>
@@ -122,6 +123,8 @@ namespace javelin::app
             domains.push_back(javelin::protocol::ChangedDomain::MailQueryWindows);
         if (change.hasNewMail || change.optimisticProjection)
             domains.push_back(javelin::protocol::ChangedDomain::MessageMetadata);
+        if (change.contactsChanged)
+            domains.push_back(javelin::protocol::ChangedDomain::Contacts);
         if (domains.empty())
             domains.push_back(javelin::protocol::ChangedDomain::MailQueryWindows);
         return domains;

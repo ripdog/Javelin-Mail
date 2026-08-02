@@ -595,13 +595,14 @@ namespace javelin::gui::contacts
           m_refreshPort(refreshPort), m_commandPort(commandPort),
           m_ownerAccountId(std::move(ownerAccountId))
     {
-        static_cast<void>(m_repository.connectChanged(this,
-                                                      [this](const QString& accountId)
-                                                      {
-                                                          if (accountId == QString::fromStdString(
-                                                                               m_ownerAccountId))
-                                                              reloadAccounts();
-                                                      }));
+        static_cast<void>(m_repository.connectChanged(
+            this,
+            [this](const QString& accountId)
+            {
+                if (std::ranges::contains(m_accounts, accountId.toStdString(),
+                                          &javelin::jmap::cache::ContactAccount::accountId))
+                    reloadAccounts();
+            }));
         setupUi();
         reloadAccounts();
     }

@@ -155,8 +155,8 @@ namespace javelin::app
         m_mailService = std::make_unique<MailApplicationService>(
             m_databaseConnection, *m_jmapCore, *m_methodTransport,
             *m_stateChangeNetworkAccessManager, *m_webSocketFailureCooldowns, *m_accountRepository,
-            *m_queryService, *m_contactService, *m_calendarService, *m_sieveService,
-            *m_errorCoordinator, *m_workScheduler, *m_undoManager);
+            *m_queryService, *m_contactRepository, *m_contactService, *m_calendarService,
+            *m_sieveService, *m_errorCoordinator, *m_workScheduler, *m_undoManager);
         m_mailCommandService = std::make_unique<MailCommandService>(*m_mailService);
         m_sieveCommandService = std::make_unique<SieveCommandService>(*m_mailService);
         m_accountRefreshCommandService =

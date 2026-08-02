@@ -4,6 +4,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <optional>
+#include <utility>
+#include <vector>
 
 TEST_CASE("GUI mail events retain daemon status published before construction", "[app][gui]")
 {
@@ -40,4 +42,34 @@ TEST_CASE("GUI mail events retain daemon status published before construction", 
     REQUIRE(recoveryStatus.has_value());
     CHECK(*recoveryStatus == javelin::app::MailAccountStatus::Disconnected);
     CHECK(events.accountStatuses().empty());
+}
+
+TEST_CASE("GUI mail events publish contact cache invalidations", "[app][gui][cache]")
+{
+    javelin::app::GuiDaemonSession session{
+        {.runtimeDirectory = QStringLiteral("/tmp"),
+         .socketPath = QStringLiteral("/tmp/unused-javelin-test.sock"),
+         .daemonExecutable = {},
+         .protocol = {.major = 2, .minor = 0},
+         .build = {.application = QStringLiteral("Javelin-Mail"),
+                   .revision = QStringLiteral("test")},
+         .startTimeoutMilliseconds = 10,
+         .startDaemonIfMissing = false}};
+
+    javelin::app::GuiMailApplicationEvents events{session};
+    std::optional<javelin::app::MailCacheInvalidation> received;
+    QObject::connect(&events, &javelin::app::MailApplicationEventsPort::cacheInvalidated,
+                     [&received](javelin::app::MailCacheInvalidation invalidation)
+                     { received = std::move(invalidation); });
+
+    session.onBoundaryEvent(javelin::protocol::CacheInvalidation{
+        .epoch = {.value = 7},
+        .changedDomains = {javelin::protocol::ChangedDomain::Contacts},
+        .affectedKeys = {QStringLiteral("contacts-account")},
+    });
+
+    REQUIRE(received.has_value());
+    CHECK(received->change.accountId == QStringLiteral("contacts-account"));
+    CHECK(received->change.contactsChanged);
+    CHECK(received->changedDomains == std::vector{javelin::protocol::ChangedDomain::Contacts});
 }

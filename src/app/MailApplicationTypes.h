@@ -39,6 +39,7 @@ namespace javelin::app
         bool mailboxTreeChanged = false;
         bool hasNewMail = false;
         bool optimisticProjection = false;
+        bool contactsChanged = false;
     };
 
     struct MailCacheInvalidation

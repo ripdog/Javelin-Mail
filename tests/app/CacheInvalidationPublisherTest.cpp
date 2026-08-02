@@ -28,6 +28,7 @@ TEST_CASE("cache invalidation publisher coalesces one account after commit",
         .mailboxTreeChanged = true,
         .hasNewMail = false,
         .optimisticProjection = false,
+        .contactsChanged = true,
     });
     publisher.publish(javelin::app::MailCacheChange{
         .accountId = QStringLiteral("account-a"),
@@ -48,6 +49,7 @@ TEST_CASE("cache invalidation publisher coalesces one account after commit",
     CHECK(invalidation.change.mailboxTreeChanged);
     CHECK(invalidation.change.hasNewMail);
     CHECK(invalidation.change.optimisticProjection);
+    CHECK(invalidation.change.contactsChanged);
     CHECK(invalidation.change.mailboxIds ==
           QStringList{QStringLiteral("mailbox-a"), QStringLiteral("mailbox-b")});
     CHECK(std::ranges::find(invalidation.changedDomains,
@@ -58,6 +60,9 @@ TEST_CASE("cache invalidation publisher coalesces one account after commit",
           invalidation.changedDomains.end());
     CHECK(std::ranges::find(invalidation.changedDomains,
                             javelin::protocol::ChangedDomain::MessageMetadata) !=
+          invalidation.changedDomains.end());
+    CHECK(std::ranges::find(invalidation.changedDomains,
+                            javelin::protocol::ChangedDomain::Contacts) !=
           invalidation.changedDomains.end());
     CHECK(std::ranges::find(invalidation.affectedKeys, QStringLiteral("account-a")) !=
           invalidation.affectedKeys.end());
@@ -105,4 +110,32 @@ TEST_CASE("cache invalidation publisher preserves account queue order and bounds
     CHECK(invalidations[1].change.accountId == QStringLiteral("account-b"));
     CHECK(invalidations[0].change.mailboxIds.size() == 80);
     CHECK(invalidations[0].affectedKeys.size() <= 64);
+}
+
+TEST_CASE("cache invalidation publisher emits contacts for contact-only changes",
+          "[app][cache][invalidation]")
+{
+    javelin::app::CacheInvalidationPublisher publisher;
+    std::vector<javelin::app::MailCacheInvalidation> invalidations;
+    QObject::connect(&publisher, &javelin::app::CacheInvalidationPublisher::invalidated,
+                     [&invalidations](javelin::app::MailCacheInvalidation invalidation)
+                     { invalidations.push_back(std::move(invalidation)); });
+
+    publisher.publish(javelin::app::MailCacheChange{
+        .accountId = QStringLiteral("contacts-account"),
+        .mailboxIds = {},
+        .queryWindows = {},
+        .searchWindows = {},
+        .mailboxTreeChanged = false,
+        .hasNewMail = false,
+        .optimisticProjection = false,
+        .contactsChanged = true,
+    });
+    publisher.flush();
+
+    REQUIRE(invalidations.size() == 1);
+    CHECK(invalidations.front().changedDomains ==
+          std::vector{javelin::protocol::ChangedDomain::Contacts});
+    CHECK(invalidations.front().affectedKeys ==
+          std::vector<QString>{QStringLiteral("contacts-account")});
 }

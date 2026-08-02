@@ -94,16 +94,19 @@ namespace javelin::app
                         << QStringLiteral("Release mail notification delivery:") << error->message;
                 queueNotificationRetry(accountId);
             });
-        connect(&mailService, &MailApplicationService::cacheCommitted, this,
-                [this](MailCacheChange change)
-                {
-                    m_services.localMaintenanceService().requestReplay();
-                    if (!change.optimisticProjection)
-                        m_services.fullMailSyncService().requestCatchUp(
-                            change.accountId.toStdString());
-                    if (change.hasNewMail)
-                        m_services.mailIndexService().requestIndex(change.accountId.toStdString());
-                });
+        connect(
+            &mailService, &MailApplicationService::cacheCommitted, this,
+            [this](MailCacheChange change)
+            {
+                m_services.localMaintenanceService().requestReplay();
+                const bool mailCacheChanged =
+                    !change.mailboxIds.isEmpty() || !change.queryWindows.empty() ||
+                    !change.searchWindows.empty() || change.mailboxTreeChanged || change.hasNewMail;
+                if (!change.optimisticProjection && mailCacheChanged)
+                    m_services.fullMailSyncService().requestCatchUp(change.accountId.toStdString());
+                if (change.hasNewMail)
+                    m_services.mailIndexService().requestIndex(change.accountId.toStdString());
+            });
         connect(&m_services.errorCoordinator(), &ApplicationErrorCoordinator::incidentRaised, this,
                 [this](const QString& connectionId, const QString&, const QString& title,
                        const QString& message, const bool persistent, const bool opensSettings)
