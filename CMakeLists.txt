@@ -36,6 +36,17 @@ find_package(KPim6Mime REQUIRED)
 
 qt_standard_project_setup()
 
+set(JAVELIN_FASTTEXT_SOURCE_MODEL_PATH
+    "${PROJECT_SOURCE_DIR}/res/models/fasttext/lid.176.ftz")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+             "${JAVELIN_FASTTEXT_SOURCE_MODEL_PATH}")
+if(JAVELIN_ENABLE_FASTTEXT_LANGUAGE_DETECTION AND
+   NOT EXISTS "${JAVELIN_FASTTEXT_SOURCE_MODEL_PATH}")
+    message(FATAL_ERROR
+            "JAVELIN_ENABLE_FASTTEXT_LANGUAGE_DETECTION is enabled, but the fastText model is missing: "
+            "${JAVELIN_FASTTEXT_SOURCE_MODEL_PATH}")
+endif()
+
 set(JAVELIN_FASTTEXT_LANGUAGE_MODEL_PATH
     "${CMAKE_INSTALL_PREFIX}/${KDE_INSTALL_DATADIR}/javelinmail/models/fasttext/lid.176.ftz")
 
@@ -1582,7 +1593,7 @@ if(JAVELIN_ENABLE_LOCAL_DATA_INSTALL)
             "${PROJECT_SOURCE_DIR}/res/javelinmailui.rc"
             "${PROJECT_SOURCE_DIR}/res/icon.svg"
             "${PROJECT_SOURCE_DIR}/res/models/fasttext/LICENSE"
-            "${PROJECT_SOURCE_DIR}/res/models/fasttext/lid.176.ftz"
+            "${JAVELIN_FASTTEXT_SOURCE_MODEL_PATH}"
             "${PROJECT_SOURCE_DIR}/res/models/fasttext/README.md"
         COMMENT "Installing data files to local prefix"
         VERBATIM
