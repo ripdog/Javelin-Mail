@@ -9,6 +9,7 @@
 #include "app/MailApplicationPorts.h"
 #include "app/MailApplicationService.h"
 #include "app/MessageContentApplicationPorts.h"
+#include "app/PerformanceMetrics.h"
 #include "app/RemoteCodec.h"
 #include "app/SieveApplicationPorts.h"
 #include "app/TranslationApplicationPorts.h"
@@ -182,6 +183,7 @@ namespace javelin::app
     javelin::protocol::CommandReply
     DaemonRemoteActionDispatcher::dispatch(javelin::protocol::CommandRequest request)
     {
+        const auto startedAt = std::chrono::steady_clock::now();
         const auto id = request.id;
         const auto* remoteCommand =
             std::get_if<javelin::protocol::RemoteActionCommand>(&request.command);
@@ -193,7 +195,14 @@ namespace javelin::app
         if (const auto replay = m_replays.find(key); replay != m_replays.end())
         {
             if (replay->second.command == *remoteCommand)
+            {
+                PerformanceMetrics::recordEvent(
+                    QStringLiteral("daemon"), QStringLiteral("remote_action_admission"),
+                    QStringLiteral("replay"),
+                    QStringLiteral("kind=%1").arg(
+                        PerformanceMetrics::remoteActionName(remoteCommand->kind)));
                 return replay->second.reply;
+            }
             return reject(id, QStringLiteral("The command identifier was reused."));
         }
 
@@ -202,8 +211,21 @@ namespace javelin::app
             std::holds_alternative<javelin::protocol::CommandAccepted>(reply) &&
             std::get<javelin::protocol::CommandAccepted>(reply).operation.has_value() &&
             !std::get<javelin::protocol::CommandAccepted>(reply).immediateResult.has_value();
-        m_replays.emplace(
-            key, ReplayEntry{.command = *remoteCommand, .reply = reply, .pending = pending});
+        PerformanceMetrics::recordDuration(
+            QStringLiteral("daemon"), QStringLiteral("remote_action_admission"),
+            std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() -
+                                                                  startedAt),
+            std::holds_alternative<javelin::protocol::CommandAccepted>(reply)
+                ? QStringLiteral("accepted")
+                : QStringLiteral("rejected"),
+            QStringLiteral("kind=%1 pending=%2 payload_bytes=%3")
+                .arg(PerformanceMetrics::remoteActionName(remoteCommand->kind))
+                .arg(pending)
+                .arg(remoteCommand->payload.size()));
+        m_replays.emplace(key, ReplayEntry{.command = *remoteCommand,
+                                           .reply = reply,
+                                           .pending = pending,
+                                           .startedAt = startedAt});
         m_replayOrder.push_back(key);
         trimReplays();
         return reply;
@@ -820,6 +842,14 @@ namespace javelin::app
         const auto replay = m_replays.find(replayKey({.value = operation.value}));
         if (replay != m_replays.end())
         {
+            PerformanceMetrics::recordDuration(
+                QStringLiteral("daemon"), QStringLiteral("remote_action_execution"),
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::steady_clock::now() - replay->second.startedAt),
+                QStringLiteral("completed"),
+                QStringLiteral("kind=%1 result_bytes=%2")
+                    .arg(PerformanceMetrics::remoteActionName(replay->second.command.kind))
+                    .arg(result.size()));
             if (auto* accepted =
                     std::get_if<javelin::protocol::CommandAccepted>(&replay->second.reply))
             {
@@ -848,6 +878,14 @@ namespace javelin::app
         const auto replay = m_replays.find(replayKey({.value = operation.value}));
         if (replay != m_replays.end())
         {
+            PerformanceMetrics::recordDuration(
+                QStringLiteral("daemon"), QStringLiteral("remote_action_execution"),
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::steady_clock::now() - replay->second.startedAt),
+                QStringLiteral("failed"),
+                QStringLiteral("kind=%1 code=%2")
+                    .arg(PerformanceMetrics::remoteActionName(replay->second.command.kind))
+                    .arg(static_cast<int>(error.code)));
             replay->second.reply = javelin::protocol::CommandRejected{
                 .id = {.value = operation.value},
                 .error = error,

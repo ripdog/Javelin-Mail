@@ -3,6 +3,7 @@
 #include "app/InlineMessageSchemeHandler.h"
 #include "app/LogStore.h"
 #include "app/MessageNavigationPort.h"
+#include "app/PerformanceMetrics.h"
 #include "app/WorkTaskPort.h"
 
 #include "gui/shell/MainWindow.h"
@@ -93,6 +94,59 @@ namespace
         QByteArray m_previous;
         bool m_hadPrevious = false;
     };
+
+    class ProfilingApplication final : public QApplication
+    {
+      public:
+        using QApplication::QApplication;
+
+        bool notify(QObject* receiver, QEvent* event) override
+        {
+            if (!javelin::app::PerformanceMetrics::enabled())
+                return QApplication::notify(receiver, event);
+
+            const int eventType = event == nullptr ? 0 : static_cast<int>(event->type());
+            const auto receiverName =
+                receiver == nullptr ? QStringLiteral("null")
+                                    : QString::fromLatin1(receiver->metaObject()->className());
+            QElapsedTimer timer;
+            timer.start();
+            const bool delivered = QApplication::notify(receiver, event);
+            if (timer.elapsed() > 50)
+            {
+                javelin::app::PerformanceMetrics::recordDuration(
+                    QStringLiteral("gui"), QStringLiteral("qt_event_handler"),
+                    std::chrono::microseconds{timer.elapsed() * 1000}, QStringLiteral("slow"),
+                    QStringLiteral("event_type=%1 receiver=%2").arg(eventType).arg(receiverName));
+            }
+            return delivered;
+        }
+
+        void startProfiling()
+        {
+            if (!javelin::app::PerformanceMetrics::enabled())
+                return;
+
+            m_heartbeatTimer.setInterval(50);
+            connect(&m_heartbeatTimer, &QTimer::timeout, this,
+                    [this]
+                    {
+                        const auto interval = m_heartbeatClock.restart();
+                        if (interval <= 200)
+                            return;
+                        javelin::app::PerformanceMetrics::recordDuration(
+                            QStringLiteral("gui"), QStringLiteral("event_loop_stall"),
+                            std::chrono::microseconds{interval * 1000}, QStringLiteral("stalled"),
+                            QStringLiteral("heartbeat_interval_ms=50"));
+                    });
+            m_heartbeatClock.start();
+            m_heartbeatTimer.start();
+        }
+
+      private:
+        QElapsedTimer m_heartbeatClock;
+        QTimer m_heartbeatTimer;
+    };
 } // namespace
 
 int main(int argc, char* argv[])
@@ -100,8 +154,9 @@ int main(int argc, char* argv[])
     configureLocalDataDirectory();
     javelin::app::registerInlineMessageUrlScheme();
 
-    QApplication application{argc, argv};
+    ProfilingApplication application{argc, argv};
     javelin::app::LogStore::install();
+    application.startProfiling();
     QCoreApplication::setOrganizationName(QStringLiteral("Javelin Mail"));
     QCoreApplication::setOrganizationDomain(QStringLiteral("javelin.app"));
     QCoreApplication::setApplicationName(QStringLiteral("Javelin Mail"));
@@ -114,6 +169,20 @@ int main(int argc, char* argv[])
     KAboutData::setApplicationData(aboutData);
     application.setWindowIcon(QIcon(QStringLiteral(":/icons/icon.svg")));
     application.setQuitOnLastWindowClosed(false);
+
+    QTimer resourceTimer;
+    if (javelin::app::PerformanceMetrics::enabled())
+    {
+        javelin::app::PerformanceMetrics::recordProcessResources(QStringLiteral("gui"));
+        resourceTimer.setInterval(30'000);
+        QObject::connect(
+            &resourceTimer, &QTimer::timeout, &application, []
+            { javelin::app::PerformanceMetrics::recordProcessResources(QStringLiteral("gui")); });
+        QObject::connect(
+            &application, &QCoreApplication::aboutToQuit, &application, []
+            { javelin::app::PerformanceMetrics::recordProcessResources(QStringLiteral("gui")); });
+        resourceTimer.start();
+    }
 
     QTranslator translator;
     for (const QString& locale : QLocale::system().uiLanguages())

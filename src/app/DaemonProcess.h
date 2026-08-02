@@ -3,6 +3,7 @@
 #include "protocol/SocketTransport.h"
 
 #include <QObject>
+#include <QTimer>
 
 #include <cstddef>
 #include <deque>
@@ -120,6 +121,7 @@ namespace javelin::app
         void flushPendingActivations();
         void launchGuiIfNeeded();
         void requestShutdown();
+        void samplePerformance();
         void onSocketConnectionClosed(javelin::protocol::SocketDisconnectReason reason,
                                       const QString& detail);
 
@@ -142,5 +144,6 @@ namespace javelin::app
         bool m_guiReady = false;
         bool m_guiLaunchRequested = false;
         std::deque<javelin::protocol::ActivationRoute> m_pendingActivations;
+        QTimer m_performanceTimer;
     };
 } // namespace javelin::app

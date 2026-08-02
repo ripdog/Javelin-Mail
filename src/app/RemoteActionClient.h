@@ -10,7 +10,9 @@
 #include <QCoroFuture>
 #include <QCoroTask>
 
+#include <chrono>
 #include <memory>
+#include <optional>
 #include <unordered_map>
 #include <variant>
 
@@ -100,6 +102,8 @@ namespace javelin::app
             javelin::protocol::RemoteActionKind kind;
             QByteArray payload;
             std::optional<javelin::protocol::DaemonInstanceId> daemon;
+            std::chrono::steady_clock::time_point startedAt;
+            std::optional<std::chrono::steady_clock::time_point> submissionStartedAt;
             bool submissionInFlight = false;
         };
 

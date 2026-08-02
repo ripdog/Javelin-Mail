@@ -1,5 +1,7 @@
 #include "app/GuiDaemonSession.h"
 
+#include "app/PerformanceMetrics.h"
+
 #include <QCoreApplication>
 #include <QDir>
 #include <QElapsedTimer>
@@ -79,43 +81,67 @@ namespace javelin::app
 
     std::optional<GuiBootstrapError> GuiDaemonSession::start()
     {
+        PerformanceSpan metrics{QStringLiteral("gui"), QStringLiteral("gui_startup")};
         if (m_readyReply.has_value())
+        {
+            metrics.finish(QStringLiteral("already_ready"));
             return std::nullopt;
+        }
         if (const auto error = connectAndHandshake(true))
+        {
+            metrics.finish(QStringLiteral("error"), QStringLiteral("stage=handshake"));
             return error;
+        }
         if (const auto error = loadSettingsAndCache())
         {
             m_client->disconnectFromDaemon();
+            metrics.finish(QStringLiteral("error"), QStringLiteral("stage=cached_view"));
             return error;
         }
         if (const auto error = m_client->readyForActivation())
         {
             m_client->disconnectFromDaemon();
+            metrics.finish(QStringLiteral("error"), QStringLiteral("stage=activation"));
             return detailError(GuiBootstrapErrorCode::DaemonUnavailable, error->detail);
         }
         m_inRecovery = false;
         Q_EMIT ready();
+        metrics.finish(QStringLiteral("ready"), QStringLiteral("cached_view_ready=true"));
         return std::nullopt;
     }
 
     std::optional<GuiBootstrapError> GuiDaemonSession::reconnect()
     {
+        PerformanceSpan metrics{QStringLiteral("gui"), QStringLiteral("gui_reconnect")};
         const auto oldReady = m_readyReply;
         if (const auto error = connectAndHandshake(false))
+        {
+            metrics.finish(QStringLiteral("error"), QStringLiteral("stage=handshake"));
             return error;
+        }
         if (const auto error = loadSettingsAndCache())
+        {
+            metrics.finish(QStringLiteral("error"), QStringLiteral("stage=cached_view"));
             return error;
+        }
 
         if (oldReady.has_value() && (oldReady->cache.instance != m_readyReply->cache.instance ||
                                      oldReady->cache.schema != m_readyReply->cache.schema))
         {
             if (const auto error = suspendReadAccess())
+            {
+                metrics.finish(QStringLiteral("error"), QStringLiteral("stage=suspend_cache"));
                 return error;
+            }
             if (const auto error = resumeReadAccess())
+            {
+                metrics.finish(QStringLiteral("error"), QStringLiteral("stage=resume_cache"));
                 return error;
+            }
         }
         m_inRecovery = false;
         Q_EMIT recoveryFinished();
+        metrics.finish(QStringLiteral("ready"));
         return std::nullopt;
     }
 
@@ -181,11 +207,17 @@ namespace javelin::app
     std::optional<protocol::BoundaryError>
     GuiDaemonSession::requestAccountRefresh(const QString& accountId)
     {
+        PerformanceSpan metrics{QStringLiteral("gui"), QStringLiteral("command_admission"),
+                                QStringLiteral("kind=refresh_account")};
         const auto reply = m_client->submitCommand(
             {.id = protocol::CommandId{.value = QUuid::createUuid()},
              .command = protocol::RefreshAccountCommand{.accountId = accountId, .force = true}});
         if (const auto* rejected = std::get_if<protocol::CommandRejected>(&reply))
+        {
+            metrics.finish(QStringLiteral("rejected"));
             return rejected->error;
+        }
+        metrics.finish(QStringLiteral("accepted"));
         return std::nullopt;
     }
 
@@ -225,6 +257,8 @@ namespace javelin::app
     GuiDaemonSession::requestMailboxWindow(const QString& accountId, const QString& mailboxId,
                                            const std::uint64_t offset, const std::uint32_t limit)
     {
+        PerformanceSpan metrics{QStringLiteral("gui"), QStringLiteral("materialization_admission"),
+                                QStringLiteral("offset=%1 limit=%2").arg(offset).arg(limit)};
         cancelMaterializationScope();
         const auto scope = protocol::ScopeId{.value = QUuid::createUuid()};
         const auto reply = m_client->requestMaterialization(
@@ -235,8 +269,12 @@ namespace javelin::app
                                                                .offset = offset,
                                                                .limit = limit}});
         if (const auto* rejected = std::get_if<protocol::MaterializationRejected>(&reply))
+        {
+            metrics.finish(QStringLiteral("rejected"));
             return rejected->error;
+        }
         m_materializationScope = scope;
+        metrics.finish(QStringLiteral("accepted"));
         return std::nullopt;
     }
 
@@ -317,12 +355,17 @@ namespace javelin::app
 
     std::optional<GuiBootstrapError> GuiDaemonSession::connectAndHandshake(const bool allowStart)
     {
+        PerformanceSpan metrics{QStringLiteral("gui"), QStringLiteral("daemon_handshake"),
+                                QStringLiteral("allow_start=%1").arg(allowStart)};
         if (!m_client->isConnected())
         {
             if (const auto error = m_client->connectToDaemon())
             {
                 if (!allowStart || !m_options.startDaemonIfMissing)
+                {
+                    metrics.finish(QStringLiteral("unavailable"));
                     return transportError(*error);
+                }
 
                 const auto executable = m_options.daemonExecutable.isEmpty()
                                             ? QDir{QCoreApplication::applicationDirPath()}.filePath(
@@ -332,9 +375,12 @@ namespace javelin::app
                                             m_options.runtimeDirectory, QStringLiteral("--socket"),
                                             m_options.socketPath};
                 if (!QProcess::startDetached(executable, arguments))
+                {
+                    metrics.finish(QStringLiteral("error"), QStringLiteral("stage=start_daemon"));
                     return detailError(
                         GuiBootstrapErrorCode::DaemonStartFailed,
                         QStringLiteral("could not start javelind: %1").arg(executable));
+                }
 
                 QElapsedTimer timer;
                 timer.start();
@@ -347,8 +393,11 @@ namespace javelin::app
                         continue;
                 }
                 if (!m_client->isConnected())
+                {
+                    metrics.finish(QStringLiteral("timeout"));
                     return detailError(GuiBootstrapErrorCode::DaemonUnavailable,
                                        QStringLiteral("javelind did not become available"));
+                }
             }
         }
 
@@ -357,6 +406,7 @@ namespace javelin::app
         if (const auto* rejected = std::get_if<protocol::HandshakeRejected>(&handshake))
         {
             m_client->disconnectFromDaemon();
+            metrics.finish(QStringLiteral("rejected"));
             const auto code = rejected->error.code == protocol::BoundaryErrorCode::IncompatibleBuild
                                   ? GuiBootstrapErrorCode::IncompatibleDaemon
                                   : GuiBootstrapErrorCode::DaemonUnavailable;
@@ -364,15 +414,21 @@ namespace javelin::app
         }
         m_readyReply = std::get<protocol::ReadyReply>(handshake);
         m_currentEpoch = m_readyReply->epoch.value;
+        metrics.finish(QStringLiteral("ready"));
         return std::nullopt;
     }
 
     std::optional<GuiBootstrapError> GuiDaemonSession::refreshSettings()
     {
+        PerformanceSpan metrics{QStringLiteral("gui"), QStringLiteral("settings_read")};
         const auto reply = m_client->getSettings();
         if (const auto* rejected = std::get_if<protocol::SettingsReadRejected>(&reply))
+        {
+            metrics.finish(QStringLiteral("rejected"));
             return detailError(GuiBootstrapErrorCode::SettingsUnavailable, rejected->error.detail);
+        }
         m_settings = std::get<protocol::SettingsSnapshotReply>(reply).snapshot;
+        metrics.finish(QStringLiteral("ready"));
         return std::nullopt;
     }
 
@@ -390,20 +446,31 @@ namespace javelin::app
 
     std::optional<GuiBootstrapError> GuiDaemonSession::openReadConnection()
     {
+        PerformanceSpan metrics{QStringLiteral("gui"), QStringLiteral("cache_read_connection")};
         if (m_databasePath.isEmpty())
+        {
+            metrics.finish(QStringLiteral("error"), QStringLiteral("stage=path"));
             return detailError(GuiBootstrapErrorCode::CacheUnavailable,
                                QStringLiteral("daemon did not provide a cache path"));
+        }
         if (readConnectionOpen())
+        {
+            metrics.finish(QStringLiteral("already_open"));
             return std::nullopt;
+        }
         auto opened = javelin::jmap::cache::GuiDatabaseFactory{
             javelin::jmap::cache::ReadOnlyThreadConnectionFactoryOptions{
                 .connectionNamePrefix = QStringLiteral("javelin-gui-read"),
                 .databasePath = m_databasePath,
             }}.openForCurrentThread("bootstrap");
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&opened))
+        {
+            metrics.finish(QStringLiteral("error"));
             return detailError(GuiBootstrapErrorCode::CacheUnavailable, error->message);
+        }
         m_readConnection =
             std::get<javelin::jmap::cache::ReadOnlyDatabaseConnection>(std::move(opened));
+        metrics.finish(QStringLiteral("ready"));
         return std::nullopt;
     }
 

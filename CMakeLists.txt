@@ -64,6 +64,18 @@ javelin_set_project_warnings(javelin_protocol)
 javelin_enable_static_analysis(javelin_protocol)
 javelin_enable_sanitizers(javelin_protocol)
 
+add_library(javelin_observability STATIC
+    src/app/PerformanceMetrics.cpp
+    src/app/PerformanceMetrics.h
+)
+target_include_directories(javelin_observability PUBLIC
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
+)
+target_link_libraries(javelin_observability PUBLIC Qt::Core)
+javelin_set_project_warnings(javelin_observability)
+javelin_enable_static_analysis(javelin_observability)
+javelin_enable_sanitizers(javelin_observability)
+
 add_library(javelin_cache_read STATIC
     src/app/CacheAccessBarrier.cpp
     src/app/CacheAccessBarrier.h
@@ -1130,6 +1142,7 @@ target_link_libraries(javelin_gui
     PRIVATE
         Qt::Concurrent
         javelin_cache_read
+        javelin_observability
 )
 javelin_set_project_warnings(javelin_gui)
 javelin_enable_static_analysis(javelin_gui)
@@ -1315,6 +1328,7 @@ target_link_libraries(javelin_daemon_core
         Qt::Concurrent
         Qt::DBus
         Qt::Network
+        javelin_observability
 )
 javelin_set_project_warnings(javelin_daemon_core)
 javelin_enable_static_analysis(javelin_daemon_core)
@@ -1434,6 +1448,7 @@ target_link_libraries(javelin
         javelin_protocol
         javelin_cache_read
         javelin_gui
+        javelin_observability
         QCoro6::Core
         Qt::Widgets
 )

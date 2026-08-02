@@ -1,5 +1,6 @@
 #include "app/DaemonProcess.h"
 #include "app/LogStore.h"
+#include "app/PerformanceMetrics.h"
 
 #include <QCommandLineOption>
 #include <QCommandLineParser>
@@ -88,10 +89,16 @@ int main(int argc, char* argv[])
     try
     {
         javelin::app::DaemonProcess process{std::move(options)};
+        javelin::app::PerformanceSpan startupMetrics{QStringLiteral("daemon"),
+                                                     QStringLiteral("process_startup")};
         QObject::connect(&process, &javelin::app::DaemonProcess::shutdownRequested, &application,
                          &QCoreApplication::quit);
         if (const auto error = process.start())
+        {
+            startupMetrics.finish(QStringLiteral("failed"));
             return fail(error->detail);
+        }
+        startupMetrics.finish(QStringLiteral("ready"), QStringLiteral("socket_ready=true"));
         return application.exec();
     }
     catch (const std::exception& exception)

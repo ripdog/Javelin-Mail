@@ -249,6 +249,7 @@ add_executable(javelin_daemon_tests
     app/DaemonProcessTest.cpp
     app/DesktopNotificationControllerTest.cpp
     app/GuiMailApplicationEventsTest.cpp
+    app/PerformanceMetricsTest.cpp
 )
 target_include_directories(javelin_daemon_tests
     PRIVATE

@@ -9,6 +9,7 @@
 #include "app/MessageListSession.h"
 #include "app/MessageListSessionFactory.h"
 #include "app/MessageNavigationPort.h"
+#include "app/PerformanceMetrics.h"
 #include "app/SearchSession.h"
 #include "app/TranslationApplicationPorts.h"
 #include "app/UndoApplicationPorts.h"
@@ -1830,6 +1831,9 @@ namespace javelin::gui::shell
 
     void MainWindow::activateTab(const int index, const bool refreshRemote)
     {
+        javelin::app::PerformanceSpan metrics{
+            QStringLiteral("gui"), QStringLiteral("tab_activation"),
+            QStringLiteral("index=%1 refresh_remote=%2").arg(index).arg(refreshRemote)};
         QElapsedTimer timer;
         timer.start();
         if (index < 0 || static_cast<std::size_t>(index) >= m_tabs.size())
@@ -1848,6 +1852,7 @@ namespace javelin::gui::shell
             updateMessageListHeader();
             updateMessageActions();
             updateToolbarForActiveTab();
+            metrics.finish(QStringLiteral("empty"));
             return;
         }
 
@@ -1917,6 +1922,7 @@ namespace javelin::gui::shell
 
         qCDebug(logGuiMailbox).noquote() << "activate tab" << index << "refreshRemote"
                                          << refreshRemote << "ms" << timer.elapsed();
+        metrics.finish(QStringLiteral("completed"));
     }
 
     void MainWindow::closeTab(const int index)
@@ -1980,6 +1986,11 @@ namespace javelin::gui::shell
 
     void MainWindow::loadActiveTabFromCache(const bool forceReload, const bool refreshRemote)
     {
+        javelin::app::PerformanceSpan metrics{QStringLiteral("gui"),
+                                              QStringLiteral("cached_view_activation"),
+                                              QStringLiteral("force_reload=%1 refresh_remote=%2")
+                                                  .arg(forceReload)
+                                                  .arg(refreshRemote)};
         QElapsedTimer timer;
         timer.start();
         auto* tab = activeTab();
@@ -1987,6 +1998,7 @@ namespace javelin::gui::shell
         {
             m_messageListTabBindingPresenter->applyPage(nullptr);
             refreshSelectionFromModels();
+            metrics.finish(QStringLiteral("empty"));
             return;
         }
 
@@ -2003,6 +2015,7 @@ namespace javelin::gui::shell
                                                      std::nullopt, std::nullopt);
             }
             updateMessageActions();
+            metrics.finish(QStringLiteral("cache_miss"));
             return;
         }
 
@@ -2015,6 +2028,9 @@ namespace javelin::gui::shell
                 << "slow cached tab activation cacheMs" << cacheMilliseconds << "applyMs"
                 << applyMilliseconds;
         }
+        metrics.finish(QStringLiteral("loaded"), QStringLiteral("cache_ms=%1 apply_ms=%2")
+                                                     .arg(cacheMilliseconds)
+                                                     .arg(applyMilliseconds));
         if (m_messageListTabController->pageStale(*tab) ||
             (refreshRemote && tabKind(*tab) == TabKind::Mailbox))
         {
@@ -2051,12 +2067,16 @@ namespace javelin::gui::shell
 
     void MainWindow::activateMailboxSelection(const bool refreshRemote)
     {
+        javelin::app::PerformanceSpan metrics{
+            QStringLiteral("gui"), QStringLiteral("mailbox_navigation"),
+            QStringLiteral("refresh_remote=%1").arg(refreshRemote)};
         QElapsedTimer timer;
         timer.start();
         const auto accountId = currentAccountId(*m_mailboxView);
         const auto mailboxId = currentMailboxId(*m_mailboxView);
         if (!accountId.has_value() || !mailboxId.has_value())
         {
+            metrics.finish(QStringLiteral("no_selection"));
             return;
         }
 
@@ -2074,9 +2094,8 @@ namespace javelin::gui::shell
             currentIndex.data(javelin::gui::mailboxes::MailboxTreeModel::MailboxNameRole)
                 .toString(),
             currentMailboxRole(*m_mailboxView), totalThreads, refreshRemote);
-        qInfo().noquote() << "GUI activate mailbox selection" << QString::fromStdString(*accountId)
-                          << QString::fromStdString(*mailboxId) << "refreshRemote" << refreshRemote
-                          << "ms" << timer.elapsed();
+        metrics.finish(QStringLiteral("completed"),
+                       QStringLiteral("elapsed_ms=%1").arg(timer.elapsed()));
     }
 
     void

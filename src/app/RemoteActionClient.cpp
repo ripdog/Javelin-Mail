@@ -1,6 +1,7 @@
 #include "app/RemoteActionClient.h"
 
 #include "app/GuiDaemonSession.h"
+#include "app/PerformanceMetrics.h"
 
 #include <QFutureWatcher>
 #include <QTimer>
@@ -32,6 +33,10 @@ namespace javelin::app
     RemoteActionClient::invokeImmediate(const javelin::protocol::RemoteActionKind kind,
                                         QByteArray payload)
     {
+        PerformanceSpan metrics{QStringLiteral("gui"), QStringLiteral("remote_action_e2e"),
+                                QStringLiteral("kind=%1 payload_bytes=%2")
+                                    .arg(PerformanceMetrics::remoteActionName(kind))
+                                    .arg(payload.size())};
         const auto commandId = javelin::protocol::CommandId{.value = QUuid::createUuid()};
         const auto originalDaemon = m_session.daemonInstance();
         auto reply = m_session.submitRemoteAction(kind, payload, commandId);
@@ -40,9 +45,13 @@ namespace javelin::app
             rejected->error.code == javelin::protocol::BoundaryErrorCode::TransportUnavailable)
         {
             if (!originalDaemon.has_value())
+            {
+                metrics.finish(QStringLiteral("transport_unavailable"));
                 return error(rejected->error);
+            }
             if (const auto reconnectError = m_session.reconnect())
             {
+                metrics.finish(QStringLiteral("transport_unavailable"));
                 return RemoteCallError{
                     .code = javelin::protocol::BoundaryErrorCode::TransportUnavailable,
                     .detail = reconnectError->detail,
@@ -51,6 +60,7 @@ namespace javelin::app
             const auto reconnectedDaemon = m_session.daemonInstance();
             if (!reconnectedDaemon.has_value() || *reconnectedDaemon != *originalDaemon)
             {
+                metrics.finish(QStringLiteral("unknown"));
                 return RemoteCallError{
                     .code = javelin::protocol::BoundaryErrorCode::TransportUnavailable,
                     .detail = QStringLiteral(
@@ -62,15 +72,20 @@ namespace javelin::app
         }
 
         if (const auto* rejected = std::get_if<javelin::protocol::CommandRejected>(&reply))
+        {
+            metrics.finish(QStringLiteral("rejected"));
             return error(rejected->error);
+        }
         const auto& accepted = std::get<javelin::protocol::CommandAccepted>(reply);
         if (!accepted.immediateResult.has_value())
         {
+            metrics.finish(QStringLiteral("protocol_error"));
             return RemoteCallError{
                 .code = javelin::protocol::BoundaryErrorCode::ProtocolViolation,
                 .detail = QStringLiteral("The daemon did not return an immediate result."),
             };
         }
+        metrics.finish(QStringLiteral("completed"));
         return *accepted.immediateResult;
     }
 
@@ -85,6 +100,7 @@ namespace javelin::app
         pending->kind = kind;
         pending->payload = std::move(payload);
         pending->daemon = m_session.daemonInstance();
+        pending->startedAt = std::chrono::steady_clock::now();
         const auto pendingKey = key(commandId.value);
         m_pending.emplace(pendingKey, std::move(pending));
         submitPending(pendingKey);
@@ -113,6 +129,7 @@ namespace javelin::app
             pending.daemon = daemon;
 
         pending.submissionInFlight = true;
+        pending.submissionStartedAt = std::chrono::steady_clock::now();
         const auto commandId = pending.commandId;
         auto* watcher = new QFutureWatcher<javelin::protocol::CommandReply>(this);
         connect(
@@ -125,22 +142,40 @@ namespace javelin::app
                 if (pendingCall == m_pending.end())
                     return;
                 pendingCall->second->submissionInFlight = false;
+                const auto recordAdmission = [&](const QString& outcome)
+                {
+                    if (!pendingCall->second->submissionStartedAt.has_value())
+                        return;
+                    PerformanceMetrics::recordDuration(
+                        QStringLiteral("gui"), QStringLiteral("remote_action_admission"),
+                        std::chrono::duration_cast<std::chrono::microseconds>(
+                            std::chrono::steady_clock::now() -
+                            *pendingCall->second->submissionStartedAt),
+                        outcome,
+                        QStringLiteral("kind=%1 payload_bytes=%2")
+                            .arg(PerformanceMetrics::remoteActionName(pendingCall->second->kind))
+                            .arg(pendingCall->second->payload.size()));
+                    pendingCall->second->submissionStartedAt.reset();
+                };
 
                 if (const auto* rejected = std::get_if<javelin::protocol::CommandRejected>(&reply))
                 {
                     if (rejected->error.code ==
                         javelin::protocol::BoundaryErrorCode::TransportUnavailable)
                     {
+                        recordAdmission(QStringLiteral("transport_unavailable"));
                         if (m_session.isReady())
                             QTimer::singleShot(0, this,
                                                [this, pendingKey] { submitPending(pendingKey); });
                         return;
                     }
+                    recordAdmission(QStringLiteral("rejected"));
                     fail(javelin::protocol::OperationId{.value = commandId.value}, rejected->error);
                     return;
                 }
 
                 const auto& accepted = std::get<javelin::protocol::CommandAccepted>(reply);
+                recordAdmission(QStringLiteral("accepted"));
                 if (accepted.immediateResult.has_value())
                 {
                     complete(javelin::protocol::OperationId{.value = commandId.value},
@@ -179,6 +214,14 @@ namespace javelin::app
         const auto found = m_pending.find(key(operation.value));
         if (found == m_pending.end())
             return;
+        PerformanceMetrics::recordDuration(
+            QStringLiteral("gui"), QStringLiteral("remote_action_e2e"),
+            std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() -
+                                                                  found->second->startedAt),
+            QStringLiteral("completed"),
+            QStringLiteral("kind=%1 payload_bytes=%2")
+                .arg(PerformanceMetrics::remoteActionName(found->second->kind))
+                .arg(found->second->payload.size()));
         found->second->promise.addResult(RawResult{std::move(result)});
         found->second->promise.finish();
         m_pending.erase(found);
@@ -190,6 +233,15 @@ namespace javelin::app
         const auto found = m_pending.find(key(operation.value));
         if (found == m_pending.end())
             return;
+        PerformanceMetrics::recordDuration(
+            QStringLiteral("gui"), QStringLiteral("remote_action_e2e"),
+            std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() -
+                                                                  found->second->startedAt),
+            QStringLiteral("failed"),
+            QStringLiteral("kind=%1 payload_bytes=%2 code=%3")
+                .arg(PerformanceMetrics::remoteActionName(found->second->kind))
+                .arg(found->second->payload.size())
+                .arg(static_cast<int>(boundaryError.code)));
         found->second->promise.addResult(RawResult{error(boundaryError)});
         found->second->promise.finish();
         m_pending.erase(found);
@@ -202,6 +254,14 @@ namespace javelin::app
         for (auto& [pendingKey, call] : pending)
         {
             Q_UNUSED(pendingKey)
+            PerformanceMetrics::recordDuration(
+                QStringLiteral("gui"), QStringLiteral("remote_action_e2e"),
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::steady_clock::now() - call->startedAt),
+                QStringLiteral("abandoned"),
+                QStringLiteral("kind=%1 payload_bytes=%2")
+                    .arg(PerformanceMetrics::remoteActionName(call->kind))
+                    .arg(call->payload.size()));
             call->promise.addResult(RawResult{RemoteCallError{.detail = detail}});
             call->promise.finish();
         }

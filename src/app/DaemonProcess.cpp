@@ -12,6 +12,7 @@
 #include "app/MailApplicationEventsPorts.h"
 #include "app/MailApplicationService.h"
 #include "app/MailIndexService.h"
+#include "app/PerformanceMetrics.h"
 #include "app/SettingsRepository.h"
 #include "app/TranslationApplicationPorts.h"
 #include "app/TranslationService.h"
@@ -156,6 +157,8 @@ namespace javelin::app
         if (!m_options.socket.expectedBuild.has_value())
             m_options.socket.expectedBuild = m_options.build;
         m_options.socket.protocol = m_options.protocol;
+        m_performanceTimer.setInterval(30'000);
+        connect(&m_performanceTimer, &QTimer::timeout, this, &DaemonProcess::samplePerformance);
     }
 
     DaemonProcess::~DaemonProcess()
@@ -251,6 +254,11 @@ namespace javelin::app
             return fail(DaemonStartupErrorCode::SocketListen, error->detail);
 
         m_lifecycle = DaemonLifecycle::Ready;
+        if (PerformanceMetrics::enabled())
+        {
+            samplePerformance();
+            m_performanceTimer.start();
+        }
         publishStatus();
         Q_EMIT ready();
         return std::nullopt;
@@ -260,6 +268,9 @@ namespace javelin::app
     {
         if (m_lifecycle == DaemonLifecycle::ShuttingDown)
             return;
+        m_performanceTimer.stop();
+        if (m_services != nullptr)
+            samplePerformance();
         m_lifecycle = DaemonLifecycle::ShuttingDown;
         if (m_background != nullptr)
         {
@@ -407,11 +418,16 @@ namespace javelin::app
 
     protocol::HandshakeReply DaemonProcess::handleHello(const protocol::HelloRequest& request)
     {
+        PerformanceSpan metrics{QStringLiteral("daemon"), QStringLiteral("daemon_handshake")};
         if (!isReady())
+        {
+            metrics.finish(QStringLiteral("unavailable"));
             return HandshakeRejected{.error = notReadyError()};
+        }
         if (request.protocol.major != m_options.protocol.major ||
             request.protocol.minor > m_options.protocol.minor)
         {
+            metrics.finish(QStringLiteral("rejected"), QStringLiteral("reason=protocol"));
             return HandshakeRejected{
                 .error = {.code = BoundaryErrorCode::InvalidProtocol,
                           .field = QStringLiteral("hello.protocol"),
@@ -419,11 +435,13 @@ namespace javelin::app
         }
         if (request.build != m_options.build)
         {
+            metrics.finish(QStringLiteral("rejected"), QStringLiteral("reason=build"));
             return HandshakeRejected{
                 .error = {.code = BoundaryErrorCode::IncompatibleBuild,
                           .field = QStringLiteral("hello.build"),
                           .detail = QStringLiteral("daemon build identity is incompatible")}};
         }
+        metrics.finish(QStringLiteral("ready"));
         return ReadyReply{.protocol = m_options.protocol,
                           .daemon = m_instanceId,
                           .cache = cacheIdentity(),
@@ -439,27 +457,42 @@ namespace javelin::app
         if (std::holds_alternative<protocol::RemoteActionCommand>(request.command))
             return m_remoteActions->dispatch(std::move(request));
 
+        PerformanceSpan metrics{QStringLiteral("daemon"), QStringLiteral("command_admission"),
+                                QStringLiteral("kind=refresh_account")};
         auto reply = m_services->commandDispatcher().dispatch(std::move(request));
         if (auto* accepted = std::get_if<protocol::CommandAccepted>(&reply))
             accepted->epoch = currentEpoch();
+        metrics.finish(std::holds_alternative<protocol::CommandAccepted>(reply)
+                           ? QStringLiteral("accepted")
+                           : QStringLiteral("rejected"));
         return reply;
     }
 
     protocol::MaterializationReply
     DaemonProcess::handleMaterialization(protocol::MaterializationRequest request)
     {
+        PerformanceSpan metrics{QStringLiteral("daemon"),
+                                QStringLiteral("materialization_admission"),
+                                QStringLiteral("kind=mailbox_window")};
         if (!isReady())
+        {
+            metrics.finish(QStringLiteral("unavailable"));
             return protocol::MaterializationRejected{.id = request.id, .error = notReadyError()};
+        }
 
         const auto* mailbox = std::get_if<protocol::MailboxWindowMaterialization>(&request.request);
         if (mailbox == nullptr)
+        {
+            metrics.finish(QStringLiteral("rejected"), QStringLiteral("reason=unsupported"));
             return protocol::MaterializationRejected{
                 .id = request.id,
                 .error = {.code = BoundaryErrorCode::UnsupportedOperation,
                           .field = QStringLiteral("materialization"),
                           .detail = QStringLiteral("materialization kind is not supported")}};
+        }
 
         const auto requestId = request.id;
+        const auto startedAt = std::chrono::steady_clock::now();
         auto task = m_services->mailService().requestMailboxWindow({
             .accountId = mailbox->accountId.toStdString(),
             .mailboxId = mailbox->mailboxId.toStdString(),
@@ -472,17 +505,38 @@ namespace javelin::app
         });
         QCoro::connect(
             std::move(task), this,
-            [this, requestId](MailboxWindowResult result)
+            [this, requestId, startedAt](MailboxWindowResult result)
             {
+                QString details;
+                if (const auto* summary = std::get_if<MailboxWindowSummary>(&result))
+                {
+                    details = QStringLiteral("returned=%1 representatives=%2")
+                                  .arg(summary->returnedLimit)
+                                  .arg(summary->representativeCount);
+                }
                 if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
                 {
+                    PerformanceMetrics::recordDuration(
+                        QStringLiteral("daemon"), QStringLiteral("materialization_completion"),
+                        std::chrono::duration_cast<std::chrono::microseconds>(
+                            std::chrono::steady_clock::now() - startedAt),
+                        QStringLiteral("failed"));
                     onBoundaryEvent(protocol::OperationFailed{
                         .operation = protocol::OperationId{.value = requestId.value},
                         .error = {.code = protocol::BoundaryErrorCode::TransportUnavailable,
                                   .field = QStringLiteral("materialization"),
                                   .detail = error->message}});
                 }
+                else
+                {
+                    PerformanceMetrics::recordDuration(
+                        QStringLiteral("daemon"), QStringLiteral("materialization_completion"),
+                        std::chrono::duration_cast<std::chrono::microseconds>(
+                            std::chrono::steady_clock::now() - startedAt),
+                        QStringLiteral("completed"), std::move(details));
+                }
             });
+        metrics.finish(QStringLiteral("accepted"));
         return protocol::MaterializationAccepted{.id = request.id};
     }
 
@@ -802,5 +856,32 @@ namespace javelin::app
             return;
         onBoundaryEvent(protocol::DaemonShutdownRequested{});
         Q_EMIT shutdownRequested();
+    }
+
+    void DaemonProcess::samplePerformance()
+    {
+        if (!PerformanceMetrics::enabled() || m_services == nullptr)
+            return;
+
+        PerformanceMetrics::recordProcessResources(QStringLiteral("daemon"), databasePath());
+        const auto& scheduler = m_services->workScheduler();
+        const auto metrics = scheduler.admissionMetrics();
+        const auto details =
+            QStringLiteral("active=%1 admitted=%2 completed=%3 rejected=%4 "
+                           "queue_wait_total_us=%5 queue_wait_max_us=%6 "
+                           "transaction_total_us=%7 foreground_total_us=%8 "
+                           "foreground_admission_total_us=%9")
+                .arg(static_cast<qulonglong>(scheduler.activeAdmissions()))
+                .arg(static_cast<qulonglong>(metrics.admitted))
+                .arg(static_cast<qulonglong>(metrics.completed))
+                .arg(static_cast<qulonglong>(metrics.rejected))
+                .arg(static_cast<qlonglong>(metrics.totalQueueWait.count()))
+                .arg(static_cast<qlonglong>(metrics.maximumQueueWait.count()))
+                .arg(static_cast<qlonglong>(metrics.totalTransactionTime.count()))
+                .arg(static_cast<qlonglong>(metrics.totalForegroundTime.count()))
+                .arg(static_cast<qlonglong>(metrics.totalForegroundAdmissionLatency.count()));
+        PerformanceMetrics::recordEvent(QStringLiteral("daemon"),
+                                        QStringLiteral("work_scheduler_snapshot"),
+                                        QStringLiteral("sample"), details);
     }
 } // namespace javelin::app

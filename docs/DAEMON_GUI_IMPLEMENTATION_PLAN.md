@@ -769,10 +769,24 @@ as the authoritative checklist.
    batching, indexes, invalidation detail, and model patches before considering any architectural
    exception.
 
+### Instrumentation delivered
+
+The opt-in `JAVELIN_UI_PROFILING=1` switch now emits split-process metrics through the normal Qt
+logging path. GUI and daemon samples carry an explicit `process` field, so IPC admission can be
+compared with daemon execution and GUI end-to-end completion without combining unlike timings. The
+instrumentation covers cached GUI startup and navigation, Qt event-loop stalls, handshake and
+command admission, materialization completion, remote-action execution, process RSS/CPU/WAL
+samples, and daemon work-scheduler contention. It is implemented in a shared observability target,
+is disabled unless explicitly enabled, and never persists telemetry in SQLite. See
+[`docs/DIAGNOSTICS.md`](DIAGNOSTICS.md) for the capture format and measurement workflow.
+
 ### Current validation status
 
-As of 2026-08-01, the complete Debug build and all 514 discovered tests pass, and the C++
-`format-check` target is clean. An isolated smoke run against a reflinked copy of the real profile
+As of 2026-08-02, the complete Debug build and all 534 discovered tests pass with local socket
+access, and the new performance-metric tests pass with profiling enabled. The touched C++ files pass
+clang-format; the repository-wide `format-check` currently reports pre-existing diagnostics in
+`src/gui/settings/GuiSettings.cpp` and `.h`, outside this Phase 12 change. An isolated smoke run
+against a reflinked copy of the real profile
 loaded both configured accounts, restored the full workspace, performed mailbox and calendar network
 work in `javelind`, kept the GUI alive, and accepted a second-launch activation with exit status 0. A
 follow-up disconnect test terminated that GUI, confirmed the daemon remained operational, reconnected

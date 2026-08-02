@@ -7,6 +7,7 @@
 
 #include <QObject>
 
+#include <chrono>
 #include <deque>
 #include <functional>
 #include <memory>
@@ -40,6 +41,7 @@ namespace javelin::app
             javelin::protocol::RemoteActionCommand command;
             javelin::protocol::CommandReply reply;
             bool pending = false;
+            std::chrono::steady_clock::time_point startedAt;
         };
 
         [[nodiscard]] javelin::protocol::CommandReply
