@@ -63,3 +63,17 @@ TEST_CASE("language detection service ignores short snippets", "[jmap][language]
 
     CHECK_FALSE(service.detect("Bonjour").has_value());
 }
+
+TEST_CASE("language detection recognizes Japanese notification text", "[jmap][language]")
+{
+    javelin::jmap::language::LanguageDetectionService service{JAVELIN_FASTTEXT_LANGUAGE_MODEL_PATH};
+    const auto detection = service.detect(
+        "【Ci-en】 新着記事のお知らせ [2026/07/30] fuwafuwataimu様 4件の新着記事があります "
+        "フォロー中のクリエイター whisp 🌟新作RPG体験版公開中🌟 しつけあい！"
+        "発売カウントダウンイラスト 2026年07月29日");
+
+    REQUIRE(detection.has_value());
+    CHECK(detection->languageCode == "ja");
+    CHECK(detection->confidence >= 0.75);
+    CHECK(shouldOfferTranslation(*detection, "en"));
+}
