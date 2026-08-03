@@ -31,21 +31,12 @@ makedepends=(
 )
 provides=('javelin-mail')
 conflicts=('javelin-mail')
+_source_ref=${JAVELIN_GIT_REF:+#commit=${JAVELIN_GIT_REF}}
+source=("${_project_name}::git+https://github.com/ripdog/Javelin-Mail.git${_source_ref}")
+sha256sums=('SKIP')
 
 _repo_root() {
-  if [[ -n ${JAVELIN_SOURCE_DIR:-} ]] && git -C "$JAVELIN_SOURCE_DIR" rev-parse --show-toplevel >/dev/null 2>&1; then
-    git -C "$JAVELIN_SOURCE_DIR" rev-parse --show-toplevel
-    return
-  fi
-
-  if [[ -n ${startdir:-} ]] && git -C "$startdir" rev-parse --show-toplevel >/dev/null 2>&1; then
-    git -C "$startdir" rev-parse --show-toplevel
-    return
-  fi
-
-  local package_dir
-  package_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-  git -C "$package_dir" rev-parse --show-toplevel
+  printf '%s\n' "$srcdir/$_project_name"
 }
 
 _canonical_version() {

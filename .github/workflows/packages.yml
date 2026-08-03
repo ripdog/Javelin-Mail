@@ -37,7 +37,7 @@ jobs:
       - name: Build package
         run: |
           sudo -u builder bash -lc \
-            "cd '$GITHUB_WORKSPACE' && JAVELIN_SOURCE_DIR='$GITHUB_WORKSPACE' makepkg --syncdeps --noconfirm --cleanbuild --clean"
+            "cd '$GITHUB_WORKSPACE' && JAVELIN_GIT_REF='$GITHUB_SHA' makepkg --syncdeps --noconfirm --cleanbuild --clean"
 
       - name: Upload package
         uses: actions/upload-artifact@v4
