@@ -1,0 +1,39 @@
+#!/bin/sh
+
+APPDIR="${APPDIR:-$(dirname "$(readlink -f "$0")")}"
+export PATH="$APPDIR/usr/bin${PATH:+:$PATH}"
+export LD_LIBRARY_PATH="$APPDIR/usr/lib:$APPDIR/usr/lib64:$APPDIR/usr/lib/x86_64-linux-gnu${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export XDG_DATA_DIRS="$APPDIR/usr/share${XDG_DATA_DIRS:+:$XDG_DATA_DIRS}"
+export QT_PLUGIN_PATH="$APPDIR/usr/plugins:$APPDIR/usr/lib/qt6/plugins${QT_PLUGIN_PATH:+:$QT_PLUGIN_PATH}"
+export QML2_IMPORT_PATH="$APPDIR/usr/qml:$APPDIR/usr/lib/qt6/qml${QML2_IMPORT_PATH:+:$QML2_IMPORT_PATH}"
+
+if [ -x "$APPDIR/usr/lib/qt6/libexec/QtWebEngineProcess" ]; then
+    export QTWEBENGINEPROCESS_PATH="$APPDIR/usr/lib/qt6/libexec/QtWebEngineProcess"
+fi
+
+case "${1:-}" in
+    --help|-h|--version|-v)
+        exec "$APPDIR/usr/bin/javelin" "$@"
+        ;;
+esac
+
+"$APPDIR/usr/bin/javelind" &
+daemon_pid=$!
+
+forward_signal()
+{
+    kill -TERM "$daemon_pid" 2>/dev/null || true
+}
+trap forward_signal HUP INT TERM
+
+"$APPDIR/usr/bin/javelin" "$@"
+gui_status=$?
+
+# The first launcher owns the daemon lifetime so the AppImage remains mounted
+# while background synchronization, notifications, and delayed sends continue.
+# Later launchers see the existing daemon, whose duplicate process exits quickly.
+if kill -0 "$daemon_pid" 2>/dev/null; then
+    wait "$daemon_pid" || true
+fi
+
+exit "$gui_status"

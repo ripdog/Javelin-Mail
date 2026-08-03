@@ -6,9 +6,10 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for component ownership and runtime inter
 
 ## Supported development environment
 
-Javelin is currently developed and tested primarily on Linux. The installed runtime expects a
-systemd user session for automatic daemon startup and a desktop with StatusNotifierItem support for
-the tray icon.
+Javelin is currently developed and tested for KDE Plasma on Linux. The installed runtime expects a
+systemd user session for automatic daemon startup and uses Plasma's StatusNotifierItem host, desktop
+notification service, icon theme, and KDE resource lookup conventions. Other Linux desktops are a
+best-effort compatibility target rather than the environment that drives design decisions.
 
 The codebase targets:
 
@@ -25,7 +26,10 @@ host CMake environment.
 
 Required Qt components are Core, DBus, Network, SQL, Widgets, Concurrent, LinguistTools, WebEngine,
 SVG, and WebSockets. Required KDE components are ConfigWidgets, XmlGui, CoreAddons, TextEditor,
-Extra CMake Modules, and KPim6Mime.
+Extra CMake Modules, and KPim6Mime. These are product dependencies, not merely build conveniences:
+KXMLGUI owns the main-window action layout, KConfigWidgets owns preferences presentation,
+KTextEditor powers compose/source and Sieve editing, and the daemon publishes a KDE
+StatusNotifierItem directly over D-Bus.
 
 CMake uses installed QCoro, Glaze, and Catch2 packages when available. Otherwise it fetches the
 versions pinned in `cmake/Dependencies.cmake`. fastText is fetched when local language detection is
@@ -147,6 +151,35 @@ makepkg -si
 The package version is derived from the CMake project version and current Git revision. After
 installation, reload and enable the user service as shown above.
 
+## Continuous integration and package artifacts
+
+GitHub Actions runs two test configurations for every pull request and every push to `master`:
+
+- the complete Debug build, Catch2 suite, and repository formatting check; and
+- the same test suite under AddressSanitizer and UndefinedBehaviorSanitizer.
+
+A separate packaging workflow produces downloadable CI artifacts:
+
+- an Arch Linux `javelin-mail-git` package built through the repository `PKGBUILD`;
+- a Flatpak bundle based on `org.kde.Platform//6.9`; and
+- an x86-64 AppImage containing both `javelin` and `javelind`.
+
+The Flatpak and AppImage deliberately omit the host systemd unit. The GUI launches the adjacent
+daemon in those portable environments. The AppImage launcher remains alive while the daemon is
+running so its mounted KDE resources, QtWebEngine helper, icons, and language model remain available
+after the GUI window closes.
+
+The Flatpak manifest is
+[`packaging/flatpak/app.javelin.JavelinMail.yml`](../packaging/flatpak/app.javelin.JavelinMail.yml).
+A local bundle can be built with:
+
+```sh
+flatpak-builder --force-clean --install-deps-from=flathub \
+  --repo=flatpak-repo flatpak-build \
+  packaging/flatpak/app.javelin.JavelinMail.yml
+flatpak build-bundle flatpak-repo Javelin-Mail.flatpak app.javelin.JavelinMail
+```
+
 ## Tests and formatting
 
 Qt test discovery starts Qt and needs a valid private runtime directory. This matters especially in
@@ -219,6 +252,7 @@ consistent with the parent widget. See Qt’s [QComboBox stylesheet example](htt
 | `JAVELIN_ENABLE_FASTTEXT_LANGUAGE_DETECTION` | `ON` | Build local fastText language detection |
 | `JAVELIN_ENABLE_CLANG_TIDY` | `OFF` | Run clang-tidy as part of compilation |
 | `JAVELIN_ENABLE_CLAZY` | `OFF` | Generate clazy targets when available |
+| `JAVELIN_INSTALL_SYSTEMD_USER_SERVICE` | `ON` | Install `javelind.service`; portable bundles disable this |
 
 The sanitizer options are set by the `asan` preset.
 

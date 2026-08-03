@@ -2,19 +2,23 @@ pkgname=javelin-mail-git
 _project_name=Javelin-Mail
 pkgver=0.1.0.r558.g5ec9807
 pkgrel=1
-pkgdesc='A Qt Widgets JMAP email client'
+pkgdesc='A KDE-focused JMAP email client'
 arch=('x86_64')
 url='https://javelin.app'
 license=('GPL-3.0-only')
 depends=(
   'gcc-libs'
   'glibc'
+  'kconfigwidgets'
   'kcoreaddons'
+  'ktexteditor'
   'kxmlgui'
+  'kmime'
   'qcoro'
   'qt6-base'
   'qt6-svg'
   'qt6-webengine'
+  'qt6-websockets'
 )
 makedepends=(
   'cmake'

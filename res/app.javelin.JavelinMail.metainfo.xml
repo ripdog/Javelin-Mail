@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>app.javelin.JavelinMail</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only</project_license>
+  <name>Javelin Mail</name>
+  <summary>KDE-focused JMAP mail, contacts, calendar, and Sieve client</summary>
+  <developer id="app.javelin">
+    <name>Javelin Mail contributors</name>
+  </developer>
+  <description>
+    <p>
+      Javelin Mail is a native KDE desktop client for JMAP mail, contacts, calendars,
+      submission, and Sieve. It combines a responsive cache-backed interface with a
+      lightweight daemon for synchronization, notifications, delayed sending, and
+      complete offline mailbox copies.
+    </p>
+    <p>
+      The interface uses KDE menus, configurable toolbars, standard actions,
+      KTextEditor, Plasma tray integration, desktop notifications, and KDE theme and
+      icon conventions.
+    </p>
+  </description>
+  <launchable type="desktop-id">javelinmail.desktop</launchable>
+  <url type="homepage">https://github.com/ripdog/Javelin-Mail</url>
+  <url type="bugtracker">https://github.com/ripdog/Javelin-Mail/issues</url>
+  <provides>
+    <binary>javelin</binary>
+  </provides>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-08-04">
+      <description>
+        <p>Pre-release development build.</p>
+      </description>
+    </release>
+  </releases>
+</component>

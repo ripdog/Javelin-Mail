@@ -16,8 +16,34 @@ in the focused documents for [optimistic consistency](OPTIMISTIC_CONSISTENCY.md)
 [database access](DATABASE_ACCESS.md), [Undo/Redo](UNDO_REDO.md), and
 [message rendering](RENDERING.md).
 
-Javelin targets Qt 6.6 or newer and C++23. Glaze provides typed JSON parsing at the JMAP boundary;
-QCoro provides coroutine-based Qt networking.
+Javelin targets Qt 6.6 or newer, KDE Frameworks 6, and C++23. Glaze provides typed JSON parsing at
+the JMAP boundary; QCoro provides coroutine-based Qt networking. KDE Plasma is the primary desktop
+integration target rather than merely one supported shell.
+
+## KDE desktop integration
+
+The GUI is intentionally a KDE application built on Qt Widgets, not a generic Qt shell with optional
+KDE theming:
+
+- `MainWindow` derives from `KXmlGuiWindow`; menus, toolbar composition, shortcut editing, and saved
+  toolbar state use KXMLGUI and KDE standard actions.
+- Preferences use `KConfigDialog`, keeping configuration presentation consistent with Plasma and
+  other KDE applications while the daemon remains the canonical settings owner.
+- Compose source/plain-text modes and the Sieve editor use `KTextEditor`, including KDE syntax and
+  editor behavior rather than a private text-editor implementation.
+- Icons are resolved through the desktop icon theme, and installed resources follow KDE install
+  directories and KXMLGUI lookup conventions.
+- `javelind` implements `org.kde.StatusNotifierItem` directly over QtDBus so tray presence and menu
+  actions remain available without loading Qt Widgets in the daemon.
+- Desktop notifications use the freedesktop notification service with stable activation routes back
+  into the KDE GUI.
+- On a normal Plasma session, `javelind.service` is attached to the systemd graphical user session.
+  Portable packages fall back to launching the adjacent daemon executable because they do not own a
+  host systemd unit.
+
+Other Linux desktops can work when they provide compatible StatusNotifierItem, notifications,
+icon-theme, D-Bus, and session behavior, but architectural decisions and release validation should
+prefer correct KDE Plasma integration.
 
 ## Runtime shape
 
@@ -113,7 +139,7 @@ The source tree is organized by responsibility rather than by feature alone:
 | `src/jmap/contacts/` | JSContact conversion, synchronization, editing, import/export, and mutation journals |
 | `src/jmap/calendar/` | JSCalendar values, recurrence editing, occurrence materialization, and calendar mutations |
 | `src/jmap/sieve/` | Sieve domain values, service operations, and optimistic mutation support |
-| `src/gui/` | Main window, tabs, controllers, models, delegates, message rendering, editors, and preferences |
+| `src/gui/` | KDE/Qt main window, KXMLGUI actions, tabs, controllers, models, delegates, message rendering, KTextEditor integration, and KConfig preferences |
 
 The principal runtime objects are:
 
@@ -129,7 +155,9 @@ The principal runtime objects are:
 | `GuiDaemonSession` | GUI | Connects, negotiates protocol/build identity, handles reconnect, and coordinates cache barriers |
 | `GuiServices` | GUI | Constructs read-only repositories and typed remote application-port adapters |
 | `RemoteActionClient` | GUI | Correlates bounded request/reply actions over the daemon session |
-| `MainWindow` and controllers | GUI | Own presentation, editing, selection, navigation, and user interaction |
+| `MainWindow` and controllers | GUI | Own KDE presentation, KXMLGUI actions, editing, selection, navigation, and user interaction |
+| `DaemonTrayController` | daemon | Publishes the KDE StatusNotifierItem and D-Bus menu without a Widgets dependency |
+| `DesktopNotificationController` | daemon | Publishes desktop notifications and stable GUI activation routes |
 | cache repositories | both, split by API | Daemon repositories write; GUI repositories use read-only/query-only connections |
 
 `DaemonServices` is the operational composition root. It is the only place where writable cache

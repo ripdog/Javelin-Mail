@@ -2,7 +2,7 @@
 Type=Application
 Version=1.0
 Name=Javelin Mail
-Comment=A JMAP email client
+Comment=A KDE-focused JMAP email client
 Exec=javelin
 Icon=javelinmail
 Terminal=false

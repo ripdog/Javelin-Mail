@@ -8,6 +8,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(JAVELIN_ENABLE_LOCAL_DATA_INSTALL "Copy app data into the active install prefix during builds" ON)
 option(JAVELIN_ENABLE_FASTTEXT_LANGUAGE_DETECTION "Use fastText for local mail language detection" ON)
+option(JAVELIN_INSTALL_SYSTEMD_USER_SERVICE "Install the javelind systemd user unit" ON)
 
 include(cmake/Warnings.cmake)
 include(cmake/Dependencies.cmake)
@@ -1665,9 +1666,11 @@ install(TARGETS javelin javelind
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
 
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/javelind.service"
-    DESTINATION ${KDE_INSTALL_LIBDIR}/systemd/user
-)
+if(JAVELIN_INSTALL_SYSTEMD_USER_SERVICE)
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/javelind.service"
+        DESTINATION ${KDE_INSTALL_LIBDIR}/systemd/user
+    )
+endif()
 
 install(FILES res/javelinmailui.rc
     DESTINATION ${KDE_INSTALL_KXMLGUIDIR}/javelinmail
@@ -1682,6 +1685,10 @@ install(DIRECTORY res/models/fasttext/
 
 install(FILES res/javelinmail.desktop
     DESTINATION ${KDE_INSTALL_APPDIR}
+)
+
+install(FILES res/app.javelin.JavelinMail.metainfo.xml
+    DESTINATION ${KDE_INSTALL_METAINFODIR}
 )
 
 install(FILES res/icon.svg

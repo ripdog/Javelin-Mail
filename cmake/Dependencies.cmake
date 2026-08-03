@@ -49,7 +49,7 @@ function(javelin_fetch_glaze)
     FetchContent_Declare(
         glaze
         GIT_REPOSITORY https://github.com/stephenberry/glaze.git
-        GIT_TAG v2.9.5
+        GIT_TAG v7.9.1
         GIT_SHALLOW TRUE
     )
 

@@ -278,8 +278,10 @@ namespace javelin::app
                 "StatusNotifier tray unavailable: session bus is not connected");
             return false;
         }
-        m_serviceName = QStringLiteral("org.kde.StatusNotifierItem-%1-1")
-                            .arg(QCoreApplication::applicationPid());
+        const auto flatpakId = qEnvironmentVariable("FLATPAK_ID");
+        m_serviceName = flatpakId.isEmpty() ? QStringLiteral("org.kde.StatusNotifierItem-%1-1")
+                                                  .arg(QCoreApplication::applicationPid())
+                                            : flatpakId + QStringLiteral(".StatusNotifierItem");
         if (!bus.registerService(m_serviceName))
         {
             const auto detail = bus.lastError().message();

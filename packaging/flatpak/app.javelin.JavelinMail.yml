@@ -1,0 +1,65 @@
+app-id: app.javelin.JavelinMail
+runtime: org.kde.Platform
+runtime-version: '6.9'
+sdk: org.kde.Sdk
+base: io.qt.qtwebengine.BaseApp
+base-version: '6.9'
+command: javelin-flatpak
+
+finish-args:
+  - --share=ipc
+  - --share=network
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  - --filesystem=xdg-download:create
+  - --talk-name=org.freedesktop.Notifications
+  - --talk-name=org.freedesktop.portal.Desktop
+  - --talk-name=org.kde.StatusNotifierWatcher
+  - --own-name=app.javelin.JavelinMail.StatusNotifierItem
+  - --env=QTWEBENGINE_DISABLE_SANDBOX=1
+
+modules:
+  - name: kmime
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DBUILD_TESTING=OFF
+    sources:
+      - type: archive
+        url: https://download.kde.org/stable/release-service/26.04.2/src/kmime-26.04.2.tar.xz
+        sha256: 7473522f42d84684cd71fe7549cc668a1fcfd91716a72860dc9bcbaa8569ed6d
+
+  - name: javelin-mail
+    buildsystem: simple
+    build-commands:
+      - test -f /app/include/QtWebEngineCore/QWebEngineUrlSchemeHandler
+      - cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/app -DBUILD_TESTING=OFF -DJAVELIN_ENABLE_LOCAL_DATA_INSTALL=OFF -DJAVELIN_INSTALL_SYSTEMD_USER_SERVICE=OFF -DFETCHCONTENT_SOURCE_DIR_GLAZE=/run/build/javelin-mail/third-party/glaze -DFETCHCONTENT_SOURCE_DIR_FASTTEXT=/run/build/javelin-mail/third-party/fastText
+      - cmake --build build --parallel 2
+      - cmake --install build
+      - install -Dm755 packaging/flatpak/javelin-flatpak /app/bin/javelin-flatpak
+      - rm -rf /app/include /app/lib/cmake /app/lib/pkgconfig
+      - find /app -type f '(' -name '*.a' -o -name '*.la' ')' -delete
+    post-install:
+      - cp /app/share/applications/javelinmail.desktop /app/share/applications/app.javelin.JavelinMail.desktop
+      - sed -i 's/^Exec=.*/Exec=javelin-flatpak/' /app/share/applications/app.javelin.JavelinMail.desktop
+      - sed -i 's/^Icon=.*/Icon=app.javelin.JavelinMail/' /app/share/applications/app.javelin.JavelinMail.desktop
+      - cp /app/share/icons/hicolor/scalable/apps/javelinmail.svg /app/share/icons/hicolor/scalable/apps/app.javelin.JavelinMail.svg
+      - sed -i 's#javelinmail.desktop#app.javelin.JavelinMail.desktop#' /app/share/metainfo/app.javelin.JavelinMail.metainfo.xml
+    sources:
+      - type: dir
+        path: ../..
+        skip:
+          - .flatpak-builder
+          - .git
+          - AppDir
+          - flatpak-build
+          - flatpak-repo
+          - out
+      - type: archive
+        url: https://github.com/stephenberry/glaze/archive/refs/tags/v7.9.1.tar.gz
+        sha256: d6dee391276f5375672c35d06058e4fd8f1f30f62bae163a004b3bd13a4e2ae3
+        dest: third-party/glaze
+      - type: archive
+        url: https://github.com/facebookresearch/fastText/archive/refs/tags/v0.9.2.tar.gz
+        sha256: 7ea4edcdb64bfc6faaaec193ef181bdc108ee62bb6a04e48b2e80b639a99e27e
+        dest: third-party/fastText

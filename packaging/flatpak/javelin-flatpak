@@ -1,0 +1,21 @@
+#!/bin/sh
+
+javelind &
+daemon_pid=$!
+
+forward_signal()
+{
+    kill -TERM "$daemon_pid" 2>/dev/null || true
+}
+trap forward_signal HUP INT TERM
+
+javelin "$@"
+gui_status=$?
+
+# Keep the Flatpak instance alive while the background daemon owns
+# synchronization, notifications, delayed sends, and tray integration.
+if kill -0 "$daemon_pid" 2>/dev/null; then
+    wait "$daemon_pid" || true
+fi
+
+exit "$gui_status"

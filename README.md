@@ -5,18 +5,36 @@
 <h1 align="center">Javelin Mail</h1>
 
 <p align="center">
-  A modern native desktop client for JMAP mail, contacts, calendars, and Sieve.
+  A KDE-focused desktop client for JMAP mail, contacts, calendars, and Sieve.
 </p>
 
-Javelin Mail provides a conventional desktop mail experience on top of JMAP. It combines a fast,
-cache-backed Qt interface with a lightweight background service, so mail synchronization,
-notifications, offline downloads, and delayed sending continue after the main window closes.
+<p align="center">
+  <a href="https://github.com/ripdog/Javelin-Mail/actions/workflows/tests.yml"><img src="https://github.com/ripdog/Javelin-Mail/actions/workflows/tests.yml/badge.svg" alt="Tests"></a>
+  <a href="https://github.com/ripdog/Javelin-Mail/actions/workflows/packages.yml"><img src="https://github.com/ripdog/Javelin-Mail/actions/workflows/packages.yml/badge.svg" alt="Packages"></a>
+</p>
+
+Javelin Mail provides a conventional desktop mail experience on top of JMAP, designed first for KDE
+Plasma. It combines a fast, cache-backed Qt and KDE Frameworks interface with a lightweight
+background service, so mail synchronization, notifications, offline downloads, and delayed sending
+continue after the main window closes.
 
 > **Project status:** Javelin is under active pre-1.0 development. The main mail client is usable,
 > but packaging, authentication, calendar interoperability, and crash/recovery testing are still
 > being hardened. Linux is currently the first-class platform.
 
 ## Highlights
+
+### Built for KDE Plasma
+
+- Native KDE menus, configurable toolbars, standard actions, shortcuts, icons, and theme integration
+- KDE configuration dialogs and remembered window, toolbar, and workspace state
+- KTextEditor-powered plain-text composition, HTML source editing, and Sieve script editing
+- Plasma tray integration through KDE's StatusNotifierItem protocol
+- Desktop notifications that open the relevant account, mailbox, thread, and message
+- Background startup through the Plasma/systemd user session while the heavy GUI remains optional
+
+Javelin should run on other modern Linux desktops that provide the same freedesktop interfaces, but
+KDE Plasma is the primary design, integration, and testing target.
 
 ### A complete desktop mail client
 
@@ -64,14 +82,16 @@ Translation is opt-in. Text selected for translation is sent to Google Translate
 
 ## Requirements
 
-Javelin currently targets Linux desktops with Qt 6 and a systemd user session. Tray integration uses
-the StatusNotifierItem protocol supported by KDE Plasma and many other desktop environments.
+Javelin currently targets KDE Plasma on Linux with Qt 6, KDE Frameworks 6, and a systemd user
+session. Other Linux desktops may work when they provide compatible StatusNotifierItem, desktop
+notification, icon-theme, and session-service integration, but they are not the primary target.
 
 A JMAP server with Core and Mail support is required. Sending requires JMAP Submission. Contacts,
 calendars, Sieve, and WebSocket push require their corresponding server capabilities.
 
-Account setup currently uses a server-issued bearer token or API key. Interactive OAuth login is not
-yet available.
+Account setup can discover JMAP and OAuth metadata from the login address. Providers that support
+Open Public Client registration can use browser-based Authorization Code with PKCE; manual JMAP URL
+and bearer-token setup remains available as a fallback.
 
 ## Getting started
 
@@ -106,15 +126,13 @@ Javelin can also offer to start the daemon from its connection-recovery window.
 
 ### 3. Add an account
 
-Open **Settings → Configure…**, select **Accounts**, and add:
+When no accounts exist, Javelin opens its onboarding wizard after connecting to the daemon. Enter the
+login email and let Javelin discover the provider. When the provider advertises compatible OAuth
+metadata and dynamic client registration, authentication continues in the system browser using PKCE.
 
-- **Display Name** — the local name shown for the connection
-- **Login Email** — the account login or primary address
-- **API Key** — the server-issued bearer token or API key
-- **Server** — an optional JMAP Session URL or server base URL
-
-Leave **Server** empty to discover `/.well-known/jmap` from the login email domain. Applying the
-settings starts capability discovery and the initial mailbox refresh.
+Manual setup remains available for private or self-hosted servers. It accepts a display name, login
+email, optional JMAP Session URL or server base URL, and a server-issued bearer token. Leaving the
+server field empty discovers `/.well-known/jmap` from the login email domain.
 
 ### 4. Choose background behaviour
 
@@ -145,8 +163,9 @@ journalctl --user -u javelind.service -f
 
 ## Important current limitations
 
-- Linux is the only actively supported desktop target.
-- Authentication currently requires a static bearer token or API key.
+- KDE Plasma on Linux is the actively supported desktop target; other Linux desktops are best-effort.
+- Automatic browser OAuth depends on provider metadata and dynamic client registration; other servers
+  require manual bearer-token setup.
 - Account credentials are stored in the daemon's native per-user settings store rather than a
   desktop secret service.
 - Calendar support should not yet be treated as fully interoperability-hardened.

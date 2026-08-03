@@ -1,0 +1,151 @@
+name: Packages
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: packages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  arch-package:
+    name: Arch Linux package
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prepare makepkg user
+        run: |
+          pacman -Syu --noconfirm --needed base-devel git sudo
+          useradd --create-home builder
+          printf 'builder ALL=(ALL) NOPASSWD: ALL\n' > /etc/sudoers.d/builder
+          chmod 440 /etc/sudoers.d/builder
+          chown -R builder:builder "$GITHUB_WORKSPACE"
+
+      - name: Build package
+        run: |
+          sudo -u builder bash -lc \
+            "cd '$GITHUB_WORKSPACE' && makepkg --syncdeps --noconfirm --cleanbuild --clean"
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: javelin-mail-arch
+          path: '*.pkg.tar.zst'
+          if-no-files-found: error
+
+  flatpak:
+    name: Flatpak
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:kde-6.9
+      options: --privileged
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Build Flatpak bundle
+        uses: flatpak/flatpak-github-actions/flatpak-builder@v6.7
+        with:
+          bundle: Javelin-Mail.flatpak
+          manifest-path: packaging/flatpak/app.javelin.JavelinMail.yml
+          cache-key: flatpak-builder-${{ github.sha }}
+          artifact-name: javelin-mail-flatpak
+
+  appimage:
+    name: AppImage
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+    env:
+      APPIMAGE_EXTRACT_AND_RUN: '1'
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install build dependencies
+        run: |
+          pacman -Syu --noconfirm --needed \
+            base-devel \
+            cmake \
+            curl \
+            extra-cmake-modules \
+            file \
+            git \
+            glaze \
+            kconfigwidgets \
+            kcoreaddons \
+            kmime \
+            ktexteditor \
+            kxmlgui \
+            ninja \
+            patchelf \
+            qcoro \
+            qt6-base \
+            qt6-svg \
+            qt6-tools \
+            qt6-webengine \
+            qt6-websockets
+
+      - name: Build install tree
+        run: |
+          cmake --preset release -B out/build/appimage \
+            -DCMAKE_INSTALL_PREFIX=/usr \
+            -DBUILD_TESTING=OFF \
+            -DJAVELIN_ENABLE_LOCAL_DATA_INSTALL=OFF \
+            -DJAVELIN_INSTALL_SYSTEMD_USER_SERVICE=OFF
+          cmake --build out/build/appimage
+          DESTDIR="$GITHUB_WORKSPACE/AppDir" cmake --install out/build/appimage
+
+      - name: Build AppImage
+        run: |
+          install -d tools
+          curl -L --fail --retry 3 \
+            https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-x86_64.AppImage \
+            -o tools/linuxdeploy
+          curl -L --fail --retry 3 \
+            https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/1-alpha-20250213-1/linuxdeploy-plugin-qt-x86_64.AppImage \
+            -o tools/linuxdeploy-plugin-qt
+          curl -L --fail --retry 3 \
+            https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/1-alpha-20250213-1/linuxdeploy-plugin-appimage-x86_64.AppImage \
+            -o tools/linuxdeploy-plugin-appimage
+          chmod +x tools/linuxdeploy tools/linuxdeploy-plugin-qt tools/linuxdeploy-plugin-appimage packaging/appimage/AppRun
+          export PATH="$GITHUB_WORKSPACE/tools:$PATH"
+          export QMAKE=/usr/bin/qmake6
+          export VERSION="0.1.0-${GITHUB_SHA::7}"
+          export OUTPUT="Javelin-Mail-${VERSION}-x86_64.AppImage"
+          linuxdeploy \
+            --appdir AppDir \
+            --executable AppDir/usr/bin/javelin \
+            --executable AppDir/usr/bin/javelind \
+            --desktop-file AppDir/usr/share/applications/javelinmail.desktop \
+            --icon-file AppDir/usr/share/icons/hicolor/scalable/apps/javelinmail.svg \
+            --custom-apprun packaging/appimage/AppRun \
+            --plugin qt \
+            --output appimage
+
+      - name: Smoke-test AppImage
+        run: |
+          image=$(printf '%s\n' Javelin-Mail-*.AppImage)
+          "./$image" --help >/dev/null
+
+      - name: Upload AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: javelin-mail-appimage
+          path: Javelin-Mail-*.AppImage
+          if-no-files-found: error

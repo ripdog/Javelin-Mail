@@ -1,0 +1,66 @@
+name: Tests
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  XDG_RUNTIME_DIR: /tmp/javelin-mail-xdg-runtime
+  QT_QPA_PLATFORM: offscreen
+  QTWEBENGINE_DISABLE_SANDBOX: '1'
+
+jobs:
+  test:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Debug tests and formatting
+            preset: debug-check
+          - name: ASan and UBSan
+            preset: asan-check
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          pacman -Syu --noconfirm --needed \
+            base-devel \
+            catch2 \
+            clang \
+            cmake \
+            dbus \
+            extra-cmake-modules \
+            git \
+            glaze \
+            kconfigwidgets \
+            kcoreaddons \
+            kmime \
+            ktexteditor \
+            kxmlgui \
+            ninja \
+            qcoro \
+            qt6-base \
+            qt6-svg \
+            qt6-tools \
+            qt6-webengine \
+            qt6-websockets
+          install -d -m 700 "$XDG_RUNTIME_DIR"
+
+      - name: Run ${{ matrix.name }}
+        run: dbus-run-session -- cmake --workflow --preset "${{ matrix.preset }}"

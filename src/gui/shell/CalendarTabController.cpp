@@ -20,6 +20,7 @@
 #include <QTime>
 #include <QTimeZone>
 
+#include <iterator>
 #include <ranges>
 #include <unordered_set>
 #include <utility>
@@ -113,8 +114,12 @@ namespace javelin::gui::shell
                     window != nullptr ? *window
                                       : std::optional<javelin::jmap::cache::CalendarWindow>{},
                     widget->palette().color(QPalette::Highlight));
-                calendarDisplays.append_range(std::move(presentation.calendars));
-                displayEvents.append_range(std::move(presentation.events));
+                calendarDisplays.insert(calendarDisplays.end(),
+                                        std::make_move_iterator(presentation.calendars.begin()),
+                                        std::make_move_iterator(presentation.calendars.end()));
+                displayEvents.insert(displayEvents.end(),
+                                     std::make_move_iterator(presentation.events.begin()),
+                                     std::make_move_iterator(presentation.events.end()));
             }
             widget->setCalendars(std::move(calendarDisplays));
             widget->setEvents(std::move(displayEvents));
