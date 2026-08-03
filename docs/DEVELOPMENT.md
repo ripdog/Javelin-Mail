@@ -197,6 +197,15 @@ cmake --build --preset debug --target <target>_clazy
 The repository-wide C++ formatter targets are `format` and `format-check`. Do not run clang-format
 on CMake, Markdown, vendored files, or other non-C++ sources.
 
+### Qt widget stylesheet subcontrols
+
+Qt complex widgets draw their subcontrols on top of the widget rule. When a stylesheet adds a
+rounded border to a `QComboBox`, it must also style `QComboBox::drop-down` with the same right-hand
+corner radii and an intentional background/border. Otherwise the native drop-down subcontrol can
+paint a square or gradient block over the widget’s rounded right edge. Before adding or changing a
+widget stylesheet, search for its `::` subcontrols and keep their geometry consistent with the
+parent widget. See Qt’s [QComboBox stylesheet example](https://doc.qt.io/qt-6/stylesheet-examples.html#customizing-qcombobox).
+
 ## Useful build options
 
 | Option | Default | Purpose |
