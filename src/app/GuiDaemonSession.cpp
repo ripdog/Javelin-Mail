@@ -267,7 +267,12 @@ namespace javelin::app
                 const auto nullDevice = QProcess::nullDevice();
                 daemonProcess.setStandardInputFile(nullDevice);
                 if (qEnvironmentVariableIsSet("JAVELIN_FORWARD_DAEMON_STDIO"))
-                    daemonProcess.setProcessChannelMode(QProcess::ForwardedChannels);
+                {
+                    // startDetached() does not forward process channels. Explicit device files keep
+                    // development diagnostics attached to the terminal that launched `make run`.
+                    daemonProcess.setStandardOutputFile(QStringLiteral("/dev/stdout"));
+                    daemonProcess.setStandardErrorFile(QStringLiteral("/dev/stderr"));
+                }
                 else
                 {
                     daemonProcess.setStandardOutputFile(nullDevice);

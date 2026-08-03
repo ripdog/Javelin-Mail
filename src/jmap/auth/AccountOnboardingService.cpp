@@ -623,14 +623,41 @@ namespace javelin::jmap::auth
     {
         const auto found = m_pendingFlows.find(request.flowId);
         if (found == m_pendingFlows.end())
+        {
+            qCWarning(oauthLog) << "Rejected OAuth callback for an expired flow";
             co_return authenticationError(
                 QStringLiteral("This sign-in attempt has expired. Please try again."));
+        }
         auto flow = std::move(found->second);
         m_pendingFlows.erase(found);
-        if (request.state != flow.state || request.code.isEmpty() ||
-            request.issuer != flow.discovery.issuer)
+
+        if (request.code.isEmpty())
+        {
+            qCWarning(oauthLog) << "OAuth callback did not include an authorization code";
             co_return authenticationError(
-                QStringLiteral("The browser returned an invalid sign-in response."));
+                QStringLiteral("The mail service did not return an authorization code."));
+        }
+        if (request.state != flow.state)
+        {
+            qCWarning(oauthLog) << "OAuth callback state did not match the pending flow";
+            co_return authenticationError(QStringLiteral(
+                "Javelin could not verify that this browser response belongs to the current "
+                "sign-in attempt."));
+        }
+        if (request.issuer.isEmpty())
+        {
+            qCWarning(oauthLog).noquote()
+                << "OAuth callback did not include iss; expected" << flow.discovery.issuer;
+            co_return authenticationError(QStringLiteral(
+                "The mail service did not identify the authorization server in its response."));
+        }
+        if (request.issuer != flow.discovery.issuer)
+        {
+            qCWarning(oauthLog).noquote() << "OAuth callback issuer mismatch; expected"
+                                          << flow.discovery.issuer << "but got" << request.issuer;
+            co_return authenticationError(
+                QStringLiteral("The authorization response came from an unexpected server."));
+        }
 
         const auto body = formBody({
             {QStringLiteral("grant_type"), QStringLiteral("authorization_code")},
