@@ -735,6 +735,8 @@ namespace javelin::gui::compose
             "QLineEdit, QComboBox { padding: 6px 8px; }"
             "QComboBox::drop-down { background: transparent; border: none; "
             "border-top-right-radius: 8px; border-bottom-right-radius: 8px; }"
+            "QComboBox::down-arrow { image: "
+            "url(:/icons/thunderbird-icons/arrow-down-12-light.svg); width: 12px; height: 12px; }"
             "QToolBar { background: #202632; border: 1px solid #394354; border-radius: 10px; "
             "spacing: 4px; }"
             "QTabWidget::pane { border: 1px solid #333c4b; border-radius: 12px; background: "
