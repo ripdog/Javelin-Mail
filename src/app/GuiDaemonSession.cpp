@@ -333,6 +333,12 @@ namespace javelin::app
             metrics.finish(QStringLiteral("error"), QStringLiteral("stage=cached_view"));
             return error;
         }
+        if (const auto error = m_client->readyForActivation())
+        {
+            m_client->disconnectFromDaemon();
+            metrics.finish(QStringLiteral("error"), QStringLiteral("stage=activation"));
+            return detailError(GuiBootstrapErrorCode::DaemonUnavailable, error->detail);
+        }
 
         if (oldReady.has_value() && (oldReady->cache.instance != m_readyReply->cache.instance ||
                                      oldReady->cache.schema != m_readyReply->cache.schema))
