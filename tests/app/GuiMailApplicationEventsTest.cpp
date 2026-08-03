@@ -73,3 +73,18 @@ TEST_CASE("GUI mail events publish contact cache invalidations", "[app][gui][cac
     CHECK(received->change.contactsChanged);
     CHECK(received->changedDomains == std::vector{javelin::protocol::ChangedDomain::Contacts});
 }
+
+TEST_CASE("GUI bootstrap does not offer the packaged service for a source build", "[app][gui]")
+{
+    javelin::app::GuiDaemonSession session{
+        {.runtimeDirectory = QStringLiteral("/tmp"),
+         .socketPath = QStringLiteral("/tmp/unused-javelin-test.sock"),
+         .daemonExecutable = {},
+         .protocol = {.major = 3, .minor = 0},
+         .build = {.application = QStringLiteral("Javelin-Mail"),
+                   .revision = QStringLiteral("test")},
+         .startTimeoutMilliseconds = 10,
+         .startDaemonIfMissing = false}};
+
+    CHECK_FALSE(session.canUseSystemdUserService());
+}

@@ -8,7 +8,9 @@
 #include <QDir>
 #include <QSettings>
 #include <QStandardPaths>
+#include <QTimer>
 
+#include <csignal>
 #include <exception>
 #include <utility>
 
@@ -18,6 +20,13 @@
 
 namespace
 {
+    volatile std::sig_atomic_t shutdownRequested = 0;
+
+    void handleShutdownSignal(int)
+    {
+        shutdownRequested = 1;
+    }
+
     [[nodiscard]] QString runtimeDirectory()
     {
         return QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);
@@ -88,6 +97,8 @@ int main(int argc, char* argv[])
 
     try
     {
+        std::signal(SIGINT, handleShutdownSignal);
+        std::signal(SIGTERM, handleShutdownSignal);
         javelin::app::DaemonProcess process{std::move(options)};
         javelin::app::PerformanceSpan startupMetrics{QStringLiteral("daemon"),
                                                      QStringLiteral("process_startup")};
@@ -99,6 +110,18 @@ int main(int argc, char* argv[])
             return fail(error->detail);
         }
         startupMetrics.finish(QStringLiteral("ready"), QStringLiteral("socket_ready=true"));
+
+        QTimer shutdownTimer;
+        shutdownTimer.setInterval(100);
+        QObject::connect(&shutdownTimer, &QTimer::timeout, &application,
+                         [&process, &shutdownTimer]
+                         {
+                             if (shutdownRequested == 0)
+                                 return;
+                             shutdownTimer.stop();
+                             process.requestShutdown();
+                         });
+        shutdownTimer.start();
         return application.exec();
     }
     catch (const std::exception& exception)

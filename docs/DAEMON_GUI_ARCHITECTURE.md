@@ -1161,12 +1161,22 @@ The additional process rule is:
 > typed IPC, visible state comes from read-only cache queries, and settings come from daemon-owned
 > `QSettings`.
 
-## Remaining implementation choices
+## Daemon packaging and startup
+
+The Arch package installs both executables and a templated `javelind.service` user unit. The package
+does not enable the unit: login-start behavior is a per-user choice and must not be changed by a
+package transaction. A GUI launched from the configured system binary directory offers to enable and
+start the unit when the user service manager reports that the unit is loaded. It also offers a
+one-shot direct daemon start. Both paths wait for the private socket, complete the normal handshake,
+load the settings snapshot and cache read connection, and only then leave the recovery surface.
+
+The GUI retains the direct launch as a fallback for development builds, non-systemd sessions, and
+installations without the packaged unit. The daemon translates service-manager termination signals
+into its normal graceful shutdown path. The unit is tied to `graphical-session.target`; user lingering
+is not enabled, because the daemon owns desktop-session tray and notification integration.
 
 The architecture does not depend on immediately deciding:
 
-- whether the daemon is started by desktop autostart, a user service manager, GUI fallback startup,
-  or socket activation;
 - whether tray integration uses direct StatusNotifierItem QtDBus or `QSystemTrayIcon`;
 - the exact framed IPC encoding;
 - how much affected-key detail is included in cache invalidations;

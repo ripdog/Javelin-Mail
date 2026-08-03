@@ -61,6 +61,7 @@ namespace javelin::app
 
         [[nodiscard]] std::optional<DaemonStartupError> start();
         void stop();
+        void requestShutdown();
 
         [[nodiscard]] bool isReady() const;
         [[nodiscard]] bool hasGuiConnection() const;
@@ -120,7 +121,6 @@ namespace javelin::app
         void connectOperationalEvents();
         void flushPendingActivations();
         void launchGuiIfNeeded();
-        void requestShutdown();
         void samplePerformance();
         void onSocketConnectionClosed(javelin::protocol::SocketDisconnectReason reason,
                                       const QString& detail);

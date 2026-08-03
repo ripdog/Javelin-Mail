@@ -6,7 +6,9 @@
 #include <QDir>
 #include <QElapsedTimer>
 #include <QEventLoop>
+#include <QFileInfo>
 #include <QProcess>
+#include <QStandardPaths>
 #include <QThread>
 #include <QTimer>
 #include <QUuid>
@@ -14,6 +16,10 @@
 #include <algorithm>
 #include <type_traits>
 #include <utility>
+
+#ifndef JAVELIN_INSTALL_BINDIR
+#define JAVELIN_INSTALL_BINDIR ""
+#endif
 
 namespace javelin::app
 {
@@ -28,6 +34,81 @@ namespace javelin::app
                                                     QString detail)
         {
             return {.code = code, .detail = std::move(detail)};
+        }
+
+        [[nodiscard]] QString systemdUnitName()
+        {
+            return QStringLiteral("javelind.service");
+        }
+
+        struct SystemdCommandResult
+        {
+            int exitCode = -1;
+            QString standardOutput;
+            QString standardError;
+        };
+
+        [[nodiscard]] QString systemctlExecutable()
+        {
+            return QStandardPaths::findExecutable(QStringLiteral("systemctl"));
+        }
+
+        [[nodiscard]] std::optional<SystemdCommandResult>
+        runSystemctl(const QStringList& arguments, const int timeoutMilliseconds)
+        {
+            const auto executable = systemctlExecutable();
+            if (executable.isEmpty())
+                return std::nullopt;
+
+            QProcess process;
+            process.setProgram(executable);
+            process.setArguments(arguments);
+            process.setProcessChannelMode(QProcess::SeparateChannels);
+            process.start();
+            if (!process.waitForStarted(timeoutMilliseconds))
+                return std::nullopt;
+            if (!process.waitForFinished(timeoutMilliseconds))
+            {
+                process.kill();
+                process.waitForFinished();
+                return std::nullopt;
+            }
+
+            return SystemdCommandResult{
+                .exitCode = process.exitCode(),
+                .standardOutput = QString::fromLocal8Bit(process.readAllStandardOutput()),
+                .standardError = QString::fromLocal8Bit(process.readAllStandardError()),
+            };
+        }
+
+        [[nodiscard]] bool runningFromConfiguredInstallDirectory()
+        {
+            constexpr auto configuredDirectory = JAVELIN_INSTALL_BINDIR;
+            if constexpr (configuredDirectory[0] == '\0')
+                return false;
+
+            const auto applicationDirectory =
+                QFileInfo{QCoreApplication::applicationFilePath()}.canonicalPath();
+            const auto installDirectory =
+                QFileInfo{QString::fromLatin1(configuredDirectory)}.canonicalFilePath();
+            const auto systemDirectories =
+                QStringList{QStringLiteral("/bin"),           QStringLiteral("/sbin"),
+                            QStringLiteral("/usr/bin"),       QStringLiteral("/usr/sbin"),
+                            QStringLiteral("/usr/local/bin"), QStringLiteral("/usr/local/sbin")};
+            return !applicationDirectory.isEmpty() && !installDirectory.isEmpty() &&
+                   applicationDirectory == installDirectory &&
+                   systemDirectories.contains(installDirectory);
+        }
+
+        [[nodiscard]] QString systemdFailureDetail(const QString& action,
+                                                   const SystemdCommandResult& result)
+        {
+            const auto detail = result.standardError.trimmed();
+            return detail.isEmpty()
+                       ? QStringLiteral("systemctl --user %1 failed with exit status %2")
+                             .arg(action)
+                             .arg(result.exitCode)
+                       : QStringLiteral("systemctl --user %1 failed: %2").arg(action, detail);
         }
     } // namespace
 
@@ -108,6 +189,124 @@ namespace javelin::app
         Q_EMIT ready();
         metrics.finish(QStringLiteral("ready"), QStringLiteral("cached_view_ready=true"));
         return std::nullopt;
+    }
+
+    std::optional<GuiBootstrapError> GuiDaemonSession::startDaemon(const GuiDaemonStartMode mode)
+    {
+        PerformanceSpan metrics{QStringLiteral("gui"), QStringLiteral("daemon_start")};
+        if (m_readyReply.has_value())
+        {
+            metrics.finish(QStringLiteral("already_ready"));
+            return std::nullopt;
+        }
+
+        if (const auto error = launchDaemon(mode))
+        {
+            metrics.finish(QStringLiteral("error"));
+            return error;
+        }
+
+        const bool wasRecovering = m_inRecovery;
+        const auto result = start();
+        if (!result.has_value() && wasRecovering)
+            Q_EMIT recoveryFinished();
+        metrics.finish(result.has_value() ? QStringLiteral("error") : QStringLiteral("ready"));
+        return result;
+    }
+
+    std::optional<GuiBootstrapError> GuiDaemonSession::launchDaemon(const GuiDaemonStartMode mode)
+    {
+        PerformanceSpan metrics{QStringLiteral("gui"), QStringLiteral("daemon_launch")};
+        if (!m_client->isConnected())
+        {
+            const auto executable = m_options.daemonExecutable.isEmpty()
+                                        ? QDir{QCoreApplication::applicationDirPath()}.filePath(
+                                              QStringLiteral("javelind"))
+                                        : m_options.daemonExecutable;
+            if (mode == GuiDaemonStartMode::EnableAndStart)
+            {
+                if (!canUseSystemdUserService())
+                {
+                    metrics.finish(QStringLiteral("unavailable"),
+                                   QStringLiteral("stage=systemd_user_service"));
+                    return detailError(
+                        GuiBootstrapErrorCode::DaemonStartFailed,
+                        QStringLiteral("the installed javelind systemd user service is not "
+                                       "available"));
+                }
+
+                const auto result = runSystemctl(
+                    {QStringLiteral("--user"), QStringLiteral("--no-pager"),
+                     QStringLiteral("enable"), QStringLiteral("--now"), systemdUnitName()},
+                    m_options.startTimeoutMilliseconds);
+                if (!result.has_value())
+                {
+                    metrics.finish(QStringLiteral("error"),
+                                   QStringLiteral("stage=enable_systemd_user_service"));
+                    return detailError(
+                        GuiBootstrapErrorCode::DaemonStartFailed,
+                        QStringLiteral("could not run systemctl --user to start javelind"));
+                }
+                if (result->exitCode != 0)
+                {
+                    metrics.finish(QStringLiteral("error"),
+                                   QStringLiteral("stage=enable_systemd_user_service"));
+                    return detailError(
+                        GuiBootstrapErrorCode::DaemonStartFailed,
+                        systemdFailureDetail(QStringLiteral("enable --now javelind.service"),
+                                             *result));
+                }
+            }
+            else
+            {
+                QProcess daemonProcess;
+                daemonProcess.setProgram(executable);
+                daemonProcess.setArguments({QStringLiteral("--runtime-directory"),
+                                            m_options.runtimeDirectory, QStringLiteral("--socket"),
+                                            m_options.socketPath});
+                const auto nullDevice = QProcess::nullDevice();
+                daemonProcess.setStandardInputFile(nullDevice);
+                daemonProcess.setStandardOutputFile(nullDevice);
+                daemonProcess.setStandardErrorFile(nullDevice);
+                if (!daemonProcess.startDetached())
+                {
+                    metrics.finish(QStringLiteral("error"), QStringLiteral("stage=start_daemon"));
+                    return detailError(
+                        GuiBootstrapErrorCode::DaemonStartFailed,
+                        QStringLiteral("could not start javelind: %1").arg(executable));
+                }
+            }
+
+            QElapsedTimer timer;
+            timer.start();
+            while (!m_client->isConnected() && timer.elapsed() < m_options.startTimeoutMilliseconds)
+            {
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+                QThread::msleep(20);
+                static_cast<void>(m_client->connectToDaemon());
+            }
+            if (!m_client->isConnected())
+            {
+                metrics.finish(QStringLiteral("timeout"));
+                return detailError(GuiBootstrapErrorCode::DaemonUnavailable,
+                                   QStringLiteral("javelind did not become available"));
+            }
+        }
+        metrics.finish(QStringLiteral("ready"));
+        return std::nullopt;
+    }
+
+    bool GuiDaemonSession::canUseSystemdUserService() const
+    {
+        if (!runningFromConfiguredInstallDirectory())
+            return false;
+
+        const auto result = runSystemctl(
+            {QStringLiteral("--user"), QStringLiteral("--no-pager"), QStringLiteral("show"),
+             QStringLiteral("--property=LoadState"), QStringLiteral("--value"), systemdUnitName()},
+            2000);
+        return result.has_value() && result->exitCode == 0 &&
+               result->standardOutput.trimmed() == QStringLiteral("loaded");
     }
 
     std::optional<GuiBootstrapError> GuiDaemonSession::reconnect()
@@ -367,44 +566,8 @@ namespace javelin::app
                     return transportError(*error);
                 }
 
-                const auto executable = m_options.daemonExecutable.isEmpty()
-                                            ? QDir{QCoreApplication::applicationDirPath()}.filePath(
-                                                  QStringLiteral("javelind"))
-                                            : m_options.daemonExecutable;
-                const QStringList arguments{QStringLiteral("--runtime-directory"),
-                                            m_options.runtimeDirectory, QStringLiteral("--socket"),
-                                            m_options.socketPath};
-                QProcess daemonProcess;
-                daemonProcess.setProgram(executable);
-                daemonProcess.setArguments(arguments);
-                const auto nullDevice = QProcess::nullDevice();
-                daemonProcess.setStandardInputFile(nullDevice);
-                daemonProcess.setStandardOutputFile(nullDevice);
-                daemonProcess.setStandardErrorFile(nullDevice);
-                if (!daemonProcess.startDetached())
-                {
-                    metrics.finish(QStringLiteral("error"), QStringLiteral("stage=start_daemon"));
-                    return detailError(
-                        GuiBootstrapErrorCode::DaemonStartFailed,
-                        QStringLiteral("could not start javelind: %1").arg(executable));
-                }
-
-                QElapsedTimer timer;
-                timer.start();
-                while (!m_client->isConnected() &&
-                       timer.elapsed() < m_options.startTimeoutMilliseconds)
-                {
-                    QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
-                    QThread::msleep(20);
-                    if (m_client->connectToDaemon().has_value())
-                        continue;
-                }
-                if (!m_client->isConnected())
-                {
-                    metrics.finish(QStringLiteral("timeout"));
-                    return detailError(GuiBootstrapErrorCode::DaemonUnavailable,
-                                       QStringLiteral("javelind did not become available"));
-                }
+                if (const auto startError = launchDaemon(GuiDaemonStartMode::Once))
+                    return startError;
             }
         }
 

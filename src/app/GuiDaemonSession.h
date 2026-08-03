@@ -40,7 +40,13 @@ namespace javelin::app
         javelin::protocol::ProtocolVersion protocol;
         javelin::protocol::BuildIdentity build;
         int startTimeoutMilliseconds = 5000;
-        bool startDaemonIfMissing = true;
+        bool startDaemonIfMissing = false;
+    };
+
+    enum class GuiDaemonStartMode
+    {
+        Once,
+        EnableAndStart,
     };
 
     class GuiDaemonSession final : public QObject,
@@ -59,8 +65,11 @@ namespace javelin::app
         GuiDaemonSession& operator=(GuiDaemonSession&&) = delete;
 
         [[nodiscard]] std::optional<GuiBootstrapError> start();
+        [[nodiscard]] std::optional<GuiBootstrapError> startDaemon(GuiDaemonStartMode mode);
         [[nodiscard]] std::optional<GuiBootstrapError> reconnect();
         void stop();
+
+        [[nodiscard]] bool canUseSystemdUserService() const;
 
         [[nodiscard]] bool isReady() const;
         [[nodiscard]] const javelin::protocol::SettingsSnapshot& settings() const override;
@@ -107,6 +116,7 @@ namespace javelin::app
 
       private:
         [[nodiscard]] std::optional<GuiBootstrapError> connectAndHandshake(bool allowStart);
+        [[nodiscard]] std::optional<GuiBootstrapError> launchDaemon(GuiDaemonStartMode mode);
         [[nodiscard]] std::optional<GuiBootstrapError> refreshSettings();
         [[nodiscard]] std::optional<GuiBootstrapError> loadSettingsAndCache();
         [[nodiscard]] std::optional<GuiBootstrapError> openReadConnection();

@@ -31,6 +31,16 @@ include(KDECMakeSettings)
 include(KDECompilerSettings NO_POLICY_SCOPE)
 include(FeatureSummary)
 
+get_filename_component(JAVELIN_INSTALL_BINDIR_ABSOLUTE
+                       "${KDE_INSTALL_BINDIR}" ABSOLUTE
+                       BASE_DIR "${CMAKE_INSTALL_PREFIX}")
+set(JAVELIN_DAEMON_EXECUTABLE "${JAVELIN_INSTALL_BINDIR_ABSOLUTE}/javelind")
+configure_file(
+    "${PROJECT_SOURCE_DIR}/res/javelind.service.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/javelind.service"
+    @ONLY
+)
+
 find_package(KF6 REQUIRED COMPONENTS ConfigWidgets XmlGui CoreAddons TextEditor)
 find_package(KPim6Mime REQUIRED)
 
@@ -1474,7 +1484,10 @@ qt_add_resources(javelin "javelin_runtime_darkreader"
     FILES
         "${CMAKE_CURRENT_SOURCE_DIR}/res/vendor/darkreader/darkreader.js"
 )
-target_compile_definitions(javelin PRIVATE JAVELIN_APP_VERSION="${PROJECT_VERSION}")
+target_compile_definitions(javelin PRIVATE
+    JAVELIN_APP_VERSION="${PROJECT_VERSION}"
+    JAVELIN_INSTALL_BINDIR="${JAVELIN_INSTALL_BINDIR_ABSOLUTE}"
+)
 if(JAVELIN_ENABLE_FASTTEXT_LANGUAGE_DETECTION)
     target_link_libraries(javelin PRIVATE fasttext_javelin)
     target_compile_definitions(javelin PRIVATE
@@ -1634,6 +1647,10 @@ install(TARGETS javelin javelind
     BUNDLE DESTINATION .
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
+
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/javelind.service"
+    DESTINATION ${KDE_INSTALL_LIBDIR}/systemd/user
 )
 
 install(FILES res/javelinmailui.rc

@@ -1,0 +1,14 @@
+[Unit]
+Description=Javelin Mail background daemon
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=exec
+ExecStart=@JAVELIN_DAEMON_EXECUTABLE@
+Restart=on-failure
+RestartSec=2s
+UMask=0077
+
+[Install]
+WantedBy=graphical-session.target
