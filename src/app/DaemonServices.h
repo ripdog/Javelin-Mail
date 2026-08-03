@@ -13,6 +13,11 @@ namespace javelin::jmap
     class JmapCore;
 }
 
+namespace javelin::jmap::auth
+{
+    class AccountOnboardingService;
+}
+
 namespace javelin::jmap::contacts
 {
     class ContactService;
@@ -155,6 +160,7 @@ namespace javelin::app
         [[nodiscard]] FullMailSyncService& fullMailSyncService();
         [[nodiscard]] MailIndexService& mailIndexService();
         [[nodiscard]] javelin::app::undo::UndoManager& undoManager();
+        [[nodiscard]] javelin::jmap::auth::AccountOnboardingService& onboardingService();
 
       private:
         std::unique_ptr<javelin::jmap::JmapCore> m_jmapCore;
@@ -167,6 +173,7 @@ namespace javelin::app
         std::unique_ptr<DeferredSendRepository> m_deferredSendRepository;
         std::unique_ptr<QNetworkAccessManager> m_networkAccessManager;
         std::unique_ptr<QNetworkAccessManager> m_stateChangeNetworkAccessManager;
+        std::unique_ptr<javelin::jmap::auth::AccountOnboardingService> m_onboardingService;
         std::unique_ptr<javelin::jmap::api::WebSocketFailureCooldowns> m_webSocketFailureCooldowns;
         std::unique_ptr<javelin::jmap::api::QtNetworkTransport> m_transport;
         std::unique_ptr<javelin::jmap::api::HttpJmapMethodTransport> m_httpMethodTransport;

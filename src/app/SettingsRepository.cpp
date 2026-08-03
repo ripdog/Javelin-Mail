@@ -22,6 +22,10 @@ namespace javelin::app
         constexpr auto accountSessionUrlKey = "sessionUrl";
         constexpr auto accountLoginEmailKey = "loginEmail";
         constexpr auto accountApiKeyKey = "apiKey";
+        constexpr auto accountRefreshTokenKey = "refreshToken";
+        constexpr auto accountTokenEndpointKey = "tokenEndpoint";
+        constexpr auto accountOauthClientIdKey = "oauthClientId";
+        constexpr auto accountTokenExpiresAtKey = "tokenExpiresAt";
         constexpr auto accountCachedIdsKey = "cachedAccountIds";
         constexpr auto mailboxIdsKey = "mailboxIds";
         constexpr auto syncedMailboxGroup = "mailboxSync";
@@ -527,6 +531,15 @@ namespace javelin::app
                 return invalidValue(settingKey(accountRevisionKey),
                                     QStringLiteral("account revision is not numeric"));
             }
+            const auto tokenExpiresAtEpochSeconds =
+                settings.value(settingKey(accountTokenExpiresAtKey), 0).toLongLong(&ok);
+            if (!ok)
+            {
+                settings.endArray();
+                settings.endGroup();
+                return invalidValue(settingKey(accountTokenExpiresAtKey),
+                                    QStringLiteral("token expiry is not numeric"));
+            }
             snapshot.accounts.push_back({
                 .id = id,
                 .revision = accountRevision,
@@ -535,6 +548,13 @@ namespace javelin::app
                 .sessionUrl = settings.value(settingKey(accountSessionUrlKey)).toString().trimmed(),
                 .loginEmail = settings.value(settingKey(accountLoginEmailKey)).toString().trimmed(),
                 .apiKey = settings.value(settingKey(accountApiKeyKey)).toString().trimmed(),
+                .refreshToken =
+                    settings.value(settingKey(accountRefreshTokenKey)).toString().trimmed(),
+                .tokenEndpoint =
+                    settings.value(settingKey(accountTokenEndpointKey)).toString().trimmed(),
+                .oauthClientId =
+                    settings.value(settingKey(accountOauthClientIdKey)).toString().trimmed(),
+                .tokenExpiresAtEpochSeconds = tokenExpiresAtEpochSeconds,
                 .cachedAccountIds =
                     toVector(settings.value(settingKey(accountCachedIdsKey)).toStringList()),
             });
@@ -645,6 +665,11 @@ namespace javelin::app
             settings.setValue(settingKey(accountSessionUrlKey), account.sessionUrl);
             settings.setValue(settingKey(accountLoginEmailKey), account.loginEmail);
             settings.setValue(settingKey(accountApiKeyKey), account.apiKey);
+            settings.setValue(settingKey(accountRefreshTokenKey), account.refreshToken);
+            settings.setValue(settingKey(accountTokenEndpointKey), account.tokenEndpoint);
+            settings.setValue(settingKey(accountOauthClientIdKey), account.oauthClientId);
+            settings.setValue(settingKey(accountTokenExpiresAtKey),
+                              account.tokenExpiresAtEpochSeconds);
             settings.setValue(settingKey(accountCachedIdsKey),
                               toStringList(account.cachedAccountIds));
         }

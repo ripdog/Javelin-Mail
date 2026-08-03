@@ -66,6 +66,7 @@ namespace javelin::app
     class RemoteMailCommandPort;
     class RemoteMessageContentPort;
     class RemoteMessageListMaterializationPort;
+    class RemoteOnboardingPort;
     class RemoteSieveCommandPort;
     class RemoteTranslationPort;
     class RemoteUndoCommandPort;
@@ -74,6 +75,7 @@ namespace javelin::app
     class TranslationPort;
     class UndoCommandPort;
     class WorkTaskPort;
+    class OnboardingPort;
 
     class GuiServices final
     {
@@ -110,6 +112,7 @@ namespace javelin::app
         [[nodiscard]] UndoCommandPort& undoCommandPort();
         [[nodiscard]] TranslationPort& translationPort();
         [[nodiscard]] WorkTaskPort& workTaskPort();
+        [[nodiscard]] OnboardingPort& onboardingPort();
         [[nodiscard]] javelin::gui::settings::GuiSettings& settings();
 
       private:
@@ -148,5 +151,6 @@ namespace javelin::app
         std::unique_ptr<RemoteUndoCommandPort> m_undoCommands;
         std::unique_ptr<RemoteTranslationPort> m_translation;
         std::unique_ptr<RemoteWorkTaskPort> m_workTasks;
+        std::unique_ptr<RemoteOnboardingPort> m_onboarding;
     };
 } // namespace javelin::app

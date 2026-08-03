@@ -9,6 +9,7 @@
 #include "app/MailApplicationPorts.h"
 #include "app/MailApplicationService.h"
 #include "app/MessageContentApplicationPorts.h"
+#include "app/OnboardingTypes.h"
 #include "app/PerformanceMetrics.h"
 #include "app/RemoteCodec.h"
 #include "app/SieveApplicationPorts.h"
@@ -16,6 +17,8 @@
 #include "app/TranslationService.h"
 #include "app/UndoApplicationPorts.h"
 #include "app/WorkScheduler.h"
+
+#include "jmap/auth/AccountOnboardingService.h"
 
 #include <QCoroTask>
 
@@ -157,6 +160,10 @@ namespace javelin::app
             case Kind::UndoSnapshot:
             case Kind::WorkList:
             case Kind::WorkSummary:
+            case Kind::OnboardingDiscover:
+            case Kind::OnboardingStartOAuth:
+            case Kind::OnboardingFinishOAuth:
+            case Kind::OnboardingAuthenticateManually:
                 return {};
             }
             return {};
@@ -276,6 +283,26 @@ namespace javelin::app
         using Kind = javelin::protocol::RemoteActionKind;
         switch (command.kind)
         {
+        case Kind::OnboardingDiscover:
+            return decodeAndApply<AccountDiscoveryRequest>(
+                command.payload, invalidPayload, [&](AccountDiscoveryRequest request)
+                { return launch(m_services.onboardingService().discover(std::move(request))); });
+        case Kind::OnboardingStartOAuth:
+            return decodeAndApply<OAuthStartRequest>(
+                command.payload, invalidPayload, [&](OAuthStartRequest request)
+                { return launch(m_services.onboardingService().startOAuth(std::move(request))); });
+        case Kind::OnboardingFinishOAuth:
+            return decodeAndApply<OAuthFinishRequest>(
+                command.payload, invalidPayload, [&](OAuthFinishRequest request)
+                { return launch(m_services.onboardingService().finishOAuth(std::move(request))); });
+        case Kind::OnboardingAuthenticateManually:
+            return decodeAndApply<ManualAuthenticationRequest>(
+                command.payload, invalidPayload,
+                [&](ManualAuthenticationRequest request)
+                {
+                    return launch(
+                        m_services.onboardingService().authenticateManually(std::move(request)));
+                });
         case Kind::RemoveConfiguredAccount:
             return decodeAndApply<QString, QString, QStringList>(
                 command.payload, invalidPayload,

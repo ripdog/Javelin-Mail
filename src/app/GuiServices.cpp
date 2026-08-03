@@ -8,6 +8,7 @@
 #include "app/MessageNavigationCoordinator.h"
 #include "app/RemoteActionClient.h"
 #include "app/RemoteApplicationPorts.h"
+#include "app/RemoteOnboardingPort.h"
 
 #include "jmap/cache/AccountReadRepository.h"
 #include "jmap/cache/ContactRepository.h"
@@ -95,6 +96,7 @@ namespace javelin::app
         m_undoCommands = std::make_unique<RemoteUndoCommandPort>(m_session, *m_remoteClient);
         m_translation = std::make_unique<RemoteTranslationPort>(m_session, *m_remoteClient);
         m_workTasks = std::make_unique<RemoteWorkTaskPort>(m_session, *m_remoteClient);
+        m_onboarding = std::make_unique<RemoteOnboardingPort>(*m_remoteClient);
     }
 
     GuiServices::~GuiServices()
@@ -223,6 +225,10 @@ namespace javelin::app
     WorkTaskPort& GuiServices::workTaskPort()
     {
         return *m_workTasks;
+    }
+    OnboardingPort& GuiServices::onboardingPort()
+    {
+        return *m_onboarding;
     }
 
     javelin::gui::settings::GuiSettings& GuiServices::settings()

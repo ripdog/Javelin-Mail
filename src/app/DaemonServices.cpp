@@ -39,6 +39,7 @@
 #include "jmap/JmapCore.h"
 #include "jmap/api/JmapMethodTransport.h"
 #include "jmap/api/Transport.h"
+#include "jmap/auth/AccountOnboardingService.h"
 #include "jmap/cache/AccountRepository.h"
 #include "jmap/cache/ContactRepository.h"
 #include "jmap/cache/IdentityRepository.h"
@@ -112,6 +113,8 @@ namespace javelin::app
             throw std::runtime_error(historyError->message.toStdString());
         m_networkAccessManager = std::make_unique<QNetworkAccessManager>();
         m_stateChangeNetworkAccessManager = std::make_unique<QNetworkAccessManager>();
+        m_onboardingService = std::make_unique<javelin::jmap::auth::AccountOnboardingService>(
+            *m_networkAccessManager);
         m_webSocketFailureCooldowns =
             std::make_unique<javelin::jmap::api::WebSocketFailureCooldowns>();
         m_transport =
@@ -222,6 +225,11 @@ namespace javelin::app
     }
 
     DaemonServices::~DaemonServices() = default;
+
+    javelin::jmap::auth::AccountOnboardingService& DaemonServices::onboardingService()
+    {
+        return *m_onboardingService;
+    }
 
     javelin::jmap::cache::AccountRepository& DaemonServices::accountRepository()
     {

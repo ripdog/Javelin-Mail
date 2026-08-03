@@ -15,6 +15,10 @@ TEST_CASE("connection settings adapt into application account settings")
         .sessionUrl = QStringLiteral("https://mail.example.test/.well-known/jmap"),
         .loginEmail = QStringLiteral("ada@example.test"),
         .apiKey = QStringLiteral("secret"),
+        .refreshToken = {},
+        .tokenEndpoint = {},
+        .oauthClientId = {},
+        .tokenExpiresAtEpochSeconds = 0,
         .cachedAccountIds = {QStringLiteral("account")},
     };
 
@@ -36,6 +40,10 @@ TEST_CASE("bootstrap adaptation transfers configured mailbox selections")
         .sessionUrl = QStringLiteral("https://mail.example.test/jmap"),
         .loginEmail = QStringLiteral("ada@example.test"),
         .apiKey = QStringLiteral("secret"),
+        .refreshToken = {},
+        .tokenEndpoint = {},
+        .oauthClientId = {},
+        .tokenExpiresAtEpochSeconds = 0,
         .cachedAccountIds = {},
     };
     const auto actual =

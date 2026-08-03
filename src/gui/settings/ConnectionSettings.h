@@ -15,6 +15,10 @@ namespace javelin::gui::settings
         QString sessionUrl;
         QString loginEmail;
         QString apiKey;
+        QString refreshToken;
+        QString tokenEndpoint;
+        QString oauthClientId;
+        qint64 tokenExpiresAtEpochSeconds = 0;
         QStringList cachedAccountIds;
     };
 } // namespace javelin::gui::settings

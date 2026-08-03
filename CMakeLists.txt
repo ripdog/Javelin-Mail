@@ -597,6 +597,7 @@ set(JAVELIN_FORMAT_FILES
     tests/FixtureReader.cpp
     tests/FixtureReader.h
     tests/jmap/AccountRepositoryTest.cpp
+    tests/jmap/AccountOnboardingServiceTest.cpp
     tests/jmap/AuthTest.cpp
     tests/jmap/ContactsMethodsTest.cpp
     tests/jmap/ContactRepositoryTest.cpp
@@ -817,6 +818,9 @@ add_library(javelin_jmap STATIC
     src/jmap/auth/AccessTokenResolver.h
     src/jmap/auth/Auth.cpp
     src/jmap/auth/Auth.h
+    src/jmap/auth/AccountOnboardingService.cpp
+    src/jmap/auth/AccountOnboardingService.h
+    src/app/OnboardingTypes.h
     src/jmap/JmapCore.cpp
     src/jmap/JmapCore.h
     src/jmap/OperationError.cpp
@@ -1317,6 +1321,7 @@ add_library(javelin_daemon_core STATIC
     src/app/DaemonRemoteActionDispatcher.cpp
     src/app/DaemonRemoteActionDispatcher.h
     src/app/RemoteActionTypes.h
+    src/app/OnboardingTypes.h
     src/app/RemoteCodec.h
     src/app/DaemonServices.cpp
     src/app/DaemonServices.h
@@ -1414,6 +1419,10 @@ qt_add_executable(javelin
     src/app/RemoteActionClient.cpp
     src/app/RemoteActionClient.h
     src/app/RemoteActionTypes.h
+    src/app/OnboardingApplicationPorts.h
+    src/app/OnboardingTypes.h
+    src/app/RemoteOnboardingPort.cpp
+    src/app/RemoteOnboardingPort.h
     src/app/RemoteApplicationPorts.cpp
     src/app/RemoteApplicationPorts.h
     src/app/RemoteCodec.h
@@ -1461,6 +1470,8 @@ qt_add_executable(javelin
     src/jmap/sync/MailboxQueryDescriptor.cpp
     src/jmap/sync/MailboxQueryDescriptor.h
     src/app/gui_main.cpp
+    src/gui/onboarding/FirstRunWizard.cpp
+    src/gui/onboarding/FirstRunWizard.h
 )
 target_link_libraries(javelin
     PRIVATE

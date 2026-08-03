@@ -20,9 +20,12 @@
 #include "app/WorkScheduler.h"
 #include "app/undo/UndoManager.h"
 
+#include "jmap/auth/AccountOnboardingService.h"
+
 #include <QCoroTask>
 
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QDir>
 #include <QLockFile>
 #include <QMetaObject>
@@ -159,6 +162,9 @@ namespace javelin::app
         m_options.socket.protocol = m_options.protocol;
         m_performanceTimer.setInterval(30'000);
         connect(&m_performanceTimer, &QTimer::timeout, this, &DaemonProcess::samplePerformance);
+        m_oauthRefreshTimer.setInterval(60'000);
+        connect(&m_oauthRefreshTimer, &QTimer::timeout, this,
+                &DaemonProcess::refreshOAuthCredentials);
     }
 
     DaemonProcess::~DaemonProcess()
@@ -254,6 +260,8 @@ namespace javelin::app
             return fail(DaemonStartupErrorCode::SocketListen, error->detail);
 
         m_lifecycle = DaemonLifecycle::Ready;
+        m_oauthRefreshTimer.start();
+        QTimer::singleShot(0, this, &DaemonProcess::refreshOAuthCredentials);
         if (PerformanceMetrics::enabled())
         {
             samplePerformance();
@@ -269,6 +277,8 @@ namespace javelin::app
         if (m_lifecycle == DaemonLifecycle::ShuttingDown)
             return;
         m_performanceTimer.stop();
+        m_oauthRefreshTimer.stop();
+        m_oauthRefreshes.clear();
         if (m_services != nullptr)
             samplePerformance();
         m_lifecycle = DaemonLifecycle::ShuttingDown;
@@ -734,6 +744,50 @@ namespace javelin::app
         m_services->fullMailSyncService().applySettings(std::move(fullSync));
         m_services->mailIndexService().applyAccounts(std::move(accountIds));
         m_services->localMaintenanceService().requestReplay();
+    }
+
+    void DaemonProcess::refreshOAuthCredentials()
+    {
+        if (!isReady() || m_services == nullptr || m_settingsRepository == nullptr)
+            return;
+        const auto refreshBefore = QDateTime::currentSecsSinceEpoch() + 300;
+        for (const auto& account : m_settingsSnapshot.accounts)
+        {
+            if (account.refreshToken.isEmpty() || account.tokenEndpoint.isEmpty() ||
+                account.oauthClientId.isEmpty() || account.tokenExpiresAtEpochSeconds == 0 ||
+                account.tokenExpiresAtEpochSeconds > refreshBefore ||
+                m_oauthRefreshes.contains(account.id))
+                continue;
+
+            m_oauthRefreshes.insert(account.id);
+            auto task = m_services->onboardingService().refreshOAuth({
+                .sessionUrl = account.sessionUrl,
+                .tokenEndpoint = account.tokenEndpoint,
+                .clientId = account.oauthClientId,
+                .refreshToken = account.refreshToken,
+            });
+            QCoro::connect(std::move(task), this,
+                           [this, connectionId = account.id](AccountAuthenticationResult result)
+                           {
+                               m_oauthRefreshes.remove(connectionId);
+                               if (!result.succeeded || !isReady())
+                                   return;
+                               auto accounts = m_settingsSnapshot.accounts;
+                               const auto found = std::ranges::find(accounts, connectionId,
+                                                                    &protocol::AccountSettings::id);
+                               if (found == accounts.end())
+                                   return;
+                               found->apiKey = std::move(result.accessToken);
+                               found->refreshToken = std::move(result.refreshToken);
+                               found->tokenExpiresAtEpochSeconds = result.expiresAtEpochSeconds;
+                               ++found->revision;
+                               protocol::SettingsUpdate update;
+                               update.accounts = std::move(accounts);
+                               static_cast<void>(handleUpdateSettings(
+                                   {.baseRevision = m_settingsSnapshot.revision,
+                                    .update = std::move(update)}));
+                           });
+        }
     }
 
     std::optional<protocol::BoundaryError> DaemonProcess::reloadSettings()

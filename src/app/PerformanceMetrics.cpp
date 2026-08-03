@@ -305,6 +305,14 @@ namespace javelin::app
             return QStringLiteral("work_list");
         case Kind::WorkSummary:
             return QStringLiteral("work_summary");
+        case Kind::OnboardingDiscover:
+            return QStringLiteral("onboarding_discover");
+        case Kind::OnboardingStartOAuth:
+            return QStringLiteral("onboarding_start_oauth");
+        case Kind::OnboardingFinishOAuth:
+            return QStringLiteral("onboarding_finish_oauth");
+        case Kind::OnboardingAuthenticateManually:
+            return QStringLiteral("onboarding_authenticate_manually");
         }
         return QStringLiteral("unknown");
     }

@@ -190,6 +190,10 @@ namespace javelin::protocol
         WorkRetry,
         WorkList,
         WorkSummary,
+        OnboardingDiscover,
+        OnboardingStartOAuth,
+        OnboardingFinishOAuth,
+        OnboardingAuthenticateManually,
     };
 
     struct RemoteActionCommand
@@ -242,6 +246,10 @@ namespace javelin::protocol
         QString sessionUrl;
         QString loginEmail;
         QString apiKey;
+        QString refreshToken;
+        QString tokenEndpoint;
+        QString oauthClientId;
+        qint64 tokenExpiresAtEpochSeconds = 0;
         std::vector<QString> cachedAccountIds;
 
         friend bool operator==(const AccountSettings&, const AccountSettings&) = default;

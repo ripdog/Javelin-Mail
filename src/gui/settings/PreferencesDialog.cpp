@@ -58,6 +58,10 @@ namespace javelin::gui::settings
                 .sessionUrl = {},
                 .loginEmail = {},
                 .apiKey = {},
+                .refreshToken = {},
+                .tokenEndpoint = {},
+                .oauthClientId = {},
+                .tokenExpiresAtEpochSeconds = 0,
                 .cachedAccountIds = {},
             };
         }

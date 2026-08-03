@@ -138,6 +138,10 @@ TEST_CASE("settings repository migrates the complete legacy operational shape", 
                           .sessionUrl = QStringLiteral("https://example.test/jmap"),
                           .loginEmail = QStringLiteral("user@example.test"),
                           .apiKey = QStringLiteral("secret"),
+                          .refreshToken = {},
+                          .tokenEndpoint = {},
+                          .oauthClientId = {},
+                          .tokenExpiresAtEpochSeconds = 0,
                           .cachedAccountIds = {QStringLiteral("account-1")}});
     REQUIRE(snapshot->syncedMailboxSelections.size() == 1);
     CHECK(snapshot->syncedMailboxSelections.front().mailboxIds ==
@@ -218,6 +222,10 @@ TEST_CASE("settings updates require the current revision and round-trip typed va
                         .sessionUrl = {},
                         .loginEmail = QStringLiteral("work@example.test"),
                         .apiKey = QStringLiteral("key"),
+                        .refreshToken = {},
+                        .tokenEndpoint = {},
+                        .oauthClientId = {},
+                        .tokenExpiresAtEpochSeconds = 0,
                         .cachedAccountIds = {}}};
     update.translation = TranslationSettings{.enabled = false,
                                              .apiKeyOverride = QStringLiteral(" key "),

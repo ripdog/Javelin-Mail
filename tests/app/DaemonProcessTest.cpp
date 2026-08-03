@@ -198,6 +198,10 @@ TEST_CASE("daemon applies offline mailbox settings by cached JMAP account id",
         .sessionUrl = QStringLiteral("https://example.test/jmap"),
         .loginEmail = QStringLiteral("user@example.test"),
         .apiKey = QStringLiteral("secret"),
+        .refreshToken = {},
+        .tokenEndpoint = {},
+        .oauthClientId = {},
+        .tokenExpiresAtEpochSeconds = 0,
         .cachedAccountIds = {QStringLiteral("account-1")},
     };
     const auto enable = process.handleUpdateSettings({

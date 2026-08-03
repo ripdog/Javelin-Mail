@@ -6,6 +6,8 @@
 #include "app/PerformanceMetrics.h"
 #include "app/WorkTaskPort.h"
 
+#include "gui/onboarding/FirstRunWizard.h"
+#include "gui/settings/GuiSettings.h"
 #include "gui/shell/MainWindow.h"
 #include "gui/tasks/TaskCenterDialog.h"
 
@@ -222,7 +224,7 @@ int main(int argc, char* argv[])
         .runtimeDirectory = runtime,
         .socketPath = socketPath + QStringLiteral(".activation"),
         .limits = {},
-        .protocol = {.major = 3, .minor = 0},
+        .protocol = {.major = 3, .minor = 1},
         .expectedBuild =
             javelin::protocol::BuildIdentity{.application = QStringLiteral("Javelin-Mail"),
                                              .revision = QStringLiteral(JAVELIN_APP_VERSION)},
@@ -292,14 +294,14 @@ int main(int argc, char* argv[])
          .socketPath = socketPath,
          .daemonExecutable =
              QDir{QCoreApplication::applicationDirPath()}.filePath(QStringLiteral("javelind")),
-         .protocol = {.major = 3, .minor = 0},
+         .protocol = {.major = 3, .minor = 1},
          .build = {.application = QStringLiteral("Javelin-Mail"),
                    .revision = QStringLiteral(JAVELIN_APP_VERSION)},
          .startTimeoutMilliseconds = 5000,
          .startDaemonIfMissing = false}};
 
     QMainWindow recoveryWindow;
-    recoveryWindow.setWindowTitle(QStringLiteral("Javelin Mail — reconnecting"));
+    recoveryWindow.setWindowTitle(QStringLiteral("Welcome to Javelin Mail"));
     recoveryWindow.setWindowIcon(application.windowIcon());
     auto* recoveryCentral = new QWidget(&recoveryWindow);
     auto* recoveryLayout = new QVBoxLayout(recoveryCentral);
@@ -319,12 +321,18 @@ int main(int argc, char* argv[])
     std::unique_ptr<javelin::app::GuiServices> services;
     QPointer<javelin::gui::shell::MainWindow> mainWindow;
     QPointer<javelin::gui::tasks::TaskCenterDialog> taskCenter;
+    QPointer<javelin::gui::onboarding::FirstRunWizard> firstRunWizard;
 
     const auto showRecovery = [&recoveryWindow, recoveryStatus, enableAndStartDaemon, startDaemon,
-                               retry, &session](const QString& detail, const bool offerDaemonStart)
+                               retry, &session](const QString&, const bool offerDaemonStart)
     {
         recoveryStatus->setText(
-            QStringLiteral("Javelin could not connect to its background service: %1").arg(detail));
+            offerDaemonStart
+                ? QStringLiteral(
+                      "Javelin’s background sync service isn’t running yet. Start it once, or "
+                      "enable it so mail stays up to date whenever you sign in.")
+                : QStringLiteral(
+                      "Javelin couldn’t open its background sync service. Please try again."));
         enableAndStartDaemon->setVisible(offerDaemonStart && session.canUseSystemdUserService());
         startDaemon->setVisible(offerDaemonStart);
         enableAndStartDaemon->setEnabled(offerDaemonStart);
@@ -385,6 +393,30 @@ int main(int argc, char* argv[])
 
     restoreMainWindow = [&](const QString& activationToken)
     {
+        if (!services)
+            services = std::make_unique<javelin::app::GuiServices>(session);
+        if (services->settings().accounts().empty())
+        {
+            recoveryWindow.hide();
+            if (firstRunWizard == nullptr)
+            {
+                firstRunWizard = new javelin::gui::onboarding::FirstRunWizard(
+                    services->onboardingPort(), services->settings());
+                firstRunWizard->setAttribute(Qt::WA_DeleteOnClose);
+                QObject::connect(firstRunWizard, &QWizard::accepted, &application,
+                                 [&]
+                                 {
+                                     firstRunWizard = nullptr;
+                                     restoreMainWindow({});
+                                 });
+                QObject::connect(firstRunWizard, &QWizard::rejected, &application,
+                                 &QCoreApplication::quit);
+            }
+            firstRunWizard->show();
+            firstRunWizard->raise();
+            firstRunWizard->activateWindow();
+            return;
+        }
         createMainWindow();
         if (mainWindow == nullptr)
             return;

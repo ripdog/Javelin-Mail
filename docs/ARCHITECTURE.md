@@ -81,6 +81,21 @@ The CMake graph enforces the architectural split:
 Configuration fails when production GUI sources access canonical `QSettings`, when GUI targets link
 `javelin_jmap` or `javelin_daemon_core`, or when daemon sources acquire Widgets/WebEngine dependencies.
 
+### First-run account onboarding
+
+The GUI presents the first-run wizard only while the daemon-owned account list is empty. Daemon
+availability is established before the wizard opens; an unavailable daemon is handled by a small
+recovery surface that can start it for the current session or enable and start its systemd user
+unit.
+
+Account discovery and authentication remain daemon services. Discovery follows the JMAP DNS and
+well-known flow, inspects the unauthenticated session when the provider exposes it, and reads OAuth
+protected-resource and authorization-server metadata. Providers with dynamic client registration
+can use Authorization Code with PKCE through the user's system browser and a temporary loopback
+callback. Manual HTTPS JMAP URL and bearer-token entry remains available when OAuth metadata or
+automatic client registration is unavailable. The wizard renders only friendly outcomes and typed
+capability results; it does not expose socket, transport, or wire-format diagnostics.
+
 ## Source and component map
 
 The source tree is organized by responsibility rather than by feature alone:

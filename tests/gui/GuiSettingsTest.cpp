@@ -35,6 +35,10 @@ TEST_CASE("GUI settings expose daemon snapshots without reading QSettings", "[gu
         .sessionUrl = QStringLiteral("https://mail.example.test/.well-known/jmap"),
         .loginEmail = QStringLiteral("alice@example.test"),
         .apiKey = QStringLiteral("secret"),
+        .refreshToken = {},
+        .tokenEndpoint = {},
+        .oauthClientId = {},
+        .tokenExpiresAtEpochSeconds = 0,
         .cachedAccountIds = {QStringLiteral("account-1")},
     });
     snapshot.notificationMailboxSelections.push_back({

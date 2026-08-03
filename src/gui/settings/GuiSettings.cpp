@@ -37,6 +37,10 @@ namespace javelin::gui::settings
                 .sessionUrl = account.sessionUrl.trimmed(),
                 .loginEmail = loginEmail,
                 .apiKey = account.apiKey.trimmed(),
+                .refreshToken = account.refreshToken.trimmed(),
+                .tokenEndpoint = account.tokenEndpoint.trimmed(),
+                .oauthClientId = account.oauthClientId.trimmed(),
+                .tokenExpiresAtEpochSeconds = account.tokenExpiresAtEpochSeconds,
                 .cachedAccountIds = stringList(account.cachedAccountIds),
             });
         }
@@ -229,6 +233,10 @@ namespace javelin::gui::settings
                 .sessionUrl = account.sessionUrl,
                 .loginEmail = account.loginEmail,
                 .apiKey = account.apiKey,
+                .refreshToken = account.refreshToken,
+                .tokenEndpoint = account.tokenEndpoint,
+                .oauthClientId = account.oauthClientId,
+                .tokenExpiresAtEpochSeconds = account.tokenExpiresAtEpochSeconds,
                 .cachedAccountIds = {account.cachedAccountIds.begin(),
                                      account.cachedAccountIds.end()},
             });

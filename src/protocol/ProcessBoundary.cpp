@@ -197,6 +197,18 @@ namespace javelin::protocol
                     if (auto error = optionalStringError(
                             account.apiKey, QStringLiteral("update.accounts.apiKey"), limits))
                         return error;
+                    if (auto error = optionalStringError(
+                            account.refreshToken, QStringLiteral("update.accounts.refreshToken"),
+                            limits))
+                        return error;
+                    if (auto error = optionalStringError(
+                            account.tokenEndpoint, QStringLiteral("update.accounts.tokenEndpoint"),
+                            limits))
+                        return error;
+                    if (auto error = optionalStringError(
+                            account.oauthClientId, QStringLiteral("update.accounts.oauthClientId"),
+                            limits))
+                        return error;
                     if (auto error =
                             validateStringList(account.cachedAccountIds,
                                                QStringLiteral("update.accounts.cachedAccountIds")))
