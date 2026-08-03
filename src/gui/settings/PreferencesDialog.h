@@ -13,6 +13,7 @@
 #include <vector>
 
 class QCheckBox;
+class QLabel;
 class QLineEdit;
 class QListWidget;
 class QPushButton;
@@ -67,7 +68,6 @@ namespace javelin::gui::settings
         void removeCurrentAccount();
         void selectAccount(int row);
         void noteUnsavedChanges();
-        void noteConnectionSettingsChanged();
         [[nodiscard]] bool saveCurrentSettings();
         void storeCurrentEdits();
         void refreshAccountList();
@@ -106,9 +106,8 @@ namespace javelin::gui::settings
         QListWidget* m_accountList = nullptr;
         QPushButton* m_removeButton = nullptr;
         QLineEdit* m_displayNameEdit = nullptr;
-        QLineEdit* m_sessionUrlEdit = nullptr;
-        QLineEdit* m_loginEmailEdit = nullptr;
-        QLineEdit* m_apiKeyEdit = nullptr;
+        QLabel* m_loginEmailLabel = nullptr;
+        QLabel* m_sessionUrlLabel = nullptr;
         QListWidget* m_remoteContentList = nullptr;
         QPushButton* m_removeRemoteContentButton = nullptr;
         QCheckBox* m_translationEnabledCheckBox = nullptr;
@@ -131,7 +130,6 @@ namespace javelin::gui::settings
         QHash<QString, QStringList> m_syncedMailboxIds;
         QHash<QString, QStringList> m_notificationMailboxIds;
         QSet<QString> m_configuredNotificationAccounts;
-        QSet<QString> m_dirtyConnectionIds;
         QString m_mailboxSyncCurrentAccountId;
     };
 

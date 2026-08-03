@@ -141,20 +141,20 @@ namespace javelin::gui::settings
         auto* formLayout = new QFormLayout();
         m_displayNameEdit = new QLineEdit(detailsPanel);
         m_displayNameEdit->setPlaceholderText(QStringLiteral("Personal"));
-        m_sessionUrlEdit = new QLineEdit(detailsPanel);
-        m_sessionUrlEdit->setPlaceholderText(
-            QStringLiteral("https://api.fastmail.com/jmap/session"));
-        m_loginEmailEdit = new QLineEdit(detailsPanel);
-        m_loginEmailEdit->setPlaceholderText(QStringLiteral("name@example.com"));
-        m_apiKeyEdit = new QLineEdit(detailsPanel);
-        m_apiKeyEdit->setEchoMode(QLineEdit::Password);
-        m_apiKeyEdit->setPlaceholderText(QStringLiteral("Paste API key"));
-        m_sessionUrlEdit->setPlaceholderText(QStringLiteral("Optional — discover from email"));
+        m_loginEmailLabel = new QLabel(detailsPanel);
+        m_loginEmailLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        m_sessionUrlLabel = new QLabel(detailsPanel);
+        m_sessionUrlLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        m_sessionUrlLabel->setWordWrap(true);
         formLayout->addRow(QStringLiteral("Display Name"), m_displayNameEdit);
-        formLayout->addRow(QStringLiteral("Server"), m_sessionUrlEdit);
-        formLayout->addRow(QStringLiteral("Login Email"), m_loginEmailEdit);
-        formLayout->addRow(QStringLiteral("API Key"), m_apiKeyEdit);
+        formLayout->addRow(QStringLiteral("Email"), m_loginEmailLabel);
+        formLayout->addRow(QStringLiteral("Mail Server"), m_sessionUrlLabel);
         detailsLayout->addLayout(formLayout);
+        auto* managedDetails = new QLabel(
+            QStringLiteral("Sign-in and server details are managed automatically."), detailsPanel);
+        managedDetails->setWordWrap(true);
+        managedDetails->setForegroundRole(QPalette::PlaceholderText);
+        detailsLayout->addWidget(managedDetails);
         detailsLayout->addStretch();
 
         splitter->addWidget(accountPanel);
@@ -351,12 +351,6 @@ namespace javelin::gui::settings
                 &PreferencesDialog::selectAccount);
         connect(m_displayNameEdit, &QLineEdit::textEdited, this,
                 &PreferencesDialog::noteUnsavedChanges);
-        connect(m_sessionUrlEdit, &QLineEdit::textEdited, this,
-                &PreferencesDialog::noteConnectionSettingsChanged);
-        connect(m_loginEmailEdit, &QLineEdit::textEdited, this,
-                &PreferencesDialog::noteConnectionSettingsChanged);
-        connect(m_apiKeyEdit, &QLineEdit::textEdited, this,
-                &PreferencesDialog::noteConnectionSettingsChanged);
         connect(m_removeRemoteContentButton, &QPushButton::clicked, this,
                 &PreferencesDialog::removeSelectedRemoteContentPermits);
         connect(m_remoteContentList, &QListWidget::itemSelectionChanged, this,
@@ -569,23 +563,18 @@ namespace javelin::gui::settings
         const bool hasAccount = row >= 0 && row < static_cast<int>(m_accounts.size());
         m_removeButton->setEnabled(hasAccount);
         m_displayNameEdit->setEnabled(hasAccount);
-        m_sessionUrlEdit->setEnabled(hasAccount);
-        m_loginEmailEdit->setEnabled(hasAccount);
-        m_apiKeyEdit->setEnabled(hasAccount);
         if (!hasAccount)
         {
             m_displayNameEdit->clear();
-            m_sessionUrlEdit->clear();
-            m_loginEmailEdit->clear();
-            m_apiKeyEdit->clear();
+            m_loginEmailLabel->clear();
+            m_sessionUrlLabel->clear();
             return;
         }
 
         const auto& account = m_accounts[static_cast<std::size_t>(row)];
         m_displayNameEdit->setText(account.displayName);
-        m_sessionUrlEdit->setText(account.sessionUrl);
-        m_loginEmailEdit->setText(account.loginEmail);
-        m_apiKeyEdit->setText(account.apiKey);
+        m_loginEmailLabel->setText(account.loginEmail);
+        m_sessionUrlLabel->setText(account.sessionUrl);
     }
 
     void PreferencesDialog::storeCurrentEdits()
@@ -596,9 +585,6 @@ namespace javelin::gui::settings
         }
         auto& account = m_accounts[static_cast<std::size_t>(m_currentRow)];
         account.displayName = m_displayNameEdit->text().trimmed();
-        account.sessionUrl = m_sessionUrlEdit->text().trimmed();
-        account.loginEmail = m_loginEmailEdit->text().trimmed();
-        account.apiKey = m_apiKeyEdit->text().trimmed();
         if (m_accountList->count() > m_currentRow)
         {
             m_accountList->item(m_currentRow)->setText(accountListText(account));
@@ -611,22 +597,10 @@ namespace javelin::gui::settings
         updateButtons();
     }
 
-    void PreferencesDialog::noteConnectionSettingsChanged()
-    {
-        if (m_currentRow >= 0 && m_currentRow < static_cast<int>(m_accounts.size()))
-            m_dirtyConnectionIds.insert(m_accounts[static_cast<std::size_t>(m_currentRow)].id);
-        noteUnsavedChanges();
-    }
-
     bool PreferencesDialog::saveCurrentSettings()
     {
         storeCurrentEdits();
         storeMailboxSyncSelection();
-        for (auto& account : m_accounts)
-        {
-            if (m_dirtyConnectionIds.contains(account.id))
-                ++account.revision;
-        }
 
         m_remoteContentSenders.removeAll(QString{});
         m_remoteContentSenders.removeDuplicates();
@@ -699,7 +673,6 @@ namespace javelin::gui::settings
         }
         m_baseRevision = m_settings.snapshot().revision;
         m_removedAccounts.clear();
-        m_dirtyConnectionIds.clear();
         m_loadedAccountIds.clear();
         for (const auto& account : m_accounts)
             m_loadedAccountIds.push_back(account.id);
