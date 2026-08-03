@@ -62,14 +62,14 @@ compose, contacts, calendars, Sieve, translation, Undo/Redo, task control, messa
 message-list materialization. Account, mailbox, contact, identity, message-view, and query presentation
 remain read-only cache clients; calendar presentation uses the typed daemon reader boundary.
 
-The framed socket is protocol version 2 because it now carries bounded typed remote-action payloads,
-immediate typed results, and asynchronous completion values in addition to the original boundary
-families. The in-process endpoint remains compiled only into the protocol conformance test target.
-There is no production single-process executable or GUI linkage to daemon/JMAP transport targets.
-Operational GUI settings now come from the handshake snapshot and are updated through revisioned daemon
-IPC, including accounts, credentials, mailbox synchronization and notifications, translation, remote
-content permissions, message appearance, attachment behavior, and undo-send delay. Window, tab, search,
-and calendar-colour presentation state remains GUI-local and is the remaining Phase 11 settings scope.
+The framed socket is protocol version 3 because it now carries the complete bounded settings schema,
+including versioned workspace state, in addition to typed remote-action payloads, immediate results,
+and asynchronous completion values. The in-process endpoint remains compiled only into the protocol
+conformance test target. There is no production single-process executable or GUI linkage to
+daemon/JMAP transport targets. All persisted settings now come from the handshake snapshot and are
+updated through revisioned daemon IPC, including accounts, credentials, mailbox synchronization and
+notifications, translation, remote-content permissions, message appearance, attachment behavior,
+undo-send delay, window/tab/search state, and calendar-colour overrides.
 
 ## Phase dependency order
 
@@ -714,10 +714,8 @@ The following searches or equivalent build checks return no production violation
 
 ### Implementation status
 
-Phase 11 is complete for executable composition, application-command routing, and operational settings
-authority, but not yet for GUI workspace-state persistence. The temporary single-process executable,
-`javelin_app` library, transitional bootstrap sources, and production use of `InProcessEndpoint` have
-been removed.
+Phase 11 is complete. The temporary single-process executable, `javelin_app` library, transitional
+bootstrap sources, and production use of `InProcessEndpoint` have been removed.
 CMake builds and installs only `javelin` and `javelind`. The production `javelin` executable now links
 the complete existing `MainWindow`/Widgets surface and supplies it with remote application-port
 adapters; it no longer links raw `CalendarMethods`/`MailMethods`, JMAP transports, daemon-core
@@ -725,12 +723,12 @@ implementations, or write-capable cache services. The daemon owns all applicatio
 calendar reads, notification/tray behavior, synchronization, and network diagnostics. Singleton
 activation and daemon-first startup have been exercised against a copied real profile.
 
-`PreferencesDialog` and the operational consumers now use a `SettingsSnapshot`-backed GUI service and
-submit one revision-checked `SettingsUpdate`; a stale dialog is rejected before it can overwrite a newer
-snapshot. A CMake boundary check prevents canonical `QSettings` access from returning to production GUI
-sources outside an explicit presentation-local allowlist. The remaining Phase 11 exception is window,
-tab, search-session, and calendar-colour persistence, which still uses GUI-local `QSettings` and should
-move into the daemon-owned workspace-state portion of the settings schema.
+`PreferencesDialog` and all persisted workspace consumers use a `SettingsSnapshot`-backed GUI service
+and submit revision-checked `SettingsUpdate` values; a stale writer is rejected before it can overwrite
+a newer snapshot. Window, tab, search-session, sort, and calendar-colour state now use a bounded,
+versioned workspace payload in settings schema version 2. Legacy profiles are migrated, verified by
+read-back, and only then have their GUI-local keys removed. The CMake boundary check has no GUI
+allowlist: any production GUI source that opens canonical `QSettings` now fails configuration.
 
 ## Phase 12: performance, reliability, and release gate
 
@@ -782,18 +780,18 @@ is disabled unless explicitly enabled, and never persists telemetry in SQLite. S
 
 ### Current validation status
 
-As of 2026-08-02, the complete Debug build and all 534 discovered tests pass with local socket
-access, and the new performance-metric tests pass with profiling enabled. The touched C++ files pass
-clang-format; the repository-wide `format-check` currently reports pre-existing diagnostics in
-`src/gui/settings/GuiSettings.cpp` and `.h`, outside this Phase 12 change. An isolated smoke run
-against a reflinked copy of the real profile
-loaded both configured accounts, restored the full workspace, performed mailbox and calendar network
-work in `javelind`, kept the GUI alive, and accepted a second-launch activation with exit status 0. A
-follow-up disconnect test terminated that GUI, confirmed the daemon remained operational, reconnected
-a new GUI, and activated it from a third invocation. A separate session-bus smoke test verified the
-daemon-owned StatusNotifierItem icon and all four DBusMenu actions. The broader performance
-measurements, crash/reconnect matrix, optimized/sanitizer runs, and final daemon-only settings migration
-remain release-gate work.
+As of 2026-08-03, the complete Debug build and all 537 discovered tests pass with local socket
+access, and the repository-wide `format-check` passes. Settings coverage now includes legacy and
+schema-version-1 workspace migration, read-back verification before legacy-key removal, every persisted
+tab type, corrupt workspace payloads, socket round-trips, stale revisions, and protocol size limits. An
+isolated smoke run against a reflinked copy of the real profile loaded both configured accounts,
+restored the full workspace, performed mailbox and calendar network work in `javelind`, kept the GUI
+alive, and accepted a second-launch activation with exit status 0. A follow-up disconnect test
+terminated that GUI, confirmed the daemon remained operational, reconnected a new GUI, and activated it
+from a third invocation. A separate session-bus smoke test verified the daemon-owned StatusNotifierItem
+icon and all four DBusMenu actions. The final daemon-only settings migration is complete. Broader
+performance measurements, the remaining crash/reconnect matrix, and optimized/sanitizer runs remain
+release-gate work.
 
 ### Final release gate
 
