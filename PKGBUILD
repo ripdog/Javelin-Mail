@@ -33,6 +33,11 @@ provides=('javelin-mail')
 conflicts=('javelin-mail')
 
 _repo_root() {
+  if [[ -n ${JAVELIN_SOURCE_DIR:-} ]] && git -C "$JAVELIN_SOURCE_DIR" rev-parse --show-toplevel >/dev/null 2>&1; then
+    git -C "$JAVELIN_SOURCE_DIR" rev-parse --show-toplevel
+    return
+  fi
+
   if [[ -n ${startdir:-} ]] && git -C "$startdir" rev-parse --show-toplevel >/dev/null 2>&1; then
     git -C "$startdir" rev-parse --show-toplevel
     return

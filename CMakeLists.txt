@@ -1361,6 +1361,7 @@ target_link_libraries(javelin_daemon_core
         Qt::Concurrent
         Qt::DBus
         Qt::Network
+        glaze::glaze
         javelin_observability
 )
 javelin_set_project_warnings(javelin_daemon_core)

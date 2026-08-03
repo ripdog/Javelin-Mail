@@ -37,7 +37,7 @@ jobs:
       - name: Build package
         run: |
           sudo -u builder bash -lc \
-            "cd '$GITHUB_WORKSPACE' && makepkg --syncdeps --noconfirm --cleanbuild --clean"
+            "cd '$GITHUB_WORKSPACE' && JAVELIN_SOURCE_DIR='$GITHUB_WORKSPACE' makepkg --syncdeps --noconfirm --cleanbuild --clean"
 
       - name: Upload package
         uses: actions/upload-artifact@v4
@@ -127,6 +127,7 @@ jobs:
           chmod +x tools/linuxdeploy tools/linuxdeploy-plugin-qt tools/linuxdeploy-plugin-appimage packaging/appimage/AppRun
           export PATH="$GITHUB_WORKSPACE/tools:$PATH"
           export QMAKE=/usr/bin/qmake6
+          export NO_STRIP=1
           export VERSION="0.1.0-${GITHUB_SHA::7}"
           export OUTPUT="Javelin-Mail-${VERSION}-x86_64.AppImage"
           linuxdeploy \
