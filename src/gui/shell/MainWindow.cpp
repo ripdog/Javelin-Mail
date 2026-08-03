@@ -25,6 +25,7 @@
 #include "gui/messages/MessageListModel.h"
 #include "gui/messages/MessageListPanePresenter.h"
 #include "gui/messageview/MessageViewContainer.h"
+#include "gui/onboarding/FirstRunWizard.h"
 #include "gui/search/AdvancedSearchDialog.h"
 #include "gui/settings/ConnectionSettingsAdapter.h"
 #include "gui/settings/GuiSettings.h"
@@ -544,6 +545,7 @@ namespace javelin::gui::shell
                 modelStatus = Model::ConnectionStatus::AuthenticationPaused;
             }
             m_mailboxModel->setConnectionStatus(accountId, modelStatus);
+            updateAuthenticationPrompt(accountId, status);
         };
         connect(&m_mailEvents, &javelin::app::MailApplicationEventsPort::accountStatusChanged, this,
                 applyAccountStatus);
@@ -2709,6 +2711,89 @@ namespace javelin::gui::shell
     void MainWindow::openPreferences()
     {
         openPreferencesForConnection({});
+    }
+
+    void MainWindow::reauthenticateConnection(const QString& connectionId)
+    {
+        javelin::gui::onboarding::FirstRunWizard wizard{m_onboardingPort, m_settings, connectionId,
+                                                        this};
+        if (wizard.exec() != QDialog::Accepted)
+            return;
+
+        const auto accounts = m_settings.accounts();
+        const auto account = std::ranges::find(accounts, connectionId,
+                                               &javelin::gui::settings::ConnectionSettings::id);
+        if (account != accounts.end())
+            m_accountRefreshController->refreshConnection(*account);
+    }
+
+    void MainWindow::updateAuthenticationPrompt(const QString& accountId,
+                                                const javelin::app::MailAccountStatus status)
+    {
+        const auto account = m_settings.accountForCachedId(accountId);
+        if (account.id.isEmpty())
+            return;
+
+        if (status == javelin::app::MailAccountStatus::AuthenticationPaused)
+            m_authenticationRequiredAccountIds.insert(accountId);
+        else
+            m_authenticationRequiredAccountIds.remove(accountId);
+
+        const bool connectionRequiresAuthentication = std::ranges::any_of(
+            account.cachedAccountIds, [this](const QString& cachedAccountId)
+            { return m_authenticationRequiredAccountIds.contains(cachedAccountId); });
+        if (!connectionRequiresAuthentication)
+        {
+            m_authenticationPromptedConnections.remove(account.id);
+            m_pendingAuthenticationPrompts.removeAll(account.id);
+            return;
+        }
+
+        if (m_authenticationPromptedConnections.contains(account.id))
+            return;
+        m_authenticationPromptedConnections.insert(account.id);
+        m_pendingAuthenticationPrompts.push_back(account.id);
+        QTimer::singleShot(0, this, &MainWindow::showNextAuthenticationPrompt);
+    }
+
+    void MainWindow::showNextAuthenticationPrompt()
+    {
+        if (m_authenticationPromptOpen)
+            return;
+        while (!m_pendingAuthenticationPrompts.isEmpty())
+        {
+            const auto connectionId = m_pendingAuthenticationPrompts.takeFirst();
+            const auto accounts = m_settings.accounts();
+            const auto account = std::ranges::find(accounts, connectionId,
+                                                   &javelin::gui::settings::ConnectionSettings::id);
+            if (account == accounts.end())
+                continue;
+            const bool connectionRequiresAuthentication = std::ranges::any_of(
+                account->cachedAccountIds, [this](const QString& accountId)
+                { return m_authenticationRequiredAccountIds.contains(accountId); });
+            if (!connectionRequiresAuthentication)
+                continue;
+
+            const auto accountName =
+                account->displayName.isEmpty() ? account->loginEmail : account->displayName;
+            QMessageBox prompt{QMessageBox::Warning, QStringLiteral("Sign in required"),
+                               QStringLiteral("%1 needs you to sign in again before Javelin can "
+                                              "synchronize mail.")
+                                   .arg(accountName),
+                               QMessageBox::NoButton, this};
+            auto* signInButton =
+                prompt.addButton(QStringLiteral("Sign In Again"), QMessageBox::AcceptRole);
+            prompt.addButton(QStringLiteral("Later"), QMessageBox::RejectRole);
+            m_authenticationPromptOpen = true;
+            prompt.exec();
+            m_authenticationPromptOpen = false;
+            if (prompt.clickedButton() == signInButton)
+                reauthenticateConnection(connectionId);
+            break;
+        }
+
+        if (!m_pendingAuthenticationPrompts.isEmpty())
+            QTimer::singleShot(0, this, &MainWindow::showNextAuthenticationPrompt);
     }
 
     void MainWindow::openPreferencesForConnection(const QString& connectionId)

@@ -8,6 +8,8 @@
 
 #include <KXmlGuiWindow>
 #include <QModelIndex>
+#include <QSet>
+#include <QStringList>
 
 #include <cstdint>
 #include <memory>
@@ -36,6 +38,7 @@ namespace javelin::jmap
 
 namespace javelin::app
 {
+    enum class MailAccountStatus;
     class AccountCommandPort;
     class CalendarCommandPort;
     class ComposeCommandPort;
@@ -247,6 +250,10 @@ namespace javelin::gui::shell
         void showMessageListContextMenu(const QPoint& position);
         void viewSelectedMessageSource();
         void openPreferences();
+        void reauthenticateConnection(const QString& connectionId);
+        void updateAuthenticationPrompt(const QString& accountId,
+                                        javelin::app::MailAccountStatus status);
+        void showNextAuthenticationPrompt();
         void reloadAccounts();
         void refreshMessageListPreservingSelection();
         void refreshSelectionFromModels();
@@ -371,6 +378,10 @@ namespace javelin::gui::shell
         javelin::jmap::query::EmailListSort m_emailListSort;
         bool m_paletteRefreshPending = false;
         bool m_modelUpdateInProgress = false;
+        bool m_authenticationPromptOpen = false;
+        QSet<QString> m_authenticationRequiredAccountIds;
+        QSet<QString> m_authenticationPromptedConnections;
+        QStringList m_pendingAuthenticationPrompts;
         std::optional<int> m_activeTabIndex;
         std::vector<TabState> m_tabs;
     };

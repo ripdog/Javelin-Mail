@@ -131,10 +131,8 @@ namespace javelin::gui::settings
 
         auto* accountButtons = new QHBoxLayout();
         auto* addButton = new QPushButton(QStringLiteral("Add"), accountPanel);
-        m_reauthenticateButton = new QPushButton(QStringLiteral("Sign In Again"), accountPanel);
         m_removeButton = new QPushButton(QStringLiteral("Remove"), accountPanel);
         accountButtons->addWidget(addButton);
-        accountButtons->addWidget(m_reauthenticateButton);
         accountButtons->addWidget(m_removeButton);
         accountLayout->addLayout(accountButtons);
 
@@ -157,6 +155,8 @@ namespace javelin::gui::settings
         managedDetails->setWordWrap(true);
         managedDetails->setForegroundRole(QPalette::PlaceholderText);
         detailsLayout->addWidget(managedDetails);
+        m_reauthenticateButton = new QPushButton(QStringLiteral("Sign In Again"), detailsPanel);
+        detailsLayout->addWidget(m_reauthenticateButton);
         detailsLayout->addStretch();
 
         splitter->addWidget(accountPanel);

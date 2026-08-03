@@ -135,6 +135,7 @@ namespace javelin::gui::onboarding
                 m_emailEdit->setText(account->loginEmail);
                 m_emailEdit->setReadOnly(true);
             }
+            setStartId(discoveryPageId);
         }
 
         connect(this, &QWizard::currentIdChanged, this,
@@ -208,8 +209,8 @@ namespace javelin::gui::onboarding
     {
         m_authenticationPage = new CompletionPage(this);
         m_authenticationPage->setTitle(QStringLiteral("Sign in"));
-        m_authenticationPage->setSubTitle(QStringLiteral(
-            "Use your normal browser so password managers and security keys work as expected."));
+        m_authenticationPage->setSubTitle(
+            QStringLiteral("Sign in with your mail service to continue."));
         auto* layout = new QVBoxLayout(m_authenticationPage);
         m_authenticationStatus = new QLabel(m_authenticationPage);
         m_authenticationStatus->setWordWrap(true);
