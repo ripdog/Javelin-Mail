@@ -262,28 +262,48 @@ namespace
 
         const auto settingsUpdate = settingsClient.updateSettings(
             {.baseRevision = {.value = 5},
-             .update = {.accounts = std::nullopt,
-                        .syncedMailboxSelections = std::nullopt,
-                        .notificationMailboxSelections = std::nullopt,
-                        .remoteContentSenders = std::nullopt,
-                        .remoteContentDomains = std::nullopt,
-                        .translation =
-                            TranslationSettings{.enabled = true,
-                                                .apiKeyOverride = {},
-                                                .targetLanguage = QStringLiteral("mi-NZ"),
-                                                .autoTranslateSenders = {},
-                                                .autoTranslateDomains = {}},
-                        .appearance = std::nullopt,
-                        .attachments = std::nullopt,
-                        .undoSendDelaySeconds = std::nullopt,
-                        .workspace = WorkspaceSettings{
-                            .formatVersion = 1,
-                            .mainWindowState = QByteArrayLiteral("updated-window-state"),
-                            .calendarColorOverrides = {{.calendarId = QStringLiteral("calendar-2"),
-                                                        .color = QStringLiteral("#abcdef")}}}}});
+             .update = {
+                 .accounts = std::vector<AccountSettings>{{
+                     .id = QStringLiteral("connection-1"),
+                     .revision = 4,
+                     .displayName = QStringLiteral("Alice"),
+                     .sessionUrl = QStringLiteral("https://mail.example.com/.well-known/jmap"),
+                     .loginEmail = QStringLiteral("alice@example.com"),
+                     .apiKey = QStringLiteral("access-token"),
+                     .refreshToken = QStringLiteral("refresh-token"),
+                     .tokenEndpoint = QStringLiteral("https://mail.example.com/token"),
+                     .oauthClientId = QStringLiteral("client-id"),
+                     .tokenExpiresAtEpochSeconds = 1'785'784'100,
+                     .cachedAccountIds = {QStringLiteral("account-1")},
+                 }},
+                 .syncedMailboxSelections = std::nullopt,
+                 .notificationMailboxSelections = std::nullopt,
+                 .remoteContentSenders = std::nullopt,
+                 .remoteContentDomains = std::nullopt,
+                 .translation = TranslationSettings{.enabled = true,
+                                                    .apiKeyOverride = {},
+                                                    .targetLanguage = QStringLiteral("mi-NZ"),
+                                                    .autoTranslateSenders = {},
+                                                    .autoTranslateDomains = {}},
+                 .appearance = std::nullopt,
+                 .attachments = std::nullopt,
+                 .undoSendDelaySeconds = std::nullopt,
+                 .workspace = WorkspaceSettings{
+                     .formatVersion = 1,
+                     .mainWindowState = QByteArrayLiteral("updated-window-state"),
+                     .calendarColorOverrides = {{.calendarId = QStringLiteral("calendar-2"),
+                                                 .color = QStringLiteral("#abcdef")}}}}});
         REQUIRE(std::holds_alternative<SettingsUpdated>(settingsUpdate));
         CHECK(std::get<SettingsUpdated>(settingsUpdate).revision.value == 6);
         REQUIRE(handler.receivedSettingsUpdate.has_value());
+        REQUIRE(handler.receivedSettingsUpdate->update.accounts.has_value());
+        REQUIRE(handler.receivedSettingsUpdate->update.accounts->size() == 1);
+        const auto& account = handler.receivedSettingsUpdate->update.accounts->front();
+        CHECK(account.apiKey == QStringLiteral("access-token"));
+        CHECK(account.refreshToken == QStringLiteral("refresh-token"));
+        CHECK(account.tokenEndpoint == QStringLiteral("https://mail.example.com/token"));
+        CHECK(account.oauthClientId == QStringLiteral("client-id"));
+        CHECK(account.tokenExpiresAtEpochSeconds == 1'785'784'100);
         REQUIRE(handler.receivedSettingsUpdate->update.workspace.has_value());
         CHECK(handler.receivedSettingsUpdate->update.workspace->mainWindowState ==
               QByteArrayLiteral("updated-window-state"));

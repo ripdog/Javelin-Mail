@@ -435,6 +435,9 @@ namespace javelin::protocol
             return writer.string(account.id) && writer.qword(account.revision) &&
                    writer.string(account.displayName) && writer.string(account.sessionUrl) &&
                    writer.string(account.loginEmail) && writer.string(account.apiKey) &&
+                   writer.string(account.refreshToken) && writer.string(account.tokenEndpoint) &&
+                   writer.string(account.oauthClientId) &&
+                   writer.qword(static_cast<quint64>(account.tokenExpiresAtEpochSeconds)) &&
                    writeVector(writer, account.cachedAccountIds, limits.maximumCollectionItems,
                                QStringLiteral("account.cachedAccountIds"),
                                [&writer](const QString& value) { return writer.string(value); });
@@ -443,10 +446,16 @@ namespace javelin::protocol
         bool readAccountSettings(PayloadReader& reader, AccountSettings& account,
                                  const BoundaryLimits& limits)
         {
-            return reader.string(account.id) && reader.qword(account.revision) &&
-                   reader.string(account.displayName) && reader.string(account.sessionUrl) &&
-                   reader.string(account.loginEmail) && reader.string(account.apiKey) &&
-                   readVector(reader, account.cachedAccountIds, limits.maximumCollectionItems,
+            quint64 expiresAt = 0;
+            if (!reader.string(account.id) || !reader.qword(account.revision) ||
+                !reader.string(account.displayName) || !reader.string(account.sessionUrl) ||
+                !reader.string(account.loginEmail) || !reader.string(account.apiKey) ||
+                !reader.string(account.refreshToken) || !reader.string(account.tokenEndpoint) ||
+                !reader.string(account.oauthClientId) || !reader.qword(expiresAt) ||
+                expiresAt > static_cast<quint64>(std::numeric_limits<qint64>::max()))
+                return false;
+            account.tokenExpiresAtEpochSeconds = static_cast<qint64>(expiresAt);
+            return readVector(reader, account.cachedAccountIds, limits.maximumCollectionItems,
                               QStringLiteral("account.cachedAccountIds"),
                               [&reader](QString& value) { return reader.string(value); });
         }

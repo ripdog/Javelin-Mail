@@ -209,6 +209,14 @@ namespace javelin::protocol
                             account.oauthClientId, QStringLiteral("update.accounts.oauthClientId"),
                             limits))
                         return error;
+                    if (account.tokenExpiresAtEpochSeconds < 0)
+                    {
+                        return BoundaryError{
+                            .code = BoundaryErrorCode::InvalidRequest,
+                            .field = QStringLiteral("update.accounts.tokenExpiresAtEpochSeconds"),
+                            .detail = QStringLiteral("token expiry must not be negative"),
+                        };
+                    }
                     if (auto error =
                             validateStringList(account.cachedAccountIds,
                                                QStringLiteral("update.accounts.cachedAccountIds")))
