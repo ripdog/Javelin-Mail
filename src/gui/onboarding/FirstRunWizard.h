@@ -76,6 +76,7 @@ namespace javelin::gui::onboarding
         QString m_oauthFlowId;
         std::optional<javelin::app::AccountDiscoveryResult> m_discovery;
         std::optional<javelin::app::AccountAuthenticationResult> m_authentication;
+        bool m_firstRun = true;
         bool m_busy = false;
     };
 } // namespace javelin::gui::onboarding

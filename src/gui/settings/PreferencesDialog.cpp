@@ -3,6 +3,7 @@
 #include "app/AccountApplicationPorts.h"
 #include "gui/mailboxes/MailboxTreeModel.h"
 #include "gui/mailboxes/MailboxTreeView.h"
+#include "gui/onboarding/FirstRunWizard.h"
 #include "jmap/cache/AccountReadRepository.h"
 #include "jmap/cache/MailboxReadRepository.h"
 
@@ -99,13 +100,14 @@ namespace javelin::gui::settings
 
     PreferencesDialog::PreferencesDialog(GuiSettings& settings,
                                          javelin::app::AccountCommandPort& accountCommandPort,
+                                         javelin::app::OnboardingPort& onboardingPort,
                                          javelin::jmap::cache::AccountReader& accountReader,
                                          javelin::jmap::cache::MailboxReader& mailboxReader,
                                          QWidget* parent)
         : KConfigDialog(parent, QStringLiteral("preferences"), nullptr), m_settings(settings),
           m_baseRevision(m_settings.snapshot().revision), m_accountCommandPort(accountCommandPort),
-          m_accountReader(accountReader), m_mailboxReader(mailboxReader),
-          m_accounts(m_settings.accounts()),
+          m_onboardingPort(onboardingPort), m_accountReader(accountReader),
+          m_mailboxReader(mailboxReader), m_accounts(m_settings.accounts()),
           m_remoteContentSenders(m_settings.remoteContentSenders()),
           m_remoteContentDomains(m_settings.remoteContentDomains()),
           m_translationSettings(m_settings.translationSettings()),
@@ -497,11 +499,29 @@ namespace javelin::gui::settings
     void PreferencesDialog::addAccount()
     {
         storeCurrentEdits();
-        m_accounts.push_back(newAccount());
-        noteUnsavedChanges();
+        if (m_hasPendingChanges && (!validateCurrentSettings() || !saveCurrentSettings()))
+            return;
+
+        QSet<QString> existingIds;
+        for (const auto& account : m_settings.accounts())
+            existingIds.insert(account.id);
+
+        javelin::gui::onboarding::FirstRunWizard wizard{m_onboardingPort, m_settings, this};
+        if (wizard.exec() != QDialog::Accepted)
+            return;
+
+        m_baseRevision = m_settings.snapshot().revision;
+        m_accounts = m_settings.accounts();
         refreshAccountList();
-        m_accountList->setCurrentRow(static_cast<int>(m_accounts.size()) - 1);
-        m_loginEmailEdit->setFocus();
+        const auto added = std::ranges::find_if(m_accounts, [&existingIds](const auto& account)
+                                                { return !existingIds.contains(account.id); });
+        if (added == m_accounts.end())
+            return;
+        const auto row = static_cast<int>(std::distance(m_accounts.begin(), added));
+        m_accountList->setCurrentRow(row);
+        refreshMailboxSyncAccounts();
+        Q_EMIT accountAdded(*added);
+        QDialog::accept();
     }
 
     void PreferencesDialog::removeCurrentAccount()

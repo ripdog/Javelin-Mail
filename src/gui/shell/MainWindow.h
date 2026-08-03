@@ -50,6 +50,7 @@ namespace javelin::app
     class MailboxSession;
     class MessageListSession;
     class MessageNavigationPort;
+    class OnboardingPort;
     class SearchSession;
     class TranslationPort;
     struct OpenEmailRoute;
@@ -147,6 +148,7 @@ namespace javelin::gui::shell
                             javelin::app::MailCommandPort& mailCommandPort,
                             javelin::app::SieveCommandPort& sieveCommandPort,
                             javelin::app::AccountRefreshPort& accountRefreshPort,
+                            javelin::app::OnboardingPort& onboardingPort,
                             javelin::app::MessageContentPort& messageContentPort,
                             javelin::app::MessageListSessionFactoryPort& messageListSessionFactory,
                             javelin::app::MailApplicationEventsPort& mailEvents,
@@ -282,6 +284,7 @@ namespace javelin::gui::shell
         javelin::app::MailCommandPort& m_mailCommandPort;
         javelin::app::SieveCommandPort& m_sieveCommandPort;
         javelin::app::AccountRefreshPort& m_accountRefreshPort;
+        javelin::app::OnboardingPort& m_onboardingPort;
         javelin::app::MessageContentPort& m_messageContentPort;
         javelin::app::MessageListSessionFactoryPort& m_messageListSessionFactory;
         javelin::app::MailApplicationEventsPort& m_mailEvents;

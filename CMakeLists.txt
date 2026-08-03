@@ -358,6 +358,8 @@ set(JAVELIN_FORMAT_FILES
     src/gui/search/SearchSessionPersistence.h
     src/gui/settings/PreferencesDialog.cpp
     src/gui/settings/PreferencesDialog.h
+    src/gui/onboarding/FirstRunWizard.cpp
+    src/gui/onboarding/FirstRunWizard.h
     src/gui/shell/ElidingLabel.cpp
     src/gui/shell/ElidingLabel.h
     src/gui/shell/FocusedCommandRouter.cpp
@@ -946,6 +948,8 @@ add_library(javelin_gui STATIC
     src/gui/search/SearchSessionPersistence.h
     src/gui/settings/PreferencesDialog.cpp
     src/gui/settings/PreferencesDialog.h
+    src/gui/onboarding/FirstRunWizard.cpp
+    src/gui/onboarding/FirstRunWizard.h
     src/gui/shell/ElidingLabel.cpp
     src/gui/shell/ElidingLabel.h
     src/gui/shell/FocusedCommandRouter.cpp
@@ -1470,8 +1474,6 @@ qt_add_executable(javelin
     src/jmap/sync/MailboxQueryDescriptor.cpp
     src/jmap/sync/MailboxQueryDescriptor.h
     src/app/gui_main.cpp
-    src/gui/onboarding/FirstRunWizard.cpp
-    src/gui/onboarding/FirstRunWizard.h
 )
 target_link_libraries(javelin
     PRIVATE

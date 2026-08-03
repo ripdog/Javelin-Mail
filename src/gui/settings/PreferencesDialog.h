@@ -35,7 +35,8 @@ namespace javelin::jmap::cache
 namespace javelin::app
 {
     class AccountCommandPort;
-}
+    class OnboardingPort;
+} // namespace javelin::app
 
 namespace javelin::gui::settings
 {
@@ -47,12 +48,16 @@ namespace javelin::gui::settings
       public:
         explicit PreferencesDialog(GuiSettings& settings,
                                    javelin::app::AccountCommandPort& accountCommandPort,
+                                   javelin::app::OnboardingPort& onboardingPort,
                                    javelin::jmap::cache::AccountReader& accountReader,
                                    javelin::jmap::cache::MailboxReader& mailboxReader,
                                    QWidget* parent = nullptr);
         ~PreferencesDialog() override;
 
         void selectConfiguredAccount(const QString& connectionId);
+
+      Q_SIGNALS:
+        void accountAdded(const javelin::gui::settings::ConnectionSettings& settings);
 
       private:
         void updateSettings() override;
@@ -82,6 +87,7 @@ namespace javelin::gui::settings
         GuiSettings& m_settings;
         javelin::protocol::SettingsRevision m_baseRevision;
         javelin::app::AccountCommandPort& m_accountCommandPort;
+        javelin::app::OnboardingPort& m_onboardingPort;
         javelin::jmap::cache::AccountReader& m_accountReader;
         javelin::jmap::cache::MailboxReader& m_mailboxReader;
         std::vector<ConnectionSettings> m_accounts;

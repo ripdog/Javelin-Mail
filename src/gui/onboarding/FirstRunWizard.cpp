@@ -88,14 +88,17 @@ namespace javelin::gui::onboarding
 
     FirstRunWizard::FirstRunWizard(javelin::app::OnboardingPort& onboarding,
                                    javelin::gui::settings::GuiSettings& settings, QWidget* parent)
-        : QWizard(parent), m_onboarding(onboarding), m_settings(settings)
+        : QWizard(parent), m_onboarding(onboarding), m_settings(settings),
+          m_firstRun(m_settings.accounts().empty())
     {
-        setWindowTitle(QStringLiteral("Welcome to Javelin Mail"));
+        setWindowTitle(m_firstRun ? QStringLiteral("Welcome to Javelin Mail")
+                                  : QStringLiteral("Add a Mail Account"));
         setWindowIcon(QIcon(QStringLiteral(":/icons/icon.svg")));
         setWizardStyle(QWizard::ModernStyle);
         setOption(QWizard::NoBackButtonOnStartPage);
         setOption(QWizard::NoBackButtonOnLastPage);
-        setButtonText(QWizard::FinishButton, QStringLiteral("Open Javelin"));
+        setButtonText(QWizard::FinishButton,
+                      m_firstRun ? QStringLiteral("Open Javelin") : QStringLiteral("Add Account"));
         resize(700, 560);
         setStyleSheet(QStringLiteral(
             "QWizard { background: palette(window); }"
@@ -128,7 +131,8 @@ namespace javelin::gui::onboarding
     void FirstRunWizard::buildWelcomePage()
     {
         auto* page = new CompletionPage(this);
-        page->setTitle(QStringLiteral("Let’s set up your mail"));
+        page->setTitle(m_firstRun ? QStringLiteral("Let’s set up your mail")
+                                  : QStringLiteral("Add another mail account"));
         page->setSubTitle(QStringLiteral(
             "Javelin’s background service is ready. Tell us who this account belongs to."));
         auto* layout = new QVBoxLayout(page);

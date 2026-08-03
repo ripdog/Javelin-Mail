@@ -360,8 +360,9 @@ int main(int argc, char* argv[])
             services->translationPort(), services->composeCommandPort(),
             services->contactCommandPort(), services->mailCommandPort(),
             services->sieveCommandPort(), services->accountRefreshPort(),
-            services->messageContentPort(), services->messageListSessionFactory(),
-            services->mailEvents(), services->messageNavigationPort(), services->undoCommandPort());
+            services->onboardingPort(), services->messageContentPort(),
+            services->messageListSessionFactory(), services->mailEvents(),
+            services->messageNavigationPort(), services->undoCommandPort());
         mainWindow->setAttribute(Qt::WA_DeleteOnClose);
 
         auto* taskButton = new QToolButton(mainWindow);

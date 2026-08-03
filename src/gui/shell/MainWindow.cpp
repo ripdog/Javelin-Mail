@@ -254,6 +254,7 @@ namespace javelin::gui::shell
                            javelin::app::MailCommandPort& mailCommandPort,
                            javelin::app::SieveCommandPort& sieveCommandPort,
                            javelin::app::AccountRefreshPort& accountRefreshPort,
+                           javelin::app::OnboardingPort& onboardingPort,
                            javelin::app::MessageContentPort& messageContentPort,
                            javelin::app::MessageListSessionFactoryPort& messageListSessionFactory,
                            javelin::app::MailApplicationEventsPort& mailEvents,
@@ -268,7 +269,7 @@ namespace javelin::gui::shell
           m_translationPort(translationPort), m_composeCommandPort(composeCommandPort),
           m_contactCommandPort(contactCommandPort), m_mailCommandPort(mailCommandPort),
           m_sieveCommandPort(sieveCommandPort), m_accountRefreshPort(accountRefreshPort),
-          m_messageContentPort(messageContentPort),
+          m_onboardingPort(onboardingPort), m_messageContentPort(messageContentPort),
           m_messageListSessionFactory(messageListSessionFactory), m_mailEvents(mailEvents),
           m_messageNavigationPort(messageNavigationPort), m_undoCommandPort(undoCommandPort)
     {
@@ -2712,8 +2713,12 @@ namespace javelin::gui::shell
 
     void MainWindow::openPreferencesForConnection(const QString& connectionId)
     {
-        javelin::gui::settings::PreferencesDialog dialog{m_settings, m_accountCommandPort,
-                                                         m_accountReader, m_mailboxReader, this};
+        javelin::gui::settings::PreferencesDialog dialog{m_settings,       m_accountCommandPort,
+                                                         m_onboardingPort, m_accountReader,
+                                                         m_mailboxReader,  this};
+        connect(&dialog, &javelin::gui::settings::PreferencesDialog::accountAdded, this,
+                [this](const javelin::gui::settings::ConnectionSettings& settings)
+                { m_accountRefreshController->refreshConnection(settings); });
         if (!connectionId.isEmpty())
             dialog.selectConfiguredAccount(connectionId);
         if (dialog.exec() == QDialog::Accepted)
