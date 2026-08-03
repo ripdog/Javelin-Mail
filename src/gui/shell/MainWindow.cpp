@@ -347,11 +347,16 @@ namespace javelin::gui::shell
                         markTabsStaleForAccount(summary.accountId);
                     reloadAccounts();
                     refreshViewsFromCache();
+                    const auto account =
+                        m_settings.accountForCachedId(QString::fromStdString(summary.accountId));
+                    const auto accountName = account.displayName.isEmpty()
+                                                 ? QStringLiteral("this account")
+                                                 : account.displayName;
                     m_statusBar->showMessage(
                         QStringLiteral("Synced %1 mailboxes and %2 messages for %3.")
                             .arg(summary.mailboxCount)
                             .arg(summary.emailCount)
-                            .arg(QString::fromStdString(summary.accountId)),
+                            .arg(accountName),
                         10000);
                 });
         connect(m_accountRefreshController, &AccountRefreshController::contactsRefreshed, this,

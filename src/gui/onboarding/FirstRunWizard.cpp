@@ -188,17 +188,17 @@ namespace javelin::gui::onboarding
                        : m_firstRun              ? QStringLiteral("Let’s set up your mail")
                                                  : QStringLiteral("Add another mail account"));
         page->setSubTitle(QStringLiteral(
-            "Javelin’s background service is ready. Tell us who this account belongs to."));
+            "Javelin’s background service is ready. Choose a label for this account."));
         auto* layout = new QVBoxLayout(page);
         auto* ready = new QLabel(QStringLiteral("✓ Background sync is ready"), page);
         ready->setStyleSheet(QStringLiteral("color: palette(highlight); font-weight: 600;"));
         layout->addWidget(ready);
         auto* form = new QFormLayout();
         m_nameEdit = new QLineEdit(page);
-        m_nameEdit->setPlaceholderText(QStringLiteral("Your name"));
+        m_nameEdit->setPlaceholderText(QStringLiteral("Personal mail, Work, or another label"));
         m_emailEdit = new QLineEdit(page);
         m_emailEdit->setPlaceholderText(QStringLiteral("you@example.com"));
-        form->addRow(QStringLiteral("Name"), m_nameEdit);
+        form->addRow(QStringLiteral("Account name"), m_nameEdit);
         form->addRow(QStringLiteral("Email address"), m_emailEdit);
         layout->addSpacing(18);
         layout->addLayout(form);
