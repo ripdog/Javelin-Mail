@@ -1,4 +1,5 @@
 #include "jmap/auth/AccountOnboardingService.h"
+#include "app/RemoteCodec.h"
 
 #include <QCoroTask>
 
@@ -6,6 +7,8 @@
 #include <QNetworkAccessManager>
 
 #include <catch2/catch_test_macros.hpp>
+
+#include <variant>
 
 namespace
 {
@@ -54,4 +57,26 @@ TEST_CASE("OAuth refresh refuses an insecure token endpoint", "[jmap][auth][onbo
 
     CHECK_FALSE(result.succeeded);
     CHECK(result.error == QStringLiteral("OAuth refresh information is incomplete."));
+}
+
+TEST_CASE("OAuth browser callback identity survives the daemon boundary",
+          "[jmap][auth][onboarding]")
+{
+    const javelin::app::OAuthFinishRequest request{
+        .flowId = QStringLiteral("flow-id"),
+        .code = QStringLiteral("authorization-code"),
+        .state = QStringLiteral("state"),
+        .issuer = QStringLiteral("https://mail.example.com"),
+    };
+
+    const auto encoded = javelin::app::remote::encode(request);
+    REQUIRE(std::holds_alternative<QByteArray>(encoded));
+    const auto decoded = javelin::app::remote::decodeValue<javelin::app::OAuthFinishRequest>(
+        std::get<QByteArray>(encoded));
+    REQUIRE(std::holds_alternative<javelin::app::OAuthFinishRequest>(decoded));
+    const auto& restored = std::get<javelin::app::OAuthFinishRequest>(decoded);
+    CHECK(restored.flowId == request.flowId);
+    CHECK(restored.code == request.code);
+    CHECK(restored.state == request.state);
+    CHECK(restored.issuer == request.issuer);
 }

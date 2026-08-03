@@ -91,10 +91,12 @@ unit.
 Account discovery and authentication remain daemon services. Discovery follows the JMAP DNS and
 well-known flow, inspects the unauthenticated session when the provider exposes it, and reads OAuth
 protected-resource and authorization-server metadata. Providers with dynamic client registration
-can use Authorization Code with PKCE through the user's system browser and a temporary loopback
-callback. Manual HTTPS JMAP URL and bearer-token entry remains available when OAuth metadata or
-automatic client registration is unavailable. The wizard renders only friendly outcomes and typed
-capability results; it does not expose socket, transport, or wire-format diagnostics.
+can use the OAuth Profile for Open Public Clients: RFC 7591 registration metadata, Authorization
+Code with PKCE, issuer verification, resource indicators, and a temporary loopback callback through
+the user's system browser. Manual HTTPS JMAP URL and bearer-token entry remains available when OAuth
+metadata or automatic client registration is unavailable. The wizard renders only friendly
+outcomes and typed capability results; it does not expose socket, transport, or wire-format
+diagnostics.
 
 ## Source and component map
 

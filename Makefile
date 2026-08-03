@@ -35,7 +35,7 @@ build-debug:
 run:
 	@test -f $(BUILD_DIR)/$(DEBUG_PRESET)/CMakeCache.txt || $(CMake) --preset $(DEBUG_PRESET)
 	$(CMake) --build --preset $(DEBUG_PRESET) --target $(GUI_TARGET) $(DAEMON_TARGET)
-	. $(BUILD_DIR)/$(DEBUG_PRESET)/prefix.sh && exec $(GUI_BINARY) $(RUN_ARGS)
+	. $(BUILD_DIR)/$(DEBUG_PRESET)/prefix.sh && export JAVELIN_FORWARD_DAEMON_STDIO=1 && exec $(GUI_BINARY) $(RUN_ARGS)
 
 configure-asan:
 	$(CMake) --preset $(ASAN_PRESET)

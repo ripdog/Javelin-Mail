@@ -68,6 +68,7 @@ namespace javelin::app
         QString flowId;
         QString code;
         QString state;
+        QString issuer;
     };
 
     struct OAuthRefreshRequest

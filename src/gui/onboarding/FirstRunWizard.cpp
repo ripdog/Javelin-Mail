@@ -346,68 +346,70 @@ namespace javelin::gui::onboarding
         while (m_callbackServer != nullptr && m_callbackServer->hasPendingConnections())
         {
             auto* socket = m_callbackServer->nextPendingConnection();
-            connect(socket, &QTcpSocket::readyRead, this,
-                    [this, socket]
+            connect(
+                socket, &QTcpSocket::readyRead, this,
+                [this, socket]
+                {
+                    if (socket->property("javelinCallbackHandled").toBool())
+                        return;
+                    auto request = socket->property("javelinCallbackRequest").toByteArray();
+                    request += socket->readAll();
+                    socket->setProperty("javelinCallbackRequest", request);
+                    const auto firstLineEnd = request.indexOf("\r\n");
+                    if (firstLineEnd < 0)
+                        return;
+                    const auto firstLine = request.first(firstLineEnd);
+                    const auto parts = firstLine.split(' ');
+                    if (parts.size() < 2)
+                        return;
+                    socket->setProperty("javelinCallbackHandled", true);
+                    const QUrl callbackUrl{QStringLiteral("http://127.0.0.1") +
+                                           QString::fromLatin1(parts.at(1))};
+                    const QUrlQuery query{callbackUrl};
+                    const auto code = query.queryItemValue(QStringLiteral("code"));
+                    const auto state = query.queryItemValue(QStringLiteral("state"));
+                    const auto issuer = query.queryItemValue(QStringLiteral("iss"));
+                    const auto error = query.queryItemValue(QStringLiteral("error"));
+                    const QByteArray body =
+                        error.isEmpty()
+                            ? QByteArrayLiteral("<h1>Signed in</h1><p>You can close this tab "
+                                                "and return to Javelin.</p>")
+                            : QByteArrayLiteral("<h1>Sign-in was cancelled</h1><p>You can "
+                                                "return to Javelin and try again.</p>");
+                    socket->write(QByteArrayLiteral(
+                                      "HTTP/1.1 200 OK\r\nContent-Type: text/html; "
+                                      "charset=utf-8\r\nConnection: close\r\nContent-Length: ") +
+                                  QByteArray::number(body.size()) + QByteArrayLiteral("\r\n\r\n") +
+                                  body);
+                    socket->disconnectFromHost();
+                    if (m_callbackServer != nullptr)
+                        m_callbackServer->close();
+                    if (!error.isEmpty())
                     {
-                        if (socket->property("javelinCallbackHandled").toBool())
-                            return;
-                        auto request = socket->property("javelinCallbackRequest").toByteArray();
-                        request += socket->readAll();
-                        socket->setProperty("javelinCallbackRequest", request);
-                        const auto firstLineEnd = request.indexOf("\r\n");
-                        if (firstLineEnd < 0)
-                            return;
-                        const auto firstLine = request.first(firstLineEnd);
-                        const auto parts = firstLine.split(' ');
-                        if (parts.size() < 2)
-                            return;
-                        socket->setProperty("javelinCallbackHandled", true);
-                        const QUrl callbackUrl{QStringLiteral("http://127.0.0.1") +
-                                               QString::fromLatin1(parts.at(1))};
-                        const QUrlQuery query{callbackUrl};
-                        const auto code = query.queryItemValue(QStringLiteral("code"));
-                        const auto state = query.queryItemValue(QStringLiteral("state"));
-                        const auto error = query.queryItemValue(QStringLiteral("error"));
-                        const QByteArray body =
-                            error.isEmpty()
-                                ? QByteArrayLiteral("<h1>Signed in</h1><p>You can close this tab "
-                                                    "and return to Javelin.</p>")
-                                : QByteArrayLiteral("<h1>Sign-in was cancelled</h1><p>You can "
-                                                    "return to Javelin and try again.</p>");
-                        socket->write(
-                            QByteArrayLiteral(
-                                "HTTP/1.1 200 OK\r\nContent-Type: text/html; "
-                                "charset=utf-8\r\nConnection: close\r\nContent-Length: ") +
-                            QByteArray::number(body.size()) + QByteArrayLiteral("\r\n\r\n") + body);
-                        socket->disconnectFromHost();
-                        if (m_callbackServer != nullptr)
-                            m_callbackServer->close();
-                        if (!error.isEmpty())
-                        {
-                            m_authenticationStatus->setText(QStringLiteral(
-                                "Sign-in was cancelled. You can try again or use manual details."));
-                            return;
-                        }
-                        setBusy(true, QStringLiteral("Finishing sign-in…"));
-                        auto task = m_onboarding.finishOAuth(
-                            {.flowId = m_oauthFlowId, .code = code, .state = state});
-                        QCoro::connect(std::move(task), this,
-                                       [this](javelin::app::OnboardingCallResult<
-                                              javelin::app::AccountAuthenticationResult>
-                                                  callResult)
+                        m_authenticationStatus->setText(QStringLiteral(
+                            "Sign-in was cancelled. You can try again or use manual details."));
+                        return;
+                    }
+                    setBusy(true, QStringLiteral("Finishing sign-in…"));
+                    auto task = m_onboarding.finishOAuth(
+                        {.flowId = m_oauthFlowId, .code = code, .state = state, .issuer = issuer});
+                    QCoro::connect(std::move(task), this,
+                                   [this](javelin::app::OnboardingCallResult<
+                                          javelin::app::AccountAuthenticationResult>
+                                              callResult)
+                                   {
+                                       setBusy(false);
+                                       if (const auto* callError =
+                                               std::get_if<QString>(&callResult))
                                        {
-                                           setBusy(false);
-                                           if (const auto* callError =
-                                                   std::get_if<QString>(&callResult))
-                                           {
-                                               m_authenticationStatus->setText(*callError);
-                                               return;
-                                           }
-                                           completeAuthentication(
-                                               std::get<javelin::app::AccountAuthenticationResult>(
-                                                   std::move(callResult)));
-                                       });
-                    });
+                                           m_authenticationStatus->setText(*callError);
+                                           return;
+                                       }
+                                       completeAuthentication(
+                                           std::get<javelin::app::AccountAuthenticationResult>(
+                                               std::move(callResult)));
+                                   });
+                });
         }
     }
 

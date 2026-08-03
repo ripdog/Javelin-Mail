@@ -14,8 +14,10 @@
 #pragma GCC diagnostic pop
 #endif
 
+#include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDateTime>
+#include <QLoggingCategory>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QRandomGenerator>
@@ -46,6 +48,7 @@ namespace javelin::jmap::auth::detail
         std::string tokenEndpoint;
         std::optional<std::string> registrationEndpoint;
         std::vector<std::string> scopesSupported;
+        std::vector<std::string> responseTypesSupported;
         std::vector<std::string> grantTypesSupported;
         std::vector<std::string> tokenEndpointAuthMethodsSupported;
         std::vector<std::string> codeChallengeMethodsSupported;
@@ -59,11 +62,26 @@ namespace javelin::jmap::auth::detail
         std::string tokenEndpointAuthMethod;
         std::vector<std::string> grantTypes;
         std::vector<std::string> responseTypes;
+        std::string scope;
+        std::string clientUri;
+        std::string logoUri;
+        std::string tosUri;
+        std::string policyUri;
+        std::string softwareId;
+        std::string softwareVersion;
     };
 
     struct RegistrationResponse
     {
         std::string clientId;
+    };
+
+    struct OAuthErrorResponse
+    {
+        std::optional<std::string> error;
+        std::optional<std::string> errorDescription;
+        std::optional<std::string> title;
+        std::optional<std::string> detail;
     };
 
     struct TokenResponse
@@ -90,26 +108,36 @@ template <> struct glz::meta<javelin::jmap::auth::detail::AuthorizationServerMet
     static constexpr auto value = glz::object(
         "issuer", &T::issuer, "authorization_endpoint", &T::authorizationEndpoint, "token_endpoint",
         &T::tokenEndpoint, "registration_endpoint", &T::registrationEndpoint, "scopes_supported",
-        &T::scopesSupported, "grant_types_supported", &T::grantTypesSupported,
-        "token_endpoint_auth_methods_supported", &T::tokenEndpointAuthMethodsSupported,
-        "code_challenge_methods_supported", &T::codeChallengeMethodsSupported,
-        "authorization_response_iss_parameter_supported",
+        &T::scopesSupported, "response_types_supported", &T::responseTypesSupported,
+        "grant_types_supported", &T::grantTypesSupported, "token_endpoint_auth_methods_supported",
+        &T::tokenEndpointAuthMethodsSupported, "code_challenge_methods_supported",
+        &T::codeChallengeMethodsSupported, "authorization_response_iss_parameter_supported",
         &T::authorizationResponseIssParameterSupported);
 };
 
 template <> struct glz::meta<javelin::jmap::auth::detail::RegistrationRequest>
 {
     using T = javelin::jmap::auth::detail::RegistrationRequest;
-    static constexpr auto value =
-        glz::object("redirect_uris", &T::redirectUris, "client_name", &T::clientName,
-                    "token_endpoint_auth_method", &T::tokenEndpointAuthMethod, "grant_types",
-                    &T::grantTypes, "response_types", &T::responseTypes);
+    static constexpr auto value = glz::object(
+        "redirect_uris", &T::redirectUris, "client_name", &T::clientName,
+        "token_endpoint_auth_method", &T::tokenEndpointAuthMethod, "grant_types", &T::grantTypes,
+        "response_types", &T::responseTypes, "scope", &T::scope, "client_uri", &T::clientUri,
+        "logo_uri", &T::logoUri, "tos_uri", &T::tosUri, "policy_uri", &T::policyUri, "software_id",
+        &T::softwareId, "software_version", &T::softwareVersion);
 };
 
 template <> struct glz::meta<javelin::jmap::auth::detail::RegistrationResponse>
 {
     using T = javelin::jmap::auth::detail::RegistrationResponse;
     static constexpr auto value = glz::object("client_id", &T::clientId);
+};
+
+template <> struct glz::meta<javelin::jmap::auth::detail::OAuthErrorResponse>
+{
+    using T = javelin::jmap::auth::detail::OAuthErrorResponse;
+    static constexpr auto value =
+        glz::object("error", &T::error, "error_description", &T::errorDescription, "title",
+                    &T::title, "detail", &T::detail);
 };
 
 template <> struct glz::meta<javelin::jmap::auth::detail::TokenResponse>
@@ -122,6 +150,8 @@ template <> struct glz::meta<javelin::jmap::auth::detail::TokenResponse>
 
 namespace javelin::jmap::auth
 {
+    Q_LOGGING_CATEGORY(oauthLog, "javelin.oauth")
+
     namespace
     {
         struct HttpResult
@@ -248,6 +278,34 @@ namespace javelin::jmap::auth
         {
             return url.isValid() && url.scheme() == QStringLiteral("https") &&
                    !url.host().isEmpty();
+        }
+
+        [[nodiscard]] QString registrationRedirectUri(const QString& callbackUri)
+        {
+            QUrl redirect{callbackUri};
+            if (redirect.scheme() == QStringLiteral("http") &&
+                (redirect.host() == QStringLiteral("127.0.0.1") ||
+                 redirect.host() == QStringLiteral("::1")))
+                redirect.setPort(-1);
+            return redirect.toString();
+        }
+
+        [[nodiscard]] QString oauthErrorText(const QByteArray& body)
+        {
+            const auto error = parseJson<detail::OAuthErrorResponse>(body);
+            if (!error.has_value())
+                return QStringLiteral("unparseable error response");
+            const auto code = error->error.has_value() ? QString::fromStdString(*error->error)
+                                                       : QStringLiteral("unspecified_error");
+            const auto description =
+                error->errorDescription.has_value()
+                    ? QString::fromStdString(*error->errorDescription).simplified().left(500)
+                : error->detail.has_value()
+                    ? QString::fromStdString(*error->detail).simplified().left(500)
+                : error->title.has_value()
+                    ? QString::fromStdString(*error->title).simplified().left(500)
+                    : QString{};
+            return description.isEmpty() ? code : code + QStringLiteral(": ") + description;
         }
 
         [[nodiscard]] QStringList strings(const std::vector<std::string>& values)
@@ -444,21 +502,32 @@ namespace javelin::jmap::auth
         const auto metadata = parseJson<detail::AuthorizationServerMetadata>(metadataResponse.body);
         if (metadataResponse.statusCode == 200 && metadata.has_value() &&
             !metadata->authorizationEndpoint.empty() && !metadata->tokenEndpoint.empty() &&
-            std::ranges::contains(metadata->codeChallengeMethodsSupported, std::string{"S256"}))
+            metadata->issuer == result.issuer)
         {
             result.issuer = QString::fromStdString(metadata->issuer);
             result.authorizationEndpoint = QString::fromStdString(metadata->authorizationEndpoint);
             result.tokenEndpoint = QString::fromStdString(metadata->tokenEndpoint);
-            const bool publicClient = std::ranges::contains(
-                metadata->tokenEndpointAuthMethodsSupported, std::string{"none"});
-            result.registrationEndpoint =
-                metadata->registrationEndpoint.has_value() && publicClient
-                    ? QString::fromStdString(*metadata->registrationEndpoint)
-                    : QString{};
-            result.refreshTokensSupported =
-                std::ranges::contains(metadata->grantTypesSupported, std::string{"refresh_token"});
             if (result.scopes.isEmpty())
                 result.scopes = strings(metadata->scopesSupported);
+            const bool openPublicClient =
+                metadata->registrationEndpoint.has_value() &&
+                std::ranges::contains(metadata->responseTypesSupported, std::string{"code"}) &&
+                std::ranges::contains(metadata->grantTypesSupported,
+                                      std::string{"authorization_code"}) &&
+                std::ranges::contains(metadata->grantTypesSupported,
+                                      std::string{"refresh_token"}) &&
+                std::ranges::contains(metadata->tokenEndpointAuthMethodsSupported,
+                                      std::string{"none"}) &&
+                std::ranges::contains(metadata->codeChallengeMethodsSupported,
+                                      std::string{"S256"}) &&
+                metadata->authorizationResponseIssParameterSupported &&
+                !requestedScopes(result.scopes).isEmpty();
+            if (openPublicClient)
+            {
+                result.registrationEndpoint =
+                    QString::fromStdString(*metadata->registrationEndpoint);
+                result.refreshTokensSupported = true;
+            }
         }
         appendOAuthFeatures(result, !result.registrationEndpoint.isEmpty());
         result.succeeded = true;
@@ -479,15 +548,21 @@ namespace javelin::jmap::auth
             co_return result;
         }
 
+        const auto scopes = requestedScopes(request.discovery.scopes);
         detail::RegistrationRequest registration{
-            .redirectUris = {request.redirectUri.toStdString()},
+            .redirectUris = {registrationRedirectUri(request.redirectUri).toStdString()},
             .clientName = "Javelin Mail",
             .tokenEndpointAuthMethod = "none",
-            .grantTypes = {"authorization_code"},
+            .grantTypes = {"authorization_code", "refresh_token"},
             .responseTypes = {"code"},
+            .scope = scopes.join(QLatin1Char(' ')).toStdString(),
+            .clientUri = "https://javelin.app/",
+            .logoUri = "https://javelin.app/icon.svg",
+            .tosUri = "https://javelin.app/terms",
+            .policyUri = "https://javelin.app/privacy",
+            .softwareId = "5f414a46-fef7-53b4-b82a-bdc4818fe0dc",
+            .softwareVersion = QCoreApplication::applicationVersion().toStdString(),
         };
-        if (request.discovery.refreshTokensSupported)
-            registration.grantTypes.push_back("refresh_token");
         std::string registrationJson;
         if (glz::write_json(registration, registrationJson))
         {
@@ -501,6 +576,12 @@ namespace javelin::jmap::auth
         if (registrationResponse.statusCode < 200 || registrationResponse.statusCode >= 300 ||
             !registered.has_value() || registered->clientId.empty())
         {
+            qCWarning(oauthLog).noquote()
+                << "OAuth dynamic registration rejected"
+                << QUrl{request.discovery.registrationEndpoint}.host() << "status"
+                << registrationResponse.statusCode
+                << (registrationResponse.error.isEmpty() ? oauthErrorText(registrationResponse.body)
+                                                         : registrationResponse.error);
             result.error = QStringLiteral("The server did not accept automatic app registration. "
                                           "You can still sign in manually.");
             co_return result;
@@ -516,7 +597,6 @@ namespace javelin::jmap::auth
         const auto challenge = QString::fromLatin1(
             QCryptographicHash::hash(flow.codeVerifier.toLatin1(), QCryptographicHash::Sha256)
                 .toBase64(QByteArray::Base64UrlEncoding | QByteArray::OmitTrailingEquals));
-        const auto scopes = requestedScopes(flow.discovery.scopes);
         QUrl authorizationUrl{flow.discovery.authorizationEndpoint};
         QUrlQuery query;
         query.addQueryItem(QStringLiteral("response_type"), QStringLiteral("code"));
@@ -527,6 +607,8 @@ namespace javelin::jmap::auth
         query.addQueryItem(QStringLiteral("state"), flow.state);
         query.addQueryItem(QStringLiteral("code_challenge"), challenge);
         query.addQueryItem(QStringLiteral("code_challenge_method"), QStringLiteral("S256"));
+        query.addQueryItem(QStringLiteral("resource"), flow.discovery.sessionUrl);
+        query.addQueryItem(QStringLiteral("login_hint"), flow.discovery.emailAddress);
         authorizationUrl.setQuery(query);
 
         result.flowId = QUuid::createUuid().toString(QUuid::WithoutBraces);
@@ -545,7 +627,8 @@ namespace javelin::jmap::auth
                 QStringLiteral("This sign-in attempt has expired. Please try again."));
         auto flow = std::move(found->second);
         m_pendingFlows.erase(found);
-        if (request.state != flow.state || request.code.isEmpty())
+        if (request.state != flow.state || request.code.isEmpty() ||
+            request.issuer != flow.discovery.issuer)
             co_return authenticationError(
                 QStringLiteral("The browser returned an invalid sign-in response."));
 

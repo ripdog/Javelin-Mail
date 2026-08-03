@@ -266,8 +266,13 @@ namespace javelin::app
                                             m_options.socketPath});
                 const auto nullDevice = QProcess::nullDevice();
                 daemonProcess.setStandardInputFile(nullDevice);
-                daemonProcess.setStandardOutputFile(nullDevice);
-                daemonProcess.setStandardErrorFile(nullDevice);
+                if (qEnvironmentVariableIsSet("JAVELIN_FORWARD_DAEMON_STDIO"))
+                    daemonProcess.setProcessChannelMode(QProcess::ForwardedChannels);
+                else
+                {
+                    daemonProcess.setStandardOutputFile(nullDevice);
+                    daemonProcess.setStandardErrorFile(nullDevice);
+                }
                 if (!daemonProcess.startDetached())
                 {
                     metrics.finish(QStringLiteral("error"), QStringLiteral("stage=start_daemon"));

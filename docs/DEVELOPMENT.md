@@ -81,7 +81,10 @@ make run
 ```
 
 `make run` sources the generated build-tree prefix before launching `javelin`. When no daemon is
-running, the GUI recovery window can start the matching build-tree `javelind` process.
+running, the GUI recovery window can start the matching build-tree `javelind` process. This target
+also sets `JAVELIN_FORWARD_DAEMON_STDIO=1`, so a daemon started by the recovery window keeps the
+terminal's standard output and error streams. Normal desktop and installed launches continue to
+detach the daemon from terminal output.
 
 Additional GUI arguments can be passed with:
 
