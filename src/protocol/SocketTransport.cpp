@@ -498,6 +498,33 @@ namespace javelin::protocol
                               [&reader](QString& value) { return reader.string(value); });
         }
 
+        bool writeWorkspaceSettings(PayloadWriter& writer, const WorkspaceSettings& workspace,
+                                    const BoundaryLimits& limits)
+        {
+            return writer.dword(workspace.formatVersion) &&
+                   writer.bytes(workspace.mainWindowState) &&
+                   writeVector(
+                       writer, workspace.calendarColorOverrides, limits.maximumCollectionItems,
+                       QStringLiteral("workspace.calendarColorOverrides"),
+                       [&writer](const CalendarColorOverride& value)
+                       { return writer.string(value.calendarId) && writer.string(value.color); });
+        }
+
+        bool readWorkspaceSettings(PayloadReader& reader, WorkspaceSettings& workspace,
+                                   const BoundaryLimits& limits)
+        {
+            if (!reader.dword(workspace.formatVersion) ||
+                !reader.bytes(workspace.mainWindowState) ||
+                static_cast<std::size_t>(workspace.mainWindowState.size()) >
+                    limits.maximumWorkspaceBytes)
+                return false;
+            return readVector(
+                reader, workspace.calendarColorOverrides, limits.maximumCollectionItems,
+                QStringLiteral("workspace.calendarColorOverrides"),
+                [&reader](CalendarColorOverride& value)
+                { return reader.string(value.calendarId) && reader.string(value.color); });
+        }
+
         bool writeSettingsUpdate(PayloadWriter& writer, const SettingsUpdate& update,
                                  const BoundaryLimits& limits)
         {
@@ -567,8 +594,14 @@ namespace javelin::protocol
 
             if (!writer.boolean(update.undoSendDelaySeconds.has_value()))
                 return false;
-            return !update.undoSendDelaySeconds.has_value() ||
-                   writer.integer(*update.undoSendDelaySeconds);
+            if (update.undoSendDelaySeconds.has_value() &&
+                !writer.integer(*update.undoSendDelaySeconds))
+                return false;
+
+            if (!writer.boolean(update.workspace.has_value()))
+                return false;
+            return !update.workspace.has_value() ||
+                   writeWorkspaceSettings(writer, *update.workspace, limits);
         }
 
         bool readSettingsUpdate(PayloadReader& reader, SettingsUpdate& update,
@@ -668,6 +701,15 @@ namespace javelin::protocol
                 if (!reader.integer(*update.undoSendDelaySeconds))
                     return false;
             }
+
+            if (!reader.boolean(present))
+                return false;
+            if (present)
+            {
+                update.workspace.emplace();
+                if (!readWorkspaceSettings(reader, *update.workspace, limits))
+                    return false;
+            }
             return true;
         }
 
@@ -747,7 +789,8 @@ namespace javelin::protocol
                    writer.integer(snapshot.appearance.messageColorMode) &&
                    writer.boolean(snapshot.attachments.alwaysAsk) &&
                    writer.string(snapshot.attachments.directory) &&
-                   writer.integer(snapshot.undoSendDelaySeconds);
+                   writer.integer(snapshot.undoSendDelaySeconds) &&
+                   writeWorkspaceSettings(writer, snapshot.workspace, limits);
         }
 
         bool readSettingsSnapshot(PayloadReader& reader, SettingsSnapshot& snapshot,
@@ -778,7 +821,8 @@ namespace javelin::protocol
                    reader.integer(snapshot.appearance.messageColorMode) &&
                    reader.boolean(snapshot.attachments.alwaysAsk) &&
                    reader.string(snapshot.attachments.directory) &&
-                   reader.integer(snapshot.undoSendDelaySeconds);
+                   reader.integer(snapshot.undoSendDelaySeconds) &&
+                   readWorkspaceSettings(reader, snapshot.workspace, limits);
         }
 
         struct EncodedPayload
@@ -2458,7 +2502,7 @@ namespace javelin::protocol
     bool SocketDaemonEndpoint::enqueue(PendingFrame frame)
     {
         const auto frameBytes = static_cast<std::size_t>(frame.data.size());
-        if (m_pendingWrites.size() + (m_currentWrite.has_value() ? 1U : 0U) >=
+        if (m_pendingWrites.size() + (m_currentWrite != nullptr ? 1U : 0U) >=
                 m_options.maximumQueuedFrames ||
             m_queuedBytes + frameBytes > m_options.maximumQueuedBytes)
             return false;
@@ -2520,7 +2564,7 @@ namespace javelin::protocol
                            .correlation = 0,
                            .coalescible = coalescible,
                            .event = event};
-        if (coalescible && (m_pendingWrites.size() + (m_currentWrite.has_value() ? 1U : 0U) >=
+        if (coalescible && (m_pendingWrites.size() + (m_currentWrite != nullptr ? 1U : 0U) >=
                                 m_options.maximumQueuedFrames ||
                             m_queuedBytes + static_cast<std::size_t>(frame.data.size()) >
                                 m_options.maximumQueuedBytes))
@@ -2536,7 +2580,7 @@ namespace javelin::protocol
     {
         if (m_socket == nullptr)
             return;
-        if (m_currentWrite.has_value())
+        if (m_currentWrite != nullptr)
         {
             auto& completed = *m_currentWrite;
             if (completed.offset != static_cast<std::size_t>(completed.data.size()) ||
@@ -2551,7 +2595,7 @@ namespace javelin::protocol
                 disconnect(m_closeReason, m_closeDetail);
             return;
         }
-        m_currentWrite = std::move(m_pendingWrites.front());
+        m_currentWrite = std::make_unique<PendingFrame>(std::move(m_pendingWrites.front()));
         m_pendingWrites.pop_front();
         auto& frame = *m_currentWrite;
         while (frame.offset < static_cast<std::size_t>(frame.data.size()))
@@ -2939,7 +2983,7 @@ namespace javelin::protocol
     std::optional<SocketTransportError> SocketDaemonClient::enqueue(PendingFrame frame)
     {
         const auto bytes = static_cast<std::size_t>(frame.data.size());
-        if (m_pendingWrites.size() + (m_currentWrite.has_value() ? 1U : 0U) >=
+        if (m_pendingWrites.size() + (m_currentWrite != nullptr ? 1U : 0U) >=
                 m_options.maximumQueuedFrames ||
             m_queuedBytes + bytes > m_options.maximumQueuedBytes)
         {
@@ -3091,7 +3135,7 @@ namespace javelin::protocol
     {
         if (m_socket == nullptr)
             return;
-        if (m_currentWrite.has_value())
+        if (m_currentWrite != nullptr)
         {
             auto& completed = *m_currentWrite;
             if (completed.offset != static_cast<std::size_t>(completed.data.size()) ||
@@ -3102,7 +3146,7 @@ namespace javelin::protocol
         }
         if (m_pendingWrites.empty())
             return;
-        m_currentWrite = std::move(m_pendingWrites.front());
+        m_currentWrite = std::make_unique<PendingFrame>(std::move(m_pendingWrites.front()));
         m_pendingWrites.pop_front();
         auto& frame = *m_currentWrite;
         while (frame.offset < static_cast<std::size_t>(frame.data.size()))

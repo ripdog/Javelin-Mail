@@ -189,7 +189,7 @@ namespace javelin::protocol
         std::unique_ptr<QLocalSocket> m_socket;
         SocketFrameDecoder m_decoder;
         std::deque<PendingFrame> m_pendingWrites;
-        std::optional<PendingFrame> m_currentWrite;
+        std::unique_ptr<PendingFrame> m_currentWrite;
         std::size_t m_queuedBytes = 0;
         std::vector<ScopeId> m_activeScopes;
         bool m_handshakeComplete = false;
@@ -333,7 +333,7 @@ namespace javelin::protocol
         std::unique_ptr<QLocalSocket> m_socket;
         SocketFrameDecoder m_decoder;
         std::deque<PendingFrame> m_pendingWrites;
-        std::optional<PendingFrame> m_currentWrite;
+        std::unique_ptr<PendingFrame> m_currentWrite;
         std::map<std::uint64_t, ReceivedFrame> m_receivedReplies;
         std::map<std::uint64_t, std::unique_ptr<PendingAsyncReply>> m_asyncReplies;
         std::size_t m_queuedBytes = 0;

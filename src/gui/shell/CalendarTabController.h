@@ -25,6 +25,11 @@ namespace javelin::gui::calendar
     class MonthCalendarWidget;
 }
 
+namespace javelin::gui::settings
+{
+    class WorkspaceSettingsPort;
+}
+
 namespace javelin::gui::shell
 {
     enum class CalendarTabCommand
@@ -40,7 +45,8 @@ namespace javelin::gui::shell
         Q_OBJECT
 
       public:
-        CalendarTabController(javelin::jmap::calendar::CalendarReader& calendarReader,
+        CalendarTabController(javelin::gui::settings::WorkspaceSettingsPort& settings,
+                              javelin::jmap::calendar::CalendarReader& calendarReader,
                               javelin::app::CalendarCommandPort& calendarCommandPort,
                               QStackedWidget& contentStack, std::vector<TabState>& tabs,
                               QObject* parent = nullptr);
@@ -62,6 +68,7 @@ namespace javelin::gui::shell
         [[nodiscard]] javelin::gui::calendar::MonthCalendarWidget*
         widgetForTab(const TabState* tab) const;
 
+        javelin::gui::settings::WorkspaceSettingsPort& m_settings;
         javelin::jmap::calendar::CalendarReader& m_calendarReader;
         javelin::app::CalendarCommandPort& m_calendarCommandPort;
         QStackedWidget& m_contentStack;

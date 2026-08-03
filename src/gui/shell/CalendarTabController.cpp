@@ -31,10 +31,11 @@ namespace javelin::gui::shell
     Q_LOGGING_CATEGORY(logCalendarOperations, "user.operations")
 
     CalendarTabController::CalendarTabController(
+        javelin::gui::settings::WorkspaceSettingsPort& settings,
         javelin::jmap::calendar::CalendarReader& calendarReader,
         javelin::app::CalendarCommandPort& calendarCommandPort, QStackedWidget& contentStack,
         std::vector<TabState>& tabs, QObject* parent)
-        : QObject(parent), m_calendarReader(calendarReader),
+        : QObject(parent), m_settings(settings), m_calendarReader(calendarReader),
           m_calendarCommandPort(calendarCommandPort), m_contentStack(contentStack), m_tabs(tabs)
     {
     }
@@ -79,7 +80,7 @@ namespace javelin::gui::shell
             return;
         }
 
-        auto* widget = new javelin::gui::calendar::MonthCalendarWidget(&m_contentStack);
+        auto* widget = new javelin::gui::calendar::MonthCalendarWidget(m_settings, &m_contentStack);
         std::vector<javelin::gui::calendar::CalendarAccountDisplay> accountDisplays;
         accountDisplays.reserve(accounts->size());
         for (const auto& account : *accounts)

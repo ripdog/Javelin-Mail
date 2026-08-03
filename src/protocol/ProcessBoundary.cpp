@@ -298,6 +298,45 @@ namespace javelin::protocol
                                      .detail =
                                          QStringLiteral("delay is outside the allowed range")};
             }
+            if (request.update.workspace.has_value())
+            {
+                const auto& workspace = *request.update.workspace;
+                if (workspace.formatVersion != 1)
+                {
+                    return BoundaryError{.code = BoundaryErrorCode::InvalidRequest,
+                                         .field = QStringLiteral("update.workspace.formatVersion"),
+                                         .detail =
+                                             QStringLiteral("workspace format is unsupported")};
+                }
+                if (static_cast<std::size_t>(workspace.mainWindowState.size()) >
+                    limits.maximumWorkspaceBytes)
+                {
+                    return BoundaryError{
+                        .code = BoundaryErrorCode::ValueTooLarge,
+                        .field = QStringLiteral("update.workspace.mainWindowState"),
+                        .detail = QStringLiteral("workspace state exceeds the protocol limit")};
+                }
+                if (workspace.calendarColorOverrides.size() > limits.maximumCollectionItems)
+                {
+                    return BoundaryError{
+                        .code = BoundaryErrorCode::TooManyValues,
+                        .field = QStringLiteral("update.workspace.calendarColorOverrides"),
+                        .detail = QStringLiteral("collection exceeds the protocol limit")};
+                }
+                for (const auto& overrideValue : workspace.calendarColorOverrides)
+                {
+                    if (auto error = requiredStringError(
+                            overrideValue.calendarId,
+                            QStringLiteral("update.workspace.calendarColorOverrides.calendarId"),
+                            limits))
+                        return error;
+                    if (auto error = requiredStringError(
+                            overrideValue.color,
+                            QStringLiteral("update.workspace.calendarColorOverrides.color"),
+                            limits))
+                        return error;
+                }
+            }
             return std::nullopt;
         }
 
@@ -466,6 +505,18 @@ namespace javelin::protocol
                         size += sizeof(value.update.appearance->messageColorMode);
                     if (value.update.undoSendDelaySeconds.has_value())
                         size += sizeof(*value.update.undoSendDelaySeconds);
+                    if (value.update.workspace.has_value())
+                    {
+                        size += sizeof(value.update.workspace->formatVersion) +
+                                static_cast<std::size_t>(
+                                    value.update.workspace->mainWindowState.size());
+                        for (const auto& overrideValue :
+                             value.update.workspace->calendarColorOverrides)
+                        {
+                            size += stringSize(overrideValue.calendarId) +
+                                    stringSize(overrideValue.color);
+                        }
+                    }
                     return size;
                 }
                 else if constexpr (std::is_same_v<Request, CancelMaterializationScopeRequest> ||

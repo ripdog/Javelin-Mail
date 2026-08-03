@@ -1,5 +1,9 @@
 #include "app/SettingsRepository.h"
 
+#include <QDataStream>
+#include <QIODevice>
+#include <QVariantMap>
+
 #include <algorithm>
 #include <utility>
 
@@ -37,9 +41,19 @@ namespace javelin::app
         constexpr auto attachmentsAlwaysAskKey = "alwaysAsk";
         constexpr auto attachmentsDirectoryKey = "directory";
         constexpr auto composeUndoSendDelayKey = "compose/undoSendDelaySeconds";
-        constexpr int settingsSchemaVersion = 1;
+        constexpr auto workspaceGroup = "workspace";
+        constexpr auto workspaceFormatVersionKey = "formatVersion";
+        constexpr auto workspaceWindowStateKey = "mainWindowState";
+        constexpr auto workspaceCalendarColorsKey = "calendarColorOverrides";
+        constexpr auto workspaceCalendarIdKey = "calendarId";
+        constexpr auto workspaceColorKey = "color";
+        constexpr auto legacyWindowGroup = "mainWindow";
+        constexpr auto legacyCalendarColorsKey = "calendar/colorOverrides";
+        constexpr int settingsSchemaVersion = 2;
+        constexpr int workspaceFormatVersion = 1;
         constexpr int maximumAccounts = 256;
         constexpr int maximumSelections = 256;
+        constexpr int maximumWorkspaceBytes = 8 * 1024 * 1024;
 
         [[nodiscard]] QString settingKey(const char* value)
         {
@@ -152,6 +166,119 @@ namespace javelin::app
             settings.endGroup();
         }
 
+        [[nodiscard]] std::variant<QByteArray, SettingsRepositoryError>
+        encodeWorkspaceMap(const QVariantMap& values)
+        {
+            QByteArray encoded;
+            QDataStream stream{&encoded, QIODeviceBase::WriteOnly};
+            stream.setByteOrder(QDataStream::BigEndian);
+            stream.setVersion(QDataStream::Qt_6_6);
+            stream << values;
+            if (stream.status() != QDataStream::Ok)
+            {
+                return SettingsRepositoryError{
+                    .code = SettingsRepositoryErrorCode::MigrationFailed,
+                    .key = settingKey(legacyWindowGroup),
+                    .detail = QStringLiteral("could not encode legacy main-window state")};
+            }
+            return encoded;
+        }
+
+        [[nodiscard]] std::optional<SettingsRepositoryError>
+        readWorkspace(QSettings& settings, javelin::protocol::WorkspaceSettings& workspace,
+                      const bool includeLegacyWorkspace)
+        {
+            workspace.formatVersion = workspaceFormatVersion;
+            if (includeLegacyWorkspace)
+            {
+                QVariantMap mainWindowValues;
+                settings.beginGroup(settingKey(legacyWindowGroup));
+                for (const auto& key : settings.allKeys())
+                    mainWindowValues.insert(key, settings.value(key));
+                settings.endGroup();
+                if (!mainWindowValues.isEmpty())
+                {
+                    auto encoded = encodeWorkspaceMap(mainWindowValues);
+                    if (const auto* error = std::get_if<SettingsRepositoryError>(&encoded))
+                        return *error;
+                    workspace.mainWindowState = std::get<QByteArray>(std::move(encoded));
+                }
+
+                const auto legacyColors =
+                    settings.value(settingKey(legacyCalendarColorsKey)).toMap();
+                workspace.calendarColorOverrides.reserve(
+                    static_cast<std::size_t>(legacyColors.size()));
+                for (auto it = legacyColors.cbegin(); it != legacyColors.cend(); ++it)
+                {
+                    const auto color = it.value().toString().trimmed();
+                    if (!it.key().trimmed().isEmpty() && !color.isEmpty())
+                    {
+                        workspace.calendarColorOverrides.push_back(
+                            {.calendarId = it.key().trimmed(), .color = color});
+                    }
+                }
+                return std::nullopt;
+            }
+
+            settings.beginGroup(settingKey(workspaceGroup));
+            bool ok = false;
+            workspace.formatVersion =
+                settings.value(settingKey(workspaceFormatVersionKey), workspaceFormatVersion)
+                    .toUInt(&ok);
+            if (!ok || workspace.formatVersion != workspaceFormatVersion)
+            {
+                settings.endGroup();
+                return invalidValue(settingKey(workspaceFormatVersionKey),
+                                    QStringLiteral("unsupported workspace format"));
+            }
+            workspace.mainWindowState =
+                settings.value(settingKey(workspaceWindowStateKey)).toByteArray();
+            if (workspace.mainWindowState.size() > maximumWorkspaceBytes)
+            {
+                settings.endGroup();
+                return invalidValue(settingKey(workspaceWindowStateKey),
+                                    QStringLiteral("workspace state is too large"));
+            }
+            const auto colorCount = settings.beginReadArray(settingKey(workspaceCalendarColorsKey));
+            if (colorCount < 0 || colorCount > maximumSelections)
+            {
+                settings.endArray();
+                settings.endGroup();
+                return invalidValue(settingKey(workspaceCalendarColorsKey),
+                                    QStringLiteral("invalid calendar color count"));
+            }
+            workspace.calendarColorOverrides.reserve(static_cast<std::size_t>(colorCount));
+            for (int index = 0; index < colorCount; ++index)
+            {
+                settings.setArrayIndex(index);
+                auto calendarId =
+                    settings.value(settingKey(workspaceCalendarIdKey)).toString().trimmed();
+                auto color = settings.value(settingKey(workspaceColorKey)).toString().trimmed();
+                if (calendarId.isEmpty() || color.isEmpty())
+                {
+                    settings.endArray();
+                    settings.endGroup();
+                    return invalidValue(settingKey(workspaceCalendarColorsKey),
+                                        QStringLiteral("calendar color entry is incomplete"));
+                }
+                workspace.calendarColorOverrides.push_back(
+                    {.calendarId = std::move(calendarId), .color = std::move(color)});
+            }
+            settings.endArray();
+            settings.endGroup();
+            std::ranges::sort(workspace.calendarColorOverrides, {},
+                              &javelin::protocol::CalendarColorOverride::calendarId);
+            const auto duplicate =
+                std::ranges::adjacent_find(workspace.calendarColorOverrides, {},
+                                           &javelin::protocol::CalendarColorOverride::calendarId);
+            if (duplicate != workspace.calendarColorOverrides.end())
+            {
+                return invalidValue(settingKey(workspaceCalendarColorsKey),
+                                    QStringLiteral("calendar color ids must be unique"));
+            }
+            return std::nullopt;
+        }
+
         [[nodiscard]] std::optional<SettingsRepositoryError>
         applyUpdate(javelin::protocol::SettingsSnapshot& snapshot,
                     const javelin::protocol::SettingsUpdate& update)
@@ -174,6 +301,8 @@ namespace javelin::app
                 snapshot.attachments = *update.attachments;
             if (update.undoSendDelaySeconds.has_value())
                 snapshot.undoSendDelaySeconds = *update.undoSendDelaySeconds;
+            if (update.workspace.has_value())
+                snapshot.workspace = *update.workspace;
 
             normalizeList(snapshot.translation.autoTranslateSenders);
             normalizeList(snapshot.translation.autoTranslateDomains);
@@ -182,6 +311,29 @@ namespace javelin::app
                 snapshot.translation.targetLanguage.trimmed().toLower();
             if (snapshot.translation.targetLanguage.isEmpty())
                 snapshot.translation.targetLanguage = QStringLiteral("en");
+
+            if (snapshot.workspace.formatVersion != workspaceFormatVersion)
+                return invalidValue(settingKey(workspaceFormatVersionKey),
+                                    QStringLiteral("unsupported workspace format"));
+            if (snapshot.workspace.mainWindowState.size() > maximumWorkspaceBytes)
+                return invalidValue(settingKey(workspaceWindowStateKey),
+                                    QStringLiteral("workspace state is too large"));
+            for (auto& overrideValue : snapshot.workspace.calendarColorOverrides)
+            {
+                overrideValue.calendarId = overrideValue.calendarId.trimmed();
+                overrideValue.color = overrideValue.color.trimmed();
+                if (overrideValue.calendarId.isEmpty() || overrideValue.color.isEmpty())
+                    return invalidValue(settingKey(workspaceCalendarColorsKey),
+                                        QStringLiteral("calendar color entry is incomplete"));
+            }
+            std::ranges::sort(snapshot.workspace.calendarColorOverrides, {},
+                              &javelin::protocol::CalendarColorOverride::calendarId);
+            const auto duplicate =
+                std::ranges::adjacent_find(snapshot.workspace.calendarColorOverrides, {},
+                                           &javelin::protocol::CalendarColorOverride::calendarId);
+            if (duplicate != snapshot.workspace.calendarColorOverrides.end())
+                return invalidValue(settingKey(workspaceCalendarColorsKey),
+                                    QStringLiteral("calendar color ids must be unique"));
             return std::nullopt;
         }
     } // namespace
@@ -266,21 +418,23 @@ namespace javelin::app
         if (const auto error = settingsStatusError(
                 settings, SettingsRepositoryErrorCode::ReadFailed, settingKey(schemaVersionKey)))
             return error;
-        if (settings.contains(settingKey(schemaVersionKey)))
+        const bool hasSchema = settings.contains(settingKey(schemaVersionKey));
+        if (hasSchema)
         {
             bool ok = false;
             const auto version = settings.value(settingKey(schemaVersionKey)).toUInt(&ok);
-            if (!ok || version != settingsSchemaVersion)
+            if (!ok || (version != 1 && version != settingsSchemaVersion))
             {
                 return SettingsRepositoryError{
                     .code = SettingsRepositoryErrorCode::UnsupportedSchema,
                     .key = settingKey(schemaVersionKey),
                     .detail = QStringLiteral("unsupported settings schema")};
             }
-            return std::nullopt;
+            if (version == settingsSchemaVersion)
+                return std::nullopt;
         }
 
-        const auto legacy = readSnapshot();
+        const auto legacy = readSnapshot(true);
         if (const auto* error = std::get_if<SettingsRepositoryError>(&legacy))
         {
             return SettingsRepositoryError{.code = SettingsRepositoryErrorCode::MigrationFailed,
@@ -290,16 +444,50 @@ namespace javelin::app
         auto migrated = std::get<javelin::protocol::SettingsSnapshot>(legacy);
         migrated.schemaVersion = settingsSchemaVersion;
         migrated.revision = {};
-        if (const auto error = writeSnapshot(migrated))
+        if (const auto error = writeSnapshot(migrated, false))
         {
             return SettingsRepositoryError{.code = SettingsRepositoryErrorCode::MigrationFailed,
                                            .key = error->key,
                                            .detail = error->detail};
         }
+        const auto verified = readSnapshot();
+        const auto* verifiedSnapshot = std::get_if<javelin::protocol::SettingsSnapshot>(&verified);
+        if (verifiedSnapshot == nullptr || *verifiedSnapshot != migrated)
+        {
+            const auto* error = std::get_if<SettingsRepositoryError>(&verified);
+            return SettingsRepositoryError{
+                .code = SettingsRepositoryErrorCode::MigrationFailed,
+                .key = error == nullptr ? settingKey(schemaVersionKey) : error->key,
+                .detail = error == nullptr
+                              ? QStringLiteral("settings migration verification failed")
+                              : error->detail};
+        }
+
+        settings.setValue(settingKey(schemaVersionKey), settingsSchemaVersion);
+        settings.sync();
+        if (const auto error =
+                settingsStatusError(settings, SettingsRepositoryErrorCode::MigrationFailed,
+                                    settingKey(schemaVersionKey)))
+            return error;
+        if (settings.value(settingKey(schemaVersionKey)).toUInt() != settingsSchemaVersion)
+        {
+            return SettingsRepositoryError{
+                .code = SettingsRepositoryErrorCode::MigrationFailed,
+                .key = settingKey(schemaVersionKey),
+                .detail = QStringLiteral("settings schema verification failed")};
+        }
+
+        settings.remove(settingKey(legacyWindowGroup));
+        settings.remove(settingKey(legacyCalendarColorsKey));
+        settings.sync();
+        if (const auto error =
+                settingsStatusError(settings, SettingsRepositoryErrorCode::MigrationFailed,
+                                    settingKey(schemaVersionKey)))
+            return error;
         return std::nullopt;
     }
 
-    SettingsReadResult SettingsRepository::readSnapshot()
+    SettingsReadResult SettingsRepository::readSnapshot(const bool includeLegacyWorkspace)
     {
         auto& settings = *m_settings;
         javelin::protocol::SettingsSnapshot snapshot;
@@ -433,11 +621,14 @@ namespace javelin::app
         if (!ok || snapshot.undoSendDelaySeconds < 1 || snapshot.undoSendDelaySeconds > 120)
             return invalidValue(settingKey(composeUndoSendDelayKey),
                                 QStringLiteral("undo-send delay is outside the supported range"));
+        if (const auto error = readWorkspace(settings, snapshot.workspace, includeLegacyWorkspace))
+            return *error;
         return snapshot;
     }
 
     std::optional<SettingsRepositoryError>
-    SettingsRepository::writeSnapshot(const javelin::protocol::SettingsSnapshot& snapshot)
+    SettingsRepository::writeSnapshot(const javelin::protocol::SettingsSnapshot& snapshot,
+                                      const bool includeSchemaVersion)
     {
         auto& settings = *m_settings;
         settings.beginGroup(settingKey(accountsGroup));
@@ -494,7 +685,25 @@ namespace javelin::app
                               settingKey(attachmentsDirectoryKey),
                           snapshot.attachments.directory);
         settings.setValue(settingKey(composeUndoSendDelayKey), snapshot.undoSendDelaySeconds);
-        settings.setValue(settingKey(schemaVersionKey), snapshot.schemaVersion);
+        settings.beginGroup(settingKey(workspaceGroup));
+        settings.setValue(settingKey(workspaceFormatVersionKey), snapshot.workspace.formatVersion);
+        settings.setValue(settingKey(workspaceWindowStateKey), snapshot.workspace.mainWindowState);
+        settings.beginWriteArray(
+            settingKey(workspaceCalendarColorsKey),
+            static_cast<int>(snapshot.workspace.calendarColorOverrides.size()));
+        for (int index = 0;
+             index < static_cast<int>(snapshot.workspace.calendarColorOverrides.size()); ++index)
+        {
+            settings.setArrayIndex(index);
+            const auto& overrideValue =
+                snapshot.workspace.calendarColorOverrides[static_cast<std::size_t>(index)];
+            settings.setValue(settingKey(workspaceCalendarIdKey), overrideValue.calendarId);
+            settings.setValue(settingKey(workspaceColorKey), overrideValue.color);
+        }
+        settings.endArray();
+        settings.endGroup();
+        if (includeSchemaVersion)
+            settings.setValue(settingKey(schemaVersionKey), snapshot.schemaVersion);
         settings.setValue(settingKey(revisionKey),
                           static_cast<qulonglong>(snapshot.revision.value));
         settings.sync();

@@ -17,6 +17,11 @@ class QGridLayout;
 class QMenu;
 class QResizeEvent;
 
+namespace javelin::gui::settings
+{
+    class WorkspaceSettingsPort;
+}
+
 namespace javelin::gui::calendar
 {
     struct MonthEvent
@@ -59,7 +64,8 @@ namespace javelin::gui::calendar
         Q_OBJECT
 
       public:
-        explicit MonthCalendarWidget(QWidget* parent = nullptr);
+        explicit MonthCalendarWidget(javelin::gui::settings::WorkspaceSettingsPort& settings,
+                                     QWidget* parent = nullptr);
 
         void setLocale(const QLocale& locale);
         void setDisplayedMonth(const QDate& month);
@@ -112,7 +118,9 @@ namespace javelin::gui::calendar
         void selectDate(const QDate& date, bool activate);
         void showDayAgenda(const QDate& date);
         void scheduleEventRebuild();
+        void reloadCalendarColors();
 
+        javelin::gui::settings::WorkspaceSettingsPort& m_settings;
         QLocale m_locale;
         QDate m_displayedMonth;
         QDate m_selectedDate;

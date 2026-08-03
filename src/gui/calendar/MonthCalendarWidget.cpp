@@ -1,5 +1,6 @@
 #include "gui/calendar/MonthCalendarWidget.h"
 #include "gui/calendar/MonthCalendarLayout.h"
+#include "gui/settings/WorkspaceSettingsPort.h"
 
 #include <QActionGroup>
 #include <QColorDialog>
@@ -19,7 +20,6 @@
 #include <QPixmap>
 #include <QPushButton>
 #include <QResizeEvent>
-#include <QSettings>
 #include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
@@ -203,9 +203,10 @@ namespace javelin::gui::calendar
         int m_overflow = 0;
     };
 
-    MonthCalendarWidget::MonthCalendarWidget(QWidget* parent)
-        : QWidget(parent), m_locale(QLocale{}), m_displayedMonth(QDate::currentDate()),
-          m_selectedDate(QDate::currentDate())
+    MonthCalendarWidget::MonthCalendarWidget(
+        javelin::gui::settings::WorkspaceSettingsPort& settings, QWidget* parent)
+        : QWidget(parent), m_settings(settings), m_locale(QLocale{}),
+          m_displayedMonth(QDate::currentDate()), m_selectedDate(QDate::currentDate())
     {
         setFocusPolicy(Qt::StrongFocus);
         auto* outer = new QVBoxLayout(this);
@@ -213,14 +214,15 @@ namespace javelin::gui::calendar
         m_title->setAlignment(Qt::AlignCenter);
         outer->addWidget(m_title);
         m_calendarMenu = new QMenu(this);
-        const auto storedColors =
-            QSettings{}.value(QStringLiteral("calendar/colorOverrides")).toMap();
-        for (auto it = storedColors.cbegin(); it != storedColors.cend(); ++it)
-        {
-            const auto color = it.value().value<QColor>();
-            if (color.isValid())
-                m_customCalendarColors.emplace(it.key().toStdString(), color);
-        }
+        reloadCalendarColors();
+        static_cast<void>(m_settings.connectWorkspaceChanged(this,
+                                                             [this]
+                                                             {
+                                                                 reloadCalendarColors();
+                                                                 applyCalendarColors();
+                                                                 rebuildCalendarMenu();
+                                                                 rebuildEvents();
+                                                             }));
         m_grid = new QGridLayout;
         m_grid->setSpacing(0);
         for (int column = 0; column < 7; ++column)
@@ -243,6 +245,18 @@ namespace javelin::gui::calendar
         connect(this, &MonthCalendarWidget::dayAgendaRequested, this,
                 &MonthCalendarWidget::showDayAgenda);
         rebuildDates();
+    }
+
+    void MonthCalendarWidget::reloadCalendarColors()
+    {
+        m_customCalendarColors.clear();
+        for (const auto& overrideValue : m_settings.workspaceSettings().calendarColorOverrides)
+        {
+            const QColor color{overrideValue.color};
+            if (color.isValid())
+                m_customCalendarColors.insert_or_assign(overrideValue.calendarId.toStdString(),
+                                                        color);
+        }
     }
 
     void MonthCalendarWidget::setLocale(const QLocale& locale)
@@ -520,11 +534,22 @@ namespace javelin::gui::calendar
         if (dialog.exec() != QDialog::Accepted)
             return;
 
+        auto workspace = m_settings.workspaceSettings();
+        workspace.calendarColorOverrides.clear();
+        workspace.calendarColorOverrides.reserve(pendingColors.size());
+        for (const auto& [id, color] : pendingColors)
+        {
+            workspace.calendarColorOverrides.push_back(
+                {.calendarId = QString::fromStdString(id), .color = color.name(QColor::HexRgb)});
+        }
+        if (const auto error = m_settings.updateWorkspace(std::move(workspace)))
+        {
+            QMessageBox::warning(this, QStringLiteral("Manage Calendars"),
+                                 QStringLiteral("The calendar colours could not be saved.\n\n%1")
+                                     .arg(error->detail));
+            return;
+        }
         m_customCalendarColors = std::move(pendingColors);
-        QVariantMap storedColors;
-        for (const auto& [id, color] : m_customCalendarColors)
-            storedColors.insert(QString::fromStdString(id), color);
-        QSettings{}.setValue(QStringLiteral("calendar/colorOverrides"), storedColors);
         applyCalendarColors();
         rebuildCalendarMenu();
         rebuildEvents();

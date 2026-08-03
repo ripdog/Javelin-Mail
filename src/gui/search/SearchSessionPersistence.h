@@ -2,7 +2,8 @@
 
 #include "app/SearchSession.h"
 
-class QSettings;
+#include <QString>
+#include <QVariantMap>
 
 namespace javelin::gui::search
 {
@@ -13,7 +14,9 @@ namespace javelin::gui::search
         javelin::app::RestoredSearchState restored;
     };
 
-    [[nodiscard]] PersistedSearchState readSearchSessionSettings(const QSettings& settings);
-    void writeSearchSessionSettings(QSettings& settings, const PersistedSearchState& state);
+    [[nodiscard]] PersistedSearchState readSearchSessionSettings(const QVariantMap& settings,
+                                                                 const QString& prefix);
+    void writeSearchSessionSettings(QVariantMap& settings, const QString& prefix,
+                                    const PersistedSearchState& state);
 
 } // namespace javelin::gui::search

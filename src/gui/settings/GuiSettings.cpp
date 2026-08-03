@@ -64,9 +64,9 @@ namespace javelin::gui::settings
 
     bool GuiSettings::hasNotificationMailboxSelection(const QStringView accountId) const
     {
-        const auto found = std::ranges::find(snapshot().notificationMailboxSelections,
-                                             accountId.toString(),
-                                             &javelin::protocol::MailboxSelectionSettings::accountId);
+        const auto found =
+            std::ranges::find(snapshot().notificationMailboxSelections, accountId.toString(),
+                              &javelin::protocol::MailboxSelectionSettings::accountId);
         return found != snapshot().notificationMailboxSelections.end() && found->configured;
     }
 
@@ -110,6 +110,11 @@ namespace javelin::gui::settings
         return snapshot().undoSendDelaySeconds;
     }
 
+    const javelin::protocol::WorkspaceSettings& GuiSettings::workspaceSettings() const
+    {
+        return snapshot().workspace;
+    }
+
     std::optional<javelin::protocol::BoundaryError>
     GuiSettings::update(javelin::protocol::SettingsUpdate update)
     {
@@ -150,8 +155,18 @@ namespace javelin::gui::settings
             value.attachments = std::move(*update.attachments);
         if (update.undoSendDelaySeconds.has_value())
             value.undoSendDelaySeconds = *update.undoSendDelaySeconds;
+        if (update.workspace.has_value())
+            value.workspace = std::move(*update.workspace);
         ++value.revision.value;
         return std::nullopt;
+    }
+
+    std::optional<javelin::protocol::BoundaryError>
+    GuiSettings::updateWorkspace(javelin::protocol::WorkspaceSettings workspace)
+    {
+        javelin::protocol::SettingsUpdate update;
+        update.workspace = std::move(workspace);
+        return this->update(std::move(update));
     }
 
     std::optional<javelin::protocol::BoundaryError>
@@ -159,8 +174,8 @@ namespace javelin::gui::settings
                                         const QString& cachedAccountId)
     {
         auto values = snapshot().accounts;
-        const auto found = std::ranges::find(values, configuredAccountId,
-                                             &javelin::protocol::AccountSettings::id);
+        const auto found =
+            std::ranges::find(values, configuredAccountId, &javelin::protocol::AccountSettings::id);
         if (found == values.end() ||
             std::ranges::contains(found->cachedAccountIds, cachedAccountId))
             return std::nullopt;
@@ -171,13 +186,14 @@ namespace javelin::gui::settings
     }
 
     std::optional<javelin::protocol::BoundaryError>
-    GuiSettings::saveResolvedSessionUrl(const QString& configuredAccountId, const QString& sessionUrl)
+    GuiSettings::saveResolvedSessionUrl(const QString& configuredAccountId,
+                                        const QString& sessionUrl)
     {
         if (sessionUrl.isEmpty())
             return std::nullopt;
         auto values = snapshot().accounts;
-        const auto found = std::ranges::find(values, configuredAccountId,
-                                             &javelin::protocol::AccountSettings::id);
+        const auto found =
+            std::ranges::find(values, configuredAccountId, &javelin::protocol::AccountSettings::id);
         if (found == values.end() || found->sessionUrl == sessionUrl)
             return std::nullopt;
         found->sessionUrl = sessionUrl;
@@ -191,6 +207,12 @@ namespace javelin::gui::settings
     {
         return m_port == nullptr ? QMetaObject::Connection{}
                                  : m_port->connectSettingsChanged(context, std::move(callback));
+    }
+
+    QMetaObject::Connection GuiSettings::connectWorkspaceChanged(QObject* context,
+                                                                 std::function<void()> callback)
+    {
+        return connectChanged(context, std::move(callback));
     }
 
     std::vector<javelin::protocol::AccountSettings>
@@ -207,7 +229,8 @@ namespace javelin::gui::settings
                 .sessionUrl = account.sessionUrl,
                 .loginEmail = account.loginEmail,
                 .apiKey = account.apiKey,
-                .cachedAccountIds = {account.cachedAccountIds.begin(), account.cachedAccountIds.end()},
+                .cachedAccountIds = {account.cachedAccountIds.begin(),
+                                     account.cachedAccountIds.end()},
             });
         }
         return result;
@@ -222,8 +245,9 @@ namespace javelin::gui::settings
         const std::vector<javelin::protocol::MailboxSelectionSettings>& selections,
         const QStringView accountId)
     {
-        const auto found = std::ranges::find(selections, accountId.toString(),
-                                             &javelin::protocol::MailboxSelectionSettings::accountId);
+        const auto found =
+            std::ranges::find(selections, accountId.toString(),
+                              &javelin::protocol::MailboxSelectionSettings::accountId);
         return found == selections.end() ? QStringList{} : stringList(found->mailboxIds);
     }
 } // namespace javelin::gui::settings

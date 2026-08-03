@@ -999,6 +999,7 @@ target_sources(javelin_gui PRIVATE
     src/gui/messageview/MessageAppearance.h
     src/gui/settings/GuiSettings.cpp
     src/gui/settings/GuiSettings.h
+    src/gui/settings/WorkspaceSettingsPort.h
 )
 qt_add_resources(javelin_gui "javelin_darkreader"
     PREFIX "/vendor/darkreader"
@@ -1159,6 +1160,7 @@ add_library(javelin_calendar_gui STATIC
     src/gui/calendar/MonthCalendarLayout.h
     src/gui/calendar/MonthCalendarWidget.cpp
     src/gui/calendar/MonthCalendarWidget.h
+    src/gui/settings/WorkspaceSettingsPort.h
     src/gui/calendar/EventDialog.cpp
     src/gui/calendar/EventDialog.h
     src/gui/calendar/RecurrenceDialog.cpp
@@ -1498,13 +1500,6 @@ if(javelind_links MATCHES "javelin_gui|Qt::(Widgets|WebEngine)")
 endif()
 
 function(javelin_assert_gui_settings_boundary target)
-    set(local_settings_sources
-        "src/gui/calendar/MonthCalendarWidget.cpp"
-        "src/gui/search/SearchSessionPersistence.cpp"
-        "src/gui/search/SearchSessionPersistence.h"
-        "src/gui/shell/MainWindowStateStore.cpp"
-        "src/gui/shell/MainWindowStateStore.h"
-    )
     get_target_property(target_sources ${target} SOURCES)
     foreach(source IN LISTS target_sources)
         if(IS_ABSOLUTE "${source}")
@@ -1516,10 +1511,6 @@ function(javelin_assert_gui_settings_boundary target)
             continue()
         endif()
         file(RELATIVE_PATH relative_source "${CMAKE_CURRENT_SOURCE_DIR}" "${source_path}")
-        list(FIND local_settings_sources "${relative_source}" local_settings_index)
-        if(local_settings_index GREATER_EQUAL 0)
-            continue()
-        endif()
         file(READ "${source_path}" source_contents)
         if(source_contents MATCHES "QSettings")
             message(FATAL_ERROR

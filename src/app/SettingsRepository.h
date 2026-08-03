@@ -43,9 +43,10 @@ namespace javelin::app
 
       private:
         [[nodiscard]] std::optional<SettingsRepositoryError> migrateIfNeeded();
-        [[nodiscard]] SettingsReadResult readSnapshot();
+        [[nodiscard]] SettingsReadResult readSnapshot(bool includeLegacyWorkspace = false);
         [[nodiscard]] std::optional<SettingsRepositoryError>
-        writeSnapshot(const javelin::protocol::SettingsSnapshot& snapshot);
+        writeSnapshot(const javelin::protocol::SettingsSnapshot& snapshot,
+                      bool includeSchemaVersion = true);
 
         std::unique_ptr<QSettings> m_settings;
     };

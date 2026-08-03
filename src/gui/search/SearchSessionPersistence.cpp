@@ -3,16 +3,21 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QSettings>
 
 namespace javelin::gui::search
 {
     namespace
     {
-        [[nodiscard]] std::optional<std::string> optionalStringSetting(const QSettings& settings,
+        [[nodiscard]] QString settingKey(const QString& prefix, const QString& key)
+        {
+            return prefix + key;
+        }
+
+        [[nodiscard]] std::optional<std::string> optionalStringSetting(const QVariantMap& settings,
+                                                                       const QString& prefix,
                                                                        const QString& key)
         {
-            const auto value = settings.value(key).toString();
+            const auto value = settings.value(settingKey(prefix, key)).toString();
             return value.isEmpty() ? std::nullopt : std::optional<std::string>{value.toStdString()};
         }
 
@@ -135,24 +140,23 @@ namespace javelin::gui::search
             };
         }
 
-        void writeOptionalField(QSettings& settings, const QString& key,
+        void writeOptionalField(QVariantMap& settings, const QString& prefix, const QString& key,
                                 const std::optional<std::string>& value)
         {
+            const auto fullKey = settingKey(prefix, key);
             if (value.has_value())
-            {
-                settings.setValue(key, QString::fromStdString(*value));
-            }
+                settings.insert(fullKey, QString::fromStdString(*value));
             else
-            {
-                settings.remove(key);
-            }
+                settings.remove(fullKey);
         }
     } // namespace
 
-    PersistedSearchState readSearchSessionSettings(const QSettings& settings)
+    PersistedSearchState readSearchSessionSettings(const QVariantMap& settings,
+                                                   const QString& prefix)
     {
         const auto cachedItems =
-            QJsonDocument::fromJson(settings.value(QStringLiteral("cachedItems")).toByteArray())
+            QJsonDocument::fromJson(
+                settings.value(settingKey(prefix, QStringLiteral("cachedItems"))).toByteArray())
                 .array();
         std::vector<javelin::jmap::cache::MessageListItem> items;
         items.reserve(static_cast<std::size_t>(cachedItems.size()));
@@ -167,35 +171,47 @@ namespace javelin::gui::search
         return PersistedSearchState{
             .criteria =
                 javelin::jmap::search::EmailSearchCriteria{
-                    .text = optionalStringSetting(settings, QStringLiteral("searchText")),
-                    .with = optionalStringSetting(settings, QStringLiteral("searchWith")),
-                    .from = optionalStringSetting(settings, QStringLiteral("searchFrom")),
-                    .to = optionalStringSetting(settings, QStringLiteral("searchTo")),
-                    .cc = optionalStringSetting(settings, QStringLiteral("searchCc")),
-                    .bcc = optionalStringSetting(settings, QStringLiteral("searchBcc")),
-                    .subject = optionalStringSetting(settings, QStringLiteral("searchSubject")),
-                    .body = optionalStringSetting(settings, QStringLiteral("searchBody")),
+                    .text = optionalStringSetting(settings, prefix, QStringLiteral("searchText")),
+                    .with = optionalStringSetting(settings, prefix, QStringLiteral("searchWith")),
+                    .from = optionalStringSetting(settings, prefix, QStringLiteral("searchFrom")),
+                    .to = optionalStringSetting(settings, prefix, QStringLiteral("searchTo")),
+                    .cc = optionalStringSetting(settings, prefix, QStringLiteral("searchCc")),
+                    .bcc = optionalStringSetting(settings, prefix, QStringLiteral("searchBcc")),
+                    .subject =
+                        optionalStringSetting(settings, prefix, QStringLiteral("searchSubject")),
+                    .body = optionalStringSetting(settings, prefix, QStringLiteral("searchBody")),
                 },
             .restored =
                 javelin::app::RestoredSearchState{
                     .page =
                         javelin::app::MessageListPage{
                             .offset = static_cast<std::size_t>(
-                                settings.value(QStringLiteral("offset"), 0).toULongLong()),
+                                settings.value(settingKey(prefix, QStringLiteral("offset")), 0)
+                                    .toULongLong()),
                             .installedOffset = std::nullopt,
                             .pendingOffset = std::nullopt,
                             .position = static_cast<std::size_t>(
-                                settings.value(QStringLiteral("position"), 0).toULongLong()),
+                                settings.value(settingKey(prefix, QStringLiteral("position")), 0)
+                                    .toULongLong()),
                             .returnedLimit = static_cast<std::size_t>(
-                                settings.value(QStringLiteral("returnedLimit"), 0).toULongLong()),
+                                settings
+                                    .value(settingKey(prefix, QStringLiteral("returnedLimit")), 0)
+                                    .toULongLong()),
                             .total =
-                                settings.value(QStringLiteral("total")).isValid()
-                                    ? std::optional<std::size_t>{static_cast<std::size_t>(
-                                          settings.value(QStringLiteral("total")).toULongLong())}
+                                settings.value(settingKey(prefix, QStringLiteral("total")))
+                                        .isValid()
+                                    ? std::optional<
+                                          std::size_t>{static_cast<std::size_t>(settings
+                                                                                    .value(
+                                                                                        settingKey(
+                                                                                            prefix, QStringLiteral(
+                                                                                                        "total")))
+                                                                                    .toULongLong())}
                                     : std::nullopt,
-                            .queryState = settings.value(QStringLiteral("queryState"))
-                                              .toString()
-                                              .toStdString(),
+                            .queryState =
+                                settings.value(settingKey(prefix, QStringLiteral("queryState")))
+                                    .toString()
+                                    .toStdString(),
                             .anchor = std::nullopt,
                             .items = std::move(items),
                             .cacheLoaded = true,
@@ -203,53 +219,62 @@ namespace javelin::gui::search
                             .stale = true,
                             .refreshError = {},
                         },
-                    .mode = settings.value(QStringLiteral("onlineSearch"), false).toBool()
-                                ? javelin::app::SearchMode::Online
-                                : javelin::app::SearchMode::Local,
+                    .mode =
+                        settings.value(settingKey(prefix, QStringLiteral("onlineSearch")), false)
+                                .toBool()
+                            ? javelin::app::SearchMode::Online
+                            : javelin::app::SearchMode::Local,
                     .sessionId =
-                        settings.value(QStringLiteral("searchSessionId")).toString().toStdString(),
+                        settings.value(settingKey(prefix, QStringLiteral("searchSessionId")))
+                            .toString()
+                            .toStdString(),
                 },
         };
     }
 
-    void writeSearchSessionSettings(QSettings& settings, const PersistedSearchState& state)
+    void writeSearchSessionSettings(QVariantMap& settings, const QString& prefix,
+                                    const PersistedSearchState& state)
     {
-        settings.setValue(QStringLiteral("type"), QStringLiteral("search"));
-        settings.setValue(QStringLiteral("onlineSearch"),
-                          state.restored.mode == javelin::app::SearchMode::Online);
-        settings.setValue(QStringLiteral("searchSessionId"),
-                          QString::fromStdString(state.restored.sessionId));
+        settings.insert(settingKey(prefix, QStringLiteral("type")), QStringLiteral("search"));
+        settings.insert(settingKey(prefix, QStringLiteral("onlineSearch")),
+                        state.restored.mode == javelin::app::SearchMode::Online);
+        settings.insert(settingKey(prefix, QStringLiteral("searchSessionId")),
+                        QString::fromStdString(state.restored.sessionId));
         const auto& criteria = state.criteria;
-        writeOptionalField(settings, QStringLiteral("searchText"), criteria.text);
-        writeOptionalField(settings, QStringLiteral("searchWith"), criteria.with);
-        writeOptionalField(settings, QStringLiteral("searchFrom"), criteria.from);
-        writeOptionalField(settings, QStringLiteral("searchTo"), criteria.to);
-        writeOptionalField(settings, QStringLiteral("searchCc"), criteria.cc);
-        writeOptionalField(settings, QStringLiteral("searchBcc"), criteria.bcc);
-        writeOptionalField(settings, QStringLiteral("searchSubject"), criteria.subject);
-        writeOptionalField(settings, QStringLiteral("searchBody"), criteria.body);
+        writeOptionalField(settings, prefix, QStringLiteral("searchText"), criteria.text);
+        writeOptionalField(settings, prefix, QStringLiteral("searchWith"), criteria.with);
+        writeOptionalField(settings, prefix, QStringLiteral("searchFrom"), criteria.from);
+        writeOptionalField(settings, prefix, QStringLiteral("searchTo"), criteria.to);
+        writeOptionalField(settings, prefix, QStringLiteral("searchCc"), criteria.cc);
+        writeOptionalField(settings, prefix, QStringLiteral("searchBcc"), criteria.bcc);
+        writeOptionalField(settings, prefix, QStringLiteral("searchSubject"), criteria.subject);
+        writeOptionalField(settings, prefix, QStringLiteral("searchBody"), criteria.body);
 
         const auto& page = state.restored.page;
-        settings.setValue(QStringLiteral("offset"), static_cast<qulonglong>(page.offset));
-        settings.setValue(QStringLiteral("position"), static_cast<qulonglong>(page.position));
-        settings.setValue(QStringLiteral("returnedLimit"),
-                          static_cast<qulonglong>(page.returnedLimit));
-        settings.setValue(QStringLiteral("queryState"), QString::fromStdString(page.queryState));
+        settings.insert(settingKey(prefix, QStringLiteral("offset")),
+                        static_cast<qulonglong>(page.offset));
+        settings.insert(settingKey(prefix, QStringLiteral("position")),
+                        static_cast<qulonglong>(page.position));
+        settings.insert(settingKey(prefix, QStringLiteral("returnedLimit")),
+                        static_cast<qulonglong>(page.returnedLimit));
+        settings.insert(settingKey(prefix, QStringLiteral("queryState")),
+                        QString::fromStdString(page.queryState));
         if (page.total.has_value())
         {
-            settings.setValue(QStringLiteral("total"), static_cast<qulonglong>(*page.total));
+            settings.insert(settingKey(prefix, QStringLiteral("total")),
+                            static_cast<qulonglong>(*page.total));
         }
         else
         {
-            settings.remove(QStringLiteral("total"));
+            settings.remove(settingKey(prefix, QStringLiteral("total")));
         }
         QJsonArray items;
         for (const auto& item : page.items)
         {
             items.push_back(serializeMessageListItem(item));
         }
-        settings.setValue(QStringLiteral("cachedItems"),
-                          QJsonDocument{items}.toJson(QJsonDocument::Compact));
+        settings.insert(settingKey(prefix, QStringLiteral("cachedItems")),
+                        QJsonDocument{items}.toJson(QJsonDocument::Compact));
     }
 
 } // namespace javelin::gui::search

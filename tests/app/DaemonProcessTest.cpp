@@ -107,7 +107,7 @@ TEST_CASE("daemon process migrates settings before exposing readiness", "[app][d
     const auto settings = process.handleGetSettings({});
     const auto* snapshot = std::get_if<javelin::protocol::SettingsSnapshotReply>(&settings);
     REQUIRE(snapshot != nullptr);
-    CHECK(snapshot->snapshot.schemaVersion == 1);
+    CHECK(snapshot->snapshot.schemaVersion == 2);
     CHECK(snapshot->snapshot.revision.value == 0);
 
     const auto update = process.handleUpdateSettings({
@@ -127,7 +127,8 @@ TEST_CASE("daemon process migrates settings before exposing readiness", "[app][d
                        },
                    .appearance = std::nullopt,
                    .attachments = std::nullopt,
-                   .undoSendDelaySeconds = std::nullopt},
+                   .undoSendDelaySeconds = std::nullopt,
+                   .workspace = std::nullopt},
     });
     const auto* updated = std::get_if<javelin::protocol::SettingsUpdated>(&update);
     REQUIRE(updated != nullptr);
@@ -215,7 +216,8 @@ TEST_CASE("daemon applies offline mailbox settings by cached JMAP account id",
                    .translation = std::nullopt,
                    .appearance = std::nullopt,
                    .attachments = std::nullopt,
-                   .undoSendDelaySeconds = std::nullopt},
+                   .undoSendDelaySeconds = std::nullopt,
+                   .workspace = std::nullopt},
     });
     REQUIRE(std::holds_alternative<javelin::protocol::SettingsUpdated>(enable));
 
@@ -254,7 +256,8 @@ TEST_CASE("daemon applies offline mailbox settings by cached JMAP account id",
                    .translation = std::nullopt,
                    .appearance = std::nullopt,
                    .attachments = std::nullopt,
-                   .undoSendDelaySeconds = std::nullopt},
+                   .undoSendDelaySeconds = std::nullopt,
+                   .workspace = std::nullopt},
     });
     REQUIRE(std::holds_alternative<javelin::protocol::SettingsUpdated>(disable));
     REQUIRE(scope.exec(QStringLiteral(
@@ -284,7 +287,8 @@ TEST_CASE("daemon applies offline mailbox settings by cached JMAP account id",
                    .translation = std::nullopt,
                    .appearance = std::nullopt,
                    .attachments = std::nullopt,
-                   .undoSendDelaySeconds = std::nullopt},
+                   .undoSendDelaySeconds = std::nullopt,
+                   .workspace = std::nullopt},
     });
     REQUIRE(std::holds_alternative<javelin::protocol::SettingsUpdated>(reenable));
     REQUIRE(scope.exec(QStringLiteral(

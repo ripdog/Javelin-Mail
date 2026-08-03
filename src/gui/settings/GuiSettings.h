@@ -4,6 +4,7 @@
 #include "app/TranslationApplicationPorts.h"
 #include "gui/messageview/MessageAppearance.h"
 #include "gui/settings/ConnectionSettings.h"
+#include "gui/settings/WorkspaceSettingsPort.h"
 
 #include <QMetaObject>
 #include <QStringList>
@@ -22,7 +23,7 @@ namespace javelin::gui::settings
         QString directory;
     };
 
-    class GuiSettings final
+    class GuiSettings final : public WorkspaceSettingsPort
     {
       public:
         explicit GuiSettings(javelin::app::SettingsPort& port);
@@ -41,6 +42,8 @@ namespace javelin::gui::settings
         messageAppearanceSettings() const;
         [[nodiscard]] AttachmentSaveSettings attachmentSaveSettings() const;
         [[nodiscard]] int undoSendDelaySeconds() const;
+        [[nodiscard]] const javelin::protocol::WorkspaceSettings&
+        workspaceSettings() const override;
 
         [[nodiscard]] std::optional<javelin::protocol::BoundaryError>
         update(javelin::protocol::SettingsUpdate update);
@@ -48,20 +51,24 @@ namespace javelin::gui::settings
         update(javelin::protocol::SettingsRevision baseRevision,
                javelin::protocol::SettingsUpdate update);
         [[nodiscard]] std::optional<javelin::protocol::BoundaryError>
+        updateWorkspace(javelin::protocol::WorkspaceSettings workspace) override;
+        [[nodiscard]] std::optional<javelin::protocol::BoundaryError>
         associateCachedAccount(const QString& configuredAccountId, const QString& cachedAccountId);
         [[nodiscard]] std::optional<javelin::protocol::BoundaryError>
         saveResolvedSessionUrl(const QString& configuredAccountId, const QString& sessionUrl);
+        [[nodiscard]] QMetaObject::Connection connectChanged(QObject* context,
+                                                             std::function<void()> callback);
         [[nodiscard]] QMetaObject::Connection
-        connectChanged(QObject* context, std::function<void()> callback);
+        connectWorkspaceChanged(QObject* context, std::function<void()> callback) override;
 
         [[nodiscard]] static std::vector<javelin::protocol::AccountSettings>
         protocolAccounts(const std::vector<ConnectionSettings>& accounts);
 
       private:
         [[nodiscard]] static QStringList stringList(const std::vector<QString>& values);
-        [[nodiscard]] static QStringList mailboxIds(
-            const std::vector<javelin::protocol::MailboxSelectionSettings>& selections,
-            QStringView accountId);
+        [[nodiscard]] static QStringList
+        mailboxIds(const std::vector<javelin::protocol::MailboxSelectionSettings>& selections,
+                   QStringView accountId);
 
         javelin::app::SettingsPort* m_port = nullptr;
         std::optional<javelin::protocol::SettingsSnapshot> m_localSnapshot;

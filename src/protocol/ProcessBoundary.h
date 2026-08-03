@@ -43,7 +43,7 @@ namespace javelin::protocol
 
     struct ProtocolVersion
     {
-        std::uint16_t major = 2;
+        std::uint16_t major = 3;
         std::uint16_t minor = 0;
 
         friend bool operator==(const ProtocolVersion&, const ProtocolVersion&) = default;
@@ -283,6 +283,24 @@ namespace javelin::protocol
         friend bool operator==(const AttachmentSettings&, const AttachmentSettings&) = default;
     };
 
+    struct CalendarColorOverride
+    {
+        QString calendarId;
+        QString color;
+
+        friend bool operator==(const CalendarColorOverride&,
+                               const CalendarColorOverride&) = default;
+    };
+
+    struct WorkspaceSettings
+    {
+        std::uint32_t formatVersion = 1;
+        QByteArray mainWindowState;
+        std::vector<CalendarColorOverride> calendarColorOverrides;
+
+        friend bool operator==(const WorkspaceSettings&, const WorkspaceSettings&) = default;
+    };
+
     struct SettingsUpdate
     {
         std::optional<std::vector<AccountSettings>> accounts;
@@ -294,6 +312,7 @@ namespace javelin::protocol
         std::optional<AppearanceSettings> appearance;
         std::optional<AttachmentSettings> attachments;
         std::optional<std::int32_t> undoSendDelaySeconds;
+        std::optional<WorkspaceSettings> workspace;
     };
 
     struct UpdateSettingsRequest
@@ -408,7 +427,7 @@ namespace javelin::protocol
     struct SettingsSnapshot
     {
         SettingsRevision revision;
-        std::uint32_t schemaVersion = 1;
+        std::uint32_t schemaVersion = 2;
         std::vector<AccountSettings> accounts;
         std::vector<MailboxSelectionSettings> syncedMailboxSelections;
         std::vector<MailboxSelectionSettings> notificationMailboxSelections;
@@ -418,6 +437,7 @@ namespace javelin::protocol
         AppearanceSettings appearance;
         AttachmentSettings attachments;
         std::int32_t undoSendDelaySeconds = 10;
+        WorkspaceSettings workspace;
 
         friend bool operator==(const SettingsSnapshot&, const SettingsSnapshot&) = default;
     };
@@ -594,6 +614,7 @@ namespace javelin::protocol
         std::size_t maximumCollectionItems = 256;
         std::size_t maximumAffectedKeys = 64;
         std::size_t maximumMaterializationItems = 500;
+        std::size_t maximumWorkspaceBytes = 8 * 1024 * 1024;
         std::size_t maximumFrameBytes = 1024 * 1024;
     };
 

@@ -14,8 +14,6 @@
 #include <variant>
 #include <vector>
 
-class QSettings;
-
 namespace javelin::gui::shell
 {
     struct PersistedTabSelection
@@ -75,12 +73,8 @@ namespace javelin::gui::shell
         std::vector<PersistedTab> tabs;
     };
 
+    [[nodiscard]] QByteArray serializeMainWindowState(const PersistedMainWindowState& state);
     [[nodiscard]] PersistedMainWindowState
-    readMainWindowState(QSettings& settings, javelin::jmap::query::EmailListSort defaultSort);
-    void writeMainWindowState(QSettings& settings, const PersistedMainWindowState& state);
-
-    [[nodiscard]] PersistedMainWindowState
-    loadMainWindowState(javelin::jmap::query::EmailListSort defaultSort);
-    void saveMainWindowState(const PersistedMainWindowState& state);
-    void saveEmailListSort(javelin::jmap::query::EmailListSort sort);
+    deserializeMainWindowState(const QByteArray& encoded,
+                               javelin::jmap::query::EmailListSort defaultSort);
 } // namespace javelin::gui::shell

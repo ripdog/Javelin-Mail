@@ -84,17 +84,23 @@ namespace
 
         SettingsReadReply handleGetSettings(const GetSettingsRequest&) override
         {
-            return SettingsSnapshotReply{.snapshot = {.revision = {.value = 5},
-                                                      .schemaVersion = 1,
-                                                      .accounts = {},
-                                                      .syncedMailboxSelections = {},
-                                                      .notificationMailboxSelections = {},
-                                                      .remoteContentSenders = {},
-                                                      .remoteContentDomains = {},
-                                                      .translation = {},
-                                                      .appearance = {},
-                                                      .attachments = {},
-                                                      .undoSendDelaySeconds = 10}};
+            return SettingsSnapshotReply{
+                .snapshot = {.revision = {.value = 5},
+                             .schemaVersion = 2,
+                             .accounts = {},
+                             .syncedMailboxSelections = {},
+                             .notificationMailboxSelections = {},
+                             .remoteContentSenders = {},
+                             .remoteContentDomains = {},
+                             .translation = {},
+                             .appearance = {},
+                             .attachments = {},
+                             .undoSendDelaySeconds = 10,
+                             .workspace = {.formatVersion = 1,
+                                           .mainWindowState = QByteArrayLiteral("window-state"),
+                                           .calendarColorOverrides = {
+                                               {.calendarId = QStringLiteral("calendar-1"),
+                                                .color = QStringLiteral("#123456")}}}}};
         }
 
         SettingsUpdateReply handleUpdateSettings(UpdateSettingsRequest request) override
@@ -245,7 +251,13 @@ namespace
 
         const auto settings = settingsClient.getSettings();
         REQUIRE(std::holds_alternative<SettingsSnapshotReply>(settings));
-        CHECK(std::get<SettingsSnapshotReply>(settings).snapshot.revision.value == 5);
+        const auto& settingsSnapshot = std::get<SettingsSnapshotReply>(settings).snapshot;
+        CHECK(settingsSnapshot.revision.value == 5);
+        CHECK(settingsSnapshot.schemaVersion == 2);
+        CHECK(settingsSnapshot.workspace.mainWindowState == QByteArrayLiteral("window-state"));
+        REQUIRE(settingsSnapshot.workspace.calendarColorOverrides.size() == 1);
+        CHECK(settingsSnapshot.workspace.calendarColorOverrides.front().calendarId ==
+              QStringLiteral("calendar-1"));
 
         const auto settingsUpdate = settingsClient.updateSettings(
             {.baseRevision = {.value = 5},
@@ -262,10 +274,22 @@ namespace
                                                 .autoTranslateDomains = {}},
                         .appearance = std::nullopt,
                         .attachments = std::nullopt,
-                        .undoSendDelaySeconds = std::nullopt}});
+                        .undoSendDelaySeconds = std::nullopt,
+                        .workspace = WorkspaceSettings{
+                            .formatVersion = 1,
+                            .mainWindowState = QByteArrayLiteral("updated-window-state"),
+                            .calendarColorOverrides = {{.calendarId = QStringLiteral("calendar-2"),
+                                                        .color = QStringLiteral("#abcdef")}}}}});
         REQUIRE(std::holds_alternative<SettingsUpdated>(settingsUpdate));
         CHECK(std::get<SettingsUpdated>(settingsUpdate).revision.value == 6);
         REQUIRE(handler.receivedSettingsUpdate.has_value());
+        REQUIRE(handler.receivedSettingsUpdate->update.workspace.has_value());
+        CHECK(handler.receivedSettingsUpdate->update.workspace->mainWindowState ==
+              QByteArrayLiteral("updated-window-state"));
+        REQUIRE(handler.receivedSettingsUpdate->update.workspace->calendarColorOverrides.size() ==
+                1);
+        CHECK(handler.receivedSettingsUpdate->update.workspace->calendarColorOverrides.front()
+                  .calendarId == QStringLiteral("calendar-2"));
 
         CHECK_FALSE(daemonStatusClient.ping().has_value());
         CHECK_FALSE(activationClient.readyForActivation().has_value());
@@ -507,6 +531,26 @@ TEST_CASE("endpoint validates bounded values and estimates their frame size", "[
     CHECK(estimatedEncodedSize(ClientRequest{request}) < BoundaryLimits{}.maximumFrameBytes);
 }
 
+TEST_CASE("workspace settings enforce protocol bounds", "[protocol][settings]")
+{
+    RecordingHandler handler;
+    InProcessEndpoint endpoint{handler, {.maximumWorkspaceBytes = 4}};
+    SettingsUpdate update;
+    update.workspace = WorkspaceSettings{
+        .formatVersion = 1,
+        .mainWindowState = QByteArrayLiteral("large"),
+        .calendarColorOverrides = {},
+    };
+
+    const auto reply =
+        endpoint.updateSettings({.baseRevision = {.value = 5}, .update = std::move(update)});
+    const auto* rejected = std::get_if<SettingsUpdateRejected>(&reply);
+    REQUIRE(rejected != nullptr);
+    CHECK(rejected->error.code == BoundaryErrorCode::ValueTooLarge);
+    CHECK(rejected->error.field == QStringLiteral("update.workspace.mainWindowState"));
+    CHECK_FALSE(handler.receivedSettingsUpdate.has_value());
+}
+
 TEST_CASE("endpoint exposes settings, handshake, lifecycle and events through typed ports",
           "[protocol]")
 {
@@ -573,7 +617,8 @@ TEST_CASE("endpoint exposes settings, handshake, lifecycle and events through ty
                                                        .autoTranslateDomains = {}},
                     .appearance = std::nullopt,
                     .attachments = std::nullopt,
-                    .undoSendDelaySeconds = std::nullopt}});
+                    .undoSendDelaySeconds = std::nullopt,
+                    .workspace = std::nullopt}});
     CHECK(std::holds_alternative<SettingsUpdated>(update));
     REQUIRE(handler.receivedSettingsUpdate.has_value());
     REQUIRE(handler.receivedSettingsUpdate->update.translation.has_value());

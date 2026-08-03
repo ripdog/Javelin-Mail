@@ -354,8 +354,8 @@ namespace javelin::gui::shell
         connect(m_accountRefreshController, &AccountRefreshController::contactsRefreshed, this,
                 [this](const javelin::jmap::contacts::ContactRefreshSummary&)
                 { reloadAccounts(); });
-        m_calendarTabController = new CalendarTabController(m_calendarReader, m_calendarCommandPort,
-                                                            *m_contentStack, m_tabs, this);
+        m_calendarTabController = new CalendarTabController(
+            m_settings, m_calendarReader, m_calendarCommandPort, *m_contentStack, m_tabs, this);
         connect(m_calendarTabController, &CalendarTabController::tabReady, this,
                 [this](const int index)
                 {
@@ -2340,7 +2340,16 @@ namespace javelin::gui::shell
 
         m_emailListSort = std::move(sort);
         m_messageListTabController->setSort(m_tabs, m_emailListSort);
-        saveEmailListSort(m_emailListSort);
+        auto workspace = m_settings.workspaceSettings();
+        auto persisted = deserializeMainWindowState(workspace.mainWindowState, m_emailListSort);
+        persisted.emailListSort = m_emailListSort;
+        workspace.mainWindowState = serializeMainWindowState(persisted);
+        if (const auto error = m_settings.updateWorkspace(std::move(workspace)))
+        {
+            qWarning().noquote() << QStringLiteral("Could not save message-list sort:")
+                                 << error->detail;
+            m_statusBar->showMessage(QStringLiteral("Could not save the message-list sort."), 5000);
+        }
 
         updateSortButton();
         loadActiveTabFromCache(true);
@@ -2907,7 +2916,8 @@ namespace javelin::gui::shell
 
     void MainWindow::restorePersistentState()
     {
-        auto state = loadMainWindowState(m_emailListSort);
+        auto state = deserializeMainWindowState(m_settings.workspaceSettings().mainWindowState,
+                                                m_emailListSort);
         if (!state.geometry.isEmpty())
             restoreGeometry(state.geometry);
         if (!state.splitterState.isEmpty())
@@ -3017,7 +3027,11 @@ namespace javelin::gui::shell
         state.tabs.reserve(m_tabs.size());
         for (const auto& tab : m_tabs)
             state.tabs.push_back(persistTab(tab));
-        saveMainWindowState(state);
+        auto workspace = m_settings.workspaceSettings();
+        workspace.mainWindowState = serializeMainWindowState(state);
+        if (const auto error = m_settings.updateWorkspace(std::move(workspace)))
+            qWarning().noquote() << QStringLiteral("Could not save the main-window state:")
+                                 << error->detail;
     }
 
     void MainWindow::closeEvent(QCloseEvent* event)

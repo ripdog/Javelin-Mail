@@ -2,17 +2,27 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <QSettings>
-#include <QTemporaryDir>
+#include <QDataStream>
+#include <QIODevice>
+#include <QVariantMap>
 
 using namespace javelin::gui::shell;
 
+namespace
+{
+    [[nodiscard]] QByteArray encodeSettings(const QVariantMap& settings)
+    {
+        QByteArray encoded;
+        QDataStream stream{&encoded, QIODeviceBase::WriteOnly};
+        stream.setByteOrder(QDataStream::BigEndian);
+        stream.setVersion(QDataStream::Qt_6_6);
+        stream << settings;
+        return encoded;
+    }
+} // namespace
+
 TEST_CASE("main window state round-trips every tab type")
 {
-    QTemporaryDir directory;
-    REQUIRE(directory.isValid());
-    QSettings settings{directory.filePath(QStringLiteral("window.ini")), QSettings::IniFormat};
-
     PersistedMainWindowState expected{
         .geometry = QByteArrayLiteral("geometry"),
         .splitterState = QByteArrayLiteral("splitter"),
@@ -91,9 +101,7 @@ TEST_CASE("main window state round-trips every tab type")
         .displayedMonth = QDate{2026, 7, 1},
     });
 
-    writeMainWindowState(settings, expected);
-    settings.sync();
-    auto actual = readMainWindowState(settings, {});
+    const auto actual = deserializeMainWindowState(serializeMainWindowState(expected), {});
 
     CHECK(actual.geometry == expected.geometry);
     CHECK(actual.splitterState == expected.splitterState);
@@ -127,16 +135,24 @@ TEST_CASE("main window state round-trips every tab type")
 
 TEST_CASE("main window state ignores invalid tab records")
 {
-    QTemporaryDir directory;
-    REQUIRE(directory.isValid());
-    QSettings settings{directory.filePath(QStringLiteral("window.ini")), QSettings::IniFormat};
-    settings.beginGroup(QStringLiteral("mainWindow"));
-    settings.beginWriteArray(QStringLiteral("tabs"));
-    settings.setArrayIndex(0);
-    settings.setValue(QStringLiteral("type"), QStringLiteral("mailbox"));
-    settings.setValue(QStringLiteral("accountId"), QStringLiteral("account"));
-    settings.endArray();
-    settings.endGroup();
+    const QVariantMap settings{
+        {QStringLiteral("tabs/size"), 1},
+        {QStringLiteral("tabs/1/type"), QStringLiteral("mailbox")},
+        {QStringLiteral("tabs/1/accountId"), QStringLiteral("account")},
+    };
 
-    CHECK(readMainWindowState(settings, {}).tabs.empty());
+    CHECK(deserializeMainWindowState(encodeSettings(settings), {}).tabs.empty());
+}
+
+TEST_CASE("main window state falls back safely when the payload is corrupt")
+{
+    const javelin::jmap::query::EmailListSort fallback{
+        .property = javelin::jmap::query::EmailListSortProperty::From,
+        .direction = javelin::jmap::query::EmailListSortDirection::Ascending,
+    };
+    const auto state = deserializeMainWindowState(QByteArrayLiteral("not a data stream"), fallback);
+
+    CHECK(state.tabs.empty());
+    CHECK(state.emailListSort.property == fallback.property);
+    CHECK(state.emailListSort.direction == fallback.direction);
 }
