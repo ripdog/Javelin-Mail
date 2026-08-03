@@ -989,7 +989,7 @@ namespace javelin::protocol
                     RemoteActionCommand command;
                     quint16 actionKind = 0;
                     if (!reader.word(actionKind) ||
-                        actionKind > static_cast<quint16>(RemoteActionKind::WorkSummary) ||
+                        actionKind > static_cast<quint16>(RemoteActionKind::Last) ||
                         !reader.bytes(command.payload))
                         return malformed(QStringLiteral("invalid remote action payload"));
                     command.kind = static_cast<RemoteActionKind>(actionKind);

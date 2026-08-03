@@ -194,6 +194,7 @@ namespace javelin::protocol
         OnboardingStartOAuth,
         OnboardingFinishOAuth,
         OnboardingAuthenticateManually,
+        Last = OnboardingAuthenticateManually,
     };
 
     struct RemoteActionCommand

@@ -12,6 +12,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <functional>
 #include <mutex>
 #include <utility>
@@ -727,6 +728,43 @@ TEST_CASE("socket endpoint runs the transport-neutral typed surface", "[protocol
                       .build = {.application = QStringLiteral("Javelin-Mail"),
                                 .revision = QStringLiteral("test")}})));
     CHECK_FALSE(client.ping().has_value());
+}
+
+TEST_CASE("socket endpoint admits every onboarding remote action", "[protocol][socket]")
+{
+    QTemporaryDir runtimeDirectory;
+    REQUIRE(runtimeDirectory.isValid());
+
+    RecordingHandler handler;
+    const auto options = socketOptions(runtimeDirectory);
+    SocketEndpointThread endpoint{handler, options};
+    REQUIRE_FALSE(endpoint.listen().has_value());
+
+    SocketDaemonClient client{options};
+    REQUIRE_FALSE(client.connectToDaemon().has_value());
+    REQUIRE(std::holds_alternative<ReadyReply>(
+        client.hello({.protocol = {.major = 1, .minor = 0},
+                      .build = {.application = QStringLiteral("Javelin-Mail"),
+                                .revision = QStringLiteral("test")}})));
+
+    const std::array actions{
+        RemoteActionKind::OnboardingDiscover,
+        RemoteActionKind::OnboardingStartOAuth,
+        RemoteActionKind::OnboardingFinishOAuth,
+        RemoteActionKind::OnboardingAuthenticateManually,
+    };
+    for (const auto action : actions)
+    {
+        const auto payload = QByteArrayLiteral("onboarding-payload");
+        const auto reply = client.submitCommand({
+            .id = {.value = QUuid::createUuid()},
+            .command = RemoteActionCommand{.kind = action, .payload = payload},
+        });
+        const auto* accepted = std::get_if<CommandAccepted>(&reply);
+        REQUIRE(accepted != nullptr);
+        REQUIRE(accepted->immediateResult.has_value());
+        CHECK(*accepted->immediateResult == payload);
+    }
 }
 
 TEST_CASE("socket boundary events permit synchronous follow-up requests", "[protocol][socket]")

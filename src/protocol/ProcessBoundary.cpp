@@ -88,7 +88,7 @@ namespace javelin::protocol
                         return validateRefreshAccount(command, limits);
                     else
                     {
-                        if (command.kind > RemoteActionKind::WorkSummary)
+                        if (command.kind > RemoteActionKind::Last)
                         {
                             return BoundaryError{
                                 .code = BoundaryErrorCode::InvalidRequest,
