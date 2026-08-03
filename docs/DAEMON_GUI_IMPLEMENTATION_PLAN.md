@@ -274,16 +274,17 @@ and [Database concurrency](DAEMON_GUI_ARCHITECTURE.md#database-concurrency).
 
 ### Phase 3 status
 
-Complete for the current in-process composition. The cache read/write boundary is now explicit and
-covered by the build graph and tests:
+Completed during the pre-socket migration and still enforced by the production split. The cache
+read/write boundary is explicit and covered by the build graph and tests:
 
 - `CacheLocationProvider` resolves the database, vault, search-index, and cache-instance identity
   without opening SQLite; daemon and GUI factories are separate.
 - GUI-visible account, mailbox, query, message-view, contact, identity, and calendar reads use
   reader ports backed by persistent `ReadOnlyDatabaseConnection` instances. Background mailbox,
   search, address-suggestion, message-view, and calendar reads use the read-only worker factory.
-- `javelin_cache_read` contains the shared read-side database/vault/email/source primitives, while
-  the remaining service adapters stay in `javelin_jmap` during the single-process transition.
+- `javelin_cache_read` contains shared read-side database, vault, Email, source, MIME, and rendering
+  primitives. Additional read-only repository implementations needed by the GUI are compiled into
+  the GUI bootstrap without linking the writable `javelin_jmap` target.
 - The GUI source boundary rejects direct writer-repository, mutable-database, transport, and sync
   includes. Contact invalidations are relayed from the daemon repository to the GUI read surface
   without exposing the writer to widgets.
@@ -291,31 +292,30 @@ covered by the build graph and tests:
   and reopening a replaced cache. `data_version` is available through the database and query-reader
   surfaces for reconnect/read coordination.
 
-Task and history command ownership remains an application-service concern and is intentionally left
-for Phase 4 command routing; it does not expose a cache connection to GUI presentation code.
+Task and history command ownership is an application-service concern and was moved behind typed
+ports in Phase 4; neither surface exposes a writable cache connection to GUI presentation code.
 
 ## Phase 4: route all application commands through the typed boundary
 
-This phase moves interpretation and execution behind the daemon endpoint while retaining the current
-single process. Follow [Mutations and optimistic consistency](DAEMON_GUI_ARCHITECTURE.md#mutations-and-optimistic-consistency),
+This phase originally moved interpretation and execution behind the daemon endpoint before the
+socket and executable split. The same boundary now runs across production IPC. Follow
+[Mutations and optimistic consistency](DAEMON_GUI_ARCHITECTURE.md#mutations-and-optimistic-consistency),
 [Undo and Redo](DAEMON_GUI_ARCHITECTURE.md#undo-and-redo), and
 [Command identity and retries](DAEMON_GUI_ARCHITECTURE.md#command-identity-and-retries).
 
 ### Implementation status
 
-Phase 4 is complete for the current in-process composition. Typed application ports and adapters now
-cover mail mutations, Undo/Redo, compose and drafts, contacts, calendar, Sieve, account and contact
-refresh, message content, attachment and source retrieval, message-list session creation, translation,
-and mail observation. Migrated GUI consumers no longer include or accept the concrete application
-services for those slices, and CMake boundary checks reject those direct crossings.
+Phase 4 is complete in the production split. Typed application ports and remote adapters cover mail
+mutations, Undo/Redo, compose and drafts, contacts, calendar, Sieve, account and contact refresh,
+message content, attachment and source retrieval, message-list sessions, translation, tasks, settings,
+and mail observation. GUI consumers no longer include or accept concrete daemon application services,
+and CMake boundary checks reject those direct crossings.
 
-`DaemonServices` owns the shared `CommandDispatcher`. It validates typed protocol requests, preserves
-exact command identity for replay, rejects UUID reuse with a different payload, reports committed
-epochs and affected-key hints, keeps direct rejection separate from later operation failure, and maps
-the current refresh workflow into the process-boundary error taxonomy. Conformance coverage exercises
-acceptance, rejection, same-UUID retry, epoch behavior, and later failure. `RefreshAccountCommand` is
-the reference protocol command for this in-process dispatcher; additional command variants and socket
-transport remain deliberately deferred to the later protocol and executable-split phases.
+`DaemonServices` owns the shared `CommandDispatcher` and remote-action dispatcher. They validate typed
+requests, preserve exact command identity where replay matters, reject incompatible UUID reuse, report
+committed epochs and affected-key hints, and keep direct rejection separate from later operation
+failure. The protocol conformance suite exercises the same typed behavior over the test in-process
+endpoint and the production socket transport.
 
 ### Work common to every command
 
@@ -525,12 +525,12 @@ This phase prepares the codebase for two executables without yet adding socket t
 
 ### Implementation status
 
-Phase 7 established the two composition surfaces and Phase 11 removes the temporary host. The
-production graph now exposes `javelin_protocol`, `javelin_cache_read`, `javelin_daemon_core`, and
-`javelin_gui`, with only the `javelin` GUI bootstrap and `javelind` daemon executable at runtime.
-Read-only cache access remains on the GUI side; writable services and settings remain on the daemon
-side. The legacy WebEngine presentation sources are isolated in the non-installed GUI test-support
-target until the richer presentation surface is migrated over the typed boundary.
+Phase 7 established the two composition surfaces and Phase 11 removed the temporary host. The
+production graph exposes `javelin_protocol`, `javelin_cache_read`, `javelin_jmap`,
+`javelin_daemon_core`, and `javelin_gui`, with only the `javelin` GUI bootstrap and `javelind` daemon
+executable at runtime. The complete Widgets/WebEngine presentation is now on the GUI side; read-only
+cache access remains there, while writable services, JMAP transports, settings, notifications, and
+background work remain on the daemon side.
 
 ## Phase 8: framed local-socket transport
 
@@ -795,7 +795,7 @@ release-gate work.
 
 ### Final release gate
 
-The split may replace the monolithic release only when:
+The split can be declared ready for a stable public release only when:
 
 - all completion-definition conditions in this document hold;
 - every architecture invariant remains true under process failure and reconnect;

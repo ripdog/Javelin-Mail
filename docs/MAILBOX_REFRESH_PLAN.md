@@ -1,5 +1,18 @@
 # Mailbox Refresh And Real-Time Update Plan
 
+## Status
+
+This is a historical implementation plan. Its problem statements describe the pre-query-window,
+pre-push, single-process code and must not be read as the current architecture. The implemented
+system now uses authoritative mailbox query windows, incremental/delta refresh executors,
+daemon-owned WebSocket/EventSource state changes, typed post-commit invalidations, and stable-ID
+selection restoration.
+
+Current invariants are defined in [ARCHITECTURE.md](ARCHITECTURE.md),
+[QUERY_WINDOWS.md](QUERY_WINDOWS.md), [OPTIMISTIC_CONSISTENCY.md](OPTIMISTIC_CONSISTENCY.md), and
+[DAEMON_GUI_ARCHITECTURE.md](DAEMON_GUI_ARCHITECTURE.md). This document remains useful as design
+history and for understanding the intended progression that produced those subsystems.
+
 ## Goal
 
 Make mailbox refresh feel seamless in the UI and use that same sync path as the foundation for real-time updates and desktop notifications.

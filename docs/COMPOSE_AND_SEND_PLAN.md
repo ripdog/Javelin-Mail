@@ -1,5 +1,18 @@
 # Compose And Send Plan
 
+## Status
+
+This is the original compose/submission implementation plan, retained as design history. The current
+product no longer follows several proposed presentation details: compose is tab-hosted, daemon-owned
+services perform draft/save/send work across typed IPC, attachments are copied into immutable daemon
+staging, and delayed send continues after the GUI exits. The implemented runtime boundaries are
+defined in [ARCHITECTURE.md](ARCHITECTURE.md),
+[DAEMON_GUI_ARCHITECTURE.md](DAEMON_GUI_ARCHITECTURE.md), and [UNDO_REDO.md](UNDO_REDO.md).
+
+The protocol, normalization, MIME, reply/forward, and testing discussions below still provide useful
+rationale, but future work should use [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) as the roadmap rather
+than treating every proposed class or window shape in this document as current.
+
 ## Goal
 
 Make composing and sending feel like a first-class desktop mail workflow, while keeping the implementation aligned with the repository's existing architecture:

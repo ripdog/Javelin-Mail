@@ -1,16 +1,21 @@
 # Database access
 
-SQLite runs in WAL mode so reads from independent thread-owned connections may proceed while a
-write is active. SQLite still permits only one writer. Javelin therefore coordinates writes in the
-process before asking SQLite for its write lock.
+SQLite runs in WAL mode so independent thread-owned readers may proceed while a write is active.
+`javelind` is the only process permitted to open the main cache for writing. It coordinates daemon
+writes before asking SQLite for its single write lock; `javelin` opens only the read surface.
 
 ## Connection ownership
 
 - A `DatabaseConnection` belongs to the thread on which it is opened.
-- Worker threads open their own connection with `ThreadConnectionFactory`; they never borrow the
-  GUI connection.
-- Connections to the same normalized database path share one recursive write coordinator.
+- Daemon worker threads open their own connection with `ThreadConnectionFactory`; they never borrow
+  another thread's connection.
+- GUI connections use `ReadOnlyDatabaseConnection`, SQLite read-only mode, and
+  `PRAGMA query_only=ON`. GUI code cannot run migrations or obtain writable repositories.
+- Connections to the same normalized database path inside the daemon share one recursive write
+  coordinator.
 - Separate per-account search-index databases have independent coordinators keyed by their paths.
+- Cache migration or replacement uses `CacheAccessBarrier`: the daemon requests suspension, the GUI
+  closes every reader and acknowledges, and only then may the daemon replace or migrate the cache.
 
 ## Writes
 

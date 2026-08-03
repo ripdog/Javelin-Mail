@@ -1,86 +1,104 @@
 # Architecture
 
-Complete-offline mail storage, scheduling, pagination, and search-index invariants are defined in
-[OFFLINE_MAIL_ARCHITECTURE.md](OFFLINE_MAIL_ARCHITECTURE.md).
+## Status and document map
 
-Javelin uses a one-way dependency and control flow:
+This document describes the current code-level architecture. The process split and IPC contract are
+defined in [DAEMON_GUI_ARCHITECTURE.md](DAEMON_GUI_ARCHITECTURE.md); its implementation history and
+remaining release validation are tracked in
+[DAEMON_GUI_IMPLEMENTATION_PLAN.md](DAEMON_GUI_IMPLEMENTATION_PLAN.md). Cross-cutting invariants live
+in the focused documents for [optimistic consistency](OPTIMISTIC_CONSISTENCY.md),
+[offline mail](OFFLINE_MAIL_ARCHITECTURE.md), [query windows](QUERY_WINDOWS.md),
+[database access](DATABASE_ACCESS.md), [Undo/Redo](UNDO_REDO.md), and
+[message rendering](RENDERING.md).
 
-The project targets Qt 6 and C++23. C++23 is required by the typed Glaze protocol parser used at
-the JMAP boundary.
+Javelin targets Qt 6.6 or newer and C++23. Glaze provides typed JSON parsing at the JMAP boundary;
+QCoro provides coroutine-based Qt networking.
+
+## Runtime shape
+
+Javelin is a split-process desktop application:
 
 ```text
-GUI -> application intents -> synchronization/cache policy -> typed JMAP client -> transport
+                                 private local JVIP socket
+┌────────────────────────────┐  commands / replies / invalidations  ┌───────────────────────────┐
+│ javelin                    │ <───────────────────────────────────> │ javelind                  │
+│ Qt Widgets + WebEngine     │                                       │ application coordination  │
+│ presentation controllers  │                                       │ JMAP + synchronization    │
+│ read-only SQLite queries  │                                       │ sole cache/settings writer│
+└──────────────┬─────────────┘                                       └─────────────┬─────────────┘
+               │ reads                                                             │ writes
+               └──────────────────────────┬─────────────────────────────────────────┘
+                                          ▼
+                              SQLite cache, search indexes,
+                              and the filesystem mail vault
+                                          │
+                                          ▼
+                                      JMAP server
 ```
 
-The GUI renders cache-backed models and reports user intent. It does not select JMAP methods,
-resolve credentials, or initiate transport operations. Mailbox visibility is represented by an
-opaque observation registered with the application coordinator. Pagination, search, content,
-downloads, contact operations, mutations, bootstrap, and explicit synchronization are typed
-application requests.
+The server is the recoverable source of truth. SQLite is the local data plane and the immediate
+source rendered by the GUI. IPC is the command and coordination plane. A cache commit always occurs
+before the daemon publishes its invalidation.
 
-Message-list commands are coordinated by the GUI-owned `MessageCommandController`. It converts
-Qt selection rows into typed `MessageSelection` values, presents destination and confirmation UI,
-queues and submits mutations through `MailApplicationService`, and reports typed completion
-summaries. `MainWindow` retains only active-tab context and visible cache-reconciliation effects.
-`AccountRefreshController` owns configured-account synchronization fallback, bootstrap single-flight
-state, resolved-session persistence, cached-account association, and the follow-up contact refresh.
-Plain `ConnectionSettings` data and its application-intent conversion are independent of the KDE
-preferences dialog; the window only applies busy/status/error and visible-cache refresh effects.
-`ComposeTabController` owns compose credential lookup, asynchronous open/reuse, working-copy
-restoration, concrete compose-widget ownership, tab title/account synchronization, toolbar commands,
-and working-copy discard. Pure `ComposeTabPolicy` selects session reuse and close behavior;
-`MainWindow` retains only confirmation dialogs, active-tab changes, and visible status/error effects.
-`CalendarTabController` owns calendar tab reuse and materialization, cached month presentation,
-visibility/default-calendar changes, owner-deduplicated range refresh, recurrence edit scope, event
-create/update/delete operations, toolbar commands, persistence restoration, and widget disposal. The
-window only activates the tab and presents controller status or errors.
-`ContactsTabController` owns contacts tab reuse and materialization, concrete widget ownership,
-toolbar commands and availability, group-menu population, persistence restoration, refresh,
-compose/search request forwarding, and busy-close protection. Contact editing and mutation UI remain
-encapsulated inside `ContactsManagerWidget`; the window only handles resulting navigation intents.
+The end-to-end command path is deliberately one-way:
 
-Mailbox and search tabs are backed by application-layer message-list sessions. These sessions own
-query-window cache reads, request generations, observation lifetimes, pagination, stale recovery,
-and search promotion/prefetch. The GUI owns only tab presentation, selection, and binding the
-active session page to the message model; it does not coordinate mailbox or search loading.
+```text
+user action
+  -> GUI controller and typed application port
+  -> RemoteActionClient
+  -> JVIP socket
+  -> DaemonRemoteActionDispatcher / CommandDispatcher
+  -> daemon application service
+  -> typed JMAP method layer
+  -> transport
+```
 
-Tab variants and shared selection state live in the shell-level `TabWorkspace` model rather than
-inside the main window. Pure workspace policy validates the active index, protects the mail home
-tab, and selects the next active tab after closure. `TabBarPresenter` renders account-qualified
-titles, unread mailbox counts, icons, visibility, and close controls. Mailbox and search session
-creation, signal binding, reuse, stale propagation, pagination, sorting, and release belong to the
-narrow `MessageListTabController`; pure `MessageListTabPolicy` decides identity matches and stale
-targets.
-`TabPersistence` converts runtime tabs into storage records and reconstructs cache-only
-mailbox/search restore plans. `MainWindow` still owns active-tab changes and visible-shell side
-effects, but it does not calculate tab-bar state, orchestrate message-list, compose, contacts, or
-calendar lifetimes, or serialize message-list sessions.
-Message selection restoration is likewise split into deterministic workspace policy and a Qt
-adapter: the policy decides surviving multi-selection, current-message fallback, and the nearest
-row after removal. `MessageSelectionController` extracts current and multi-selection state,
-builds selected-message summaries, synchronizes tab selection, and applies restoration plans;
-`MainWindow` only presents the resulting message context and triggers application intents.
-`MessageNavigationController` owns routed-message matching, one-shot mailbox reveal requests,
-refresh waiting, and route completion; pure navigation policy keeps those decisions independent of
-Qt indexes and widgets. `MessageContentController` owns content-request deduplication, stale
-completion fencing, and typed result dispatch. Pure content ownership policy decides whether a
-completion still belongs to the active selection or routed detail before the window refreshes the
-visible message.
-`MessageActionPolicy` decides command availability from tab context, selection size, Drafts
-membership, and read state; the window only gathers those facts and updates actions.
-`MessageListPresentationPolicy` maps tab state into page headers and empty-state semantics, while
-`MessageListTabPresenter` adapts live sessions and applies that plan to the message-list pane.
-`MessageListTabBindingPresenter` binds the active mailbox/search page to the Qt model and keeps the
-mailbox tree and search field synchronized; recursive mailbox selection lives in a reusable mailbox
-adapter. Pure `TabActivationPolicy` selects mailbox-pane visibility, message presentation behavior,
-and whether activation needs one remote refresh. Concrete widget switching remains in
-`MainWindow`, while message-list cache loads, page movement, sorting, search promotion, and refresh
-calls go through `MessageListTabController`.
+The return path is a typed admission or failure result followed by committed cache state and bounded
+invalidations. The GUI never constructs JMAP method JSON, resolves credentials, opens a writable
+cache connection, or treats an invalidation payload as object state.
+
+## Build and module boundaries
+
+The CMake graph enforces the architectural split:
+
+- `javelin_protocol` owns bounded process-boundary values, framing, socket transport, and the test-only
+  in-process endpoint.
+- `javelin_cache_read` owns database-location discovery and reusable read-only cache, MIME, vault, and
+  rendering primitives.
+- `javelin_jmap` owns typed JMAP protocol, capability negotiation, transport, cache repositories,
+  synchronization primitives, contacts, calendars, submission, Sieve, and optimistic journals. It
+  has no Widgets or WebEngine dependency.
+- `javelin_daemon_core` owns application coordination, writable repositories, settings, background
+  work, notifications, tray integration, deferred send, history, and synchronization lifecycle.
+- `javelin_gui` and the `javelin` bootstrap own presentation, read-only repositories, remote port
+  adapters, WebEngine, editing state, selection, and navigation.
+
+Configuration fails when production GUI sources access canonical `QSettings`, when GUI targets link
+`javelin_jmap` or `javelin_daemon_core`, or when daemon sources acquire Widgets/WebEngine dependencies.
+
+## Presentation and application coordination
+
+The GUI renders cache-backed models and reports user intent through typed ports. Mailbox visibility
+is represented by an opaque observation registered with the daemon-side coordinator. Pagination,
+search, content retrieval, downloads, contacts, calendars, Sieve, translation, mutations, bootstrap,
+and explicit synchronization all use typed application requests.
+
+`MessageCommandController` converts Qt selections into stable `MessageSelection` values, presents
+confirmation and destination UI, and submits commands through `MailCommandPort`. Compose, contacts,
+calendar, account refresh, message navigation, content loading, message-list sessions, and Undo/Redo
+follow the same pattern: GUI controllers own interaction and presentation lifetime, while daemon
+services own application policy and operational execution.
+
+Mailbox and search tabs use application-layer sessions that own query-window reads, request
+generations, observation lifetimes, pagination, stale recovery, and prefetch. `TabWorkspace` owns tab
+identity and shared selection state. Selection restoration, activation, navigation, content ownership,
+action availability, and list presentation are separated into deterministic policies plus narrow Qt
+adapters so cache changes cannot reinterpret row numbers as user intent.
 
 The account synchronization service owns state-change consumption, debounce and single-flight
-refresh, mailbox interest, state tokens, cache reconciliation, retries, and post-commit events.
-Consumers receive one `MailCacheChange` after a synchronization pass commits and reload affected
-views from SQLite.
+refresh, mailbox interest, state tokens, cache reconciliation, retries, and post-commit publication.
+Consumers reload affected state from SQLite only after the daemon has committed the corresponding
+transaction.
 
 ## Cache materialization and navigation
 
@@ -130,13 +148,13 @@ keep an authenticated `jmap` WebSocket per owning account, correlate concurrent 
 typed method envelopes over that connection. It falls back to `HttpJmapMethodTransport` only when
 the request was not dispatched, so an uncertain disconnect cannot replay a mutation.
 
-The transport decision is persisted per owning account and advertised WebSocket URL. A failed
-endpoint uses HTTP for a bounded retry period; a newly advertised URL is probed immediately.
-State-change synchronization consults the same decision, preferring RFC 8887 push and switching to
-the JMAP EventSource endpoint when WebSocket push fails. Startup performs lightweight Session
-rediscovery before restarting account synchronization, while account bootstrap discovers the same
-capability during account addition. Session discovery and binary resource transfers remain HTTP
-operations.
+The owning-account relationship and advertised WebSocket URL are cached with the Session. WebSocket
+failure cooldowns are process-local and shared by method and state-change transports: a failed
+endpoint uses HTTP/EventSource for at most 15 minutes, while a newly advertised URL or a new daemon
+process is probed immediately. State-change synchronization prefers RFC 8887 push and switches to the
+JMAP EventSource endpoint during the same cooldown. Startup performs lightweight Session rediscovery
+before restarting account synchronization, while account bootstrap discovers the same capability
+during account addition. Session discovery and binary resource transfers remain HTTP operations.
 
 ## Message translation
 
