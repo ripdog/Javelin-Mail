@@ -168,6 +168,9 @@ namespace javelin::gui::settings
     std::optional<javelin::protocol::BoundaryError>
     GuiSettings::updateWorkspace(javelin::protocol::WorkspaceSettings workspace)
     {
+        if (workspace == snapshot().workspace)
+            return std::nullopt;
+
         javelin::protocol::SettingsUpdate update;
         update.workspace = std::move(workspace);
         return this->update(std::move(update));

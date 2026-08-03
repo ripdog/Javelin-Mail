@@ -13,6 +13,9 @@ namespace javelin::app
         std::string sessionUrl;
         std::string loginEmail;
         std::string apiKey;
+
+        friend bool operator==(const AccountConnectionSettings&,
+                               const AccountConnectionSettings&) = default;
     };
 
 } // namespace javelin::app

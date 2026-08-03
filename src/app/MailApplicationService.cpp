@@ -312,6 +312,16 @@ namespace javelin::app
 
     void MailApplicationService::applySettings(std::vector<AccountSyncConfiguration> configurations)
     {
+        const bool accountConfigurationsChanged =
+            m_configurations.size() != configurations.size() ||
+            std::ranges::any_of(configurations,
+                                [this](const AccountSyncConfiguration& configuration)
+                                {
+                                    const auto previous =
+                                        m_configurations.find(configuration.accountId);
+                                    return previous == m_configurations.end() ||
+                                           !(previous->second == configuration);
+                                });
         std::unordered_set<std::string> previousConnectionIds;
         for (const auto& [accountId, configuration] : m_configurations)
         {
@@ -357,7 +367,8 @@ namespace javelin::app
                 m_errorCoordinator.forgetConnection(connectionId);
         }
         restoreContactRefreshJobs();
-        refreshConfiguredSessions();
+        if (accountConfigurationsChanged)
+            refreshConfiguredSessions();
     }
 
     void MailApplicationService::networkBecameReachable()

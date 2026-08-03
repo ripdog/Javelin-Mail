@@ -58,3 +58,17 @@ TEST_CASE("GUI settings expose daemon snapshots without reading QSettings", "[gu
     CHECK_FALSE(settings.attachmentSaveSettings().alwaysAsk);
     CHECK(settings.attachmentSaveSettings().directory == QStringLiteral("/tmp/mail"));
 }
+
+TEST_CASE("GUI settings ignore identical workspace updates", "[gui][settings][workspace]")
+{
+    javelin::protocol::SettingsSnapshot snapshot;
+    snapshot.revision = {.value = 4};
+    snapshot.workspace.mainWindowState = QByteArrayLiteral("window-state");
+
+    const auto workspace = snapshot.workspace;
+    javelin::gui::settings::GuiSettings settings{std::move(snapshot)};
+
+    CHECK_FALSE(settings.updateWorkspace(workspace).has_value());
+    CHECK(settings.snapshot().revision.value == 4);
+    CHECK(settings.workspaceSettings() == workspace);
+}
