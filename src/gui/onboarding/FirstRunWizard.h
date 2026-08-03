@@ -35,6 +35,9 @@ namespace javelin::gui::onboarding
       public:
         FirstRunWizard(javelin::app::OnboardingPort& onboarding,
                        javelin::gui::settings::GuiSettings& settings, QWidget* parent = nullptr);
+        FirstRunWizard(javelin::app::OnboardingPort& onboarding,
+                       javelin::gui::settings::GuiSettings& settings, QString connectionId,
+                       QWidget* parent);
         ~FirstRunWizard() override;
 
       protected:
@@ -72,6 +75,7 @@ namespace javelin::gui::onboarding
         QPushButton* m_manualButton = nullptr;
         QListWidget* m_finishedFeatures = nullptr;
         QTcpServer* m_callbackServer = nullptr;
+        QString m_connectionId;
         QString m_discoveredEmail;
         QString m_oauthFlowId;
         std::optional<javelin::app::AccountDiscoveryResult> m_discovery;

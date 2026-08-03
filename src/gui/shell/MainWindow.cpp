@@ -2719,6 +2719,9 @@ namespace javelin::gui::shell
         connect(&dialog, &javelin::gui::settings::PreferencesDialog::accountAdded, this,
                 [this](const javelin::gui::settings::ConnectionSettings& settings)
                 { m_accountRefreshController->refreshConnection(settings); });
+        connect(&dialog, &javelin::gui::settings::PreferencesDialog::accountReauthenticated, this,
+                [this](const javelin::gui::settings::ConnectionSettings& settings)
+                { m_accountRefreshController->refreshConnection(settings); });
         if (!connectionId.isEmpty())
             dialog.selectConfiguredAccount(connectionId);
         if (dialog.exec() == QDialog::Accepted)

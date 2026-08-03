@@ -23,6 +23,7 @@
 #include <QVBoxLayout>
 #include <QWizardPage>
 
+#include <algorithm>
 #include <utility>
 
 namespace javelin::gui::onboarding
@@ -88,17 +89,28 @@ namespace javelin::gui::onboarding
 
     FirstRunWizard::FirstRunWizard(javelin::app::OnboardingPort& onboarding,
                                    javelin::gui::settings::GuiSettings& settings, QWidget* parent)
-        : QWizard(parent), m_onboarding(onboarding), m_settings(settings),
-          m_firstRun(m_settings.accounts().empty())
+        : FirstRunWizard(onboarding, settings, {}, parent)
     {
-        setWindowTitle(m_firstRun ? QStringLiteral("Welcome to Javelin Mail")
-                                  : QStringLiteral("Add a Mail Account"));
+    }
+
+    FirstRunWizard::FirstRunWizard(javelin::app::OnboardingPort& onboarding,
+                                   javelin::gui::settings::GuiSettings& settings,
+                                   QString connectionId, QWidget* parent)
+        : QWizard(parent), m_onboarding(onboarding), m_settings(settings),
+          m_connectionId(std::move(connectionId)),
+          m_firstRun(m_connectionId.isEmpty() && m_settings.accounts().empty())
+    {
+        setWindowTitle(!m_connectionId.isEmpty() ? QStringLiteral("Sign In Again")
+                       : m_firstRun              ? QStringLiteral("Welcome to Javelin Mail")
+                                                 : QStringLiteral("Add a Mail Account"));
         setWindowIcon(QIcon(QStringLiteral(":/icons/icon.svg")));
         setWizardStyle(QWizard::ModernStyle);
         setOption(QWizard::NoBackButtonOnStartPage);
         setOption(QWizard::NoBackButtonOnLastPage);
-        setButtonText(QWizard::FinishButton,
-                      m_firstRun ? QStringLiteral("Open Javelin") : QStringLiteral("Add Account"));
+        setButtonText(QWizard::FinishButton, !m_connectionId.isEmpty()
+                                                 ? QStringLiteral("Finish Sign-In")
+                                             : m_firstRun ? QStringLiteral("Open Javelin")
+                                                          : QStringLiteral("Add Account"));
         resize(700, 560);
         setStyleSheet(QStringLiteral(
             "QWizard { background: palette(window); }"
@@ -111,6 +123,19 @@ namespace javelin::gui::onboarding
         buildDiscoveryPage();
         buildAuthenticationPage();
         buildFinishedPage();
+
+        if (!m_connectionId.isEmpty())
+        {
+            const auto accounts = m_settings.accounts();
+            const auto account = std::ranges::find(accounts, m_connectionId,
+                                                   &javelin::gui::settings::ConnectionSettings::id);
+            if (account != accounts.end())
+            {
+                m_nameEdit->setText(account->displayName);
+                m_emailEdit->setText(account->loginEmail);
+                m_emailEdit->setReadOnly(true);
+            }
+        }
 
         connect(this, &QWizard::currentIdChanged, this,
                 [this](const int pageId)
@@ -131,8 +156,9 @@ namespace javelin::gui::onboarding
     void FirstRunWizard::buildWelcomePage()
     {
         auto* page = new CompletionPage(this);
-        page->setTitle(m_firstRun ? QStringLiteral("Let’s set up your mail")
-                                  : QStringLiteral("Add another mail account"));
+        page->setTitle(!m_connectionId.isEmpty() ? QStringLiteral("Sign in to your account again")
+                       : m_firstRun              ? QStringLiteral("Let’s set up your mail")
+                                                 : QStringLiteral("Add another mail account"));
         page->setSubTitle(QStringLiteral(
             "Javelin’s background service is ready. Tell us who this account belongs to."));
         auto* layout = new QVBoxLayout(page);
@@ -231,9 +257,13 @@ namespace javelin::gui::onboarding
     void FirstRunWizard::buildFinishedPage()
     {
         auto* page = new QWizardPage(this);
-        page->setTitle(QStringLiteral("Your account is ready"));
-        page->setSubTitle(QStringLiteral(
-            "Javelin will fetch your mailboxes and recent mail when setup finishes."));
+        page->setTitle(!m_connectionId.isEmpty() ? QStringLiteral("You’re signed in again")
+                                                 : QStringLiteral("Your account is ready"));
+        page->setSubTitle(
+            !m_connectionId.isEmpty()
+                ? QStringLiteral("Javelin will resume synchronizing when setup finishes.")
+                : QStringLiteral(
+                      "Javelin will fetch your mailboxes and recent mail when setup finishes."));
         auto* layout = new QVBoxLayout(page);
         auto* heading = new QLabel(QStringLiteral("Available for this account"), page);
         heading->setStyleSheet(QStringLiteral("font-weight: 600; font-size: 12pt;"));
@@ -504,19 +534,42 @@ namespace javelin::gui::onboarding
         if (!m_authentication.has_value())
             return;
         auto accounts = m_settings.accounts();
-        accounts.push_back({
-            .id = QUuid::createUuid().toString(QUuid::WithoutBraces),
-            .revision = 1,
-            .displayName = m_nameEdit->text().trimmed(),
-            .sessionUrl = m_authentication->sessionUrl,
-            .loginEmail = m_emailEdit->text().trimmed(),
-            .apiKey = m_authentication->accessToken,
-            .refreshToken = m_authentication->refreshToken,
-            .tokenEndpoint = m_authentication->tokenEndpoint,
-            .oauthClientId = m_authentication->clientId,
-            .tokenExpiresAtEpochSeconds = m_authentication->expiresAtEpochSeconds,
-            .cachedAccountIds = {},
-        });
+        if (m_connectionId.isEmpty())
+        {
+            accounts.push_back({
+                .id = QUuid::createUuid().toString(QUuid::WithoutBraces),
+                .revision = 1,
+                .displayName = m_nameEdit->text().trimmed(),
+                .sessionUrl = m_authentication->sessionUrl,
+                .loginEmail = m_emailEdit->text().trimmed(),
+                .apiKey = m_authentication->accessToken,
+                .refreshToken = m_authentication->refreshToken,
+                .tokenEndpoint = m_authentication->tokenEndpoint,
+                .oauthClientId = m_authentication->clientId,
+                .tokenExpiresAtEpochSeconds = m_authentication->expiresAtEpochSeconds,
+                .cachedAccountIds = {},
+            });
+        }
+        else
+        {
+            const auto account = std::ranges::find(accounts, m_connectionId,
+                                                   &javelin::gui::settings::ConnectionSettings::id);
+            if (account == accounts.end())
+            {
+                QMessageBox::warning(this, QStringLiteral("Couldn’t update the account"),
+                                     QStringLiteral("This account is no longer configured."));
+                return;
+            }
+            ++account->revision;
+            account->displayName = m_nameEdit->text().trimmed();
+            account->sessionUrl = m_authentication->sessionUrl;
+            account->loginEmail = m_emailEdit->text().trimmed();
+            account->apiKey = m_authentication->accessToken;
+            account->refreshToken = m_authentication->refreshToken;
+            account->tokenEndpoint = m_authentication->tokenEndpoint;
+            account->oauthClientId = m_authentication->clientId;
+            account->tokenExpiresAtEpochSeconds = m_authentication->expiresAtEpochSeconds;
+        }
         javelin::protocol::SettingsUpdate update;
         update.accounts = javelin::gui::settings::GuiSettings::protocolAccounts(accounts);
         if (const auto error = m_settings.update(std::move(update)))

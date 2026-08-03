@@ -59,12 +59,14 @@ namespace javelin::gui::settings
 
       Q_SIGNALS:
         void accountAdded(const javelin::gui::settings::ConnectionSettings& settings);
+        void accountReauthenticated(const javelin::gui::settings::ConnectionSettings& settings);
 
       private:
         void updateSettings() override;
         [[nodiscard]] bool hasChanged() override;
 
         void addAccount();
+        void reauthenticateCurrentAccount();
         void removeCurrentAccount();
         void selectAccount(int row);
         void noteUnsavedChanges();
@@ -104,6 +106,7 @@ namespace javelin::gui::settings
         bool m_hasPendingChanges = false;
         int m_currentRow = -1;
         QListWidget* m_accountList = nullptr;
+        QPushButton* m_reauthenticateButton = nullptr;
         QPushButton* m_removeButton = nullptr;
         QLineEdit* m_displayNameEdit = nullptr;
         QLabel* m_loginEmailLabel = nullptr;
