@@ -6,11 +6,11 @@
 #include "jmap/api/ResponseReader.h"
 #include "jmap/auth/Auth.h"
 #include "jmap/cache/SessionRepository.h"
+#include "jmap/calendar/CalendarColor.h"
 #include "jmap/calendar/CalendarMutationJournal.h"
 #include "jmap/sync/ConsistencyDomain.h"
 #include "jmap/sync/MutationJournal.h"
 
-#include <QColor>
 #include <QDateTime>
 #include <QLoggingCategory>
 #include <QRegularExpression>
@@ -693,8 +693,7 @@ namespace javelin::jmap::calendar
         if (command.name.empty() || command.name.size() > 255)
             co_return error(OperationErrorCode::InvalidUserInput,
                             QStringLiteral("Calendar names must contain 1 to 255 UTF-8 bytes."));
-        if (command.color.has_value() &&
-            !QColor::isValidColorName(QString::fromStdString(*command.color)))
+        if (command.color.has_value() && !isValidCalendarColor(*command.color))
             co_return error(OperationErrorCode::InvalidUserInput,
                             QStringLiteral("Choose a valid calendar color."));
         const auto sessionResult = loadSession(m_connection, ownerAccountId);

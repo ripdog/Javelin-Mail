@@ -16,6 +16,7 @@
 #include "jmap/cache/QueryService.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/cache/SubmissionRepository.h"
+#include "jmap/render/HtmlTextExtractor.h"
 #include "jmap/submission/DraftMutationJournal.h"
 #include "jmap/sync/ConsistencyDomain.h"
 #include "jmap/sync/EmailMutationJournal.h"
@@ -31,7 +32,6 @@
 #include <QMimeDatabase>
 #include <QRegularExpression>
 #include <QString>
-#include <QTextDocument>
 #include <QUrl>
 #include <QUuid>
 
@@ -293,9 +293,9 @@ namespace javelin::jmap::submission
 
         [[nodiscard]] std::string strippedPlainText(const std::string_view html)
         {
-            QTextDocument document;
-            document.setHtml(QString::fromStdString(std::string{html}));
-            return document.toPlainText().toStdString();
+            return javelin::jmap::render::plainTextFromHtml(
+                       QString::fromStdString(std::string{html}))
+                .toStdString();
         }
 
         [[nodiscard]] std::string htmlFromText(const std::string_view plainText)

@@ -2,57 +2,65 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <QMessageLogContext>
+#include <QCoreApplication>
 #include <QString>
-#include <QtLogging>
 
-#include <atomic>
+#include <memory>
 
 namespace
 {
-    std::atomic_int invalidPixelSizeWarnings = 0;
-    QtMessageHandler previousMessageHandler = nullptr;
-
-    void captureInvalidPixelSizeWarning(const QtMsgType type, const QMessageLogContext& context,
-                                        const QString& message)
+    void ensureCoreApplication()
     {
-        if (message.startsWith(QStringLiteral("QFont::setPixelSize: Pixel size <= 0")))
-            ++invalidPixelSizeWarnings;
-        if (previousMessageHandler != nullptr)
-            previousMessageHandler(type, context, message);
+        if (QCoreApplication::instance() != nullptr)
+            return;
+        static int argc = 1;
+        static char name[] = "html-text-extractor-test";
+        static char* argv[]{name, nullptr};
+        static const auto application = std::make_unique<QCoreApplication>(argc, argv);
+        Q_UNUSED(application);
     }
-
-    class WarningCapture final
-    {
-      public:
-        WarningCapture()
-        {
-            invalidPixelSizeWarnings = 0;
-            previousMessageHandler = qInstallMessageHandler(captureInvalidPixelSizeWarning);
-        }
-
-        ~WarningCapture()
-        {
-            qInstallMessageHandler(previousMessageHandler);
-            previousMessageHandler = nullptr;
-        }
-
-        WarningCapture(const WarningCapture&) = delete;
-        WarningCapture& operator=(const WarningCapture&) = delete;
-    };
 } // namespace
 
-TEST_CASE("HTML text extraction accepts zero-sized email markup")
+TEST_CASE("HTML text extraction is safe under QCoreApplication", "[jmap][render][html]")
 {
-    const WarningCapture warningCapture;
-    const auto text = javelin::jmap::render::plainTextFromHtml(QStringLiteral(
-        R"(<style>.preheader { FONT-SIZE: 0 !important; }</style>
-           <p style="font-size:0px">Hidden preheader</p>
-           <table><tr><td style='font-size: 0.0pt; line-height: 0'>Spacer</td></tr></table>
-           <p>Visible body</p>)"));
+    ensureCoreApplication();
 
-    CHECK(text.contains(QStringLiteral("Hidden preheader")));
-    CHECK(text.contains(QStringLiteral("Spacer")));
-    CHECK(text.contains(QStringLiteral("Visible body")));
-    CHECK(invalidPixelSizeWarnings == 0);
+    const auto text = javelin::jmap::render::plainTextFromHtml(QStringLiteral(
+        R"(<html><head><style>
+             table { border-spacing: 1em; }
+             td { padding: 0.5em; font-size: 0 !important; }
+           </style></head><body>
+           <p style="margin: 1em">Incoming message</p>
+           <table><tr><td>First cell</td><td>Second cell</td></tr></table>
+           </body></html>)"));
+
+    CHECK(text == QStringLiteral("Incoming message\nFirst cell\tSecond cell"));
+}
+
+TEST_CASE("HTML text extraction preserves readable structure and entities", "[jmap][render][html]")
+{
+    const auto text = javelin::jmap::render::plainTextFromHtml(QStringLiteral(
+        R"(<p>Hello&nbsp;<strong>world</strong> &amp; universe; caf&eacute;.</p>
+           <ul><li>One</li><li>Two<br>continued</li></ul>)"));
+
+    CHECK(text == QStringLiteral("Hello world & universe; café.\nOne\nTwo\ncontinued"));
+}
+
+TEST_CASE("HTML text extraction ignores non-content elements and tolerates malformed markup",
+          "[jmap][render][html]")
+{
+    const auto text = javelin::jmap::render::plainTextFromHtml(QStringLiteral(
+        R"(<style>.secret { display: none; }</style>
+           <script>alert('not content')</script>
+           <p>Before <b>bold</p>After &unknown; &#x1f642;)"));
+
+    CHECK(text == QStringLiteral("Before bold\nAfter &unknown; 🙂"));
+}
+
+TEST_CASE("HTML text extraction preserves preformatted whitespace", "[jmap][render][html]")
+{
+    const auto text = javelin::jmap::render::plainTextFromHtml(
+        QStringLiteral("<pre>alpha\n  beta</pre><p>gamma</p>"));
+
+    CHECK(text == QStringLiteral("alpha\n  beta\ngamma"));
 }

@@ -42,7 +42,7 @@ configure_file(
     @ONLY
 )
 
-find_package(KF6 REQUIRED COMPONENTS ConfigWidgets XmlGui CoreAddons TextEditor)
+find_package(KF6 REQUIRED COMPONENTS Codecs ConfigWidgets XmlGui CoreAddons TextEditor)
 find_package(KPim6Mime REQUIRED)
 
 qt_standard_project_setup()
@@ -119,7 +119,6 @@ target_link_libraries(javelin_cache_read
         KPim6::Mime
         Qt::Concurrent
         Qt::Core
-        Qt::Gui
         Qt::Sql
 )
 javelin_set_project_warnings(javelin_cache_read)
@@ -430,6 +429,8 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/api/CalendarMethods.h
     src/jmap/calendar/CalendarTypes.h
     src/jmap/calendar/CalendarCommandTypes.h
+    src/jmap/calendar/CalendarColor.cpp
+    src/jmap/calendar/CalendarColor.h
     src/jmap/calendar/CalendarEventEditing.cpp
     src/jmap/calendar/CalendarEventEditing.h
     src/jmap/calendar/CalendarService.cpp
@@ -606,6 +607,7 @@ set(JAVELIN_FORMAT_FILES
     tests/jmap/ContactRepositoryTest.cpp
     tests/jmap/ContactServiceTest.cpp
     tests/jmap/CalendarMethodsTest.cpp
+    tests/jmap/CalendarColorTest.cpp
     tests/jmap/CalendarRepositoryTest.cpp
     tests/gui/MonthCalendarWidgetTest.cpp
     tests/gui/RecurrencePatternTest.cpp
@@ -655,6 +657,8 @@ add_library(javelin_jmap STATIC
     src/jmap/api/CalendarMethods.h
     src/jmap/calendar/CalendarTypes.h
     src/jmap/calendar/CalendarCommandTypes.h
+    src/jmap/calendar/CalendarColor.cpp
+    src/jmap/calendar/CalendarColor.h
     src/jmap/calendar/CalendarService.cpp
     src/jmap/calendar/CalendarService.h
     src/jmap/calendar/CalendarReader.h
@@ -853,12 +857,12 @@ target_link_libraries(javelin_jmap
         javelin_cache_read
         QCoro6::Coro
         Qt::Core
-        Qt::Gui
         Qt::Network
         Qt::Sql
         Qt::WebSockets
         KPim6::Mime
     PRIVATE
+        KF6::Codecs
         QCoro6::Network
         Qt::Concurrent
         glaze::glaze
@@ -1368,6 +1372,14 @@ target_compile_options(javelin_daemon_core PRIVATE -fexceptions)
 # Phase 11 composition checks.  The daemon target is the socket-safe half of
 # the application graph.  The GUI bootstrap consumes only the typed protocol,
 # read-only cache, and presentation targets.
+get_target_property(javelin_cache_read_links javelin_cache_read LINK_LIBRARIES)
+if(javelin_cache_read_links MATCHES "Qt::(Widgets|Gui)|Qt::WebEngine")
+    message(FATAL_ERROR "javelin_cache_read must remain usable from QCoreApplication processes")
+endif()
+get_target_property(javelin_jmap_links javelin_jmap LINK_LIBRARIES)
+if(javelin_jmap_links MATCHES "Qt::(Widgets|Gui)|Qt::WebEngine")
+    message(FATAL_ERROR "javelin_jmap must remain usable from QCoreApplication processes")
+endif()
 get_target_property(javelin_daemon_core_links javelin_daemon_core LINK_LIBRARIES)
 if(javelin_daemon_core_links MATCHES "Qt::(Widgets|Gui)|Qt::WebEngine")
     message(FATAL_ERROR "javelin_daemon_core must not link GUI or WebEngine targets")
