@@ -809,11 +809,43 @@ namespace javelin::app
         connect(&events, &MailApplicationEventsPort::cacheInvalidated, this,
                 [this](MailCacheInvalidation invalidation)
                 {
+                    std::vector<QString> mailboxIds{invalidation.change.mailboxIds.begin(),
+                                                    invalidation.change.mailboxIds.end()};
+                    std::vector<MailboxWindowInvalidation> mailboxWindows;
+                    mailboxWindows.reserve(invalidation.change.queryWindows.size());
+                    for (const auto& window : invalidation.change.queryWindows)
+                    {
+                        mailboxWindows.push_back({
+                            .mailboxId = window.mailboxId,
+                            .offset = static_cast<std::uint64_t>(window.offset),
+                            .limit = static_cast<std::uint64_t>(window.limit),
+                            .total = window.total.transform(
+                                [](const std::size_t total)
+                                { return static_cast<std::uint64_t>(total); }),
+                        });
+                    }
+                    std::vector<SearchWindowInvalidation> searchWindows;
+                    searchWindows.reserve(invalidation.change.searchWindows.size());
+                    for (const auto& window : invalidation.change.searchWindows)
+                    {
+                        searchWindows.push_back({
+                            .queryKey = window.queryKey,
+                            .offset = static_cast<std::uint64_t>(window.offset),
+                            .limit = static_cast<std::uint64_t>(window.limit),
+                            .total = window.total.transform(
+                                [](const std::size_t total)
+                                { return static_cast<std::uint64_t>(total); }),
+                        });
+                    }
                     ++m_epoch.value;
                     onBoundaryEvent(CacheInvalidation{
                         .epoch = currentEpoch(),
                         .changedDomains = std::move(invalidation.changedDomains),
                         .affectedKeys = std::move(invalidation.affectedKeys),
+                        .accountId = std::move(invalidation.change.accountId),
+                        .mailboxIds = std::move(mailboxIds),
+                        .mailboxWindows = std::move(mailboxWindows),
+                        .searchWindows = std::move(searchWindows),
                     });
                 });
         connect(&events, &MailApplicationEventsPort::accountStatusChanged, this,

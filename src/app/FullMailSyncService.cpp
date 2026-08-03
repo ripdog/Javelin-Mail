@@ -386,7 +386,10 @@ namespace javelin::app
             QSqlQuery accountMetadata{m_connection.database()};
             accountMetadata.prepare(QStringLiteral(
                 "INSERT INTO mail_vault_projection_jobs(account_id,email_id,operation) "
-                "VALUES(:account,'','metadata')"));
+                "SELECT :account,'','metadata' WHERE EXISTS(SELECT 1 FROM accounts WHERE "
+                "account_id=:account) AND NOT EXISTS(SELECT 1 FROM mail_vault_projection_jobs "
+                "WHERE account_id=:account AND email_id='' AND mailbox_id IS NULL AND "
+                "operation='metadata' AND status='pending')"));
             accountMetadata.bindValue(QStringLiteral(":account"),
                                       QString::fromStdString(configuration.accountId));
             if (!accountMetadata.exec())
@@ -432,7 +435,11 @@ namespace javelin::app
                 QSqlQuery mailboxMetadata{m_connection.database()};
                 mailboxMetadata.prepare(QStringLiteral(
                     "INSERT INTO mail_vault_projection_jobs(account_id,email_id,mailbox_id,"
-                    "operation) VALUES(:account,'',:mailbox,'metadata')"));
+                    "operation) SELECT :account,'',:mailbox,'metadata' WHERE EXISTS(SELECT 1 FROM "
+                    "mailboxes WHERE account_id=:account AND mailbox_id=:mailbox) AND NOT "
+                    "EXISTS(SELECT 1 FROM mail_vault_projection_jobs WHERE account_id=:account "
+                    "AND email_id='' AND mailbox_id=:mailbox AND operation='metadata' AND "
+                    "status='pending')"));
                 mailboxMetadata.bindValue(QStringLiteral(":account"),
                                           QString::fromStdString(configuration.accountId));
                 mailboxMetadata.bindValue(QStringLiteral(":mailbox"),

@@ -136,7 +136,8 @@ namespace javelin::jmap::cache
             if (const auto error = transaction.commit())
                 return *error;
         }
-        return replayProjectionJobs();
+        static_cast<void>(replayProjectionJobs());
+        return std::nullopt;
     }
 
     std::optional<DatabaseError>
@@ -189,7 +190,8 @@ namespace javelin::jmap::cache
                 return *error;
         }
 
-        return replayProjectionJobs();
+        static_cast<void>(replayProjectionJobs());
+        return std::nullopt;
     }
 
     std::variant<std::optional<RawMessageSource>, DatabaseError>
@@ -469,6 +471,7 @@ namespace javelin::jmap::cache
         select.finish();
 
         const MailVault vault = MailVault::forDatabase(m_connection);
+        std::optional<DatabaseError> firstFailure;
         for (const auto& job : jobs)
         {
             std::optional<MailVaultError> failure;
@@ -492,13 +495,17 @@ namespace javelin::jmap::cache
                         "SELECT email_address FROM accounts WHERE account_id=:account"));
                     metadata.bindValue(QStringLiteral(":account"),
                                        QString::fromStdString(job.accountId));
-                    if (!metadata.exec() || !metadata.next())
+                    if (!metadata.exec())
+                    {
                         failure = MailVaultError{
                             .message = QStringLiteral("Read mail account metadata: ") +
                                        metadata.lastError().text()};
-                    else
+                    }
+                    else if (metadata.next())
+                    {
                         failure = vault.writeAccountMetadata(
                             job.accountId, metadata.value(0).toString().toStdString());
+                    }
                 }
                 else
                 {
@@ -509,14 +516,18 @@ namespace javelin::jmap::cache
                                        QString::fromStdString(job.accountId));
                     metadata.bindValue(QStringLiteral(":mailbox"),
                                        QString::fromStdString(job.mailboxId));
-                    if (!metadata.exec() || !metadata.next())
+                    if (!metadata.exec())
+                    {
                         failure = MailVaultError{
                             .message = QStringLiteral("Read mail mailbox metadata: ") +
                                        metadata.lastError().text()};
-                    else
+                    }
+                    else if (metadata.next())
+                    {
                         failure =
                             vault.writeMailboxMetadata(job.accountId, job.mailboxId,
                                                        metadata.value(0).toString().toStdString());
+                    }
                 }
             }
             else
@@ -538,10 +549,10 @@ namespace javelin::jmap::cache
             update.bindValue(QStringLiteral(":job_id"), job.id);
             if (!update.exec())
                 return makeQueryError(QStringLiteral("Complete mail vault projection job"), update);
-            if (failure)
-                return vaultError(*failure);
+            if (failure && !firstFailure.has_value())
+                firstFailure = vaultError(*failure);
         }
-        return std::nullopt;
+        return firstFailure;
     }
 
 } // namespace javelin::jmap::cache

@@ -66,12 +66,49 @@ TEST_CASE("GUI mail events publish contact cache invalidations", "[app][gui][cac
         .epoch = {.value = 7},
         .changedDomains = {javelin::protocol::ChangedDomain::Contacts},
         .affectedKeys = {QStringLiteral("contacts-account")},
+        .accountId = QStringLiteral("contacts-account"),
     });
 
     REQUIRE(received.has_value());
     CHECK(received->change.accountId == QStringLiteral("contacts-account"));
     CHECK(received->change.contactsChanged);
     CHECK(received->changedDomains == std::vector{javelin::protocol::ChangedDomain::Contacts});
+}
+
+TEST_CASE("GUI mail events preserve equal account and mailbox identifiers", "[app][gui][cache]")
+{
+    javelin::app::GuiDaemonSession session{
+        {.runtimeDirectory = QStringLiteral("/tmp"),
+         .socketPath = QStringLiteral("/tmp/unused-javelin-test.sock"),
+         .daemonExecutable = {},
+         .protocol = {.major = 3, .minor = 0},
+         .build = {.application = QStringLiteral("Javelin-Mail"),
+                   .revision = QStringLiteral("test")},
+         .startTimeoutMilliseconds = 10,
+         .startDaemonIfMissing = false}};
+
+    javelin::app::GuiMailApplicationEvents events{session};
+    std::optional<javelin::app::MailCacheInvalidation> received;
+    QObject::connect(&events, &javelin::app::MailApplicationEventsPort::cacheInvalidated,
+                     [&received](javelin::app::MailCacheInvalidation invalidation)
+                     { received = std::move(invalidation); });
+
+    session.onBoundaryEvent(javelin::protocol::CacheInvalidation{
+        .epoch = {.value = 8},
+        .changedDomains = {javelin::protocol::ChangedDomain::MailQueryWindows},
+        .affectedKeys = {QStringLiteral("c")},
+        .accountId = QStringLiteral("c"),
+        .mailboxIds = {QStringLiteral("c")},
+        .mailboxWindows =
+            {{.mailboxId = QStringLiteral("c"), .offset = 0, .limit = 100, .total = 113}},
+    });
+
+    REQUIRE(received.has_value());
+    CHECK(received->change.accountId == QStringLiteral("c"));
+    CHECK(received->change.mailboxIds == QStringList{QStringLiteral("c")});
+    REQUIRE(received->change.queryWindows.size() == 1);
+    CHECK(received->change.queryWindows.front().mailboxId == QStringLiteral("c"));
+    CHECK(received->change.queryWindows.front().total == std::optional<std::size_t>{113});
 }
 
 TEST_CASE("GUI bootstrap does not offer the packaged service for a source build", "[app][gui]")

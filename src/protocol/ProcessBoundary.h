@@ -595,11 +595,31 @@ namespace javelin::protocol
     {
     };
 
+    struct MailboxWindowInvalidation
+    {
+        QString mailboxId;
+        std::uint64_t offset = 0;
+        std::uint64_t limit = 0;
+        std::optional<std::uint64_t> total;
+    };
+
+    struct SearchWindowInvalidation
+    {
+        QString queryKey;
+        std::uint64_t offset = 0;
+        std::uint64_t limit = 0;
+        std::optional<std::uint64_t> total;
+    };
+
     struct CacheInvalidation
     {
         InvalidationEpoch epoch;
         std::vector<ChangedDomain> changedDomains;
         std::vector<QString> affectedKeys;
+        QString accountId{};
+        std::vector<QString> mailboxIds{};
+        std::vector<MailboxWindowInvalidation> mailboxWindows{};
+        std::vector<SearchWindowInvalidation> searchWindows{};
     };
 
     struct ActivationRequested

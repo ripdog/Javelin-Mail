@@ -697,14 +697,31 @@ TEST_CASE("socket endpoint runs the transport-neutral typed surface", "[protocol
     REQUIRE(invalidReplyRejected != nullptr);
     CHECK(invalidReplyRejected->error.code == BoundaryErrorCode::ProtocolViolation);
 
-    endpoint.publishEvent(CacheInvalidation{.epoch = {.value = 13},
-                                            .changedDomains = {ChangedDomain::MessageMetadata},
-                                            .affectedKeys = {QStringLiteral("email-1")}});
+    endpoint.publishEvent(CacheInvalidation{
+        .epoch = {.value = 13},
+        .changedDomains = {ChangedDomain::MessageMetadata},
+        .affectedKeys = {QStringLiteral("c")},
+        .accountId = QStringLiteral("c"),
+        .mailboxIds = {QStringLiteral("c")},
+        .mailboxWindows =
+            {{.mailboxId = QStringLiteral("c"), .offset = 0, .limit = 100, .total = 113}},
+        .searchWindows = {{.queryKey = QStringLiteral("search-1"),
+                           .offset = 100,
+                           .limit = 50,
+                           .total = std::nullopt}},
+    });
     processUntil([&sink] { return sink.received.has_value(); });
     REQUIRE(sink.received.has_value());
     const auto* invalidation = std::get_if<CacheInvalidation>(&*sink.received);
     REQUIRE(invalidation != nullptr);
     CHECK(invalidation->epoch.value == 13);
+    CHECK(invalidation->accountId == QStringLiteral("c"));
+    CHECK(invalidation->mailboxIds == std::vector{QStringLiteral("c")});
+    REQUIRE(invalidation->mailboxWindows.size() == 1);
+    CHECK(invalidation->mailboxWindows.front().mailboxId == QStringLiteral("c"));
+    CHECK(invalidation->mailboxWindows.front().total == std::optional<std::uint64_t>{113});
+    REQUIRE(invalidation->searchWindows.size() == 1);
+    CHECK(invalidation->searchWindows.front().queryKey == QStringLiteral("search-1"));
 
     sink.received.reset();
     endpoint.publishEvent(DaemonShutdownRequested{});

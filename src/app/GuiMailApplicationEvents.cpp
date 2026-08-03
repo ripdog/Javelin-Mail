@@ -84,15 +84,29 @@ namespace javelin::app
         const javelin::protocol::CacheInvalidation& invalidation)
     {
         MailCacheChange change;
-        if (!invalidation.affectedKeys.empty())
+        change.accountId = invalidation.accountId;
+        change.mailboxIds = {invalidation.mailboxIds.begin(), invalidation.mailboxIds.end()};
+        change.queryWindows.reserve(invalidation.mailboxWindows.size());
+        for (const auto& window : invalidation.mailboxWindows)
         {
-            change.accountId = invalidation.affectedKeys.front();
-            for (auto key = std::next(invalidation.affectedKeys.begin());
-                 key != invalidation.affectedKeys.end(); ++key)
-            {
-                if (!key->isEmpty() && !change.mailboxIds.contains(*key))
-                    change.mailboxIds.push_back(*key);
-            }
+            change.queryWindows.push_back({
+                .mailboxId = window.mailboxId,
+                .offset = static_cast<std::size_t>(window.offset),
+                .limit = static_cast<std::size_t>(window.limit),
+                .total = window.total.transform([](const std::uint64_t total)
+                                                { return static_cast<std::size_t>(total); }),
+            });
+        }
+        change.searchWindows.reserve(invalidation.searchWindows.size());
+        for (const auto& window : invalidation.searchWindows)
+        {
+            change.searchWindows.push_back({
+                .queryKey = window.queryKey,
+                .offset = static_cast<std::size_t>(window.offset),
+                .limit = static_cast<std::size_t>(window.limit),
+                .total = window.total.transform([](const std::uint64_t total)
+                                                { return static_cast<std::size_t>(total); }),
+            });
         }
         change.mailboxTreeChanged =
             hasDomain(invalidation.changedDomains, javelin::protocol::ChangedDomain::MailboxTree);

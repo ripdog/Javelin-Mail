@@ -32,7 +32,7 @@ namespace javelin::protocol
     namespace
     {
         constexpr std::size_t frameHeaderBytes = 24;
-        constexpr quint16 wireVersion = 1;
+        constexpr quint16 wireVersion = 2;
         constexpr char frameMagic[] = {'J', 'V', 'I', 'P'};
 
         [[nodiscard]] quint16 readU16(const QByteArray& bytes, const int offset)
@@ -764,6 +764,90 @@ namespace javelin::protocol
                                     QStringLiteral("affectedKeys"));
         }
 
+        bool writeOptionalSize(PayloadWriter& writer, const std::optional<std::uint64_t> value)
+        {
+            return writer.boolean(value.has_value()) &&
+                   (!value.has_value() || writer.qword(*value));
+        }
+
+        bool readOptionalSize(PayloadReader& reader, std::optional<std::uint64_t>& value)
+        {
+            bool present = false;
+            if (!reader.boolean(present))
+                return false;
+            if (!present)
+            {
+                value.reset();
+                return true;
+            }
+            value.emplace();
+            return reader.qword(*value);
+        }
+
+        bool writeMailboxWindowInvalidation(PayloadWriter& writer,
+                                            const MailboxWindowInvalidation& window)
+        {
+            return writer.string(window.mailboxId) && writer.qword(window.offset) &&
+                   writer.qword(window.limit) && writeOptionalSize(writer, window.total);
+        }
+
+        bool readMailboxWindowInvalidation(PayloadReader& reader, MailboxWindowInvalidation& window)
+        {
+            return reader.string(window.mailboxId) && reader.qword(window.offset) &&
+                   reader.qword(window.limit) && readOptionalSize(reader, window.total);
+        }
+
+        bool writeSearchWindowInvalidation(PayloadWriter& writer,
+                                           const SearchWindowInvalidation& window)
+        {
+            return writer.string(window.queryKey) && writer.qword(window.offset) &&
+                   writer.qword(window.limit) && writeOptionalSize(writer, window.total);
+        }
+
+        bool readSearchWindowInvalidation(PayloadReader& reader, SearchWindowInvalidation& window)
+        {
+            return reader.string(window.queryKey) && reader.qword(window.offset) &&
+                   reader.qword(window.limit) && readOptionalSize(reader, window.total);
+        }
+
+        bool writeCacheInvalidation(PayloadWriter& writer, const CacheInvalidation& invalidation,
+                                    const BoundaryLimits& limits)
+        {
+            return writer.qword(invalidation.epoch.value) &&
+                   writeChangedDomains(writer, invalidation.changedDomains, limits) &&
+                   writeAffectedKeys(writer, invalidation.affectedKeys, limits) &&
+                   writer.string(invalidation.accountId) &&
+                   writeStringVector(writer, invalidation.mailboxIds, limits.maximumAffectedKeys,
+                                     QStringLiteral("mailboxIds")) &&
+                   writeVector(writer, invalidation.mailboxWindows, limits.maximumCollectionItems,
+                               QStringLiteral("mailboxWindows"),
+                               [&writer](const MailboxWindowInvalidation& window)
+                               { return writeMailboxWindowInvalidation(writer, window); }) &&
+                   writeVector(writer, invalidation.searchWindows, limits.maximumCollectionItems,
+                               QStringLiteral("searchWindows"),
+                               [&writer](const SearchWindowInvalidation& window)
+                               { return writeSearchWindowInvalidation(writer, window); });
+        }
+
+        bool readCacheInvalidation(PayloadReader& reader, CacheInvalidation& invalidation,
+                                   const BoundaryLimits& limits)
+        {
+            return reader.qword(invalidation.epoch.value) &&
+                   readChangedDomains(reader, invalidation.changedDomains, limits) &&
+                   readAffectedKeys(reader, invalidation.affectedKeys, limits) &&
+                   reader.string(invalidation.accountId) &&
+                   readStringVector(reader, invalidation.mailboxIds, limits.maximumAffectedKeys,
+                                    QStringLiteral("mailboxIds")) &&
+                   readVector(reader, invalidation.mailboxWindows, limits.maximumCollectionItems,
+                              QStringLiteral("mailboxWindows"),
+                              [&reader](MailboxWindowInvalidation& window)
+                              { return readMailboxWindowInvalidation(reader, window); }) &&
+                   readVector(reader, invalidation.searchWindows, limits.maximumCollectionItems,
+                              QStringLiteral("searchWindows"),
+                              [&reader](SearchWindowInvalidation& window)
+                              { return readSearchWindowInvalidation(reader, window); });
+        }
+
         bool writeSettingsSnapshot(PayloadWriter& writer, const SettingsSnapshot& snapshot,
                                    const BoundaryLimits& limits)
         {
@@ -1479,9 +1563,7 @@ namespace javelin::protocol
                         {
                             using Event = std::decay_t<decltype(value)>;
                             if constexpr (std::is_same_v<Event, CacheInvalidation>)
-                                return writer.qword(value.epoch.value) &&
-                                       writeChangedDomains(writer, value.changedDomains, limits) &&
-                                       writeAffectedKeys(writer, value.affectedKeys, limits);
+                                return writeCacheInvalidation(writer, value, limits);
                             else if constexpr (std::is_same_v<Event, OperationFailed>)
                                 return writer.uuid(value.operation.value) &&
                                        writeBoundaryError(writer, value.error);
@@ -1534,9 +1616,7 @@ namespace javelin::protocol
             if (kind == 0)
             {
                 CacheInvalidation event;
-                if (!reader.qword(event.epoch.value) ||
-                    !readChangedDomains(reader, event.changedDomains, limits) ||
-                    !readAffectedKeys(reader, event.affectedKeys, limits))
+                if (!readCacheInvalidation(reader, event, limits))
                     return malformed(QStringLiteral("invalid cache invalidation"));
                 return finishReply(reader, BoundaryEvent{std::move(event)});
             }
@@ -1796,19 +1876,59 @@ namespace javelin::protocol
         void mergeInvalidation(CacheInvalidation& target, const CacheInvalidation& source,
                                const BoundaryLimits& limits)
         {
+            const auto appendUnique = [](auto& values, const auto& value, const std::size_t maximum)
+            {
+                if (values.size() < maximum && !std::ranges::contains(values, value))
+                    values.push_back(value);
+            };
             target.epoch = source.epoch;
+            if (target.accountId.isEmpty())
+                target.accountId = source.accountId;
             for (const auto domain : source.changedDomains)
-            {
-                if (std::ranges::find(target.changedDomains, domain) ==
-                        target.changedDomains.end() &&
-                    target.changedDomains.size() < limits.maximumCollectionItems)
-                    target.changedDomains.push_back(domain);
-            }
+                appendUnique(target.changedDomains, domain, limits.maximumCollectionItems);
             for (const auto& key : source.affectedKeys)
+                appendUnique(target.affectedKeys, key, limits.maximumAffectedKeys);
+            for (const auto& mailboxId : source.mailboxIds)
+                appendUnique(target.mailboxIds, mailboxId, limits.maximumAffectedKeys);
+            for (const auto& window : source.mailboxWindows)
             {
-                if (std::ranges::find(target.affectedKeys, key) == target.affectedKeys.end() &&
-                    target.affectedKeys.size() < limits.maximumAffectedKeys)
-                    target.affectedKeys.push_back(key);
+                const auto found =
+                    std::ranges::find_if(target.mailboxWindows,
+                                         [&window](const MailboxWindowInvalidation& existing)
+                                         {
+                                             return existing.mailboxId == window.mailboxId &&
+                                                    existing.offset == window.offset &&
+                                                    existing.limit == window.limit;
+                                         });
+                if (found == target.mailboxWindows.end())
+                {
+                    if (target.mailboxWindows.size() < limits.maximumCollectionItems)
+                        target.mailboxWindows.push_back(window);
+                }
+                else if (window.total.has_value())
+                {
+                    found->total = window.total;
+                }
+            }
+            for (const auto& window : source.searchWindows)
+            {
+                const auto found =
+                    std::ranges::find_if(target.searchWindows,
+                                         [&window](const SearchWindowInvalidation& existing)
+                                         {
+                                             return existing.queryKey == window.queryKey &&
+                                                    existing.offset == window.offset &&
+                                                    existing.limit == window.limit;
+                                         });
+                if (found == target.searchWindows.end())
+                {
+                    if (target.searchWindows.size() < limits.maximumCollectionItems)
+                        target.searchWindows.push_back(window);
+                }
+                else if (window.total.has_value())
+                {
+                    found->total = window.total;
+                }
             }
         }
 
@@ -2537,8 +2657,10 @@ namespace javelin::protocol
                     continue;
                 if (auto* target = std::get_if<CacheInvalidation>(&*iterator->event))
                 {
-                    mergeInvalidation(*target, std::get<CacheInvalidation>(event),
-                                      m_options.limits);
+                    const auto& source = std::get<CacheInvalidation>(event);
+                    if (target->accountId != source.accountId)
+                        continue;
+                    mergeInvalidation(*target, source, m_options.limits);
                     const auto merged = encodeBoundaryEvent(*iterator->event, m_options.limits);
                     if (std::holds_alternative<SocketFrameError>(merged))
                         return false;

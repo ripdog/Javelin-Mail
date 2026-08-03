@@ -153,6 +153,77 @@ TEST_CASE("daemon process migrates settings before exposing readiness", "[app][d
     CHECK_FALSE(process.isReady());
 }
 
+TEST_CASE("daemon does not queue vault metadata for undiscovered connection ids",
+          "[app][daemon][settings][offline][vault]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir temporaryDirectory;
+    REQUIRE(temporaryDirectory.isValid());
+
+    const auto runtimeDirectory = temporaryDirectory.filePath(QStringLiteral("runtime"));
+    const auto cacheRoot = temporaryDirectory.filePath(QStringLiteral("cache"));
+    const auto settingsPath = temporaryDirectory.filePath(QStringLiteral("settings.ini"));
+    REQUIRE(QDir{}.mkpath(runtimeDirectory));
+    REQUIRE(QDir{}.mkpath(cacheRoot));
+    REQUIRE(QFile::setPermissions(runtimeDirectory, QFileDevice::ReadOwner |
+                                                        QFileDevice::WriteOwner |
+                                                        QFileDevice::ExeOwner));
+
+    javelin::app::DaemonProcess process{optionsFor(runtimeDirectory, cacheRoot, settingsPath)};
+    const auto startupError = process.start();
+    INFO((startupError.has_value() ? startupError->detail.toStdString() : std::string{"no error"}));
+    REQUIRE_FALSE(startupError.has_value());
+
+    const auto currentSettings = process.handleGetSettings({});
+    const auto* current = std::get_if<javelin::protocol::SettingsSnapshotReply>(&currentSettings);
+    REQUIRE(current != nullptr);
+    const auto update = process.handleUpdateSettings({
+        .baseRevision = current->snapshot.revision,
+        .update = {.accounts = std::vector{javelin::protocol::AccountSettings{
+                       .id = QStringLiteral("connection-1"),
+                       .revision = 0,
+                       .displayName = QStringLiteral("Example"),
+                       .sessionUrl = QStringLiteral("https://example.test/jmap"),
+                       .loginEmail = QStringLiteral("user@example.test"),
+                       .apiKey = QStringLiteral("secret"),
+                       .refreshToken = {},
+                       .tokenEndpoint = {},
+                       .oauthClientId = {},
+                       .tokenExpiresAtEpochSeconds = 0,
+                       .cachedAccountIds = {},
+                   }},
+                   .syncedMailboxSelections =
+                       std::vector<javelin::protocol::MailboxSelectionSettings>{},
+                   .notificationMailboxSelections =
+                       std::vector<javelin::protocol::MailboxSelectionSettings>{},
+                   .remoteContentSenders = std::nullopt,
+                   .remoteContentDomains = std::nullopt,
+                   .translation = std::nullopt,
+                   .appearance = std::nullopt,
+                   .attachments = std::nullopt,
+                   .undoSendDelaySeconds = std::nullopt,
+                   .workspace = std::nullopt},
+    });
+    REQUIRE(std::holds_alternative<javelin::protocol::SettingsUpdated>(update));
+
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("daemon-undiscovered-vault-test"),
+        .databasePath = process.databasePath(),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    QSqlQuery jobs{connection.database()};
+    jobs.prepare(QStringLiteral(
+        "SELECT COUNT(*) FROM mail_vault_projection_jobs WHERE account_id=:account"));
+    jobs.bindValue(QStringLiteral(":account"), QStringLiteral("connection-1"));
+    REQUIRE(jobs.exec());
+    REQUIRE(jobs.next());
+    CHECK(jobs.value(0).toInt() == 0);
+
+    process.stop();
+}
+
 TEST_CASE("daemon applies offline mailbox settings by cached JMAP account id",
           "[app][daemon][settings][offline]")
 {

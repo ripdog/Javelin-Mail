@@ -548,9 +548,16 @@ namespace javelin::protocol
                 using Event = std::decay_t<decltype(value)>;
                 if constexpr (std::is_same_v<Event, CacheInvalidation>)
                 {
-                    std::size_t size = 24 + value.changedDomains.size();
+                    std::size_t size =
+                        48 + value.changedDomains.size() + stringSize(value.accountId);
                     for (const auto& key : value.affectedKeys)
                         size += stringSize(key);
+                    for (const auto& mailboxId : value.mailboxIds)
+                        size += stringSize(mailboxId);
+                    for (const auto& window : value.mailboxWindows)
+                        size += 32 + stringSize(window.mailboxId);
+                    for (const auto& window : value.searchWindows)
+                        size += 32 + stringSize(window.queryKey);
                     return size;
                 }
                 else if constexpr (std::is_same_v<Event, OperationFailed>)

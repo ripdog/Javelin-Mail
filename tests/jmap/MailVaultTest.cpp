@@ -144,6 +144,55 @@ TEST_CASE("mail vault stores one immutable object and projects effective mailbox
     CHECK_FALSE(QFileInfo::exists(movedPath));
 }
 
+TEST_CASE("mail vault storage is not failed by stale metadata projection work",
+          "[jmap][cache][vault][projection]")
+{
+    if (QCoreApplication::instance() == nullptr)
+    {
+        static int argc = 1;
+        static char name[] = "vault-projection-test";
+        static char* argv[]{name, nullptr};
+        static const auto application = std::make_unique<QCoreApplication>(argc, argv);
+        Q_UNUSED(application);
+    }
+    auto context = database();
+    seedAccount(context.connection);
+    const auto message = email("email-1", {"inbox"});
+    javelin::jmap::cache::EmailRepository emails{context.connection};
+    REQUIRE_FALSE(emails.upsertMany("account-1", {message}).has_value());
+
+    QSqlQuery stale{context.connection.database()};
+    REQUIRE(stale.exec(
+        QStringLiteral("INSERT INTO mail_vault_projection_jobs(account_id,email_id,operation) "
+                       "VALUES('obsolete-connection-id','','metadata')")));
+
+    const QByteArray payload = QByteArrayLiteral("stored despite stale projection");
+    javelin::jmap::cache::RawMessageSourceRepository sources{context.connection};
+    REQUIRE_FALSE(sources
+                      .upsert("account-1",
+                              {.emailId = message.id, .blobId = message.blobId, .payload = payload})
+                      .has_value());
+
+    const auto loaded = sources.find("account-1", "email-1");
+    REQUIRE(std::holds_alternative<std::optional<javelin::jmap::cache::RawMessageSource>>(loaded));
+    REQUIRE(std::get<std::optional<javelin::jmap::cache::RawMessageSource>>(loaded).has_value());
+    CHECK(std::get<std::optional<javelin::jmap::cache::RawMessageSource>>(loaded)->payload ==
+          payload);
+
+    const auto projectionPath =
+        QDir(javelin::jmap::cache::MailVault::forDatabase(context.connection).rootPath())
+            .filePath(QStringLiteral("accounts/account-1/mailboxes/inbox/messages/email-1.eml"));
+    CHECK(QFileInfo::exists(projectionPath));
+
+    QSqlQuery status{context.connection.database()};
+    REQUIRE(status.exec(
+        QStringLiteral("SELECT status,last_error FROM mail_vault_projection_jobs WHERE account_id="
+                       "'obsolete-connection-id'")));
+    REQUIRE(status.next());
+    CHECK(status.value(0).toString() == QStringLiteral("complete"));
+    CHECK(status.value(1).isNull());
+}
+
 TEST_CASE("mail vault leases prevent eviction and release on disconnect",
           "[jmap][cache][vault][lease]")
 {
