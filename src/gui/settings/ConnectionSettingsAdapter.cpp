@@ -4,6 +4,12 @@
 
 namespace javelin::gui::settings
 {
+    bool needsInitialAccountBootstrap(const ConnectionSettings& settings)
+    {
+        return settings.cachedAccountIds.isEmpty() && !settings.sessionUrl.isEmpty() &&
+               !settings.loginEmail.isEmpty() && !settings.apiKey.isEmpty();
+    }
+
     javelin::app::AccountConnectionSettings
     toAccountConnectionSettings(const ConnectionSettings& settings)
     {

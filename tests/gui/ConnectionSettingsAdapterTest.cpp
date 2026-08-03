@@ -52,3 +52,29 @@ TEST_CASE("bootstrap adaptation transfers configured mailbox selections")
     CHECK(actual.settings.connectionId == "connection");
     CHECK((actual.mailboxIds == std::vector<std::string>{"inbox", "archive"}));
 }
+
+TEST_CASE("authenticated connections without cached accounts require initial bootstrap")
+{
+    ConnectionSettings settings{
+        .id = QStringLiteral("connection"),
+        .revision = 1,
+        .displayName = QStringLiteral("Personal"),
+        .sessionUrl = QStringLiteral("https://mail.example.test/jmap"),
+        .loginEmail = QStringLiteral("ada@example.test"),
+        .apiKey = QStringLiteral("secret"),
+        .refreshToken = {},
+        .tokenEndpoint = {},
+        .oauthClientId = {},
+        .tokenExpiresAtEpochSeconds = 0,
+        .cachedAccountIds = {},
+    };
+
+    CHECK(needsInitialAccountBootstrap(settings));
+
+    settings.cachedAccountIds = {QStringLiteral("account")};
+    CHECK_FALSE(needsInitialAccountBootstrap(settings));
+
+    settings.cachedAccountIds.clear();
+    settings.apiKey.clear();
+    CHECK_FALSE(needsInitialAccountBootstrap(settings));
+}

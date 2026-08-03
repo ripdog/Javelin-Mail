@@ -228,8 +228,8 @@ namespace javelin::gui::onboarding
     {
         auto* page = new QWizardPage(this);
         page->setTitle(QStringLiteral("Your account is ready"));
-        page->setSubTitle(
-            QStringLiteral("Javelin will begin synchronizing as soon as you open your mailbox."));
+        page->setSubTitle(QStringLiteral(
+            "Javelin will fetch your mailboxes and recent mail when setup finishes."));
         auto* layout = new QVBoxLayout(page);
         auto* heading = new QLabel(QStringLiteral("Available for this account"), page);
         heading->setStyleSheet(QStringLiteral("font-weight: 600; font-size: 12pt;"));

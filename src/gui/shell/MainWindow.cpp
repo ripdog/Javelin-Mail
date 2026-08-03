@@ -26,6 +26,7 @@
 #include "gui/messages/MessageListPanePresenter.h"
 #include "gui/messageview/MessageViewContainer.h"
 #include "gui/search/AdvancedSearchDialog.h"
+#include "gui/settings/ConnectionSettingsAdapter.h"
 #include "gui/settings/GuiSettings.h"
 #include "gui/settings/PreferencesDialog.h"
 #include "gui/shell/AccountRefreshController.h"
@@ -574,6 +575,15 @@ namespace javelin::gui::shell
                     resolveOpenEmailRoute();
                 });
         restorePersistentState();
+
+        const auto accounts = m_settings.accounts();
+        const auto uninitialized =
+            std::ranges::find_if(accounts, javelin::gui::settings::needsInitialAccountBootstrap);
+        if (uninitialized != accounts.end())
+        {
+            QTimer::singleShot(0, this, [this, settings = *uninitialized]
+                               { m_accountRefreshController->refreshConnection(settings); });
+        }
 
         auto* stateSaveTimer = new QTimer(this);
         stateSaveTimer->setInterval(std::chrono::minutes{1});

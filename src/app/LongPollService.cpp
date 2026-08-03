@@ -257,10 +257,20 @@ namespace javelin::app
         const auto sessionResult = sessionRepository.load(m_accountId);
         const auto* session =
             std::get_if<std::optional<javelin::jmap::api::Session>>(&sessionResult);
-        if (session == nullptr || !session->has_value() ||
-            (!(*session)->eventSourceUrl.has_value() &&
-             (!(*session)->capabilities.websocket.has_value() ||
-              !(*session)->capabilities.websocket->supportsPush)))
+        if (session == nullptr)
+        {
+            qWarning() << "Account sync configuration unavailable because the cached session "
+                          "could not be loaded";
+            return std::nullopt;
+        }
+        if (!session->has_value())
+        {
+            qInfo() << "Account sync is waiting for initial session discovery";
+            return std::nullopt;
+        }
+        if (!(*session)->eventSourceUrl.has_value() &&
+            (!(*session)->capabilities.websocket.has_value() ||
+             !(*session)->capabilities.websocket->supportsPush))
         {
             qWarning() << "Account sync configuration unavailable because the cached session has "
                           "no state-change source";

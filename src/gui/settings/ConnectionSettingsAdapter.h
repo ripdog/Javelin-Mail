@@ -8,6 +8,8 @@
 
 namespace javelin::gui::settings
 {
+    [[nodiscard]] bool needsInitialAccountBootstrap(const ConnectionSettings& settings);
+
     [[nodiscard]] javelin::app::AccountConnectionSettings
     toAccountConnectionSettings(const ConnectionSettings& settings);
 
