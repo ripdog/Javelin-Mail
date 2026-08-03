@@ -21,6 +21,7 @@ depends=(
   'qt6-websockets'
 )
 makedepends=(
+  'boost'
   'cmake'
   'extra-cmake-modules'
   'git'
@@ -32,7 +33,14 @@ provides=('javelin-mail')
 conflicts=('javelin-mail')
 
 _repo_root() {
-  cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P
+  if [[ -n ${startdir:-} ]] && git -C "$startdir" rev-parse --show-toplevel >/dev/null 2>&1; then
+    git -C "$startdir" rev-parse --show-toplevel
+    return
+  fi
+
+  local package_dir
+  package_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+  git -C "$package_dir" rev-parse --show-toplevel
 }
 
 _canonical_version() {

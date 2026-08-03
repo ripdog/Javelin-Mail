@@ -35,12 +35,13 @@ jobs:
             preset: asan-check
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install build dependencies
         run: |
           pacman -Syu --noconfirm --needed \
             base-devel \
+            boost \
             catch2 \
             clang \
             cmake \

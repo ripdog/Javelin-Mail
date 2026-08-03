@@ -22,7 +22,7 @@ jobs:
       image: archlinux:latest
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -54,7 +54,7 @@ jobs:
       options: --privileged
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Build Flatpak bundle
         uses: flatpak/flatpak-github-actions/flatpak-builder@v6.7
@@ -73,7 +73,7 @@ jobs:
       APPIMAGE_EXTRACT_AND_RUN: '1'
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -81,6 +81,7 @@ jobs:
         run: |
           pacman -Syu --noconfirm --needed \
             base-devel \
+            boost \
             cmake \
             curl \
             extra-cmake-modules \

@@ -37,8 +37,11 @@ namespace javelin::protocol
 
         [[nodiscard]] quint16 readU16(const QByteArray& bytes, const int offset)
         {
-            return (static_cast<quint16>(static_cast<unsigned char>(bytes.at(offset))) << 8) |
-                   static_cast<quint16>(static_cast<unsigned char>(bytes.at(offset + 1)));
+            const auto high =
+                static_cast<unsigned int>(static_cast<unsigned char>(bytes.at(offset)));
+            const auto low =
+                static_cast<unsigned int>(static_cast<unsigned char>(bytes.at(offset + 1)));
+            return static_cast<quint16>((high << 8U) | low);
         }
 
         [[nodiscard]] quint32 readU32(const QByteArray& bytes, const int offset)
