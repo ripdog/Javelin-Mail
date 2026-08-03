@@ -1,5 +1,6 @@
 #include "app/LongPollService.h"
 
+#include "app/MessageSubject.h"
 #include "app/StateChangePolicy.h"
 #include "app/WorkScheduler.h"
 
@@ -951,16 +952,14 @@ namespace javelin::app
         {
             title = QStringLiteral("New mail in %1")
                         .arg(QString::fromStdString(std::string{mailboxName}));
-            message = QString::fromStdString(
-                candidates.front().subject.value_or(std::string{"(no subject)"}));
+            message = subjectForDisplay(candidates.front().subject);
         }
         else
         {
             title = QStringLiteral("%1 new messages in %2")
                         .arg(candidates.size())
                         .arg(QString::fromStdString(std::string{mailboxName}));
-            message = QString::fromStdString(
-                candidates.front().subject.value_or(std::string{"(no subject)"}));
+            message = subjectForDisplay(candidates.front().subject);
         }
 
         QStringList deliveredEmailIds;

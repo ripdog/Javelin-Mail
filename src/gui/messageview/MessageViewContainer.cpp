@@ -1,4 +1,5 @@
 #include "gui/messageview/MessageViewContainer.h"
+#include "app/MessageSubject.h"
 #include "app/TranslationApplicationPorts.h"
 #include "gui/IconUtils.h"
 #include "gui/messageview/HtmlMessageView.h"
@@ -329,9 +330,7 @@ namespace javelin::gui::messageview
                 layout->setContentsMargins(8, 8, 8, 8);
                 layout->setSpacing(4);
 
-                const auto subject = message.subject.has_value()
-                                         ? QString::fromStdString(*message.subject)
-                                         : QStringLiteral("(no subject)");
+                const auto subject = javelin::app::subjectForDisplay(message.subject);
                 auto* subjectLabel = new QLabel(subject, this);
                 subjectLabel->setWordWrap(true);
                 auto subjectFont = subjectLabel->font();
@@ -1426,9 +1425,7 @@ namespace javelin::gui::messageview
             return;
         }
 
-        const auto subject = m_snapshot->email.subject.has_value()
-                                 ? QString::fromStdString(*m_snapshot->email.subject)
-                                 : QStringLiteral("(no subject)");
+        const auto subject = javelin::app::subjectForDisplay(m_snapshot->email.subject);
 
         m_titleLabel->setText(subject);
         m_detailLabel->clear();

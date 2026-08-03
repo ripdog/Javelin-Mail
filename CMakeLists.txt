@@ -197,6 +197,7 @@ set(JAVELIN_FORMAT_FILES
     src/app/MessageContentCommandService.cpp
     src/app/MessageContentCommandService.h
     src/app/MessageListCacheRead.h
+    src/app/MessageSubject.h
     src/app/MailboxTreeCacheRead.h
     src/app/MessageListSessionFactory.h
     src/app/MessageListSessionFactoryService.cpp
@@ -873,6 +874,7 @@ add_library(javelin_gui STATIC
     src/app/AddressSuggestionStore.h
     src/app/InlineMessageSchemeHandler.cpp
     src/app/InlineMessageSchemeHandler.h
+    src/app/MessageSubject.h
     src/app/WorkTaskModel.cpp
     src/app/WorkTaskModel.h
     src/app/WorkTaskPort.h
@@ -1224,6 +1226,7 @@ add_library(javelin_daemon_core STATIC
     src/app/MessageContentCommandService.cpp
     src/app/MessageContentCommandService.h
     src/app/MessageListCacheRead.h
+    src/app/MessageSubject.h
     src/app/MailboxTreeCacheRead.h
     src/app/MessageListSessionFactory.h
     src/app/MessageListSessionFactoryService.cpp

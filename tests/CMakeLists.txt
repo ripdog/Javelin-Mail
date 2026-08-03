@@ -250,6 +250,7 @@ add_executable(javelin_daemon_tests
     ${PROJECT_SOURCE_DIR}/src/app/GuiMailApplicationEvents.cpp
     app/DaemonProcessTest.cpp
     app/DesktopNotificationControllerTest.cpp
+    app/MessageSubjectTest.cpp
     app/GuiMailApplicationEventsTest.cpp
     app/PerformanceMetricsTest.cpp
 )

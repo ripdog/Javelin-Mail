@@ -1,6 +1,7 @@
 #include "gui/messages/MessageListModel.h"
 
 #include "app/MessageListCacheRead.h"
+#include "app/MessageSubject.h"
 
 #include <QDataStream>
 #include <QFutureWatcher>
@@ -85,8 +86,7 @@ namespace javelin::gui::messages
         const auto sender = item.from.has_value()
                                 ? QString::fromStdString(item.from->name.value_or(item.from->email))
                                 : QStringLiteral("(unknown sender)");
-        const auto subject = item.subject.has_value() ? QString::fromStdString(*item.subject)
-                                                      : QStringLiteral("(no subject)");
+        const auto subject = javelin::app::subjectForDisplay(item.subject);
         const auto preview =
             item.preview.has_value() ? QString::fromStdString(*item.preview) : QString{};
 
