@@ -366,10 +366,14 @@ namespace javelin::gui::onboarding
                     const QUrl callbackUrl{QStringLiteral("http://127.0.0.1") +
                                            QString::fromLatin1(parts.at(1))};
                     const QUrlQuery query{callbackUrl};
-                    const auto code = query.queryItemValue(QStringLiteral("code"));
-                    const auto state = query.queryItemValue(QStringLiteral("state"));
-                    const auto issuer = query.queryItemValue(QStringLiteral("iss"));
-                    const auto error = query.queryItemValue(QStringLiteral("error"));
+                    const auto code =
+                        query.queryItemValue(QStringLiteral("code"), QUrl::FullyDecoded);
+                    const auto state =
+                        query.queryItemValue(QStringLiteral("state"), QUrl::FullyDecoded);
+                    const auto issuer =
+                        query.queryItemValue(QStringLiteral("iss"), QUrl::FullyDecoded);
+                    const auto error =
+                        query.queryItemValue(QStringLiteral("error"), QUrl::FullyDecoded);
                     const QByteArray body =
                         error.isEmpty()
                             ? QByteArrayLiteral("<h1>Signed in</h1><p>You can close this tab "
