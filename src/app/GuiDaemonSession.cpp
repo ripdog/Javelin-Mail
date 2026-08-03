@@ -374,7 +374,14 @@ namespace javelin::app
                 const QStringList arguments{QStringLiteral("--runtime-directory"),
                                             m_options.runtimeDirectory, QStringLiteral("--socket"),
                                             m_options.socketPath};
-                if (!QProcess::startDetached(executable, arguments))
+                QProcess daemonProcess;
+                daemonProcess.setProgram(executable);
+                daemonProcess.setArguments(arguments);
+                const auto nullDevice = QProcess::nullDevice();
+                daemonProcess.setStandardInputFile(nullDevice);
+                daemonProcess.setStandardOutputFile(nullDevice);
+                daemonProcess.setStandardErrorFile(nullDevice);
+                if (!daemonProcess.startDetached())
                 {
                     metrics.finish(QStringLiteral("error"), QStringLiteral("stage=start_daemon"));
                     return detailError(
