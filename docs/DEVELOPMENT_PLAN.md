@@ -3,7 +3,8 @@
 ## Purpose and authority
 
 This document is the forward-looking product and engineering roadmap for the current Javelin
-codebase. It is not an architecture specification. Current invariants are defined by
+codebase. It is not a build guide or architecture specification. Build-environment setup and
+validation commands live in [DEVELOPMENT.md](DEVELOPMENT.md). Current invariants are defined by
 [ARCHITECTURE.md](ARCHITECTURE.md),
 [DAEMON_GUI_ARCHITECTURE.md](DAEMON_GUI_ARCHITECTURE.md), and the focused subsystem documents linked
 from them.

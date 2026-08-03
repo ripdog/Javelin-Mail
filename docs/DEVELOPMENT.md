@@ -1,0 +1,245 @@
+# Development
+
+This document covers build-environment setup, compilation, testing, local execution, and packaging.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for component ownership and runtime interactions, and
+[DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) for the current engineering roadmap.
+
+## Supported development environment
+
+Javelin is currently developed and tested primarily on Linux. The installed runtime expects a
+systemd user session for automatic daemon startup and a desktop with StatusNotifierItem support for
+the tray icon.
+
+The codebase targets:
+
+- C++23
+- CMake 3.25 or newer for the supplied presets
+- Ninja
+- Qt 6.6 or newer
+- KDE Frameworks 6
+
+Both GCC and Clang should work, but the normal repository workflow uses the compiler selected by the
+host CMake environment.
+
+## Dependencies
+
+Required Qt components are Core, DBus, Network, SQL, Widgets, Concurrent, LinguistTools, WebEngine,
+SVG, and WebSockets. Required KDE components are ConfigWidgets, XmlGui, CoreAddons, TextEditor,
+Extra CMake Modules, and KPim6Mime.
+
+CMake uses installed QCoro, Glaze, and Catch2 packages when available. Otherwise it fetches the
+versions pinned in `cmake/Dependencies.cmake`. fastText is fetched when local language detection is
+enabled; its compact language model is already included in the repository.
+
+### Arch Linux
+
+A suitable base environment can be installed with:
+
+```sh
+sudo pacman -S --needed \
+  base-devel cmake extra-cmake-modules git ninja \
+  qt6-base qt6-svg qt6-tools qt6-webengine qt6-websockets \
+  kconfigwidgets kcoreaddons ktexteditor kxmlgui kmime
+```
+
+Installed `qcoro`, `glaze`, and `catch2` packages are optional because CMake can fetch them. A fresh
+configuration therefore needs network access unless all fallback dependencies are already available.
+
+For formatting and optional analysis, also install the appropriate tools:
+
+```sh
+sudo pacman -S --needed clang
+```
+
+Install `clazy` when using the clazy targets.
+
+## CMake presets
+
+The repository provides these primary configure presets:
+
+| Preset | Purpose |
+| --- | --- |
+| `debug` | Normal development and test build |
+| `asan` | Debug build with AddressSanitizer and UndefinedBehaviorSanitizer |
+| `release` | Optimized build suitable for installation or packaging |
+
+Build trees are created under `out/build/<preset>`. Local development data is installed under
+`out/install/<preset>` by default so KXMLGUI resources, icons, and the language model are available
+without a system install.
+
+## Debug build
+
+```sh
+cmake --preset debug
+cmake --build --preset debug
+```
+
+The convenience target builds both processes and launches the GUI:
+
+```sh
+make run
+```
+
+`make run` sources the generated build-tree prefix before launching `javelin`. When no daemon is
+running, the GUI recovery window can start the matching build-tree `javelind` process.
+
+Additional GUI arguments can be passed with:
+
+```sh
+make run RUN_ARGS="--help"
+```
+
+## Running isolated development processes
+
+An installed daemon and a development daemon normally use the same runtime socket. For an isolated
+session, provide a private runtime directory to both executables:
+
+```sh
+runtime_dir="$(mktemp -d)"
+chmod 700 "$runtime_dir"
+
+. out/build/debug/prefix.sh
+out/build/debug/bin/javelind --runtime-directory "$runtime_dir" &
+out/build/debug/bin/javelin --runtime-directory "$runtime_dir"
+```
+
+Both executables also accept `--socket <path>`. The socket path must remain inside the selected
+private runtime directory.
+
+The GUI does not silently enter a daemon-free mode. If the daemon is absent or incompatible, it
+shows the recovery surface instead of opening a partially functional application.
+
+## Release build and system installation
+
+```sh
+cmake --preset release \
+  -DCMAKE_INSTALL_PREFIX=/usr \
+  -DJAVELIN_ENABLE_LOCAL_DATA_INSTALL=OFF
+cmake --build --preset release
+sudo cmake --install out/build/release
+```
+
+Then load and enable the installed user service:
+
+```sh
+systemctl --user daemon-reload
+systemctl --user enable --now javelind.service
+```
+
+The installation includes:
+
+- `javelin`, the Qt Widgets/WebEngine GUI
+- `javelind`, the background daemon
+- `javelind.service`, a systemd user unit
+- the desktop file, icon, KXMLGUI resource, fastText model, and third-party notices
+
+## Arch package build
+
+The repository contains a development `PKGBUILD` that builds the current checkout:
+
+```sh
+makepkg -si
+```
+
+The package version is derived from the CMake project version and current Git revision. After
+installation, reload and enable the user service as shown above.
+
+## Tests and formatting
+
+Qt test discovery starts Qt and needs a valid private runtime directory. This matters especially in
+remote, headless, or tool-managed sessions:
+
+```sh
+install -d -m 700 /tmp/javelin-mail-xdg-runtime
+export XDG_RUNTIME_DIR=/tmp/javelin-mail-xdg-runtime
+```
+
+The standard repository check configures, builds, runs all tests, and checks formatting:
+
+```sh
+cmake --workflow --preset debug-check
+```
+
+Individual steps are:
+
+```sh
+cmake --preset debug
+cmake --build --preset debug
+ctest --test-dir out/build/debug --output-on-failure
+cmake --build --preset debug-format-check
+```
+
+Sanitizer validation uses:
+
+```sh
+cmake --workflow --preset asan-check
+```
+
+The project uses Catch2 for deterministic unit and integration tests. Network-dependent behavior
+should normally be exercised through scripted transports and fixtures rather than live accounts.
+
+## Static analysis
+
+Enable clang-tidy during compilation with:
+
+```sh
+cmake --preset debug -DJAVELIN_ENABLE_CLANG_TIDY=ON
+cmake --build --preset debug
+```
+
+Enable per-target clazy targets with:
+
+```sh
+cmake --preset debug -DJAVELIN_ENABLE_CLAZY=ON
+cmake --build --preset debug --target <target>_clazy
+```
+
+The repository-wide C++ formatter targets are `format` and `format-check`. Do not run clang-format
+on CMake, Markdown, vendored files, or other non-C++ sources.
+
+## Useful build options
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `BUILD_TESTING` | `ON` in normal preset use | Build the test suite |
+| `JAVELIN_ENABLE_LOCAL_DATA_INSTALL` | `ON` | Copy application resources into the active build install prefix |
+| `JAVELIN_ENABLE_FASTTEXT_LANGUAGE_DETECTION` | `ON` | Build local fastText language detection |
+| `JAVELIN_ENABLE_CLANG_TIDY` | `OFF` | Run clang-tidy as part of compilation |
+| `JAVELIN_ENABLE_CLAZY` | `OFF` | Generate clazy targets when available |
+
+The sanitizer options are set by the `asan` preset.
+
+## Diagnostics
+
+Set `JAVELIN_UI_PROFILING=1` before starting both processes to enable split-process performance
+metrics:
+
+```sh
+JAVELIN_UI_PROFILING=1 make run 2>javelin-performance.log
+```
+
+See [DIAGNOSTICS.md](DIAGNOSTICS.md) for the metric format and measurement workflow.
+
+The repository also builds these diagnostic tools:
+
+- `jmap-query` — send configured diagnostic JMAP requests
+- `jmap-transport-benchmark` — inspect method-transport behavior
+- `javelin-undo-live-check` — exercise live Undo/Redo workflows
+
+See [JMAP_QUERY_TOOL.md](JMAP_QUERY_TOOL.md) and
+[LIVE_UNDO_REDO_CHECK.md](LIVE_UNDO_REDO_CHECK.md).
+
+## Source and contribution workflow
+
+Read the repository `AGENTS.md` before changing code. In particular:
+
+- use the Debug preset for normal development validation;
+- keep protocol, daemon coordination, cache, and GUI responsibilities within their documented
+  boundaries;
+- add deterministic tests for new state transitions and regressions;
+- update documentation when a workflow or architectural invariant changes; and
+- commit meaningful changes in focused logical commits.
+
+The high-level source map and representative data flows are in [ARCHITECTURE.md](ARCHITECTURE.md).
+The detailed implementation priorities are maintained separately in
+[DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md).

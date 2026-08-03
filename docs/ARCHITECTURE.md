@@ -2,9 +2,14 @@
 
 ## Status and document map
 
-This document describes the current code-level architecture. The process split and IPC contract are
-defined in [DAEMON_GUI_ARCHITECTURE.md](DAEMON_GUI_ARCHITECTURE.md); its implementation history and
-remaining release validation are tracked in
+This document describes the current code-level architecture: the major runtime components, their
+ownership boundaries, and the paths followed by commands and synchronized data. User-facing setup
+belongs in the repository [README](../README.md), while build and test instructions live in
+[DEVELOPMENT.md](DEVELOPMENT.md).
+
+The process split and IPC contract are defined in
+[DAEMON_GUI_ARCHITECTURE.md](DAEMON_GUI_ARCHITECTURE.md); its implementation history and remaining
+release validation are tracked in
 [DAEMON_GUI_IMPLEMENTATION_PLAN.md](DAEMON_GUI_IMPLEMENTATION_PLAN.md). Cross-cutting invariants live
 in the focused documents for [optimistic consistency](OPTIMISTIC_CONSISTENCY.md),
 [offline mail](OFFLINE_MAIL_ARCHITECTURE.md), [query windows](QUERY_WINDOWS.md),
@@ -75,6 +80,117 @@ The CMake graph enforces the architectural split:
 
 Configuration fails when production GUI sources access canonical `QSettings`, when GUI targets link
 `javelin_jmap` or `javelin_daemon_core`, or when daemon sources acquire Widgets/WebEngine dependencies.
+
+## Source and component map
+
+The source tree is organized by responsibility rather than by feature alone:
+
+| Area | Responsibility |
+| --- | --- |
+| `src/protocol/` | Process-boundary value types, framing, socket transport, correlation, limits, and transport conformance |
+| `src/app/` | Composition roots, application commands, settings, background scheduling, notifications, history, and GUI remote adapters |
+| `src/jmap/api/` | Session discovery, capabilities, typed JMAP envelopes, HTTP/WebSocket transport, and resource transfer |
+| `src/jmap/cache/` | SQLite schema and repositories, read models, query windows, MIME source storage, and search indexes |
+| `src/jmap/sync/` | State-change sources, refresh planning, reconciliation, mutation projection, and consistency fences |
+| `src/jmap/submission/` | Draft snapshots, attachment manifests, compose revisions, and EmailSubmission workflows |
+| `src/jmap/contacts/` | JSContact conversion, synchronization, editing, import/export, and mutation journals |
+| `src/jmap/calendar/` | JSCalendar values, recurrence editing, occurrence materialization, and calendar mutations |
+| `src/jmap/sieve/` | Sieve domain values, service operations, and optimistic mutation support |
+| `src/gui/` | Main window, tabs, controllers, models, delegates, message rendering, editors, and preferences |
+
+The principal runtime objects are:
+
+| Component | Process | Role |
+| --- | --- | --- |
+| `DaemonProcess` | daemon | Starts settings, cache recovery, service composition, sockets, and daemon lifecycle |
+| `DaemonServices` | daemon | Owns writable repositories, JMAP transports, coordinators, command services, and background work |
+| `DaemonRemoteActionDispatcher` | daemon | Decodes typed remote actions and routes them to application services |
+| `CommandDispatcher` | daemon | Admits stateful commands, preserves command identity, and separates rejection from later failure |
+| `SettingsRepository` | daemon | Owns the canonical revisioned settings snapshot and migration |
+| `WorkScheduler` | daemon | Prioritizes foreground, synchronization, indexing, offline, and maintenance work |
+| `DaemonBackgroundController` | daemon | Owns notifications, reminders, delayed-send actions, network recovery, and tray integration |
+| `GuiDaemonSession` | GUI | Connects, negotiates protocol/build identity, handles reconnect, and coordinates cache barriers |
+| `GuiServices` | GUI | Constructs read-only repositories and typed remote application-port adapters |
+| `RemoteActionClient` | GUI | Correlates bounded request/reply actions over the daemon session |
+| `MainWindow` and controllers | GUI | Own presentation, editing, selection, navigation, and user interaction |
+| cache repositories | both, split by API | Daemon repositories write; GUI repositories use read-only/query-only connections |
+
+`DaemonServices` is the operational composition root. It is the only place where writable cache
+repositories, JMAP transports, synchronization services, history executors, settings, and background
+controllers are assembled together. `GuiServices` is deliberately smaller: it exposes read-only
+cache readers and remote ports matching the interfaces expected by GUI controllers.
+
+## Representative runtime flows
+
+### Startup and reconnect
+
+```text
+systemd or explicit launch
+  -> javelind / DaemonProcess
+  -> settings migration and cache recovery
+  -> DaemonServices and account coordinators
+  -> command and activation sockets become ready
+  -> javelin / GuiDaemonSession handshake
+  -> settings snapshot and cache identity
+  -> read-only GUI repositories
+  -> workspace restoration
+```
+
+The GUI never opens the normal workspace before a coherent daemon handshake. A replaced cache or
+schema transition uses the cache suspend/acknowledge/resume barrier so the GUI closes every read
+handle before daemon migration or replacement.
+
+### Stateful user command
+
+```text
+GUI controller
+  -> typed application port
+  -> RemoteActionClient and JVIP socket
+  -> DaemonRemoteActionDispatcher
+  -> command/application service
+  -> optimistic projection transaction
+  -> command admission with committed cache epoch
+  -> GUI reloads projected state
+  -> JMAP dispatch
+  -> acceptance, rejection, or unknown reconciliation
+  -> post-commit invalidation
+```
+
+Admission means the daemon accepted responsibility and committed the local operation state. It does
+not mean the server has accepted the mutation. A transport failure after dispatch is preserved as an
+unknown result rather than guessed or replayed.
+
+### Cache read and materialization
+
+```text
+GUI session requests page/content/range
+  -> read current SQLite state
+  -> request daemon materialization when coverage is missing
+  -> WorkScheduler admission
+  -> JMAP query/get or vault operation
+  -> atomic cache and query-window commit
+  -> bounded invalidation
+  -> generation-fenced GUI read
+  -> precise model update with stable selection restoration
+```
+
+IPC does not carry complete mailbox pages, contact documents, or calendar ranges. It requests work
+and announces committed changes; the cache remains the data plane.
+
+### Push and notifications
+
+```text
+WebSocket push or EventSource state change
+  -> account coordinator / LongPollService
+  -> typed refresh and reconciliation
+  -> cache commit and invalidation
+  -> notification discovery outbox
+  -> desktop notification publication
+  -> optional activation route to GUI
+```
+
+Notification arrival does not change GUI selection. Activating a notification is a separate explicit
+navigation request containing stable account, mailbox, thread, and Email identities.
 
 ## Presentation and application coordination
 
