@@ -185,6 +185,56 @@ namespace
 
 } // namespace
 
+TEST_CASE("plain text compose creates no HTML body alternative", "[jmap][submission][plain-text]")
+{
+    ensureApplication();
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("compose-plain-text-test"),
+        .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    seedAccount(connection, "account-2", "https://account-2.example.test/jmap", "identity-2",
+                "sender@example.test");
+
+    FakeTransport transport;
+    transport.results = {draftCreatedResponse()};
+    javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
+    javelin::jmap::JmapCore core{connection, transport, methodTransport};
+    javelin::jmap::submission::ComposeService service{connection, transport, methodTransport, core};
+    const auto result = QCoro::waitFor(service.saveDraft(
+        {
+            .sessionUrl = "https://account-2.example.test/.well-known/jmap",
+            .loginEmail = "shared-login@example.test",
+            .apiKey = "account-2-secret",
+        },
+        {
+            .composeSessionId = "compose-plain",
+            .accountId = "account-2",
+            .draftEmailId = std::nullopt,
+            .mode = javelin::jmap::submission::ComposeMode::NewMessage,
+            .editorMode = javelin::jmap::submission::BodyEditorMode::PlainText,
+            .identityId = "identity-2",
+            .to = {{.name = std::nullopt, .email = "recipient@example.test"}},
+            .cc = {},
+            .bcc = {},
+            .subject = "Plain text",
+            .plainTextBody = "First line\nSecond line",
+            .htmlBody = "<p>This stale HTML must not be sent.</p>",
+            .threading = {},
+            .attachments = {},
+        }));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::submission::DraftSaveSummary>(result));
+    REQUIRE(transport.requests.size() == 1);
+    CHECK(transport.requests.front().body.contains("\"type\":\"text/plain\""));
+    CHECK_FALSE(transport.requests.front().body.contains("\"type\":\"text/html\""));
+    CHECK_FALSE(transport.requests.front().body.contains("html-body"));
+    CHECK_FALSE(transport.requests.front().body.contains("stale HTML"));
+}
+
 TEST_CASE("compose sending uses the account selected with the From identity",
           "[jmap][submission][multiple-accounts]")
 {

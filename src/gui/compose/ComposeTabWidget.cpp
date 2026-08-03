@@ -1,6 +1,7 @@
 #include "gui/compose/ComposeTabWidget.h"
 
 #include "app/ComposeApplicationPorts.h"
+#include "gui/compose/ComposeBodyConverter.h"
 #include "gui/messageview/HtmlMessageView.h"
 #include "gui/settings/GuiSettings.h"
 #include "gui/widgets/EmailAddressLineEdit.h"
@@ -67,6 +68,9 @@ namespace javelin::gui::compose
         constexpr auto richEditorTabIndex = 0;
         constexpr auto htmlSourceTabIndex = 1;
         constexpr auto previewTabIndex = 2;
+        constexpr auto plainTextTabIndex = 3;
+        constexpr auto htmlFormatIndex = 0;
+        constexpr auto plainTextFormatIndex = 1;
         constexpr auto senderIdentityIdRole = Qt::UserRole;
         constexpr auto senderAccountIdRole = Qt::UserRole + 1;
 
@@ -357,7 +361,7 @@ namespace javelin::gui::compose
         {
           public:
             DraftAttachmentChip(const javelin::jmap::submission::DraftAttachment& attachment,
-                                std::function<void()> removeAction,
+                                const bool embeddingAllowed, std::function<void()> removeAction,
                                 std::function<void(bool)> embedAction, QWidget* parent = nullptr)
                 : QFrame(parent), m_removeAction(std::move(removeAction)),
                   m_embedAction(std::move(embedAction))
@@ -385,7 +389,7 @@ namespace javelin::gui::compose
                 sizeLabel->setStyleSheet(QStringLiteral("color: #c2c6cf;"));
                 sizeLabel->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
 
-                if (isImageAttachment(attachment))
+                if (embeddingAllowed && isImageAttachment(attachment))
                 {
                     auto* attachRadio = new QRadioButton(QStringLiteral("Attach"), this);
                     auto* embedRadio = new QRadioButton(QStringLiteral("Embed"), this);
@@ -437,13 +441,6 @@ namespace javelin::gui::compose
             std::function<void()> m_removeAction;
             std::function<void(bool)> m_embedAction;
         };
-
-        [[nodiscard]] std::string plainTextFromHtml(const QString& html)
-        {
-            QTextDocument document;
-            document.setHtml(html);
-            return document.toPlainText().toStdString();
-        }
 
         [[nodiscard]] QString identityDisplayText(const javelin::jmap::domain::Identity& identity,
                                                   const QString& accountDisplayName)
@@ -523,6 +520,8 @@ namespace javelin::gui::compose
                     syncSnapshotFromUi();
                     scheduleWorkingCopySave();
                 });
+        connect(m_bodyFormatCombo, qOverload<int>(&QComboBox::currentIndexChanged), this,
+                &ComposeTabWidget::switchBodyFormat);
         for (auto* edit : {m_toEdit, m_ccEdit, m_bccEdit, m_subjectEdit})
         {
             connect(edit, &QLineEdit::textChanged, this,
@@ -541,8 +540,8 @@ namespace javelin::gui::compose
         connect(m_richTextEdit, &QTextEdit::textChanged, this,
                 [this]
                 {
-                    if (m_syncingUi ||
-                        m_snapshot.editorMode == javelin::jmap::submission::BodyEditorMode::RawHtml)
+                    if (m_syncingUi || m_snapshot.editorMode !=
+                                           javelin::jmap::submission::BodyEditorMode::RichText)
                     {
                         return;
                     }
@@ -564,6 +563,18 @@ namespace javelin::gui::compose
                     refreshPreview();
                     scheduleWorkingCopySave();
                 });
+        connect(m_plainTextDocument, &KTextEditor::Document::textChanged, this,
+                [this]
+                {
+                    if (m_syncingUi || m_snapshot.editorMode !=
+                                           javelin::jmap::submission::BodyEditorMode::PlainText)
+                    {
+                        return;
+                    }
+
+                    syncSnapshotFromUi();
+                    scheduleWorkingCopySave();
+                });
         connect(m_editorTabs, &QTabWidget::currentChanged, this,
                 [this](const int index)
                 {
@@ -573,7 +584,8 @@ namespace javelin::gui::compose
                     }
 
                     if (index == htmlSourceTabIndex &&
-                        m_snapshot.editorMode != javelin::jmap::submission::BodyEditorMode::RawHtml)
+                        m_snapshot.editorMode ==
+                            javelin::jmap::submission::BodyEditorMode::RichText)
                     {
                         syncHtmlSourceFromRichText();
                         m_snapshot.editorMode = javelin::jmap::submission::BodyEditorMode::RawHtml;
@@ -584,6 +596,12 @@ namespace javelin::gui::compose
                     {
                         syncRichTextFromHtmlSource();
                         m_snapshot.editorMode = javelin::jmap::submission::BodyEditorMode::RichText;
+                    }
+                    else if (index == previewTabIndex &&
+                             m_snapshot.editorMode ==
+                                 javelin::jmap::submission::BodyEditorMode::RawHtml)
+                    {
+                        syncRichTextFromHtmlSource();
                     }
 
                     updateEditorModeUi();
@@ -616,11 +634,22 @@ namespace javelin::gui::compose
     bool ComposeTabWidget::isEmptyDraft() const
     {
         const auto subject = m_subjectEdit->text().trimmed();
-        const auto richPlain = m_richTextEdit->toPlainText().trimmed();
-        const auto rawHtml = m_htmlSourceDocument->text().trimmed();
+        QString body;
+        switch (m_snapshot.editorMode)
+        {
+        case javelin::jmap::submission::BodyEditorMode::RichText:
+            body = m_richTextEdit->toPlainText();
+            break;
+        case javelin::jmap::submission::BodyEditorMode::RawHtml:
+            body = plainTextFromHtml(m_htmlSourceDocument->text());
+            break;
+        case javelin::jmap::submission::BodyEditorMode::PlainText:
+            body = m_plainTextDocument->text();
+            break;
+        }
         return subject.isEmpty() && m_toEdit->text().trimmed().isEmpty() &&
                m_ccEdit->text().trimmed().isEmpty() && m_bccEdit->text().trimmed().isEmpty() &&
-               richPlain.isEmpty() && rawHtml.isEmpty() && m_snapshot.attachments.empty();
+               body.trimmed().isEmpty() && m_snapshot.attachments.empty();
     }
 
     bool ComposeTabWidget::closeWithoutPrompt() const
@@ -730,6 +759,12 @@ namespace javelin::gui::compose
         titleLabel->setFont(titleFont);
         headingRow->addWidget(titleLabel);
         headingRow->addStretch(1);
+        auto* formatLabel = new QLabel(QStringLiteral("Format"), headerFrame);
+        m_bodyFormatCombo = new QComboBox(headerFrame);
+        m_bodyFormatCombo->addItem(QStringLiteral("HTML"));
+        m_bodyFormatCombo->addItem(QStringLiteral("Plain text"));
+        headingRow->addWidget(formatLabel);
+        headingRow->addWidget(m_bodyFormatCombo);
         headerLayout->addLayout(headingRow);
 
         auto* fromRow = new QHBoxLayout();
@@ -745,27 +780,59 @@ namespace javelin::gui::compose
         toLabel->setMinimumWidth(52);
         m_toEdit = new widgets::EmailAddressLineEdit(true, headerFrame);
         m_toEdit->setPlaceholderText(QStringLiteral("alice@example.com, Bob <bob@example.com>"));
+        m_ccButton = new QToolButton(headerFrame);
+        m_ccButton->setText(QStringLiteral("Cc"));
+        m_ccButton->setCheckable(true);
+        m_ccButton->setAutoRaise(true);
+        m_bccButton = new QToolButton(headerFrame);
+        m_bccButton->setText(QStringLiteral("Bcc"));
+        m_bccButton->setCheckable(true);
+        m_bccButton->setAutoRaise(true);
         toRow->addWidget(toLabel);
         toRow->addWidget(m_toEdit, 1);
+        toRow->addWidget(m_ccButton);
+        toRow->addWidget(m_bccButton);
         headerLayout->addLayout(toRow);
 
-        auto* ccRow = new QHBoxLayout();
-        auto* ccLabel = new QLabel(QStringLiteral("Cc"), headerFrame);
+        m_ccRow = new QWidget(headerFrame);
+        auto* ccRowLayout = new QHBoxLayout(m_ccRow);
+        ccRowLayout->setContentsMargins(0, 0, 0, 0);
+        auto* ccLabel = new QLabel(QStringLiteral("Cc"), m_ccRow);
         ccLabel->setMinimumWidth(52);
-        m_ccEdit = new widgets::EmailAddressLineEdit(true, headerFrame);
+        m_ccEdit = new widgets::EmailAddressLineEdit(true, m_ccRow);
         m_ccEdit->setPlaceholderText(QStringLiteral("Optional"));
-        ccRow->addWidget(ccLabel);
-        ccRow->addWidget(m_ccEdit, 1);
-        headerLayout->addLayout(ccRow);
+        ccRowLayout->addWidget(ccLabel);
+        ccRowLayout->addWidget(m_ccEdit, 1);
+        headerLayout->addWidget(m_ccRow);
 
-        auto* bccRow = new QHBoxLayout();
-        auto* bccLabel = new QLabel(QStringLiteral("Bcc"), headerFrame);
+        m_bccRow = new QWidget(headerFrame);
+        auto* bccRowLayout = new QHBoxLayout(m_bccRow);
+        bccRowLayout->setContentsMargins(0, 0, 0, 0);
+        auto* bccLabel = new QLabel(QStringLiteral("Bcc"), m_bccRow);
         bccLabel->setMinimumWidth(52);
-        m_bccEdit = new widgets::EmailAddressLineEdit(true, headerFrame);
+        m_bccEdit = new widgets::EmailAddressLineEdit(true, m_bccRow);
         m_bccEdit->setPlaceholderText(QStringLiteral("Optional"));
-        bccRow->addWidget(bccLabel);
-        bccRow->addWidget(m_bccEdit, 1);
-        headerLayout->addLayout(bccRow);
+        bccRowLayout->addWidget(bccLabel);
+        bccRowLayout->addWidget(m_bccEdit, 1);
+        headerLayout->addWidget(m_bccRow);
+        connect(m_ccButton, &QToolButton::toggled, this,
+                [this](const bool visible)
+                {
+                    setOptionalRecipientVisible(m_ccRow, m_ccButton, visible);
+                    if (visible)
+                    {
+                        m_ccEdit->setFocus();
+                    }
+                });
+        connect(m_bccButton, &QToolButton::toggled, this,
+                [this](const bool visible)
+                {
+                    setOptionalRecipientVisible(m_bccRow, m_bccButton, visible);
+                    if (visible)
+                    {
+                        m_bccEdit->setFocus();
+                    }
+                });
 
         auto* subjectRow = new QHBoxLayout();
         auto* subjectLabel = new QLabel(QStringLiteral("Subject"), headerFrame);
@@ -791,6 +858,9 @@ namespace javelin::gui::compose
         m_htmlSourceDocument->setHighlightingMode(QStringLiteral("HTML"));
         m_htmlSourceView = m_htmlSourceDocument->createView(m_editorTabs);
         m_htmlSourceView->setAcceptDrops(false);
+        m_plainTextDocument = KTextEditor::Editor::instance()->createDocument(this);
+        m_plainTextView = m_plainTextDocument->createView(m_editorTabs);
+        m_plainTextView->setAcceptDrops(false);
         m_previewView = new javelin::gui::messageview::HtmlMessageView(
             m_settings.messageAppearanceSettings(), m_editorTabs);
         m_previewView->setAcceptDrops(false);
@@ -798,6 +868,7 @@ namespace javelin::gui::compose
         m_editorTabs->addTab(m_richTextEdit, QStringLiteral("Compose"));
         m_editorTabs->addTab(m_htmlSourceView, QStringLiteral("HTML"));
         m_editorTabs->addTab(m_previewView, QStringLiteral("Preview"));
+        m_editorTabs->addTab(m_plainTextView, QStringLiteral("Plain text"));
         rootLayout->addWidget(m_editorTabs, 1);
 
         m_attachmentScrollArea = new QScrollArea(this);
@@ -998,7 +1069,9 @@ namespace javelin::gui::compose
         const QSignalBlocker subjectBlocker{m_subjectEdit};
         const QSignalBlocker richBlocker{m_richTextEdit};
         const QSignalBlocker htmlBlocker{m_htmlSourceDocument};
+        const QSignalBlocker plainBlocker{m_plainTextDocument};
         const QSignalBlocker tabBlocker{m_editorTabs};
+        const QSignalBlocker formatBlocker{m_bodyFormatCombo};
 
         int identityIndex = -1;
         for (int index = 0; index < m_fromCombo->count(); ++index)
@@ -1025,10 +1098,23 @@ namespace javelin::gui::compose
                                    : QString{});
         m_richTextEdit->setHtml(QString::fromStdString(m_snapshot.htmlBody));
         m_htmlSourceDocument->setText(QString::fromStdString(m_snapshot.htmlBody));
-        m_editorTabs->setCurrentIndex(m_snapshot.editorMode ==
-                                              javelin::jmap::submission::BodyEditorMode::RawHtml
-                                          ? htmlSourceTabIndex
-                                          : richEditorTabIndex);
+        m_plainTextDocument->setText(QString::fromStdString(m_snapshot.plainTextBody));
+        const bool plainTextMode =
+            m_snapshot.editorMode == javelin::jmap::submission::BodyEditorMode::PlainText;
+        m_bodyFormatCombo->setCurrentIndex(plainTextMode ? plainTextFormatIndex : htmlFormatIndex);
+        for (const auto index : {richEditorTabIndex, htmlSourceTabIndex, previewTabIndex})
+        {
+            m_editorTabs->setTabVisible(index, !plainTextMode);
+        }
+        m_editorTabs->setTabVisible(plainTextTabIndex, plainTextMode);
+        m_editorTabs->setCurrentIndex(
+            plainTextMode
+                ? plainTextTabIndex
+                : (m_snapshot.editorMode == javelin::jmap::submission::BodyEditorMode::RawHtml
+                       ? htmlSourceTabIndex
+                       : richEditorTabIndex));
+        setOptionalRecipientVisible(m_ccRow, m_ccButton, !m_snapshot.cc.empty());
+        setOptionalRecipientVisible(m_bccRow, m_bccButton, !m_snapshot.bcc.empty());
         populateAttachments();
         m_syncingUi = false;
     }
@@ -1049,9 +1135,10 @@ namespace javelin::gui::compose
         for (std::size_t index = 0; index < m_snapshot.attachments.size(); ++index)
         {
             auto* chip = new DraftAttachmentChip(
-                m_snapshot.attachments[index], [this, index] { removeAttachmentAt(index); },
-                [this, index](const bool embedded) { setAttachmentEmbedded(index, embedded); },
-                m_attachmentStrip);
+                m_snapshot.attachments[index],
+                m_snapshot.editorMode != javelin::jmap::submission::BodyEditorMode::PlainText,
+                [this, index] { removeAttachmentAt(index); }, [this, index](const bool embedded)
+                { setAttachmentEmbedded(index, embedded); }, m_attachmentStrip);
             chip->setEnabled(!m_operationInFlight);
             m_attachmentStripLayout->addWidget(chip);
         }
@@ -1060,10 +1147,14 @@ namespace javelin::gui::compose
 
     void ComposeTabWidget::refreshPreview()
     {
+        if (m_snapshot.editorMode == javelin::jmap::submission::BodyEditorMode::PlainText)
+        {
+            return;
+        }
         const auto html =
             m_snapshot.editorMode == javelin::jmap::submission::BodyEditorMode::RawHtml
                 ? m_htmlSourceDocument->text()
-                : m_richTextEdit->document()->toHtml();
+                : cleanHtmlFromDocument(*m_richTextEdit->document());
         m_previewView->setDocumentHtml(html.toStdString());
     }
 
@@ -1092,16 +1183,25 @@ namespace javelin::gui::compose
                 ? std::nullopt
                 : std::optional<std::string>{m_subjectEdit->text().trimmed().toStdString()};
 
-        if (m_snapshot.editorMode == javelin::jmap::submission::BodyEditorMode::RawHtml)
+        switch (m_snapshot.editorMode)
+        {
+        case javelin::jmap::submission::BodyEditorMode::RawHtml:
         {
             const auto html = m_htmlSourceDocument->text();
             m_snapshot.htmlBody = html.toStdString();
-            m_snapshot.plainTextBody = plainTextFromHtml(html);
+            m_snapshot.plainTextBody = plainTextFromHtml(html).toStdString();
+            break;
         }
-        else
+        case javelin::jmap::submission::BodyEditorMode::RichText:
         {
-            m_snapshot.htmlBody = m_richTextEdit->document()->toHtml().toStdString();
+            m_snapshot.htmlBody = cleanHtmlFromDocument(*m_richTextEdit->document()).toStdString();
             m_snapshot.plainTextBody = m_richTextEdit->toPlainText().toStdString();
+            break;
+        }
+        case javelin::jmap::submission::BodyEditorMode::PlainText:
+            m_snapshot.plainTextBody = m_plainTextDocument->text().toStdString();
+            m_snapshot.htmlBody.clear();
+            break;
         }
 
         ++m_snapshot.revision;
@@ -1120,8 +1220,59 @@ namespace javelin::gui::compose
     {
         m_syncingUi = true;
         const QSignalBlocker htmlBlocker{m_htmlSourceDocument};
-        m_htmlSourceDocument->setText(m_richTextEdit->document()->toHtml());
+        m_htmlSourceDocument->setText(cleanHtmlFromDocument(*m_richTextEdit->document()));
         m_syncingUi = false;
+    }
+
+    void ComposeTabWidget::switchBodyFormat(const int index)
+    {
+        if (m_syncingUi)
+        {
+            return;
+        }
+
+        m_syncingUi = true;
+        const bool plainTextMode = index == plainTextFormatIndex;
+        if (plainTextMode &&
+            m_snapshot.editorMode != javelin::jmap::submission::BodyEditorMode::PlainText)
+        {
+            const auto html =
+                m_snapshot.editorMode == javelin::jmap::submission::BodyEditorMode::RawHtml
+                    ? m_htmlSourceDocument->text()
+                    : cleanHtmlFromDocument(*m_richTextEdit->document());
+            m_plainTextDocument->setText(plainTextFromHtml(html));
+            m_snapshot.editorMode = javelin::jmap::submission::BodyEditorMode::PlainText;
+        }
+        else if (!plainTextMode &&
+                 m_snapshot.editorMode == javelin::jmap::submission::BodyEditorMode::PlainText)
+        {
+            const auto html = htmlFromPlainText(m_plainTextDocument->text());
+            m_richTextEdit->setHtml(html);
+            m_htmlSourceDocument->setText(html);
+            m_snapshot.editorMode = javelin::jmap::submission::BodyEditorMode::RichText;
+        }
+
+        for (const auto tabIndex : {richEditorTabIndex, htmlSourceTabIndex, previewTabIndex})
+        {
+            m_editorTabs->setTabVisible(tabIndex, !plainTextMode);
+        }
+        m_editorTabs->setTabVisible(plainTextTabIndex, plainTextMode);
+        m_editorTabs->setCurrentIndex(plainTextMode ? plainTextTabIndex : richEditorTabIndex);
+        m_syncingUi = false;
+
+        populateAttachments();
+        updateEditorModeUi();
+        syncSnapshotFromUi();
+        refreshPreview();
+        scheduleWorkingCopySave();
+    }
+
+    void ComposeTabWidget::setOptionalRecipientVisible(QWidget* row, QToolButton* button,
+                                                       const bool visible)
+    {
+        const QSignalBlocker blocker{button};
+        button->setChecked(visible);
+        row->setVisible(visible);
     }
 
     void ComposeTabWidget::scheduleWorkingCopySave()
@@ -1148,12 +1299,16 @@ namespace javelin::gui::compose
     {
         m_operationInFlight = busy;
         m_fromCombo->setEnabled(!busy);
+        m_bodyFormatCombo->setEnabled(!busy);
         m_toEdit->setEnabled(!busy);
         m_ccEdit->setEnabled(!busy);
         m_bccEdit->setEnabled(!busy);
+        m_ccButton->setEnabled(!busy);
+        m_bccButton->setEnabled(!busy);
         m_subjectEdit->setEnabled(!busy);
         m_richTextEdit->setEnabled(!busy);
         m_htmlSourceView->setEnabled(!busy);
+        m_plainTextView->setEnabled(!busy);
         m_editorTabs->setEnabled(!busy);
         m_formatToolbar->setEnabled(!busy && m_editorTabs->currentIndex() == richEditorTabIndex);
         populateAttachments();
@@ -1163,7 +1318,7 @@ namespace javelin::gui::compose
     {
         const bool richMode =
             m_editorTabs->currentIndex() == richEditorTabIndex &&
-            m_snapshot.editorMode != javelin::jmap::submission::BodyEditorMode::RawHtml;
+            m_snapshot.editorMode == javelin::jmap::submission::BodyEditorMode::RichText;
         m_formatToolbar->setEnabled(!m_operationInFlight && richMode);
     }
 
@@ -1242,6 +1397,7 @@ namespace javelin::gui::compose
     void ComposeTabWidget::setAttachmentEmbedded(const std::size_t index, const bool embedded)
     {
         if (index >= m_snapshot.attachments.size() ||
+            m_snapshot.editorMode == javelin::jmap::submission::BodyEditorMode::PlainText ||
             embedded == m_snapshot.attachments[index].inlineDisposition)
         {
             return;

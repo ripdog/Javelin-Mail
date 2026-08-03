@@ -155,13 +155,6 @@ namespace javelin::jmap::submission
             return QDateTime::currentDateTimeUtc().toString(Qt::ISODate).toStdString();
         }
 
-        [[nodiscard]] std::string escapeHtml(const QString& value)
-        {
-            QString escaped = value.toHtmlEscaped();
-            escaped.replace(QStringLiteral("\n"), QStringLiteral("<br/>"));
-            return escaped.toStdString();
-        }
-
         [[nodiscard]] std::string trimSubjectPrefix(const std::string_view subject,
                                                     const std::string_view prefix)
         {
@@ -307,10 +300,17 @@ namespace javelin::jmap::submission
 
         [[nodiscard]] std::string htmlFromText(const std::string_view plainText)
         {
-            return QStringLiteral("<p>%1</p>")
-                .arg(QString::fromStdString(
-                    escapeHtml(QString::fromStdString(std::string{plainText}))))
-                .toStdString();
+            QStringList paragraphs;
+            const auto lines = QString::fromStdString(std::string{plainText})
+                                   .split(QLatin1Char('\n'), Qt::KeepEmptyParts);
+            paragraphs.reserve(lines.size());
+            for (const auto& line : lines)
+            {
+                paragraphs.push_back(line.isEmpty()
+                                         ? QStringLiteral("<p>&nbsp;</p>")
+                                         : QStringLiteral("<p>%1</p>").arg(line.toHtmlEscaped()));
+            }
+            return paragraphs.join(QLatin1Char('\n')).toStdString();
         }
 
         [[nodiscard]] std::vector<DraftAttachment> draftAttachmentsFromMessage(
@@ -649,6 +649,9 @@ namespace javelin::jmap::submission
             std::vector<javelin::jmap::api::EmailBodyPartCreate> attachmentParts;
             for (const auto& attachment : snapshot.attachments)
             {
+                const bool inlineDisposition = !snapshot.htmlBody.empty() &&
+                                               attachment.inlineDisposition &&
+                                               attachment.contentId.has_value();
                 auto part = javelin::jmap::api::EmailBodyPartCreate{
                     .partId = std::nullopt,
                     .blobId = attachment.blobId,
@@ -656,13 +659,12 @@ namespace javelin::jmap::submission
                     .name = attachment.displayName.empty()
                                 ? std::nullopt
                                 : std::optional<std::string>{attachment.displayName},
-                    .disposition = attachment.inlineDisposition
-                                       ? std::optional<std::string>{"inline"}
-                                       : std::optional<std::string>{"attachment"},
-                    .cid = attachment.contentId,
+                    .disposition = inlineDisposition ? std::optional<std::string>{"inline"}
+                                                     : std::optional<std::string>{"attachment"},
+                    .cid = inlineDisposition ? attachment.contentId : std::nullopt,
                     .subParts = std::nullopt,
                 };
-                if (attachment.inlineDisposition && attachment.contentId.has_value())
+                if (inlineDisposition)
                 {
                     inlineParts.push_back(std::move(part));
                 }
@@ -979,12 +981,14 @@ namespace javelin::jmap::submission
         case ComposeMode::EditDraft:
             snapshot.draftEmailId = sourceEmailId;
             snapshot.mode = ComposeMode::EditDraft;
+            snapshot.editorMode = messageSnapshot->htmlBody.has_value() ? BodyEditorMode::RichText
+                                                                        : BodyEditorMode::PlainText;
             snapshot.to = messageSnapshot->email.to;
             snapshot.cc = messageSnapshot->email.cc;
             snapshot.bcc = messageSnapshot->email.bcc;
             snapshot.subject = messageSnapshot->email.subject;
             snapshot.plainTextBody = plainBody;
-            snapshot.htmlBody = htmlBody;
+            snapshot.htmlBody = messageSnapshot->htmlBody.has_value() ? htmlBody : std::string{};
             snapshot.threading.messageId = messageSnapshot->email.messageId;
             snapshot.threading.inReplyTo = messageSnapshot->email.inReplyTo;
             snapshot.threading.references = messageSnapshot->email.references;
@@ -1146,7 +1150,11 @@ namespace javelin::jmap::submission
             };
         }
 
-        if (snapshot.htmlBody.empty() && !snapshot.plainTextBody.empty())
+        if (snapshot.editorMode == BodyEditorMode::PlainText)
+        {
+            snapshot.htmlBody.clear();
+        }
+        else if (snapshot.htmlBody.empty() && !snapshot.plainTextBody.empty())
         {
             snapshot.htmlBody = htmlFromText(snapshot.plainTextBody);
         }

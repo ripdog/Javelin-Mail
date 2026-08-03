@@ -171,6 +171,7 @@ add_executable(javelin_jmap_tests
     gui/ConnectionSettingsAdapterTest.cpp
     gui/GuiSettingsTest.cpp
     gui/ComposeTabPolicyTest.cpp
+    gui/ComposeBodyConverterTest.cpp
     gui/MailboxSelectionTest.cpp
     gui/MailboxSortTest.cpp
     gui/MessageActionPolicyTest.cpp
@@ -196,6 +197,7 @@ add_executable(javelin_jmap_tests
     ${PROJECT_SOURCE_DIR}/src/gui/settings/GuiSettings.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/shell/FocusedCommandRouter.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/shell/ComposeTabPolicy.cpp
+    ${PROJECT_SOURCE_DIR}/src/gui/compose/ComposeBodyConverter.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/mailboxes/MailboxSelection.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/messages/MessageActionSelection.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/messages/MessageListModel.cpp
