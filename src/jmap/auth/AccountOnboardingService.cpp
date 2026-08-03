@@ -679,6 +679,13 @@ namespace javelin::jmap::auth
             co_return authenticationError(detail);
         }
 
+        qCInfo(oauthLog).noquote()
+            << "OAuth token response accepted"
+            << "accessTokenPresent=" << !token->accessToken.empty() << "refreshTokenPresent="
+            << (token->refreshToken.has_value() && !token->refreshToken->empty())
+            << "expiresInPresent=" << token->expiresIn.has_value()
+            << "tokenEndpointHost=" << QUrl{flow.discovery.tokenEndpoint}.host();
+
         const auto sessionResponse =
             co_await get(m_networkAccessManager, QUrl{flow.discovery.sessionUrl},
                          QByteArray::fromStdString(token->accessToken));
@@ -687,7 +694,7 @@ namespace javelin::jmap::auth
             co_return authenticationError(
                 QStringLiteral("Sign-in succeeded, but the JMAP account could not be verified."));
 
-        co_return javelin::app::AccountAuthenticationResult{
+        auto result = javelin::app::AccountAuthenticationResult{
             .succeeded = true,
             .error = {},
             .sessionUrl = flow.discovery.sessionUrl,
@@ -702,6 +709,13 @@ namespace javelin::jmap::auth
                                          : 0,
             .features = sessionFeatures(*session.session),
         };
+        qCInfo(oauthLog).noquote() << "OAuth authorization completed"
+                                   << "accessTokenPresent=" << !result.accessToken.isEmpty()
+                                   << "refreshTokenPresent=" << !result.refreshToken.isEmpty()
+                                   << "clientIdPresent=" << !result.clientId.isEmpty()
+                                   << "tokenEndpointHost=" << QUrl{result.tokenEndpoint}.host()
+                                   << "expiresAtEpochSeconds=" << result.expiresAtEpochSeconds;
+        co_return result;
     }
 
     QCoro::Task<javelin::app::AccountAuthenticationResult>

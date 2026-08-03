@@ -82,5 +82,6 @@ namespace javelin::gui::onboarding
         std::optional<javelin::app::AccountAuthenticationResult> m_authentication;
         bool m_firstRun = true;
         bool m_busy = false;
+        bool m_oauthAuthentication = false;
     };
 } // namespace javelin::gui::onboarding

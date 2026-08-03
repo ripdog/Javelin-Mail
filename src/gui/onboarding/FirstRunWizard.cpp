@@ -13,6 +13,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QLoggingCategory>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QTcpServer>
@@ -25,6 +26,8 @@
 
 #include <algorithm>
 #include <utility>
+
+Q_LOGGING_CATEGORY(onboardingOAuthLog, "javelin.oauth.gui")
 
 namespace javelin::gui::onboarding
 {
@@ -84,6 +87,30 @@ namespace javelin::gui::onboarding
                 return QStringLiteral("Stay signed in");
             }
             return QStringLiteral("Unknown feature");
+        }
+
+        void logOAuthResult(const char* stage,
+                            const javelin::app::AccountAuthenticationResult& result)
+        {
+            qCInfo(onboardingOAuthLog).noquote()
+                << stage << "succeeded=" << result.succeeded
+                << "accessTokenPresent=" << !result.accessToken.isEmpty()
+                << "refreshTokenPresent=" << !result.refreshToken.isEmpty()
+                << "clientIdPresent=" << !result.clientId.isEmpty()
+                << "tokenEndpointHost=" << QUrl{result.tokenEndpoint}.host()
+                << "expiresAtEpochSeconds=" << result.expiresAtEpochSeconds;
+        }
+
+        void logOAuthSettings(const char* stage,
+                              const javelin::gui::settings::ConnectionSettings& account)
+        {
+            qCInfo(onboardingOAuthLog).noquote()
+                << stage << "connection=" << account.id
+                << "accessTokenPresent=" << !account.apiKey.isEmpty()
+                << "refreshTokenPresent=" << !account.refreshToken.isEmpty()
+                << "clientIdPresent=" << !account.oauthClientId.isEmpty()
+                << "tokenEndpointHost=" << QUrl{account.tokenEndpoint}.host()
+                << "expiresAtEpochSeconds=" << account.tokenExpiresAtEpochSeconds;
         }
     } // namespace
 
@@ -432,22 +459,24 @@ namespace javelin::gui::onboarding
                     setBusy(true, QStringLiteral("Finishing sign-in…"));
                     auto task = m_onboarding.finishOAuth(
                         {.flowId = m_oauthFlowId, .code = code, .state = state, .issuer = issuer});
-                    QCoro::connect(std::move(task), this,
-                                   [this](javelin::app::OnboardingCallResult<
-                                          javelin::app::AccountAuthenticationResult>
-                                              callResult)
-                                   {
-                                       setBusy(false);
-                                       if (const auto* callError =
-                                               std::get_if<QString>(&callResult))
-                                       {
-                                           m_authenticationStatus->setText(*callError);
-                                           return;
-                                       }
-                                       completeAuthentication(
-                                           std::get<javelin::app::AccountAuthenticationResult>(
-                                               std::move(callResult)));
-                                   });
+                    QCoro::connect(
+                        std::move(task), this,
+                        [this](javelin::app::OnboardingCallResult<
+                               javelin::app::AccountAuthenticationResult>
+                                   callResult)
+                        {
+                            setBusy(false);
+                            if (const auto* callError = std::get_if<QString>(&callResult))
+                            {
+                                m_authenticationStatus->setText(*callError);
+                                return;
+                            }
+                            auto result = std::get<javelin::app::AccountAuthenticationResult>(
+                                std::move(callResult));
+                            logOAuthResult("OAuth result received by wizard", result);
+                            m_oauthAuthentication = true;
+                            completeAuthentication(std::move(result));
+                        });
                 });
         }
     }
@@ -476,6 +505,7 @@ namespace javelin::gui::onboarding
                     m_authenticationStatus->setText(*error);
                     return;
                 }
+                m_oauthAuthentication = false;
                 completeAuthentication(
                     std::get<javelin::app::AccountAuthenticationResult>(std::move(callResult)));
             });
@@ -535,10 +565,12 @@ namespace javelin::gui::onboarding
         if (!m_authentication.has_value())
             return;
         auto accounts = m_settings.accounts();
+        QString savedConnectionId;
         if (m_connectionId.isEmpty())
         {
+            savedConnectionId = QUuid::createUuid().toString(QUuid::WithoutBraces);
             accounts.push_back({
-                .id = QUuid::createUuid().toString(QUuid::WithoutBraces),
+                .id = savedConnectionId,
                 .revision = 1,
                 .displayName = m_nameEdit->text().trimmed(),
                 .sessionUrl = m_authentication->sessionUrl,
@@ -553,6 +585,7 @@ namespace javelin::gui::onboarding
         }
         else
         {
+            savedConnectionId = m_connectionId;
             const auto account = std::ranges::find(accounts, m_connectionId,
                                                    &javelin::gui::settings::ConnectionSettings::id);
             if (account == accounts.end())
@@ -571,6 +604,13 @@ namespace javelin::gui::onboarding
             account->oauthClientId = m_authentication->clientId;
             account->tokenExpiresAtEpochSeconds = m_authentication->expiresAtEpochSeconds;
         }
+        if (m_oauthAuthentication)
+        {
+            const auto account = std::ranges::find(accounts, savedConnectionId,
+                                                   &javelin::gui::settings::ConnectionSettings::id);
+            if (account != accounts.end())
+                logOAuthSettings("OAuth credentials submitted to settings", *account);
+        }
         javelin::protocol::SettingsUpdate update;
         update.accounts = javelin::gui::settings::GuiSettings::protocolAccounts(accounts);
         if (const auto error = m_settings.update(std::move(update)))
@@ -579,6 +619,18 @@ namespace javelin::gui::onboarding
                 this, QStringLiteral("Couldn’t save the account"),
                 QStringLiteral("Javelin couldn’t save your account yet. Please try again."));
             return;
+        }
+        if (m_oauthAuthentication)
+        {
+            const auto persistedAccounts = m_settings.accounts();
+            const auto account = std::ranges::find(persistedAccounts, savedConnectionId,
+                                                   &javelin::gui::settings::ConnectionSettings::id);
+            if (account != persistedAccounts.end())
+                logOAuthSettings("OAuth credentials present after settings update", *account);
+            else
+                qCWarning(onboardingOAuthLog).noquote()
+                    << "OAuth account missing after settings update"
+                    << "connection=" << savedConnectionId;
         }
         QWizard::accept();
     }

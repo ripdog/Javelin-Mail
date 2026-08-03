@@ -2,6 +2,11 @@
 
 #include "app/RemoteActionClient.h"
 
+#include <QLoggingCategory>
+#include <QUrl>
+
+Q_LOGGING_CATEGORY(remoteOAuthLog, "javelin.oauth.remote")
+
 namespace javelin::app
 {
     namespace
@@ -37,8 +42,24 @@ namespace javelin::app
     QCoro::Task<OnboardingCallResult<AccountAuthenticationResult>>
     RemoteOnboardingPort::finishOAuth(OAuthFinishRequest request)
     {
-        co_return friendlyResult(co_await m_client.call<AccountAuthenticationResult>(
+        auto result = friendlyResult(co_await m_client.call<AccountAuthenticationResult>(
             javelin::protocol::RemoteActionKind::OnboardingFinishOAuth, request));
+        if (const auto* authentication = std::get_if<AccountAuthenticationResult>(&result))
+        {
+            qCInfo(remoteOAuthLog).noquote()
+                << "OAuth result decoded from daemon"
+                << "succeeded=" << authentication->succeeded
+                << "accessTokenPresent=" << !authentication->accessToken.isEmpty()
+                << "refreshTokenPresent=" << !authentication->refreshToken.isEmpty()
+                << "clientIdPresent=" << !authentication->clientId.isEmpty()
+                << "tokenEndpointHost=" << QUrl{authentication->tokenEndpoint}.host()
+                << "expiresAtEpochSeconds=" << authentication->expiresAtEpochSeconds;
+        }
+        else
+        {
+            qCWarning(remoteOAuthLog) << "OAuth daemon call returned an error";
+        }
+        co_return result;
     }
 
     QCoro::Task<OnboardingCallResult<AccountAuthenticationResult>>

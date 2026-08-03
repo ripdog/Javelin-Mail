@@ -80,3 +80,34 @@ TEST_CASE("OAuth browser callback identity survives the daemon boundary",
     CHECK(restored.state == request.state);
     CHECK(restored.issuer == request.issuer);
 }
+
+TEST_CASE("OAuth authentication credentials survive the daemon boundary",
+          "[jmap][auth][onboarding]")
+{
+    const javelin::app::AccountAuthenticationResult result{
+        .succeeded = true,
+        .error = {},
+        .sessionUrl = QStringLiteral("https://mail.example.com/.well-known/jmap"),
+        .accessToken = QStringLiteral("access-token"),
+        .refreshToken = QStringLiteral("refresh-token"),
+        .tokenEndpoint = QStringLiteral("https://auth.example.com/token"),
+        .clientId = QStringLiteral("client-id"),
+        .expiresAtEpochSeconds = 123456789,
+        .features = {},
+    };
+
+    const auto encoded = javelin::app::remote::encode(result);
+    REQUIRE(std::holds_alternative<QByteArray>(encoded));
+    const auto decoded =
+        javelin::app::remote::decodeValue<javelin::app::AccountAuthenticationResult>(
+            std::get<QByteArray>(encoded));
+    REQUIRE(std::holds_alternative<javelin::app::AccountAuthenticationResult>(decoded));
+    const auto& restored = std::get<javelin::app::AccountAuthenticationResult>(decoded);
+    CHECK(restored.succeeded == result.succeeded);
+    CHECK(restored.sessionUrl == result.sessionUrl);
+    CHECK(restored.accessToken == result.accessToken);
+    CHECK(restored.refreshToken == result.refreshToken);
+    CHECK(restored.tokenEndpoint == result.tokenEndpoint);
+    CHECK(restored.clientId == result.clientId);
+    CHECK(restored.expiresAtEpochSeconds == result.expiresAtEpochSeconds);
+}
