@@ -23,6 +23,8 @@ catch_discover_tests(javelin_protocol_tests)
 add_executable(javelin_jmap_tests
     ${PROJECT_SOURCE_DIR}/src/app/ApplicationErrorCoordinator.cpp
     ${PROJECT_SOURCE_DIR}/src/app/ApplicationErrorCoordinator.h
+    ${PROJECT_SOURCE_DIR}/src/app/OAuthRefreshSingleFlight.cpp
+    ${PROJECT_SOURCE_DIR}/src/app/OAuthRefreshSingleFlight.h
     ${PROJECT_SOURCE_DIR}/src/app/CommandDispatcher.cpp
     ${PROJECT_SOURCE_DIR}/src/app/CommandDispatcher.h
     ${PROJECT_SOURCE_DIR}/src/app/CacheLocationProvider.cpp
@@ -115,6 +117,7 @@ add_executable(javelin_jmap_tests
     jmap/LongPollMailboxObserverTest.cpp
     jmap/LongPollWorkerTest.cpp
     app/ApplicationErrorCoordinatorTest.cpp
+    app/OAuthRefreshSingleFlightTest.cpp
     app/CacheInvalidationPublisherTest.cpp
     app/CommandDispatcherTest.cpp
     app/ContactCommandPreparationTest.cpp

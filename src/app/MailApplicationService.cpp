@@ -371,8 +371,8 @@ namespace javelin::app
             refreshConfiguredSessions();
     }
 
-    void
-    MailApplicationService::setAuthenticationRefreshHandler(AuthenticationRefreshHandler handler)
+    void MailApplicationService::setAuthenticationRefreshHandler(
+        javelin::jmap::auth::AccessTokenRefreshHandler handler)
     {
         m_authenticationRefreshHandler = std::move(handler);
     }

@@ -104,6 +104,29 @@ namespace javelin::jmap::api
             return std::chrono::seconds{seconds};
         }
 
+        [[nodiscard]] bool isUnauthorized(const TransportResult& result)
+        {
+            const auto* error = std::get_if<TransportError>(&result);
+            return error != nullptr && error->code == TransportErrorCode::HttpFailure &&
+                   error->httpStatus == 401;
+        }
+
+        void replaceBearerToken(HttpRequest& request, const std::string& accessToken)
+        {
+            const auto value =
+                QByteArrayLiteral("Bearer ") + QByteArray::fromStdString(accessToken);
+            for (auto& header : request.headers)
+            {
+                if (header.name.compare(QByteArrayLiteral("Authorization"), Qt::CaseInsensitive) ==
+                    0)
+                {
+                    header.value = value;
+                    break;
+                }
+            }
+            request.authentication->accessToken = accessToken;
+        }
+
         [[nodiscard]] TransportError mapReplyError(QNetworkReply& reply)
         {
             if (reply.property(networkInvalidatedProperty).toBool())
@@ -140,6 +163,52 @@ namespace javelin::jmap::api
         }
 
     } // namespace
+
+    RefreshingTransport::RefreshingTransport(AbstractTransport& transport) : m_transport(transport)
+    {
+    }
+
+    void
+    RefreshingTransport::setRefreshHandler(javelin::jmap::auth::AccessTokenRefreshHandler handler)
+    {
+        m_refreshHandler = std::move(handler);
+    }
+
+    void RefreshingTransport::invalidateConnections()
+    {
+        m_transport.invalidateConnections();
+    }
+
+    QCoro::Task<TransportResult> RefreshingTransport::send(HttpRequest request)
+    {
+        auto retryRequest = request;
+        auto result = co_await m_transport.send(std::move(request));
+        if (!isUnauthorized(result) || !retryRequest.authentication.has_value() ||
+            !m_refreshHandler)
+        {
+            co_return result;
+        }
+
+        const auto rejectedAccessToken = retryRequest.authentication->accessToken;
+        auto refreshedAccessToken =
+            co_await m_refreshHandler(retryRequest.authentication->accountId, rejectedAccessToken);
+        if (!refreshedAccessToken.has_value() || *refreshedAccessToken == rejectedAccessToken)
+        {
+            co_return result;
+        }
+        if (retryRequest.cancellation.isCancellationRequested())
+        {
+            co_return TransportError{
+                .code = TransportErrorCode::Cancelled,
+                .message = "HTTP request cancelled while refreshing authentication",
+                .httpStatus = std::nullopt,
+            };
+        }
+
+        replaceBearerToken(retryRequest, *refreshedAccessToken);
+        retryRequest.dispatched = {};
+        co_return co_await m_transport.send(std::move(retryRequest));
+    }
 
     QtNetworkTransport::QtNetworkTransport(QNetworkAccessManager& networkAccessManager)
         : m_networkAccessManager(networkAccessManager)

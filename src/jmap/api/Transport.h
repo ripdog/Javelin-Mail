@@ -2,6 +2,7 @@
 
 #include "jmap/api/Cancellation.h"
 #include "jmap/api/Error.h"
+#include "jmap/auth/Auth.h"
 
 #include <QCoroTask>
 
@@ -31,12 +32,19 @@ namespace javelin::jmap::api
         QByteArray value;
     };
 
+    struct BearerAuthentication
+    {
+        std::string accountId;
+        std::string accessToken;
+    };
+
     struct HttpRequest
     {
         HttpMethod method = HttpMethod::Get;
         QUrl url;
         QList<HttpHeader> headers;
         QByteArray body;
+        std::optional<BearerAuthentication> authentication;
         CancellationToken cancellation{};
         std::function<void()> dispatched;
     };
@@ -59,6 +67,21 @@ namespace javelin::jmap::api
         }
 
         [[nodiscard]] virtual QCoro::Task<TransportResult> send(HttpRequest request) = 0;
+    };
+
+    class RefreshingTransport final : public AbstractTransport
+    {
+      public:
+        explicit RefreshingTransport(AbstractTransport& transport);
+
+        void setRefreshHandler(javelin::jmap::auth::AccessTokenRefreshHandler handler);
+        void invalidateConnections() override;
+
+        [[nodiscard]] QCoro::Task<TransportResult> send(HttpRequest request) override;
+
+      private:
+        AbstractTransport& m_transport;
+        javelin::jmap::auth::AccessTokenRefreshHandler m_refreshHandler;
     };
 
     class QtNetworkTransport : public AbstractTransport

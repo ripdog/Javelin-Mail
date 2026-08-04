@@ -43,12 +43,16 @@ namespace
 
         javelin::jmap::api::HttpJmapMethodTransport methodTransport;
         javelin::jmap::api::HttpRequest lastRequest;
+        std::vector<javelin::jmap::api::HttpRequest> requests;
         std::vector<javelin::jmap::api::TransportResult> queuedResults;
 
         [[nodiscard]] QCoro::Task<javelin::jmap::api::TransportResult>
         send(javelin::jmap::api::HttpRequest request) override
         {
             lastRequest = request;
+            requests.push_back(request);
+            if (request.dispatched)
+                request.dispatched();
             REQUIRE_FALSE(queuedResults.empty());
 
             auto result = std::move(queuedResults.front());
@@ -67,6 +71,25 @@ namespace
         call(javelin::jmap::api::JmapMethodRequest value) override
         {
             request = std::move(value);
+            co_return result;
+        }
+    };
+
+    class ScriptedJmapMethodTransport final : public javelin::jmap::api::JmapMethodTransport
+    {
+      public:
+        std::vector<javelin::jmap::api::JmapMethodRequest> requests;
+        std::vector<javelin::jmap::api::JmapMethodTransportResult> results;
+
+        [[nodiscard]] QCoro::Task<javelin::jmap::api::JmapMethodTransportResult>
+        call(javelin::jmap::api::JmapMethodRequest request) override
+        {
+            if (request.dispatched)
+                request.dispatched();
+            requests.push_back(request);
+            REQUIRE_FALSE(results.empty());
+            auto result = std::move(results.front());
+            results.erase(results.begin());
             co_return result;
         }
     };
@@ -276,6 +299,169 @@ TEST_CASE("method caller refreshes expired tokens and persists them when configu
     REQUIRE(secretStore.storedToken.has_value());
     CHECK(secretStore.storedToken->accessToken == "refreshed-token");
     CHECK(transport.lastRequest.headers.front().value == "Bearer refreshed-token");
+}
+
+TEST_CASE("refreshing HTTP transport retries one definite unauthorized response",
+          "[jmap][transport][auth]")
+{
+    ensureApplication();
+
+    FakeTransport rawTransport;
+    rawTransport.queuedResults.push_back(javelin::jmap::api::TransportError{
+        .code = javelin::jmap::api::TransportErrorCode::HttpFailure,
+        .message = "Unauthorized",
+        .httpStatus = 401,
+    });
+    rawTransport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body = "ok",
+    });
+    javelin::jmap::api::RefreshingTransport transport{rawTransport};
+    int refreshCalls = 0;
+    transport.setRefreshHandler(
+        [&](std::string accountId,
+            std::string rejectedAccessToken) -> QCoro::Task<std::optional<std::string>>
+        {
+            ++refreshCalls;
+            CHECK(accountId == "u1");
+            CHECK(rejectedAccessToken == "access-token");
+            co_return std::string{"refreshed-token"};
+        });
+    int dispatchCalls = 0;
+
+    const auto result = QCoro::waitFor(transport.send({
+        .method = javelin::jmap::api::HttpMethod::Get,
+        .url = QUrl{QStringLiteral("https://mail.example.com/resource")},
+        .headers = {{.name = "Authorization", .value = "Bearer access-token"}},
+        .body = {},
+        .authentication =
+            javelin::jmap::api::BearerAuthentication{
+                .accountId = "u1",
+                .accessToken = "access-token",
+            },
+        .cancellation = {},
+        .dispatched = [&dispatchCalls] { ++dispatchCalls; },
+    }));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::api::HttpResponse>(result));
+    CHECK(refreshCalls == 1);
+    CHECK(dispatchCalls == 1);
+    REQUIRE(rawTransport.requests.size() == 2);
+    REQUIRE(rawTransport.requests[1].authentication.has_value());
+    CHECK(rawTransport.requests[1].authentication->accessToken == "refreshed-token");
+    CHECK(rawTransport.requests[1].headers.front().value == "Bearer refreshed-token");
+}
+
+TEST_CASE("refreshing HTTP transport surfaces a second unauthorized response",
+          "[jmap][transport][auth]")
+{
+    ensureApplication();
+
+    FakeTransport rawTransport;
+    for (int attempt = 0; attempt < 2; ++attempt)
+    {
+        rawTransport.queuedResults.push_back(javelin::jmap::api::TransportError{
+            .code = javelin::jmap::api::TransportErrorCode::HttpFailure,
+            .message = "Unauthorized",
+            .httpStatus = 401,
+        });
+    }
+    javelin::jmap::api::RefreshingTransport transport{rawTransport};
+    int refreshCalls = 0;
+    transport.setRefreshHandler(
+        [&](std::string, std::string) -> QCoro::Task<std::optional<std::string>>
+        {
+            ++refreshCalls;
+            co_return std::string{"refreshed-token"};
+        });
+
+    const auto result = QCoro::waitFor(transport.send({
+        .method = javelin::jmap::api::HttpMethod::Get,
+        .url = QUrl{QStringLiteral("https://mail.example.com/resource")},
+        .headers = {{.name = "Authorization", .value = "Bearer access-token"}},
+        .body = {},
+        .authentication =
+            javelin::jmap::api::BearerAuthentication{
+                .accountId = "u1",
+                .accessToken = "access-token",
+            },
+        .cancellation = {},
+        .dispatched = {},
+    }));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::api::TransportError>(result));
+    CHECK(std::get<javelin::jmap::api::TransportError>(result).httpStatus == 401);
+    CHECK(refreshCalls == 1);
+    CHECK(rawTransport.requests.size() == 2);
+}
+
+TEST_CASE("refreshing JMAP transport retries one definite unauthorized response",
+          "[jmap][method][transport][auth]")
+{
+    ensureApplication();
+    const auto parsed = javelin::jmap::api::parseResponseEnvelope(
+        javelin::tests::loadFixture("jmap/method/response.json"));
+    REQUIRE(parsed.ok());
+
+    ScriptedJmapMethodTransport rawTransport;
+    rawTransport.results.push_back(javelin::jmap::api::TransportError{
+        .code = javelin::jmap::api::TransportErrorCode::HttpFailure,
+        .message = "Unauthorized",
+        .httpStatus = 401,
+    });
+    rawTransport.results.push_back(*parsed.value);
+    javelin::jmap::api::RefreshingJmapMethodTransport transport{rawTransport};
+    int refreshCalls = 0;
+    transport.setRefreshHandler(
+        [&](std::string accountId,
+            std::string rejectedAccessToken) -> QCoro::Task<std::optional<std::string>>
+        {
+            ++refreshCalls;
+            CHECK(accountId == "u1");
+            CHECK(rejectedAccessToken == "access-token");
+            co_return std::string{"refreshed-token"};
+        });
+    javelin::jmap::api::MethodCaller caller{transport};
+
+    const auto result = QCoro::waitFor(caller.call(makeRequestContext(), loadRequestEnvelope()));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::api::ResponseEnvelope>(result));
+    CHECK(refreshCalls == 1);
+    REQUIRE(rawTransport.requests.size() == 2);
+    CHECK(rawTransport.requests.front().accessToken == "access-token");
+    CHECK(rawTransport.requests.back().accessToken == "refreshed-token");
+}
+
+TEST_CASE("refreshing JMAP transport surfaces a second unauthorized response",
+          "[jmap][method][transport][auth]")
+{
+    ensureApplication();
+
+    ScriptedJmapMethodTransport rawTransport;
+    for (int attempt = 0; attempt < 2; ++attempt)
+    {
+        rawTransport.results.push_back(javelin::jmap::api::TransportError{
+            .code = javelin::jmap::api::TransportErrorCode::HttpFailure,
+            .message = "Unauthorized",
+            .httpStatus = 401,
+        });
+    }
+    javelin::jmap::api::RefreshingJmapMethodTransport transport{rawTransport};
+    int refreshCalls = 0;
+    transport.setRefreshHandler(
+        [&](std::string, std::string) -> QCoro::Task<std::optional<std::string>>
+        {
+            ++refreshCalls;
+            co_return std::string{"refreshed-token"};
+        });
+    javelin::jmap::api::MethodCaller caller{transport};
+
+    const auto result = QCoro::waitFor(caller.call(makeRequestContext(), loadRequestEnvelope()));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::api::TransportError>(result));
+    CHECK(std::get<javelin::jmap::api::TransportError>(result).httpStatus == 401);
+    CHECK(refreshCalls == 1);
+    CHECK(rawTransport.requests.size() == 2);
 }
 
 TEST_CASE("method caller propagates transport failures", "[jmap][method][transport]")

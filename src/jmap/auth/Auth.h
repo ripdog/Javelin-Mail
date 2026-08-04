@@ -3,7 +3,10 @@
 #include "jmap/api/Error.h"
 #include "jmap/api/Session.h"
 
+#include <QCoroTask>
+
 #include <chrono>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -41,6 +44,8 @@ namespace javelin::jmap::auth
     };
 
     using TokenRefreshResult = std::variant<OAuthToken, javelin::jmap::api::AuthError>;
+    using AccessTokenRefreshHandler = std::function<QCoro::Task<std::optional<std::string>>(
+        std::string accountId, std::string rejectedAccessToken)>;
 
     class SecretStore
     {

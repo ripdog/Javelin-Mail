@@ -74,7 +74,8 @@ namespace javelin::app
         javelin::jmap::api::WebSocketFailureCooldowns& cooldowns,
         javelin::jmap::cache::AccountRepository& accountRepository,
         javelin::jmap::cache::QueryService& queryService, WorkScheduler& workScheduler,
-        AuthenticationRefreshHandler authenticationRefreshHandler, QObject* parent)
+        javelin::jmap::auth::AccessTokenRefreshHandler authenticationRefreshHandler,
+        QObject* parent)
         : QObject(parent), m_databaseConnection(databaseConnection),
           m_methodTransport(methodTransport), m_networkAccessManager(networkAccessManager),
           m_transportCooldowns(cooldowns), m_accountRepository(accountRepository),
@@ -447,7 +448,7 @@ namespace javelin::app
             if (const auto* error = std::get_if<javelin::jmap::OperationError>(&deltaResult))
             {
                 qWarning().noquote() << "Account mail delta refresh failed" << error->message;
-                handleOperationError(QStringLiteral("Synchronize mail changes"), *error);
+                publishOperationError(QStringLiteral("Synchronize mail changes"), *error);
                 if (javelin::jmap::isTransientError(*error))
                     scheduleDebouncedRefresh(true);
                 co_return;
@@ -558,7 +559,7 @@ namespace javelin::app
             else if (const auto* error = std::get_if<javelin::jmap::OperationError>(&refreshResult))
             {
                 qWarning().noquote() << "Push mailbox refresh failed" << error->message;
-                handleOperationError(QStringLiteral("Synchronize mailbox"), *error);
+                publishOperationError(QStringLiteral("Synchronize mailbox"), *error);
                 if (javelin::jmap::isAuthenticationError(*error))
                     co_return;
                 if (javelin::jmap::isTransientError(*error))
@@ -624,7 +625,7 @@ namespace javelin::app
         if (const auto* error = std::get_if<javelin::jmap::OperationError>(&refreshResult))
         {
             qWarning().noquote() << "Account sync mailbox state refresh failed" << error->message;
-            handleOperationError(QStringLiteral("Synchronize mailbox state"), *error);
+            publishOperationError(QStringLiteral("Synchronize mailbox state"), *error);
             if (javelin::jmap::isTransientError(*error))
                 scheduleDebouncedRefresh(true);
             co_return false;
@@ -878,6 +879,7 @@ namespace javelin::app
 
                 if (status == javelin::jmap::sync::StateChangeConnectionStatus::Connected)
                 {
+                    m_stateChangeAuthenticationRetryToken.reset();
                     return;
                 }
 
@@ -887,7 +889,8 @@ namespace javelin::app
             {
                 if (m_runContext == nullptr || m_runContext->generation != generation)
                     return;
-                handleOperationError(QStringLiteral("Maintain account connection"), error);
+                handleStateChangeAuthenticationError(QStringLiteral("Maintain account connection"),
+                                                     error);
             });
 
         m_runContext = runContext;
@@ -931,32 +934,44 @@ namespace javelin::app
         Q_EMIT statusChanged(m_status);
     }
 
-    void AccountSyncCoordinator::handleOperationError(const QString& operation,
-                                                      const javelin::jmap::OperationError& error)
+    void AccountSyncCoordinator::handleStateChangeAuthenticationError(
+        const QString& operation, const javelin::jmap::OperationError& error)
     {
-        if (javelin::jmap::isAuthenticationError(error) && m_settings.has_value() &&
-            !m_settings->refreshToken.empty() && m_authenticationRefreshHandler)
+        if (!javelin::jmap::isAuthenticationError(error) || !m_settings.has_value() ||
+            !m_authenticationRefreshHandler)
         {
-            if (m_authenticationRecoveryInFlight)
-                return;
-
-            m_authenticationRecoveryInFlight = true;
-            auto task =
-                recoverAuthentication(operation, error, m_generation, m_settings->connectionId);
-            QCoro::connect(std::move(task), this, []() {});
+            publishOperationError(operation, error);
             return;
         }
 
-        publishOperationError(operation, error);
+        const auto rejectedAccessToken = m_settings->apiKey;
+        if (m_stateChangeAuthenticationRetryToken == rejectedAccessToken)
+        {
+            publishOperationError(operation, error);
+            return;
+        }
+        if (m_authenticationRecoveryInFlight)
+            return;
+
+        m_authenticationRecoveryInFlight = true;
+        auto task = recoverStateChangeAuthentication(operation, error, m_generation, m_accountId,
+                                                     rejectedAccessToken);
+        QCoro::connect(std::move(task), this, []() {});
     }
 
-    QCoro::Task<void> AccountSyncCoordinator::recoverAuthentication(
+    QCoro::Task<void> AccountSyncCoordinator::recoverStateChangeAuthentication(
         QString operation, javelin::jmap::OperationError error, const std::size_t generation,
-        std::string connectionId)
+        std::string accountId, std::string rejectedAccessToken)
     {
-        const bool refreshed = co_await m_authenticationRefreshHandler(std::move(connectionId));
+        auto refreshedAccessToken =
+            co_await m_authenticationRefreshHandler(std::move(accountId), rejectedAccessToken);
         m_authenticationRecoveryInFlight = false;
-        if (refreshed || m_runContext == nullptr || m_runContext->generation != generation)
+        if (refreshedAccessToken.has_value() && *refreshedAccessToken != rejectedAccessToken)
+        {
+            m_stateChangeAuthenticationRetryToken = std::move(*refreshedAccessToken);
+            co_return;
+        }
+        if (m_runContext == nullptr || m_runContext->generation != generation)
             co_return;
 
         publishOperationError(operation, error);

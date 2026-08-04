@@ -17,6 +17,7 @@ namespace javelin::jmap::api
     {
 
         [[nodiscard]] HttpRequest buildSessionRequest(const QUrl& sessionUrl,
+                                                      const std::string& accountId,
                                                       const std::string& accessToken)
         {
             return HttpRequest{
@@ -34,6 +35,11 @@ namespace javelin::jmap::api
                         },
                     },
                 .body = {},
+                .authentication =
+                    BearerAuthentication{
+                        .accountId = accountId,
+                        .accessToken = accessToken,
+                    },
                 .cancellation = {},
                 .dispatched = {},
             };
@@ -71,7 +77,8 @@ namespace javelin::jmap::api
         }
         m_resolvedSessionUrl = sessionUrl->toString().toStdString();
         const auto transportResult = co_await m_transport.send(buildSessionRequest(
-            *sessionUrl, std::get<javelin::jmap::auth::OAuthToken>(tokenResult).accessToken));
+            *sessionUrl, requestContext.credentials.accountId,
+            std::get<javelin::jmap::auth::OAuthToken>(tokenResult).accessToken));
 
         if (std::holds_alternative<TransportError>(transportResult))
         {

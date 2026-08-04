@@ -1,6 +1,7 @@
 #pragma once
 
 #include "app/CacheLocationProvider.h"
+#include "jmap/auth/Auth.h"
 #include "jmap/cache/Database.h"
 #include "protocol/ProcessBoundary.h"
 
@@ -82,6 +83,8 @@ namespace javelin::jmap::api
 {
     class HttpJmapMethodTransport;
     class PreferredJmapMethodTransport;
+    class RefreshingJmapMethodTransport;
+    class RefreshingTransport;
     class QtNetworkTransport;
     class WebSocketFailureCooldowns;
 } // namespace javelin::jmap::api
@@ -161,6 +164,8 @@ namespace javelin::app
         [[nodiscard]] MailIndexService& mailIndexService();
         [[nodiscard]] javelin::app::undo::UndoManager& undoManager();
         [[nodiscard]] javelin::jmap::auth::AccountOnboardingService& onboardingService();
+        void
+        setAuthenticationRefreshHandler(javelin::jmap::auth::AccessTokenRefreshHandler handler);
 
       private:
         std::unique_ptr<javelin::jmap::JmapCore> m_jmapCore;
@@ -175,9 +180,12 @@ namespace javelin::app
         std::unique_ptr<QNetworkAccessManager> m_stateChangeNetworkAccessManager;
         std::unique_ptr<javelin::jmap::auth::AccountOnboardingService> m_onboardingService;
         std::unique_ptr<javelin::jmap::api::WebSocketFailureCooldowns> m_webSocketFailureCooldowns;
-        std::unique_ptr<javelin::jmap::api::QtNetworkTransport> m_transport;
+        std::unique_ptr<javelin::jmap::api::QtNetworkTransport> m_networkTransport;
+        std::unique_ptr<javelin::jmap::api::RefreshingTransport> m_transport;
         std::unique_ptr<javelin::jmap::api::HttpJmapMethodTransport> m_httpMethodTransport;
-        std::unique_ptr<javelin::jmap::api::PreferredJmapMethodTransport> m_methodTransport;
+        std::unique_ptr<javelin::jmap::api::PreferredJmapMethodTransport>
+            m_preferredMethodTransport;
+        std::unique_ptr<javelin::jmap::api::RefreshingJmapMethodTransport> m_methodTransport;
         std::unique_ptr<javelin::jmap::cache::AccountRepository> m_accountRepository;
         std::unique_ptr<AccountCommandService> m_accountCommandService;
         std::unique_ptr<javelin::jmap::cache::ContactRepository> m_contactRepository;

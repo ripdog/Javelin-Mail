@@ -271,6 +271,8 @@ set(JAVELIN_FORMAT_FILES
     src/app/LogStore.h
     src/app/LongPollService.cpp
     src/app/LongPollService.h
+    src/app/OAuthRefreshSingleFlight.cpp
+    src/app/OAuthRefreshSingleFlight.h
     src/app/MailApplicationService.cpp
     src/app/MailApplicationService.h
     src/app/MailboxSelectionMutation.cpp
@@ -648,6 +650,7 @@ set(JAVELIN_FORMAT_FILES
     tests/jmap/SyncReconcilerTest.cpp
     tests/jmap/ThreadRepositoryTest.cpp
     tests/app/CacheAccessBarrierTest.cpp
+    tests/app/OAuthRefreshSingleFlightTest.cpp
     tests/jmap/ReadOnlyCacheSurfaceTest.cpp
 )
 
@@ -1307,6 +1310,8 @@ add_library(javelin_daemon_core STATIC
     src/app/LogStore.h
     src/app/LongPollService.cpp
     src/app/LongPollService.h
+    src/app/OAuthRefreshSingleFlight.cpp
+    src/app/OAuthRefreshSingleFlight.h
     src/app/MailApplicationService.cpp
     src/app/MailApplicationService.h
     src/app/MailboxSelectionMutation.cpp

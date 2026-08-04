@@ -1,12 +1,11 @@
 #pragma once
 
+#include "app/OAuthRefreshSingleFlight.h"
 #include "protocol/SocketTransport.h"
 
 #include <QCoroTask>
 
-#include <QHash>
 #include <QObject>
-#include <QSet>
 #include <QTimer>
 
 #include <cstddef>
@@ -14,6 +13,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 
 class QLockFile;
 
@@ -128,8 +128,15 @@ namespace javelin::app
         void launchGuiIfNeeded();
         void samplePerformance();
         void refreshOAuthCredentials();
-        void startOAuthRefresh(const QString& connectionId, bool force);
-        [[nodiscard]] QCoro::Task<bool> refreshOAuthCredentialsFor(std::string connectionId);
+        [[nodiscard]] QCoro::Task<OAuthRefreshOutcome> startOAuthRefresh(QString connectionId,
+                                                                         bool force);
+        [[nodiscard]] QCoro::Task<OAuthRefreshOutcome>
+        performOAuthRefresh(QString connectionId, QString sessionUrl, QString refreshToken,
+                            QString tokenEndpoint, QString clientId, QString previousAccessToken);
+        [[nodiscard]] const javelin::protocol::AccountSettings*
+        connectionForAccount(std::string_view accountId) const;
+        [[nodiscard]] QCoro::Task<std::optional<std::string>>
+        refreshOAuthCredentialsFor(std::string accountId, std::string rejectedAccessToken);
         void onSocketConnectionClosed(javelin::protocol::SocketDisconnectReason reason,
                                       const QString& detail);
 
@@ -154,7 +161,6 @@ namespace javelin::app
         std::deque<javelin::protocol::ActivationRoute> m_pendingActivations;
         QTimer m_performanceTimer;
         QTimer m_oauthRefreshTimer;
-        QSet<QString> m_oauthRefreshes;
-        QHash<QString, bool> m_oauthRefreshResults;
+        OAuthRefreshSingleFlight m_oauthRefreshes;
     };
 } // namespace javelin::app

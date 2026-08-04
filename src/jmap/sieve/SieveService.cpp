@@ -325,6 +325,11 @@ namespace javelin::jmap::sieve
                             {.name = "Accept", .value = "application/json"},
                             {.name = "Content-Type", .value = "application/sieve"}},
                 .body = std::move(content),
+                .authentication =
+                    api::BearerAuthentication{
+                        .accountId = context.sieveAccountId,
+                        .accessToken = context.credentials.token.accessToken,
+                    },
                 .cancellation = {},
                 .dispatched = {},
             });
@@ -582,6 +587,11 @@ namespace javelin::jmap::sieve
                                   QByteArray::fromStdString(context.credentials.token.accessToken)},
                         {.name = "Accept", .value = "application/sieve"}},
             .body = {},
+            .authentication =
+                api::BearerAuthentication{
+                    .accountId = context.sieveAccountId,
+                    .accessToken = context.credentials.token.accessToken,
+                },
             .cancellation = {},
             .dispatched = {},
         });

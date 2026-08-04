@@ -112,7 +112,8 @@ namespace javelin::jmap
         }
 
         [[nodiscard]] javelin::jmap::api::HttpRequest
-        buildDownloadRequest(const QUrl& url, const std::string& accessToken)
+        buildDownloadRequest(const QUrl& url, const std::string& accountId,
+                             const std::string& accessToken)
         {
             return javelin::jmap::api::HttpRequest{
                 .method = javelin::jmap::api::HttpMethod::Get,
@@ -129,6 +130,11 @@ namespace javelin::jmap
                         },
                     },
                 .body = {},
+                .authentication =
+                    javelin::jmap::api::BearerAuthentication{
+                        .accountId = accountId,
+                        .accessToken = accessToken,
+                    },
                 .cancellation = {},
                 .dispatched = {},
             };
@@ -241,7 +247,7 @@ namespace javelin::jmap
                      QString failurePrefix)
         {
             const auto transportResult = co_await transport.send(buildDownloadRequest(
-                buildDownloadUrl(downloadUrlTemplate, accountId, part), accessToken));
+                buildDownloadUrl(downloadUrlTemplate, accountId, part), accountId, accessToken));
             if (const auto* error =
                     std::get_if<javelin::jmap::api::TransportError>(&transportResult))
             {

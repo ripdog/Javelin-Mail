@@ -3,6 +3,7 @@
 #include "jmap/api/Cancellation.h"
 #include "jmap/api/Error.h"
 #include "jmap/api/MethodEnvelope.h"
+#include "jmap/auth/Auth.h"
 
 #include <QCoroTask>
 
@@ -83,6 +84,22 @@ namespace javelin::jmap::api
 
         [[nodiscard]] virtual QCoro::Task<JmapMethodTransportResult>
         call(JmapMethodRequest request) = 0;
+    };
+
+    class RefreshingJmapMethodTransport final : public JmapMethodTransport
+    {
+      public:
+        explicit RefreshingJmapMethodTransport(JmapMethodTransport& transport);
+
+        void setRefreshHandler(javelin::jmap::auth::AccessTokenRefreshHandler handler);
+        void invalidateConnection(std::string_view accountId) override;
+
+        [[nodiscard]] QCoro::Task<JmapMethodTransportResult>
+        call(JmapMethodRequest request) override;
+
+      private:
+        JmapMethodTransport& m_transport;
+        javelin::jmap::auth::AccessTokenRefreshHandler m_refreshHandler;
     };
 
     class HttpJmapMethodTransport final : public JmapMethodTransport

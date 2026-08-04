@@ -95,7 +95,8 @@ namespace javelin::app
                                QObject* parent = nullptr);
 
         void applySettings(std::vector<AccountSyncConfiguration> configurations);
-        void setAuthenticationRefreshHandler(AuthenticationRefreshHandler handler);
+        void
+        setAuthenticationRefreshHandler(javelin::jmap::auth::AccessTokenRefreshHandler handler);
         void networkBecameReachable();
         [[nodiscard]] std::unordered_map<std::string, AccountSyncCoordinator::Status>
         accountStatuses() const;
@@ -279,7 +280,7 @@ namespace javelin::app
         javelin::jmap::sieve::SieveService& m_sieveService;
         ApplicationErrorCoordinator& m_errorCoordinator;
         WorkScheduler& m_workScheduler;
-        AuthenticationRefreshHandler m_authenticationRefreshHandler;
+        javelin::jmap::auth::AccessTokenRefreshHandler m_authenticationRefreshHandler;
         javelin::app::undo::UndoManager& m_undoManager;
         struct VisibleCalendarRange
         {

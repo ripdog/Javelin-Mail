@@ -34,8 +34,6 @@ namespace javelin::app
 {
     class WorkScheduler;
 
-    using AuthenticationRefreshHandler = std::function<QCoro::Task<bool>(std::string connectionId)>;
-
     class AccountSyncCoordinator final : public QObject,
                                          public javelin::jmap::sync::StateChangeConsumer
     {
@@ -51,15 +49,15 @@ namespace javelin::app
         };
         Q_ENUM(Status)
 
-        AccountSyncCoordinator(javelin::jmap::cache::DatabaseConnection& databaseConnection,
-                               javelin::jmap::api::JmapMethodTransport& methodTransport,
-                               QNetworkAccessManager& networkAccessManager,
-                               javelin::jmap::api::WebSocketFailureCooldowns& cooldowns,
-                               javelin::jmap::cache::AccountRepository& accountRepository,
-                               javelin::jmap::cache::QueryService& queryService,
-                               WorkScheduler& workScheduler,
-                               AuthenticationRefreshHandler authenticationRefreshHandler = {},
-                               QObject* parent = nullptr);
+        AccountSyncCoordinator(
+            javelin::jmap::cache::DatabaseConnection& databaseConnection,
+            javelin::jmap::api::JmapMethodTransport& methodTransport,
+            QNetworkAccessManager& networkAccessManager,
+            javelin::jmap::api::WebSocketFailureCooldowns& cooldowns,
+            javelin::jmap::cache::AccountRepository& accountRepository,
+            javelin::jmap::cache::QueryService& queryService, WorkScheduler& workScheduler,
+            javelin::jmap::auth::AccessTokenRefreshHandler authenticationRefreshHandler = {},
+            QObject* parent = nullptr);
         ~AccountSyncCoordinator() override;
 
         void applySettings(AccountConnectionSettings settings, std::string accountId,
@@ -177,12 +175,12 @@ namespace javelin::app
         void restartForCatchUp();
         void restart();
         void setStatus(Status status);
-        void handleOperationError(const QString& operation,
-                                  const javelin::jmap::OperationError& error);
-        [[nodiscard]] QCoro::Task<void> recoverAuthentication(QString operation,
-                                                              javelin::jmap::OperationError error,
-                                                              std::size_t generation,
-                                                              std::string connectionId);
+        void handleStateChangeAuthenticationError(const QString& operation,
+                                                  const javelin::jmap::OperationError& error);
+        [[nodiscard]] QCoro::Task<void>
+        recoverStateChangeAuthentication(QString operation, javelin::jmap::OperationError error,
+                                         std::size_t generation, std::string accountId,
+                                         std::string rejectedAccessToken);
         void publishOperationError(const QString& operation,
                                    const javelin::jmap::OperationError& error);
         void publishNotifications(
@@ -196,7 +194,7 @@ namespace javelin::app
         javelin::jmap::cache::AccountRepository& m_accountRepository;
         javelin::jmap::cache::QueryService& m_queryService;
         WorkScheduler& m_workScheduler;
-        AuthenticationRefreshHandler m_authenticationRefreshHandler;
+        javelin::jmap::auth::AccessTokenRefreshHandler m_authenticationRefreshHandler;
         std::optional<AccountConnectionSettings> m_settings;
         std::string m_accountId;
         std::vector<std::string> m_mailboxIds;
@@ -211,6 +209,7 @@ namespace javelin::app
         bool m_shouldCatchUpRefreshOnReconnect = false;
         bool m_refreshInFlight = false;
         bool m_authenticationRecoveryInFlight = false;
+        std::optional<std::string> m_stateChangeAuthenticationRetryToken;
         std::optional<std::size_t> m_refreshGenerationInFlight;
         MailRefreshDemand m_queuedRefreshDemand;
         MailRefreshDemand m_debouncedRefreshDemand;

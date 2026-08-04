@@ -117,12 +117,17 @@ namespace javelin::app
             *m_networkAccessManager);
         m_webSocketFailureCooldowns =
             std::make_unique<javelin::jmap::api::WebSocketFailureCooldowns>();
-        m_transport =
+        m_networkTransport =
             std::make_unique<javelin::jmap::api::QtNetworkTransport>(*m_networkAccessManager);
+        m_transport =
+            std::make_unique<javelin::jmap::api::RefreshingTransport>(*m_networkTransport);
         m_httpMethodTransport =
             std::make_unique<javelin::jmap::api::HttpJmapMethodTransport>(*m_transport);
-        m_methodTransport = std::make_unique<javelin::jmap::api::PreferredJmapMethodTransport>(
-            m_databaseConnection, *m_httpMethodTransport, *m_webSocketFailureCooldowns);
+        m_preferredMethodTransport =
+            std::make_unique<javelin::jmap::api::PreferredJmapMethodTransport>(
+                m_databaseConnection, *m_httpMethodTransport, *m_webSocketFailureCooldowns);
+        m_methodTransport = std::make_unique<javelin::jmap::api::RefreshingJmapMethodTransport>(
+            *m_preferredMethodTransport);
         m_jmapCore = std::make_unique<javelin::jmap::JmapCore>(m_databaseConnection, *m_transport,
                                                                *m_methodTransport);
         m_mailIndexService =
@@ -229,6 +234,14 @@ namespace javelin::app
     javelin::jmap::auth::AccountOnboardingService& DaemonServices::onboardingService()
     {
         return *m_onboardingService;
+    }
+
+    void DaemonServices::setAuthenticationRefreshHandler(
+        javelin::jmap::auth::AccessTokenRefreshHandler handler)
+    {
+        m_transport->setRefreshHandler(handler);
+        m_methodTransport->setRefreshHandler(handler);
+        m_mailService->setAuthenticationRefreshHandler(std::move(handler));
     }
 
     javelin::jmap::cache::AccountRepository& DaemonServices::accountRepository()

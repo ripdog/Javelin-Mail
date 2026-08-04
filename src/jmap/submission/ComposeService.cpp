@@ -529,6 +529,11 @@ namespace javelin::jmap::submission
                         },
                     },
                 .body = body,
+                .authentication =
+                    javelin::jmap::api::BearerAuthentication{
+                        .accountId = accountId,
+                        .accessToken = std::get<std::string>(tokenResult),
+                    },
                 .cancellation = {},
                 .dispatched = {},
             });

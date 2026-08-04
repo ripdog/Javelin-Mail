@@ -740,6 +740,55 @@ namespace javelin::jmap::api
         static_cast<void>(accountId);
     }
 
+    RefreshingJmapMethodTransport::RefreshingJmapMethodTransport(JmapMethodTransport& transport)
+        : m_transport(transport)
+    {
+    }
+
+    void RefreshingJmapMethodTransport::setRefreshHandler(
+        javelin::jmap::auth::AccessTokenRefreshHandler handler)
+    {
+        m_refreshHandler = std::move(handler);
+    }
+
+    void RefreshingJmapMethodTransport::invalidateConnection(const std::string_view accountId)
+    {
+        m_transport.invalidateConnection(accountId);
+    }
+
+    QCoro::Task<JmapMethodTransportResult>
+    RefreshingJmapMethodTransport::call(JmapMethodRequest request)
+    {
+        auto retryRequest = request;
+        auto result = co_await m_transport.call(std::move(request));
+        const auto* error = std::get_if<TransportError>(&result);
+        if (error == nullptr || error->code != TransportErrorCode::HttpFailure ||
+            error->httpStatus != 401 || !m_refreshHandler)
+        {
+            co_return result;
+        }
+
+        const auto rejectedAccessToken = retryRequest.accessToken;
+        auto refreshedAccessToken =
+            co_await m_refreshHandler(retryRequest.accountId, rejectedAccessToken);
+        if (!refreshedAccessToken.has_value() || *refreshedAccessToken == rejectedAccessToken)
+        {
+            co_return result;
+        }
+        if (retryRequest.cancellation.isCancellationRequested())
+        {
+            co_return TransportError{
+                .code = TransportErrorCode::Cancelled,
+                .message = "JMAP method call cancelled while refreshing authentication",
+                .httpStatus = std::nullopt,
+            };
+        }
+
+        retryRequest.accessToken = std::move(*refreshedAccessToken);
+        retryRequest.dispatched = {};
+        co_return co_await m_transport.call(std::move(retryRequest));
+    }
+
     HttpJmapMethodTransport::HttpJmapMethodTransport(AbstractTransport& transport)
         : m_transport(transport)
     {
@@ -783,6 +832,7 @@ namespace javelin::jmap::api
                     HttpHeader{.name = "Content-Type", .value = "application/json"},
                 },
             .body = QByteArray::fromStdString(*body),
+            .authentication = {},
             .cancellation = std::move(request.cancellation),
             .dispatched = std::move(request.dispatched),
         });

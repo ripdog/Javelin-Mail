@@ -2725,6 +2725,11 @@ namespace javelin::jmap::contacts
                              QByteArray{"Bearer "} + QByteArray::fromStdString(settings.apiKey)},
                         {.name = "Content-Type", .value = QByteArray::fromStdString(mediaType)}},
             .body = std::move(payload),
+            .authentication =
+                javelin::jmap::api::BearerAuthentication{
+                    .accountId = ownerAccountId,
+                    .accessToken = settings.apiKey,
+                },
             .cancellation = {},
             .dispatched = {},
         });
@@ -2771,6 +2776,11 @@ namespace javelin::jmap::contacts
                          .value =
                              QByteArray{"Bearer "} + QByteArray::fromStdString(settings.apiKey)}},
             .body = {},
+            .authentication =
+                javelin::jmap::api::BearerAuthentication{
+                    .accountId = ownerAccountId,
+                    .accessToken = settings.apiKey,
+                },
             .cancellation = {},
             .dispatched = {},
         });
