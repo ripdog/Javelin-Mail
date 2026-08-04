@@ -40,6 +40,7 @@ namespace
                 .composeSessionId = snapshot.composeSessionId,
                 .accountId = snapshot.accountId,
                 .draftEmailId = *snapshot.draftEmailId,
+                .affectedMailboxIds = {},
                 .operationGroupId = "group",
                 .createMutationId = "create",
                 .destroyMutationId = std::nullopt,

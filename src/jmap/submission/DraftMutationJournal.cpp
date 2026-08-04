@@ -2,11 +2,14 @@
 
 #include "jmap/cache/ComposeSessionRepository.h"
 #include "jmap/cache/EmailRepository.h"
+#include "jmap/cache/MailboxWindowRepository.h"
+#include "jmap/cache/SearchWindowRepository.h"
 #include "jmap/domain/MailEntityParsers.h"
 #include "jmap/sync/ConsistencyDomain.h"
 
 #include <glaze/glaze.hpp>
 
+#include <algorithm>
 #include <array>
 
 namespace
@@ -92,6 +95,38 @@ namespace javelin::jmap::submission
             }};
             return transaction.advance(domains);
         }
+
+        [[nodiscard]] std::vector<std::string> affectedMailboxIds(const DraftMutationGroup& group)
+        {
+            auto mailboxIds = group.projectedEmail.mailboxIds;
+            if (group.baseEmail.has_value())
+            {
+                mailboxIds.insert(mailboxIds.end(), group.baseEmail->mailboxIds.begin(),
+                                  group.baseEmail->mailboxIds.end());
+            }
+            std::ranges::sort(mailboxIds);
+            mailboxIds.erase(std::ranges::unique(mailboxIds).begin(), mailboxIds.end());
+            return mailboxIds;
+        }
+
+        [[nodiscard]] std::optional<cache::DatabaseError>
+        projectQueryWindows(cache::DatabaseConnection& connection,
+                            sync::MutationProjectionTransaction& transaction,
+                            const DraftMutationGroup& group)
+        {
+            cache::MailboxWindowRepository mailboxWindows{connection};
+            for (const auto& mailboxId : affectedMailboxIds(group))
+            {
+                if (const auto error = mailboxWindows.invalidateMailbox(
+                        transaction.cacheTransaction(), group.accountId, mailboxId,
+                        cache::QueryWindowCoverage::LocallyProjected))
+                {
+                    return error;
+                }
+            }
+            cache::SearchWindowRepository searchWindows{connection};
+            return searchWindows.projectAccount(transaction.cacheTransaction(), group.accountId);
+        }
     } // namespace
 
     DraftMutationJournal::DraftMutationJournal(cache::DatabaseConnection& connection)
@@ -133,6 +168,8 @@ namespace javelin::jmap::submission
                     emails.removeMany(transaction.cacheTransaction(), group.accountId, ids))
                 return error;
         }
+        if (const auto error = projectQueryWindows(m_connection, transaction, group))
+            return error;
         auto projectedSnapshot = group.baseSnapshot;
         projectedSnapshot.draftEmailId = group.temporaryEmailId;
         cache::ComposeSessionRepository composeSessions{m_connection};
@@ -203,6 +240,8 @@ namespace javelin::jmap::submission
                                                      group.accountId, {*group.baseEmail}))
                 return error;
         }
+        if (const auto error = projectQueryWindows(m_connection, transaction, group))
+            return error;
         cache::ComposeSessionRepository composeSessions{m_connection};
         if (const auto error =
                 composeSessions.upsert(transaction.cacheTransaction(), group.baseSnapshot))
@@ -232,6 +271,8 @@ namespace javelin::jmap::submission
             return error;
         if (const auto error =
                 emails.upsertMany(transaction.cacheTransaction(), group.accountId, {acceptedEmail}))
+            return error;
+        if (const auto error = projectQueryWindows(m_connection, transaction, group))
             return error;
         cache::ComposeSessionRepository composeSessions{m_connection};
         if (const auto error = composeSessions.upsert(transaction.cacheTransaction(), snapshot))
@@ -286,6 +327,8 @@ namespace javelin::jmap::submission
                                                      group.accountId, {*group.baseEmail}))
                 return error;
         }
+        if (const auto error = projectQueryWindows(m_connection, transaction, group))
+            return error;
         return transaction.commit();
     }
 

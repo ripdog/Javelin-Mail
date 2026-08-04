@@ -29,6 +29,7 @@ namespace javelin::app
     class ApplicationErrorCoordinator;
     class AccountConnectionProvider;
     class DeferredSendService;
+    class MailCacheChangePublisher;
     class WorkScheduler;
     namespace undo
     {
@@ -41,6 +42,7 @@ namespace javelin::app
         ComposeService(javelin::jmap::submission::ComposeService& service,
                        ApplicationErrorCoordinator& errorCoordinator, WorkScheduler& workScheduler,
                        AccountConnectionProvider& connectionProvider,
+                       MailCacheChangePublisher& cacheChangePublisher,
                        javelin::app::undo::UndoManager& undoManager,
                        DeferredSendService& deferredSendService);
 
@@ -84,6 +86,7 @@ namespace javelin::app
         ApplicationErrorCoordinator& m_errorCoordinator;
         WorkScheduler& m_workScheduler;
         AccountConnectionProvider& m_connectionProvider;
+        MailCacheChangePublisher& m_cacheChangePublisher;
         javelin::app::undo::UndoManager& m_undoManager;
         DeferredSendService& m_deferredSendService;
         std::unordered_map<std::string, javelin::jmap::submission::DraftSnapshot>

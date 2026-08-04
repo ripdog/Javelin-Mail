@@ -299,6 +299,7 @@ namespace javelin::app
                      .composeSessionId = send.composeSessionId,
                      .accountId = send.accountId,
                      .draftEmailId = send.draftEmailId,
+                     .affectedMailboxIds = {},
                      .operationGroupId = {},
                      .createMutationId = {},
                      .destroyMutationId = std::nullopt,

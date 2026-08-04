@@ -1500,6 +1500,7 @@ namespace javelin::jmap::submission
             .composeSessionId = snapshot.composeSessionId,
             .accountId = snapshot.accountId,
             .draftEmailId = *snapshot.draftEmailId,
+            .affectedMailboxIds = {draftsMailbox->id},
             .operationGroupId = resolvedOperationGroupId,
             .createMutationId = draftMutation.createMutationId,
             .destroyMutationId = draftMutation.destroyMutationId,

@@ -7,6 +7,8 @@
 #include "jmap/cache/EmailRepository.h"
 #include "jmap/cache/IdentityRepository.h"
 #include "jmap/cache/MailboxRepository.h"
+#include "jmap/cache/MailboxWindowRepository.h"
+#include "jmap/cache/QueryService.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/sync/MutationJournal.h"
 
@@ -198,6 +200,23 @@ TEST_CASE("plain text compose creates no HTML body alternative", "[jmap][submiss
     auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
     seedAccount(connection, "account-2", "https://account-2.example.test/jmap", "identity-2",
                 "sender@example.test");
+    const std::string draftsQueryKey =
+        "mailbox:account-2-drafts|sort:receivedAt:desc|collapseThreads:true";
+    javelin::jmap::cache::MailboxWindowRepository windows{connection};
+    REQUIRE_FALSE(windows
+                      .replace({
+                          .accountId = "account-2",
+                          .mailboxId = "account-2-drafts",
+                          .queryKey = draftsQueryKey,
+                          .requestedOffset = 0,
+                          .requestedLimit = 100,
+                          .position = 0,
+                          .returnedLimit = 0,
+                          .total = 0,
+                          .queryState = "draft-query-1",
+                          .emailIds = {},
+                      })
+                      .has_value());
 
     FakeTransport transport;
     transport.results = {draftCreatedResponse()};
@@ -228,6 +247,17 @@ TEST_CASE("plain text compose creates no HTML body alternative", "[jmap][submiss
         }));
 
     REQUIRE(std::holds_alternative<javelin::jmap::submission::DraftSaveSummary>(result));
+    const auto& summary = std::get<javelin::jmap::submission::DraftSaveSummary>(result);
+    CHECK(summary.affectedMailboxIds == std::vector<std::string>{"account-2-drafts"});
+    javelin::jmap::cache::QueryService queries{connection};
+    const auto projectedResult = queries.loadMailboxWindow("account-2", draftsQueryKey, 0, 100, {});
+    const auto* projected =
+        std::get_if<std::optional<javelin::jmap::cache::MailboxWindowPage>>(&projectedResult);
+    REQUIRE(projected != nullptr);
+    REQUIRE(projected->has_value());
+    CHECK((*projected)->coverage == javelin::jmap::cache::QueryWindowCoverage::LocallyProjected);
+    REQUIRE((*projected)->items.size() == 1);
+    CHECK((*projected)->items.front().emailId == "draft-2");
     REQUIRE(transport.requests.size() == 1);
     CHECK(transport.requests.front().body.contains("\"type\":\"text/plain\""));
     CHECK_FALSE(transport.requests.front().body.contains("\"type\":\"text/html\""));

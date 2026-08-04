@@ -651,6 +651,11 @@ namespace javelin::app
         return notifications.recoverDispatches();
     }
 
+    void MailApplicationService::publishCacheChange(MailCacheChange change)
+    {
+        Q_EMIT cacheCommitted(std::move(change));
+    }
+
     void MailApplicationService::publishMailboxWindowCommitted(QString accountId, QString mailboxId,
                                                                const std::size_t offset,
                                                                const std::size_t limit)

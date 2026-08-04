@@ -182,7 +182,7 @@ namespace javelin::app
         m_undoManager->setExecutor(QStringLiteral("deferred_send"), m_deferredSendService.get());
         m_composeService = std::make_unique<ComposeService>(
             *m_jmapComposeService, *m_errorCoordinator, *m_workScheduler, *m_mailService,
-            *m_undoManager, *m_deferredSendService);
+            *m_mailService, *m_undoManager, *m_deferredSendService);
         m_composeCommandService = std::make_unique<ComposeCommandService>(*m_composeService);
         m_draftHistoryExecutor =
             std::make_unique<javelin::app::undo::DraftHistoryExecutor>(*m_composeService);

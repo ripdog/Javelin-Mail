@@ -81,6 +81,7 @@ namespace javelin::jmap::submission
         std::string composeSessionId;
         std::string accountId;
         std::string draftEmailId;
+        std::vector<std::string> affectedMailboxIds;
         std::string operationGroupId;
         std::string createMutationId;
         std::optional<std::string> destroyMutationId;

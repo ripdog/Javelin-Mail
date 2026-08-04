@@ -1,5 +1,6 @@
 #pragma once
 
+#include "app/MailApplicationTypes.h"
 #include "app/MailboxSelectionMutation.h"
 #include "app/MessageSelection.h"
 #include "jmap/JmapCore.h"
@@ -16,6 +17,13 @@
 
 namespace javelin::app
 {
+
+    class MailCacheChangePublisher
+    {
+      public:
+        virtual ~MailCacheChangePublisher() = default;
+        virtual void publishCacheChange(MailCacheChange change) = 0;
+    };
 
     struct QueuedMailboxSelectionMutation
     {

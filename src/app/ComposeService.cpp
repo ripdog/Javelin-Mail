@@ -3,6 +3,7 @@
 #include "app/ApplicationErrorCoordinator.h"
 #include "app/ComposePreferences.h"
 #include "app/DeferredSendService.h"
+#include "app/MailApplicationPorts.h"
 #include "app/WorkScheduler.h"
 #include "app/undo/UndoManager.h"
 
@@ -50,11 +51,12 @@ namespace javelin::app
                                    ApplicationErrorCoordinator& errorCoordinator,
                                    WorkScheduler& workScheduler,
                                    AccountConnectionProvider& connectionProvider,
+                                   MailCacheChangePublisher& cacheChangePublisher,
                                    javelin::app::undo::UndoManager& undoManager,
                                    DeferredSendService& deferredSendService)
         : m_service(service), m_errorCoordinator(errorCoordinator), m_workScheduler(workScheduler),
-          m_connectionProvider(connectionProvider), m_undoManager(undoManager),
-          m_deferredSendService(deferredSendService)
+          m_connectionProvider(connectionProvider), m_cacheChangePublisher(cacheChangePublisher),
+          m_undoManager(undoManager), m_deferredSendService(deferredSendService)
     {
     }
 
@@ -181,6 +183,19 @@ namespace javelin::app
             m_errorCoordinator.reportSuccess(settings.connectionId);
             const auto& summary = std::get<javelin::jmap::submission::DraftSaveSummary>(result);
             savedSnapshot = summary.savedSnapshot;
+            QStringList affectedMailboxIds;
+            affectedMailboxIds.reserve(static_cast<qsizetype>(summary.affectedMailboxIds.size()));
+            for (const auto& mailboxId : summary.affectedMailboxIds)
+                affectedMailboxIds.push_back(QString::fromStdString(mailboxId));
+            m_cacheChangePublisher.publishCacheChange({
+                .accountId = QString::fromStdString(summary.accountId),
+                .mailboxIds = std::move(affectedMailboxIds),
+                .queryWindows = {},
+                .searchWindows = {},
+                .mailboxTreeChanged = false,
+                .hasNewMail = false,
+                .optimisticProjection = true,
+            });
             m_lastSavedSnapshots.insert_or_assign(savedSnapshot.composeSessionId, savedSnapshot);
             if (prepared.has_value())
             {

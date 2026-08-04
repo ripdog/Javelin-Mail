@@ -69,6 +69,7 @@ namespace javelin::app
     class MailApplicationService final : public QObject,
                                          public MessageListMaterializationPort,
                                          public AccountConnectionProvider,
+                                         public MailCacheChangePublisher,
                                          public ContactRefreshPort,
                                          public javelin::app::undo::MailHistoryPort,
                                          public javelin::app::undo::SieveHistoryPort,
@@ -224,6 +225,8 @@ namespace javelin::app
                              bool active,
                              javelin::app::undo::CommandOrigin origin =
                                  javelin::app::undo::CommandOrigin::User) override;
+        void publishCacheChange(javelin::app::MailCacheChange change) override;
+
       Q_SIGNALS:
         void accountStatusChanged(const QString& accountId,
                                   javelin::app::AccountSyncCoordinator::Status status);
