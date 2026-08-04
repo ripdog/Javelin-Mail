@@ -1,9 +1,13 @@
 CMake ?= cmake
+FLOCK ?= flock
 SOURCE_DIR ?= .
 BUILD_DIR ?= out/build
 DEBUG_PRESET ?= debug
 ASAN_PRESET ?= asan
 RELEASE_PRESET ?= release
+DEBUG_BUILD_LOCK ?= /tmp/javelin-mail-debug-build-$(USER).lock
+ASAN_BUILD_LOCK ?= /tmp/javelin-mail-asan-build-$(USER).lock
+RELEASE_BUILD_LOCK ?= /tmp/javelin-mail-release-build-$(USER).lock
 GUI_TARGET ?= javelin
 DAEMON_TARGET ?= javelind
 GUI_BINARY ?= $(BUILD_DIR)/$(DEBUG_PRESET)/bin/$(GUI_TARGET)
@@ -26,31 +30,29 @@ help:
 		'  make clean             Remove the build directory'
 
 configure-debug:
-	$(CMake) --preset $(DEBUG_PRESET)
+	$(FLOCK) $(DEBUG_BUILD_LOCK) $(CMake) --preset $(DEBUG_PRESET)
 
-build-debug:
-	@test -f $(BUILD_DIR)/$(DEBUG_PRESET)/CMakeCache.txt || $(CMake) --preset $(DEBUG_PRESET)
-	$(CMake) --build --preset $(DEBUG_PRESET)
+build-debug: configure-debug
+	$(FLOCK) $(DEBUG_BUILD_LOCK) $(CMake) --build --preset $(DEBUG_PRESET)
 
-run:
-	@test -f $(BUILD_DIR)/$(DEBUG_PRESET)/CMakeCache.txt || $(CMake) --preset $(DEBUG_PRESET)
-	$(CMake) --build --preset $(DEBUG_PRESET) --target $(GUI_TARGET) $(DAEMON_TARGET)
+run: configure-debug
+	$(FLOCK) $(DEBUG_BUILD_LOCK) $(CMake) --build --preset $(DEBUG_PRESET) --target $(GUI_TARGET) $(DAEMON_TARGET)
 	. $(BUILD_DIR)/$(DEBUG_PRESET)/prefix.sh && export JAVELIN_FORWARD_DAEMON_STDIO=1 && exec $(GUI_BINARY) $(RUN_ARGS)
 
 configure-asan:
-	$(CMake) --preset $(ASAN_PRESET)
+	$(FLOCK) $(ASAN_BUILD_LOCK) $(CMake) --preset $(ASAN_PRESET)
 
 build-asan: configure-asan
-	$(CMake) --build --preset $(ASAN_PRESET)
+	$(FLOCK) $(ASAN_BUILD_LOCK) $(CMake) --build --preset $(ASAN_PRESET)
 
 configure-release:
-	$(CMake) --preset $(RELEASE_PRESET)
+	$(FLOCK) $(RELEASE_BUILD_LOCK) $(CMake) --preset $(RELEASE_PRESET)
 
 build-release: configure-release
-	$(CMake) --build --preset $(RELEASE_PRESET)
+	$(FLOCK) $(RELEASE_BUILD_LOCK) $(CMake) --build --preset $(RELEASE_PRESET)
 
 test-debug: build-debug
-	ctest --test-dir $(BUILD_DIR)/$(DEBUG_PRESET) --output-on-failure
+	$(FLOCK) $(DEBUG_BUILD_LOCK) ctest --test-dir $(BUILD_DIR)/$(DEBUG_PRESET) --output-on-failure
 
 clean:
-	rm -rf $(BUILD_DIR)
+	$(FLOCK) $(DEBUG_BUILD_LOCK) $(FLOCK) $(ASAN_BUILD_LOCK) $(FLOCK) $(RELEASE_BUILD_LOCK) rm -rf $(BUILD_DIR)
