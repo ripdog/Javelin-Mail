@@ -19,6 +19,7 @@
 #include <QTimer>
 
 #include <deque>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <ranges>
@@ -32,6 +33,9 @@ class QNetworkAccessManager;
 namespace javelin::app
 {
     class WorkScheduler;
+
+    using AuthenticationRefreshHandler = std::function<QCoro::Task<bool>(std::string connectionId)>;
+
     class AccountSyncCoordinator final : public QObject,
                                          public javelin::jmap::sync::StateChangeConsumer
     {
@@ -53,7 +57,9 @@ namespace javelin::app
                                javelin::jmap::api::WebSocketFailureCooldowns& cooldowns,
                                javelin::jmap::cache::AccountRepository& accountRepository,
                                javelin::jmap::cache::QueryService& queryService,
-                               WorkScheduler& workScheduler, QObject* parent = nullptr);
+                               WorkScheduler& workScheduler,
+                               AuthenticationRefreshHandler authenticationRefreshHandler = {},
+                               QObject* parent = nullptr);
         ~AccountSyncCoordinator() override;
 
         void applySettings(AccountConnectionSettings settings, std::string accountId,
@@ -174,6 +180,12 @@ namespace javelin::app
         void setStatus(Status status);
         void handleOperationError(const QString& operation,
                                   const javelin::jmap::OperationError& error);
+        [[nodiscard]] QCoro::Task<void> recoverAuthentication(QString operation,
+                                                              javelin::jmap::OperationError error,
+                                                              std::size_t generation,
+                                                              std::string connectionId);
+        void publishOperationError(const QString& operation,
+                                   const javelin::jmap::OperationError& error);
         void publishNotifications(
             const RunContext& runContext, std::string_view mailboxId, std::string_view mailboxName,
             const std::vector<javelin::jmap::sync::RefreshNotificationCandidate>& candidates);
@@ -185,6 +197,7 @@ namespace javelin::app
         javelin::jmap::cache::AccountRepository& m_accountRepository;
         javelin::jmap::cache::QueryService& m_queryService;
         WorkScheduler& m_workScheduler;
+        AuthenticationRefreshHandler m_authenticationRefreshHandler;
         std::optional<AccountConnectionSettings> m_settings;
         std::string m_accountId;
         std::vector<std::string> m_mailboxIds;
@@ -199,6 +212,7 @@ namespace javelin::app
         Status m_status = Status::Disconnected;
         bool m_shouldCatchUpRefreshOnReconnect = false;
         bool m_refreshInFlight = false;
+        bool m_authenticationRecoveryInFlight = false;
         std::optional<std::size_t> m_refreshGenerationInFlight;
         MailRefreshDemand m_queuedRefreshDemand;
         MailRefreshDemand m_debouncedRefreshDemand;

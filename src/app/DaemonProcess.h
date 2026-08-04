@@ -2,6 +2,9 @@
 
 #include "protocol/SocketTransport.h"
 
+#include <QCoroTask>
+
+#include <QHash>
 #include <QObject>
 #include <QSet>
 #include <QTimer>
@@ -10,6 +13,7 @@
 #include <deque>
 #include <memory>
 #include <optional>
+#include <string>
 
 class QLockFile;
 
@@ -124,6 +128,8 @@ namespace javelin::app
         void launchGuiIfNeeded();
         void samplePerformance();
         void refreshOAuthCredentials();
+        void startOAuthRefresh(const QString& connectionId, bool force);
+        [[nodiscard]] QCoro::Task<bool> refreshOAuthCredentialsFor(std::string connectionId);
         void onSocketConnectionClosed(javelin::protocol::SocketDisconnectReason reason,
                                       const QString& detail);
 
@@ -149,5 +155,6 @@ namespace javelin::app
         QTimer m_performanceTimer;
         QTimer m_oauthRefreshTimer;
         QSet<QString> m_oauthRefreshes;
+        QHash<QString, bool> m_oauthRefreshResults;
     };
 } // namespace javelin::app

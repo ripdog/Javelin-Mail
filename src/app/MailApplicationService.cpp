@@ -371,6 +371,12 @@ namespace javelin::app
             refreshConfiguredSessions();
     }
 
+    void
+    MailApplicationService::setAuthenticationRefreshHandler(AuthenticationRefreshHandler handler)
+    {
+        m_authenticationRefreshHandler = std::move(handler);
+    }
+
     void MailApplicationService::networkBecameReachable()
     {
         m_networkAccessManager.clearConnectionCache();
@@ -532,7 +538,8 @@ namespace javelin::app
         {
             coordinatorIt->second = std::make_unique<AccountSyncCoordinator>(
                 m_databaseConnection, m_methodTransport, m_networkAccessManager,
-                m_transportCooldowns, m_accountRepository, m_queryService, m_workScheduler, this);
+                m_transportCooldowns, m_accountRepository, m_queryService, m_workScheduler,
+                m_authenticationRefreshHandler, this);
             connectCoordinator(coordinatorIt->first, *coordinatorIt->second);
         }
         if (m_errorCoordinator.authenticationPaused(configuration.settings.connectionId,

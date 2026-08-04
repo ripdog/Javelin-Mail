@@ -23,6 +23,7 @@
 #include "jmap/auth/AccountOnboardingService.h"
 
 #include <QCoroTask>
+#include <QCoroTimer>
 
 #include <QCoreApplication>
 #include <QDateTime>
@@ -51,7 +52,10 @@ namespace javelin::app
                     .revision = settings.revision,
                     .sessionUrl = settings.sessionUrl.toStdString(),
                     .loginEmail = settings.loginEmail.toStdString(),
-                    .apiKey = settings.apiKey.toStdString()};
+                    .apiKey = settings.apiKey.toStdString(),
+                    .refreshToken = settings.refreshToken.toStdString(),
+                    .tokenEndpoint = settings.tokenEndpoint.toStdString(),
+                    .oauthClientId = settings.oauthClientId.toStdString()};
         }
 
         [[nodiscard]] const MailboxSelectionSettings*
@@ -226,6 +230,9 @@ namespace javelin::app
             m_remoteActions = std::make_unique<DaemonRemoteActionDispatcher>(
                 *m_services, *this, [this] { return currentEpoch(); },
                 [this] { return reloadSettings(); }, this);
+            m_services->mailService().setAuthenticationRefreshHandler(
+                [this](std::string connectionId)
+                { return refreshOAuthCredentialsFor(std::move(connectionId)); });
             applySettings();
             m_background = std::make_unique<DaemonBackgroundController>(*m_services, this);
             m_services->commandDispatcher().setEventSink(this);
@@ -279,6 +286,7 @@ namespace javelin::app
         m_performanceTimer.stop();
         m_oauthRefreshTimer.stop();
         m_oauthRefreshes.clear();
+        m_oauthRefreshResults.clear();
         if (m_services != nullptr)
             samplePerformance();
         m_lifecycle = DaemonLifecycle::ShuttingDown;
@@ -759,35 +767,108 @@ namespace javelin::app
                 m_oauthRefreshes.contains(account.id))
                 continue;
 
-            m_oauthRefreshes.insert(account.id);
-            auto task = m_services->onboardingService().refreshOAuth({
-                .sessionUrl = account.sessionUrl,
-                .tokenEndpoint = account.tokenEndpoint,
-                .clientId = account.oauthClientId,
-                .refreshToken = account.refreshToken,
-            });
-            QCoro::connect(std::move(task), this,
-                           [this, connectionId = account.id](AccountAuthenticationResult result)
-                           {
-                               m_oauthRefreshes.remove(connectionId);
-                               if (!result.succeeded || !isReady())
-                                   return;
-                               auto accounts = m_settingsSnapshot.accounts;
-                               const auto found = std::ranges::find(accounts, connectionId,
-                                                                    &protocol::AccountSettings::id);
-                               if (found == accounts.end())
-                                   return;
-                               found->apiKey = std::move(result.accessToken);
-                               found->refreshToken = std::move(result.refreshToken);
-                               found->tokenExpiresAtEpochSeconds = result.expiresAtEpochSeconds;
-                               ++found->revision;
-                               protocol::SettingsUpdate update;
-                               update.accounts = std::move(accounts);
-                               static_cast<void>(handleUpdateSettings(
-                                   {.baseRevision = m_settingsSnapshot.revision,
-                                    .update = std::move(update)}));
-                           });
+            startOAuthRefresh(account.id, false);
         }
+    }
+
+    void DaemonProcess::startOAuthRefresh(const QString& connectionId, const bool force)
+    {
+        if (!isReady() || m_services == nullptr || m_settingsRepository == nullptr ||
+            m_oauthRefreshes.contains(connectionId))
+            return;
+
+        const auto account = std::ranges::find(m_settingsSnapshot.accounts, connectionId,
+                                               &protocol::AccountSettings::id);
+        if (account == m_settingsSnapshot.accounts.end() || account->refreshToken.isEmpty() ||
+            account->tokenEndpoint.isEmpty() || account->oauthClientId.isEmpty())
+            return;
+
+        if (!force &&
+            (account->tokenExpiresAtEpochSeconds == 0 ||
+             account->tokenExpiresAtEpochSeconds > QDateTime::currentSecsSinceEpoch() + 300))
+            return;
+
+        const auto accountRevision = account->revision;
+        const auto previousAccessToken = account->apiKey;
+        m_oauthRefreshResults.remove(connectionId);
+        m_oauthRefreshes.insert(connectionId);
+        auto task = m_services->onboardingService().refreshOAuth({
+            .sessionUrl = account->sessionUrl,
+            .tokenEndpoint = account->tokenEndpoint,
+            .clientId = account->oauthClientId,
+            .refreshToken = account->refreshToken,
+        });
+        QCoro::connect(
+            std::move(task), this,
+            [this, connectionId, accountRevision,
+             previousAccessToken](AccountAuthenticationResult result)
+            {
+                bool succeeded = false;
+                if (result.succeeded && isReady())
+                {
+                    auto accounts = m_settingsSnapshot.accounts;
+                    const auto found =
+                        std::ranges::find(accounts, connectionId, &protocol::AccountSettings::id);
+                    if (found != accounts.end() && found->revision == accountRevision &&
+                        found->apiKey == previousAccessToken)
+                    {
+                        found->apiKey = std::move(result.accessToken);
+                        found->refreshToken = std::move(result.refreshToken);
+                        found->tokenExpiresAtEpochSeconds = result.expiresAtEpochSeconds;
+                        ++found->revision;
+                        protocol::SettingsUpdate update;
+                        update.accounts = std::move(accounts);
+                        const auto updateResult =
+                            handleUpdateSettings({.baseRevision = m_settingsSnapshot.revision,
+                                                  .update = std::move(update)});
+                        if (std::holds_alternative<protocol::SettingsUpdated>(updateResult))
+                        {
+                            succeeded = true;
+                        }
+                        else
+                        {
+                            const auto& rejected =
+                                std::get<protocol::SettingsUpdateRejected>(updateResult);
+                            qWarning().noquote()
+                                << QStringLiteral("OAuth refresh credentials were not applied")
+                                << connectionId << rejected.error.detail;
+                        }
+                    }
+                    else if (found != accounts.end() && found->apiKey != previousAccessToken)
+                    {
+                        succeeded = true;
+                    }
+                }
+
+                if (!succeeded && !result.succeeded)
+                    qWarning().noquote() << QStringLiteral("OAuth credential refresh failed")
+                                         << connectionId << result.error;
+                m_oauthRefreshResults.insert(connectionId, succeeded);
+                m_oauthRefreshes.remove(connectionId);
+            });
+    }
+
+    QCoro::Task<bool> DaemonProcess::refreshOAuthCredentialsFor(std::string connectionId)
+    {
+        if (!isReady() || m_services == nullptr || m_settingsRepository == nullptr)
+            co_return false;
+
+        const auto connectionKey = QString::fromStdString(connectionId);
+        startOAuthRefresh(connectionKey, true);
+        while (m_oauthRefreshes.contains(connectionKey))
+        {
+            QTimer timer;
+            timer.setSingleShot(true);
+            timer.start(10);
+            co_await qCoro(timer).waitForTimeout();
+        }
+
+        const auto result = m_oauthRefreshResults.find(connectionKey);
+        if (result == m_oauthRefreshResults.end())
+            co_return false;
+        const bool succeeded = result.value();
+        m_oauthRefreshResults.erase(result);
+        co_return succeeded;
     }
 
     std::optional<protocol::BoundaryError> DaemonProcess::reloadSettings()

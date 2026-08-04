@@ -19,6 +19,9 @@ namespace javelin::gui::settings
             .sessionUrl = settings.sessionUrl.toStdString(),
             .loginEmail = settings.loginEmail.toStdString(),
             .apiKey = settings.apiKey.toStdString(),
+            .refreshToken = settings.refreshToken.toStdString(),
+            .tokenEndpoint = settings.tokenEndpoint.toStdString(),
+            .oauthClientId = settings.oauthClientId.toStdString(),
         };
     }
 

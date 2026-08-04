@@ -74,11 +74,12 @@ namespace javelin::app
         javelin::jmap::api::WebSocketFailureCooldowns& cooldowns,
         javelin::jmap::cache::AccountRepository& accountRepository,
         javelin::jmap::cache::QueryService& queryService, WorkScheduler& workScheduler,
-        QObject* parent)
+        AuthenticationRefreshHandler authenticationRefreshHandler, QObject* parent)
         : QObject(parent), m_databaseConnection(databaseConnection),
           m_methodTransport(methodTransport), m_networkAccessManager(networkAccessManager),
           m_transportCooldowns(cooldowns), m_accountRepository(accountRepository),
-          m_queryService(queryService), m_workScheduler(workScheduler)
+          m_queryService(queryService), m_workScheduler(workScheduler),
+          m_authenticationRefreshHandler(std::move(authenticationRefreshHandler))
     {
         m_refreshDebounceTimer.setSingleShot(true);
         m_refreshDebounceTimer.setInterval(refreshDebounceInterval);
@@ -190,6 +191,7 @@ namespace javelin::app
         m_pendingStateChanges.clear();
         m_pendingCalendarStateChanges.clear();
         m_pendingContactStateChanges.clear();
+        m_authenticationRecoveryInFlight = false;
         m_refreshDebounceTimer.stop();
         m_queuedRefreshDemand = {};
         m_debouncedRefreshDemand = {};
@@ -454,6 +456,11 @@ namespace javelin::app
             const auto deltaResult = co_await deltaExecutor.refresh(
                 runContext->configuration.accountId,
                 {.mailbox = demand.mailboxState, .email = demand.emailState});
+            if (m_runContext == nullptr || m_runContext->generation != runContext->generation ||
+                runContext->cancellation.isCancelled())
+            {
+                co_return;
+            }
             if (const auto* error = std::get_if<javelin::jmap::OperationError>(&deltaResult))
             {
                 qWarning().noquote() << "Account mail delta refresh failed" << error->message;
@@ -515,6 +522,11 @@ namespace javelin::app
             const auto refreshResult = co_await mailboxRefreshExecutor.refreshCollapsedMailbox(
                 runContext->configuration.accountId, mailboxId, {}, false,
                 !accountEmailStateRefreshed);
+            if (m_runContext == nullptr || m_runContext->generation != runContext->generation ||
+                runContext->cancellation.isCancelled())
+            {
+                co_return;
+            }
             if (const auto* summary =
                     std::get_if<javelin::jmap::sync::MailboxRefreshSummary>(&refreshResult))
             {
@@ -938,6 +950,37 @@ namespace javelin::app
 
     void AccountSyncCoordinator::handleOperationError(const QString& operation,
                                                       const javelin::jmap::OperationError& error)
+    {
+        if (javelin::jmap::isAuthenticationError(error) && m_settings.has_value() &&
+            !m_settings->refreshToken.empty() && m_authenticationRefreshHandler)
+        {
+            if (m_authenticationRecoveryInFlight)
+                return;
+
+            m_authenticationRecoveryInFlight = true;
+            auto task =
+                recoverAuthentication(operation, error, m_generation, m_settings->connectionId);
+            QCoro::connect(std::move(task), this, []() {});
+            return;
+        }
+
+        publishOperationError(operation, error);
+    }
+
+    QCoro::Task<void> AccountSyncCoordinator::recoverAuthentication(
+        QString operation, javelin::jmap::OperationError error, const std::size_t generation,
+        std::string connectionId)
+    {
+        const bool refreshed = co_await m_authenticationRefreshHandler(std::move(connectionId));
+        m_authenticationRecoveryInFlight = false;
+        if (refreshed || m_runContext == nullptr || m_runContext->generation != generation)
+            co_return;
+
+        publishOperationError(operation, error);
+    }
+
+    void AccountSyncCoordinator::publishOperationError(const QString& operation,
+                                                       const javelin::jmap::OperationError& error)
     {
         Q_EMIT operationFailed(operation, error);
         if (javelin::jmap::isAuthenticationError(error))

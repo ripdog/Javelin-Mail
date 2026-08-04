@@ -48,6 +48,9 @@ TEST_CASE("application errors log all available diagnostic context")
         .sessionUrl = "https://example.test/jmap",
         .loginEmail = "user@example.test",
         .apiKey = "secret",
+        .refreshToken = {},
+        .tokenEndpoint = {},
+        .oauthClientId = {},
     };
     const WarningCapture warningCapture;
 
@@ -84,6 +87,9 @@ TEST_CASE("application errors are deduplicated and rearmed after recovery")
         .sessionUrl = "https://example.test/jmap",
         .loginEmail = "user@example.test",
         .apiKey = "secret",
+        .refreshToken = {},
+        .tokenEndpoint = {},
+        .oauthClientId = {},
     };
     int incidents = 0;
     QString userMessage;
@@ -123,6 +129,9 @@ TEST_CASE("authentication pause persists until a newer connection revision is ap
         .sessionUrl = "https://example.test/jmap",
         .loginEmail = "user@example.test",
         .apiKey = "bad-secret",
+        .refreshToken = {},
+        .tokenEndpoint = {},
+        .oauthClientId = {},
     };
     {
         javelin::app::ApplicationErrorCoordinator coordinator;

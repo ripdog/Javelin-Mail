@@ -96,6 +96,9 @@ namespace
                         .sessionUrl = sessionUrl,
                         .loginEmail = loginEmail,
                         .apiKey = apiKey,
+                        .refreshToken = {},
+                        .tokenEndpoint = {},
+                        .oauthClientId = {},
                     },
                 .accountIds = std::move(accountIds),
             });
