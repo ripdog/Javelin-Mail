@@ -56,6 +56,7 @@ configure_file(
 
 find_package(KF6 REQUIRED COMPONENTS Codecs ConfigWidgets XmlGui CoreAddons TextEditor)
 find_package(KPim6Mime REQUIRED)
+find_package(KPim6MessageComposer REQUIRED)
 
 qt_standard_project_setup()
 
@@ -139,6 +140,14 @@ javelin_enable_sanitizers(javelin_cache_read)
 
 set(JAVELIN_FORMAT_FILES
     src/protocol/SocketTransport.cpp
+    src/jmap/render/HtmlBodyEmbedding.cpp
+    src/jmap/submission/DraftInlineImageStorage.cpp
+    src/jmap/submission/DraftInlineImageStorage.h
+    src/jmap/render/HtmlBodyEmbedding.h
+    tests/gui/ComposerInlineImageCodecTest.cpp
+    tests/gui/JavelinComposerEditTest.cpp
+    tests/jmap/DraftInlineImageStorageTest.cpp
+    tests/jmap/HtmlBodyEmbeddingTest.cpp
     src/protocol/SocketTransport.h
     tests/protocol/ProcessBoundaryTest.cpp
     src/jmap/sync/PreferredStateChangeSource.cpp
@@ -319,6 +328,10 @@ set(JAVELIN_FORMAT_FILES
     src/gui/mailboxes/MailboxTreeView.h
     src/gui/compose/ComposeTabWidget.cpp
     src/gui/compose/ComposeTabWidget.h
+    src/gui/compose/ComposerInlineImageCodec.cpp
+    src/gui/compose/ComposerInlineImageCodec.h
+    src/gui/compose/JavelinComposerEdit.cpp
+    src/gui/compose/JavelinComposerEdit.h
     src/gui/compose/ComposeBodyConverter.cpp
     src/gui/compose/ComposeBodyConverter.h
     src/gui/contacts/ContactsManagerWidget.cpp
@@ -661,6 +674,10 @@ set(JAVELIN_FORMAT_FILES
 
 add_library(javelin_jmap STATIC
     src/jmap/EmailMutation.h
+    src/jmap/render/HtmlBodyEmbedding.cpp
+    src/jmap/submission/DraftInlineImageStorage.cpp
+    src/jmap/submission/DraftInlineImageStorage.h
+    src/jmap/render/HtmlBodyEmbedding.h
     src/jmap/api/CalendarMethods.cpp
     src/jmap/api/CalendarMethods.h
     src/jmap/calendar/CalendarTypes.h
@@ -968,6 +985,10 @@ add_library(javelin_gui STATIC
     src/gui/mailboxes/MailboxSort.h
     src/gui/compose/ComposeTabWidget.cpp
     src/gui/compose/ComposeTabWidget.h
+    src/gui/compose/ComposerInlineImageCodec.cpp
+    src/gui/compose/ComposerInlineImageCodec.h
+    src/gui/compose/JavelinComposerEdit.cpp
+    src/gui/compose/JavelinComposerEdit.h
     src/gui/compose/ComposeBodyConverter.cpp
     src/gui/compose/ComposeBodyConverter.h
     src/gui/contacts/ContactsManagerWidget.cpp
@@ -1233,6 +1254,7 @@ target_link_libraries(javelin_gui
         KF6::ConfigWidgets
         KF6::XmlGui
         KF6::TextEditor
+        KPim6::MessageComposer
         QCoro6::Coro
         javelin_translation
     PRIVATE

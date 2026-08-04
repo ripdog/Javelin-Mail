@@ -136,11 +136,13 @@ add_executable(javelin_jmap_tests
     jmap/ContactServiceTest.cpp
     jmap/ComposeRevisionGateTest.cpp
     jmap/ComposeServiceTest.cpp
+    jmap/DraftInlineImageStorageTest.cpp
     jmap/ConsistencyDomainTest.cpp
     jmap/DatabaseTest.cpp
     jmap/EmailRepositoryTest.cpp
     jmap/EmailSearchTest.cpp
     jmap/EventSourceLongPollTest.cpp
+    jmap/HtmlBodyEmbeddingTest.cpp
     jmap/HtmlMessageDocumentBuilderTest.cpp
     jmap/HtmlTextExtractorTest.cpp
     jmap/InlineMessageUrlTest.cpp
@@ -331,3 +333,32 @@ javelin_enable_static_analysis(javelin_contacts_gui_tests)
 javelin_enable_sanitizers(javelin_contacts_gui_tests)
 target_compile_options(javelin_contacts_gui_tests PRIVATE -fexceptions)
 catch_discover_tests(javelin_contacts_gui_tests DISCOVERY_MODE PRE_TEST)
+
+add_executable(javelin_composer_gui_tests
+    gui/ContactsGuiTestMain.cpp
+    gui/JavelinComposerEditTest.cpp
+    gui/ComposerInlineImageCodecTest.cpp
+    ${PROJECT_SOURCE_DIR}/src/gui/compose/JavelinComposerEdit.cpp
+    ${PROJECT_SOURCE_DIR}/src/gui/compose/JavelinComposerEdit.h
+    ${PROJECT_SOURCE_DIR}/src/gui/compose/ComposeBodyConverter.cpp
+    ${PROJECT_SOURCE_DIR}/src/gui/compose/ComposeBodyConverter.h
+    ${PROJECT_SOURCE_DIR}/src/gui/compose/ComposerInlineImageCodec.cpp
+    ${PROJECT_SOURCE_DIR}/src/gui/compose/ComposerInlineImageCodec.h
+)
+target_include_directories(javelin_composer_gui_tests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/src
+        ${PROJECT_SOURCE_DIR}/tests
+)
+target_link_libraries(javelin_composer_gui_tests
+    PRIVATE
+        Catch2::Catch2
+        KF6::XmlGui
+        KPim6::MessageComposer
+        Qt::Widgets
+)
+javelin_set_project_warnings(javelin_composer_gui_tests)
+javelin_enable_static_analysis(javelin_composer_gui_tests)
+javelin_enable_sanitizers(javelin_composer_gui_tests)
+target_compile_options(javelin_composer_gui_tests PRIVATE -fexceptions)
+catch_discover_tests(javelin_composer_gui_tests DISCOVERY_MODE PRE_TEST)
