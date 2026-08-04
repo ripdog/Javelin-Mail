@@ -335,7 +335,14 @@ TEST_CASE("compose sending uses the account selected with the From identity",
                           .attachments = {},
                       }));
     REQUIRE(std::holds_alternative<javelin::jmap::submission::PreparedSend>(preparedResult));
-    CHECK(transport.requests.size() == 1);
+    REQUIRE(transport.requests.size() == 1);
+    const auto plainPartPosition =
+        transport.requests.front().body.indexOf(QByteArrayLiteral("\"partId\":\"text-body\""));
+    const auto htmlPartPosition =
+        transport.requests.front().body.indexOf(QByteArrayLiteral("\"partId\":\"html-body\""));
+    REQUIRE(plainPartPosition >= 0);
+    REQUIRE(htmlPartPosition >= 0);
+    CHECK(plainPartPosition < htmlPartPosition);
 
     bool submissionDispatched = false;
     const auto result = QCoro::waitFor(service.submitPreparedSend(

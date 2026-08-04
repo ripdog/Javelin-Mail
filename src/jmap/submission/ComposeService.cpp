@@ -631,18 +631,18 @@ namespace javelin::jmap::submission
             if (hasHtml && hasPlain)
             {
                 bodyParts.push_back(javelin::jmap::api::EmailBodyPartCreate{
-                    .partId = std::string{"html-body"},
+                    .partId = std::string{"text-body"},
                     .blobId = std::nullopt,
-                    .type = "text/html",
+                    .type = "text/plain",
                     .name = std::nullopt,
                     .disposition = std::nullopt,
                     .cid = std::nullopt,
                     .subParts = std::nullopt,
                 });
                 bodyParts.push_back(javelin::jmap::api::EmailBodyPartCreate{
-                    .partId = std::string{"text-body"},
+                    .partId = std::string{"html-body"},
                     .blobId = std::nullopt,
-                    .type = "text/plain",
+                    .type = "text/html",
                     .name = std::nullopt,
                     .disposition = std::nullopt,
                     .cid = std::nullopt,
