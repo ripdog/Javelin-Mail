@@ -66,14 +66,6 @@ namespace javelin::gui::settings
         return mailboxIds(snapshot().notificationMailboxSelections, accountId);
     }
 
-    bool GuiSettings::hasNotificationMailboxSelection(const QStringView accountId) const
-    {
-        const auto found =
-            std::ranges::find(snapshot().notificationMailboxSelections, accountId.toString(),
-                              &javelin::protocol::MailboxSelectionSettings::accountId);
-        return found != snapshot().notificationMailboxSelections.end() && found->configured;
-    }
-
     QStringList GuiSettings::remoteContentSenders() const
     {
         return stringList(snapshot().remoteContentSenders);

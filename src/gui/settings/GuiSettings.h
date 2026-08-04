@@ -34,7 +34,6 @@ namespace javelin::gui::settings
         [[nodiscard]] ConnectionSettings accountForCachedId(QStringView accountId) const;
         [[nodiscard]] QStringList syncedMailboxIds(QStringView accountId) const;
         [[nodiscard]] QStringList notificationMailboxIds(QStringView accountId) const;
-        [[nodiscard]] bool hasNotificationMailboxSelection(QStringView accountId) const;
         [[nodiscard]] QStringList remoteContentSenders() const;
         [[nodiscard]] QStringList remoteContentDomains() const;
         [[nodiscard]] javelin::app::TranslationSettings translationSettings() const;

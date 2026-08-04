@@ -121,6 +121,58 @@ TEST_CASE("JmapCore startup session refresh discovers and caches websocket capab
     CHECK(session.capabilities.websocket->supportsPush);
 }
 
+TEST_CASE("JmapCore does not invent an initial mailbox when none is configured",
+          "[jmap][core][settings]")
+{
+    ensureApplication();
+    QTemporaryDir temporaryDir;
+    REQUIRE(temporaryDir.isValid());
+
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = makeConnectionName(),
+        .databasePath = temporaryDir.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto database = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+
+    FakeTransport transport;
+    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body = QByteArray::fromStdString(
+            javelin::tests::loadFixture("jmap/session/websocket_session.json")),
+    });
+    transport.queuedResults.push_back(javelin::jmap::api::HttpResponse{
+        .statusCode = 200,
+        .body = QByteArray::fromStdString(serializeResponseEnvelope({
+            .methodResponses =
+                {
+                    {
+                        .name = "Mailbox/get",
+                        .arguments =
+                            javelin::tests::loadFixture("jmap/method/mailbox_get_arguments.json"),
+                        .callId = "mailboxes",
+                    },
+                },
+            .createdIds = std::nullopt,
+            .sessionState = "session-state-2",
+        })),
+    });
+    javelin::jmap::api::HttpJmapMethodTransport methodTransport{transport};
+    javelin::jmap::JmapCore core{database, transport, methodTransport};
+
+    const auto result = QCoro::waitFor(core.refreshFromServer({
+        .sessionUrl = "https://mail.example.com/.well-known/jmap",
+        .loginEmail = "alice@example.com",
+        .apiKey = "access-token",
+    }));
+
+    REQUIRE(std::holds_alternative<javelin::jmap::LiveRefreshSummary>(result));
+    const auto& summary = std::get<javelin::jmap::LiveRefreshSummary>(result);
+    CHECK_FALSE(summary.selectedMailboxId.has_value());
+    CHECK(summary.emailCount == 0);
+    CHECK(transport.requests.size() == 2);
+}
+
 TEST_CASE("JmapCore mailbox pages use one requested-page envelope", "[jmap][core][pagination]")
 {
     ensureApplication();

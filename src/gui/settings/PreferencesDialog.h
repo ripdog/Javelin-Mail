@@ -7,7 +7,6 @@
 
 #include <KConfigDialog>
 #include <QHash>
-#include <QSet>
 
 #include <cstdint>
 #include <vector>
@@ -132,7 +131,6 @@ namespace javelin::gui::settings
         javelin::gui::mailboxes::MailboxTreeModel* m_mailboxNotificationModel = nullptr;
         QHash<QString, QStringList> m_syncedMailboxIds;
         QHash<QString, QStringList> m_notificationMailboxIds;
-        QSet<QString> m_configuredNotificationAccounts;
         QString m_mailboxSyncCurrentAccountId;
     };
 

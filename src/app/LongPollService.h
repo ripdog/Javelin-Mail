@@ -64,8 +64,7 @@ namespace javelin::app
 
         void applySettings(AccountConnectionSettings settings, std::string accountId,
                            std::vector<std::string> mailboxIds,
-                           std::vector<std::string> notificationMailboxIds,
-                           bool notificationMailboxSelectionConfigured);
+                           std::vector<std::string> notificationMailboxIds);
         void stop();
         void pauseForAuthentication();
         void networkBecameReachable();
@@ -204,7 +203,6 @@ namespace javelin::app
         std::shared_ptr<RunContext> m_runContext;
         std::string m_lastEventId;
         std::vector<std::string> m_notificationMailboxIds;
-        bool m_notificationMailboxSelectionConfigured = false;
         std::unordered_map<std::string, std::string> m_pendingStateChanges;
         javelin::jmap::sync::AccountTypeStateMap m_pendingCalendarStateChanges;
         javelin::jmap::sync::AccountTypeStateMap m_pendingContactStateChanges;

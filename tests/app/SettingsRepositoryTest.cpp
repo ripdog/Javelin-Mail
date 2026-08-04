@@ -147,7 +147,6 @@ TEST_CASE("settings repository migrates the complete legacy operational shape", 
     CHECK(snapshot->syncedMailboxSelections.front().mailboxIds ==
           std::vector<QString>{QStringLiteral("inbox"), QStringLiteral("archive")});
     REQUIRE(snapshot->notificationMailboxSelections.size() == 1);
-    CHECK(snapshot->notificationMailboxSelections.front().configured);
     CHECK_FALSE(snapshot->translation.enabled);
     CHECK(snapshot->translation.apiKeyOverride == QStringLiteral("translation-key"));
     CHECK(snapshot->translation.targetLanguage == QStringLiteral("ja"));
@@ -227,6 +226,15 @@ TEST_CASE("settings updates require the current revision and round-trip typed va
                         .oauthClientId = {},
                         .tokenExpiresAtEpochSeconds = 0,
                         .cachedAccountIds = {}}};
+    update.syncedMailboxSelections = std::vector<javelin::protocol::MailboxSelectionSettings>{{
+        .accountId = QStringLiteral("account-1"),
+        .mailboxIds = {},
+    }};
+    update.notificationMailboxSelections =
+        std::vector<javelin::protocol::MailboxSelectionSettings>{{
+            .accountId = QStringLiteral("account-1"),
+            .mailboxIds = {},
+        }};
     update.translation = TranslationSettings{.enabled = false,
                                              .apiKeyOverride = QStringLiteral(" key "),
                                              .targetLanguage = QStringLiteral("DE"),
@@ -250,6 +258,10 @@ TEST_CASE("settings updates require the current revision and round-trip typed va
     REQUIRE(reloaded != nullptr);
     CHECK(reloaded->revision.value == 1);
     CHECK(reloaded->accounts.front().displayName == QStringLiteral("Work"));
+    REQUIRE(reloaded->syncedMailboxSelections.size() == 1);
+    CHECK(reloaded->syncedMailboxSelections.front().mailboxIds.empty());
+    REQUIRE(reloaded->notificationMailboxSelections.size() == 1);
+    CHECK(reloaded->notificationMailboxSelections.front().mailboxIds.empty());
     CHECK_FALSE(reloaded->translation.enabled);
     CHECK(reloaded->translation.apiKeyOverride == QStringLiteral("key"));
     CHECK(reloaded->translation.targetLanguage == QStringLiteral("de"));

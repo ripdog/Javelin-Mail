@@ -105,8 +105,7 @@ namespace javelin::app
     void AccountSyncCoordinator::applySettings(AccountConnectionSettings settings,
                                                std::string accountId,
                                                std::vector<std::string> mailboxIds,
-                                               std::vector<std::string> notificationMailboxIds,
-                                               const bool notificationMailboxSelectionConfigured)
+                                               std::vector<std::string> notificationMailboxIds)
     {
         const bool resumingAfterAuthentication = m_status == Status::AuthenticationPaused;
         const bool connectionSettingsUnchanged =
@@ -117,7 +116,6 @@ namespace javelin::app
         m_accountId = std::move(accountId);
         m_mailboxIds = std::move(mailboxIds);
         m_notificationMailboxIds = std::move(notificationMailboxIds);
-        m_notificationMailboxSelectionConfigured = notificationMailboxSelectionConfigured;
 
         if (connectionSettingsUnchanged && m_runContext != nullptr)
         {
@@ -298,21 +296,6 @@ namespace javelin::app
             }
         }
 
-        auto notificationMailboxIds = m_notificationMailboxIds;
-        if (!m_notificationMailboxSelectionConfigured)
-        {
-            const auto inbox = std::ranges::find(*mailboxTree, std::optional<std::string>{"inbox"},
-                                                 &javelin::jmap::cache::MailboxTreeItem::role);
-            if (inbox != mailboxTree->end())
-            {
-                notificationMailboxIds.push_back(inbox->id);
-                if (std::ranges::find(m_mailboxIds, inbox->id) == m_mailboxIds.end())
-                {
-                    mailboxes.emplace_back(inbox->id, inbox->name);
-                }
-            }
-        }
-
         bool calendarCapable = false;
         bool contactsCapable = false;
         std::vector<std::string> groupwareAccountIds;
@@ -339,8 +322,8 @@ namespace javelin::app
             .settings = *m_settings,
             .accountId = m_accountId,
             .mailboxes = std::move(mailboxes),
-            .notificationMailboxIds = {notificationMailboxIds.begin(),
-                                       notificationMailboxIds.end()},
+            .notificationMailboxIds = {m_notificationMailboxIds.begin(),
+                                       m_notificationMailboxIds.end()},
             .apiUrl = session->value().apiUrl,
             .requestLimits = *requestLimits,
             .eventSourceUrl = session->value().eventSourceUrl.value_or(std::string{}),

@@ -463,7 +463,7 @@ namespace javelin::protocol
         bool writeMailboxSelection(PayloadWriter& writer, const MailboxSelectionSettings& selection,
                                    const BoundaryLimits& limits)
         {
-            return writer.string(selection.accountId) && writer.boolean(selection.configured) &&
+            return writer.string(selection.accountId) &&
                    writeVector(writer, selection.mailboxIds, limits.maximumCollectionItems,
                                QStringLiteral("mailboxSelection.mailboxIds"),
                                [&writer](const QString& value) { return writer.string(value); });
@@ -472,7 +472,7 @@ namespace javelin::protocol
         bool readMailboxSelection(PayloadReader& reader, MailboxSelectionSettings& selection,
                                   const BoundaryLimits& limits)
         {
-            return reader.string(selection.accountId) && reader.boolean(selection.configured) &&
+            return reader.string(selection.accountId) &&
                    readVector(reader, selection.mailboxIds, limits.maximumCollectionItems,
                               QStringLiteral("mailboxSelection.mailboxIds"),
                               [&reader](QString& value) { return reader.string(value); });

@@ -260,7 +260,6 @@ namespace javelin::protocol
     {
         QString accountId;
         std::vector<QString> mailboxIds;
-        bool configured = false;
 
         friend bool operator==(const MailboxSelectionSettings&,
                                const MailboxSelectionSettings&) = default;

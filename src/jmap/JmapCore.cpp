@@ -91,25 +91,6 @@ namespace javelin::jmap
             return {};
         }
 
-        [[nodiscard]] std::optional<std::string>
-        selectMailboxForInitialSync(const std::vector<javelin::jmap::domain::Mailbox>& mailboxes)
-        {
-            for (const auto& mailbox : mailboxes)
-            {
-                if (mailbox.role == std::optional<std::string>{"inbox"})
-                {
-                    return mailbox.id;
-                }
-            }
-
-            if (!mailboxes.empty())
-            {
-                return mailboxes.front().id;
-            }
-
-            return std::nullopt;
-        }
-
         [[nodiscard]] QString encodedTemplateValue(const std::string_view value)
         {
             return QString::fromUtf8(
@@ -687,7 +668,7 @@ namespace javelin::jmap
     QCoro::Task<LiveRefreshResult>
     JmapCore::refreshFromServer(LiveConnectionSettings settings,
                                 std::function<void(const QString&)> progressCallback,
-                                std::optional<std::vector<std::string>> configuredMailboxIds)
+                                std::vector<std::string> configuredMailboxIds)
     {
         const auto reportProgress = [&progressCallback](const QString& message)
         {
@@ -827,8 +808,7 @@ namespace javelin::jmap
             co_return javelin::jmap::operationError(*error);
         }
 
-        const auto selectedMailboxId = selectMailboxForInitialSync(parsedMailboxes.list);
-        auto mailboxIds = configuredMailboxIds.value_or(std::vector<std::string>{});
+        auto mailboxIds = std::move(configuredMailboxIds);
         std::erase_if(mailboxIds,
                       [&parsedMailboxes](const auto& mailboxId)
                       {
@@ -836,11 +816,6 @@ namespace javelin::jmap
                                                       [&mailboxId](const auto& mailbox)
                                                       { return mailbox.id == mailboxId; });
                       });
-        if (!configuredMailboxIds.has_value() && mailboxIds.empty() &&
-            selectedMailboxId.has_value())
-        {
-            mailboxIds.push_back(*selectedMailboxId);
-        }
         std::size_t emailCount = 0;
 
         if (!mailboxIds.empty())

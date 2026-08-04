@@ -120,7 +120,6 @@ namespace
                     .mailboxIds = {},
                     .fullSyncMailboxIds = {},
                     .notificationMailboxIds = {},
-                    .notificationMailboxSelectionConfigured = false,
                 });
         return result;
     }

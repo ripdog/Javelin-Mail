@@ -61,7 +61,6 @@ namespace javelin::app
         std::vector<std::string> mailboxIds;
         std::vector<std::string> fullSyncMailboxIds;
         std::vector<std::string> notificationMailboxIds;
-        bool notificationMailboxSelectionConfigured = false;
 
         friend bool operator==(const AccountSyncConfiguration&,
                                const AccountSyncConfiguration&) = default;

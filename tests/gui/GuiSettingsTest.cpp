@@ -44,7 +44,6 @@ TEST_CASE("GUI settings expose daemon snapshots without reading QSettings", "[gu
     snapshot.notificationMailboxSelections.push_back({
         .accountId = QStringLiteral("account-1"),
         .mailboxIds = {QStringLiteral("inbox")},
-        .configured = true,
     });
     snapshot.attachments = {.alwaysAsk = false, .directory = QStringLiteral("/tmp/mail")};
 
@@ -54,9 +53,30 @@ TEST_CASE("GUI settings expose daemon snapshots without reading QSettings", "[gu
     CHECK(account.displayName == QStringLiteral("Personal"));
     CHECK(settings.notificationMailboxIds(QStringLiteral("account-1")) ==
           QStringList{QStringLiteral("inbox")});
-    CHECK(settings.hasNotificationMailboxSelection(QStringLiteral("account-1")));
     CHECK_FALSE(settings.attachmentSaveSettings().alwaysAsk);
     CHECK(settings.attachmentSaveSettings().directory == QStringLiteral("/tmp/mail"));
+}
+
+TEST_CASE("GUI settings keep absent mailbox selections empty", "[gui][settings][mailbox]")
+{
+    javelin::protocol::SettingsSnapshot snapshot;
+    snapshot.accounts.push_back({
+        .id = QStringLiteral("connection-1"),
+        .revision = 0,
+        .displayName = {},
+        .sessionUrl = {},
+        .loginEmail = {},
+        .apiKey = {},
+        .refreshToken = {},
+        .tokenEndpoint = {},
+        .oauthClientId = {},
+        .tokenExpiresAtEpochSeconds = 0,
+        .cachedAccountIds = {QStringLiteral("account-1")},
+    });
+
+    javelin::gui::settings::GuiSettings settings{std::move(snapshot)};
+    CHECK(settings.syncedMailboxIds(QStringLiteral("account-1")).isEmpty());
+    CHECK(settings.notificationMailboxIds(QStringLiteral("account-1")).isEmpty());
 }
 
 TEST_CASE("GUI settings ignore identical workspace updates", "[gui][settings][workspace]")

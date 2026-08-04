@@ -145,8 +145,7 @@ namespace javelin::app
                                         QStringLiteral("mailbox selection has no account id"));
                 }
                 output.push_back({.accountId = accountId,
-                                  .mailboxIds = toVector(settings.value(key).toStringList()),
-                                  .configured = true});
+                                  .mailboxIds = toVector(settings.value(key).toStringList())});
             }
             settings.endGroup();
             std::ranges::sort(output, {}, &javelin::protocol::MailboxSelectionSettings::accountId);
@@ -162,8 +161,6 @@ namespace javelin::app
             settings.remove(QString{});
             for (const auto& selection : values)
             {
-                if (!selection.configured)
-                    continue;
                 settings.setValue(groupKey(selection.accountId),
                                   toStringList(selection.mailboxIds));
             }

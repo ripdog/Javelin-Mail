@@ -282,7 +282,6 @@ TEST_CASE("daemon applies offline mailbox settings by cached JMAP account id",
                        std::vector{javelin::protocol::MailboxSelectionSettings{
                            .accountId = QStringLiteral("account-1"),
                            .mailboxIds = {QStringLiteral("archive")},
-                           .configured = true,
                        }},
                    .notificationMailboxSelections =
                        std::vector<javelin::protocol::MailboxSelectionSettings>{},
@@ -323,7 +322,6 @@ TEST_CASE("daemon applies offline mailbox settings by cached JMAP account id",
                        std::vector{javelin::protocol::MailboxSelectionSettings{
                            .accountId = QStringLiteral("account-1"),
                            .mailboxIds = {},
-                           .configured = true,
                        }},
                    .notificationMailboxSelections = std::nullopt,
                    .remoteContentSenders = std::nullopt,
@@ -354,7 +352,6 @@ TEST_CASE("daemon applies offline mailbox settings by cached JMAP account id",
                        std::vector{javelin::protocol::MailboxSelectionSettings{
                            .accountId = QStringLiteral("account-1"),
                            .mailboxIds = {QStringLiteral("archive")},
-                           .configured = true,
                        }},
                    .notificationMailboxSelections = std::nullopt,
                    .remoteContentSenders = std::nullopt,
@@ -436,7 +433,6 @@ TEST_CASE("completed offline mailbox pages materialize without server access",
         .mailboxIds = {"archive"},
         .fullSyncMailboxIds = {"archive"},
         .notificationMailboxIds = {},
-        .notificationMailboxSelectionConfigured = false,
     }});
 
     const auto result = QCoro::waitFor(services.mailService().requestMailboxWindow({

@@ -550,8 +550,7 @@ namespace javelin::app
         }
         coordinatorIt->second->applySettings(std::move(configuration.settings), accountId,
                                              std::move(configuration.mailboxIds),
-                                             std::move(configuration.notificationMailboxIds),
-                                             configuration.notificationMailboxSelectionConfigured);
+                                             std::move(configuration.notificationMailboxIds));
         if (m_pendingContactRefreshes.contains(accountId))
             scheduleContactRefresh(accountId);
     }

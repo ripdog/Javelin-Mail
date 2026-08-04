@@ -13,6 +13,7 @@
 #include <QDir>
 #include <QFileDialog>
 #include <QFormLayout>
+#include <QGridLayout>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
@@ -20,7 +21,9 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QRadioButton>
+#include <QSet>
 #include <QSignalBlocker>
+#include <QSizePolicy>
 #include <QSpinBox>
 #include <QSplitter>
 #include <QUuid>
@@ -168,12 +171,16 @@ namespace javelin::gui::settings
 
         auto* mailboxSyncPage = new QWidget(this);
         auto* mailboxSyncLayout = new QVBoxLayout(mailboxSyncPage);
-        mailboxSyncLayout->addWidget(new QLabel(
+        auto* mailboxSyncDescription = new QLabel(
             QStringLiteral(
                 "Download every message and attachment in selected mailboxes for "
                 "complete offline access. Large mailboxes continue in the Task Center "
                 "and can be paused. Unchecking keeps downloaded mail as removable cache."),
-            mailboxSyncPage));
+            mailboxSyncPage);
+        mailboxSyncDescription->setWordWrap(true);
+        mailboxSyncDescription->setSizePolicy(
+            QSizePolicy{QSizePolicy::Preferred, QSizePolicy::Minimum});
+        mailboxSyncLayout->addWidget(mailboxSyncDescription);
         m_mailboxSyncAccount = new QComboBox(mailboxSyncPage);
         mailboxSyncLayout->addWidget(m_mailboxSyncAccount);
         m_mailboxSyncList = new javelin::gui::mailboxes::MailboxTreeView(mailboxSyncPage);
@@ -187,12 +194,13 @@ namespace javelin::gui::settings
              { return m_settings.accountForCachedId(accountId).displayName; }},
             m_mailboxSyncList);
         m_mailboxSyncList->setModel(m_mailboxSyncModel);
-        auto* mailboxLists = new QHBoxLayout();
+        auto* mailboxLists = new QGridLayout();
         auto* syncListLayout = new QVBoxLayout();
         syncListLayout->addWidget(
             new QLabel(QStringLiteral("Keep complete offline copy"), mailboxSyncPage));
+        m_mailboxSyncList->setSizePolicy(QSizePolicy{QSizePolicy::Ignored, QSizePolicy::Expanding});
         syncListLayout->addWidget(m_mailboxSyncList, 1);
-        mailboxLists->addLayout(syncListLayout, 1);
+        mailboxLists->addLayout(syncListLayout, 0, 0);
         auto* notificationListLayout = new QVBoxLayout();
         notificationListLayout->addWidget(
             new QLabel(QStringLiteral("Show notifications"), mailboxSyncPage));
@@ -207,8 +215,12 @@ namespace javelin::gui::settings
              { return m_settings.accountForCachedId(accountId).displayName; }},
             m_mailboxNotificationList);
         m_mailboxNotificationList->setModel(m_mailboxNotificationModel);
+        m_mailboxNotificationList->setSizePolicy(
+            QSizePolicy{QSizePolicy::Ignored, QSizePolicy::Expanding});
         notificationListLayout->addWidget(m_mailboxNotificationList, 1);
-        mailboxLists->addLayout(notificationListLayout, 1);
+        mailboxLists->addLayout(notificationListLayout, 0, 1);
+        mailboxLists->setColumnStretch(0, 1);
+        mailboxLists->setColumnStretch(1, 1);
         mailboxSyncLayout->addLayout(mailboxLists, 1);
         addPage(mailboxSyncPage, QStringLiteral("Mailbox Sync"), QStringLiteral("view-refresh"),
                 QString{}, false);
@@ -646,8 +658,7 @@ namespace javelin::gui::settings
         m_translationSettings.autoTranslateSenders = m_autoTranslateSenders;
         m_translationSettings.autoTranslateDomains = m_autoTranslateDomains;
 
-        const auto selections =
-            [](const QHash<QString, QStringList>& values, const QSet<QString>* configured)
+        const auto selections = [](const QHash<QString, QStringList>& values)
         {
             std::vector<javelin::protocol::MailboxSelectionSettings> result;
             result.reserve(static_cast<std::size_t>(values.size()));
@@ -656,7 +667,6 @@ namespace javelin::gui::settings
                 result.push_back({
                     .accountId = it.key(),
                     .mailboxIds = {it.value().begin(), it.value().end()},
-                    .configured = configured == nullptr || configured->contains(it.key()),
                 });
             }
             return result;
@@ -664,9 +674,8 @@ namespace javelin::gui::settings
 
         javelin::protocol::SettingsUpdate update;
         update.accounts = GuiSettings::protocolAccounts(m_accounts);
-        update.syncedMailboxSelections = selections(m_syncedMailboxIds, nullptr);
-        update.notificationMailboxSelections =
-            selections(m_notificationMailboxIds, &m_configuredNotificationAccounts);
+        update.syncedMailboxSelections = selections(m_syncedMailboxIds);
+        update.notificationMailboxSelections = selections(m_notificationMailboxIds);
         update.remoteContentSenders =
             std::vector<QString>{m_remoteContentSenders.begin(), m_remoteContentSenders.end()};
         update.remoteContentDomains =
@@ -745,8 +754,6 @@ namespace javelin::gui::settings
             m_syncedMailboxIds.insert(accountId, m_settings.syncedMailboxIds(accountId));
             m_notificationMailboxIds.insert(accountId,
                                             m_settings.notificationMailboxIds(accountId));
-            if (m_settings.hasNotificationMailboxSelection(accountId))
-                m_configuredNotificationAccounts.insert(accountId);
         }
         m_mailboxSyncCurrentAccountId = m_mailboxSyncAccount->currentData().toString();
         refreshMailboxSyncList();
@@ -771,17 +778,7 @@ namespace javelin::gui::settings
             return;
         }
         const auto selected = m_syncedMailboxIds.value(accountId);
-        auto notificationSelected = m_notificationMailboxIds.value(accountId);
-        if (!m_configuredNotificationAccounts.contains(accountId))
-        {
-            const auto inbox = std::ranges::find(*mailboxes, std::optional<std::string>{"inbox"},
-                                                 &javelin::jmap::cache::MailboxTreeItem::role);
-            if (inbox != mailboxes->end())
-            {
-                notificationSelected.push_back(QString::fromStdString(inbox->id));
-                m_notificationMailboxIds.insert(accountId, notificationSelected);
-            }
-        }
+        const auto notificationSelected = m_notificationMailboxIds.value(accountId);
         const auto modelAccountId = std::optional<std::string>{accountId.toStdString()};
         m_mailboxSyncModel->setCheckedMailboxIds(selected);
         m_mailboxSyncModel->setAccountId(modelAccountId);
@@ -800,7 +797,6 @@ namespace javelin::gui::settings
         }
         const auto selected = m_mailboxNotificationModel->checkedMailboxIds();
         m_notificationMailboxIds.insert(accountId, selected);
-        m_configuredNotificationAccounts.insert(accountId);
     }
 
     void PreferencesDialog::storeMailboxSyncSelection()

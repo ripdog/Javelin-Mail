@@ -115,8 +115,6 @@ namespace javelin::app
                         .notificationMailboxIds = notifications == nullptr
                                                       ? std::vector<std::string>{}
                                                       : stringIds(notifications->mailboxIds),
-                        .notificationMailboxSelectionConfigured =
-                            notifications != nullptr && notifications->configured,
                     });
                 };
                 for (const auto& accountId : account.cachedAccountIds)
