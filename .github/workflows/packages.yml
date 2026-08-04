@@ -132,6 +132,7 @@ jobs:
             fi
           done < <(find /usr/lib/qt6/plugins -type f -name '*.so' -print0)
           export PATH="$GITHUB_WORKSPACE/tools:$PATH"
+          export PATCHELF=/usr/bin/patchelf
           export QMAKE=/usr/bin/qmake6
           export NO_STRIP=1
           export VERSION="0.1.0-${GITHUB_SHA::7}"
