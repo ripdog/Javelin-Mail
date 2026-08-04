@@ -1323,6 +1323,8 @@ add_library(javelin_daemon_core STATIC
     src/app/MessageNavigationPort.h
     src/app/MessageSelection.cpp
     src/app/MessageSelection.h
+    src/app/ProcessInstanceLock.cpp
+    src/app/ProcessInstanceLock.h
     src/app/DaemonBackgroundController.cpp
     src/app/DaemonBackgroundController.h
     src/app/DaemonProcess.cpp
@@ -1444,6 +1446,8 @@ qt_add_executable(javelin
     src/app/RemoteApplicationPorts.cpp
     src/app/RemoteApplicationPorts.h
     src/app/RemoteCodec.h
+    src/app/ProcessInstanceLock.cpp
+    src/app/ProcessInstanceLock.h
     src/app/SearchSession.cpp
     src/app/SearchSession.h
     src/jmap/cache/AccountReadRepository.cpp

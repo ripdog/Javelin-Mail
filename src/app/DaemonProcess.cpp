@@ -13,6 +13,7 @@
 #include "app/MailApplicationService.h"
 #include "app/MailIndexService.h"
 #include "app/PerformanceMetrics.h"
+#include "app/ProcessInstanceLock.h"
 #include "app/SettingsRepository.h"
 #include "app/TranslationApplicationPorts.h"
 #include "app/TranslationService.h"
@@ -28,10 +29,13 @@
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
+#include <QElapsedTimer>
+#include <QLocalSocket>
 #include <QLockFile>
 #include <QMetaObject>
 #include <QProcess>
 #include <QSettings>
+#include <QThread>
 #include <QTimer>
 
 #include <algorithm>
@@ -154,6 +158,25 @@ namespace javelin::app
         {
             return QString::fromUtf8(exception.what());
         }
+
+        [[nodiscard]] bool daemonSocketIsAlive(const QString& socketPath)
+        {
+            QElapsedTimer timer;
+            timer.start();
+            constexpr qint64 startupGraceMilliseconds = 1000;
+            do
+            {
+                QLocalSocket socket;
+                socket.connectToServer(socketPath, QIODevice::ReadWrite);
+                if (socket.waitForConnected(50))
+                {
+                    socket.disconnectFromServer();
+                    return true;
+                }
+                QThread::msleep(25);
+            } while (timer.elapsed() < startupGraceMilliseconds);
+            return false;
+        }
     } // namespace
 
     DaemonProcess::DaemonProcess(DaemonProcessOptions options, QObject* parent)
@@ -196,13 +219,38 @@ namespace javelin::app
                             QStringLiteral("could not acquire daemon instance lock: %1")
                                 .arg(static_cast<int>(m_instanceLock->error())));
 
-            qint64 pid = 0;
-            QString hostname;
-            QString applicationName;
-            auto detail = QStringLiteral("another javelind instance is already running");
-            if (m_instanceLock->getLockInfo(&pid, &hostname, &applicationName))
-                detail += QStringLiteral(" (pid %1)").arg(pid);
-            return fail(DaemonStartupErrorCode::InstanceAlreadyRunning, std::move(detail));
+            if (!daemonSocketIsAlive(m_options.socket.socketPath))
+            {
+                const auto recovery =
+                    recoverAbandonedProcessLock(*m_instanceLock, QStringLiteral("javelind"));
+                if (recovery == ProcessLockRecoveryResult::RemovalFailed)
+                {
+                    return fail(DaemonStartupErrorCode::SocketListen,
+                                QStringLiteral("could not remove stale daemon instance lock"));
+                }
+                if (recovery == ProcessLockRecoveryResult::Removed && m_instanceLock->tryLock(0))
+                {
+                    qInfo() << QStringLiteral("Removed stale daemon instance lock");
+                }
+                else if (recovery == ProcessLockRecoveryResult::Removed &&
+                         m_instanceLock->error() != QLockFile::LockFailedError)
+                {
+                    return fail(DaemonStartupErrorCode::SocketListen,
+                                QStringLiteral("could not acquire daemon instance lock: %1")
+                                    .arg(static_cast<int>(m_instanceLock->error())));
+                }
+            }
+
+            if (!m_instanceLock->isLocked())
+            {
+                qint64 pid = 0;
+                QString hostname;
+                QString applicationName;
+                auto detail = QStringLiteral("another javelind instance is already running");
+                if (m_instanceLock->getLockInfo(&pid, &hostname, &applicationName))
+                    detail += QStringLiteral(" (pid %1)").arg(pid);
+                return fail(DaemonStartupErrorCode::InstanceAlreadyRunning, std::move(detail));
+            }
         }
 
         m_settingsRepository =

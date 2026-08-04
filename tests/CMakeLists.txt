@@ -255,6 +255,7 @@ add_executable(javelin_daemon_tests
     app/MessageSubjectTest.cpp
     app/GuiMailApplicationEventsTest.cpp
     app/PerformanceMetricsTest.cpp
+    app/ProcessInstanceLockTest.cpp
 )
 target_include_directories(javelin_daemon_tests
     PRIVATE

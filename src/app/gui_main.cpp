@@ -4,6 +4,7 @@
 #include "app/LogStore.h"
 #include "app/MessageNavigationPort.h"
 #include "app/PerformanceMetrics.h"
+#include "app/ProcessInstanceLock.h"
 #include "app/WorkTaskPort.h"
 
 #include "gui/onboarding/FirstRunWizard.h"
@@ -266,6 +267,29 @@ int main(int argc, char* argv[])
 
             if (guiInstanceLock.tryLock(0))
                 break;
+
+            const auto recovery = javelin::app::recoverAbandonedProcessLock(
+                guiInstanceLock, QStringLiteral("javelin"));
+            if (recovery == javelin::app::ProcessLockRecoveryResult::RemovalFailed)
+            {
+                qCritical() << QStringLiteral("Could not remove stale GUI instance lock.");
+                return 1;
+            }
+            if (recovery == javelin::app::ProcessLockRecoveryResult::Removed)
+            {
+                if (guiInstanceLock.tryLock(0))
+                {
+                    qInfo() << QStringLiteral("Removed stale GUI instance lock");
+                    break;
+                }
+                if (guiInstanceLock.error() != QLockFile::LockFailedError)
+                {
+                    qCritical().noquote() << QStringLiteral("Could not acquire GUI instance lock:")
+                                          << static_cast<int>(guiInstanceLock.error());
+                    return 1;
+                }
+            }
+
             if (activationWait.elapsed() >= activationWaitTimeoutMilliseconds)
             {
                 qint64 pid = 0;
