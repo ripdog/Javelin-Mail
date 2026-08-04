@@ -1495,6 +1495,7 @@ target_link_libraries(javelin
         javelin_cache_read
         javelin_gui
         javelin_observability
+        glaze::glaze
         QCoro6::Core
         Qt::Widgets
 )
