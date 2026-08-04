@@ -149,7 +149,11 @@ jobs:
       - name: Smoke-test AppImage
         run: |
           image=$(printf '%s\n' Javelin-Mail-*.AppImage)
-          "./$image" --help >/dev/null
+          rm -rf squashfs-root
+          env -u APPIMAGE_EXTRACT_AND_RUN "./$image" --appimage-extract >/dev/null
+          ldd squashfs-root/usr/bin/javelin
+          APPDIR="$GITHUB_WORKSPACE/squashfs-root" sh -x squashfs-root/AppRun --help
+          "./$image" --help
 
       - name: Upload AppImage
         uses: actions/upload-artifact@v4
