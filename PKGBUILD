@@ -14,6 +14,7 @@ depends=(
   'ktexteditor'
   'kxmlgui'
   'kmime'
+  'messagelib'
   'qcoro'
   'qt6-base'
   'qt6-svg'

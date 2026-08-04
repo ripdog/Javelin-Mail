@@ -53,6 +53,7 @@ jobs:
             kconfigwidgets \
             kcoreaddons \
             kmime \
+            messagelib \
             ktexteditor \
             kxmlgui \
             ninja \

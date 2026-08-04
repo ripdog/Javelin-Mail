@@ -26,10 +26,11 @@ host CMake environment.
 
 Required Qt components are Core, DBus, Network, SQL, Widgets, Concurrent, LinguistTools, WebEngine,
 SVG, and WebSockets. Required KDE components are ConfigWidgets, XmlGui, CoreAddons, TextEditor,
-Extra CMake Modules, and KPim6Mime. These are product dependencies, not merely build conveniences:
-KXMLGUI owns the main-window action layout, KConfigWidgets owns preferences presentation,
-KTextEditor powers compose/source and Sieve editing, and the daemon publishes a KDE
-StatusNotifierItem directly over D-Bus.
+Extra CMake Modules, KPim6Mime, and KPim6MessageComposer. These are product dependencies, not merely
+build conveniences: KXMLGUI owns the main-window action layout, KConfigWidgets owns preferences
+presentation, KTextEditor powers compose/source and Sieve editing, MessageComposer supplies the
+KMail-grade rich-text editor and body conversion, and the daemon publishes a KDE StatusNotifierItem
+directly over D-Bus.
 
 CMake uses installed QCoro, Glaze, and Catch2 packages when available. Otherwise it fetches the
 versions pinned in `cmake/Dependencies.cmake`. fastText is fetched when local language detection is
@@ -43,7 +44,7 @@ A suitable base environment can be installed with:
 sudo pacman -S --needed \
   base-devel ccache cmake extra-cmake-modules git ninja \
   qt6-base qt6-svg qt6-tools qt6-webengine qt6-websockets \
-  kconfigwidgets kcoreaddons ktexteditor kxmlgui kmime
+  kconfigwidgets kcoreaddons ktexteditor kxmlgui kmime messagelib
 ```
 
 Installed `qcoro`, `glaze`, and `catch2` packages are optional because CMake can fetch them. A fresh
