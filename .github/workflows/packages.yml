@@ -125,6 +125,7 @@ jobs:
             https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/1-alpha-20250213-1/linuxdeploy-plugin-appimage-x86_64.AppImage \
             -o tools/linuxdeploy-plugin-appimage
           chmod +x tools/linuxdeploy tools/linuxdeploy-plugin-qt tools/linuxdeploy-plugin-appimage packaging/appimage/AppRun
+          find /usr/lib/qt6/plugins/sqldrivers -type f ! -name 'libqsqlite.so' -delete
           export PATH="$GITHUB_WORKSPACE/tools:$PATH"
           export QMAKE=/usr/bin/qmake6
           export NO_STRIP=1

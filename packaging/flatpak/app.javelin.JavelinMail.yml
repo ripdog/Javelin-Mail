@@ -20,6 +20,16 @@ finish-args:
   - --env=QTWEBENGINE_DISABLE_SANDBOX=1
 
 modules:
+  - name: boost-pfr
+    buildsystem: simple
+    build-commands:
+      - install -d /app/include/boost
+      - cp -a include/boost/pfr /app/include/boost/
+    sources:
+      - type: archive
+        url: https://github.com/boostorg/pfr/archive/refs/tags/boost-1.88.0.tar.gz
+        sha256: 56104541553dddb94079f66376a38b965cb2d9fc3e3b15fc0ea0fbfdfc56a6e6
+
   - name: kmime
     buildsystem: cmake-ninja
     config-opts:
