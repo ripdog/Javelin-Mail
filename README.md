@@ -14,9 +14,18 @@
 </p>
 
 Javelin Mail provides a conventional desktop mail experience on top of JMAP, designed first for KDE
-Plasma. It combines a fast, cache-backed Qt and KDE Frameworks interface with a lightweight
+Plasma. It combines a fast, cache-backed Qt Widgets and KDE Frameworks interface with a lightweight
 background service, so mail synchronization, notifications, offline downloads, and delayed sending
 continue after the main window closes.
+
+Javelin is aggressively modern. It targets the latest JMAP standards, including some still in the draft
+phase. It does not work with most mail services! There is no support for IMAP, CalDAV or CardDAV. 
+
+### Recommended Servers
+
+Javelin has been tested with the latest Stalwart server. This is recommended, as Stalwart has good
+support for JMAP Mail, Contacts, and Calendar. Fastmail (with thanks for their work on the JMAP standard)
+is supported, but only for Mail and Contacts.
 
 > **Project status:** Javelin is under active pre-1.0 development. The main mail client is usable,
 > but packaging, authentication, calendar interoperability, and crash/recovery testing are still
