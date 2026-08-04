@@ -11,16 +11,17 @@
 #include <vector>
 
 class QAction;
+class KActionCollection;
 class QComboBox;
 class QDragEnterEvent;
 class QDragMoveEvent;
 class QDropEvent;
 class QHBoxLayout;
+class QImage;
 class QLabel;
 class QLineEdit;
 class QScrollArea;
 class QTabWidget;
-class QTextEdit;
 class QTimer;
 class QToolBar;
 class QToolButton;
@@ -52,6 +53,8 @@ namespace javelin::jmap::contacts
 
 namespace javelin::gui::compose
 {
+
+    class JavelinComposerEdit;
 
     class ComposeTabWidget : public QWidget
     {
@@ -102,6 +105,7 @@ namespace javelin::gui::compose
         void syncSnapshotFromUi();
         void syncRichTextFromHtmlSource();
         void syncHtmlSourceFromRichText();
+        void refreshPlainTextRepresentation();
         void switchBodyFormat(int index);
         void setOptionalRecipientVisible(QWidget* row, QToolButton* button, bool visible);
         void scheduleWorkingCopySave();
@@ -111,24 +115,20 @@ namespace javelin::gui::compose
         void updateTabTitle();
         void addAttachments();
         void addAttachmentPaths(const QStringList& filePaths);
+        void addInlineImagePath(const QString& filePath);
+        void addPastedInlineImage(const QImage& image);
+        void insertImage();
         void removeAttachmentAt(std::size_t index);
         void setAttachmentEmbedded(std::size_t index, bool embedded);
         void insertEmbeddedImage(std::size_t index);
         void removeEmbeddedImageReference(const std::string& contentId);
+        void setEditorHtml(const QString& html);
+        void loadInlineImageResources();
+        [[nodiscard]] QString stableEditorHtml();
+        void reconcileInlineAttachmentReferences(const QString& html);
         void startSaveDraft(bool closeAfterSave);
         void startSend();
-        void toggleBold();
-        void toggleItalic();
-        void toggleUnderline();
-        void toggleStrikethrough();
         void toggleCode();
-        void insertBulletList();
-        void insertNumberedList();
-        void alignLeft();
-        void alignCenter();
-        void alignRight();
-        void clearFormatting();
-        void insertLink();
 
         javelin::gui::settings::GuiSettings& m_settings;
         javelin::app::ComposeCommandPort& m_composeCommandPort;
@@ -152,7 +152,8 @@ namespace javelin::gui::compose
         QToolButton* m_ccButton = nullptr;
         QToolButton* m_bccButton = nullptr;
         QToolBar* m_formatToolbar = nullptr;
-        QTextEdit* m_richTextEdit = nullptr;
+        KActionCollection* m_actionCollection = nullptr;
+        JavelinComposerEdit* m_richTextEdit = nullptr;
         KTextEditor::Document* m_htmlSourceDocument = nullptr;
         KTextEditor::View* m_htmlSourceView = nullptr;
         KTextEditor::Document* m_plainTextDocument = nullptr;
@@ -162,11 +163,8 @@ namespace javelin::gui::compose
         QScrollArea* m_attachmentScrollArea = nullptr;
         QWidget* m_attachmentStrip = nullptr;
         QHBoxLayout* m_attachmentStripLayout = nullptr;
-        QAction* m_boldAction = nullptr;
-        QAction* m_italicAction = nullptr;
-        QAction* m_underlineAction = nullptr;
-        QAction* m_strikethroughAction = nullptr;
         QAction* m_codeAction = nullptr;
+        QAction* m_insertImageAction = nullptr;
     };
 
 } // namespace javelin::gui::compose

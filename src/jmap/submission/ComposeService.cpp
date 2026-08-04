@@ -16,7 +16,9 @@
 #include "jmap/cache/QueryService.h"
 #include "jmap/cache/SessionRepository.h"
 #include "jmap/cache/SubmissionRepository.h"
+#include "jmap/render/HtmlBodyEmbedding.h"
 #include "jmap/render/HtmlTextExtractor.h"
+#include "jmap/submission/DraftInlineImageStorage.h"
 #include "jmap/submission/DraftMutationJournal.h"
 #include "jmap/sync/ConsistencyDomain.h"
 #include "jmap/sync/EmailMutationJournal.h"
@@ -224,9 +226,11 @@ namespace javelin::jmap::submission
                           .arg(QStringLiteral("mid:%1")
                                    .arg(QString::fromStdString(email.messageId.front()))
                                    .toHtmlEscaped());
+            const auto embeddedBody = javelin::jmap::render::htmlBodyContentForEmbedding(
+                QString::fromStdString(std::string{htmlBody}));
             return QStringLiteral("<p><br/></p><div class=\"moz-cite-prefix\">On %1, %2 "
                                   "wrote:<br/></div><blockquote type=\"cite\"%3>%4</blockquote>")
-                .arg(sentAt, from, cite, QString::fromStdString(std::string{htmlBody}))
+                .arg(sentAt, from, cite, embeddedBody)
                 .toStdString();
         }
 
@@ -247,14 +251,15 @@ namespace javelin::jmap::submission
         [[nodiscard]] std::string buildForwardHtml(const javelin::jmap::domain::Email& email,
                                                    const std::string_view htmlBody)
         {
+            const auto embeddedBody = javelin::jmap::render::htmlBodyContentForEmbedding(
+                QString::fromStdString(std::string{htmlBody}));
             return QStringLiteral(
                        "<p><br/></p><hr/><p><b>From:</b> %1<br/><b>To:</b> %2<br/><b>Subject:</b> "
                        "%3<br/><b>Date:</b> %4</p>%5")
                 .arg(QString::fromStdString(joinAddresses(email.from)),
                      QString::fromStdString(joinAddresses(email.to)),
                      QString::fromStdString(email.subject.value_or(std::string{})),
-                     QString::fromStdString(email.sentAt.value_or(email.receivedAt)),
-                     QString::fromStdString(std::string{htmlBody}))
+                     QString::fromStdString(email.sentAt.value_or(email.receivedAt)), embeddedBody)
                 .toStdString();
         }
 
@@ -333,6 +338,43 @@ namespace javelin::jmap::submission
                 });
             }
             return draftAttachments;
+        }
+
+        [[nodiscard]] QCoro::Task<
+            std::variant<std::vector<DraftAttachment>, javelin::jmap::OperationError>>
+        materializeInlineDraftImages(
+            javelin::jmap::cache::DatabaseConnection& connection, javelin::jmap::JmapCore& core,
+            javelin::jmap::LiveConnectionSettings settings, const std::string& accountId,
+            const std::string& emailId,
+            const std::vector<javelin::jmap::cache::MessageAttachment>& sourceAttachments)
+        {
+            auto draftAttachments = draftAttachmentsFromMessage(sourceAttachments);
+            const auto vault = javelin::jmap::cache::MailVault::forDatabase(connection);
+            for (std::size_t index = 0; index < sourceAttachments.size(); ++index)
+            {
+                const auto& source = sourceAttachments[index];
+                auto& draft = draftAttachments[index];
+                if (!draft.inlineDisposition || !draft.contentId.has_value() ||
+                    !source.mediaType.starts_with("image/") || source.partId.empty())
+                {
+                    continue;
+                }
+
+                const auto download =
+                    co_await core.downloadAttachment(settings, accountId, emailId, source.partId);
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&download))
+                {
+                    co_return *error;
+                }
+                auto materialized = materializeDraftInlineImage(
+                    vault, std::move(draft), std::get<javelin::jmap::AttachmentDownload>(download));
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&materialized))
+                {
+                    co_return *error;
+                }
+                draft = std::get<DraftAttachment>(std::move(materialized));
+            }
+            co_return draftAttachments;
         }
 
         [[nodiscard]] bool isWildcardSenderIdentity(const javelin::jmap::domain::Identity& identity)
@@ -997,7 +1039,17 @@ namespace javelin::jmap::submission
             snapshot.threading.messageId = messageSnapshot->email.messageId;
             snapshot.threading.inReplyTo = messageSnapshot->email.inReplyTo;
             snapshot.threading.references = messageSnapshot->email.references;
-            snapshot.attachments = draftAttachmentsFromMessage(messageSnapshot->attachments);
+            {
+                auto attachments = co_await materializeInlineDraftImages(
+                    m_connection, m_jmapCore, settings, request.accountId, *sourceEmailId,
+                    messageSnapshot->attachments);
+                if (const auto* error = std::get_if<javelin::jmap::OperationError>(&attachments))
+                {
+                    co_return *error;
+                }
+                snapshot.attachments =
+                    std::get<std::vector<DraftAttachment>>(std::move(attachments));
+            }
             break;
         case ComposeMode::NewMessage:
             break;
