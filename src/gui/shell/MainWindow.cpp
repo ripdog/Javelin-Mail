@@ -348,8 +348,11 @@ namespace javelin::gui::shell
                                                 std::string_view{*summary.selectedMailboxId});
                     else
                         markTabsStaleForAccount(summary.accountId);
+                    if (m_tabs.empty() && !currentMailboxId(*m_mailboxView).has_value())
+                        m_pendingInitialMailboxAccountId = summary.accountId;
                     reloadAccounts();
-                    refreshViewsFromCache();
+                    loadActiveTabFromCache(true);
+                    selectPendingInitialMailbox();
                     const auto account =
                         m_settings.accountForCachedId(QString::fromStdString(summary.accountId));
                     const auto accountName = account.displayName.isEmpty()
@@ -1103,6 +1106,8 @@ namespace javelin::gui::shell
         m_mailboxView->setModel(m_mailboxModel);
         connect(m_mailboxModel, &QAbstractItemModel::modelReset, m_mailboxView,
                 &QTreeView::expandAll);
+        connect(m_mailboxModel, &QAbstractItemModel::modelReset, this,
+                [this] { selectPendingInitialMailbox(); });
         m_mailboxView->expandAll();
         m_mailboxView->setContextMenuPolicy(Qt::CustomContextMenu);
         m_mailboxView->setAcceptDrops(true);
@@ -2506,6 +2511,28 @@ namespace javelin::gui::shell
         updateEmptyStates();
         updateMessageListHeader();
         updateMessageActions();
+    }
+
+    void MainWindow::selectPendingInitialMailbox()
+    {
+        if (!m_pendingInitialMailboxAccountId.has_value())
+            return;
+
+        if (!m_tabs.empty() || currentMailboxId(*m_mailboxView).has_value())
+        {
+            m_pendingInitialMailboxAccountId.reset();
+            return;
+        }
+
+        const auto index = javelin::gui::mailboxes::findMailboxIndexForRole(
+            *m_mailboxModel, QString::fromStdString(*m_pendingInitialMailboxAccountId),
+            QStringLiteral("inbox"));
+        if (!index.isValid())
+            return;
+
+        m_pendingInitialMailboxAccountId.reset();
+        m_mailboxView->setCurrentIndex(index);
+        m_mailboxView->scrollTo(index);
     }
 
     void MainWindow::updateEmptyStates()

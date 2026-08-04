@@ -45,3 +45,22 @@ TEST_CASE("mailbox selection does not cross account boundaries")
                                              std::optional<QString>{QStringLiteral("inbox")})
                     .isValid());
 }
+
+TEST_CASE("mailbox selection finds a mailbox by role")
+{
+    QStandardItemModel model;
+    auto* account = new QStandardItem(QStringLiteral("Account"));
+    account->setData(QStringLiteral("account"), MailboxTreeModel::AccountIdRole);
+    auto* inbox = new QStandardItem(QStringLiteral("Inbox"));
+    inbox->setData(QStringLiteral("account"), MailboxTreeModel::AccountIdRole);
+    inbox->setData(QStringLiteral("inbox"), MailboxTreeModel::MailboxIdRole);
+    inbox->setData(QStringLiteral("inbox"), MailboxTreeModel::MailboxRoleRole);
+    account->appendRow(inbox);
+    model.appendRow(account);
+
+    const auto inboxIndex =
+        findMailboxIndexForRole(model, QStringLiteral("account"), QStringLiteral("inbox"));
+
+    REQUIRE(inboxIndex.isValid());
+    CHECK(inboxIndex.data(MailboxTreeModel::MailboxIdRole).toString() == QStringLiteral("inbox"));
+}

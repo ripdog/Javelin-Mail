@@ -258,6 +258,7 @@ namespace javelin::gui::shell
         void reloadAccounts();
         void refreshMessageListPreservingSelection();
         void refreshSelectionFromModels();
+        void selectPendingInitialMailbox();
         void restorePersistentState();
         void restoreMailboxTab(const PersistedMailboxTab& tab);
         void restoreSearchTab(PersistedSearchTab tab);
@@ -384,6 +385,7 @@ namespace javelin::gui::shell
         QSet<QString> m_authenticationRequiredAccountIds;
         QSet<QString> m_authenticationPromptedConnections;
         QStringList m_pendingAuthenticationPrompts;
+        std::optional<std::string> m_pendingInitialMailboxAccountId;
         std::optional<int> m_activeTabIndex;
         std::vector<TabState> m_tabs;
     };
