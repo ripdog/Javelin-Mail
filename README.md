@@ -81,13 +81,17 @@ workflows.
 
 ### Translation and appearance
 
-- Local language detection
-- Optional Google Translate integration with a configurable target language
-- Per-sender and per-domain automatic translation choices
+- Local language detection in the GUI process
+- Google Translate or private on-device translation using Firefox-compatible models on x86-64
+- Configurable target language and per-sender or per-domain automatic translation choices
+- Downloadable local model directions with verified, atomic installation and removal from Preferences
 - HTML message colours can follow the application theme, retain their original appearance, or use a
   dark presentation
 
-Translation is opt-in. Text selected for translation is sent to Google Translate.
+Google remains the default translation provider. Text is sent to Google only after an explicit
+Translate action or a saved automatic-translation rule. Choosing **Local (Firefox models)** keeps
+message text on the machine; required Mozilla-hosted model packs are downloaded on demand and remain
+installed until removed. Choosing **Disabled** also disables language detection.
 
 ## Requirements
 

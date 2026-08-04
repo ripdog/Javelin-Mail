@@ -1,5 +1,21 @@
 # GUI-owned translation implementation plan
 
+## Implementation status
+
+Implemented in the main checkout on 5 August 2026. The production architecture now follows this
+document: translation settings, language detection, provider execution, model management, and the
+dedicated cache are GUI-owned; protocol major version 4 and settings schema version 3 contain no
+translation fields or actions; main-database migration 39 drops the former daemon cache.
+
+One upstream format assumption changed during implementation. Mozilla's current
+`translations-models-v2` production records publish `application/zstd` attachments rather than gzip.
+The committed manifest generator accepts the declared Zstandard format, and the installer performs
+bounded streaming zstd decompression with compressed and decompressed size/SHA-256 verification. The
+security and atomic-install requirements below are unchanged.
+
+Manual end-to-end provider checks and performance measurements remain release validation work; the
+implementation and deterministic automated coverage are complete.
+
 ## Authority and intent
 
 This document is the authoritative implementation plan for message translation in Javelin Mail. It
@@ -741,7 +757,8 @@ translation SQLite directory or main mail cache.
 4. Download each attachment with `QNetworkAccessManager` and QCoro into `*.part` files.
 5. Enforce the manifest compressed-size limit while streaming.
 6. Verify compressed SHA-256 and size.
-7. Decompress gzip with zlib into a temporary output file while enforcing decompressed-size limit.
+7. Decompress Zstandard with libzstd into a temporary output file while enforcing the
+   decompressed-size limit.
 8. Verify decompressed SHA-256 and size.
 9. Write `installed.json` containing manifest revision, direction, model version, architecture, file
    hashes, and installation time.
@@ -1036,7 +1053,7 @@ Add GUI-local translation provider settings
 
 1. Add the pinned recursive FetchContent dependency and optional build flag.
 2. Create `javelin_translation` and move fastText ownership into it.
-3. Add zlib and sentence-split runtime resources.
+3. Add libzstd and sentence-split runtime resources.
 4. Implement the manifest generator and commit `manifest-v1.json`.
 5. Implement typed manifest parsing, validation, language catalog, and route resolution.
 6. Update Arch, Flatpak, AppImage, and notice packaging.
@@ -1057,7 +1074,7 @@ Integrate native Firefox translation engine
 
 ### Phase 4: implement production model installation and local inference
 
-1. Implement model store paths, installed metadata, validation, download, gzip decompression,
+1. Implement model store paths, installed metadata, validation, download, Zstandard decompression,
    verification, atomic installation, replacement, and removal.
 2. Implement direct and English-pivot route installation.
 3. Implement serial worker-owned BlockingService/model LRU.

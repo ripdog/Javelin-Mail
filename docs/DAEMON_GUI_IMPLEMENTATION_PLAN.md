@@ -1,5 +1,13 @@
 # Daemon and GUI split implementation plan
 
+> **Translation ownership update (5 August 2026):**
+> [GUI_TRANSLATION_IMPLEMENTATION_PLAN.md](GUI_TRANSLATION_IMPLEMENTATION_PLAN.md) supersedes this
+> document wherever it previously placed message translation, language detection, translation
+> settings, or translation caching in the daemon. Protocol major version 4 and settings schema
+> version 3 no longer carry translation. The GUI directly owns the `translation` QSettings group and
+> a separate translation cache; that narrow presentation-only exception does not weaken the daemon's
+> authority over shared operational settings or the main mail database.
+
 ## Authority and purpose
 
 [DAEMON_GUI_ARCHITECTURE.md](DAEMON_GUI_ARCHITECTURE.md) is the authoritative design. This document
@@ -20,9 +28,9 @@ intent.
 
 The split is complete when:
 
-- the installed GUI executable contains the Widgets presentation and read-only cache surface but no
-  JMAP transport, synchronization coordinator, write-capable cache repository, mutation executor,
-  notification publisher, tray implementation, or canonical `QSettings` access;
+- the installed GUI executable contains the Widgets presentation and read-only main-cache surface but
+  no JMAP transport, synchronization coordinator, write-capable main-cache repository, mutation
+  executor, notification publisher, tray implementation, or canonical shared-settings access;
 - the installed daemon executable owns every responsibility listed under
   [The daemon is the sole operational authority](DAEMON_GUI_ARCHITECTURE.md#the-daemon-is-the-sole-operational-authority);
 - GUI commands, settings, materialization requests, activation, invalidations, status, and failures
@@ -58,18 +66,21 @@ synchronization, mutations, history, deferred send, indexing, maintenance, notif
 background work. `GuiDaemonSession` owns the GUI socket session, settings snapshot, cache barrier, and
 read-only cache connection. The installed GUI is the complete `MainWindow` workspace rather than the
 reduced migration shell. Its existing controllers consume daemon-backed application ports for mail,
-compose, contacts, calendars, Sieve, translation, Undo/Redo, task control, message content, and
-message-list materialization. Account, mailbox, contact, identity, message-view, and query presentation
-remain read-only cache clients; calendar presentation uses the typed daemon reader boundary.
+compose, contacts, calendars, Sieve, Undo/Redo, task control, message content, and message-list
+materialization. Account, mailbox, contact, identity, message-view, and query presentation remain
+read-only clients of the main cache; calendar presentation uses the typed daemon reader boundary.
+Translation is the explicit presentation-only exception: its settings, detector, provider network,
+dedicated cache, and optional local models live entirely in the GUI.
 
-The framed socket is protocol version 3 because it now carries the complete bounded settings schema,
-including versioned workspace state, in addition to typed remote-action payloads, immediate results,
-and asynchronous completion values. The in-process endpoint remains compiled only into the protocol
-conformance test target. There is no production single-process executable or GUI linkage to
-daemon/JMAP transport targets. All persisted settings now come from the handshake snapshot and are
-updated through revisioned daemon IPC, including accounts, credentials, mailbox synchronization and
-notifications, translation, remote-content permissions, message appearance, attachment behavior,
-undo-send delay, window/tab/search state, and calendar-colour overrides.
+The framed socket is protocol version 4. It carries the bounded shared-settings schema and typed
+remote-action payloads, immediate results, and asynchronous completion values, but no translation
+action or setting. The in-process endpoint remains compiled only into the protocol conformance test
+target. There is no production single-process executable or GUI linkage to daemon/JMAP transport
+targets. Shared persisted settings come from the handshake snapshot and are updated through
+revisioned daemon IPC, including accounts, credentials, mailbox synchronization and notifications,
+remote-content permissions, message appearance, attachment behavior, undo-send delay,
+window/tab/search state, and calendar-colour overrides. GUI translation preferences are stored
+separately by `TranslationSettingsStore`.
 
 ## Phase dependency order
 
@@ -182,15 +193,16 @@ request. Remove their old direct call paths once the typed paths pass tests.
 ## Phase 2: move all persisted settings behind the daemon boundary
 
 This phase implements [Settings](DAEMON_GUI_ARCHITECTURE.md#settings) and
-[Settings lifecycle](DAEMON_GUI_ARCHITECTURE.md#settings-lifecycle). All persisted settings remain one
-bulk daemon-owned schema, including GUI workspace state.
+[Settings lifecycle](DAEMON_GUI_ARCHITECTURE.md#settings-lifecycle). Shared operational and workspace
+settings remain one bulk daemon-owned schema. Translation preferences are the deliberate GUI-local
+exception described in the ownership update above.
 
 ### Work
 
 1. Define one typed `SettingsSnapshot` covering the complete currently persisted shape:
    - account and authentication configuration;
    - synchronization and notification choices;
-   - compose, translation, attachment, appearance, calendar, and search preferences;
+   - compose, attachment, appearance, calendar, and search preferences;
    - window, tab, sort, and other retained workspace state; and
    - settings schema and revision.
 2. Create a daemon-side settings repository/service responsible for:
@@ -204,8 +216,8 @@ bulk daemon-owned schema, including GUI workspace state.
    typed update and handles stale-revision rejection; its static storage helpers are removed.
 4. Replace direct settings access in, at minimum:
    - `ApplicationBootstrap` account configuration;
-   - `TranslationService` and `ComposePreferences`;
-   - `ApplicationErrorCoordinator`;
+   - `ComposePreferences` and `ApplicationErrorCoordinator`;
+   - all GUI preferences except the dedicated `TranslationSettingsStore`;
    - `MainWindowStateStore`, `TabPersistence`, and search-session persistence;
    - calendar colour overrides;
    - message appearance and remote-content preferences;
@@ -222,8 +234,9 @@ bulk daemon-owned schema, including GUI workspace state.
 
 ### Exit gate
 
-- Production GUI sources no longer instantiate canonical `QSettings`.
-- The daemon can start and configure all operational services without a GUI.
+- Production GUI sources no longer instantiate canonical shared `QSettings`; only
+  `TranslationSettingsStore` opens the GUI-local translation group.
+- The daemon can start and configure all operational services without a GUI or translation state.
 - A GUI receives the complete settings state in one typed startup snapshot.
 - Stale settings writes are rejected and tested.
 
@@ -307,8 +320,8 @@ socket and executable split. The same boundary now runs across production IPC. F
 
 Phase 4 is complete in the production split. Typed application ports and remote adapters cover mail
 mutations, Undo/Redo, compose and drafts, contacts, calendar, Sieve, account and contact refresh,
-message content, attachment and source retrieval, message-list sessions, translation, tasks, settings,
-and mail observation. GUI consumers no longer include or accept concrete daemon application services,
+message content, attachment and source retrieval, message-list sessions, tasks, shared settings, and
+mail observation. Translation no longer crosses this boundary. GUI consumers no longer include or accept concrete daemon application services,
 and CMake boundary checks reject those direct crossings.
 
 `DaemonServices` owns the shared `CommandDispatcher` and remote-action dispatcher. They validate typed
@@ -354,9 +367,9 @@ Migrate one vertical slice at a time and remove its direct path immediately:
 5. **Calendar**
    - route visible-range materialization and every event/calendar mutation through the boundary;
    - retain pure recurrence and editor transformation helpers in shared domain code.
-6. **Sieve, files, translation, account refresh, and maintenance actions**
-   - route all operations that can write cache, settings, vault, or remote state through typed
-     commands or materialization requests;
+6. **Sieve, files, account refresh, and maintenance actions**
+   - route all operations that can write the main cache, shared settings, vault, or remote state
+     through typed commands or materialization requests;
    - remove GUI helpers that take `MailApplicationService`, `ComposeService`, or other concrete daemon
      services.
 
@@ -501,9 +514,9 @@ This phase prepares the codebase for two executables without yet adding socket t
    they can still be hosted by one temporary executable for integration testing.
 3. Move `InlineMessageSchemeHandler` and all `QWebEngineProfile` work to the GUI side and make the
    handler read through the GUI cache/vault surface.
-4. Keep translation networking/cache writes on the operational side if translation remains a cached
-   service; expose it as a typed command/materialization workflow. Keep only HTML presentation in the
-   GUI.
+4. Keep the complete translation subsystem on the GUI side: provider networking, language detection,
+   dedicated translation cache, local model storage, inference, and HTML/plain-text presentation. It
+   must not link daemon/JMAP targets or write the main cache.
 5. Reshape CMake toward the targets named by the design:
    - `javelin_protocol`;
    - `javelin_cache_read`;
@@ -707,7 +720,7 @@ The following searches or equivalent build checks return no production violation
 
 - GUI includes of concrete daemon coordination services;
 - GUI construction of write-capable database connections;
-- GUI canonical `QSettings` access;
+- GUI canonical shared-settings access outside the translation settings-store exception;
 - daemon references to Widgets, WebEngine, `MainWindow`, or presentation models;
 - direct mutation/cache writes outside the existing consistency subsystem; and
 - old dual bootstrap or fallback paths.
@@ -726,9 +739,10 @@ activation and daemon-first startup have been exercised against a copied real pr
 `PreferencesDialog` and all persisted workspace consumers use a `SettingsSnapshot`-backed GUI service
 and submit revision-checked `SettingsUpdate` values; a stale writer is rejected before it can overwrite
 a newer snapshot. Window, tab, search-session, sort, and calendar-colour state now use a bounded,
-versioned workspace payload in settings schema version 2. Legacy profiles are migrated, verified by
-read-back, and only then have their GUI-local keys removed. The CMake boundary check has no GUI
-allowlist: any production GUI source that opens canonical `QSettings` now fails configuration.
+versioned workspace payload in settings schema version 3. Legacy profiles are migrated, verified by
+read-back, and only then have their obsolete GUI-local keys removed. The CMake boundary check allows
+canonical `QSettings` only in `TranslationSettingsStore.cpp`; every other production GUI source that
+opens it fails configuration.
 
 ## Phase 12: performance, reliability, and release gate
 

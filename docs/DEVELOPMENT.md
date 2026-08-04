@@ -33,7 +33,11 @@ StatusNotifierItem directly over D-Bus.
 
 CMake uses installed QCoro, Glaze, and Catch2 packages when available. Otherwise it fetches the
 versions pinned in `cmake/Dependencies.cmake`. fastText is fetched when local language detection is
-enabled; its compact language model is already included in the repository.
+enabled; its compact language model is already included in the repository. On x86-64, local message
+translation also fetches Mozilla's `translations` source at the exact audited commit recorded in
+`cmake/Dependencies.cmake`, builds its native Bergamot/Marian inference target, and links it only into
+the GUI translation dependency closure. Zstandard development files are required to verify and
+unpack current Firefox model attachments.
 
 ### Arch Linux
 
@@ -43,7 +47,7 @@ A suitable base environment can be installed with:
 sudo pacman -S --needed \
   base-devel ccache cmake extra-cmake-modules git ninja \
   qt6-base qt6-svg qt6-tools qt6-webengine qt6-websockets \
-  kconfigwidgets kcoreaddons ktexteditor kxmlgui kmime
+  kconfigwidgets kcoreaddons ktexteditor kxmlgui kmime zstd
 ```
 
 Installed `qcoro`, `glaze`, and `catch2` packages are optional because CMake can fetch them. A fresh
@@ -277,11 +281,44 @@ consistent with the parent widget. See Qt’s [QComboBox stylesheet example](htt
 | `BUILD_TESTING` | `ON` in normal preset use | Build the test suite |
 | `JAVELIN_ENABLE_LOCAL_DATA_INSTALL` | `ON` | Copy application resources into the active build install prefix |
 | `JAVELIN_ENABLE_FASTTEXT_LANGUAGE_DETECTION` | `ON` | Build local fastText language detection |
+| `JAVELIN_ENABLE_BERGAMOT_TRANSLATION` | `ON` on x86-64, otherwise `OFF` | Build native Firefox-compatible local translation; currently rejected on non-x86-64 targets |
 | `JAVELIN_ENABLE_CLANG_TIDY` | `OFF` | Run clang-tidy as part of compilation |
 | `JAVELIN_ENABLE_CLAZY` | `OFF` | Generate clazy targets when available |
 | `JAVELIN_INSTALL_SYSTEMD_USER_SERVICE` | `ON` | Install `javelind.service`; portable bundles disable this |
 
 The sanitizer options are set by the `asan` preset.
+
+### Updating the local translation manifest
+
+Javelin does not query Firefox Remote Settings at runtime. The reviewed model catalogue is committed
+at `res/models/translations/manifest-v1.json`. Regenerate it from Mozilla's production
+`translations-models-v2` collection with:
+
+```sh
+./tools/update_translation_model_manifest.py
+```
+
+Review the complete diff. The generator accepts only stable complete model directions, HTTPS
+Mozilla attachment URLs, declared Zstandard compression, valid sizes, and SHA-256 hashes. A manifest
+revision must remain compatible with the pinned Bergamot engine commit; engine upgrades and manifest
+format changes belong in the same audited change. See `res/models/translations/README.md` for the
+runtime verification and storage rules.
+
+### Local translation runtime and packaging
+
+Packaged builds install the fastText detector model under
+`share/javelinmail/models/fasttext`, the upstream `ssplit-cpp` nonbreaking-prefix files under
+`share/javelinmail/models/ssplit`, and Mozilla/Marian/ssplit notices plus the reviewed manifest under
+`share/licenses/javelinmail/translations`. Language model packs are never bundled.
+
+The GUI stores downloaded packs in
+`QStandardPaths::AppLocalDataLocation/translations/models/v1` and translation results in
+`QStandardPaths::CacheLocation/translations/cache-v1.sqlite3`. These paths are independent of the
+main mail cache and daemon cache instance. Flatpak must supply the pinned recursive Mozilla source at
+`third-party/mozilla-translations`; the manifest passes that checkout through
+`FETCHCONTENT_SOURCE_DIR_MOZILLA_TRANSLATIONS` so package builds do not fetch source during CMake
+configuration. Arch and AppImage builds use the same CMake install rules for prefixes, notices, and
+manifest data.
 
 ## Diagnostics
 

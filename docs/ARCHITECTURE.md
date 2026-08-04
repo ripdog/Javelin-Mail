@@ -319,18 +319,33 @@ during account addition. Session discovery and binary resource transfers remain 
 
 ## Message translation
 
-`TranslationService` is an application-owned provider boundary. It owns persisted translation
-preferences, provider credentials, target-language selection, network request batching, and the
-SQLite translation cache. The built-in Google credential remains the default when no override is
-configured; Preferences may override it, select another target language, or disable translation
-entirely. Message text is sent to the configured remote provider only after an explicit Translate
-action or a persisted sender/domain auto-translate choice.
+Translation is a GUI-owned presentation subsystem under `src/gui/translation`. It is deliberately
+absent from `javelind`, the process protocol, daemon settings, and the main mail database. Closing the
+GUI therefore stops language detection, provider requests, model inference, and model memory use
+without affecting synchronization or notifications.
 
-The message-view GUI extracts and reapplies plain-text or HTML text chunks, but it does not know the
-provider endpoint, construct provider requests, or read and write the translation cache. Translation
-requests carry a view generation so a response cannot be applied after navigation or a preference
-change. Language-offer policy compares the detected primary language with the configured target
-language rather than assuming English is always the target.
+`TranslationService` owns the provider setting, target language, per-sender/domain automatic rules,
+cache policy, and the process-wide fastText detector. `GoogleTranslationBackend` retains the existing
+remote service and is the migrated default. On x86-64 builds, `BergamotTranslationBackend` runs the
+pinned native Mozilla/Marian engine on a private one-thread worker and supports direct directions or
+English-pivot routes. Local model packs are selected from the committed Firefox manifest, downloaded
+from Mozilla's attachment CDN only after an explicit translation or saved automatic rule, verified by
+compressed and decompressed size and SHA-256, and installed atomically under the GUI's application
+data directory.
+
+Translated strings are cached in the dedicated GUI SQLite database
+`CacheLocation/translations/cache-v1.sqlite3`. Cache identity includes provider, canonical source and
+target tags, backend/model revision, and input hash; the GUI never writes translation data to the
+main mail cache. Generic language offers may restore cached translations or use already-installed
+local models, but cannot trigger network traffic. Explicit Translate actions and persisted automatic
+rules may fetch from Google or download required local models.
+
+`MessageViewContainer` extracts and reapplies plain-text or HTML chunks and retains a view-generation
+token so navigation cannot apply a stale result to another message. Language-offer policy compares
+the detected primary language with the configured target rather than assuming English. Preferences
+store translation settings directly in the GUI's `translation` QSettings group; this is the sole
+presentation-only exception to the normal rule that production GUI code does not access canonical
+settings.
 
 ## Calendar protocol baseline
 

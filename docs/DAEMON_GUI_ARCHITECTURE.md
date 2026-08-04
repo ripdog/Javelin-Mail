@@ -122,16 +122,21 @@ The daemon owns:
 - notification discovery, publication, and action handling;
 - the tray icon and its actions;
 - background work scheduling and priority;
-- all writes to the SQLite cache and filesystem vault; and
-- the canonical persisted settings in daemon-owned `QSettings`.
+- all writes to the main SQLite mail cache and filesystem vault; and
+- the canonical shared operational/workspace settings in daemon-owned `QSettings`.
+
+Message translation is the narrow presentation-only exception. The GUI owns its `translation`
+`QSettings` group, dedicated translation cache, downloaded model data, provider networking, language
+detection, and local inference. None of those surfaces participates in mail synchronization,
+mutation ordering, or daemon recovery.
 
 The GUI may ask the daemon to perform an application command. It does not decide how that command is
 translated into cache, journal, JMAP, notification, or history operations.
 
-### The GUI is a read-only cache client
+### The GUI is a read-only main-cache client
 
-The GUI opens SQLite in read-only mode and uses it to construct active presentation models. It must
-not write:
+The GUI opens the main mail SQLite database in read-only mode and uses it to construct active
+presentation models. It must not write:
 
 - JMAP cache objects;
 - mailbox or search query windows;
@@ -142,10 +147,12 @@ not write:
 - delayed-send rows;
 - background-job state;
 - notification state; or
-- settings.
+- shared operational/workspace settings.
 
-The GUI submits changes over IPC. The daemon performs any required SQLite or `QSettings` write and
-returns a typed result.
+The GUI submits shared changes over IPC. The daemon performs any required main-cache or shared
+`QSettings` write and returns a typed result. Translation uses a separate GUI-owned SQLite database,
+GUI-local settings group, and application-data model directory; those explicit surfaces do not grant
+write access to the main cache.
 
 This boundary should be enforced by distinct connection APIs and the build graph, not only by code
 review. GUI connections use SQLite read-only mode and `PRAGMA query_only=ON`. Only daemon targets
@@ -1026,14 +1033,16 @@ Remove direct GUI writes and direct GUI mutation-service calls.
 
 ### 3. Separate daemon-safe and GUI-only targets
 
-Move WebEngine scheme handling, translation presentation, navigation state, and widget-oriented code
-out of operational service targets. Ensure the future daemon core links only the dependencies it
-actually requires.
+Move WebEngine scheme handling, the complete translation subsystem, navigation state, and
+widget-oriented code out of operational service targets. Ensure the future daemon core links only the
+dependencies it actually requires.
 
 ### 4. Move settings authority to daemon `QSettings`
 
-Define the typed settings schema, revision rules, migration, snapshot protocol, and update protocol.
-Remove SQLite settings plans and stop GUI code from opening the canonical settings store directly.
+Define the typed shared-settings schema, revision rules, migration, snapshot protocol, and update
+protocol. Remove SQLite settings plans and stop GUI code from opening the canonical shared settings
+store directly. Permit only `TranslationSettingsStore` to open the separate GUI-local translation
+group.
 
 ### 5. Add volatile invalidation and transient telemetry interfaces
 
