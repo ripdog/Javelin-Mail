@@ -198,6 +198,29 @@ than independently backed-up user data.
 Focused design documents for synchronization, offline storage, pagination, Undo/Redo, rendering,
 and the daemon/GUI split are linked from the architecture document.
 
+## Acknowledgements
+
+Javelin Mail is made possible by these projects and resources:
+
+- [fastText](https://github.com/facebookresearch/fastText), including the `lid.176.ftz`
+  language-identification model distributed by Facebook Research under
+  [CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/).
+- [Firefox Translations](https://github.com/mozilla/translations) and the
+  [Bergamot](https://github.com/browsermt/bergamot-translator) translation engine. Translation
+  model packs are distributed by Mozilla under the Mozilla Public License 2.0; the relevant
+  notices and provenance are recorded in the downloaded model installation.
+- [Thunderbird](https://github.com/thunderbird/thunderbird) for the adapted interface icons,
+  licensed under the Mozilla Public License 2.0.
+- [Dark Reader](https://github.com/darkreader/darkreader) for the HTML message appearance runtime,
+  licensed under the MIT License.
+- [Qt](https://www.qt.io/), [KDE Frameworks](https://develop.kde.org/products/frameworks/),
+  [QCoro](https://github.com/qcoro/qcoro), [glaze](https://github.com/stephenberry/glaze), and
+  [Catch2](https://github.com/catchorg/Catch2).
+
+Licence and provenance notices are recorded in the repository under [`res/`](res/) and bundled
+with installed builds as applicable. Javelin Mail is not affiliated with or endorsed by any of
+these projects.
+
 ## Licence
 
 Javelin Mail is licensed under **GPL-3.0-only**. Bundled third-party assets retain their own licences
