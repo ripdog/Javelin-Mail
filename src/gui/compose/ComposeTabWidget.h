@@ -26,12 +26,6 @@ class QTimer;
 class QToolBar;
 class QToolButton;
 
-namespace KTextEditor
-{
-    class Document;
-    class View;
-} // namespace KTextEditor
-
 namespace javelin::gui::messageview
 {
     class HtmlMessageView;
@@ -103,9 +97,6 @@ namespace javelin::gui::compose
         void populateAttachments();
         void refreshPreview();
         void syncSnapshotFromUi();
-        void syncRichTextFromHtmlSource();
-        void syncHtmlSourceFromRichText();
-        void refreshPlainTextRepresentation();
         void switchBodyFormat(int index);
         void setOptionalRecipientVisible(QWidget* row, QToolButton* button, bool visible);
         void scheduleWorkingCopySave();
@@ -154,10 +145,6 @@ namespace javelin::gui::compose
         QToolBar* m_formatToolbar = nullptr;
         KActionCollection* m_actionCollection = nullptr;
         JavelinComposerEdit* m_richTextEdit = nullptr;
-        KTextEditor::Document* m_htmlSourceDocument = nullptr;
-        KTextEditor::View* m_htmlSourceView = nullptr;
-        KTextEditor::Document* m_plainTextDocument = nullptr;
-        KTextEditor::View* m_plainTextView = nullptr;
         javelin::gui::messageview::HtmlMessageView* m_previewView = nullptr;
         QTabWidget* m_editorTabs = nullptr;
         QScrollArea* m_attachmentScrollArea = nullptr;

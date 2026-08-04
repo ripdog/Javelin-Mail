@@ -15,9 +15,6 @@
 #include <KActionCollection>
 #include <KPIMTextEdit/RichTextComposerControler>
 #include <KPIMTextEdit/RichTextComposerImages>
-#include <KTextEditor/Document>
-#include <KTextEditor/Editor>
-#include <KTextEditor/View>
 #include <MessageComposer/TextPart>
 
 #include <QAbstractButton>
@@ -53,13 +50,10 @@
 #include <QTabWidget>
 #include <QTextCharFormat>
 #include <QTextCursor>
-#include <QTextDocument>
 #include <QTextEdit>
-#include <QTextImageFormat>
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
-#include <QUrl>
 #include <QUuid>
 #include <QVBoxLayout>
 
@@ -75,9 +69,7 @@ namespace javelin::gui::compose
     {
 
         constexpr auto richEditorTabIndex = 0;
-        constexpr auto htmlSourceTabIndex = 1;
-        constexpr auto previewTabIndex = 2;
-        constexpr auto plainTextTabIndex = 3;
+        constexpr auto previewTabIndex = 1;
         constexpr auto htmlFormatIndex = 0;
         constexpr auto plainTextFormatIndex = 1;
         constexpr auto senderIdentityIdRole = Qt::UserRole;
@@ -509,14 +501,12 @@ namespace javelin::gui::compose
         connect(m_richTextEdit, &QTextEdit::textChanged, this,
                 [this]
                 {
-                    if (m_syncingUi ||
-                        m_snapshot.editorMode == javelin::jmap::submission::BodyEditorMode::RawHtml)
+                    if (m_syncingUi)
                     {
                         return;
                     }
 
                     syncSnapshotFromUi();
-                    refreshPlainTextRepresentation();
                     refreshPreview();
                     scheduleWorkingCopySave();
                 });
@@ -530,19 +520,6 @@ namespace javelin::gui::compose
                             QStringLiteral("monospace")));
                     }
                 });
-        connect(m_htmlSourceDocument, &KTextEditor::Document::textChanged, this,
-                [this]
-                {
-                    if (m_syncingUi ||
-                        m_snapshot.editorMode != javelin::jmap::submission::BodyEditorMode::RawHtml)
-                    {
-                        return;
-                    }
-
-                    syncSnapshotFromUi();
-                    refreshPreview();
-                    scheduleWorkingCopySave();
-                });
         connect(m_editorTabs, &QTabWidget::currentChanged, this,
                 [this](const int index)
                 {
@@ -551,35 +528,12 @@ namespace javelin::gui::compose
                         return;
                     }
 
-                    if (index == htmlSourceTabIndex &&
-                        m_snapshot.editorMode ==
-                            javelin::jmap::submission::BodyEditorMode::RichText)
+                    if (index == previewTabIndex)
                     {
-                        syncHtmlSourceFromRichText();
-                        m_snapshot.editorMode = javelin::jmap::submission::BodyEditorMode::RawHtml;
+                        syncSnapshotFromUi();
+                        refreshPreview();
                     }
-                    else if (index == richEditorTabIndex &&
-                             m_snapshot.editorMode ==
-                                 javelin::jmap::submission::BodyEditorMode::RawHtml)
-                    {
-                        syncRichTextFromHtmlSource();
-                        m_snapshot.editorMode = javelin::jmap::submission::BodyEditorMode::RichText;
-                    }
-                    else if (index == previewTabIndex &&
-                             m_snapshot.editorMode ==
-                                 javelin::jmap::submission::BodyEditorMode::RawHtml)
-                    {
-                        syncRichTextFromHtmlSource();
-                    }
-                    else if (index == plainTextTabIndex)
-                    {
-                        refreshPlainTextRepresentation();
-                    }
-
                     updateEditorModeUi();
-                    syncSnapshotFromUi();
-                    refreshPreview();
-                    scheduleWorkingCopySave();
                 });
 
         refreshPreview();
@@ -606,19 +560,7 @@ namespace javelin::gui::compose
     bool ComposeTabWidget::isEmptyDraft() const
     {
         const auto subject = m_subjectEdit->text().trimmed();
-        QString body;
-        switch (m_snapshot.editorMode)
-        {
-        case javelin::jmap::submission::BodyEditorMode::RichText:
-            body = m_richTextEdit->toPlainText();
-            break;
-        case javelin::jmap::submission::BodyEditorMode::RawHtml:
-            body = plainTextFromHtml(m_htmlSourceDocument->text());
-            break;
-        case javelin::jmap::submission::BodyEditorMode::PlainText:
-            body = m_plainTextDocument->text();
-            break;
-        }
+        const auto body = m_richTextEdit->toPlainText();
         return subject.isEmpty() && m_toEdit->text().trimmed().isEmpty() &&
                m_ccEdit->text().trimmed().isEmpty() && m_bccEdit->text().trimmed().isEmpty() &&
                body.trimmed().isEmpty() && m_snapshot.attachments.empty();
@@ -830,22 +772,12 @@ namespace javelin::gui::compose
         m_richTextEdit->setAcceptDrops(false);
         m_richTextEdit->setAcceptRichText(true);
         m_richTextEdit->document()->setDocumentMargin(14);
-        m_htmlSourceDocument = KTextEditor::Editor::instance()->createDocument(this);
-        m_htmlSourceDocument->setHighlightingMode(QStringLiteral("HTML"));
-        m_htmlSourceView = m_htmlSourceDocument->createView(m_editorTabs);
-        m_htmlSourceView->setAcceptDrops(false);
-        m_plainTextDocument = KTextEditor::Editor::instance()->createDocument(this);
-        m_plainTextDocument->setReadWrite(false);
-        m_plainTextView = m_plainTextDocument->createView(m_editorTabs);
-        m_plainTextView->setAcceptDrops(false);
         m_previewView = new javelin::gui::messageview::HtmlMessageView(
             m_settings.messageAppearanceSettings(), m_editorTabs);
         m_previewView->setAcceptDrops(false);
         m_previewView->setRemoteContentEnabled(false);
         m_editorTabs->addTab(m_richTextEdit, QStringLiteral("Compose"));
-        m_editorTabs->addTab(m_htmlSourceView, QStringLiteral("HTML"));
         m_editorTabs->addTab(m_previewView, QStringLiteral("Preview"));
-        m_editorTabs->addTab(m_plainTextView, QStringLiteral("Plain text"));
         rootLayout->addWidget(m_editorTabs, 1);
 
         m_attachmentScrollArea = new QScrollArea(this);
@@ -1055,8 +987,6 @@ namespace javelin::gui::compose
         const QSignalBlocker bccBlocker{m_bccEdit};
         const QSignalBlocker subjectBlocker{m_subjectEdit};
         const QSignalBlocker richBlocker{m_richTextEdit};
-        const QSignalBlocker htmlBlocker{m_htmlSourceDocument};
-        const QSignalBlocker plainBlocker{m_plainTextDocument};
         const QSignalBlocker tabBlocker{m_editorTabs};
         const QSignalBlocker formatBlocker{m_bodyFormatCombo};
 
@@ -1084,6 +1014,10 @@ namespace javelin::gui::compose
                                    ? QString::fromStdString(*m_snapshot.subject)
                                    : QString{});
 
+        if (m_snapshot.editorMode == javelin::jmap::submission::BodyEditorMode::RawHtml)
+        {
+            m_snapshot.editorMode = javelin::jmap::submission::BodyEditorMode::RichText;
+        }
         const bool plainTextMode =
             m_snapshot.editorMode == javelin::jmap::submission::BodyEditorMode::PlainText;
         if (plainTextMode)
@@ -1096,18 +1030,9 @@ namespace javelin::gui::compose
         {
             setEditorHtml(QString::fromStdString(m_snapshot.htmlBody));
         }
-        m_htmlSourceDocument->setText(QString::fromStdString(m_snapshot.htmlBody));
-        refreshPlainTextRepresentation();
-
         m_bodyFormatCombo->setCurrentIndex(plainTextMode ? plainTextFormatIndex : htmlFormatIndex);
-        m_editorTabs->setTabVisible(richEditorTabIndex, true);
-        m_editorTabs->setTabVisible(htmlSourceTabIndex, !plainTextMode);
         m_editorTabs->setTabVisible(previewTabIndex, !plainTextMode);
-        m_editorTabs->setTabVisible(plainTextTabIndex, true);
-        m_editorTabs->setCurrentIndex(m_snapshot.editorMode ==
-                                              javelin::jmap::submission::BodyEditorMode::RawHtml
-                                          ? htmlSourceTabIndex
-                                          : richEditorTabIndex);
+        m_editorTabs->setCurrentIndex(richEditorTabIndex);
         setOptionalRecipientVisible(m_ccRow, m_ccButton, !m_snapshot.cc.empty());
         setOptionalRecipientVisible(m_bccRow, m_bccButton, !m_snapshot.bcc.empty());
         populateAttachments();
@@ -1144,13 +1069,10 @@ namespace javelin::gui::compose
     {
         if (m_snapshot.editorMode == javelin::jmap::submission::BodyEditorMode::PlainText)
         {
+            m_previewView->clearDocument();
             return;
         }
-        const auto html =
-            m_snapshot.editorMode == javelin::jmap::submission::BodyEditorMode::RawHtml
-                ? m_htmlSourceDocument->text()
-                : stableEditorHtml();
-        m_previewView->setDocumentHtml(html.toStdString());
+        m_previewView->setDocumentHtml(stableEditorHtml().toStdString());
     }
 
     void ComposeTabWidget::syncSnapshotFromUi()
@@ -1181,19 +1103,13 @@ namespace javelin::gui::compose
         switch (m_snapshot.editorMode)
         {
         case javelin::jmap::submission::BodyEditorMode::RawHtml:
-        {
-            const auto html = m_htmlSourceDocument->text();
-            m_snapshot.htmlBody = html.toStdString();
-            m_snapshot.plainTextBody = plainTextFromHtml(html).toStdString();
-            reconcileInlineAttachmentReferences(html);
-            break;
-        }
+            m_snapshot.editorMode = javelin::jmap::submission::BodyEditorMode::RichText;
+            [[fallthrough]];
         case javelin::jmap::submission::BodyEditorMode::RichText:
         {
             MessageComposer::TextPart textPart;
             m_richTextEdit->fillComposerTextPart(&textPart);
-            const auto html =
-                stableHtmlForInlineAttachments(textPart.cleanHtml(), m_snapshot.attachments);
+            const auto html = stableEditorHtml();
             reconcileInlineAttachmentReferences(html);
             m_snapshot.htmlBody = html.toStdString();
             m_snapshot.plainTextBody = textPart.cleanPlainText().toStdString();
@@ -1210,40 +1126,6 @@ namespace javelin::gui::compose
         updateTabTitle();
     }
 
-    void ComposeTabWidget::syncRichTextFromHtmlSource()
-    {
-        m_syncingUi = true;
-        const QSignalBlocker richBlocker{m_richTextEdit};
-        setEditorHtml(m_htmlSourceDocument->text());
-        m_syncingUi = false;
-    }
-
-    void ComposeTabWidget::syncHtmlSourceFromRichText()
-    {
-        m_syncingUi = true;
-        const QSignalBlocker htmlBlocker{m_htmlSourceDocument};
-        m_htmlSourceDocument->setText(stableEditorHtml());
-        m_syncingUi = false;
-    }
-
-    void ComposeTabWidget::refreshPlainTextRepresentation()
-    {
-        QString plainText;
-        if (m_snapshot.editorMode == javelin::jmap::submission::BodyEditorMode::RawHtml)
-        {
-            plainText = plainTextFromHtml(m_htmlSourceDocument->text());
-        }
-        else
-        {
-            plainText = m_richTextEdit->composerControler()->toCleanPlainText();
-        }
-
-        const QSignalBlocker blocker{m_plainTextDocument};
-        m_plainTextDocument->setReadWrite(true);
-        m_plainTextDocument->setText(plainText);
-        m_plainTextDocument->setReadWrite(false);
-    }
-
     void ComposeTabWidget::switchBodyFormat(const int index)
     {
         if (m_syncingUi)
@@ -1255,11 +1137,6 @@ namespace javelin::gui::compose
         if (plainTextMode &&
             m_snapshot.editorMode != javelin::jmap::submission::BodyEditorMode::PlainText)
         {
-            if (m_snapshot.editorMode == javelin::jmap::submission::BodyEditorMode::RawHtml)
-            {
-                syncRichTextFromHtmlSource();
-            }
-
             bool useMarkup = false;
             if (m_richTextEdit->composerControler()->isFormattingUsed())
             {
@@ -1298,16 +1175,11 @@ namespace javelin::gui::compose
             m_richTextEdit->activateRichText();
             m_snapshot.editorMode = javelin::jmap::submission::BodyEditorMode::RichText;
             m_syncingUi = false;
-            syncHtmlSourceFromRichText();
         }
 
-        m_editorTabs->setTabVisible(richEditorTabIndex, true);
-        m_editorTabs->setTabVisible(htmlSourceTabIndex, !plainTextMode);
-        m_editorTabs->setTabVisible(previewTabIndex, !plainTextMode);
-        m_editorTabs->setTabVisible(plainTextTabIndex, true);
         m_editorTabs->setCurrentIndex(richEditorTabIndex);
+        m_editorTabs->setTabVisible(previewTabIndex, !plainTextMode);
 
-        refreshPlainTextRepresentation();
         populateAttachments();
         updateEditorModeUi();
         syncSnapshotFromUi();
@@ -1355,8 +1227,6 @@ namespace javelin::gui::compose
         m_bccButton->setEnabled(!busy);
         m_subjectEdit->setEnabled(!busy);
         m_richTextEdit->setEnabled(!busy);
-        m_htmlSourceView->setEnabled(!busy);
-        m_plainTextView->setEnabled(!busy);
         m_editorTabs->setEnabled(!busy);
         updateEditorModeUi();
         populateAttachments();
@@ -1556,19 +1426,6 @@ namespace javelin::gui::compose
             return;
         }
 
-        const auto cidUrl = composerContentIdUrl(*attachment.contentId);
-        if (m_snapshot.editorMode == javelin::jmap::submission::BodyEditorMode::RawHtml)
-        {
-            auto html = m_htmlSourceDocument->text();
-            if (!html.contains(cidUrl))
-            {
-                html.append(QStringLiteral("<p><img src=\"%1\" alt=\"%2\"></p>")
-                                .arg(cidUrl, attachmentDisplayName(attachment).toHtmlEscaped()));
-                m_htmlSourceDocument->setText(html);
-            }
-            return;
-        }
-
         const QImage image{QString::fromStdString(attachment.localFilePath)};
         if (image.isNull())
         {
@@ -1592,14 +1449,6 @@ namespace javelin::gui::compose
             QStringLiteral("<img\\b[^>]*\\bsrc\\s*=\\s*([\"'])%1\\1[^>]*>")
                 .arg(QRegularExpression::escape(cidUrl)),
             QRegularExpression::CaseInsensitiveOption};
-
-        if (m_snapshot.editorMode == javelin::jmap::submission::BodyEditorMode::RawHtml)
-        {
-            auto html = m_htmlSourceDocument->text();
-            html.remove(imageTagPattern);
-            m_htmlSourceDocument->setText(html);
-            return;
-        }
 
         auto html = stableEditorHtml();
         html.remove(imageTagPattern);
@@ -1640,9 +1489,8 @@ namespace javelin::gui::compose
 
     QString ComposeTabWidget::stableEditorHtml()
     {
-        MessageComposer::TextPart textPart;
-        m_richTextEdit->fillComposerTextPart(&textPart);
-        return stableHtmlForInlineAttachments(textPart.cleanHtml(), m_snapshot.attachments);
+        return stableHtmlForInlineAttachments(m_richTextEdit->toCleanHtml(),
+                                              m_snapshot.attachments);
     }
 
     void ComposeTabWidget::reconcileInlineAttachmentReferences(const QString& html)

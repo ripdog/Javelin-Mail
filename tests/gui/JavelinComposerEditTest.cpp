@@ -144,6 +144,28 @@ TEST_CASE("KDE body generation produces matching HTML and plain alternatives",
     CHECK(textPart.cleanPlainText().contains(QStringLiteral("Two")));
 }
 
+TEST_CASE("unformatted composer content still has a complete preview document",
+          "[gui][compose][composer]")
+{
+    javelin::gui::compose::JavelinComposerEdit editor;
+    editor.activateRichText();
+    editor.setPlainText(QStringLiteral("Ordinary unformatted text"));
+
+    MessageComposer::TextPart textPart;
+    editor.fillComposerTextPart(&textPart);
+    const auto documentHtml = editor.toCleanHtml();
+
+    CHECK_FALSE(documentHtml.isEmpty());
+    CHECK(documentHtml.contains(QStringLiteral("<html"), Qt::CaseInsensitive));
+    CHECK(documentHtml.contains(QStringLiteral("<body"), Qt::CaseInsensitive));
+    CHECK(documentHtml.contains(QStringLiteral("Ordinary unformatted text")));
+    CHECK(editor.toPlainText() == QStringLiteral("Ordinary unformatted text"));
+    if (!textPart.isHtmlUsed())
+    {
+        CHECK(textPart.cleanHtml().isEmpty());
+    }
+}
+
 TEST_CASE("Javelin code formatting survives KDE body generation", "[gui][compose][composer]")
 {
     javelin::gui::compose::JavelinComposerEdit editor;
@@ -182,10 +204,8 @@ TEST_CASE("KDE image resources serialize through stable Javelin content IDs",
         .contentId = contentId,
         .contentHash = std::nullopt,
     }};
-    MessageComposer::TextPart textPart;
-    editor.fillComposerTextPart(&textPart);
     const auto stableHtml =
-        javelin::gui::compose::stableHtmlForInlineAttachments(textPart.cleanHtml(), attachments);
+        javelin::gui::compose::stableHtmlForInlineAttachments(editor.toCleanHtml(), attachments);
 
     CHECK(stableHtml.contains(QStringLiteral("cid:javelin-image@inline")));
     CHECK_FALSE(stableHtml.contains(QStringLiteral("javelin-inline:")));
