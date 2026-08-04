@@ -268,6 +268,14 @@ namespace javelin::app
             m_remoteActions = std::make_unique<DaemonRemoteActionDispatcher>(
                 *m_services, *this, [this] { return currentEpoch(); },
                 [this] { return reloadSettings(); }, this);
+            m_services->setAccessTokenProvider(
+                [this](const std::string_view accountId) -> std::optional<std::string>
+                {
+                    const auto* connection = connectionForAccount(accountId);
+                    if (connection == nullptr || connection->apiKey.isEmpty())
+                        return std::nullopt;
+                    return connection->apiKey.toStdString();
+                });
             m_services->setAuthenticationRefreshHandler(
                 [this](std::string accountId, std::string rejectedAccessToken)
                 {

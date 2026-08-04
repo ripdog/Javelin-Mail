@@ -74,6 +74,7 @@ namespace javelin::jmap::api
       public:
         explicit RefreshingTransport(AbstractTransport& transport);
 
+        void setAccessTokenProvider(javelin::jmap::auth::AccessTokenProvider provider);
         void setRefreshHandler(javelin::jmap::auth::AccessTokenRefreshHandler handler);
         void invalidateConnections() override;
 
@@ -81,6 +82,7 @@ namespace javelin::jmap::api
 
       private:
         AbstractTransport& m_transport;
+        javelin::jmap::auth::AccessTokenProvider m_accessTokenProvider;
         javelin::jmap::auth::AccessTokenRefreshHandler m_refreshHandler;
     };
 

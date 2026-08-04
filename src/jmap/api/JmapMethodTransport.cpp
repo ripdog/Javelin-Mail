@@ -745,6 +745,12 @@ namespace javelin::jmap::api
     {
     }
 
+    void RefreshingJmapMethodTransport::setAccessTokenProvider(
+        javelin::jmap::auth::AccessTokenProvider provider)
+    {
+        m_accessTokenProvider = std::move(provider);
+    }
+
     void RefreshingJmapMethodTransport::setRefreshHandler(
         javelin::jmap::auth::AccessTokenRefreshHandler handler)
     {
@@ -759,6 +765,13 @@ namespace javelin::jmap::api
     QCoro::Task<JmapMethodTransportResult>
     RefreshingJmapMethodTransport::call(JmapMethodRequest request)
     {
+        if (m_accessTokenProvider)
+        {
+            const auto currentAccessToken = m_accessTokenProvider(request.accountId);
+            if (currentAccessToken.has_value() && *currentAccessToken != request.accessToken)
+                request.accessToken = *currentAccessToken;
+        }
+
         auto retryRequest = request;
         auto result = co_await m_transport.call(std::move(request));
         const auto* error = std::get_if<TransportError>(&result);

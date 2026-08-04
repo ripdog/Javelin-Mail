@@ -44,6 +44,8 @@ namespace javelin::jmap::auth
     };
 
     using TokenRefreshResult = std::variant<OAuthToken, javelin::jmap::api::AuthError>;
+    using AccessTokenProvider =
+        std::function<std::optional<std::string>(std::string_view accountId)>;
     using AccessTokenRefreshHandler = std::function<QCoro::Task<std::optional<std::string>>(
         std::string accountId, std::string rejectedAccessToken)>;
 

@@ -229,6 +229,12 @@ namespace javelin::app
         return *m_onboardingService;
     }
 
+    void DaemonServices::setAccessTokenProvider(javelin::jmap::auth::AccessTokenProvider provider)
+    {
+        m_transport->setAccessTokenProvider(provider);
+        m_methodTransport->setAccessTokenProvider(std::move(provider));
+    }
+
     void DaemonServices::setAuthenticationRefreshHandler(
         javelin::jmap::auth::AccessTokenRefreshHandler handler)
     {

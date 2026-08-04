@@ -160,6 +160,7 @@ namespace javelin::app
         [[nodiscard]] MailIndexService& mailIndexService();
         [[nodiscard]] javelin::app::undo::UndoManager& undoManager();
         [[nodiscard]] javelin::jmap::auth::AccountOnboardingService& onboardingService();
+        void setAccessTokenProvider(javelin::jmap::auth::AccessTokenProvider provider);
         void
         setAuthenticationRefreshHandler(javelin::jmap::auth::AccessTokenRefreshHandler handler);
 

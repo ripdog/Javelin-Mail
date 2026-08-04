@@ -169,6 +169,12 @@ namespace javelin::jmap::api
     }
 
     void
+    RefreshingTransport::setAccessTokenProvider(javelin::jmap::auth::AccessTokenProvider provider)
+    {
+        m_accessTokenProvider = std::move(provider);
+    }
+
+    void
     RefreshingTransport::setRefreshHandler(javelin::jmap::auth::AccessTokenRefreshHandler handler)
     {
         m_refreshHandler = std::move(handler);
@@ -181,6 +187,17 @@ namespace javelin::jmap::api
 
     QCoro::Task<TransportResult> RefreshingTransport::send(HttpRequest request)
     {
+        if (request.authentication.has_value() && m_accessTokenProvider)
+        {
+            const auto currentAccessToken =
+                m_accessTokenProvider(request.authentication->accountId);
+            if (currentAccessToken.has_value() &&
+                *currentAccessToken != request.authentication->accessToken)
+            {
+                replaceBearerToken(request, *currentAccessToken);
+            }
+        }
+
         auto retryRequest = request;
         auto result = co_await m_transport.send(std::move(request));
         if (!isUnauthorized(result) || !retryRequest.authentication.has_value() ||

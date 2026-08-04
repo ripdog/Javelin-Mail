@@ -91,6 +91,7 @@ namespace javelin::jmap::api
       public:
         explicit RefreshingJmapMethodTransport(JmapMethodTransport& transport);
 
+        void setAccessTokenProvider(javelin::jmap::auth::AccessTokenProvider provider);
         void setRefreshHandler(javelin::jmap::auth::AccessTokenRefreshHandler handler);
         void invalidateConnection(std::string_view accountId) override;
 
@@ -99,6 +100,7 @@ namespace javelin::jmap::api
 
       private:
         JmapMethodTransport& m_transport;
+        javelin::jmap::auth::AccessTokenProvider m_accessTokenProvider;
         javelin::jmap::auth::AccessTokenRefreshHandler m_refreshHandler;
     };
 
