@@ -39,8 +39,9 @@ is supported, but only for Mail and Contacts.
 - KDE configuration dialogs and remembered window, toolbar, and workspace state
 - KTextEditor-powered plain-text composition, HTML source editing, and Sieve script editing
 - Plasma tray integration through KDE's StatusNotifierItem protocol
-- Desktop notifications that open the relevant account, mailbox, thread, and message
+- Desktop notifications on configurable mailboxes
 - Background startup through the Plasma/systemd user session while the heavy GUI remains optional
+- Memory efficient - the background service uses between 5-40MiB of RAM when idle
 
 Javelin should run on other modern Linux desktops that provide the same freedesktop interfaces, but
 KDE Plasma is the primary design, integration, and testing target.
@@ -178,16 +179,11 @@ journalctl --user -u javelind.service -f
 
 - KDE Plasma on Linux is the actively supported desktop target; other Linux desktops are best-effort.
 - Automatic browser OAuth depends on provider metadata and dynamic client registration; other servers
-  require manual bearer-token setup.
+  require manual API key setup.
 - Account credentials are stored in the daemon's native per-user settings store rather than a
   desktop secret service.
 - Calendar support should not yet be treated as fully interoperability-hardened.
-- The project is pre-1.0; cache formats and settings may change without long-term compatibility
-  guarantees.
 
-The server remains authoritative for mail, drafts, contacts, and calendars. Javelin's local cache,
-offline vault, search indexes, task state, and Undo history are designed to be rebuildable rather
-than independently backed-up user data.
 
 ## Documentation
 
