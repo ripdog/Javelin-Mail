@@ -1581,7 +1581,7 @@ javelin_enable_sanitizers(jmap-transport-benchmark)
 qt_add_executable(jmap-query
     src/tools/JmapQuery.cpp
 )
-target_link_libraries(jmap-query PRIVATE javelin_jmap Qt::Core Qt::Network)
+target_link_libraries(jmap-query PRIVATE javelin_jmap Qt::Core Qt::Network glaze::glaze)
 target_compile_options(jmap-query PRIVATE -fexceptions)
 javelin_set_project_warnings(jmap-query)
 javelin_enable_sanitizers(jmap-query)
