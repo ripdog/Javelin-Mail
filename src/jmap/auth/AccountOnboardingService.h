@@ -10,6 +10,11 @@
 
 namespace javelin::jmap::auth
 {
+    namespace detail
+    {
+        [[nodiscard]] QString registrationRedirectUri(const QString& callbackUri);
+    }
+
     class AccountOnboardingService final
     {
       public:

@@ -40,6 +40,7 @@ namespace javelin::app
         QString error;
         QString emailAddress;
         QString sessionUrl;
+        QString resourceUrl;
         QString authorizationEndpoint;
         QString tokenEndpoint;
         QString registrationEndpoint;

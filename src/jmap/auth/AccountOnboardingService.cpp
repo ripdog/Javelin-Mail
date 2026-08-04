@@ -152,6 +152,20 @@ namespace javelin::jmap::auth
 {
     Q_LOGGING_CATEGORY(oauthLog, "javelin.oauth")
 
+    QString detail::registrationRedirectUri(const QString& callbackUri)
+    {
+        QUrl redirect{callbackUri};
+        if (redirect.scheme() == QStringLiteral("http") &&
+            (redirect.host() == QStringLiteral("localhost") ||
+             redirect.host() == QStringLiteral("127.0.0.1") ||
+             redirect.host() == QStringLiteral("::1")))
+        {
+            redirect.setHost(QStringLiteral("localhost"));
+            redirect.setPort(-1);
+        }
+        return redirect.toString();
+    }
+
     namespace
     {
         struct HttpResult
@@ -278,16 +292,6 @@ namespace javelin::jmap::auth
         {
             return url.isValid() && url.scheme() == QStringLiteral("https") &&
                    !url.host().isEmpty();
-        }
-
-        [[nodiscard]] QString registrationRedirectUri(const QString& callbackUri)
-        {
-            QUrl redirect{callbackUri};
-            if (redirect.scheme() == QStringLiteral("http") &&
-                (redirect.host() == QStringLiteral("127.0.0.1") ||
-                 redirect.host() == QStringLiteral("::1")))
-                redirect.setPort(-1);
-            return redirect.toString();
         }
 
         [[nodiscard]] QString oauthErrorText(const QByteArray& body)
@@ -488,13 +492,16 @@ namespace javelin::jmap::auth
             co_return result;
         }
         const auto resource = parseJson<detail::ProtectedResourceMetadata>(resourceResponse.body);
-        if (!resource.has_value() || resource->authorizationServers.empty())
+        if (!resource.has_value() || resource->resource.empty() ||
+            resource->authorizationServers.empty() ||
+            !isSecureServerUrl(QUrl{QString::fromStdString(resource->resource)}))
         {
             appendOAuthFeatures(result, false);
             result.succeeded = true;
             co_return result;
         }
 
+        result.resourceUrl = QString::fromStdString(resource->resource);
         result.scopes = strings(resource->scopesSupported);
         result.issuer = QString::fromStdString(resource->authorizationServers.front());
         const auto metadataResponse =
@@ -539,10 +546,11 @@ namespace javelin::jmap::auth
     {
         javelin::app::OAuthStartResult result;
         if (!request.discovery.succeeded || request.discovery.registrationEndpoint.isEmpty() ||
-            request.redirectUri.isEmpty() ||
+            request.discovery.resourceUrl.isEmpty() || request.redirectUri.isEmpty() ||
             !isSecureServerUrl(QUrl{request.discovery.registrationEndpoint}) ||
             !isSecureServerUrl(QUrl{request.discovery.authorizationEndpoint}) ||
-            !isSecureServerUrl(QUrl{request.discovery.tokenEndpoint}))
+            !isSecureServerUrl(QUrl{request.discovery.tokenEndpoint}) ||
+            !isSecureServerUrl(QUrl{request.discovery.resourceUrl}))
         {
             result.error = QStringLiteral("This server requires manual application registration.");
             co_return result;
@@ -550,7 +558,7 @@ namespace javelin::jmap::auth
 
         const auto scopes = requestedScopes(request.discovery.scopes);
         detail::RegistrationRequest registration{
-            .redirectUris = {registrationRedirectUri(request.redirectUri).toStdString()},
+            .redirectUris = {detail::registrationRedirectUri(request.redirectUri).toStdString()},
             .clientName = "Javelin Mail",
             .tokenEndpointAuthMethod = "none",
             .grantTypes = {"authorization_code", "refresh_token"},
@@ -607,7 +615,7 @@ namespace javelin::jmap::auth
         query.addQueryItem(QStringLiteral("state"), flow.state);
         query.addQueryItem(QStringLiteral("code_challenge"), challenge);
         query.addQueryItem(QStringLiteral("code_challenge_method"), QStringLiteral("S256"));
-        query.addQueryItem(QStringLiteral("resource"), flow.discovery.sessionUrl);
+        query.addQueryItem(QStringLiteral("resource"), flow.discovery.resourceUrl);
         query.addQueryItem(QStringLiteral("login_hint"), flow.discovery.emailAddress);
         authorizationUrl.setQuery(query);
 

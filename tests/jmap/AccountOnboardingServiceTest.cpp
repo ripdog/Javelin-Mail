@@ -59,6 +59,45 @@ TEST_CASE("OAuth refresh refuses an insecure token endpoint", "[jmap][auth][onbo
     CHECK(result.error == QStringLiteral("OAuth refresh information is incomplete."));
 }
 
+TEST_CASE("OAuth dynamic registration canonicalizes loopback callback addresses",
+          "[jmap][auth][onboarding]")
+{
+    using javelin::jmap::auth::detail::registrationRedirectUri;
+
+    CHECK(registrationRedirectUri(QStringLiteral("http://127.0.0.1:49152/oauth/callback")) ==
+          QStringLiteral("http://localhost/oauth/callback"));
+    CHECK(registrationRedirectUri(QStringLiteral("http://[::1]:49152/oauth/callback")) ==
+          QStringLiteral("http://localhost/oauth/callback"));
+    CHECK(registrationRedirectUri(QStringLiteral("http://localhost:49152/oauth/callback")) ==
+          QStringLiteral("http://localhost/oauth/callback"));
+}
+
+TEST_CASE("OAuth discovery resource survives the daemon boundary", "[jmap][auth][onboarding]")
+{
+    const javelin::app::AccountDiscoveryResult result{
+        .succeeded = true,
+        .error = {},
+        .emailAddress = QStringLiteral("alice@example.com"),
+        .sessionUrl = QStringLiteral("https://mail.example.com/.well-known/jmap"),
+        .resourceUrl = QStringLiteral("https://mail.example.com/jmap/session"),
+        .authorizationEndpoint = QStringLiteral("https://auth.example.com/authorize"),
+        .tokenEndpoint = QStringLiteral("https://auth.example.com/token"),
+        .registrationEndpoint = QStringLiteral("https://auth.example.com/register"),
+        .issuer = QStringLiteral("https://auth.example.com"),
+        .scopes = {QStringLiteral("urn:ietf:params:oauth:scope:mail")},
+        .refreshTokensSupported = true,
+        .features = {},
+    };
+
+    const auto encoded = javelin::app::remote::encode(result);
+    REQUIRE(std::holds_alternative<QByteArray>(encoded));
+    const auto decoded = javelin::app::remote::decodeValue<javelin::app::AccountDiscoveryResult>(
+        std::get<QByteArray>(encoded));
+    REQUIRE(std::holds_alternative<javelin::app::AccountDiscoveryResult>(decoded));
+    CHECK(std::get<javelin::app::AccountDiscoveryResult>(decoded).resourceUrl ==
+          result.resourceUrl);
+}
+
 TEST_CASE("OAuth browser callback identity survives the daemon boundary",
           "[jmap][auth][onboarding]")
 {
