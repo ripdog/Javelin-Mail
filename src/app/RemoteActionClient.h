@@ -105,6 +105,7 @@ namespace javelin::app
             std::chrono::steady_clock::time_point startedAt;
             std::optional<std::chrono::steady_clock::time_point> submissionStartedAt;
             bool submissionInFlight = false;
+            bool terminalTimeoutScheduled = false;
         };
 
         void submitPending(const QString& pendingKey);

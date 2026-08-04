@@ -62,6 +62,7 @@ namespace javelin::app
         MailboxObservationLease m_observation;
         std::int64_t m_anchorOffset = 1;
         std::uint64_t m_generation = 0;
+        std::uint64_t m_refreshRequestId = 0;
         std::uint64_t m_cacheEpoch = 0;
         RefreshGeneration m_refreshGeneration;
         bool m_projectedReloadInFlight = false;

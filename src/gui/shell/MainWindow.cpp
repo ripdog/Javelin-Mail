@@ -1948,7 +1948,7 @@ namespace javelin::gui::shell
             .messagePageStale = m_messageListTabController->pageStale(tab),
             .remoteRefreshRequested = refreshRemote,
         });
-        if (loadedPlan.refreshRemote && (refreshRemote || index != 0))
+        if (loadedPlan.refreshRemote)
         {
             QTimer::singleShot(
                 100, this,

@@ -12,6 +12,11 @@
 
 namespace javelin::app
 {
+    namespace
+    {
+        constexpr auto mailboxWindowTerminalTimeout = std::chrono::seconds{90};
+    }
+
     RemoteActionClient::RemoteActionClient(GuiDaemonSession& session, QObject* parent)
         : QObject(parent), m_session(session)
     {
@@ -189,6 +194,26 @@ namespace javelin::app
                           .field = QStringLiteral("command.operation"),
                           .detail = QStringLiteral(
                               "The daemon returned an invalid operation identifier.")});
+                    return;
+                }
+                if (pendingCall->second->kind ==
+                        javelin::protocol::RemoteActionKind::MailboxWindow &&
+                    !pendingCall->second->terminalTimeoutScheduled)
+                {
+                    pendingCall->second->terminalTimeoutScheduled = true;
+                    QTimer::singleShot(
+                        mailboxWindowTerminalTimeout, this,
+                        [this, pendingKey, commandId]
+                        {
+                            if (!m_pending.contains(pendingKey))
+                                return;
+                            fail(
+                                javelin::protocol::OperationId{.value = commandId.value},
+                                {.code = javelin::protocol::BoundaryErrorCode::TransportUnavailable,
+                                 .field = QStringLiteral("command.operation"),
+                                 .detail = QStringLiteral(
+                                     "The mailbox request did not produce a terminal result.")});
+                        });
                 }
             });
         watcher->setFuture(

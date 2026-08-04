@@ -72,6 +72,12 @@ namespace javelin::app
                         if (window.mailboxId.toStdString() == m_mailboxId &&
                             window.offset == m_page.offset)
                         {
+                            if (m_page.refreshInFlight)
+                            {
+                                ++m_refreshRequestId;
+                                m_page.refreshInFlight = false;
+                                Q_EMIT pageChanged();
+                            }
                             reloadProjectedPage();
                             return;
                         }
@@ -203,6 +209,7 @@ namespace javelin::app
         Q_EMIT pageChanged();
         const auto offset = m_page.offset;
         const auto generation = m_generation;
+        const auto requestId = ++m_refreshRequestId;
         auto task = m_materializationPort.requestMailboxWindow(MailboxWindowIntent{
             .accountId = m_accountId,
             .mailboxId = m_mailboxId,
@@ -215,11 +222,16 @@ namespace javelin::app
         });
         QCoro::connect(
             std::move(task), this,
-            [this, offset, generation](MailboxWindowResult result)
+            [this, offset, generation, requestId](MailboxWindowResult result)
             {
-                if (offset != m_page.offset || generation != m_generation)
+                if (requestId != m_refreshRequestId)
                     return;
                 m_page.refreshInFlight = false;
+                if (offset != m_page.offset || generation != m_generation)
+                {
+                    Q_EMIT pageChanged();
+                    return;
+                }
                 if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
                 {
                     m_page.refreshError = error->message;
@@ -324,6 +336,7 @@ namespace javelin::app
     void MailboxSession::resetForPageChange()
     {
         ++m_generation;
+        ++m_refreshRequestId;
         static_cast<void>(m_refreshGeneration.begin(m_cacheEpoch));
         m_page.pendingOffset = m_page.offset;
         m_page.position = m_page.offset;
