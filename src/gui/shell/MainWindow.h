@@ -22,6 +22,7 @@ class QLabel;
 class QLineEdit;
 class QListView;
 class QPoint;
+class QProgressBar;
 class QSplitter;
 class QStackedWidget;
 class QSpinBox;
@@ -325,6 +326,7 @@ namespace javelin::gui::shell
         ElidingLabel* m_messageListTitleLabel = nullptr;
         QLabel* m_messageListMetaLabel = nullptr;
         QLabel* m_messagePageLabel = nullptr;
+        QProgressBar* m_messageLoadingIndicator = nullptr;
         QToolButton* m_searchServerButton = nullptr;
         QToolButton* m_messageSortButton = nullptr;
         QToolButton* m_firstPageButton = nullptr;

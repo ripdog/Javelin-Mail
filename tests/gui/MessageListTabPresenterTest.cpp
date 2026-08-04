@@ -52,6 +52,7 @@ TEST_CASE("message list presentation preserves mailbox page metadata")
     CHECK(header.offset == 100);
     CHECK(header.total == std::optional<std::size_t>{218});
     CHECK_FALSE(header.search);
+    CHECK(header.refreshInFlight);
 }
 
 TEST_CASE("local search presentation selects the indexed empty state")

@@ -7,6 +7,7 @@
 
 class QLabel;
 class QListView;
+class QProgressBar;
 class QSpinBox;
 class QToolButton;
 
@@ -49,6 +50,7 @@ namespace javelin::gui::messages
         bool search = false;
         bool indexedSearch = false;
         bool canSearchServer = false;
+        bool refreshInFlight = false;
     };
 
     class MessageListPanePresenter
@@ -56,10 +58,10 @@ namespace javelin::gui::messages
       public:
         MessageListPanePresenter(javelin::gui::shell::ElidingLabel& titleLabel, QLabel& metaLabel,
                                  QLabel& pageLabel, QLabel& emptyState, QListView& messageView,
-                                 QToolButton& searchServerButton, QToolButton& firstPageButton,
-                                 QToolButton& previousPageButton, QSpinBox& pageNumberSpinBox,
-                                 QToolButton& nextPageButton, QToolButton& lastPageButton,
-                                 std::size_t defaultPageSize);
+                                 QProgressBar& loadingIndicator, QToolButton& searchServerButton,
+                                 QToolButton& firstPageButton, QToolButton& previousPageButton,
+                                 QSpinBox& pageNumberSpinBox, QToolButton& nextPageButton,
+                                 QToolButton& lastPageButton, std::size_t defaultPageSize);
 
         void showEmptyState(const MessageListEmptyState& state) const;
         void showNoContext() const;
@@ -68,12 +70,14 @@ namespace javelin::gui::messages
 
       private:
         void disablePagination() const;
+        void showLoadingIndicator(bool inFlight) const;
 
         javelin::gui::shell::ElidingLabel& m_titleLabel;
         QLabel& m_metaLabel;
         QLabel& m_pageLabel;
         QLabel& m_emptyState;
         QListView& m_messageView;
+        QProgressBar& m_loadingIndicator;
         QToolButton& m_searchServerButton;
         QToolButton& m_firstPageButton;
         QToolButton& m_previousPageButton;

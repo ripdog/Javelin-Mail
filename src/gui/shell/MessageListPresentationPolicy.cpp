@@ -22,7 +22,9 @@ namespace javelin::gui::shell
         }
         else if (input.page.has_value())
         {
-            header = *input.page;
+            auto page = *input.page;
+            page.refreshInFlight = input.refreshInFlight;
+            header = std::move(page);
         }
         else
         {

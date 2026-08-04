@@ -79,6 +79,7 @@
 #include <QElapsedTimer>
 #include <QEvent>
 #include <QFrame>
+#include <QGridLayout>
 #include <QHBoxLayout>
 #include <QItemSelection>
 #include <QItemSelectionModel>
@@ -92,9 +93,11 @@
 #include <QMessageBox>
 #include <QMetaObject>
 #include <QMouseEvent>
+#include <QProgressBar>
 #include <QPushButton>
 #include <QScrollBar>
 #include <QSignalBlocker>
+#include <QSizePolicy>
 #include <QSpinBox>
 #include <QSplitter>
 #include <QStackedWidget>
@@ -1210,66 +1213,89 @@ namespace javelin::gui::shell
         auto* messagePane = new QWidget(this);
         auto* messageLayout = new QVBoxLayout(messagePane);
         messageLayout->setContentsMargins(0, 0, 0, 0);
-        messageLayout->setSpacing(8);
+        messageLayout->setSpacing(0);
         auto* messageHeader = new QWidget(messagePane);
-        auto* messageHeaderLayout = new QHBoxLayout(messageHeader);
-        messageHeaderLayout->setContentsMargins(8, 3, 8, 3);
-        messageHeaderLayout->setSpacing(8);
-        m_messageListTitleLabel = new ElidingLabel(messageHeader);
-        m_messageListMetaLabel = new QLabel(messageHeader);
-        m_searchServerButton = new QToolButton(messageHeader);
+        auto* messageHeaderLayout = new QVBoxLayout(messageHeader);
+        messageHeaderLayout->setContentsMargins(0, 0, 0, 0);
+        messageHeaderLayout->setSpacing(0);
+        auto* messageHeaderRow = new QWidget(messageHeader);
+        auto* messageHeaderRowLayout = new QHBoxLayout(messageHeaderRow);
+        messageHeaderRowLayout->setContentsMargins(8, 3, 8, 3);
+        messageHeaderRowLayout->setSpacing(8);
+        m_messageListTitleLabel = new ElidingLabel(messageHeaderRow);
+        m_messageListMetaLabel = new QLabel(messageHeaderRow);
+        m_searchServerButton = new QToolButton(messageHeaderRow);
         m_searchServerButton->setText(QStringLiteral("Search server"));
         m_searchServerButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
         m_searchServerButton->setToolTip(
             QStringLiteral("Replace results indexed on this device with authoritative server "
                            "results"));
         m_searchServerButton->setVisible(false);
-        m_messageSortButton = new QToolButton(messageHeader);
+        m_messageSortButton = new QToolButton(messageHeaderRow);
         m_messageSortButton->setIcon(javelin::gui::themedSvgIcon(
             QStringLiteral(":/icons/thunderbird-icons/display-options.svg"),
             palette().color(QPalette::Text)));
         m_messageSortButton->setToolTip(QStringLiteral("Sort messages"));
-        m_firstPageButton = new QToolButton(messageHeader);
+        m_firstPageButton = new QToolButton(messageHeaderRow);
         m_firstPageButton->setIcon(style()->standardIcon(QStyle::SP_MediaSkipBackward));
         m_firstPageButton->setToolTip(QStringLiteral("First page"));
-        m_previousPageButton = new QToolButton(messageHeader);
+        m_previousPageButton = new QToolButton(messageHeaderRow);
         m_previousPageButton->setIcon(
             javelin::gui::themedSvgIcon(QStringLiteral(":/icons/thunderbird-icons/nav-left.svg"),
                                         palette().color(QPalette::Text)));
         m_previousPageButton->setToolTip(QStringLiteral("Previous page"));
-        m_nextPageButton = new QToolButton(messageHeader);
+        m_nextPageButton = new QToolButton(messageHeaderRow);
         m_nextPageButton->setIcon(
             javelin::gui::themedSvgIcon(QStringLiteral(":/icons/thunderbird-icons/nav-right.svg"),
                                         palette().color(QPalette::Text)));
         m_nextPageButton->setToolTip(QStringLiteral("Next page"));
-        m_lastPageButton = new QToolButton(messageHeader);
+        m_lastPageButton = new QToolButton(messageHeaderRow);
         m_lastPageButton->setIcon(style()->standardIcon(QStyle::SP_MediaSkipForward));
         m_lastPageButton->setToolTip(QStringLiteral("Last page"));
-        m_pageNumberSpinBox = new QSpinBox(messageHeader);
+        m_pageNumberSpinBox = new QSpinBox(messageHeaderRow);
         m_pageNumberSpinBox->setPrefix(QStringLiteral("Page "));
         m_pageNumberSpinBox->setAlignment(Qt::AlignCenter);
         m_pageNumberSpinBox->setToolTip(QStringLiteral("Enter a page number"));
-        m_messagePageLabel = new QLabel(messageHeader);
+        m_messagePageLabel = new QLabel(messageHeaderRow);
         auto titleFont = m_messageListTitleLabel->font();
         titleFont.setPointSize(titleFont.pointSize() + 4);
         titleFont.setBold(true);
         m_messageListTitleLabel->setFont(titleFont);
-        messageHeaderLayout->addWidget(m_messageListTitleLabel, 1);
-        messageHeaderLayout->addWidget(m_messageListMetaLabel);
-        messageHeaderLayout->addWidget(m_searchServerButton);
-        messageHeaderLayout->addWidget(m_firstPageButton);
-        messageHeaderLayout->addWidget(m_previousPageButton);
-        messageHeaderLayout->addWidget(m_pageNumberSpinBox);
-        messageHeaderLayout->addWidget(m_messagePageLabel);
-        messageHeaderLayout->addWidget(m_nextPageButton);
-        messageHeaderLayout->addWidget(m_lastPageButton);
-        messageHeaderLayout->addWidget(m_messageSortButton);
-        m_messageEmptyState = new QLabel(
-            QStringLiteral("No messages are available for the selected mailbox yet."), messagePane);
+        messageHeaderRowLayout->addWidget(m_messageListTitleLabel, 1);
+        messageHeaderRowLayout->addWidget(m_messageListMetaLabel);
+        messageHeaderRowLayout->addWidget(m_searchServerButton);
+        messageHeaderRowLayout->addWidget(m_firstPageButton);
+        messageHeaderRowLayout->addWidget(m_previousPageButton);
+        messageHeaderRowLayout->addWidget(m_pageNumberSpinBox);
+        messageHeaderRowLayout->addWidget(m_messagePageLabel);
+        messageHeaderRowLayout->addWidget(m_nextPageButton);
+        messageHeaderRowLayout->addWidget(m_lastPageButton);
+        messageHeaderRowLayout->addWidget(m_messageSortButton);
+        messageHeaderLayout->addWidget(messageHeaderRow);
+        m_messageLoadingIndicator = new QProgressBar(messageHeader);
+        m_messageLoadingIndicator->setAccessibleName(QStringLiteral("Loading messages"));
+        m_messageLoadingIndicator->setFixedHeight(2);
+        m_messageLoadingIndicator->setTextVisible(false);
+        m_messageLoadingIndicator->setRange(0, 1);
+        m_messageLoadingIndicator->setValue(0);
+        m_messageLoadingIndicator->setStyleSheet(
+            QStringLiteral("QProgressBar { border: none; background: transparent; }"
+                           "QProgressBar::chunk { background-color: palette(highlight); }"));
+        messageHeaderLayout->addWidget(m_messageLoadingIndicator);
+
+        auto* messageListArea = new QWidget(messagePane);
+        auto* messageListAreaLayout = new QGridLayout(messageListArea);
+        messageListAreaLayout->setContentsMargins(0, 0, 0, 0);
+        messageListAreaLayout->setSpacing(0);
+        m_messageEmptyState = new QLabel(QStringLiteral("No messages"), messageListArea);
+        m_messageEmptyState->setAlignment(Qt::AlignCenter);
+        m_messageEmptyState->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
         m_messageEmptyState->setWordWrap(true);
+        m_messageEmptyState->setAttribute(Qt::WA_TransparentForMouseEvents);
+        messageListAreaLayout->addWidget(m_messageView, 0, 0);
+        messageListAreaLayout->addWidget(m_messageEmptyState, 0, 0);
         messageLayout->addWidget(messageHeader);
-        messageLayout->addWidget(m_messageEmptyState);
-        messageLayout->addWidget(m_messageView, 1);
+        messageLayout->addWidget(messageListArea, 1);
 
         m_messageViewContainer = new javelin::gui::messageview::MessageViewContainer(
             m_settings, m_translationPort, m_contactIdentityLookup, this);
@@ -1378,9 +1404,9 @@ namespace javelin::gui::shell
         m_messageListPanePresenter =
             std::make_unique<javelin::gui::messages::MessageListPanePresenter>(
                 *m_messageListTitleLabel, *m_messageListMetaLabel, *m_messagePageLabel,
-                *m_messageEmptyState, *m_messageView, *m_searchServerButton, *m_firstPageButton,
-                *m_previousPageButton, *m_pageNumberSpinBox, *m_nextPageButton, *m_lastPageButton,
-                pageSize);
+                *m_messageEmptyState, *m_messageView, *m_messageLoadingIndicator,
+                *m_searchServerButton, *m_firstPageButton, *m_previousPageButton,
+                *m_pageNumberSpinBox, *m_nextPageButton, *m_lastPageButton, pageSize);
         m_messageListTabPresenter = std::make_unique<MessageListTabPresenter>(
             *m_messageListPanePresenter, *m_tabBarPresenter);
         updateEmptyStates();

@@ -5,6 +5,7 @@
 
 #include <QLabel>
 #include <QListView>
+#include <QProgressBar>
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QToolButton>
@@ -16,15 +17,16 @@ namespace javelin::gui::messages
 {
     MessageListPanePresenter::MessageListPanePresenter(
         javelin::gui::shell::ElidingLabel& titleLabel, QLabel& metaLabel, QLabel& pageLabel,
-        QLabel& emptyState, QListView& messageView, QToolButton& searchServerButton,
-        QToolButton& firstPageButton, QToolButton& previousPageButton, QSpinBox& pageNumberSpinBox,
-        QToolButton& nextPageButton, QToolButton& lastPageButton, const std::size_t defaultPageSize)
+        QLabel& emptyState, QListView& messageView, QProgressBar& loadingIndicator,
+        QToolButton& searchServerButton, QToolButton& firstPageButton,
+        QToolButton& previousPageButton, QSpinBox& pageNumberSpinBox, QToolButton& nextPageButton,
+        QToolButton& lastPageButton, const std::size_t defaultPageSize)
         : m_titleLabel(titleLabel), m_metaLabel(metaLabel), m_pageLabel(pageLabel),
           m_emptyState(emptyState), m_messageView(messageView),
-          m_searchServerButton(searchServerButton), m_firstPageButton(firstPageButton),
-          m_previousPageButton(previousPageButton), m_pageNumberSpinBox(pageNumberSpinBox),
-          m_nextPageButton(nextPageButton), m_lastPageButton(lastPageButton),
-          m_defaultPageSize(defaultPageSize)
+          m_loadingIndicator(loadingIndicator), m_searchServerButton(searchServerButton),
+          m_firstPageButton(firstPageButton), m_previousPageButton(previousPageButton),
+          m_pageNumberSpinBox(pageNumberSpinBox), m_nextPageButton(nextPageButton),
+          m_lastPageButton(lastPageButton), m_defaultPageSize(defaultPageSize)
     {
     }
 
@@ -38,7 +40,7 @@ namespace javelin::gui::messages
         }
         else if (state.refreshInFlight && state.itemCount == 0)
         {
-            m_emptyState.setText(QStringLiteral("Loading messages..."));
+            m_emptyState.setText(QStringLiteral("Looking for messages…"));
             m_emptyState.setStyleSheet(QString{});
         }
         else if (state.collection == MessageCollectionKind::LocalSearch)
@@ -49,17 +51,15 @@ namespace javelin::gui::messages
         }
         else if (state.collection == MessageCollectionKind::OnlineSearch)
         {
-            m_emptyState.setText(
-                QStringLiteral("No server results matched your search in this account."));
+            m_emptyState.setText(QStringLiteral("No messages matched your search."));
             m_emptyState.setStyleSheet(QString{});
         }
         else
         {
-            m_emptyState.setText(
-                QStringLiteral("No messages are available for the selected mailbox yet."));
+            m_emptyState.setText(QStringLiteral("No messages"));
             m_emptyState.setStyleSheet(QString{});
         }
-        m_emptyState.setVisible(state.itemCount == 0 || !state.refreshError.isEmpty());
+        m_emptyState.setVisible(state.itemCount == 0);
         m_messageView.setVisible(true);
     }
 
@@ -68,6 +68,7 @@ namespace javelin::gui::messages
         m_titleLabel.setText(QStringLiteral("Messages"));
         m_metaLabel.clear();
         m_searchServerButton.setVisible(false);
+        showLoadingIndicator(false);
         disablePagination();
     }
 
@@ -76,6 +77,7 @@ namespace javelin::gui::messages
         m_titleLabel.setText(header.title);
         m_metaLabel.setText(header.context);
         m_searchServerButton.setVisible(false);
+        showLoadingIndicator(false);
         disablePagination();
     }
 
@@ -83,6 +85,7 @@ namespace javelin::gui::messages
     {
         m_titleLabel.setText(header.title);
         m_searchServerButton.setVisible(header.canSearchServer);
+        showLoadingIndicator(header.refreshInFlight);
         const auto step = header.returnedLimit == 0 ? m_defaultPageSize : header.returnedLimit;
         const QSignalBlocker pageNumberBlocker{&m_pageNumberSpinBox};
         if (!header.total)
@@ -128,6 +131,17 @@ namespace javelin::gui::messages
         m_previousPageButton.setEnabled(header.position > 0);
         m_nextPageButton.setEnabled(metrics.hasNext);
         m_lastPageButton.setEnabled(metrics.hasNext);
+    }
+
+    void MessageListPanePresenter::showLoadingIndicator(const bool inFlight) const
+    {
+        if (inFlight)
+        {
+            m_loadingIndicator.setRange(0, 0);
+            return;
+        }
+        m_loadingIndicator.setRange(0, 1);
+        m_loadingIndicator.setValue(0);
     }
 
     void MessageListPanePresenter::disablePagination() const
