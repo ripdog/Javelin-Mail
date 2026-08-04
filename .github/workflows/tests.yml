@@ -43,6 +43,7 @@ jobs:
             base-devel \
             boost \
             catch2 \
+            ccache \
             clang \
             cmake \
             dbus \

@@ -151,6 +151,17 @@ transport outcome, stale refresh rebasing, and crash/retry safety.
 ## Build And Dependency Preferences
 
 - Use CMake as the single build entrypoint.
+- Debug and sanitizer builds require `ccache`; verify it is available before starting substantial
+  compilation work.
+- Never run concurrent configure, build, or test commands against the same CMake binary directory.
+  In the shared repository workspace, use `scripts/check-debug.sh` so these operations are
+  serialized. Truly concurrent work requires separate worktrees and build directories; those may
+  safely share the per-user ccache.
+- During implementation, build the narrowest relevant target and run selected tests with
+  `scripts/check-debug.sh --target <target> --tests <regex>`. Use
+  `scripts/check-debug.sh --full` only for final verification.
+- Do not terminate Ninja merely because a build is taking longer than expected. If a build must be
+  stopped, allow the process to handle an interrupt and exit before starting another build.
 - Prefer explicit targets with clear dependency boundaries.
 - External dependencies should be introduced deliberately and kept minimal.
 - Use `FetchContent` for project-managed third-party dependencies when reproducibility matters.

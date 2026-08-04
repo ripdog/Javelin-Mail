@@ -41,7 +41,7 @@ A suitable base environment can be installed with:
 
 ```sh
 sudo pacman -S --needed \
-  base-devel cmake extra-cmake-modules git ninja \
+  base-devel ccache cmake extra-cmake-modules git ninja \
   qt6-base qt6-svg qt6-tools qt6-webengine qt6-websockets \
   kconfigwidgets kcoreaddons ktexteditor kxmlgui kmime
 ```
@@ -71,11 +71,38 @@ Build trees are created under `out/build/<preset>`. Local development data is in
 `out/install/<preset>` by default so KXMLGUI resources, icons, and the language model are available
 without a system install.
 
+The `debug` and `asan` presets use `ccache` as the C++ compiler launcher. They store cached objects
+in `/tmp/javelin-mail-ccache-$USER`, which is writable from sandboxed development agents and shared
+by their separate worktrees. Configure a suitable per-user limit once, for example with
+`CCACHE_DIR="/tmp/javelin-mail-ccache-$USER" ccache --max-size 20G`, and inspect effectiveness with
+`CCACHE_DIR="/tmp/javelin-mail-ccache-$USER" ccache --show-stats`. The operating system may clear
+this cache on reboot. Debug, sanitizer, and compiler-option differences intentionally produce
+distinct cache entries.
+
+Never run multiple CMake or Ninja processes against the same binary directory. For work performed
+in the shared repository workspace, use `scripts/check-debug.sh`; it serializes configuration,
+compilation, and tests with a host-wide lock. Truly concurrent agents should instead use isolated
+worktrees with their own build directories. Their shared `ccache` makes those isolated builds
+inexpensive after the cache has warmed.
+
 ## Debug build
 
 ```sh
 cmake --preset debug
 cmake --build --preset debug
+```
+
+For a focused build and test run in the shared workspace, use:
+
+```sh
+scripts/check-debug.sh --target javelin_jmap_tests --tests 'SessionClient'
+```
+
+Repeat `--target` to build more than one target. Run the complete configure, build, test, and format
+workflow only for final verification:
+
+```sh
+scripts/check-debug.sh --full
 ```
 
 The convenience target builds both processes and launches the GUI:

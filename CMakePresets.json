@@ -19,15 +19,23 @@
     {
       "name": "debug",
       "inherits": "base",
+      "environment": {
+        "CCACHE_DIR": "/tmp/javelin-mail-ccache-$env{USER}"
+      },
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug"
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_COMPILER_LAUNCHER": "ccache"
       }
     },
     {
       "name": "asan",
       "inherits": "base",
+      "environment": {
+        "CCACHE_DIR": "/tmp/javelin-mail-ccache-$env{USER}"
+      },
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_COMPILER_LAUNCHER": "ccache",
         "JAVELIN_ENABLE_ASAN": "ON",
         "JAVELIN_ENABLE_UBSAN": "ON"
       }
