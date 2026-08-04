@@ -260,6 +260,7 @@ add_executable(javelin_daemon_tests
     app/MailboxSessionTest.cpp
     app/PerformanceMetricsTest.cpp
     app/ProcessInstanceLockTest.cpp
+    app/SearchSessionTest.cpp
 )
 target_include_directories(javelin_daemon_tests
     PRIVATE

@@ -77,11 +77,13 @@ namespace javelin::app
         std::string m_sessionId;
         std::vector<javelin::jmap::cache::MessageListItem> m_localSnapshot;
         std::unordered_set<std::size_t> m_prefetchOffsets;
+        std::optional<std::size_t> m_visiblePrefetchOffset;
         bool m_localSnapshotLoaded = false;
         bool m_localSearchInFlight = false;
         bool m_refreshAfterCurrent = false;
         bool m_closed = false;
         std::uint64_t m_generation = 0;
+        std::uint64_t m_refreshRequestId = 0;
         std::uint64_t m_cacheEpoch = 0;
         RefreshGeneration m_refreshGeneration;
         bool m_projectedReloadInFlight = false;

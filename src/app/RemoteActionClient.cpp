@@ -14,7 +14,7 @@ namespace javelin::app
 {
     namespace
     {
-        constexpr auto mailboxWindowTerminalTimeout = std::chrono::seconds{90};
+        constexpr auto messageListWindowTerminalTimeout = std::chrono::seconds{90};
     }
 
     RemoteActionClient::RemoteActionClient(GuiDaemonSession& session, QObject* parent)
@@ -196,13 +196,15 @@ namespace javelin::app
                               "The daemon returned an invalid operation identifier.")});
                     return;
                 }
-                if (pendingCall->second->kind ==
-                        javelin::protocol::RemoteActionKind::MailboxWindow &&
-                    !pendingCall->second->terminalTimeoutScheduled)
+                const bool messageListWindow =
+                    pendingCall->second->kind ==
+                        javelin::protocol::RemoteActionKind::MailboxWindow ||
+                    pendingCall->second->kind == javelin::protocol::RemoteActionKind::SearchWindow;
+                if (messageListWindow && !pendingCall->second->terminalTimeoutScheduled)
                 {
                     pendingCall->second->terminalTimeoutScheduled = true;
                     QTimer::singleShot(
-                        mailboxWindowTerminalTimeout, this,
+                        messageListWindowTerminalTimeout, this,
                         [this, pendingKey, commandId]
                         {
                             if (!m_pending.contains(pendingKey))
@@ -211,8 +213,8 @@ namespace javelin::app
                                 javelin::protocol::OperationId{.value = commandId.value},
                                 {.code = javelin::protocol::BoundaryErrorCode::TransportUnavailable,
                                  .field = QStringLiteral("command.operation"),
-                                 .detail = QStringLiteral(
-                                     "The mailbox request did not produce a terminal result.")});
+                                 .detail = QStringLiteral("The message-list request did not "
+                                                          "produce a terminal result.")});
                         });
                 }
             });
