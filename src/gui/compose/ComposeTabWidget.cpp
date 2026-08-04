@@ -38,6 +38,7 @@
 #include <QScrollArea>
 #include <QSignalBlocker>
 #include <QSizePolicy>
+#include <QStringList>
 #include <QStyle>
 #include <QTabWidget>
 #include <QTextBlockFormat>
@@ -330,7 +331,7 @@ namespace javelin::gui::compose
             html.remove(fontAttribute);
             html.remove(fontOpenTag);
             html.remove(fontCloseTag);
-            return html;
+            return htmlForQtDocument(html);
         }
 
         class RichTextComposeEdit : public QTextEdit
@@ -918,6 +919,11 @@ namespace javelin::gui::compose
         connect(m_strikethroughAction, &QAction::triggered, this,
                 &ComposeTabWidget::toggleStrikethrough);
 
+        m_codeAction = m_formatToolbar->addAction(
+            QIcon::fromTheme(QStringLiteral("format-text-code")), QStringLiteral("Code"));
+        m_codeAction->setCheckable(true);
+        connect(m_codeAction, &QAction::triggered, this, &ComposeTabWidget::toggleCode);
+
         m_formatToolbar->addSeparator();
 
         auto* bulletAction = m_formatToolbar->addAction(
@@ -1106,7 +1112,7 @@ namespace javelin::gui::compose
         m_subjectEdit->setText(m_snapshot.subject.has_value()
                                    ? QString::fromStdString(*m_snapshot.subject)
                                    : QString{});
-        m_richTextEdit->setHtml(QString::fromStdString(m_snapshot.htmlBody));
+        m_richTextEdit->setHtml(htmlForQtDocument(QString::fromStdString(m_snapshot.htmlBody)));
         m_htmlSourceDocument->setText(QString::fromStdString(m_snapshot.htmlBody));
         m_plainTextDocument->setText(QString::fromStdString(m_snapshot.plainTextBody));
         const bool plainTextMode =
@@ -1222,7 +1228,7 @@ namespace javelin::gui::compose
     {
         m_syncingUi = true;
         const QSignalBlocker richBlocker{m_richTextEdit};
-        m_richTextEdit->setHtml(m_htmlSourceDocument->text());
+        m_richTextEdit->setHtml(htmlForQtDocument(m_htmlSourceDocument->text()));
         m_syncingUi = false;
     }
 
@@ -1257,7 +1263,7 @@ namespace javelin::gui::compose
                  m_snapshot.editorMode == javelin::jmap::submission::BodyEditorMode::PlainText)
         {
             const auto html = htmlFromPlainText(m_plainTextDocument->text());
-            m_richTextEdit->setHtml(html);
+            m_richTextEdit->setHtml(htmlForQtDocument(html));
             m_htmlSourceDocument->setText(html);
             m_snapshot.editorMode = javelin::jmap::submission::BodyEditorMode::RichText;
         }
@@ -1504,7 +1510,7 @@ namespace javelin::gui::compose
 
         auto html = m_richTextEdit->document()->toHtml();
         html.remove(imageTagPattern);
-        m_richTextEdit->setHtml(html);
+        m_richTextEdit->setHtml(htmlForQtDocument(html));
     }
 
     void ComposeTabWidget::startSaveDraft(const bool closeAfterSave)
@@ -1657,6 +1663,20 @@ namespace javelin::gui::compose
         m_richTextEdit->mergeCurrentCharFormat(format);
     }
 
+    void ComposeTabWidget::toggleCode()
+    {
+        QTextCharFormat format;
+        if (m_codeAction->isChecked())
+        {
+            format.setFontFamilies(QStringList{QStringLiteral("monospace")});
+        }
+        else
+        {
+            format.clearProperty(QTextFormat::FontFamilies);
+        }
+        m_richTextEdit->mergeCurrentCharFormat(format);
+    }
+
     void ComposeTabWidget::insertBulletList()
     {
         QTextListFormat listFormat;
@@ -1694,6 +1714,7 @@ namespace javelin::gui::compose
         charFormat.setFontItalic(false);
         charFormat.setFontUnderline(false);
         charFormat.setFontStrikeOut(false);
+        charFormat.clearProperty(QTextFormat::FontFamilies);
         cursor.mergeCharFormat(charFormat);
         QTextBlockFormat blockFormat;
         blockFormat.setAlignment(Qt::AlignLeft);
@@ -1703,6 +1724,7 @@ namespace javelin::gui::compose
         m_italicAction->setChecked(false);
         m_underlineAction->setChecked(false);
         m_strikethroughAction->setChecked(false);
+        m_codeAction->setChecked(false);
     }
 
     void ComposeTabWidget::insertLink()

@@ -31,6 +31,9 @@ namespace javelin::gui::compose
             static const QRegularExpression strikeStyle{
                 QStringLiteral("\\btext-decoration[^:]*:[^;]*\\bline-through\\b"),
                 QRegularExpression::CaseInsensitiveOption};
+            static const QRegularExpression codeStyle{
+                QStringLiteral("\\bfont-family\\s*:\\s*(?:[\\\"']\\s*)?monospace\\b"),
+                QRegularExpression::CaseInsensitiveOption};
 
             QString result;
             result.reserve(html.size());
@@ -78,6 +81,10 @@ namespace javelin::gui::compose
                 {
                     appendTag(QStringLiteral("s"));
                 }
+                if (codeStyle.match(style).hasMatch())
+                {
+                    appendTag(QStringLiteral("code"));
+                }
                 result.append(opening);
                 closingTags.push_back(closing);
             }
@@ -91,6 +98,18 @@ namespace javelin::gui::compose
         }
 
     } // namespace
+
+    QString htmlForQtDocument(QString html)
+    {
+        static const QRegularExpression codeOpenTag{QStringLiteral("<code\\b[^>]*>"),
+                                                    QRegularExpression::CaseInsensitiveOption};
+        static const QRegularExpression codeCloseTag{QStringLiteral("</code\\s*>"),
+                                                     QRegularExpression::CaseInsensitiveOption};
+
+        html.replace(codeOpenTag, QStringLiteral("<span style=\"font-family: monospace;\">"));
+        html.replace(codeCloseTag, QStringLiteral("</span>"));
+        return html;
+    }
 
     QString cleanHtmlFromDocument(const QTextDocument& document)
     {
@@ -132,7 +151,7 @@ namespace javelin::gui::compose
     QString plainTextFromHtml(const QString& html)
     {
         QTextDocument document;
-        document.setHtml(html);
+        document.setHtml(htmlForQtDocument(html));
         auto lines = document.toPlainText().split(QLatin1Char('\n'), Qt::KeepEmptyParts);
         for (auto& line : lines)
         {

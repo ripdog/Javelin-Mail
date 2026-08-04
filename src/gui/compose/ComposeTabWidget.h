@@ -121,6 +121,7 @@ namespace javelin::gui::compose
         void toggleItalic();
         void toggleUnderline();
         void toggleStrikethrough();
+        void toggleCode();
         void insertBulletList();
         void insertNumberedList();
         void alignLeft();
@@ -165,6 +166,7 @@ namespace javelin::gui::compose
         QAction* m_italicAction = nullptr;
         QAction* m_underlineAction = nullptr;
         QAction* m_strikethroughAction = nullptr;
+        QAction* m_codeAction = nullptr;
     };
 
 } // namespace javelin::gui::compose

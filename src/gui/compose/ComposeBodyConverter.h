@@ -8,6 +8,7 @@ namespace javelin::gui::compose
 {
 
     [[nodiscard]] QString cleanHtmlFromDocument(const QTextDocument& document);
+    [[nodiscard]] QString htmlForQtDocument(QString html);
     [[nodiscard]] QString htmlFromPlainText(const QString& plainText);
     [[nodiscard]] QString plainTextFromHtml(const QString& html);
 
