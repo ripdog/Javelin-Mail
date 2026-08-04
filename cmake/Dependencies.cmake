@@ -105,6 +105,49 @@ function(javelin_fetch_fasttext)
     target_link_libraries(fasttext_javelin PUBLIC Threads::Threads)
 endfunction()
 
+function(javelin_fetch_bergamot)
+    set(COMPILE_WASM OFF CACHE BOOL "" FORCE)
+    set(USE_WASM_COMPATIBLE_SOURCE OFF CACHE BOOL "" FORCE)
+    set(COMPILE_TESTS OFF CACHE BOOL "" FORCE)
+    set(COMPILE_UNIT_TESTS OFF CACHE BOOL "" FORCE)
+    set(COMPILE_PYTHON OFF CACHE BOOL "" FORCE)
+    set(COMPILE_LIBRARY_ONLY ON CACHE BOOL "" FORCE)
+    set(SPM_BUILD_LIBRARY_ONLY OFF CACHE BOOL "" FORCE)
+    set(SPM_ENABLE_NFKC_COMPILE OFF CACHE BOOL "" FORCE)
+    set(USE_STATIC_LIBS ON CACHE BOOL "" FORCE)
+    set(BUILD_ARCH x86-64 CACHE STRING "" FORCE)
+    set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
+    set(GIT_SUBMODULE OFF CACHE BOOL "" FORCE)
+
+    FetchContent_Declare(
+        mozilla_translations
+        GIT_REPOSITORY https://github.com/mozilla/translations.git
+        GIT_TAG 4732dc947bc952abb019aabfe5582006d4fc3337
+        GIT_SHALLOW FALSE
+        GIT_SUBMODULES
+            inference/3rd_party/ssplit-cpp
+            inference/marian-fork/src/3rd_party/sentencepiece
+            inference/marian-fork/src/3rd_party/fbgemm
+            inference/marian-fork/src/3rd_party/intgemm
+            inference/marian-fork/src/3rd_party/ruy
+            inference/marian-fork/src/3rd_party/simd_utils
+        GIT_SUBMODULES_RECURSE TRUE
+        SOURCE_SUBDIR inference
+    )
+    FetchContent_MakeAvailable(mozilla_translations)
+    set_property(DIRECTORY "${mozilla_translations_SOURCE_DIR}/inference"
+                 PROPERTY EXCLUDE_FROM_ALL YES)
+    foreach(optional_tool IN ITEMS translator-cli spm_encode spm_decode spm_normalize
+                                   spm_train spm_export_vocab compile_charsmap)
+        if(TARGET ${optional_tool})
+            set_target_properties(${optional_tool} PROPERTIES EXCLUDE_FROM_ALL TRUE)
+        endif()
+    endforeach()
+
+    set(JAVELIN_BERGAMOT_SOURCE_DIR "${mozilla_translations_SOURCE_DIR}"
+        CACHE INTERNAL "Pinned Mozilla translations source directory")
+endfunction()
+
 function(javelin_configure_dependencies)
     find_package(QCoro6 CONFIG QUIET COMPONENTS Core Coro Network)
     if(NOT QCoro6_FOUND)
@@ -128,5 +171,11 @@ function(javelin_configure_dependencies)
 
     if(JAVELIN_ENABLE_FASTTEXT_LANGUAGE_DETECTION)
         javelin_fetch_fasttext()
+    endif()
+
+    if(JAVELIN_ENABLE_BERGAMOT_TRANSLATION)
+        find_package(PkgConfig REQUIRED)
+        pkg_check_modules(ZSTD REQUIRED IMPORTED_TARGET libzstd)
+        javelin_fetch_bergamot()
     endif()
 endfunction()

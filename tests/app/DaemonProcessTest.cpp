@@ -49,13 +49,13 @@ namespace
             .socket = {.runtimeDirectory = runtimeDirectory,
                        .socketPath = runtimeDirectory + QStringLiteral("/javelind.sock"),
                        .limits = {},
-                       .protocol = {.major = 1, .minor = 0},
+                       .protocol = {.major = 4, .minor = 0},
                        .expectedBuild = std::nullopt,
                        .maximumQueuedFrames = 16,
                        .maximumQueuedBytes = 4096,
                        .responseTimeoutMilliseconds = 1000,
                        .enforcePeerCredentials = false},
-            .protocol = {.major = 1, .minor = 0},
+            .protocol = {.major = 4, .minor = 0},
             .build = {.application = QStringLiteral("Javelin-Mail"),
                       .revision = QStringLiteral("daemon-test")},
             .guiExecutable = {},
@@ -95,19 +95,19 @@ TEST_CASE("daemon process migrates settings before exposing readiness", "[app][d
     CHECK(duplicateError->code == javelin::app::DaemonStartupErrorCode::InstanceAlreadyRunning);
     CHECK(process.isReady());
 
-    const auto hello = process.handleHello({.protocol = {.major = 1, .minor = 0},
+    const auto hello = process.handleHello({.protocol = {.major = 4, .minor = 0},
                                             .build = {.application = QStringLiteral("Javelin-Mail"),
                                                       .revision = QStringLiteral("daemon-test")}});
     const auto* ready = std::get_if<javelin::protocol::ReadyReply>(&hello);
     REQUIRE(ready != nullptr);
-    CHECK(ready->protocol.major == 1);
+    CHECK(ready->protocol.major == 4);
     CHECK(ready->cache.instance.value != QUuid{});
     CHECK(ready->cache.schema.value > 0);
 
     const auto settings = process.handleGetSettings({});
     const auto* snapshot = std::get_if<javelin::protocol::SettingsSnapshotReply>(&settings);
     REQUIRE(snapshot != nullptr);
-    CHECK(snapshot->snapshot.schemaVersion == 2);
+    CHECK(snapshot->snapshot.schemaVersion == 3);
     CHECK(snapshot->snapshot.revision.value == 0);
 
     const auto update = process.handleUpdateSettings({
@@ -117,14 +117,6 @@ TEST_CASE("daemon process migrates settings before exposing readiness", "[app][d
                    .notificationMailboxSelections = std::nullopt,
                    .remoteContentSenders = std::nullopt,
                    .remoteContentDomains = std::nullopt,
-                   .translation =
-                       javelin::protocol::TranslationSettings{
-                           .enabled = true,
-                           .apiKeyOverride = {},
-                           .targetLanguage = QStringLiteral("mi-NZ"),
-                           .autoTranslateSenders = {},
-                           .autoTranslateDomains = {},
-                       },
                    .appearance = std::nullopt,
                    .attachments = std::nullopt,
                    .undoSendDelaySeconds = std::nullopt,
@@ -199,7 +191,6 @@ TEST_CASE("daemon does not queue vault metadata for undiscovered connection ids"
                        std::vector<javelin::protocol::MailboxSelectionSettings>{},
                    .remoteContentSenders = std::nullopt,
                    .remoteContentDomains = std::nullopt,
-                   .translation = std::nullopt,
                    .appearance = std::nullopt,
                    .attachments = std::nullopt,
                    .undoSendDelaySeconds = std::nullopt,
@@ -287,7 +278,6 @@ TEST_CASE("daemon applies offline mailbox settings by cached JMAP account id",
                        std::vector<javelin::protocol::MailboxSelectionSettings>{},
                    .remoteContentSenders = std::nullopt,
                    .remoteContentDomains = std::nullopt,
-                   .translation = std::nullopt,
                    .appearance = std::nullopt,
                    .attachments = std::nullopt,
                    .undoSendDelaySeconds = std::nullopt,
@@ -326,7 +316,6 @@ TEST_CASE("daemon applies offline mailbox settings by cached JMAP account id",
                    .notificationMailboxSelections = std::nullopt,
                    .remoteContentSenders = std::nullopt,
                    .remoteContentDomains = std::nullopt,
-                   .translation = std::nullopt,
                    .appearance = std::nullopt,
                    .attachments = std::nullopt,
                    .undoSendDelaySeconds = std::nullopt,
@@ -356,7 +345,6 @@ TEST_CASE("daemon applies offline mailbox settings by cached JMAP account id",
                    .notificationMailboxSelections = std::nullopt,
                    .remoteContentSenders = std::nullopt,
                    .remoteContentDomains = std::nullopt,
-                   .translation = std::nullopt,
                    .appearance = std::nullopt,
                    .attachments = std::nullopt,
                    .undoSendDelaySeconds = std::nullopt,

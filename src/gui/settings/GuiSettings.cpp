@@ -76,18 +76,6 @@ namespace javelin::gui::settings
         return stringList(snapshot().remoteContentDomains);
     }
 
-    javelin::app::TranslationSettings GuiSettings::translationSettings() const
-    {
-        const auto& value = snapshot().translation;
-        return {
-            .enabled = value.enabled,
-            .apiKeyOverride = value.apiKeyOverride,
-            .targetLanguage = value.targetLanguage,
-            .autoTranslateSenders = stringList(value.autoTranslateSenders),
-            .autoTranslateDomains = stringList(value.autoTranslateDomains),
-        };
-    }
-
     javelin::gui::messageview::MessageAppearanceSettings
     GuiSettings::messageAppearanceSettings() const
     {
@@ -143,8 +131,6 @@ namespace javelin::gui::settings
             value.remoteContentSenders = std::move(*update.remoteContentSenders);
         if (update.remoteContentDomains.has_value())
             value.remoteContentDomains = std::move(*update.remoteContentDomains);
-        if (update.translation.has_value())
-            value.translation = std::move(*update.translation);
         if (update.appearance.has_value())
             value.appearance = std::move(*update.appearance);
         if (update.attachments.has_value())

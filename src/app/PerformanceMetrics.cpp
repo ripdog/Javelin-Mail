@@ -281,8 +281,6 @@ namespace javelin::app
             return QStringLiteral("search_window");
         case Kind::SearchRetire:
             return QStringLiteral("search_retire");
-        case Kind::TranslationTranslate:
-            return QStringLiteral("translation_translate");
         case Kind::Undo:
             return QStringLiteral("undo");
         case Kind::Redo:

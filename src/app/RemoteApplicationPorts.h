@@ -10,7 +10,6 @@
 #include "app/MessageListMaterializationPort.h"
 #include "app/RemoteActionClient.h"
 #include "app/SieveApplicationPorts.h"
-#include "app/TranslationApplicationPorts.h"
 #include "app/UndoApplicationPorts.h"
 #include "app/WorkTaskPort.h"
 #include "jmap/calendar/CalendarReader.h"
@@ -249,32 +248,6 @@ namespace javelin::app
 
       private:
         RemoteActionClient& m_client;
-    };
-
-    class RemoteTranslationPort final : public TranslationPort
-    {
-      public:
-        RemoteTranslationPort(GuiDaemonSession& session, RemoteActionClient& client);
-        ~RemoteTranslationPort() override;
-        void reloadSettings() override;
-        [[nodiscard]] const TranslationSettings& settings() const override;
-        [[nodiscard]] bool isEnabled() const override;
-        [[nodiscard]] QString targetLanguage() const override;
-        [[nodiscard]] bool shouldAutoTranslate(const QString& sender,
-                                               const QString& domain) const override;
-        void setAutoTranslateSender(QString sender, bool enabled) override;
-        void setAutoTranslateDomain(QString domain, bool enabled) override;
-        [[nodiscard]] QCoro::Task<TranslationResult> translate(TranslationChunks sourceChunks,
-                                                               QString sourceLanguage,
-                                                               bool allowNetwork) override;
-
-      private:
-        void loadFromSnapshot();
-        void persist();
-        GuiDaemonSession& m_session;
-        RemoteActionClient& m_client;
-        TranslationSettings m_settings;
-        QMetaObject::Connection m_settingsConnection;
     };
 
     class RemoteUndoCommandPort final : public UndoCommandPort

@@ -15,8 +15,6 @@
 #include "app/PerformanceMetrics.h"
 #include "app/ProcessInstanceLock.h"
 #include "app/SettingsRepository.h"
-#include "app/TranslationApplicationPorts.h"
-#include "app/TranslationService.h"
 #include "app/UndoApplicationPorts.h"
 #include "app/WorkScheduler.h"
 #include "app/undo/UndoManager.h"
@@ -77,11 +75,6 @@ namespace javelin::app
             for (const auto& id : ids)
                 result.push_back(id.toStdString());
             return result;
-        }
-
-        [[nodiscard]] QStringList stringList(const std::vector<QString>& values)
-        {
-            return {values.begin(), values.end()};
         }
 
         [[nodiscard]] std::vector<AccountSyncConfiguration>
@@ -787,14 +780,6 @@ namespace javelin::app
                                  .arg(configurations.size())
                                  .arg(configurations.size() == 1 ? QString{} : QStringLiteral("s"),
                                       configuredAccountIds.join(QStringLiteral(", ")));
-        const auto& translation = m_settingsSnapshot.translation;
-        m_services->translationService().applySettings({
-            .enabled = translation.enabled,
-            .apiKeyOverride = translation.apiKeyOverride,
-            .targetLanguage = translation.targetLanguage,
-            .autoTranslateSenders = stringList(translation.autoTranslateSenders),
-            .autoTranslateDomains = stringList(translation.autoTranslateDomains),
-        });
         m_services->mailService().applySettings(configurations);
         m_services->fullMailSyncService().applySettings(std::move(fullSync));
         m_services->mailIndexService().applyAccounts(std::move(accountIds));

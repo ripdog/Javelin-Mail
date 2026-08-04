@@ -1,14 +1,13 @@
-#include "jmap/language/LanguageDetection.h"
+#include "gui/translation/LanguageDetection.h"
 
-#include "jmap/language/FastTextLanguageDetector.h"
+#include "gui/translation/FastTextLanguageDetector.h"
 
 #include <algorithm>
 #include <cctype>
 #include <cstddef>
-#include <string>
 #include <utility>
 
-namespace javelin::jmap::language
+namespace javelin::gui::translation
 {
     namespace
     {
@@ -37,14 +36,15 @@ namespace javelin::jmap::language
         {
             return false;
         }
-
         return targetLanguage != "en" || detection.englishConfidence <= maximumEnglishConfidence;
     }
 
     LanguageDetectionService::LanguageDetectionService(std::string modelPath)
-        : m_modelPath(std::move(modelPath))
+        : m_detector(std::make_unique<FastTextLanguageDetector>(std::move(modelPath)))
     {
     }
+
+    LanguageDetectionService::~LanguageDetectionService() = default;
 
     std::optional<LanguageDetectionResult>
     LanguageDetectionService::detect(const std::string_view utf8Text)
@@ -53,9 +53,6 @@ namespace javelin::jmap::language
         {
             return std::nullopt;
         }
-
-        FastTextLanguageDetector detector{m_modelPath};
-        return detector.detect(utf8Text);
+        return m_detector->detect(utf8Text);
     }
-
-} // namespace javelin::jmap::language
+} // namespace javelin::gui::translation

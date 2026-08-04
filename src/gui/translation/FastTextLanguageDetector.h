@@ -1,6 +1,6 @@
 #pragma once
 
-#include "jmap/language/LanguageDetection.h"
+#include "gui/translation/LanguageDetection.h"
 
 #include <memory>
 #include <optional>
@@ -12,9 +12,8 @@ namespace fasttext
     class FastText;
 }
 
-namespace javelin::jmap::language
+namespace javelin::gui::translation
 {
-
     class FastTextLanguageDetector
     {
       public:
@@ -34,5 +33,4 @@ namespace javelin::jmap::language
         std::unique_ptr<fasttext::FastText> m_model;
 #endif
     };
-
-} // namespace javelin::jmap::language
+} // namespace javelin::gui::translation

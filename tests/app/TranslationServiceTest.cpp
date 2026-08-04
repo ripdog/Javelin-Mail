@@ -1,7 +1,8 @@
-#include "app/TranslationService.h"
-
-#include "jmap/cache/Database.h"
-#include "jmap/cache/TranslationCacheRepository.h"
+#include "gui/translation/TranslationService.h"
+#include "gui/translation/GoogleTranslationBackend.h"
+#include "gui/translation/TranslationBackend.h"
+#include "gui/translation/TranslationCache.h"
+#include "gui/translation/TranslationSettingsStore.h"
 
 #include <QCoroTask>
 #include <catch2/catch_test_macros.hpp>
@@ -12,10 +13,14 @@
 #include <QTemporaryDir>
 
 #include <memory>
+#include <optional>
+#include <utility>
 #include <variant>
 
 namespace
 {
+    using namespace javelin::gui::translation;
+
     class ApplicationGuard
     {
       public:
@@ -25,9 +30,8 @@ namespace
             {
                 return;
             }
-
             static int argc = 1;
-            static char appName[] = "javelin-tests";
+            static char appName[] = "javelin-translation-tests";
             static char* argv[] = {appName, nullptr};
             m_application = std::make_unique<QCoreApplication>(argc, argv);
         }
@@ -36,42 +40,74 @@ namespace
         std::unique_ptr<QCoreApplication> m_application;
     };
 
-    class ApplicationIdentityGuard
-    {
-      public:
-        ApplicationIdentityGuard()
-            : m_applicationName(QCoreApplication::applicationName()),
-              m_organizationName(QCoreApplication::organizationName())
-        {
-        }
-
-        ~ApplicationIdentityGuard()
-        {
-            QCoreApplication::setApplicationName(m_applicationName);
-            QCoreApplication::setOrganizationName(m_organizationName);
-        }
-
-      private:
-        QString m_applicationName;
-        QString m_organizationName;
-    };
-
     void useTemporarySettings(const QTemporaryDir& directory)
     {
+        QCoreApplication::setOrganizationName(QStringLiteral("Javelin Mail Tests"));
+        QCoreApplication::setApplicationName(QStringLiteral("translation-tests"));
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, directory.path());
-        QSettings{}.clear();
+        QSettings settings;
+        settings.clear();
+        settings.sync();
     }
 
-    [[nodiscard]] QString makeConnectionName()
+    class FakeBackend final : public TranslationBackend
     {
-        static int counter = 0;
-        return QStringLiteral("javelin-translation-service-%1").arg(++counter);
-    }
+      public:
+        [[nodiscard]] QString revision(QStringView sourceLanguage,
+                                       QStringView targetLanguage) const override
+        {
+            return QStringLiteral("fake-v1:%1-%2").arg(sourceLanguage, targetLanguage);
+        }
+
+        [[nodiscard]] QCoro::Task<BackendResult> translate(BackendRequest request) override
+        {
+            ++calls;
+            receivedTexts += request.texts.size();
+            lastPolicy = request.fetchPolicy;
+            if (request.fetchPolicy != ExternalFetchPolicy::AllowExternalFetch)
+            {
+                co_return TranslationUnavailable{
+                    .reason = TranslationUnavailable::Reason::ExternalFetchNotAllowed,
+                };
+            }
+
+            QVector<QString> translated;
+            translated.reserve(request.texts.size());
+            for (const auto& text : request.texts)
+            {
+                translated.push_back(QStringLiteral("translated:%1").arg(text));
+            }
+            co_return BackendTranslation{
+                .texts = std::move(translated),
+                .backendRevision = revision(request.sourceLanguage, request.targetLanguage),
+            };
+        }
+
+        int calls = 0;
+        qsizetype receivedTexts = 0;
+        ExternalFetchPolicy lastPolicy = ExternalFetchPolicy::InstalledAndCachedOnly;
+    };
+
+    struct ServiceFixture
+    {
+        explicit ServiceFixture(const QString& cachePath,
+                                TranslationBackend* localBackend = nullptr)
+            : cache(cachePath), google(network),
+              service(settingsStore, cache, google, std::string{}, localBackend)
+        {
+        }
+
+        TranslationSettingsStore settingsStore;
+        TranslationCache cache;
+        QNetworkAccessManager network;
+        GoogleTranslationBackend google;
+        TranslationService service;
+    };
 } // namespace
 
-TEST_CASE("translation settings persist provider overrides and normalized auto rules",
-          "[app][translation][settings]")
+TEST_CASE("translation settings migrate the legacy enabled flag and normalize values",
+          "[translation][settings]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
@@ -79,25 +115,38 @@ TEST_CASE("translation settings persist provider overrides and normalized auto r
     REQUIRE(settingsDirectory.isValid());
     useTemporarySettings(settingsDirectory);
 
-    javelin::app::TranslationService::saveSettings({
-        .enabled = false,
-        .apiKeyOverride = QStringLiteral(" custom-key "),
-        .targetLanguage = QStringLiteral("JA"),
-        .autoTranslateSenders = {QStringLiteral(" Sender@Example.test "),
-                                 QStringLiteral("sender@example.test")},
-        .autoTranslateDomains = {QStringLiteral(" Example.test ")},
-    });
+    QSettings legacy;
+    legacy.beginGroup(QStringLiteral("translation"));
+    legacy.setValue(QStringLiteral("enabled"), false);
+    legacy.setValue(QStringLiteral("apiKeyOverride"), QStringLiteral(" custom-key "));
+    legacy.setValue(QStringLiteral("targetLanguage"), QStringLiteral("zh_cn"));
+    legacy.setValue(QStringLiteral("autoTranslateSenders"),
+                    QStringList{QStringLiteral(" Sender@Example.test "),
+                                QStringLiteral("sender@example.test")});
+    legacy.setValue(QStringLiteral("autoTranslateDomains"),
+                    QStringList{QStringLiteral(" Example.test ")});
+    legacy.endGroup();
+    legacy.sync();
 
-    const auto settings = javelin::app::TranslationService::loadSettings();
-    CHECK_FALSE(settings.enabled);
+    TranslationSettingsStore store;
+    const auto loaded = store.load();
+    REQUIRE(std::holds_alternative<TranslationSettings>(loaded));
+    const auto& settings = std::get<TranslationSettings>(loaded);
+    CHECK(settings.provider == TranslationProvider::Disabled);
     CHECK(settings.apiKeyOverride == QStringLiteral("custom-key"));
-    CHECK(settings.targetLanguage == QStringLiteral("ja"));
+    CHECK(settings.targetLanguage == QStringLiteral("zh-Hans"));
     CHECK(settings.autoTranslateSenders == QStringList{QStringLiteral("sender@example.test")});
     CHECK(settings.autoTranslateDomains == QStringList{QStringLiteral("example.test")});
+
+    QSettings migrated;
+    migrated.beginGroup(QStringLiteral("translation"));
+    CHECK(migrated.value(QStringLiteral("provider")).toString() == QStringLiteral("disabled"));
+    CHECK_FALSE(migrated.contains(QStringLiteral("enabled")));
+    migrated.endGroup();
 }
 
-TEST_CASE("translation service uses the configured target-language cache before the network",
-          "[app][translation][cache]")
+TEST_CASE("translation service deduplicates misses and caches backend results",
+          "[translation][service][cache]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
@@ -106,66 +155,45 @@ TEST_CASE("translation service uses the configured target-language cache before 
     REQUIRE(settingsDirectory.isValid());
     REQUIRE(cacheDirectory.isValid());
     useTemporarySettings(settingsDirectory);
-    javelin::app::TranslationService::saveSettings({
-        .enabled = true,
-        .apiKeyOverride = {},
-        .targetLanguage = QStringLiteral("ja"),
-        .autoTranslateSenders = {},
-        .autoTranslateDomains = {},
-    });
 
-    auto connectionResult = javelin::jmap::cache::DatabaseConnection::open({
-        .connectionName = makeConnectionName(),
-        .databasePath = cacheDirectory.filePath(QStringLiteral("cache.sqlite3")),
-    });
-    if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&connectionResult))
-    {
-        FAIL(error->message.toStdString());
-    }
-    auto connection =
-        std::get<javelin::jmap::cache::DatabaseConnection>(std::move(connectionResult));
-    javelin::jmap::cache::TranslationCacheRepository repository{connection};
-    REQUIRE_FALSE(repository
-                      .upsert({
-                          .sourceLanguage = QStringLiteral("auto"),
-                          .targetLanguage = QStringLiteral("ja"),
-                          .inputText = QStringLiteral("Hello"),
-                          .translatedText = QStringLiteral("こんにちは"),
+    TranslationSettingsStore store;
+    REQUIRE_FALSE(store
+                      .save({
+                          .provider = TranslationProvider::Local,
+                          .apiKeyOverride = {},
+                          .targetLanguage = QStringLiteral("en"),
+                          .autoTranslateSenders = {},
+                          .autoTranslateDomains = {},
                       })
                       .has_value());
+    FakeBackend backend;
+    ServiceFixture fixture{cacheDirectory.filePath(QStringLiteral("cache.sqlite3")), &backend};
 
-    QNetworkAccessManager networkAccessManager;
-    javelin::app::TranslationService service{networkAccessManager, repository};
-    javelin::app::TranslationService::TranslationChunks chunks;
-    chunks.push_back(QStringList{QStringLiteral("Hello")});
-    const auto result =
-        QCoro::waitFor(service.translate(std::move(chunks), QStringLiteral("auto"), false));
+    TranslationChunks chunks{
+        QStringList{QStringLiteral("Bonjour"), QStringLiteral("Bonjour")},
+        QStringList{QStringLiteral("Monde")},
+    };
+    const auto translated = QCoro::waitFor(fixture.service.translate(
+        chunks, QStringLiteral("fr"), ExternalFetchPolicy::AllowExternalFetch));
+    REQUIRE(std::holds_alternative<TranslationChunks>(translated));
+    CHECK(
+        std::get<TranslationChunks>(translated) ==
+        TranslationChunks{
+            QStringList{QStringLiteral("translated:Bonjour"), QStringLiteral("translated:Bonjour")},
+            QStringList{QStringLiteral("translated:Monde")},
+        });
+    CHECK(backend.calls == 1);
+    CHECK(backend.receivedTexts == 2);
 
-    REQUIRE(std::holds_alternative<javelin::app::TranslationService::TranslationChunks>(result));
-    const auto& translated = std::get<javelin::app::TranslationService::TranslationChunks>(result);
-    REQUIRE(translated.size() == 1);
-    CHECK(translated.front() == QStringList{QStringLiteral("こんにちは")});
-
-    javelin::app::TranslationService::TranslationChunks missing;
-    missing.push_back(QStringList{QStringLiteral("Not cached")});
-    const auto miss =
-        QCoro::waitFor(service.translate(std::move(missing), QStringLiteral("auto"), false));
-    CHECK(std::holds_alternative<javelin::app::TranslationUnavailable>(miss));
-
-    auto disabledSettings = service.settings();
-    disabledSettings.enabled = false;
-    javelin::app::TranslationService::saveSettings(std::move(disabledSettings));
-    service.reloadSettings();
-    javelin::app::TranslationService::TranslationChunks disabledChunks;
-    disabledChunks.push_back(QStringList{QStringLiteral("Hello")});
-    const auto disabled =
-        QCoro::waitFor(service.translate(std::move(disabledChunks), QStringLiteral("auto"), false));
-    REQUIRE(std::holds_alternative<QString>(disabled));
-    CHECK(std::get<QString>(disabled).contains(QStringLiteral("disabled"), Qt::CaseInsensitive));
+    const auto cached = QCoro::waitFor(fixture.service.translate(
+        chunks, QStringLiteral("fr"), ExternalFetchPolicy::InstalledAndCachedOnly));
+    REQUIRE(std::holds_alternative<TranslationChunks>(cached));
+    CHECK(std::get<TranslationChunks>(cached) == std::get<TranslationChunks>(translated));
+    CHECK(backend.calls == 1);
 }
 
-TEST_CASE("translation service accepts daemon-owned settings without consulting QSettings",
-          "[app][translation][settings]")
+TEST_CASE("automatic translation does not fetch without an explicit saved rule",
+          "[translation][service][policy]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
@@ -174,89 +202,61 @@ TEST_CASE("translation service accepts daemon-owned settings without consulting 
     REQUIRE(settingsDirectory.isValid());
     REQUIRE(cacheDirectory.isValid());
     useTemporarySettings(settingsDirectory);
-    javelin::app::TranslationService::saveSettings({
-        .enabled = false,
-        .apiKeyOverride = {},
-        .targetLanguage = QStringLiteral("en"),
-        .autoTranslateSenders = {},
-        .autoTranslateDomains = {},
-    });
 
-    auto connectionResult = javelin::jmap::cache::DatabaseConnection::open({
-        .connectionName = makeConnectionName(),
-        .databasePath = cacheDirectory.filePath(QStringLiteral("cache.sqlite3")),
-    });
-    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(connectionResult));
-    auto connection =
-        std::get<javelin::jmap::cache::DatabaseConnection>(std::move(connectionResult));
-    javelin::jmap::cache::TranslationCacheRepository repository{connection};
-    QNetworkAccessManager networkAccessManager;
-    javelin::app::TranslationService service{networkAccessManager, repository};
-    REQUIRE_FALSE(service.isEnabled());
+    TranslationSettingsStore store;
+    REQUIRE_FALSE(store
+                      .save({
+                          .provider = TranslationProvider::Local,
+                          .apiKeyOverride = {},
+                          .targetLanguage = QStringLiteral("en"),
+                          .autoTranslateSenders = {},
+                          .autoTranslateDomains = {},
+                      })
+                      .has_value());
+    FakeBackend backend;
+    ServiceFixture fixture{cacheDirectory.filePath(QStringLiteral("cache.sqlite3")), &backend};
 
-    service.applySettings({
-        .enabled = true,
-        .apiKeyOverride = QStringLiteral(" override "),
-        .targetLanguage = QStringLiteral("JA"),
-        .autoTranslateSenders = {QStringLiteral(" Sender@Example.test ")},
-        .autoTranslateDomains = {QStringLiteral(" Example.test ")},
-    });
+    const auto result = QCoro::waitFor(fixture.service.translate(
+        TranslationChunks{QStringList{QStringLiteral("Bonjour")}}, QStringLiteral("fr"),
+        ExternalFetchPolicy::InstalledAndCachedOnly));
+    REQUIRE(std::holds_alternative<TranslationUnavailable>(result));
+    CHECK(std::get<TranslationUnavailable>(result).reason ==
+          TranslationUnavailable::Reason::ExternalFetchNotAllowed);
+    CHECK(backend.calls == 1);
 
-    CHECK(service.isEnabled());
-    CHECK(service.targetLanguage() == QStringLiteral("ja"));
-    CHECK(service.settings().apiKeyOverride == QStringLiteral("override"));
-    CHECK(service.shouldAutoTranslate(QStringLiteral("sender@example.test"), QString{}));
-    CHECK(service.shouldAutoTranslate(QString{}, QStringLiteral("example.test")));
+    REQUIRE_FALSE(
+        fixture.service.setAutoTranslateDomain(QStringLiteral("Example.test"), true).has_value());
+    CHECK(fixture.service.shouldAutoTranslate(QString{}, QStringLiteral("example.test")));
 }
 
-TEST_CASE("translation service reloads settings after the application identity is finalized",
-          "[app][translation][settings]")
+TEST_CASE("translation service returns identity text without invoking a provider",
+          "[translation][service]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
-    ApplicationIdentityGuard identity;
     QTemporaryDir settingsDirectory;
     QTemporaryDir cacheDirectory;
     REQUIRE(settingsDirectory.isValid());
     REQUIRE(cacheDirectory.isValid());
     useTemporarySettings(settingsDirectory);
 
-    QCoreApplication::setOrganizationName(QStringLiteral("Javelin Mail"));
-    QCoreApplication::setApplicationName(QStringLiteral("Javelin Mail"));
-    javelin::app::TranslationService::saveSettings({
-        .enabled = true,
-        .apiKeyOverride = {},
-        .targetLanguage = QStringLiteral("en"),
-        .autoTranslateSenders = {},
-        .autoTranslateDomains = {},
-    });
+    TranslationSettingsStore store;
+    REQUIRE_FALSE(store
+                      .save({
+                          .provider = TranslationProvider::Local,
+                          .apiKeyOverride = {},
+                          .targetLanguage = QStringLiteral("fr"),
+                          .autoTranslateSenders = {},
+                          .autoTranslateDomains = {},
+                      })
+                      .has_value());
+    FakeBackend backend;
+    ServiceFixture fixture{cacheDirectory.filePath(QStringLiteral("cache.sqlite3")), &backend};
+    const TranslationChunks chunks{QStringList{QStringLiteral("Bonjour")}};
 
-    auto connectionResult = javelin::jmap::cache::DatabaseConnection::open({
-        .connectionName = makeConnectionName(),
-        .databasePath = cacheDirectory.filePath(QStringLiteral("cache.sqlite3")),
-    });
-    if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&connectionResult))
-    {
-        FAIL(error->message.toStdString());
-    }
-    auto connection =
-        std::get<javelin::jmap::cache::DatabaseConnection>(std::move(connectionResult));
-    javelin::jmap::cache::TranslationCacheRepository repository{connection};
-    QNetworkAccessManager networkAccessManager;
-    javelin::app::TranslationService service{networkAccessManager, repository};
-
-    QCoreApplication::setApplicationName(QStringLiteral("javelinmail"));
-    javelin::app::TranslationService::saveSettings({
-        .enabled = true,
-        .apiKeyOverride = {},
-        .targetLanguage = QStringLiteral("en"),
-        .autoTranslateSenders = {QStringLiteral("no-reply@ci-en.net")},
-        .autoTranslateDomains = {},
-    });
-
-    CHECK_FALSE(service.shouldAutoTranslate(QStringLiteral("no-reply@ci-en.net"),
-                                            QStringLiteral("ci-en.net")));
-    service.reloadSettings();
-    CHECK(service.shouldAutoTranslate(QStringLiteral("no-reply@ci-en.net"),
-                                      QStringLiteral("ci-en.net")));
+    const auto result = QCoro::waitFor(fixture.service.translate(
+        chunks, QStringLiteral("fr"), ExternalFetchPolicy::InstalledAndCachedOnly));
+    REQUIRE(std::holds_alternative<TranslationChunks>(result));
+    CHECK(std::get<TranslationChunks>(result) == chunks);
+    CHECK(backend.calls == 0);
 }

@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.19)
+cmake_minimum_required(VERSION 3.24)
 project(Javelin-Mail VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 23)
@@ -8,6 +8,18 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(JAVELIN_ENABLE_LOCAL_DATA_INSTALL "Copy app data into the active install prefix during builds" ON)
 option(JAVELIN_ENABLE_FASTTEXT_LANGUAGE_DETECTION "Use fastText for local mail language detection" ON)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$")
+    set(JAVELIN_BERGAMOT_DEFAULT ON)
+else()
+    set(JAVELIN_BERGAMOT_DEFAULT OFF)
+endif()
+option(JAVELIN_ENABLE_BERGAMOT_TRANSLATION
+       "Build native local message translation"
+       ${JAVELIN_BERGAMOT_DEFAULT})
+if(JAVELIN_ENABLE_BERGAMOT_TRANSLATION AND
+   NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$")
+    message(FATAL_ERROR "Native Bergamot translation is currently supported only on x86-64")
+endif()
 option(JAVELIN_INSTALL_SYSTEMD_USER_SERVICE "Install the javelind systemd user unit" ON)
 
 include(cmake/Warnings.cmake)
@@ -205,7 +217,6 @@ set(JAVELIN_FORMAT_FILES
     src/app/SieveApplicationPorts.h
     src/app/SieveCommandService.cpp
     src/app/SieveCommandService.h
-    src/app/TranslationApplicationPorts.h
     src/app/UndoApplicationPorts.h
     src/app/UndoCommandService.cpp
     src/app/UndoCommandService.h
@@ -507,8 +518,6 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/cache/SyncStateRepository.h
     src/jmap/cache/ThreadRepository.cpp
     src/jmap/cache/ThreadRepository.h
-    src/jmap/cache/TranslationCacheRepository.cpp
-    src/jmap/cache/TranslationCacheRepository.h
     src/jmap/domain/MailEntities.h
     src/jmap/contacts/ContactTypes.cpp
     src/jmap/contacts/ContactTypes.h
@@ -581,10 +590,6 @@ set(JAVELIN_FORMAT_FILES
     src/jmap/OperationError.cpp
     src/jmap/OperationError.h
     src/jmap/EmailMutation.h
-    src/jmap/language/FastTextLanguageDetector.cpp
-    src/jmap/language/FastTextLanguageDetector.h
-    src/jmap/language/LanguageDetection.cpp
-    src/jmap/language/LanguageDetection.h
     src/jmap/submission/ComposeService.cpp
     src/jmap/submission/ComposeService.h
     src/jmap/submission/ComposeRevisionGate.h
@@ -768,8 +773,6 @@ add_library(javelin_jmap STATIC
     src/jmap/cache/SyncStateRepository.h
     src/jmap/cache/ThreadRepository.cpp
     src/jmap/cache/ThreadRepository.h
-    src/jmap/cache/TranslationCacheRepository.cpp
-    src/jmap/cache/TranslationCacheRepository.h
     src/jmap/domain/MailEntities.h
     src/jmap/domain/MailEntityParsers.cpp
     src/jmap/domain/MailEntityParsers.h
@@ -835,10 +838,6 @@ add_library(javelin_jmap STATIC
     src/jmap/JmapCore.h
     src/jmap/OperationError.cpp
     src/jmap/OperationError.h
-    src/jmap/language/FastTextLanguageDetector.cpp
-    src/jmap/language/FastTextLanguageDetector.h
-    src/jmap/language/LanguageDetection.cpp
-    src/jmap/language/LanguageDetection.h
     src/jmap/submission/ComposeService.cpp
     src/jmap/submission/ComposeService.h
     src/jmap/submission/ComposeRevisionGate.h
@@ -870,18 +869,82 @@ target_link_libraries(javelin_jmap
         Qt::Concurrent
         glaze::glaze
 )
-if(JAVELIN_ENABLE_FASTTEXT_LANGUAGE_DETECTION)
-    target_link_libraries(javelin_jmap PRIVATE fasttext_javelin)
-    target_compile_definitions(javelin_jmap
-        PUBLIC
-            JAVELIN_ENABLE_FASTTEXT_LANGUAGE_DETECTION=1
-            JAVELIN_FASTTEXT_LANGUAGE_MODEL_PATH="${JAVELIN_FASTTEXT_LANGUAGE_MODEL_PATH}"
-    )
-    target_compile_options(javelin_jmap PRIVATE -fexceptions)
-endif()
 javelin_set_project_warnings(javelin_jmap)
 javelin_enable_static_analysis(javelin_jmap)
 javelin_enable_sanitizers(javelin_jmap)
+
+add_library(javelin_translation STATIC
+    src/gui/translation/TranslationTypes.h
+    src/gui/translation/TranslationSettingsPolicy.cpp
+    src/gui/translation/TranslationSettingsStore.h
+    src/gui/translation/TranslationSettingsStore.cpp
+    src/gui/translation/TranslationCache.h
+    src/gui/translation/TranslationCache.cpp
+    src/gui/translation/TranslationBackend.h
+    src/gui/translation/GoogleTranslationBackend.h
+    src/gui/translation/GoogleTranslationBackend.cpp
+    src/gui/translation/TranslationService.h
+    src/gui/translation/TranslationService.cpp
+    src/gui/translation/LanguageDetection.h
+    src/gui/translation/LanguageDetection.cpp
+    src/gui/translation/FastTextLanguageDetector.h
+    src/gui/translation/FastTextLanguageDetector.cpp
+)
+if(JAVELIN_ENABLE_BERGAMOT_TRANSLATION)
+    target_sources(javelin_translation PRIVATE
+        src/gui/translation/TranslationModelManifest.h
+        src/gui/translation/TranslationModelManifest.cpp
+        src/gui/translation/TranslationModelStore.h
+        src/gui/translation/TranslationModelStore.cpp
+        src/gui/translation/BergamotTranslationBackend.h
+        src/gui/translation/BergamotTranslationBackend.cpp
+    )
+endif()
+target_include_directories(javelin_translation PUBLIC
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
+)
+target_link_libraries(javelin_translation
+    PUBLIC
+        QCoro6::Core
+        Qt::Core
+    PRIVATE
+        QCoro6::Network
+        Qt::Concurrent
+        Qt::Network
+        Qt::Sql
+)
+if(JAVELIN_ENABLE_FASTTEXT_LANGUAGE_DETECTION)
+    target_link_libraries(javelin_translation PRIVATE fasttext_javelin)
+    target_compile_definitions(javelin_translation
+        PUBLIC
+            JAVELIN_ENABLE_FASTTEXT_LANGUAGE_DETECTION=1
+            JAVELIN_FASTTEXT_LANGUAGE_MODEL_PATH=\"${JAVELIN_FASTTEXT_LANGUAGE_MODEL_PATH}\"
+    )
+else()
+    target_compile_definitions(javelin_translation
+        PUBLIC JAVELIN_ENABLE_FASTTEXT_LANGUAGE_DETECTION=0)
+endif()
+if(JAVELIN_ENABLE_BERGAMOT_TRANSLATION)
+    target_link_libraries(javelin_translation PRIVATE
+        bergamot-translator-source
+        PkgConfig::ZSTD
+    )
+    target_compile_definitions(javelin_translation PUBLIC
+        JAVELIN_ENABLE_BERGAMOT_TRANSLATION=1
+        JAVELIN_SSPLIT_PREFIX_DIR=\"${CMAKE_INSTALL_PREFIX}/${KDE_INSTALL_DATADIR}/javelinmail/models/ssplit\"
+    )
+    target_include_directories(javelin_translation SYSTEM PRIVATE
+        "${JAVELIN_BERGAMOT_SOURCE_DIR}/inference"
+        "${JAVELIN_BERGAMOT_SOURCE_DIR}/inference/src"
+    )
+else()
+    target_compile_definitions(javelin_translation PUBLIC
+        JAVELIN_ENABLE_BERGAMOT_TRANSLATION=0)
+endif()
+target_compile_options(javelin_translation PRIVATE -fexceptions)
+javelin_set_project_warnings(javelin_translation)
+javelin_enable_static_analysis(javelin_translation)
+javelin_enable_sanitizers(javelin_translation)
 
 add_library(javelin_gui STATIC
     src/app/AddressSuggestionStore.cpp
@@ -1026,7 +1089,6 @@ add_library(javelin_gui STATIC
 )
 target_sources(javelin_gui PRIVATE
     src/app/SettingsApplicationPorts.h
-    src/app/TranslationSettingsPolicy.cpp
     src/gui/messageview/MessageAppearance.cpp
     src/gui/messageview/MessageAppearance.h
     src/gui/settings/GuiSettings.cpp
@@ -1051,8 +1113,8 @@ foreach(gui_source IN LISTS javelin_gui_boundary_sources)
        gui_source_contents MATCHES "javelin::jmap::cache::Database(Connection|Transaction|WriteScope)" OR
        gui_source_contents MATCHES "#include \"jmap/contacts/ContactService\\.h\"" OR
        gui_source_contents MATCHES "#include \"jmap/sync/(MailboxRefreshExecutor|MailboxStateRefreshExecutor)\\.h\"" OR
-       gui_source_contents MATCHES "#include \"app/(MailApplicationService|TranslationService)\\.h\"" OR
-       gui_source_contents MATCHES "javelin::app::(MailApplicationService|TranslationService)" OR
+       gui_source_contents MATCHES "#include \"app/MailApplicationService\\.h\"" OR
+       gui_source_contents MATCHES "javelin::app::MailApplicationService" OR
        gui_source_contents MATCHES "AccountSyncConfiguration" OR
        gui_source_contents MATCHES "javelin::jmap::MailboxPage(Result|Summary)" OR
        gui_source_contents MATCHES "javelin::jmap::MessageSearch(Result|Summary)" OR
@@ -1172,6 +1234,7 @@ target_link_libraries(javelin_gui
         KF6::XmlGui
         KF6::TextEditor
         QCoro6::Coro
+        javelin_translation
     PRIVATE
         Qt::Concurrent
         javelin_cache_read
@@ -1182,10 +1245,6 @@ javelin_enable_static_analysis(javelin_gui)
 javelin_enable_sanitizers(javelin_gui)
 # QCoro uses exceptions internally
 target_compile_options(javelin_gui PRIVATE -fexceptions)
-if(JAVELIN_ENABLE_FASTTEXT_LANGUAGE_DETECTION)
-    target_compile_definitions(javelin_gui PRIVATE
-        JAVELIN_FASTTEXT_LANGUAGE_MODEL_PATH="${JAVELIN_FASTTEXT_LANGUAGE_MODEL_PATH}")
-endif()
 
 add_library(javelin_calendar_gui STATIC
     src/gui/calendar/MonthCalendarLayout.cpp
@@ -1250,7 +1309,6 @@ add_library(javelin_daemon_core STATIC
     src/app/SieveApplicationPorts.h
     src/app/SieveCommandService.cpp
     src/app/SieveCommandService.h
-    src/app/TranslationApplicationPorts.h
     src/app/UndoApplicationPorts.h
     src/app/UndoCommandService.cpp
     src/app/UndoCommandService.h
@@ -1347,10 +1405,6 @@ add_library(javelin_daemon_core STATIC
     src/app/SearchSession.h
     src/app/SettingsRepository.cpp
     src/app/SettingsRepository.h
-    src/app/TranslationService.cpp
-    src/app/TranslationService.h
-    src/app/TranslationSettings.cpp
-    src/app/TranslationSettingsPolicy.cpp
     src/app/WorkScheduler.cpp
     src/app/WorkScheduler.h
     src/app/WorkTaskPort.h
@@ -1488,10 +1542,6 @@ qt_add_executable(javelin
     src/jmap/domain/MailEntityParsers.cpp
     src/jmap/domain/MailEntityParsers.h
     src/jmap/domain/MailEntities.h
-    src/jmap/language/FastTextLanguageDetector.cpp
-    src/jmap/language/FastTextLanguageDetector.h
-    src/jmap/language/LanguageDetection.cpp
-    src/jmap/language/LanguageDetection.h
     src/jmap/search/EmailSearch.cpp
     src/jmap/search/EmailSearch.h
     src/jmap/sync/MailboxQueryDescriptor.cpp
@@ -1524,19 +1574,26 @@ qt_add_resources(javelin "javelin_runtime_darkreader"
     FILES
         "${CMAKE_CURRENT_SOURCE_DIR}/res/vendor/darkreader/darkreader.js"
 )
+if(JAVELIN_ENABLE_BERGAMOT_TRANSLATION)
+    set_source_files_properties(
+        "${JAVELIN_BERGAMOT_SOURCE_DIR}/LICENSE"
+        PROPERTIES QT_RESOURCE_ALIAS "MPL-2.0.txt")
+    qt_add_resources(javelin "javelin_translation_models"
+        PREFIX "/javelin/translation"
+        BASE "${CMAKE_CURRENT_SOURCE_DIR}/res/models/translations"
+        FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/res/models/translations/manifest-v1.json"
+    )
+    qt_add_resources(javelin "javelin_translation_licenses"
+        PREFIX "/javelin/translation/licenses"
+        FILES
+            "${JAVELIN_BERGAMOT_SOURCE_DIR}/LICENSE"
+    )
+endif()
 target_compile_definitions(javelin PRIVATE
     JAVELIN_APP_VERSION="${PROJECT_VERSION}"
     JAVELIN_INSTALL_BINDIR="${JAVELIN_INSTALL_BINDIR_ABSOLUTE}"
 )
-if(JAVELIN_ENABLE_FASTTEXT_LANGUAGE_DETECTION)
-    target_link_libraries(javelin PRIVATE fasttext_javelin)
-    target_compile_definitions(javelin PRIVATE
-        JAVELIN_ENABLE_FASTTEXT_LANGUAGE_DETECTION=1
-        JAVELIN_FASTTEXT_LANGUAGE_MODEL_PATH="${JAVELIN_FASTTEXT_LANGUAGE_MODEL_PATH}"
-    )
-else()
-    target_compile_definitions(javelin PRIVATE JAVELIN_ENABLE_FASTTEXT_LANGUAGE_DETECTION=0)
-endif()
 target_compile_options(javelin PRIVATE -fexceptions)
 javelin_set_project_warnings(javelin)
 javelin_enable_static_analysis(javelin)
@@ -1569,13 +1626,15 @@ function(javelin_assert_gui_settings_boundary target)
         endif()
         file(RELATIVE_PATH relative_source "${CMAKE_CURRENT_SOURCE_DIR}" "${source_path}")
         file(READ "${source_path}" source_contents)
-        if(source_contents MATCHES "QSettings")
+        if(source_contents MATCHES "QSettings" AND
+           NOT relative_source STREQUAL "src/gui/translation/TranslationSettingsStore.cpp")
             message(FATAL_ERROR
                     "Production GUI source accesses canonical QSettings: ${relative_source}")
         endif()
     endforeach()
 endfunction()
 
+javelin_assert_gui_settings_boundary(javelin_translation)
 javelin_assert_gui_settings_boundary(javelin_gui)
 javelin_assert_gui_settings_boundary(javelin)
 
@@ -1622,6 +1681,14 @@ set(_local_kxmlgui_dir "${CMAKE_INSTALL_PREFIX}/${KDE_INSTALL_KXMLGUIDIR}/javeli
 set(_local_kxmlgui_runtime_dir
     "${CMAKE_INSTALL_PREFIX}/${KDE_INSTALL_DATADIR}/kxmlgui/javelinmail")
 set(_local_icon_theme_dir "${CMAKE_INSTALL_PREFIX}/${KDE_INSTALL_ICONDIR}")
+if(JAVELIN_ENABLE_BERGAMOT_TRANSLATION)
+    set(_ssplit_prefix_source_dir
+        "${JAVELIN_BERGAMOT_SOURCE_DIR}/inference/3rd_party/ssplit-cpp/nonbreaking_prefixes")
+    set(_local_ssplit_prefix_dir
+        "${CMAKE_INSTALL_PREFIX}/${KDE_INSTALL_DATADIR}/javelinmail/models/ssplit")
+    set(_local_translation_notice_dir
+        "${CMAKE_INSTALL_PREFIX}/${KDE_INSTALL_DATADIR}/licenses/javelinmail/translations")
+endif()
 target_compile_definitions(javelin_daemon_core
     PRIVATE JAVELIN_ICON_THEME_PATH="${_local_icon_theme_dir}"
 )
@@ -1664,9 +1731,47 @@ if(JAVELIN_ENABLE_LOCAL_DATA_INSTALL)
     add_custom_target(install_data DEPENDS "${_install_data_stamp}")
 endif()
 
+if(JAVELIN_ENABLE_LOCAL_DATA_INSTALL AND JAVELIN_ENABLE_BERGAMOT_TRANSLATION)
+    set(_install_translation_data_stamp
+        "${CMAKE_CURRENT_BINARY_DIR}/install_translation_data.stamp")
+    add_custom_command(
+        OUTPUT "${_install_translation_data_stamp}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${_local_ssplit_prefix_dir}"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${_ssplit_prefix_source_dir}"
+            "${_local_ssplit_prefix_dir}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${_local_translation_notice_dir}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${JAVELIN_BERGAMOT_SOURCE_DIR}/LICENSE"
+            "${_local_translation_notice_dir}/Mozilla-Translations-MPL-2.0.txt"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${JAVELIN_BERGAMOT_SOURCE_DIR}/inference/3rd_party/ssplit-cpp/LICENSE.md"
+            "${_local_translation_notice_dir}/ssplit-cpp-LICENSE.md"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${JAVELIN_BERGAMOT_SOURCE_DIR}/inference/marian-fork/LICENSE.md"
+            "${_local_translation_notice_dir}/Marian-LICENSE.md"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${PROJECT_SOURCE_DIR}/res/models/translations/manifest-v1.json"
+            "${_local_translation_notice_dir}/manifest-v1.json"
+        COMMAND ${CMAKE_COMMAND} -E touch "${_install_translation_data_stamp}"
+        DEPENDS
+            "${JAVELIN_BERGAMOT_SOURCE_DIR}/LICENSE"
+            "${JAVELIN_BERGAMOT_SOURCE_DIR}/inference/3rd_party/ssplit-cpp/LICENSE.md"
+            "${JAVELIN_BERGAMOT_SOURCE_DIR}/inference/marian-fork/LICENSE.md"
+            "${PROJECT_SOURCE_DIR}/res/models/translations/manifest-v1.json"
+        COMMENT "Installing local translation resources"
+        VERBATIM
+    )
+    add_custom_target(install_translation_data
+                      DEPENDS "${_install_translation_data_stamp}")
+endif()
+
 if(JAVELIN_ENABLE_LOCAL_DATA_INSTALL)
     add_dependencies(javelin install_data)
     add_dependencies(javelind install_data)
+    if(JAVELIN_ENABLE_BERGAMOT_TRANSLATION)
+        add_dependencies(javelin install_translation_data)
+    endif()
 endif()
 
 file(GLOB_RECURSE JAVELIN_ALL_FORMAT_FILES CONFIGURE_DEPENDS
@@ -1705,6 +1810,32 @@ install(FILES res/vendor/darkreader/LICENSE
 install(DIRECTORY res/models/fasttext/
     DESTINATION ${KDE_INSTALL_DATADIR}/javelinmail/models/fasttext
 )
+
+if(JAVELIN_ENABLE_BERGAMOT_TRANSLATION)
+    install(DIRECTORY "${_ssplit_prefix_source_dir}/"
+        DESTINATION ${KDE_INSTALL_DATADIR}/javelinmail/models/ssplit
+    )
+    install(FILES
+        "${JAVELIN_BERGAMOT_SOURCE_DIR}/LICENSE"
+        DESTINATION ${KDE_INSTALL_DATADIR}/licenses/javelinmail/translations
+        RENAME Mozilla-Translations-MPL-2.0.txt
+    )
+    install(FILES
+        "${JAVELIN_BERGAMOT_SOURCE_DIR}/inference/3rd_party/ssplit-cpp/LICENSE.md"
+        DESTINATION ${KDE_INSTALL_DATADIR}/licenses/javelinmail/translations
+        RENAME ssplit-cpp-LICENSE.md
+    )
+    install(FILES
+        "${JAVELIN_BERGAMOT_SOURCE_DIR}/inference/marian-fork/LICENSE.md"
+        DESTINATION ${KDE_INSTALL_DATADIR}/licenses/javelinmail/translations
+        RENAME Marian-LICENSE.md
+    )
+    install(FILES
+        res/models/translations/manifest-v1.json
+        res/models/translations/README.md
+        DESTINATION ${KDE_INSTALL_DATADIR}/licenses/javelinmail/translations
+    )
+endif()
 
 install(FILES res/javelinmail.desktop
     DESTINATION ${KDE_INSTALL_APPDIR}

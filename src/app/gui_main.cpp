@@ -225,7 +225,7 @@ int main(int argc, char* argv[])
         .runtimeDirectory = runtime,
         .socketPath = socketPath + QStringLiteral(".activation"),
         .limits = {},
-        .protocol = {.major = 3, .minor = 1},
+        .protocol = {.major = 4, .minor = 0},
         .expectedBuild =
             javelin::protocol::BuildIdentity{.application = QStringLiteral("Javelin-Mail"),
                                              .revision = QStringLiteral(JAVELIN_APP_VERSION)},
@@ -318,7 +318,7 @@ int main(int argc, char* argv[])
          .socketPath = socketPath,
          .daemonExecutable =
              QDir{QCoreApplication::applicationDirPath()}.filePath(QStringLiteral("javelind")),
-         .protocol = {.major = 3, .minor = 1},
+         .protocol = {.major = 4, .minor = 0},
          .build = {.application = QStringLiteral("Javelin-Mail"),
                    .revision = QStringLiteral(JAVELIN_APP_VERSION)},
          .startTimeoutMilliseconds = 5000,
@@ -381,7 +381,7 @@ int main(int argc, char* argv[])
             services->mailboxReader(), services->contactReader(), services->calendarReader(),
             services->calendarCommandPort(), services->contactIdentityLookup(),
             services->identityReader(), services->messageViewReader(), services->queryReader(),
-            services->translationPort(), services->composeCommandPort(),
+            services->translationService(), services->composeCommandPort(),
             services->contactCommandPort(), services->mailCommandPort(),
             services->sieveCommandPort(), services->accountRefreshPort(),
             services->onboardingPort(), services->messageContentPort(),

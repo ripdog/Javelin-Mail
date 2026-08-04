@@ -1,4 +1,4 @@
-#include "jmap/language/LanguageDetection.h"
+#include "gui/translation/LanguageDetection.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -6,10 +6,10 @@
 #include <string>
 
 TEST_CASE("language detection policy compares confident text with the translation target",
-          "[jmap][language]")
+          "[translation][language]")
 {
-    using javelin::jmap::language::LanguageDetectionResult;
-    using javelin::jmap::language::shouldOfferTranslation;
+    using javelin::gui::translation::LanguageDetectionResult;
+    using javelin::gui::translation::shouldOfferTranslation;
 
     const LanguageDetectionResult french{
         .languageCode = "fr",
@@ -57,16 +57,18 @@ TEST_CASE("language detection policy compares confident text with the translatio
         "ja"));
 }
 
-TEST_CASE("language detection service ignores short snippets", "[jmap][language]")
+TEST_CASE("language detection service ignores short snippets", "[translation][language]")
 {
-    javelin::jmap::language::LanguageDetectionService service{std::string{}};
+    javelin::gui::translation::LanguageDetectionService service{std::string{}};
 
     CHECK_FALSE(service.detect("Bonjour").has_value());
 }
 
-TEST_CASE("language detection recognizes Japanese body text", "[jmap][language]")
+TEST_CASE("language detection recognizes Japanese body text", "[translation][language]")
 {
-    javelin::jmap::language::LanguageDetectionService service{JAVELIN_FASTTEXT_LANGUAGE_MODEL_PATH};
+    using javelin::gui::translation::shouldOfferTranslation;
+    javelin::gui::translation::LanguageDetectionService service{
+        JAVELIN_FASTTEXT_LANGUAGE_MODEL_PATH};
     const auto detection = service.detect(
         "クリエイター新着記事のお知らせ2026年07月30日版fuwafuwataimu様4件の新着記事があります"
         "フォロー中のクリエイターwhisp新作RPG体験版公開中しつけあいあと3日発売カウントダウン"

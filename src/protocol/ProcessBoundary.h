@@ -43,7 +43,7 @@ namespace javelin::protocol
 
     struct ProtocolVersion
     {
-        std::uint16_t major = 3;
+        std::uint16_t major = 4;
         std::uint16_t minor = 0;
 
         friend bool operator==(const ProtocolVersion&, const ProtocolVersion&) = default;
@@ -178,7 +178,6 @@ namespace javelin::protocol
         MailboxWindow,
         SearchWindow,
         SearchRetire,
-        TranslationTranslate,
         Undo,
         Redo,
         UndoAcknowledgeRemove,
@@ -265,17 +264,6 @@ namespace javelin::protocol
                                const MailboxSelectionSettings&) = default;
     };
 
-    struct TranslationSettings
-    {
-        bool enabled = true;
-        QString apiKeyOverride;
-        QString targetLanguage = QStringLiteral("en");
-        std::vector<QString> autoTranslateSenders;
-        std::vector<QString> autoTranslateDomains;
-
-        friend bool operator==(const TranslationSettings&, const TranslationSettings&) = default;
-    };
-
     struct AppearanceSettings
     {
         std::int32_t messageColorMode = 0;
@@ -316,7 +304,6 @@ namespace javelin::protocol
         std::optional<std::vector<MailboxSelectionSettings>> notificationMailboxSelections;
         std::optional<std::vector<QString>> remoteContentSenders;
         std::optional<std::vector<QString>> remoteContentDomains;
-        std::optional<TranslationSettings> translation;
         std::optional<AppearanceSettings> appearance;
         std::optional<AttachmentSettings> attachments;
         std::optional<std::int32_t> undoSendDelaySeconds;
@@ -435,13 +422,12 @@ namespace javelin::protocol
     struct SettingsSnapshot
     {
         SettingsRevision revision;
-        std::uint32_t schemaVersion = 2;
+        std::uint32_t schemaVersion = 3;
         std::vector<AccountSettings> accounts;
         std::vector<MailboxSelectionSettings> syncedMailboxSelections;
         std::vector<MailboxSelectionSettings> notificationMailboxSelections;
         std::vector<QString> remoteContentSenders;
         std::vector<QString> remoteContentDomains;
-        TranslationSettings translation;
         AppearanceSettings appearance;
         AttachmentSettings attachments;
         std::int32_t undoSendDelaySeconds = 10;

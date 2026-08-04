@@ -767,6 +767,9 @@ TEST_CASE("mailbox refresh executor applies updated-only deltas without full reb
             .sessionState = "session-state-2",
         })),
     });
+    QSqlQuery createInterleaveProbe{databaseContext.connection.database()};
+    REQUIRE(createInterleaveProbe.exec(QStringLiteral(
+        "CREATE TABLE refresh_interleave_probe(key TEXT PRIMARY KEY,value TEXT NOT NULL) STRICT")));
     int interleavedWrites = 0;
     transport.onSend = [&]()
     {
@@ -786,9 +789,8 @@ TEST_CASE("mailbox refresh executor applies updated-only deltas without full reb
         auto transaction =
             std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
         QSqlQuery write{writer.database()};
-        REQUIRE(write.exec(QStringLiteral(
-            "INSERT INTO translation_cache(source_language,target_language,input_hash,input_text,"
-            "translated_text) VALUES('en','fr','refresh-interleave','source','translated')")));
+        REQUIRE(write.exec(QStringLiteral("INSERT INTO refresh_interleave_probe(key,value) "
+                                          "VALUES('refresh-interleave','translated')")));
         REQUIRE_FALSE(transaction.commit().has_value());
     };
 

@@ -1,4 +1,4 @@
-#include "jmap/cache/TranslationCacheRepository.h"
+#include "gui/translation/TranslationCache.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -6,11 +6,13 @@
 #include <QTemporaryDir>
 
 #include <memory>
+#include <optional>
 #include <variant>
+
+using namespace javelin::gui::translation;
 
 namespace
 {
-
     class ApplicationGuard
     {
       public:
@@ -20,9 +22,8 @@ namespace
             {
                 return;
             }
-
             static int argc = 1;
-            static char appName[] = "javelin-tests";
+            static char appName[] = "javelin-translation-cache-tests";
             static char* argv[] = {appName, nullptr};
             m_application = std::make_unique<QCoreApplication>(argc, argv);
         }
@@ -30,56 +31,75 @@ namespace
       private:
         std::unique_ptr<QCoreApplication> m_application;
     };
-
-    [[nodiscard]] QString makeConnectionName()
-    {
-        static int counter = 0;
-        ++counter;
-        return QStringLiteral("javelin-translation-cache-%1").arg(counter);
-    }
-
 } // namespace
 
-TEST_CASE("translation cache repository round-trips translated strings",
-          "[jmap][cache][translation]")
+TEST_CASE("GUI translation cache round-trips Unicode and isolates provider revisions",
+          "[translation][cache]")
 {
     ApplicationGuard application;
     Q_UNUSED(application);
+    QTemporaryDir temporaryDirectory;
+    REQUIRE(temporaryDirectory.isValid());
+    TranslationCache cache{temporaryDirectory.filePath(QStringLiteral("cache.sqlite3"))};
+    REQUIRE_FALSE(cache.open().has_value());
 
-    QTemporaryDir temporaryDir;
-    REQUIRE(temporaryDir.isValid());
-
-    auto connectionResult = javelin::jmap::cache::DatabaseConnection::open({
-        .connectionName = makeConnectionName(),
-        .databasePath = temporaryDir.filePath(QStringLiteral("cache.sqlite3")),
-    });
-    if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&connectionResult))
-    {
-        FAIL(error->message.toStdString());
-    }
-
-    auto connection =
-        std::get<javelin::jmap::cache::DatabaseConnection>(std::move(connectionResult));
-    javelin::jmap::cache::TranslationCacheRepository repository{connection};
-
-    REQUIRE_FALSE(repository
-                      .upsert({
-                          .sourceLanguage = QStringLiteral("auto"),
+    REQUIRE_FALSE(cache
+                      .upsert({TranslationCacheRecord{
+                          .provider = TranslationProvider::Google,
+                          .sourceLanguage = QStringLiteral("ja"),
                           .targetLanguage = QStringLiteral("en"),
-                          .inputText = QStringLiteral("こんにちは"),
-                          .translatedText = QStringLiteral("Hello"),
-                      })
+                          .backendRevision = QStringLiteral("google-v1"),
+                          .inputText = QStringLiteral("こんにちは 🌏"),
+                          .translatedText = QStringLiteral("Hello 🌏"),
+                      }})
                       .has_value());
 
-    const auto result =
-        repository.find(QStringLiteral("auto"), QStringLiteral("en"), QStringLiteral("こんにちは"));
-    REQUIRE(std::holds_alternative<std::optional<QString>>(result));
-    const auto translated = std::get<std::optional<QString>>(result);
-    REQUIRE(translated.has_value());
-    CHECK(*translated == QStringLiteral("Hello"));
+    const auto hit =
+        cache.find(TranslationProvider::Google, QStringLiteral("ja"), QStringLiteral("en"),
+                   QStringLiteral("google-v1"), QStringLiteral("こんにちは 🌏"));
+    REQUIRE(std::holds_alternative<std::optional<QString>>(hit));
+    REQUIRE(std::get<std::optional<QString>>(hit).has_value());
+    CHECK(*std::get<std::optional<QString>>(hit) == QStringLiteral("Hello 🌏"));
 
-    const auto miss =
-        repository.find(QStringLiteral("auto"), QStringLiteral("en"), QStringLiteral("こんばんは"));
-    REQUIRE(std::holds_alternative<std::optional<QString>>(miss));
-    CHECK_FALSE(std::get<std::optional<QString>>(miss).has_value());
+    const auto providerMiss =
+        cache.find(TranslationProvider::Local, QStringLiteral("ja"), QStringLiteral("en"),
+                   QStringLiteral("google-v1"), QStringLiteral("こんにちは 🌏"));
+    REQUIRE(std::holds_alternative<std::optional<QString>>(providerMiss));
+    CHECK_FALSE(std::get<std::optional<QString>>(providerMiss).has_value());
+
+    const auto revisionMiss =
+        cache.find(TranslationProvider::Google, QStringLiteral("ja"), QStringLiteral("en"),
+                   QStringLiteral("google-v2"), QStringLiteral("こんにちは 🌏"));
+    REQUIRE(std::holds_alternative<std::optional<QString>>(revisionMiss));
+    CHECK_FALSE(std::get<std::optional<QString>>(revisionMiss).has_value());
+}
+
+TEST_CASE("GUI translation cache replaces an existing identity transactionally",
+          "[translation][cache]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir temporaryDirectory;
+    REQUIRE(temporaryDirectory.isValid());
+    TranslationCache cache{temporaryDirectory.filePath(QStringLiteral("cache.sqlite3"))};
+
+    const TranslationCacheRecord initial{
+        .provider = TranslationProvider::Local,
+        .sourceLanguage = QStringLiteral("fr"),
+        .targetLanguage = QStringLiteral("en"),
+        .backendRevision = QStringLiteral("model-a"),
+        .inputText = QStringLiteral("Bonjour"),
+        .translatedText = QStringLiteral("Hello"),
+    };
+    REQUIRE_FALSE(cache.upsert({initial}).has_value());
+    auto replacement = initial;
+    replacement.translatedText = QStringLiteral("Good morning");
+    REQUIRE_FALSE(cache.upsert({replacement}).has_value());
+
+    const auto result =
+        cache.find(TranslationProvider::Local, QStringLiteral("fr"), QStringLiteral("en"),
+                   QStringLiteral("model-a"), QStringLiteral("Bonjour"));
+    REQUIRE(std::holds_alternative<std::optional<QString>>(result));
+    CHECK(std::get<std::optional<QString>>(result) ==
+          std::optional<QString>{QStringLiteral("Good morning")});
 }

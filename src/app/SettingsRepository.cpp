@@ -33,12 +33,6 @@ namespace javelin::app
         constexpr auto remoteContentGroup = "remoteContent";
         constexpr auto remoteContentSendersKey = "allowedSenders";
         constexpr auto remoteContentDomainsKey = "allowedDomains";
-        constexpr auto translationGroup = "translation";
-        constexpr auto translationEnabledKey = "enabled";
-        constexpr auto translationApiKeyOverrideKey = "apiKeyOverride";
-        constexpr auto translationTargetLanguageKey = "targetLanguage";
-        constexpr auto translationSendersKey = "autoTranslateSenders";
-        constexpr auto translationDomainsKey = "autoTranslateDomains";
         constexpr auto appearanceGroup = "messageAppearance";
         constexpr auto appearanceColorModeKey = "colorMode";
         constexpr auto attachmentsGroup = "attachments";
@@ -53,7 +47,7 @@ namespace javelin::app
         constexpr auto workspaceColorKey = "color";
         constexpr auto legacyWindowGroup = "mainWindow";
         constexpr auto legacyCalendarColorsKey = "calendar/colorOverrides";
-        constexpr int settingsSchemaVersion = 2;
+        constexpr int settingsSchemaVersion = 3;
         constexpr int workspaceFormatVersion = 1;
         constexpr int maximumAccounts = 256;
         constexpr int maximumSelections = 256;
@@ -103,18 +97,6 @@ namespace javelin::app
             for (const auto& value : values)
                 result.push_back(value);
             return result;
-        }
-
-        void normalizeList(std::vector<QString>& values)
-        {
-            for (auto& value : values)
-                value = value.trimmed().toLower();
-            values.erase(std::remove_if(values.begin(), values.end(),
-                                        [](const QString& value) { return value.isEmpty(); }),
-                         values.end());
-            std::ranges::sort(values, [](const QString& left, const QString& right)
-                              { return left.compare(right, Qt::CaseInsensitive) < 0; });
-            values.erase(std::ranges::unique(values).begin(), values.end());
         }
 
         [[nodiscard]] std::optional<SettingsRepositoryError>
@@ -294,8 +276,6 @@ namespace javelin::app
                 snapshot.remoteContentSenders = *update.remoteContentSenders;
             if (update.remoteContentDomains.has_value())
                 snapshot.remoteContentDomains = *update.remoteContentDomains;
-            if (update.translation.has_value())
-                snapshot.translation = *update.translation;
             if (update.appearance.has_value())
                 snapshot.appearance = *update.appearance;
             if (update.attachments.has_value())
@@ -304,14 +284,6 @@ namespace javelin::app
                 snapshot.undoSendDelaySeconds = *update.undoSendDelaySeconds;
             if (update.workspace.has_value())
                 snapshot.workspace = *update.workspace;
-
-            normalizeList(snapshot.translation.autoTranslateSenders);
-            normalizeList(snapshot.translation.autoTranslateDomains);
-            snapshot.translation.apiKeyOverride = snapshot.translation.apiKeyOverride.trimmed();
-            snapshot.translation.targetLanguage =
-                snapshot.translation.targetLanguage.trimmed().toLower();
-            if (snapshot.translation.targetLanguage.isEmpty())
-                snapshot.translation.targetLanguage = QStringLiteral("en");
 
             if (snapshot.workspace.formatVersion != workspaceFormatVersion)
                 return invalidValue(settingKey(workspaceFormatVersionKey),
@@ -424,7 +396,7 @@ namespace javelin::app
         {
             bool ok = false;
             const auto version = settings.value(settingKey(schemaVersionKey)).toUInt(&ok);
-            if (!ok || (version != 1 && version != settingsSchemaVersion))
+            if (!ok || (version != 1 && version != 2 && version != settingsSchemaVersion))
             {
                 return SettingsRepositoryError{
                     .code = SettingsRepositoryErrorCode::UnsupportedSchema,
@@ -576,40 +548,6 @@ namespace javelin::app
                          .value(settingKey(remoteContentGroup) + QLatin1Char('/') +
                                 settingKey(remoteContentDomainsKey))
                          .toStringList());
-        snapshot.translation = {
-            .enabled = settings
-                           .value(settingKey(translationGroup) + QLatin1Char('/') +
-                                      settingKey(translationEnabledKey),
-                                  true)
-                           .toBool(),
-            .apiKeyOverride = settings
-                                  .value(settingKey(translationGroup) + QLatin1Char('/') +
-                                         settingKey(translationApiKeyOverrideKey))
-                                  .toString()
-                                  .trimmed(),
-            .targetLanguage = settings
-                                  .value(settingKey(translationGroup) + QLatin1Char('/') +
-                                             settingKey(translationTargetLanguageKey),
-                                         QStringLiteral("en"))
-                                  .toString()
-                                  .trimmed()
-                                  .toLower(),
-            .autoTranslateSenders =
-                toVector(settings
-                             .value(settingKey(translationGroup) + QLatin1Char('/') +
-                                    settingKey(translationSendersKey))
-                             .toStringList()),
-            .autoTranslateDomains =
-                toVector(settings
-                             .value(settingKey(translationGroup) + QLatin1Char('/') +
-                                    settingKey(translationDomainsKey))
-                             .toStringList()),
-        };
-        normalizeList(snapshot.translation.autoTranslateSenders);
-        normalizeList(snapshot.translation.autoTranslateDomains);
-        if (snapshot.translation.targetLanguage.isEmpty())
-            snapshot.translation.targetLanguage = QStringLiteral("en");
-
         snapshot.appearance.messageColorMode =
             settings
                 .value(settingKey(appearanceGroup) + QLatin1Char('/') +
@@ -682,21 +620,6 @@ namespace javelin::app
         settings.setValue(settingKey(remoteContentGroup) + QLatin1Char('/') +
                               settingKey(remoteContentDomainsKey),
                           toStringList(snapshot.remoteContentDomains));
-        settings.setValue(settingKey(translationGroup) + QLatin1Char('/') +
-                              settingKey(translationEnabledKey),
-                          snapshot.translation.enabled);
-        settings.setValue(settingKey(translationGroup) + QLatin1Char('/') +
-                              settingKey(translationApiKeyOverrideKey),
-                          snapshot.translation.apiKeyOverride);
-        settings.setValue(settingKey(translationGroup) + QLatin1Char('/') +
-                              settingKey(translationTargetLanguageKey),
-                          snapshot.translation.targetLanguage);
-        settings.setValue(settingKey(translationGroup) + QLatin1Char('/') +
-                              settingKey(translationSendersKey),
-                          toStringList(snapshot.translation.autoTranslateSenders));
-        settings.setValue(settingKey(translationGroup) + QLatin1Char('/') +
-                              settingKey(translationDomainsKey),
-                          toStringList(snapshot.translation.autoTranslateDomains));
         settings.setValue(settingKey(appearanceGroup) + QLatin1Char('/') +
                               settingKey(appearanceColorModeKey),
                           snapshot.appearance.messageColorMode);

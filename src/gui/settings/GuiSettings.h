@@ -1,7 +1,6 @@
 #pragma once
 
 #include "app/SettingsApplicationPorts.h"
-#include "app/TranslationApplicationPorts.h"
 #include "gui/messageview/MessageAppearance.h"
 #include "gui/settings/ConnectionSettings.h"
 #include "gui/settings/WorkspaceSettingsPort.h"
@@ -36,7 +35,6 @@ namespace javelin::gui::settings
         [[nodiscard]] QStringList notificationMailboxIds(QStringView accountId) const;
         [[nodiscard]] QStringList remoteContentSenders() const;
         [[nodiscard]] QStringList remoteContentDomains() const;
-        [[nodiscard]] javelin::app::TranslationSettings translationSettings() const;
         [[nodiscard]] javelin::gui::messageview::MessageAppearanceSettings
         messageAppearanceSettings() const;
         [[nodiscard]] AttachmentSaveSettings attachmentSaveSettings() const;

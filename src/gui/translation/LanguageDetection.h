@@ -1,11 +1,13 @@
 #pragma once
 
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
 
-namespace javelin::jmap::language
+namespace javelin::gui::translation
 {
+    class FastTextLanguageDetector;
 
     struct LanguageDetectionResult
     {
@@ -21,11 +23,16 @@ namespace javelin::jmap::language
     {
       public:
         explicit LanguageDetectionService(std::string modelPath);
+        ~LanguageDetectionService();
+
+        LanguageDetectionService(const LanguageDetectionService&) = delete;
+        LanguageDetectionService& operator=(const LanguageDetectionService&) = delete;
+        LanguageDetectionService(LanguageDetectionService&&) = delete;
+        LanguageDetectionService& operator=(LanguageDetectionService&&) = delete;
 
         [[nodiscard]] std::optional<LanguageDetectionResult> detect(std::string_view utf8Text);
 
       private:
-        std::string m_modelPath;
+        std::unique_ptr<FastTextLanguageDetector> m_detector;
     };
-
-} // namespace javelin::jmap::language
+} // namespace javelin::gui::translation

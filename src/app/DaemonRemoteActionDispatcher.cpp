@@ -13,8 +13,6 @@
 #include "app/PerformanceMetrics.h"
 #include "app/RemoteCodec.h"
 #include "app/SieveApplicationPorts.h"
-#include "app/TranslationApplicationPorts.h"
-#include "app/TranslationService.h"
 #include "app/UndoApplicationPorts.h"
 #include "app/WorkScheduler.h"
 
@@ -156,7 +154,6 @@ namespace javelin::app
             case Kind::SieveValidate:
             case Kind::MailboxObserve:
             case Kind::MailboxUnobserve:
-            case Kind::TranslationTranslate:
             case Kind::UndoSnapshot:
             case Kind::WorkList:
             case Kind::WorkSummary:
@@ -744,14 +741,6 @@ namespace javelin::app
                     m_services.mailService().retireSearchWindow(std::move(accountId),
                                                                 std::move(windowKey));
                     return empty();
-                });
-        case Kind::TranslationTranslate:
-            return decodeAndApply<TranslationChunks, QString, bool>(
-                command.payload, invalidPayload,
-                [&](TranslationChunks chunks, QString sourceLanguage, const bool allowNetwork)
-                {
-                    return launch(m_services.translationService().translate(
-                        std::move(chunks), std::move(sourceLanguage), allowNetwork));
                 });
         case Kind::Undo:
             return launch(performUndo(false));

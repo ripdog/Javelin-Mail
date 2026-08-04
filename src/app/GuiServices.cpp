@@ -21,7 +21,18 @@
 #include "jmap/render/InlineMessageUrl.h"
 
 #include "gui/settings/GuiSettings.h"
+#include "gui/translation/GoogleTranslationBackend.h"
+#include "gui/translation/TranslationCache.h"
+#include "gui/translation/TranslationService.h"
+#include "gui/translation/TranslationSettingsStore.h"
+#if JAVELIN_ENABLE_BERGAMOT_TRANSLATION
+#include "gui/translation/BergamotTranslationBackend.h"
+#include "gui/translation/TranslationModelManifest.h"
+#include "gui/translation/TranslationModelStore.h"
+#endif
 
+#include <QDebug>
+#include <QNetworkAccessManager>
 #include <QWebEngineProfile>
 
 #include <algorithm>
@@ -31,6 +42,18 @@
 
 namespace javelin::app
 {
+    namespace
+    {
+        [[nodiscard]] std::string languageModelPath()
+        {
+#ifdef JAVELIN_FASTTEXT_LANGUAGE_MODEL_PATH
+            return JAVELIN_FASTTEXT_LANGUAGE_MODEL_PATH;
+#else
+            return {};
+#endif
+        }
+    } // namespace
+
     GuiServices::GuiServices(GuiDaemonSession& session,
                              const bool installInlineMessageSchemeHandler)
         : m_session(session)
@@ -78,6 +101,37 @@ namespace javelin::app
         }
 
         m_settings = std::make_unique<javelin::gui::settings::GuiSettings>(m_session);
+        m_networkAccessManager = std::make_unique<QNetworkAccessManager>();
+        m_translationSettingsStore =
+            std::make_unique<javelin::gui::translation::TranslationSettingsStore>();
+        m_translationCache = std::make_unique<javelin::gui::translation::TranslationCache>();
+        m_googleTranslationBackend =
+            std::make_unique<javelin::gui::translation::GoogleTranslationBackend>(
+                *m_networkAccessManager);
+        javelin::gui::translation::TranslationBackend* localBackend = nullptr;
+#if JAVELIN_ENABLE_BERGAMOT_TRANSLATION
+        javelin::gui::translation::TranslationError manifestError;
+        m_translationModelManifest =
+            javelin::gui::translation::TranslationModelManifest::fromResource(manifestError);
+        if (m_translationModelManifest != nullptr)
+        {
+            m_translationModelStore =
+                std::make_unique<javelin::gui::translation::TranslationModelStore>(
+                    *m_translationModelManifest, *m_networkAccessManager);
+            m_bergamotTranslationBackend =
+                std::make_unique<javelin::gui::translation::BergamotTranslationBackend>(
+                    *m_translationModelManifest, *m_translationModelStore);
+            localBackend = m_bergamotTranslationBackend.get();
+        }
+        else
+        {
+            qWarning().noquote() << "Local translation disabled:" << manifestError.message;
+        }
+#endif
+        m_translationService = std::make_unique<javelin::gui::translation::TranslationService>(
+            *m_translationSettingsStore, *m_translationCache, *m_googleTranslationBackend,
+            languageModelPath(), localBackend, m_translationModelManifest.get(),
+            m_translationModelStore.get());
         m_remoteClient = std::make_unique<RemoteActionClient>(m_session);
         m_calendarReader = std::make_unique<RemoteCalendarReader>(*m_remoteClient);
         m_accountCommands = std::make_unique<RemoteAccountCommandPort>(*m_remoteClient);
@@ -94,7 +148,6 @@ namespace javelin::app
             std::make_unique<MessageListSessionFactoryService>(*m_materialization, *m_mailEvents);
         m_messageNavigation = std::make_unique<MessageNavigationCoordinator>();
         m_undoCommands = std::make_unique<RemoteUndoCommandPort>(m_session, *m_remoteClient);
-        m_translation = std::make_unique<RemoteTranslationPort>(m_session, *m_remoteClient);
         m_workTasks = std::make_unique<RemoteWorkTaskPort>(m_session, *m_remoteClient);
         m_onboarding = std::make_unique<RemoteOnboardingPort>(*m_remoteClient);
     }
@@ -218,9 +271,9 @@ namespace javelin::app
     {
         return *m_undoCommands;
     }
-    TranslationPort& GuiServices::translationPort()
+    javelin::gui::translation::TranslationService& GuiServices::translationService()
     {
-        return *m_translation;
+        return *m_translationService;
     }
     WorkTaskPort& GuiServices::workTaskPort()
     {

@@ -100,7 +100,8 @@ jobs:
             qt6-svg \
             qt6-tools \
             qt6-webengine \
-            qt6-websockets
+            qt6-websockets \
+            zstd
 
       - name: Build install tree
         run: |

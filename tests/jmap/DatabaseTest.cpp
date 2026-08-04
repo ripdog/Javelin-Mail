@@ -100,7 +100,7 @@ TEST_CASE("database connection creates the initial cache schema", "[jmap][cache]
                        "'mail_notification_outbox', "
                        "'raw_message_sources', 'mail_vault_objects', 'mail_vault_email_refs', "
                        "'offline_mailbox_scopes', 'background_jobs', "
-                       "'schema_migrations', 'translation_cache', 'search_windows', "
+                       "'schema_migrations', 'search_windows', "
                        "'search_window_items', 'mailbox_query_windows', "
                        "'mailbox_query_window_items', 'sync_state', 'consistency_domains', "
                        "'mutation_journal', 'calendar_notification_state', "
@@ -138,8 +138,7 @@ TEST_CASE("database connection creates the initial cache schema", "[jmap][cache]
                                     QStringLiteral("schema_migrations"),
                                     QStringLiteral("search_window_items"),
                                     QStringLiteral("search_windows"),
-                                    QStringLiteral("sync_state"),
-                                    QStringLiteral("translation_cache")});
+                                    QStringLiteral("sync_state")});
     CHECK(pragmaValue(connection.database(), QStringLiteral("foreign_keys")) ==
           QStringLiteral("1"));
     CHECK(pragmaValue(connection.database(), QStringLiteral("journal_mode"))
@@ -336,6 +335,9 @@ TEST_CASE("database write coordination serializes real connections with no SQLit
     });
     REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(initialOpen));
     auto initial = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(initialOpen));
+    QSqlQuery createProbe{initial.database()};
+    REQUIRE(createProbe.exec(QStringLiteral(
+        "CREATE TABLE write_coordination_probe(key TEXT PRIMARY KEY,value TEXT NOT NULL) STRICT")));
 
     std::atomic_int ready = 0;
     std::atomic_bool start = false;
@@ -384,9 +386,7 @@ TEST_CASE("database write coordination serializes real connections with no SQLit
             std::this_thread::sleep_for(std::chrono::milliseconds{50});
             QSqlQuery query{connection->database()};
             const bool inserted = query.exec(QStringLiteral(
-                "INSERT INTO "
-                "translation_cache(source_language,target_language,input_hash,input_text,"
-                "translated_text) VALUES('en','fr','first','one','un')"));
+                "INSERT INTO write_coordination_probe(key,value) VALUES('first','one')"));
             firstSucceeded.store(inserted && !transaction.commit().has_value(),
                                  std::memory_order_release);
         }};
@@ -413,9 +413,7 @@ TEST_CASE("database write coordination serializes real connections with no SQLit
                 std::get<javelin::jmap::cache::DatabaseTransaction>(std::move(transactionResult));
             QSqlQuery query{connection->database()};
             const bool inserted = query.exec(QStringLiteral(
-                "INSERT INTO "
-                "translation_cache(source_language,target_language,input_hash,input_text,"
-                "translated_text) VALUES('en','fr','second','two','deux')"));
+                "INSERT INTO write_coordination_probe(key,value) VALUES('second','two')"));
             secondSucceeded.store(inserted && !transaction.commit().has_value(),
                                   std::memory_order_release);
         }};
@@ -428,7 +426,7 @@ TEST_CASE("database write coordination serializes real connections with no SQLit
     CHECK(firstSucceeded.load(std::memory_order_acquire));
     CHECK(secondSucceeded.load(std::memory_order_acquire));
     QSqlQuery count{initial.database()};
-    REQUIRE(count.exec(QStringLiteral("SELECT COUNT(*) FROM translation_cache")));
+    REQUIRE(count.exec(QStringLiteral("SELECT COUNT(*) FROM write_coordination_probe")));
     REQUIRE(count.next());
     CHECK(count.value(0).toInt() == 2);
 }
@@ -509,6 +507,9 @@ TEST_CASE("transactions and autocommit writes remain safe under mixed connection
     });
     REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(initialOpen));
     auto initial = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(initialOpen));
+    QSqlQuery createProbe{initial.database()};
+    REQUIRE(createProbe.exec(QStringLiteral(
+        "CREATE TABLE mixed_write_probe(key TEXT PRIMARY KEY,value TEXT NOT NULL) STRICT")));
 
     constexpr int writerCount = 4;
     constexpr int writesPerWriter = 25;
@@ -558,12 +559,10 @@ TEST_CASE("transactions and autocommit writes remain safe under mixed connection
                     }
                     QSqlQuery insert{connection.database()};
                     insert.prepare(QStringLiteral(
-                        "INSERT INTO translation_cache(source_language,target_language,input_hash,"
-                        "input_text,translated_text) VALUES('en','fr',:hash,:input,:translation)"));
+                        "INSERT INTO mixed_write_probe(key,value) VALUES(:key,:value)"));
                     const QString key = QStringLiteral("%1-%2").arg(writer).arg(item);
-                    insert.bindValue(QStringLiteral(":hash"), key);
-                    insert.bindValue(QStringLiteral(":input"), key);
-                    insert.bindValue(QStringLiteral(":translation"), key);
+                    insert.bindValue(QStringLiteral(":key"), key);
+                    insert.bindValue(QStringLiteral(":value"), key);
                     if (!insert.exec())
                         failures.fetch_add(1, std::memory_order_relaxed);
                     if (transaction && transaction->commit())
@@ -577,7 +576,7 @@ TEST_CASE("transactions and autocommit writes remain safe under mixed connection
 
     CHECK(failures.load(std::memory_order_acquire) == 0);
     QSqlQuery count{initial.database()};
-    REQUIRE(count.exec(QStringLiteral("SELECT COUNT(*) FROM translation_cache")));
+    REQUIRE(count.exec(QStringLiteral("SELECT COUNT(*) FROM mixed_write_probe")));
     REQUIRE(count.next());
     CHECK(count.value(0).toInt() == writerCount * writesPerWriter);
 }

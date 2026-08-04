@@ -4,8 +4,11 @@
 #include "gui/mailboxes/MailboxTreeModel.h"
 #include "gui/mailboxes/MailboxTreeView.h"
 #include "gui/onboarding/FirstRunWizard.h"
+#include "gui/translation/TranslationService.h"
 #include "jmap/cache/AccountReadRepository.h"
 #include "jmap/cache/MailboxReadRepository.h"
+
+#include <QCoroTask>
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -18,6 +21,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QLocale>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QRadioButton>
@@ -31,6 +35,7 @@
 
 #include <algorithm>
 #include <optional>
+#include <utility>
 
 namespace javelin::gui::settings
 {
@@ -40,6 +45,8 @@ namespace javelin::gui::settings
         constexpr int remoteContentValueRole = Qt::UserRole + 2;
         constexpr int autoTranslateKindRole = Qt::UserRole + 1;
         constexpr int autoTranslateValueRole = Qt::UserRole + 2;
+        constexpr int localModelSourceRole = Qt::UserRole + 1;
+        constexpr int localModelTargetRole = Qt::UserRole + 2;
 
         enum class RemoteContentPermitKind
         {
@@ -85,6 +92,13 @@ namespace javelin::gui::settings
                                                 : account.loginEmail;
         }
 
+        [[nodiscard]] javelin::gui::translation::TranslationProvider
+        selectedTranslationProvider(const QComboBox& comboBox)
+        {
+            return static_cast<javelin::gui::translation::TranslationProvider>(
+                comboBox.currentData().toInt());
+        }
+
         [[nodiscard]] QString selectedTranslationLanguageCode(const QComboBox& comboBox)
         {
             const int index = comboBox.currentIndex();
@@ -101,19 +115,20 @@ namespace javelin::gui::settings
 
     } // namespace
 
-    PreferencesDialog::PreferencesDialog(GuiSettings& settings,
-                                         javelin::app::AccountCommandPort& accountCommandPort,
-                                         javelin::app::OnboardingPort& onboardingPort,
-                                         javelin::jmap::cache::AccountReader& accountReader,
-                                         javelin::jmap::cache::MailboxReader& mailboxReader,
-                                         QWidget* parent)
+    PreferencesDialog::PreferencesDialog(
+        GuiSettings& settings, javelin::app::AccountCommandPort& accountCommandPort,
+        javelin::app::OnboardingPort& onboardingPort,
+        javelin::gui::translation::TranslationService& translationService,
+        javelin::jmap::cache::AccountReader& accountReader,
+        javelin::jmap::cache::MailboxReader& mailboxReader, QWidget* parent)
         : KConfigDialog(parent, QStringLiteral("preferences"), nullptr), m_settings(settings),
           m_baseRevision(m_settings.snapshot().revision), m_accountCommandPort(accountCommandPort),
-          m_onboardingPort(onboardingPort), m_accountReader(accountReader),
-          m_mailboxReader(mailboxReader), m_accounts(m_settings.accounts()),
+          m_onboardingPort(onboardingPort), m_translationService(translationService),
+          m_accountReader(accountReader), m_mailboxReader(mailboxReader),
+          m_accounts(m_settings.accounts()),
           m_remoteContentSenders(m_settings.remoteContentSenders()),
           m_remoteContentDomains(m_settings.remoteContentDomains()),
-          m_translationSettings(m_settings.translationSettings()),
+          m_translationSettings(m_translationService.settings()),
           m_autoTranslateSenders(m_translationSettings.autoTranslateSenders),
           m_autoTranslateDomains(m_translationSettings.autoTranslateDomains),
           m_messageAppearanceSettings(m_settings.messageAppearanceSettings()),
@@ -261,29 +276,37 @@ namespace javelin::gui::settings
 
         auto* translationPage = new QWidget(this);
         auto* translationLayout = new QVBoxLayout(translationPage);
-        m_translationEnabledCheckBox =
-            new QCheckBox(QStringLiteral("Enable message translation"), translationPage);
-        m_translationEnabledCheckBox->setChecked(m_translationSettings.enabled);
-        translationLayout->addWidget(m_translationEnabledCheckBox);
+        auto* providerForm = new QFormLayout();
+        m_translationProvider = new QComboBox(translationPage);
+        m_translationProvider->addItem(
+            QStringLiteral("Disabled"),
+            static_cast<int>(javelin::gui::translation::TranslationProvider::Disabled));
+        m_translationProvider->addItem(
+            QStringLiteral("Google Translate"),
+            static_cast<int>(javelin::gui::translation::TranslationProvider::Google));
+        if (m_translationService.localProviderAvailable())
+        {
+            m_translationProvider->addItem(
+                QStringLiteral("Local (Firefox models)"),
+                static_cast<int>(javelin::gui::translation::TranslationProvider::Local));
+        }
+        const auto providerIndex =
+            m_translationProvider->findData(static_cast<int>(m_translationSettings.provider));
+        m_translationProvider->setCurrentIndex(providerIndex >= 0 ? providerIndex : 1);
+        providerForm->addRow(QStringLiteral("Translation provider"), m_translationProvider);
+        translationLayout->addLayout(providerForm);
 
         m_translationControls = new QWidget(translationPage);
         auto* translationControlsLayout = new QVBoxLayout(m_translationControls);
         translationControlsLayout->setContentsMargins(0, 0, 0, 0);
-        auto* translationDescription = new QLabel(
-            QStringLiteral("Translated message text is sent to Google Translate. Leave the API "
-                           "key empty to use Javelin's built-in default key."),
-            m_translationControls);
-        translationDescription->setWordWrap(true);
-        translationControlsLayout->addWidget(translationDescription);
-
         auto* translationForm = new QFormLayout();
         m_translationTargetLanguage = new QComboBox(m_translationControls);
         m_translationTargetLanguage->setEditable(true);
         m_translationTargetLanguage->addItem(QStringLiteral("English"), QStringLiteral("en"));
         m_translationTargetLanguage->addItem(QStringLiteral("Chinese (Simplified)"),
-                                             QStringLiteral("zh-cn"));
+                                             QStringLiteral("zh-Hans"));
         m_translationTargetLanguage->addItem(QStringLiteral("Chinese (Traditional)"),
-                                             QStringLiteral("zh-tw"));
+                                             QStringLiteral("zh-Hant"));
         m_translationTargetLanguage->addItem(QStringLiteral("French"), QStringLiteral("fr"));
         m_translationTargetLanguage->addItem(QStringLiteral("German"), QStringLiteral("de"));
         m_translationTargetLanguage->addItem(QStringLiteral("Italian"), QStringLiteral("it"));
@@ -304,12 +327,65 @@ namespace javelin::gui::settings
         }
         translationForm->addRow(QStringLiteral("Target language"), m_translationTargetLanguage);
 
-        m_translationApiKeyEdit = new QLineEdit(m_translationControls);
+        translationControlsLayout->addLayout(translationForm);
+
+        m_googleTranslationControls = new QWidget(m_translationControls);
+        auto* googleLayout = new QVBoxLayout(m_googleTranslationControls);
+        googleLayout->setContentsMargins(0, 0, 0, 0);
+        auto* googleDescription = new QLabel(
+            QStringLiteral("Translated message text is sent to Google Translate. Leave the API "
+                           "key empty to use Javelin's built-in default key."),
+            m_googleTranslationControls);
+        googleDescription->setWordWrap(true);
+        googleLayout->addWidget(googleDescription);
+        auto* googleForm = new QFormLayout();
+        m_translationApiKeyEdit = new QLineEdit(m_googleTranslationControls);
         m_translationApiKeyEdit->setEchoMode(QLineEdit::Password);
         m_translationApiKeyEdit->setPlaceholderText(QStringLiteral("Use built-in default key"));
         m_translationApiKeyEdit->setText(m_translationSettings.apiKeyOverride);
-        translationForm->addRow(QStringLiteral("API key override"), m_translationApiKeyEdit);
-        translationControlsLayout->addLayout(translationForm);
+        googleForm->addRow(QStringLiteral("API key override"), m_translationApiKeyEdit);
+        googleLayout->addLayout(googleForm);
+        translationControlsLayout->addWidget(m_googleTranslationControls);
+
+        m_localTranslationControls = new QWidget(m_translationControls);
+        auto* localLayout = new QVBoxLayout(m_localTranslationControls);
+        localLayout->setContentsMargins(0, 0, 0, 0);
+        auto* localDescription = new QLabel(
+            QStringLiteral("Local translation runs only in the Javelin GUI. Firefox-compatible "
+                           "models are downloaded on demand and remain on this computer."),
+            m_localTranslationControls);
+        localDescription->setWordWrap(true);
+        localLayout->addWidget(localDescription);
+        auto* localRouteLayout = new QHBoxLayout();
+        m_localTranslationSource = new QComboBox(m_localTranslationControls);
+        m_localTranslationTarget = new QComboBox(m_localTranslationControls);
+        for (const auto& language : m_translationService.localSourceLanguages())
+        {
+            m_localTranslationSource->addItem(language, language);
+        }
+        localRouteLayout->addWidget(new QLabel(QStringLiteral("From"), m_localTranslationControls));
+        localRouteLayout->addWidget(m_localTranslationSource, 1);
+        localRouteLayout->addWidget(new QLabel(QStringLiteral("to"), m_localTranslationControls));
+        localRouteLayout->addWidget(m_localTranslationTarget, 1);
+        m_downloadLocalModelsButton =
+            new QPushButton(QStringLiteral("Download models"), m_localTranslationControls);
+        localRouteLayout->addWidget(m_downloadLocalModelsButton);
+        localLayout->addLayout(localRouteLayout);
+        m_localModelStatus = new QLabel(m_localTranslationControls);
+        m_localModelStatus->setWordWrap(true);
+        localLayout->addWidget(m_localModelStatus);
+        localLayout->addWidget(
+            new QLabel(QStringLiteral("Downloaded model directions"), m_localTranslationControls));
+        m_installedLocalModels = new QListWidget(m_localTranslationControls);
+        m_installedLocalModels->setSelectionMode(QAbstractItemView::ExtendedSelection);
+        localLayout->addWidget(m_installedLocalModels);
+        auto* localButtons = new QHBoxLayout();
+        localButtons->addStretch(1);
+        m_removeLocalModelsButton =
+            new QPushButton(QStringLiteral("Remove"), m_localTranslationControls);
+        localButtons->addWidget(m_removeLocalModelsButton);
+        localLayout->addLayout(localButtons);
+        translationControlsLayout->addWidget(m_localTranslationControls);
 
         translationControlsLayout->addWidget(
             new QLabel(QStringLiteral("Auto-Translate Entries"), m_translationControls));
@@ -383,10 +459,11 @@ namespace javelin::gui::settings
                             m_messageColorMode->itemData(index).toInt());
                     noteUnsavedChanges();
                 });
-        connect(m_translationEnabledCheckBox, &QCheckBox::toggled, this,
-                [this](const bool enabled)
+        connect(m_translationProvider, &QComboBox::currentIndexChanged, this,
+                [this]
                 {
-                    m_translationSettings.enabled = enabled;
+                    m_translationSettings.provider =
+                        selectedTranslationProvider(*m_translationProvider);
                     updateTranslationControls();
                     noteUnsavedChanges();
                 });
@@ -403,6 +480,30 @@ namespace javelin::gui::settings
                     m_translationSettings.apiKeyOverride = apiKey;
                     noteUnsavedChanges();
                 });
+        connect(m_localTranslationSource, &QComboBox::currentIndexChanged, this,
+                &PreferencesDialog::updateLocalTranslationTargets);
+        connect(m_downloadLocalModelsButton, &QPushButton::clicked, this,
+                &PreferencesDialog::downloadSelectedLocalModels);
+        connect(m_removeLocalModelsButton, &QPushButton::clicked, this,
+                &PreferencesDialog::removeSelectedLocalModels);
+        connect(m_installedLocalModels, &QListWidget::itemSelectionChanged, this,
+                [this]
+                {
+                    m_removeLocalModelsButton->setEnabled(
+                        !m_installedLocalModels->selectedItems().empty());
+                });
+        connect(&m_translationService,
+                &javelin::gui::translation::TranslationService::localModelDownloadProgress, this,
+                [this](const QString& direction, const qint64 received, const qint64 total)
+                {
+                    m_localModelStatus->setText(QStringLiteral("Downloading %1: %2 of %3")
+                                                    .arg(direction,
+                                                         QLocale{}.formattedDataSize(received),
+                                                         QLocale{}.formattedDataSize(total)));
+                });
+        connect(&m_translationService,
+                &javelin::gui::translation::TranslationService::installedLocalModelsChanged, this,
+                &PreferencesDialog::refreshInstalledLocalModels);
         connect(m_removeAutoTranslateButton, &QPushButton::clicked, this,
                 &PreferencesDialog::removeSelectedAutoTranslateEntries);
         connect(m_autoTranslateList, &QListWidget::itemSelectionChanged, this,
@@ -472,6 +573,8 @@ namespace javelin::gui::settings
         refreshAccountList();
         refreshRemoteContentList();
         refreshAutoTranslateList();
+        updateLocalTranslationTargets();
+        refreshInstalledLocalModels();
         refreshMailboxSyncAccounts();
         updateTranslationControls();
         updateAttachmentDirectoryControls();
@@ -651,7 +754,7 @@ namespace javelin::gui::settings
         m_remoteContentDomains.removeAll(QString{});
         m_remoteContentDomains.removeDuplicates();
         m_remoteContentDomains.sort(Qt::CaseInsensitive);
-        m_translationSettings.enabled = m_translationEnabledCheckBox->isChecked();
+        m_translationSettings.provider = selectedTranslationProvider(*m_translationProvider);
         m_translationSettings.apiKeyOverride = m_translationApiKeyEdit->text();
         m_translationSettings.targetLanguage =
             selectedTranslationLanguageCode(*m_translationTargetLanguage);
@@ -680,13 +783,6 @@ namespace javelin::gui::settings
             std::vector<QString>{m_remoteContentSenders.begin(), m_remoteContentSenders.end()};
         update.remoteContentDomains =
             std::vector<QString>{m_remoteContentDomains.begin(), m_remoteContentDomains.end()};
-        update.translation = {
-            .enabled = m_translationSettings.enabled,
-            .apiKeyOverride = m_translationSettings.apiKeyOverride,
-            .targetLanguage = m_translationSettings.targetLanguage,
-            .autoTranslateSenders = {m_autoTranslateSenders.begin(), m_autoTranslateSenders.end()},
-            .autoTranslateDomains = {m_autoTranslateDomains.begin(), m_autoTranslateDomains.end()},
-        };
         update.appearance = {
             .messageColorMode = static_cast<std::int32_t>(m_messageAppearanceSettings.colorMode),
         };
@@ -699,6 +795,13 @@ namespace javelin::gui::settings
         {
             QMessageBox::critical(this, QStringLiteral("Could not save preferences"),
                                   error->detail);
+            return false;
+        }
+        m_baseRevision = m_settings.snapshot().revision;
+        if (const auto error = m_translationService.saveSettings(m_translationSettings))
+        {
+            QMessageBox::critical(this, QStringLiteral("Could not save translation preferences"),
+                                  error->message);
             return false;
         }
 
@@ -900,7 +1003,103 @@ namespace javelin::gui::settings
 
     void PreferencesDialog::updateTranslationControls()
     {
-        m_translationControls->setEnabled(m_translationEnabledCheckBox->isChecked());
+        const auto provider = selectedTranslationProvider(*m_translationProvider);
+        const bool enabled = provider != javelin::gui::translation::TranslationProvider::Disabled;
+        m_translationControls->setEnabled(enabled);
+        m_googleTranslationControls->setVisible(
+            provider == javelin::gui::translation::TranslationProvider::Google);
+        m_localTranslationControls->setVisible(
+            provider == javelin::gui::translation::TranslationProvider::Local);
+    }
+
+    void PreferencesDialog::updateLocalTranslationTargets()
+    {
+        const auto source = m_localTranslationSource->currentData().toString();
+        const auto previousTarget = m_localTranslationTarget->currentData().toString();
+        const QSignalBlocker blocker{m_localTranslationTarget};
+        m_localTranslationTarget->clear();
+        for (const auto& target : m_translationService.localTargetLanguages(source))
+        {
+            m_localTranslationTarget->addItem(target, target);
+        }
+        const auto previousIndex = m_localTranslationTarget->findData(previousTarget);
+        if (previousIndex >= 0)
+        {
+            m_localTranslationTarget->setCurrentIndex(previousIndex);
+        }
+        m_downloadLocalModelsButton->setEnabled(!source.isEmpty() &&
+                                                m_localTranslationTarget->count() > 0);
+    }
+
+    void PreferencesDialog::refreshInstalledLocalModels()
+    {
+        m_installedLocalModels->clear();
+        qint64 totalSize = 0;
+        for (const auto& model : m_translationService.installedLocalModels())
+        {
+            totalSize += model.diskSize;
+            auto* item = new QListWidgetItem(QStringLiteral("%1 → %2 — %3 (%4), %5")
+                                                 .arg(model.sourceLanguage, model.targetLanguage,
+                                                      model.modelVersion, model.architecture,
+                                                      QLocale{}.formattedDataSize(model.diskSize)),
+                                             m_installedLocalModels);
+            item->setData(localModelSourceRole, model.sourceLanguage);
+            item->setData(localModelTargetRole, model.targetLanguage);
+        }
+        m_removeLocalModelsButton->setEnabled(false);
+        if (m_installedLocalModels->count() == 0)
+        {
+            m_localModelStatus->setText(
+                QStringLiteral("No local translation models are installed."));
+        }
+        else
+        {
+            m_localModelStatus->setText(QStringLiteral("%1 model directions installed, using %2.")
+                                            .arg(m_installedLocalModels->count())
+                                            .arg(QLocale{}.formattedDataSize(totalSize)));
+        }
+    }
+
+    void PreferencesDialog::downloadSelectedLocalModels()
+    {
+        const auto source = m_localTranslationSource->currentData().toString();
+        const auto target = m_localTranslationTarget->currentData().toString();
+        if (source.isEmpty() || target.isEmpty())
+        {
+            return;
+        }
+        m_downloadLocalModelsButton->setEnabled(false);
+        m_localModelStatus->setText(
+            QStringLiteral("Preparing %1 → %2 models…").arg(source, target));
+        auto task = m_translationService.installLocalModels(source, target);
+        QCoro::connect(std::move(task), this,
+                       [this](std::optional<javelin::gui::translation::TranslationError> error)
+                       {
+                           m_downloadLocalModelsButton->setEnabled(true);
+                           if (error.has_value())
+                           {
+                               m_localModelStatus->setText(
+                                   QStringLiteral("Model download failed: %1").arg(error->message));
+                               return;
+                           }
+                           refreshInstalledLocalModels();
+                       });
+    }
+
+    void PreferencesDialog::removeSelectedLocalModels()
+    {
+        for (const auto* item : m_installedLocalModels->selectedItems())
+        {
+            const auto source = item->data(localModelSourceRole).toString();
+            const auto target = item->data(localModelTargetRole).toString();
+            if (const auto error = m_translationService.removeLocalModels(source, target))
+            {
+                QMessageBox::critical(this, QStringLiteral("Could not remove translation model"),
+                                      error->message);
+                return;
+            }
+        }
+        refreshInstalledLocalModels();
     }
 
     void PreferencesDialog::selectAttachmentDirectory()
@@ -920,7 +1119,8 @@ namespace javelin::gui::settings
 
     bool PreferencesDialog::validateCurrentSettings()
     {
-        if (m_translationEnabledCheckBox->isChecked() &&
+        if (selectedTranslationProvider(*m_translationProvider) !=
+                javelin::gui::translation::TranslationProvider::Disabled &&
             selectedTranslationLanguageCode(*m_translationTargetLanguage).isEmpty())
         {
             QMessageBox::warning(this, QStringLiteral("Invalid translation language"),

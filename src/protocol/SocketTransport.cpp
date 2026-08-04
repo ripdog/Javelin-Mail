@@ -478,38 +478,6 @@ namespace javelin::protocol
                               [&reader](QString& value) { return reader.string(value); });
         }
 
-        bool writeTranslation(PayloadWriter& writer, const TranslationSettings& translation,
-                              const BoundaryLimits& limits)
-        {
-            return writer.boolean(translation.enabled) &&
-                   writer.string(translation.apiKeyOverride) &&
-                   writer.string(translation.targetLanguage) &&
-                   writeVector(writer, translation.autoTranslateSenders,
-                               limits.maximumCollectionItems,
-                               QStringLiteral("translation.autoTranslateSenders"),
-                               [&writer](const QString& value) { return writer.string(value); }) &&
-                   writeVector(writer, translation.autoTranslateDomains,
-                               limits.maximumCollectionItems,
-                               QStringLiteral("translation.autoTranslateDomains"),
-                               [&writer](const QString& value) { return writer.string(value); });
-        }
-
-        bool readTranslation(PayloadReader& reader, TranslationSettings& translation,
-                             const BoundaryLimits& limits)
-        {
-            return reader.boolean(translation.enabled) &&
-                   reader.string(translation.apiKeyOverride) &&
-                   reader.string(translation.targetLanguage) &&
-                   readVector(reader, translation.autoTranslateSenders,
-                              limits.maximumCollectionItems,
-                              QStringLiteral("translation.autoTranslateSenders"),
-                              [&reader](QString& value) { return reader.string(value); }) &&
-                   readVector(reader, translation.autoTranslateDomains,
-                              limits.maximumCollectionItems,
-                              QStringLiteral("translation.autoTranslateDomains"),
-                              [&reader](QString& value) { return reader.string(value); });
-        }
-
         bool writeWorkspaceSettings(PayloadWriter& writer, const WorkspaceSettings& workspace,
                                     const BoundaryLimits& limits)
         {
@@ -583,12 +551,6 @@ namespace javelin::protocol
                                  QStringLiteral("update.remoteContentSenders")) ||
                 !writeStringList(update.remoteContentDomains,
                                  QStringLiteral("update.remoteContentDomains")))
-                return false;
-
-            if (!writer.boolean(update.translation.has_value()))
-                return false;
-            if (update.translation.has_value() &&
-                !writeTranslation(writer, *update.translation, limits))
                 return false;
 
             if (!writer.boolean(update.appearance.has_value()))
@@ -676,15 +638,6 @@ namespace javelin::protocol
                 !readStringList(update.remoteContentDomains,
                                 QStringLiteral("update.remoteContentDomains")))
                 return false;
-
-            if (!reader.boolean(present))
-                return false;
-            if (present)
-            {
-                update.translation.emplace();
-                if (!readTranslation(reader, *update.translation, limits))
-                    return false;
-            }
 
             if (!reader.boolean(present))
                 return false;
@@ -881,7 +834,6 @@ namespace javelin::protocol
                    writeStringVector(writer, snapshot.remoteContentDomains,
                                      limits.maximumCollectionItems,
                                      QStringLiteral("snapshot.remoteContentDomains")) &&
-                   writeTranslation(writer, snapshot.translation, limits) &&
                    writer.integer(snapshot.appearance.messageColorMode) &&
                    writer.boolean(snapshot.attachments.alwaysAsk) &&
                    writer.string(snapshot.attachments.directory) &&
@@ -913,7 +865,6 @@ namespace javelin::protocol
                    readStringVector(reader, snapshot.remoteContentDomains,
                                     limits.maximumCollectionItems,
                                     QStringLiteral("snapshot.remoteContentDomains")) &&
-                   readTranslation(reader, snapshot.translation, limits) &&
                    reader.integer(snapshot.appearance.messageColorMode) &&
                    reader.boolean(snapshot.attachments.alwaysAsk) &&
                    reader.string(snapshot.attachments.directory) &&

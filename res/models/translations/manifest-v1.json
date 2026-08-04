@@ -1,0 +1,2598 @@
+{
+  "schemaVersion": 1,
+  "manifestRevision": "mozilla-remote-settings-1785456008241",
+  "engine": {
+    "name": "bergamot",
+    "version": "v0.6.0",
+    "sourceCommit": "4732dc947bc952abb019aabfe5582006d4fc3337"
+  },
+  "directions": [
+    {
+      "source": "ar",
+      "target": "en",
+      "mozillaSource": "ar",
+      "mozillaTarget": "en",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/5fef8e32-9215-4eda-b63d-b4105b9820f6.zst",
+          "compression": "zstd",
+          "compressedSize": 1623998,
+          "compressedSha256": "0dc3d51a8e41da0ee6f53784e04b2cd044e20e15f15b09aa9c1d96047de803b4",
+          "decompressedSize": 4627200,
+          "decompressedSha256": "4b45f14dbea40d368093a13563fc1ca48457ee70c1291c82b206f3baff210081",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/c1fc44d3-7b80-415e-9b74-57c4ee027559.zst",
+          "compression": "zstd",
+          "compressedSize": 22770191,
+          "compressedSha256": "beed6b0da7378dfe256a9c0604a0d07dcb2b9ad4ce5295ac1ea6f1c5815eed65",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "7b7af0282dc5f4d8805b9a298c2fa828967e3f09ca10f1942ebeea0b2cfc12fa",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/324af319-7174-4574-a0e5-dc047a78aa33.zst",
+          "compression": "zstd",
+          "compressedSize": 349058,
+          "compressedSha256": "4e7256a9b84ae2773a5b32a234418d1c111a018b9e1bf2580ad83972d5166687",
+          "decompressedSize": 860035,
+          "decompressedSha256": "51b4ee3f828d10015464523d0b4f5a6c086b0b2a9bde716a581001cf6c260366",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "bg",
+      "target": "en",
+      "mozillaSource": "bg",
+      "mozillaTarget": "en",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/39d79707-99b4-4f8e-9f60-580cf32daa87.zst",
+          "compression": "zstd",
+          "compressedSize": 1612063,
+          "compressedSha256": "ac39857f2d64c0b22058b9dddeb51a7d10f3bcda4dce25e29d35606239526a1f",
+          "decompressedSize": 4355920,
+          "decompressedSha256": "e661dfdd88aa9ff9606f237a60c910d97c2e710960199589579f628c5d8aa899",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/df1d4066-190a-476c-96bd-a420ca43be49.zst",
+          "compression": "zstd",
+          "compressedSize": 21619339,
+          "compressedSha256": "aab74c61e1f7daa7520a9810e337749a51abb3a45512f7cd9263c0eec6a7f501",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "78f7e6e1435cc2d4a29cf597f493187fe29ddb9ce9d3766c287e2e6d37052d01",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/e019e5dd-8275-4362-b12d-09643941ec3a.zst",
+          "compression": "zstd",
+          "compressedSize": 362233,
+          "compressedSha256": "9bb4902078de81ad820b8254950685f89be9d1510e6de90220bb994450742c6b",
+          "decompressedSize": 922482,
+          "decompressedSha256": "4bafad5fcc0e771ed82233d1e99d69dcb96487b430702f7e688615c8a61f3df4",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "bs",
+      "target": "en",
+      "mozillaSource": "bs",
+      "mozillaTarget": "en",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/27a7a9e6-bad8-4a9a-856b-94fed9ec8231.zst",
+          "compression": "zstd",
+          "compressedSize": 1852684,
+          "compressedSha256": "06a3d99378cca3688149431ecc1371d927a201c28634db96161d626257220026",
+          "decompressedSize": 5155408,
+          "decompressedSha256": "dccff06320cb87aaa6f93c246038b453d0d0c6f47fa3acd1162f104ac6a2c43f",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/cd47512a-c163-429d-a389-daef3d4d2594.zst",
+          "compression": "zstd",
+          "compressedSize": 22423975,
+          "compressedSha256": "58463c12f2b96b42d8415438c378780f83109f5ff66380db825737f6349e2bfb",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "744c61ec0b987c44717f192fcebda7c2a1ac34f5cbfb56672771d28ff79c82c7",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/aac2dcf7-da41-496e-903c-cf44ef4092f3.zst",
+          "compression": "zstd",
+          "compressedSize": 347424,
+          "compressedSha256": "d1c9ba8eb54eb2c3801f7afca08916c8e49f1f8bce765723032932dffba97935",
+          "decompressedSize": 817335,
+          "decompressedSha256": "320561e2cef014a6d626a64822add3a387c91f609f23ea3b7f421d194075c14c",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "ca",
+      "target": "en",
+      "mozillaSource": "ca",
+      "mozillaTarget": "en",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/946cc7eb-d2fe-4170-ab8f-ccce07663a7a.zst",
+          "compression": "zstd",
+          "compressedSize": 1667664,
+          "compressedSha256": "470b9f9951a51f1ab1e4267a9d41bcfc436ada9f10578a8a7a29f5f2bf84d10e",
+          "decompressedSize": 4359552,
+          "decompressedSha256": "74880047539925630601d61aa6c29a0672046236ca6cf33eeaf6f6f6690e914e",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/908bd013-ac93-4a2d-9dbf-639d42d4a6b6.zst",
+          "compression": "zstd",
+          "compressedSize": 22168642,
+          "compressedSha256": "c02a864c4cb792b563a02067e6a2e6f220ac450ed3de60d849998df7007064e0",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "b7f9c70823052f60c257eb1c4eff893abea3648aa9d1c23c8774e1e5ef061434",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/25d8affa-0c00-43d0-a507-2751e3275e51.zst",
+          "compression": "zstd",
+          "compressedSize": 349163,
+          "compressedSha256": "e4b7830b44a4188599d10a2726c309dc5ed4d5658e4fde5f672f47829bc64cba",
+          "decompressedSize": 810273,
+          "decompressedSha256": "6d22da90905873c2793d0805e34e5c27901b16e7e7a7a427696696f67dfe1f0e",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "cs",
+      "target": "en",
+      "mozillaSource": "cs",
+      "mozillaTarget": "en",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/279d0bdb-1a73-4fb9-a0f8-3b8287159336.zst",
+          "compression": "zstd",
+          "compressedSize": 1817446,
+          "compressedSha256": "589ccd8040ee6072e72d82f3ace02062491c26a61afd41ddd94089bc54fed3ce",
+          "decompressedSize": 4990588,
+          "decompressedSha256": "eba6bd9575251525f1941640ea0b6527a06e72a46421579eafea04d635ee20a8",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/859d2cbf-a174-4747-84cf-73740298ac9f.zst",
+          "compression": "zstd",
+          "compressedSize": 22287863,
+          "compressedSha256": "68317506ddfb9c6b0ca38aaa47da82837a20764de83de54e9fe14f5a6c215f46",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "c815273b31074492eaab0ccd78d33d7ac16f94088707ab2492abaedcb9ee0b75",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/64090225-9ac6-458f-95a4-96ffdd7e6ba8.zst",
+          "compression": "zstd",
+          "compressedSize": 350374,
+          "compressedSha256": "f9955569c41ac41578c5f9923bb7d7dbe62ed343f6475cf31078608bd9f753d4",
+          "decompressedSize": 815154,
+          "decompressedSha256": "ee4b8ce15c8e1237c5f7a2d04741341beb0a5d5c09820f7ec08f13ee2b212755",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "de",
+      "target": "en",
+      "mozillaSource": "de",
+      "mozillaTarget": "en",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/87ba9213-f69e-4e31-9251-aa2e297d1f26.zst",
+          "compression": "zstd",
+          "compressedSize": 1953706,
+          "compressedSha256": "a308bd1cae2bf372a352d2e37b9ba286616d2cf386d14bdf848b54f8eb1d7408",
+          "decompressedSize": 4945796,
+          "decompressedSha256": "113b98460468360cca68c042e1cddf49c4e1931cbb975ed04349c9a3bd607010",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/172680a0-ffd1-4c00-8b35-216898c4f462.zst",
+          "compression": "zstd",
+          "compressedSize": 21611407,
+          "compressedSha256": "1a1d3db174f2e555a2d5d11abc303cc839a84dace2de1dcc46d65e3a217d3a7c",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "3e6f7c2c2425d10824797270b382bee718ff34af2cab9308841c82ca46dc6f20",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/3187809f-ec68-4da1-8149-f9c4b0f36644.zst",
+          "compression": "zstd",
+          "compressedSize": 352776,
+          "compressedSha256": "688bd61fce9ff1a1f93b81f0f039f9a850a3f345b0a82e044a743ff48b71ffbc",
+          "decompressedSize": 810073,
+          "decompressedSha256": "69f730becafa48e3bb2c244eab66456877c08959a02f2bd5519b5a3088b62f9c",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "en",
+      "target": "ar",
+      "mozillaSource": "en",
+      "mozillaTarget": "ar",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/6b7c1061-729a-44e3-858d-409a7061a704.zst",
+          "compression": "zstd",
+          "compressedSize": 1204697,
+          "compressedSha256": "f5fe1d8d145e38b4c6fd9f7a35d0d5779388fa135743561e1d25e982d7191222",
+          "decompressedSize": 3139692,
+          "decompressedSha256": "2b7194817c5dd9225ca90c0d908cc92e1d6d1f45625781a5feb037ac568d6a61",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/0d56ac93-c0ac-4854-b48e-09e38d51dace.zst",
+          "compression": "zstd",
+          "compressedSize": 22272394,
+          "compressedSha256": "41dc919c1110508ad7f03ee53bbb28a54abd61d1b15bbc3fe51c5df5c9331016",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "ae659d7045fc2e5d6ba50583586a5d94ee4358d92c019847e37b57a0e627faa8",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/371728a2-8c02-4528-bd76-4cd1c4e8f05e.zst",
+          "compression": "zstd",
+          "compressedSize": 351089,
+          "compressedSha256": "9f68a65a64d4c64ea41d94024160e1443ff51b6c7ba0a2f93e7702beaa0b1d25",
+          "decompressedSize": 863591,
+          "decompressedSha256": "8d93c54aa5e2044c416ec680b5ff9af0227bd698521666e8b1a1ea1b041fbae8",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "en",
+      "target": "bg",
+      "mozillaSource": "en",
+      "mozillaTarget": "bg",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/89d43f4b-ab82-4a14-824b-f2080f97dd08.zst",
+          "compression": "zstd",
+          "compressedSize": 1150376,
+          "compressedSha256": "e49b8c60c3f3ad94a76d97d94d46a7278cc27023e2299dba8d4826c2adda4748",
+          "decompressedSize": 3075948,
+          "decompressedSha256": "93d4ca4412db269cc4164cbfa04c08edd0f65690c8264d6215a0522d4a13ec1a",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/8e69c3ee-573f-4382-8eaa-45926a54e016.zst",
+          "compression": "zstd",
+          "compressedSize": 23004373,
+          "compressedSha256": "53612f6fccd4be0c62a9a325a91094ac130301c976202425d8c8184967ebcb0a",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "e2b30db98ac6706efc893067a74e51f36f015a8f820fe8a4f0f5052fa6a22f30",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/be4b55af-bea2-42fc-a9bd-1683688511d3.zst",
+          "compression": "zstd",
+          "compressedSize": 362233,
+          "compressedSha256": "9bb4902078de81ad820b8254950685f89be9d1510e6de90220bb994450742c6b",
+          "decompressedSize": 922482,
+          "decompressedSha256": "4bafad5fcc0e771ed82233d1e99d69dcb96487b430702f7e688615c8a61f3df4",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "en",
+      "target": "bs",
+      "mozillaSource": "en",
+      "mozillaTarget": "bs",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/8d07a1aa-fce3-41ff-90d6-6dd21f358585.zst",
+          "compression": "zstd",
+          "compressedSize": 1235280,
+          "compressedSha256": "50485d3dc180dc6b689e42683e79cd3dd6940c811eae371b6efc1124851e10e0",
+          "decompressedSize": 3214628,
+          "decompressedSha256": "6847523f4d5df9425cda606e73f404c07e19452dac7659bdcc92743c46cba3c0",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/88131bc2-4d8d-4509-a2f6-9cbab104fb9e.zst",
+          "compression": "zstd",
+          "compressedSize": 22411967,
+          "compressedSha256": "fc48b1b457f54e14bb42f7e6b07be283d45f8b417cac1406212db017af275e85",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "27575113fffad6c45a0bad36bd1823c4f319ed30f65ec134815b67bdae0d9f8d",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/e9097c22-e99b-4234-81ea-539f4b76af3a.zst",
+          "compression": "zstd",
+          "compressedSize": 351120,
+          "compressedSha256": "8398949edf4f1a337ff8b3de2ddce096a7164ec3c4c8ac0676c2df670fff508f",
+          "decompressedSize": 823444,
+          "decompressedSha256": "dfed9c3e08e85a22feac7748a20fa981dca94f358115af2f45d704b9cc944cc8",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "en",
+      "target": "ca",
+      "mozillaSource": "en",
+      "mozillaTarget": "ca",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/6c1acc5c-0e63-4d59-85f1-7750e111d587.zst",
+          "compression": "zstd",
+          "compressedSize": 1538773,
+          "compressedSha256": "21af04d762eb5e1c0eef53953f95230974d068442178dbb4ca9eb8951f9e071e",
+          "decompressedSize": 4344092,
+          "decompressedSha256": "8f2151a7fb75454f5167a8df8758ec02ab02c0302893851bad7caa6b729822fb",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/0824541f-1569-41c1-9cef-89e15ae1ae23.zst",
+          "compression": "zstd",
+          "compressedSize": 22714103,
+          "compressedSha256": "e226f70dc0f72727d56107dc871ab0074f47eda1ba2c88fee013e60d2cf81f22",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "735881c99ff303e55eb2e92a3b86762523d5dd1a4797b2574b851062051426ee",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/528ab11c-7a99-453b-94e5-297354f5e254.zst",
+          "compression": "zstd",
+          "compressedSize": 349175,
+          "compressedSha256": "4d5e882e7278133539e6b899e3c6a2d501ee09ac1af7f2c955e4855b74fb3132",
+          "decompressedSize": 810653,
+          "decompressedSha256": "64ebcb5f6cb5a954ced615e48a44a85e77a644e4910544014b299b8ee0fa1b1f",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "en",
+      "target": "cs",
+      "mozillaSource": "en",
+      "mozillaTarget": "cs",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/093fce8e-5584-433a-b278-baad59426a2a.zst",
+          "compression": "zstd",
+          "compressedSize": 1399382,
+          "compressedSha256": "d08adc371880efb2685ba5f36d466027993b9788272ad8a37ccac63ee940ef54",
+          "decompressedSize": 3572436,
+          "decompressedSha256": "699b9b59fe3acbcddf831380024b2e139f2cbe225dce96d59ade2b159318f58b",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/1b7dfd02-c40e-4ca7-8a34-fc50daa42fbf.zst",
+          "compression": "zstd",
+          "compressedSize": 22714358,
+          "compressedSha256": "7a83ea3580b2d4f8fc490b38b74d7638e8eb488f2860f1ae66e0d5e7f75ba38d",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "1d7855f91c3e2b8ef79fbea62707d46ceb8a1ad01834ef6dd500f32a7006cc2c",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/3cc5bdb9-d6a4-4d3b-a394-ed1141d650df.zst",
+          "compression": "zstd",
+          "compressedSize": 350374,
+          "compressedSha256": "f9955569c41ac41578c5f9923bb7d7dbe62ed343f6475cf31078608bd9f753d4",
+          "decompressedSize": 815154,
+          "decompressedSha256": "ee4b8ce15c8e1237c5f7a2d04741341beb0a5d5c09820f7ec08f13ee2b212755",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "en",
+      "target": "de",
+      "mozillaSource": "en",
+      "mozillaTarget": "de",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/7b8929f7-c5c2-4869-9193-12821a86354d.zst",
+          "compression": "zstd",
+          "compressedSize": 1696246,
+          "compressedSha256": "a483b34d541dc8d4097cbfafbb188d68ee54d68368b96ed2e3d1e16bcfad40aa",
+          "decompressedSize": 4347672,
+          "decompressedSha256": "7ed39f1cffbd68a27ddf05bbfe068de2060f1d7e69f1a20e27ae923551dd7393",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/210d5dea-12cc-4960-9f6a-aa21740c6735.zst",
+          "compression": "zstd",
+          "compressedSize": 22461496,
+          "compressedSha256": "db0fa25f3767efdf913ad7d213adf51702a87fb9b07f5e6c64fc4dc13c2eb2cf",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "8df29d9494d19f47fd5d97c6a73474c6f657e9f81c1a607c431d02befdf3810f",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/a850d21e-c220-45ea-b978-a826a9248e64.zst",
+          "compression": "zstd",
+          "compressedSize": 352776,
+          "compressedSha256": "688bd61fce9ff1a1f93b81f0f039f9a850a3f345b0a82e044a743ff48b71ffbc",
+          "decompressedSize": 810073,
+          "decompressedSha256": "69f730becafa48e3bb2c244eab66456877c08959a02f2bd5519b5a3088b62f9c",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "en",
+      "target": "es",
+      "mozillaSource": "en",
+      "mozillaTarget": "es",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/51318160-1249-451f-80fb-12e61f8c1def.zst",
+          "compression": "zstd",
+          "compressedSize": 1687731,
+          "compressedSha256": "0dd2945dc8a5bbccad6fb1e1dfce137d363de839f4492cab717f60f1f38c09e6",
+          "decompressedSize": 4198436,
+          "decompressedSha256": "7d51237c0a07027dcd61643cfbbb0f8c48597d19907ef53d2cae9d6bec2cf25c",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/1d705201-9be0-40c4-a0b4-18d1e3973777.zst",
+          "compression": "zstd",
+          "compressedSize": 22085725,
+          "compressedSha256": "ce7ba731d3352d7e595d96ed4fac513744568eaf9a271daf90b5fa8fa33b195d",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "3b1c399511c01c84c36fae5c0524df44096288efdc8236e182b5c97d7ad2244c",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/b2b5907b-8759-4cc8-a721-89c283e6e45b.zst",
+          "compression": "zstd",
+          "compressedSize": 348996,
+          "compressedSha256": "76b9ef220b22cec379f097852ca6312cabf065d5ddfb05149d5af31aa050ec22",
+          "decompressedSize": 816054,
+          "decompressedSha256": "5ae254fa9b15aa182e70fd2a6186b1333c63a29a48043a9224c6aa4fcac058ad",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "en",
+      "target": "et",
+      "mozillaSource": "en",
+      "mozillaTarget": "et",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/d3bab544-243b-44f4-a407-135dd21c7974.zst",
+          "compression": "zstd",
+          "compressedSize": 1368909,
+          "compressedSha256": "5e5da5e1aaa48148a11df2155a67c5a1d49e673e47ff6ebd3d2dd554478cd137",
+          "decompressedSize": 3488368,
+          "decompressedSha256": "259c60582f49449c226a6e5a369481c68322013f367e459e54c595686c05d4d8",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/4be2c694-cfc9-48f9-8c92-fa26e911f6cc.zst",
+          "compression": "zstd",
+          "compressedSize": 22407140,
+          "compressedSha256": "dfd5fe02fec145b2352056ce128eb4b1e515b2c8704e3130b4ca9280dec2c199",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "36bdc87f8d500861a5d286ebd3ea58df530da87e31b8a233f5e9c46c300c281d",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/13ef5e54-0255-4847-846f-0ed2208097b5.zst",
+          "compression": "zstd",
+          "compressedSize": 351938,
+          "compressedSha256": "41ad1d1b1b37a99d379251d3194a06a33bb5160761156275c849c05c3c32770b",
+          "decompressedSize": 817574,
+          "decompressedSha256": "89a3deea4ae7d674fb46a4dae39135dd4dfaac9786f2868d0b5bc5c0aca2ef83",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "en",
+      "target": "eu",
+      "mozillaSource": "en",
+      "mozillaTarget": "eu",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/20260522152850--5448591b-b51c-4b84-9e35-0a7eeffe4e78--07ab80ed-1755-42f5-9cc0-d0418ced3d01.zst",
+          "compression": "zstd",
+          "compressedSize": 1222367,
+          "compressedSha256": "c3c40eaee20adea72a84b0d091aabc245a40e90b7034f529fb7891ef3fd7b8fe",
+          "decompressedSize": 3149580,
+          "decompressedSha256": "a6a856a89acc6bbf970b6c5e51fe705bee6fe2b8007a3c31ae54ca2c6fd69aad",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/20260522152858--397a185c-d3d7-4878-aa4f-e7bed7f79c19--a5e238cc-79d7-4902-b012-be2458541309.zst",
+          "compression": "zstd",
+          "compressedSize": 22597194,
+          "compressedSha256": "6cf5cfc32e712e5c3c01f502dc022b79f6e92105565c550b86d4c191a19d324a",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "f28d03817b718806c9262e3d76960efb8cbd04d0721307c8e23edcae9364150a",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/20260522152852--6e6d6de4-9edc-4fa8-a52e-66dd31f5fb83--caaec2be-af9c-4132-9a84-6df37b51116c.zst",
+          "compression": "zstd",
+          "compressedSize": 349873,
+          "compressedSha256": "f516b6b08da38d3a493d3d3cf6d5881be5508536903ff0909f073898bdfeae6f",
+          "decompressedSize": 820820,
+          "decompressedSha256": "d0cbd7a04e20c3a45bcf29260967db26a97c4787c03a9d867df0465bc104cec2",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "en",
+      "target": "fi",
+      "mozillaSource": "en",
+      "mozillaTarget": "fi",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/bcfb49bb-3cfc-4fb8-8811-0c4ef54b720c.zst",
+          "compression": "zstd",
+          "compressedSize": 1374448,
+          "compressedSha256": "70b2a204c787ffa496e88458347cb3d2bb4438e12541a1cbf9fc78ef972a9077",
+          "decompressedSize": 3490092,
+          "decompressedSha256": "26e95a87f87e4b0fa9a35524cf9fea691204504453877ba4ac81ccc66af1488c",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/67993263-7c4b-4ffe-a618-957f1b49ac6b.zst",
+          "compression": "zstd",
+          "compressedSize": 21904925,
+          "compressedSha256": "8c772d71e6ac5eda7beaf484702a856c90bf826e5e20bfe3b447018d2173f5a4",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "88b0caa4cc6980d632801cb2b1950748f1dc43ad2ac83678917ad86c720b5cdd",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/077a390a-75cd-49f7-8bc0-249934d29212.zst",
+          "compression": "zstd",
+          "compressedSize": 352840,
+          "compressedSha256": "18158b030337d5774e251174227999737fcafa5b277ed1b56bc35e2b2d984e3f",
+          "decompressedSize": 818770,
+          "decompressedSha256": "6a866911427f2916609ae89c7f2f04a78de3fdd8aa183039ecba986635d4f246",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "en",
+      "target": "fr",
+      "mozillaSource": "en",
+      "mozillaTarget": "fr",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/bff0d10a-d07a-4873-a5a7-a6b7af42bf86.zst",
+          "compression": "zstd",
+          "compressedSize": 1703263,
+          "compressedSha256": "371c84ca05d528013638c4c19c24fb12a15cbe9208239e599498539467a0436e",
+          "decompressedSize": 4372936,
+          "decompressedSha256": "2585ed98d3af0bc949865aedeb390493d591f56870814376e73e4144c41ed059",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/570d07a3-d360-430f-bbb4-37d89715bcfb.zst",
+          "compression": "zstd",
+          "compressedSize": 22542574,
+          "compressedSha256": "98c229b4f356565fec4cd9ba9374b1fa0216965addeef7ca250d4a3ed4a396eb",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "6322e296d4fecfe395a8d5723da4ec37ecbe6d7613bb1dfcf4b28e2a47498b68",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/faa168f7-1b8d-4d29-9267-cc5e1bac3c73.zst",
+          "compression": "zstd",
+          "compressedSize": 348946,
+          "compressedSha256": "61c982758a3e7dc880a8dbc11aaf0fb04a1e4f5d2d7a36ee11bc419323f2ca80",
+          "decompressedSize": 814404,
+          "decompressedSha256": "783abf3abe075afdf8d85d233994bef2c3a064e935ab1bed946820aff6ac002a",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "en",
+      "target": "gl",
+      "mozillaSource": "en",
+      "mozillaTarget": "gl",
+      "modelVersion": "3.1",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/20260603153912--4f2a4498-3e99-448d-b791-2733a1b830f7--a4673662-ddd1-4292-9f0f-721b76515a97.zst",
+          "compression": "zstd",
+          "compressedSize": 1215663,
+          "compressedSha256": "950466cbb844744c37ef508ea0255cc76666ac0f1940c6b45a396e5fb59795bb",
+          "decompressedSize": 3007680,
+          "decompressedSha256": "28621d3797a945ca0112c872640686586e77957b5421b0ef95886806b09d8874",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/20260603153911--d5d6fe5a-de98-4d06-b91b-fb246e804663--aa2a518c-e51c-42bd-a714-a72b8577850e.zst",
+          "compression": "zstd",
+          "compressedSize": 23052514,
+          "compressedSha256": "0e9d52399e71c7285e84df84b2380af48c31f012f2c6b9cdd79111e7d955f16d",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "bec08e5408932c3813ccfb565ab7003d334dd6ca148c9d2bd074e17b8c0be1b1",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/20260603153906--8b4f263c-48a3-45a4-adb2-c28b43e1674b--daed3d55-4a5a-4c89-bf2c-67327626c445.zst",
+          "compression": "zstd",
+          "compressedSize": 349637,
+          "compressedSha256": "741de7b1e854572e83b771cf9c7e1ae641ac8e7e1dc40e72d08c541b0b75c2ee",
+          "decompressedSize": 827026,
+          "decompressedSha256": "da044600f961c4c977e747cc9fb8afd4c05829629033d344a575a93807ea1cba",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "en",
+      "target": "hr",
+      "mozillaSource": "en",
+      "mozillaTarget": "hr",
+      "modelVersion": "3.1",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/d38479e1-0836-41d3-b733-b1b251c546a3.zst",
+          "compression": "zstd",
+          "compressedSize": 1264869,
+          "compressedSha256": "93d00791cc010e0e060627d9a19506b9f642f4f1ebe5322706a0c94d5f8cf613",
+          "decompressedSize": 3232644,
+          "decompressedSha256": "70cf1afc8aeb6d7ed7dc269ccdd4e40e2d139a2b1106313c94210d32b14bc845",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/e2f83f97-f9bc-4c44-92e8-67b0a27d08e2.zst",
+          "compression": "zstd",
+          "compressedSize": 22160499,
+          "compressedSha256": "a596ac8dd542a955630acfe587dab5ab6b7520b19479cf58ba8fa5573b5c098b",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "2f34590dff70aec009d3c6e9bee7a4a18aa6a0a1978c7dc49c686eb454b77704",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/dc1cfb29-e157-4383-8355-10821a6f4b8f.zst",
+          "compression": "zstd",
+          "compressedSize": 349542,
+          "compressedSha256": "a3c4cc9ca240bdc609af8479887775b2261ffb38e2975871e0f6565f0ad7908d",
+          "decompressedSize": 820766,
+          "decompressedSha256": "6b86a23aac0ba7aae69218826600afe1c70b3e5830814d9428f7248d23e016f8",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "en",
+      "target": "hu",
+      "mozillaSource": "en",
+      "mozillaTarget": "hu",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/038b0cfe-e770-4d79-81ce-0c8a22fba462.zst",
+          "compression": "zstd",
+          "compressedSize": 1308627,
+          "compressedSha256": "a18f76a09432a8ccda4902f00bbacd9cdd22b4f9167bb0c526eae455b07e6bd5",
+          "decompressedSize": 3490288,
+          "decompressedSha256": "f3d1e61003597d1cc9d87e05d2b398a7ae2b3941e3f96947764aac239df1a808",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/31bacb38-def1-47d0-83e8-92bf7098bc39.zst",
+          "compression": "zstd",
+          "compressedSize": 23372483,
+          "compressedSha256": "7804d3e5130ed5dd57c191295d0285da66c7b801c6c6ed154bc81a900f7b4aa4",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "ec0c210d09cd5d8a5edf7a50462db0a8fb5dd78d03bbc6d4d72d91074f0490e4",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/1d57af8b-b76e-45a0-9bae-7e1c5fa92004.zst",
+          "compression": "zstd",
+          "compressedSize": 342459,
+          "compressedSha256": "58b0feee37156776628569accc5fdfa3c71bd080d59cb50d84da94031ff5782a",
+          "decompressedSize": 806121,
+          "decompressedSha256": "2eee837cfdcc45c091d025f585d3fcdb293db7794e316b38a0aeff8c47a659e0",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "en",
+      "target": "is",
+      "mozillaSource": "en",
+      "mozillaTarget": "is",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/294b1f10-c5b1-43b0-a739-703358b4325b.zst",
+          "compression": "zstd",
+          "compressedSize": 1438927,
+          "compressedSha256": "fd764cbcca28a4a46cd709d11966cc35a8f0f68c2c0043f57848295396b7c206",
+          "decompressedSize": 3837564,
+          "decompressedSha256": "4927d2bed702141b4ddd8a5e7034b27fb17312fdb7e3cc5f455ccf2e2f6670e0",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/b5e24255-f5dc-492f-be70-98d0f0e14a93.zst",
+          "compression": "zstd",
+          "compressedSize": 21926606,
+          "compressedSha256": "8402e6c013b5ecb857208e591ba74b0fc18d148045bd6fbcde5f6f40b4d4fc1f",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "459626236a49158aa555facd23e5f594e2f8416f4ebad32e0548af94c5b1ae0c",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/871e46d5-3cb8-4dc7-8b2f-3f11b24efbc5.zst",
+          "compression": "zstd",
+          "compressedSize": 351867,
+          "compressedSha256": "1bc4b6654739253e1957f9799879361cbabaa0984a38fdec6d48335eb5d581c0",
+          "decompressedSize": 809991,
+          "decompressedSha256": "61b2ea10edbe4cc61e36c833cacc2f55778ed9ca860cd382729060634d4b0adb",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "en",
+      "target": "it",
+      "mozillaSource": "en",
+      "mozillaTarget": "it",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/598d567f-4a7e-4ae8-b9b2-0c4edbc01aa6.zst",
+          "compression": "zstd",
+          "compressedSize": 1646871,
+          "compressedSha256": "a97b81e39392c07084f3e8340f119e31ae10529634dd0ad6bad1f945d94bb4c7",
+          "decompressedSize": 4133192,
+          "decompressedSha256": "8b21914804625b2777dae7fdb636eb78f02a3eb8b7bceaa50f29ac740961da93",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/3869680e-cedc-4af2-9167-bee368caa4be.zst",
+          "compression": "zstd",
+          "compressedSize": 23600729,
+          "compressedSha256": "ed0580da44b91afd665956959d893c02e16e27240542799a524a3041c523ca17",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "248f47568788ecc351da7e5e07064d4153b4f71e011364ae2c931ffeec4d1cc2",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/6779446e-354e-44ec-a0d1-f3435c340b86.zst",
+          "compression": "zstd",
+          "compressedSize": 346942,
+          "compressedSha256": "ad75fd13305e6dc6ec6cc95e43fbb3cb2fe8b7ea60332f195785541325555db8",
+          "decompressedSize": 812724,
+          "decompressedSha256": "3ef0211d4ae6db21440892f180f2019fe2bfc110a330ffa9d2eca9665e4f2bc5",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "en",
+      "target": "ja",
+      "mozillaSource": "en",
+      "mozillaTarget": "ja",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/83e22dc9-40c4-4ac1-8c25-5d3877b5f628.zst",
+          "compression": "zstd",
+          "compressedSize": 1751977,
+          "compressedSha256": "8954d5b63432366992b22ad2aaa11895e2643014835049fe677655540a705915",
+          "decompressedSize": 4128360,
+          "decompressedSha256": "edfb7eb47b98a2689b804ab3614c31b24f1257aa54b1154da3d85e1ae8152d9f",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/a01a5318-41c7-4266-8fe1-66c105d6d711.zst",
+          "compression": "zstd",
+          "compressedSize": 32431590,
+          "compressedSha256": "f92259b9904812350b71f440c3328f3e2e856f31c1a3ab6002756380dd908e00",
+          "decompressedSize": 43849787,
+          "decompressedSha256": "59ae659f9bb63e4f81f474fe3c03d3f4499434b5f9e779fab7c12a45f31fd562",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "srcvocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/d10e4482-b9ba-4565-ab44-5ba3cebcf94b.zst",
+          "compression": "zstd",
+          "compressedSize": 345747,
+          "compressedSha256": "dd1e93d625d9a8d8a42f75255343f302ea37527933eda1a490652b66a7408a64",
+          "decompressedSize": 796275,
+          "decompressedSha256": "970c98d174fc01e0339fbabbf45af36a4be3f26f819ec1a5ea1189f71e091889",
+          "installedName": "srcvocab.spm"
+        },
+        {
+          "type": "trgvocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/e54d177c-1131-4fbf-90ea-6741a98d6675.zst",
+          "compression": "zstd",
+          "compressedSize": 361180,
+          "compressedSha256": "5384abf34f0e1298f795bd14909a577272059041e60f91a5eb10500e35d0ee98",
+          "decompressedSize": 827144,
+          "decompressedSha256": "3b3d9f8f3a034d98d0a476f1794fa79c01e4e98a967ceb6777a66ba2d03ec1e1",
+          "installedName": "trgvocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "en",
+      "target": "ko",
+      "mozillaSource": "en",
+      "mozillaTarget": "ko",
+      "modelVersion": "3.1",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/81fc59a3-084c-4885-86d3-6636ab74ae79.zst",
+          "compression": "zstd",
+          "compressedSize": 2451078,
+          "compressedSha256": "d98258e56fd35c59555836286aeb4278df8275ee8b5eed314003d0895e93cc40",
+          "decompressedSize": 6449612,
+          "decompressedSha256": "96efba97d4bb93ab362e5569bea0f115184d2f68d63b67305ee663c18e32fbeb",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/bcc59468-c032-43c4-9539-6e14fc2707f3.zst",
+          "compression": "zstd",
+          "compressedSize": 33362245,
+          "compressedSha256": "27a1ff5306d9325192e19bec69ad7ca870208937701602cdd259f49d53353fe6",
+          "decompressedSize": 43849787,
+          "decompressedSha256": "ffe5ef2ce3f2e944055e35310bab186f6a70d533a0ee4394adf716a0e383afbb",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "srcvocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/16b94e20-f11a-49fe-81fd-762d86b5ad69.zst",
+          "compression": "zstd",
+          "compressedSize": 345003,
+          "compressedSha256": "5d8d6196ece8c45747b78dfeea1364dc4097271ff04aea81364aa6133c080d50",
+          "decompressedSize": 791280,
+          "decompressedSha256": "8d4e3141868efd410eb86c2b60d41aa6bc6b46e4c4b2c0b85e3792493c69d802",
+          "installedName": "srcvocab.spm"
+        },
+        {
+          "type": "trgvocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/727c6d70-15ca-4e86-8310-d6303efbb893.zst",
+          "compression": "zstd",
+          "compressedSize": 348381,
+          "compressedSha256": "0e9e37fe978a94ffa908180719517121d95b751012306976edf4e64f246ba78c",
+          "decompressedSize": 815353,
+          "decompressedSha256": "2ece21b28dd7022d36127d17423a74dabf544787dfc1cf614f7b565f93a4a1d3",
+          "installedName": "trgvocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "en",
+      "target": "lt",
+      "mozillaSource": "en",
+      "mozillaTarget": "lt",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/3706a1a9-e629-45e7-8506-780af4d1231f.zst",
+          "compression": "zstd",
+          "compressedSize": 1293319,
+          "compressedSha256": "2c5c4bf6430208d41982f6af77b04652ffa9e66750d6068d55c22731b0f9f79f",
+          "decompressedSize": 3421640,
+          "decompressedSha256": "5972c834218c7beea241dc8fe77c2e577a8d8b4eb3d3dc286d10ad890c64d374",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/1d30200d-a399-4603-8d8b-b9046ad781ab.zst",
+          "compression": "zstd",
+          "compressedSize": 22311787,
+          "compressedSha256": "86aa3577cbcb5743900f01fd062e03c9480007d9e5824ae5a0741fc18389efb0",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "d27c676d9d761c2abfffec83956e32b2923f3f745b56acdbd84c49d888cdc94e",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/e79b6651-7e15-4d48-8088-bd2b3f34ac1c.zst",
+          "compression": "zstd",
+          "compressedSize": 340144,
+          "compressedSha256": "77bd9e1fe272e80e18032d609b387b39e75cffea72a15d961dc006bd2310060e",
+          "decompressedSize": 806827,
+          "decompressedSha256": "5d38fe70ff4a50368af756b715b69519c9ee064c27cbceeabc90d4e1a10f25a8",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "en",
+      "target": "lv",
+      "mozillaSource": "en",
+      "mozillaTarget": "lv",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/6d4b6947-a999-4d90-8c5c-a54329c2163e.zst",
+          "compression": "zstd",
+          "compressedSize": 1268276,
+          "compressedSha256": "fc8e637965da42be3a606585df3cc56df35b7e27046d20a0ccf665bcd818841a",
+          "decompressedSize": 3359096,
+          "decompressedSha256": "d54b9bc278558444c5c25df5ae7339b73eee55cf79705f19fec672b6d55d959c",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/5d523b02-e5f8-44b6-8fbf-958a8ec823f6.zst",
+          "compression": "zstd",
+          "compressedSize": 23399525,
+          "compressedSha256": "67bd9e660b505c36245a6887fd63ceebdc56b1ef12d419616ff05909b85cb1a2",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "715f9f444dffa0b39e71955c28bffd30afa4cc8300a192ec8fabb766cc5ba11d",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/ba99fa09-4c28-4a50-9624-28d8bf3015bd.zst",
+          "compression": "zstd",
+          "compressedSize": 343181,
+          "compressedSha256": "d6fd97c19cb9e8f6215445d53e5850cc1f626501278fd0a85e0d7b3885920e8c",
+          "decompressedSize": 816287,
+          "decompressedSha256": "63146b49ce46ba1283b6956e38efdd4899d1a409cad9d2b6a06cbd4e32ca0808",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "en",
+      "target": "nl",
+      "mozillaSource": "en",
+      "mozillaTarget": "nl",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/7fb33be6-a706-4178-a8c5-39a36bf99d4e.zst",
+          "compression": "zstd",
+          "compressedSize": 1614605,
+          "compressedSha256": "6ed3bcd2e369a873452c0948597d5bc1c2e08878277635afab3385bb425798d2",
+          "decompressedSize": 4030624,
+          "decompressedSha256": "bb4922718f8ca6d746ad090c0a88110a664dc050ee3f311bce33698b4e1679e9",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/08e82901-8409-4eb0-b3ca-5299f4225ba3.zst",
+          "compression": "zstd",
+          "compressedSize": 22991428,
+          "compressedSha256": "bccfa93a22ec77e86dfa839dc49c1a11602b1918bb08dbdc8636b0fb8f5dcee1",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "7e8402da61972dc2fdcf7147c7f1e12f7916a6d9349514ee7a731288357575a9",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/86f8efc7-7ee3-4b86-861a-999ab313d492.zst",
+          "compression": "zstd",
+          "compressedSize": 349477,
+          "compressedSha256": "4e9d279e681372a4dd9b81a737a5a06692d08ed1ecad3b58067e0576e838e5cc",
+          "decompressedSize": 807708,
+          "decompressedSha256": "c09588ca5662b230ed65bd39a07f58d9f7dd21c3a19e4aeb1bff39bf3b297c56",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "en",
+      "target": "pl",
+      "mozillaSource": "en",
+      "mozillaTarget": "pl",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/0c4c3c04-92c0-495d-9216-5ee715575bc1.zst",
+          "compression": "zstd",
+          "compressedSize": 1379394,
+          "compressedSha256": "9934637772a0408e97b767b87580bd56678bbde6a1b9f73afd503aad174cba60",
+          "decompressedSize": 3540052,
+          "decompressedSha256": "d7d7b364673f633763c9f8f2e8ee9c7a184e92f4086e8b84abe870a2a8dbe5d5",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/251fa2ec-4d4e-4c44-8520-8c5c35d967a0.zst",
+          "compression": "zstd",
+          "compressedSize": 21869196,
+          "compressedSha256": "4c3e2a71b7f801eeb81394b3b4a66189b4ee850cf7202855157776c7fa55bf0b",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "b0b59716bcc8f46b8dc6ab5c32a2732acaad42a5a6d9ae9b472526a1bb0d71d4",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/900a6ffd-7ef3-4e05-8a2b-236d4ef616d3.zst",
+          "compression": "zstd",
+          "compressedSize": 351738,
+          "compressedSha256": "7926a0be1849310fe58241d9b9539fe65f796dffcc7a8c52daa4a78234ebb2c0",
+          "decompressedSize": 821612,
+          "decompressedSha256": "2000f182efa8ce5f69bc3f9e574666b5bc2c0af684eedd32f69d15aa9021ea85",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "en",
+      "target": "pt",
+      "mozillaSource": "en",
+      "mozillaTarget": "pt",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/94532a3d-b009-4b56-9ffb-213a052c22fe.zst",
+          "compression": "zstd",
+          "compressedSize": 1588521,
+          "compressedSha256": "c51d8fa1524a4fd70ac32dc6ef8df2a7683ec8da1b7888ef0b82dc1fcbafd14b",
+          "decompressedSize": 3970340,
+          "decompressedSha256": "ccb4c31c9e1899d77a200e71a86958e6ef6c8649627d0bbf3f873b57d9f236bd",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/90cb3b8f-d3bd-4584-9b49-f3072a952582.zst",
+          "compression": "zstd",
+          "compressedSize": 22901341,
+          "compressedSha256": "b6ae4dfe27a5fd5bfaaeb4d84c4297e69c83a329e7eb26ae6ceefafe5ab541c9",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "07892fd2544ee79dcb643615d8f2debb9793fae16842e87c328e27a3dd26a770",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/1ae15c1a-90b6-4c32-8dfa-50dbb710904c.zst",
+          "compression": "zstd",
+          "compressedSize": 348792,
+          "compressedSha256": "5b2ef32ade5c06aa3503186dc8c73e0ff21374e097a071f04d73f8bb1ab0e052",
+          "decompressedSize": 816726,
+          "decompressedSha256": "d9f46182823d5bbc84201252b2dfcac28f63e561f0ec827ed858f241864c9def",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "en",
+      "target": "ru",
+      "mozillaSource": "en",
+      "mozillaTarget": "ru",
+      "modelVersion": "3.1",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/c846c29f-b9e0-465d-b74f-de3e022de8c7.zst",
+          "compression": "zstd",
+          "compressedSize": 1013057,
+          "compressedSha256": "d7998ec23c850255c2436bab1a248944877f63bf1842e02f67e50807d172b1bf",
+          "decompressedSize": 2774540,
+          "decompressedSha256": "4d91839726b960e70b6d05c53d0cffd16262832b1c0e1ea99d66f412dcc6a239",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/bcb1b4a7-3a6a-4974-86f6-76f39b1adf28.zst",
+          "compression": "zstd",
+          "compressedSize": 21044601,
+          "compressedSha256": "a55b2af86653d6e5f4501c674f3806535734f93540e83db19bffdafe456d0887",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "184cb5cda528eeefc0f75f5d0035d787b71d74af135e3c5608d01ae02ecfb920",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/e88102cf-1664-482e-a1f2-a5e1390e2584.zst",
+          "compression": "zstd",
+          "compressedSize": 345737,
+          "compressedSha256": "088a38d8b5faf6315b284e3088714f70a8c79438496b15826b6c62496503c447",
+          "decompressedSize": 904455,
+          "decompressedSha256": "56ee63e14e8cb926c394242adc3ed7cc602644c3d33058cff2ce2959d52a6258",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "en",
+      "target": "sk",
+      "mozillaSource": "en",
+      "mozillaTarget": "sk",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/09ad7811-f925-423a-9602-4d7e6950c46a.zst",
+          "compression": "zstd",
+          "compressedSize": 1247884,
+          "compressedSha256": "66dcee968a7466846e0e9924b9b9814e429ccd134177c4a4366055c4efd07c81",
+          "decompressedSize": 3356348,
+          "decompressedSha256": "f3d1aec4ee5246d6a6ee5dc7ed4c6b18f6071c7baca69bf1344aef675b95515d",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/289dec6a-cbd3-42a8-8f2e-98feb5d363aa.zst",
+          "compression": "zstd",
+          "compressedSize": 22359789,
+          "compressedSha256": "9765cf79693796e6031f42892d50697898dd82044ff48f9a2319572597c3ffe9",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "e33af359fd58c8958104b1b74b3ea302800ccba2f125c1629e09d7f9dd9a3804",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/30e326e9-18d1-44fa-9e08-ba8917fddd54.zst",
+          "compression": "zstd",
+          "compressedSize": 341557,
+          "compressedSha256": "49f63165c0c04a461a83b148caa2364b47ca3aa513d1411be473b01b4d558319",
+          "decompressedSize": 808888,
+          "decompressedSha256": "cfa6a9e601d74686b117f041eb1ad9de94c34219110b67367d570a9e27026a46",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "en",
+      "target": "sl",
+      "mozillaSource": "en",
+      "mozillaTarget": "sl",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/bf434266-a13c-436e-8ce6-a7aa181fe394.zst",
+          "compression": "zstd",
+          "compressedSize": 1266300,
+          "compressedSha256": "78794bb2fbc2b11c656e03c21608d4b85c1a2a58a0981e17054b16d101aae350",
+          "decompressedSize": 3428300,
+          "decompressedSha256": "2190798297bc12505f917189defcf451ab5bd2e815bc05df244dc291dc2ae63b",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/c1302918-496a-4088-a303-3648d7b1afb4.zst",
+          "compression": "zstd",
+          "compressedSize": 22036195,
+          "compressedSha256": "c7aa9d806a9a6971ed00ba7565f88f9eea7f82a4afccb8eef9f5ad2d7e319718",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "a34fc5cc2f52733f64e37f8512cf1ddc4723c08a7a1a59d01fc2b6e641fc2280",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/ba6a290f-f9f6-4bee-8047-20c8ad6e435e.zst",
+          "compression": "zstd",
+          "compressedSize": 337127,
+          "compressedSha256": "4fcec69e165d39b061acdb861652e3601e26ea0bdff2bc8723555828496f395d",
+          "decompressedSize": 803212,
+          "decompressedSha256": "7cd295383c46824c05a05db76b543d3595f2516537dd22b77190a45c8919224d",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "en",
+      "target": "sr",
+      "mozillaSource": "en",
+      "mozillaTarget": "sr",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/1a2ee4d7-3fd5-4c81-a229-cfa408c3d7fb.zst",
+          "compression": "zstd",
+          "compressedSize": 956170,
+          "compressedSha256": "01c211de37ecf83bcff19da0949e9879e7c55c21936c3c12f5af3b5744ec9c0b",
+          "decompressedSize": 2542096,
+          "decompressedSha256": "b2ae22b4d7bc4295d25b8a55559ebbdbd8f728bc8de5c3d6f110bd44ce7d8962",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/6c944d09-abc8-429d-97a3-191768f74f8e.zst",
+          "compression": "zstd",
+          "compressedSize": 22502199,
+          "compressedSha256": "34467c4c67b210f798ca8b15e26a285d357585133d9f244c6b1eff9a221e74af",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "d26e1c5a01f917c38ccda17d1bf116024ac4d988105e1bbf70bc5e8f9191c57a",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/527fe333-fe48-473a-9746-d47d7641953a.zst",
+          "compression": "zstd",
+          "compressedSize": 360481,
+          "compressedSha256": "a86654ebeb15e78ece526d24576907675239f477dba4ea70e914be6daa5c3197",
+          "decompressedSize": 922599,
+          "decompressedSha256": "7f54ba1554b7b1a89299a0ec5950535432f062b50a5f8c9bcd664a2444fa882a",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "en",
+      "target": "ta",
+      "mozillaSource": "en",
+      "mozillaTarget": "ta",
+      "modelVersion": "3.1",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/20260715140551--84fdbd66-f788-4dbf-8fe1-ddd67c829bf7--9906075d-b09b-4ee0-9451-a9ebfc92c9e9.zst",
+          "compression": "zstd",
+          "compressedSize": 1068923,
+          "compressedSha256": "b898393600ec4acbc0017ee12887d08a13dd7bebe8cb2850021c906324989420",
+          "decompressedSize": 2746824,
+          "decompressedSha256": "3a40b2175a114f3ca0ee5501c12e9636ef46f282304b041001f282baf4a5bc6f",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/20260715140559--365beab7-e160-4f36-b192-33a8d43a92d0--fb6709e3-2ebd-4638-9615-bd1a9a7ca2bf.zst",
+          "compression": "zstd",
+          "compressedSize": 22781995,
+          "compressedSha256": "9b5b5caa2b82365fceb64352d3c80f2fe3f891e537324267eb6b84823c406f83",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "83266ea604611756d1c3c358d7bed1fdf79a646c1f701b42c1db501c237c0f3b",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/20260715140552--76b1f964-664b-466f-b200-22ba520e1f9d--40e4bf19-0888-4d80-88e0-ec492cd17092.zst",
+          "compression": "zstd",
+          "compressedSize": 372451,
+          "compressedSha256": "dd8a074cc4a67b6a343f78658f1eb643e99e3ddd431ff7c50010bd4a64ca740d",
+          "decompressedSize": 1097357,
+          "decompressedSha256": "c4fd3cbcec4e7c8a80b7c0656092fb482b9f266b1e8c6cb171f81af394f0f899",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "en",
+      "target": "th",
+      "mozillaSource": "en",
+      "mozillaTarget": "th",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/cb5e4e88-8cda-4202-afbc-a701c978c115.zst",
+          "compression": "zstd",
+          "compressedSize": 1202033,
+          "compressedSha256": "6214e1e62f26be63366c4f405cc9ca1c78f272e9005a5f8a650acb71ae16bf23",
+          "decompressedSize": 3016612,
+          "decompressedSha256": "6961ce07f38e6c113a70855706aa7cad4cc828f986d1751c33f14699f885a2e8",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/68f6f6ce-7583-4b98-96d6-dd0e72f35073.zst",
+          "compression": "zstd",
+          "compressedSize": 22466990,
+          "compressedSha256": "64245d72caec9c3e05573ae7bf39f8eb1f07285214a4e6f88b27b78df05b7cb7",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "80e326097655fca75f841130da3338a849aa245374e1616448bcf37b9523a05a",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/68945752-9714-4b84-bb03-6c475953c15c.zst",
+          "compression": "zstd",
+          "compressedSize": 372200,
+          "compressedSha256": "59a73a98188bbb03d8c9ab8bd02f72058c23d7671cc0c7980df79e4850718a53",
+          "decompressedSize": 993517,
+          "decompressedSha256": "5deff7093d558768f8c22406449202e27595f023cc383a2b66beed240ed46443",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "en",
+      "target": "uk",
+      "mozillaSource": "en",
+      "mozillaTarget": "uk",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/dc8eb360-c8ce-48e0-adfa-76c3d202fe2b.zst",
+          "compression": "zstd",
+          "compressedSize": 1140141,
+          "compressedSha256": "0996c9dab7edb0ea89acd854dcc5346647945a220436b454c5cd477068ae7048",
+          "decompressedSize": 3054364,
+          "decompressedSha256": "dbfd4f8dc95da9c575164f7fc95ef00a2fb5f7d9f51b656559f99eeebdb57c87",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/ef729bdb-748a-4a9a-9587-7d4209abf966.zst",
+          "compression": "zstd",
+          "compressedSize": 22275099,
+          "compressedSha256": "ff694d02907bdb7036b291d24e32600ee3c415aca70ffde5346bd6e130ba110b",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "ed8bb4a811e1c45a259e91052080d25e5c8b4e2df0e59cb1521c04a57855ef97",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/3220a17f-a05d-4a90-8b31-6be582725582.zst",
+          "compression": "zstd",
+          "compressedSize": 363469,
+          "compressedSha256": "888881477ce96954928a993c7df7d942a712b668a701dea01a0b5e76a46773f8",
+          "decompressedSize": 922077,
+          "decompressedSha256": "4dd6a91feff71e745395dcc0d52f885848ca0d843d5f70628ca51b3be1b70b45",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "en",
+      "target": "vi",
+      "mozillaSource": "en",
+      "mozillaTarget": "vi",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/8c1496df-6214-415f-8fff-fc909b09f2d8.zst",
+          "compression": "zstd",
+          "compressedSize": 1708810,
+          "compressedSha256": "bbd8db580c380045eec351fd6a20ad0205853418fff56dbd2cc45c4c70bf4b95",
+          "decompressedSize": 4597684,
+          "decompressedSha256": "18116817fcd3d24dcdfd97cb57e9e60472800dae3b8a007f6f36d61d645f699c",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/b2fdb03b-d12f-47ad-b433-6a226e79e06d.zst",
+          "compression": "zstd",
+          "compressedSize": 24034236,
+          "compressedSha256": "4a48edf88d1c31af324f610c5d58540e231c6eb724ba77be77b9772d8dd969cc",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "04fa6044593a404c2aa02b3096f203880852df6f8f41e5eb966ed9f2b4366737",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/068c956e-df98-4a92-afd3-c9558a5112c0.zst",
+          "compression": "zstd",
+          "compressedSize": 342504,
+          "compressedSha256": "f92b1bc63a78b5d6df7393bcd82116300adfc281f6dfc2b404f60f343828300f",
+          "decompressedSize": 785200,
+          "decompressedSha256": "76daa9a49e393e50c865c889290e4dc36e9453e5e1ec9df7b9f3bc39ea782537",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "en",
+      "target": "zh-Hans",
+      "mozillaSource": "en",
+      "mozillaTarget": "zh-Hans",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/900beaed-2dba-4a88-ad7c-852ec9e73f6a.zst",
+          "compression": "zstd",
+          "compressedSize": 2499275,
+          "compressedSha256": "c7e4b2ee202e6cf526d07f9c5a47b759ba32b0b42a5353d3db4ee1ff3bfb5217",
+          "decompressedSize": 6506248,
+          "decompressedSha256": "4a5e5827788060f1d718a8132b69440929387514a045796e9b77f935db68c055",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/321191b6-2c42-4bca-84ec-b7b074b67bd6.zst",
+          "compression": "zstd",
+          "compressedSize": 32923790,
+          "compressedSha256": "f0c96e546b0af7c1fe84647d450b1eba0b0591c167e1ead135b334e4b54f6e08",
+          "decompressedSize": 43849787,
+          "decompressedSha256": "4e5accc141373565ddc8fa1565bceaa8d0c3482a82cab8131c719ebcc6c2157c",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "srcvocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/83278466-fec4-4944-a99d-c2372fa9de88.zst",
+          "compression": "zstd",
+          "compressedSize": 348078,
+          "compressedSha256": "ec495ad8f0c80ba4eae5ac3b9a8e2ccb4a3a7becb1992efcfea5f4653ffdece1",
+          "decompressedSize": 806952,
+          "decompressedSha256": "bd9b65504acc6d9726dd281f7defc2adb7c2c22d0688fe2f84697de25197c8c5",
+          "installedName": "srcvocab.spm"
+        },
+        {
+          "type": "trgvocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/84236654-1b66-42fc-9ba2-74c37f27e5eb.zst",
+          "compression": "zstd",
+          "compressedSize": 354994,
+          "compressedSha256": "25c6c984a7556cb6478b9f1748ff68d8fd433c0e7d472bfdbd4d64a2dffa21f1",
+          "decompressedSize": 772004,
+          "decompressedSha256": "aded6993c36e440284d11cec3f6b8aef9c0e43188a772d80be342a713adf223d",
+          "installedName": "trgvocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "en",
+      "target": "zh-Hant",
+      "mozillaSource": "en",
+      "mozillaTarget": "zh-Hant",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/2fbf2d3e-9917-4564-8348-0bc0356de46c.zst",
+          "compression": "zstd",
+          "compressedSize": 1726096,
+          "compressedSha256": "efbff0226db207c2b698b711025e8a11c19ea66fc1cea816a6d182d2d3efff9d",
+          "decompressedSize": 4057188,
+          "decompressedSha256": "d891404d1436a7334df12539fe30a26f9e9f2b80bd42fdb8b5f8849e8a1e942b",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/c21ec952-90bb-42dc-b245-7b73e90df282.zst",
+          "compression": "zstd",
+          "compressedSize": 32758465,
+          "compressedSha256": "8563ada56a7a07323979057d9185e69eec530f70dbc06c1001089cb3f4c01c9f",
+          "decompressedSize": 43849787,
+          "decompressedSha256": "559ab90d723a58c1f1e2ab7cc12137bc667af5ba3e325e3eb30b5cdc930db520",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "srcvocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/103d9764-f969-4c25-9ac9-ac08bc628e07.zst",
+          "compression": "zstd",
+          "compressedSize": 346110,
+          "compressedSha256": "00736ec54a77532dd7c3f0c1473ed71503260465d67dc5c10d8096317ba932e4",
+          "decompressedSize": 803694,
+          "decompressedSha256": "2266df70492162a249ab1c0154f929bd6098b246544c666c1a0d5a24dde7d2ea",
+          "installedName": "srcvocab.spm"
+        },
+        {
+          "type": "trgvocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/349beae6-80c3-4e87-bfcb-4963d8f58882.zst",
+          "compression": "zstd",
+          "compressedSize": 350477,
+          "compressedSha256": "41c1ce6c9e1fa4eb330dcef5abe718d2c32574d4c6a43dd37b2f22ad9907154b",
+          "decompressedSize": 751671,
+          "decompressedSha256": "22b91a4436d70b91ab8777c677252ab5fae2bc284d71f977df5206c110e3444c",
+          "installedName": "trgvocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "es",
+      "target": "en",
+      "mozillaSource": "es",
+      "mozillaTarget": "en",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/64f16997-3cf3-4cc8-a069-b143760b1173.zst",
+          "compression": "zstd",
+          "compressedSize": 1880457,
+          "compressedSha256": "5c3aae52d8fddeb2e09098171cdecf059ea453474633edcebc77375b04cbcaee",
+          "decompressedSize": 4636248,
+          "decompressedSha256": "e2610211d3b9577d012638fe7e7e74ed7b4b708ce96b9e792e67c282a6492daa",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/fccccf6a-6d29-407d-82a5-0cf73b23d892.zst",
+          "compression": "zstd",
+          "compressedSize": 22849210,
+          "compressedSha256": "7d1a512f3d3c420a0d87e52dccf6c83bf7eba7f4c54608824d3f86b757993a3e",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "4aed7734152ae0045d1a69ae49c86cfda18f53c61f90e95e1d1de1c7c7c3b033",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/2239f64b-dfc4-41c1-9e06-d532dce7b246.zst",
+          "compression": "zstd",
+          "compressedSize": 348996,
+          "compressedSha256": "76b9ef220b22cec379f097852ca6312cabf065d5ddfb05149d5af31aa050ec22",
+          "decompressedSize": 816054,
+          "decompressedSha256": "5ae254fa9b15aa182e70fd2a6186b1333c63a29a48043a9224c6aa4fcac058ad",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "et",
+      "target": "en",
+      "mozillaSource": "et",
+      "mozillaTarget": "en",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/cbce5b8e-9b64-4592-971c-1baf0f7d454c.zst",
+          "compression": "zstd",
+          "compressedSize": 1683808,
+          "compressedSha256": "109854ff9fb13acc068fbb5b0cadd9f11f2ebe092e3302a0dab80eacc28a9562",
+          "decompressedSize": 4625968,
+          "decompressedSha256": "ad9750f3b41cb5686e561608271a0dc935fc827bf43226e579a6f48a3f6b5f11",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/6d30da5f-b47f-45be-9ac6-aa77f7991442.zst",
+          "compression": "zstd",
+          "compressedSize": 22209211,
+          "compressedSha256": "fff9da74420cee845d6f163f9516244b768ee50d92e39378343b9fee85646b76",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "df844b3a6df906b2e0682fb7765694f35b351854db00f964896d9c8c365fbff3",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/d16aa408-557b-4dd5-afbd-14fef8c23732.zst",
+          "compression": "zstd",
+          "compressedSize": 351938,
+          "compressedSha256": "41ad1d1b1b37a99d379251d3194a06a33bb5160761156275c849c05c3c32770b",
+          "decompressedSize": 817574,
+          "decompressedSha256": "89a3deea4ae7d674fb46a4dae39135dd4dfaac9786f2868d0b5bc5c0aca2ef83",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "eu",
+      "target": "en",
+      "mozillaSource": "eu",
+      "mozillaTarget": "en",
+      "modelVersion": "3.1",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/20260603154048--8d7e911e-84eb-4bfc-a276-1fde15dc6dc9--57c11503-ba2c-41ca-a628-19aef72de80b.zst",
+          "compression": "zstd",
+          "compressedSize": 1374364,
+          "compressedSha256": "d016e1ec42a7d025f082936c2b1e985d3ed1fe2622b638debcfba1b71bba3649",
+          "decompressedSize": 3738856,
+          "decompressedSha256": "4be647536631440bdf68c59d3de5720d8e87a482e0493ff41767488b4df1731d",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/20260603154103--6f6862b1-2c5c-4eac-b0cd-c30cb72df5a0--9be5961a-5bb8-4d6d-919d-7fea39b19003.zst",
+          "compression": "zstd",
+          "compressedSize": 22805446,
+          "compressedSha256": "a085223d2d99b2162e5dc33ddbd25fc4b1db4a4ec7e35cb595faed1704a20e7c",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "f0a31e26b381d6340b069da4d505e11d18ac91e42f0189d37ed5fe6aa3685ed4",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/20260603154104--d402a556-de00-46b3-924f-3a28b76ebdbf--d8f74b87-951e-4375-8dfc-4dbf9ff66f7d.zst",
+          "compression": "zstd",
+          "compressedSize": 351849,
+          "compressedSha256": "8689a86e4745c07299d1c7685a0f319a706782143406e6ae5950087318e6c70d",
+          "decompressedSize": 826064,
+          "decompressedSha256": "8f0cdff0c5bca8ed24d91c415f428d8b208f4991087723f38c1c28b59896de89",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "fi",
+      "target": "en",
+      "mozillaSource": "fi",
+      "mozillaTarget": "en",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/272b125f-2638-40e7-b69a-ed0eba5fd04d.zst",
+          "compression": "zstd",
+          "compressedSize": 1858085,
+          "compressedSha256": "e942f0004bb2f4bc32a551097c6d26a3ce78fb5acaca76a899096dc47b5e4ad3",
+          "decompressedSize": 5195132,
+          "decompressedSha256": "8bad431e07b062ba47f363b76e4656cc743fd608316d8a4830a4315e44ac9abb",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/6effeb07-6e36-486c-ac11-8cc162366001.zst",
+          "compression": "zstd",
+          "compressedSize": 22410920,
+          "compressedSha256": "2b80cd9797707ae096e7c167b827ed37b973aa41f1ac104351b5f4a2c454638d",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "e3887341f18bcc7787d9b59eb1229b56eefce18d49b7ebf1e62c55d65a377321",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/41aa5107-53e3-44b5-b701-8bd3ae65debd.zst",
+          "compression": "zstd",
+          "compressedSize": 352840,
+          "compressedSha256": "18158b030337d5774e251174227999737fcafa5b277ed1b56bc35e2b2d984e3f",
+          "decompressedSize": 818770,
+          "decompressedSha256": "6a866911427f2916609ae89c7f2f04a78de3fdd8aa183039ecba986635d4f246",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "fr",
+      "target": "en",
+      "mozillaSource": "fr",
+      "mozillaTarget": "en",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/7238348a-b118-40f8-9e17-327fb54b2dc8.zst",
+          "compression": "zstd",
+          "compressedSize": 1959170,
+          "compressedSha256": "97d54df5179b2c7909eb075367765829f6a17ac2304ba3dba28accff09fe26e2",
+          "decompressedSize": 4824120,
+          "decompressedSha256": "87c6752ea908f5f0347c10ac0cf7d80d9c2f4f20c81c90168f3e8230b56d4440",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/3a84a714-bfc7-4e52-81a1-b08d5d9421d2.zst",
+          "compression": "zstd",
+          "compressedSize": 22712124,
+          "compressedSha256": "aba908645fa802706cf9ab0bcbf95a6b1ff1281e65402c9225893c923bd73f9a",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "15f997bc0d13808b0b0fbd0786e684a3c8a52adcd8071844b76123fdacbf2b90",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/671f09a0-12a2-436e-94d8-2575a4594c2a.zst",
+          "compression": "zstd",
+          "compressedSize": 348946,
+          "compressedSha256": "61c982758a3e7dc880a8dbc11aaf0fb04a1e4f5d2d7a36ee11bc419323f2ca80",
+          "decompressedSize": 814404,
+          "decompressedSha256": "783abf3abe075afdf8d85d233994bef2c3a064e935ab1bed946820aff6ac002a",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "gl",
+      "target": "en",
+      "mozillaSource": "gl",
+      "mozillaTarget": "en",
+      "modelVersion": "3.1",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/20260603153951--cab4871e-3719-4ef7-954a-d27bd1cbe638--bf562083-8b8d-4632-ae31-276f502915d8.zst",
+          "compression": "zstd",
+          "compressedSize": 1640275,
+          "compressedSha256": "d0dc57bbccf3115f608e6ce3bf25e19c9fd354ab54915fcfa28d15a1dcc03421",
+          "decompressedSize": 4367596,
+          "decompressedSha256": "fea6d0e1ea5d5e8e5f7207e4572867fb8f8d8b3f5f983a33067a06b218ab287f",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/20260603154000--809309bc-79df-4647-8826-324a9545beaa--40b04807-0cf6-441f-869c-ef26f03efbbb.zst",
+          "compression": "zstd",
+          "compressedSize": 22568466,
+          "compressedSha256": "b3cbf45c539d857bb220cd476ab4ba058e7574e531f15b9deb61180ea234152a",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "7e8ea0279166c72b0b430327533c643a88f26e80e4a9f9f294244a84213f3e6d",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/20260603153952--ec836b3d-3dc2-45e4-b972-c55a26561c70--35a6a9a8-f5be-4eeb-a0c3-3ce2bb73e61c.zst",
+          "compression": "zstd",
+          "compressedSize": 349642,
+          "compressedSha256": "74d37fdaae6a6ed2276db9079fb8c9e79f41624a81fbeae79d31db6495b49220",
+          "decompressedSize": 827023,
+          "decompressedSha256": "5157bf2e08eeac7b98703bf50a14653eab84607bb707a00db81585f61c814a6c",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "hr",
+      "target": "en",
+      "mozillaSource": "hr",
+      "mozillaTarget": "en",
+      "modelVersion": "3.1",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/b9f68ac3-d2f6-4ff2-92e9-ffe38b53e55c.zst",
+          "compression": "zstd",
+          "compressedSize": 1852684,
+          "compressedSha256": "06a3d99378cca3688149431ecc1371d927a201c28634db96161d626257220026",
+          "decompressedSize": 5155408,
+          "decompressedSha256": "dccff06320cb87aaa6f93c246038b453d0d0c6f47fa3acd1162f104ac6a2c43f",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/d986c5c6-6477-4062-bdc0-4b4a659b1757.zst",
+          "compression": "zstd",
+          "compressedSize": 22423975,
+          "compressedSha256": "58463c12f2b96b42d8415438c378780f83109f5ff66380db825737f6349e2bfb",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "744c61ec0b987c44717f192fcebda7c2a1ac34f5cbfb56672771d28ff79c82c7",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/c6e6b29b-e90c-4588-acc1-ab98e4f3452d.zst",
+          "compression": "zstd",
+          "compressedSize": 347424,
+          "compressedSha256": "d1c9ba8eb54eb2c3801f7afca08916c8e49f1f8bce765723032932dffba97935",
+          "decompressedSize": 817335,
+          "decompressedSha256": "320561e2cef014a6d626a64822add3a387c91f609f23ea3b7f421d194075c14c",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "is",
+      "target": "en",
+      "mozillaSource": "is",
+      "mozillaTarget": "en",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/11ecf779-6cf8-474e-b5fb-aeace6a6157a.zst",
+          "compression": "zstd",
+          "compressedSize": 1520156,
+          "compressedSha256": "ab8ea8f40724ff3d001da26f67dfe16c0ab7ac0f36ee1e2ebfe0def0035bfcf1",
+          "decompressedSize": 3951884,
+          "decompressedSha256": "0655d05ccaf3cd2a01f910ef542455b7b14e66d96f6c95889079b9ca1ee168cf",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/d8d6ea43-2cd4-4801-ac11-fdea4e61eeb5.zst",
+          "compression": "zstd",
+          "compressedSize": 22784368,
+          "compressedSha256": "3dd0dcdeb25157ba631c43574b979877ff350b8a93296715be651eb6943e2b73",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "d2c285755d37f710458f1a49db5391a123e4e41ca7bd9829dd87cc61e4907ee6",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/22f9389f-cf73-451f-bc89-2de0bb21911c.zst",
+          "compression": "zstd",
+          "compressedSize": 351172,
+          "compressedSha256": "0fbe02de86825fce8c0b38d3ce924e0e167a9baa63006c1cd9196abfa6d8103b",
+          "decompressedSize": 808315,
+          "decompressedSha256": "5c69f0c81f6198f5615ac5aad9d89eb81a46ae8ea396a9e8e274a76409d35e13",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "it",
+      "target": "en",
+      "mozillaSource": "it",
+      "mozillaTarget": "en",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/6a146710-1ffc-415e-995e-18588e56f40d.zst",
+          "compression": "zstd",
+          "compressedSize": 1878098,
+          "compressedSha256": "b5855a724527cb0a41dbe0b83de9682a389dab2300904ab84c2a12f4e9056c2e",
+          "decompressedSize": 4713616,
+          "decompressedSha256": "0700d6d70b30490e68ff9deca0b45b80310745b491855bde3a13e1692d0cbce1",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/24527d9a-7ab8-40e3-a240-f894e0244371.zst",
+          "compression": "zstd",
+          "compressedSize": 22858815,
+          "compressedSha256": "5d3d5a8c463cd9f3a35d99d72165281f66c4637d5297c15418fe1e7cda49856a",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "21b70978ce2f3b4da7a06b5de86a09abe3acd30b9eee1b2ebb3582b9bad790bf",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/352a4445-9c4b-43df-a292-c76cb040f428.zst",
+          "compression": "zstd",
+          "compressedSize": 346942,
+          "compressedSha256": "ad75fd13305e6dc6ec6cc95e43fbb3cb2fe8b7ea60332f195785541325555db8",
+          "decompressedSize": 812724,
+          "decompressedSha256": "3ef0211d4ae6db21440892f180f2019fe2bfc110a330ffa9d2eca9665e4f2bc5",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "ja",
+      "target": "en",
+      "mozillaSource": "ja",
+      "mozillaTarget": "en",
+      "modelVersion": "3.1",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/55f9a9f0-891f-448b-85b7-d62488b45b1e.zst",
+          "compression": "zstd",
+          "compressedSize": 3359102,
+          "compressedSha256": "571403c44adfa4d545e9e4d537e0e7e56ab6bc3858669db7545c70b0bf39f31e",
+          "decompressedSize": 9348172,
+          "decompressedSha256": "525f412f0d210536c2933c78ae395fa0bf2b5ee6cc5dda61ebc2e79410ebaee4",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/74c6f502-909a-4683-a5f3-e1283ad086a9.zst",
+          "compression": "zstd",
+          "compressedSize": 31973916,
+          "compressedSha256": "dadb385632174c77ab57c130c9e3cab1cd1a6874fe85b799a8b0af439fe78c91",
+          "decompressedSize": 43977787,
+          "decompressedSha256": "3a603e20bfe1be86071913f9e23ab5129075bc0a8490151020ac4821e4f17302",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/9c331ae2-c079-425a-908b-c1a3192dcfaa.zst",
+          "compression": "zstd",
+          "compressedSize": 617539,
+          "compressedSha256": "f41f32e36f879643a47fedbd0616fa12f416da62e23af8620ee4fc7705217acc",
+          "decompressedSize": 1443222,
+          "decompressedSha256": "5cb217758bae05877bb3f0c2f612e4e7c1e4cb03c10db11f4a47098d7ae62919",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "ko",
+      "target": "en",
+      "mozillaSource": "ko",
+      "mozillaTarget": "en",
+      "modelVersion": "3.1",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/fbd16dc3-f550-4754-9b0b-ba88120ff8cc.zst",
+          "compression": "zstd",
+          "compressedSize": 3119058,
+          "compressedSha256": "e09289af785ede03003a4ba0671095711211e203a0c10b966be0bb61d7c62010",
+          "decompressedSize": 8617516,
+          "decompressedSha256": "b26291f063ce216a74239275f0485534a38111203e59d42a2a56ba62d6eeb196",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/f4de8251-2ac0-4a4d-b0d4-d229ef050314.zst",
+          "compression": "zstd",
+          "compressedSize": 31458175,
+          "compressedSha256": "439031098a88a1975b0d3bfaccf99ea5a6c8448345a54e64ac9e1f032af07e7f",
+          "decompressedSize": 43977787,
+          "decompressedSha256": "7cb30cbc0a86e242084756445268a2346136771c92b884d9b4ebb077f67d5507",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/38107fa5-ef4b-4eb8-b6a7-8ef468b61121.zst",
+          "compression": "zstd",
+          "compressedSize": 595536,
+          "compressedSha256": "0ada2b1c9fde85c727ee88d702d1444f9ae427fa85a5bc269035b936ba4a6673",
+          "decompressedSize": 1410063,
+          "decompressedSha256": "1c72b740ab793cdc3a8f16913dd6b4e806c77421077dd2d85edeb7be38418598",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "nl",
+      "target": "en",
+      "mozillaSource": "nl",
+      "mozillaTarget": "en",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/a74e89d6-f632-4f28-8218-450968b2e35c.zst",
+          "compression": "zstd",
+          "compressedSize": 1974176,
+          "compressedSha256": "1d739818fbc6bc2afeea12ecd382bfd22c5ec9847e26910080ef759ef5e047ce",
+          "decompressedSize": 4862412,
+          "decompressedSha256": "811ac8f9dcbd12706e2d73a7057a7bbe6b9f0607d15170ffe9439977e8229b41",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/930af1f1-d3de-4e83-852c-81ffe530b8f1.zst",
+          "compression": "zstd",
+          "compressedSize": 22001741,
+          "compressedSha256": "4337cb340c250f93360af3449e32cbfe059d9ba655ac1f2226d16180b93e8bac",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "ff987741ff15a5d94fff16cbef28f2b0a85a6e9547d982fad60ac09d16d11270",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/42020f06-3938-4cc4-952d-94acc032e5f0.zst",
+          "compression": "zstd",
+          "compressedSize": 349477,
+          "compressedSha256": "4e9d279e681372a4dd9b81a737a5a06692d08ed1ecad3b58067e0576e838e5cc",
+          "decompressedSize": 807708,
+          "decompressedSha256": "c09588ca5662b230ed65bd39a07f58d9f7dd21c3a19e4aeb1bff39bf3b297c56",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "pl",
+      "target": "en",
+      "mozillaSource": "pl",
+      "mozillaTarget": "en",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/bf697ced-51fc-43c9-8600-51d7e2109505.zst",
+          "compression": "zstd",
+          "compressedSize": 1809189,
+          "compressedSha256": "9ba237b1684337cd937e20205d2947fec2db65c08fa17b555e52236e87a41b09",
+          "decompressedSize": 4964208,
+          "decompressedSha256": "b295dfefa7022a62e105276e8c39fdfd67bffe588f4fd78583edd4e04ee0cb3b",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/5e139d66-ff65-435b-8b43-3602b0b492cf.zst",
+          "compression": "zstd",
+          "compressedSize": 21997629,
+          "compressedSha256": "bac2aaa11d0dd40aae999929702b3e97dd4c6e8780920a55edb58b40705593e5",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "06dbab3baa3bbceab746bc6a3bba807878f38536382c03acddf59d3edf3b5d94",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/a28acc03-8d4b-468e-a781-67f395ce66c6.zst",
+          "compression": "zstd",
+          "compressedSize": 351738,
+          "compressedSha256": "7926a0be1849310fe58241d9b9539fe65f796dffcc7a8c52daa4a78234ebb2c0",
+          "decompressedSize": 821612,
+          "decompressedSha256": "2000f182efa8ce5f69bc3f9e574666b5bc2c0af684eedd32f69d15aa9021ea85",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "pt",
+      "target": "en",
+      "mozillaSource": "pt",
+      "mozillaTarget": "en",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/35d7b065-8aca-4f7e-82dd-9b2cc287a7f6.zst",
+          "compression": "zstd",
+          "compressedSize": 1850036,
+          "compressedSha256": "30d224e25a2e1bdc3aa31af7398f4e317d96d71d463efe3284d4aef230f951c7",
+          "decompressedSize": 4634492,
+          "decompressedSha256": "2685d8b6530be92a4db4cc61f15a097eb114552be15cb6c1699e9d2d99d24470",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/193c17c2-1c17-4fd3-b810-7de7d376a4ea.zst",
+          "compression": "zstd",
+          "compressedSize": 22030075,
+          "compressedSha256": "f2543035eb4e0cf7814d373e7ae69a10d6b48bdcb47121b372ae7b796bbdf9e6",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "7b854f1ec5a485dd33efd7c1bc01dd7d5a57f566957c5e47722af333f0ce9157",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/ae51a6b3-800f-4198-8b27-c805216f1979.zst",
+          "compression": "zstd",
+          "compressedSize": 348792,
+          "compressedSha256": "5b2ef32ade5c06aa3503186dc8c73e0ff21374e097a071f04d73f8bb1ab0e052",
+          "decompressedSize": 816726,
+          "decompressedSha256": "d9f46182823d5bbc84201252b2dfcac28f63e561f0ec827ed858f241864c9def",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "sl",
+      "target": "en",
+      "mozillaSource": "sl",
+      "mozillaTarget": "en",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/63d726cb-53f3-4ffc-b84e-29f4a931f671.zst",
+          "compression": "zstd",
+          "compressedSize": 1545228,
+          "compressedSha256": "73d8b5d54ca7fca81bbe1624a1566e79b2b7a768788a7ec77c0cc17cedee77d7",
+          "decompressedSize": 4320484,
+          "decompressedSha256": "f456a49e437ccb4a547e4b51480e29c8b83f11e26a3713af35b078cd4dd255cc",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/136f4425-db72-46c4-9604-9158d1f9af0d.zst",
+          "compression": "zstd",
+          "compressedSize": 23428321,
+          "compressedSha256": "e6799be2554f24b67c5fafce2ca105ee52dd76c1c83f75113f580d01c1b03378",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "9d15df58b60048366de4f7b6e727157ffdaea3a0fd1c1759ce232b057e2f991c",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/b7741d7d-f9c8-440b-b38c-748ad81549ce.zst",
+          "compression": "zstd",
+          "compressedSize": 336950,
+          "compressedSha256": "2e265dd39128d39044459f2942067527f32d696c082e2e6d0ad4c9ccd64f911b",
+          "decompressedSize": 803078,
+          "decompressedSha256": "54ed331d3435e2bdc5b02462180197b77631f466fc0e61897b5469449857dd2b",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "sr",
+      "target": "en",
+      "mozillaSource": "sr",
+      "mozillaTarget": "en",
+      "modelVersion": "3.1",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/3b8f6978-a46c-4cf7-a81b-20f6823c8bc0.zst",
+          "compression": "zstd",
+          "compressedSize": 1852684,
+          "compressedSha256": "06a3d99378cca3688149431ecc1371d927a201c28634db96161d626257220026",
+          "decompressedSize": 5155408,
+          "decompressedSha256": "dccff06320cb87aaa6f93c246038b453d0d0c6f47fa3acd1162f104ac6a2c43f",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/927effa8-f9d2-438d-a24c-35b53ea8d5a4.zst",
+          "compression": "zstd",
+          "compressedSize": 22423975,
+          "compressedSha256": "58463c12f2b96b42d8415438c378780f83109f5ff66380db825737f6349e2bfb",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "744c61ec0b987c44717f192fcebda7c2a1ac34f5cbfb56672771d28ff79c82c7",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/e927340c-b45a-4417-9c8a-e8cc64179aee.zst",
+          "compression": "zstd",
+          "compressedSize": 347424,
+          "compressedSha256": "d1c9ba8eb54eb2c3801f7afca08916c8e49f1f8bce765723032932dffba97935",
+          "decompressedSize": 817335,
+          "decompressedSha256": "320561e2cef014a6d626a64822add3a387c91f609f23ea3b7f421d194075c14c",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "ta",
+      "target": "en",
+      "mozillaSource": "ta",
+      "mozillaTarget": "en",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/20260715140645--409163ce-ea58-460d-912a-ea8411fd3b7a--53b3d647-1234-4b25-8131-4f1a059c7b88.zst",
+          "compression": "zstd",
+          "compressedSize": 1725316,
+          "compressedSha256": "e6625b02a9447a6edab565bb9905ac3fe844273fcd6dd9f51b54bfad2c33ad80",
+          "decompressedSize": 4940884,
+          "decompressedSha256": "2eb77117d9997984fe700c386126865a6ca951fcfb78b3c29b2921a6a770d63a",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/20260715140643--9e3dc4f4-454b-4943-a311-943182289526--0a8d67c9-ac53-494d-af9a-8262866b8a96.zst",
+          "compression": "zstd",
+          "compressedSize": 23151000,
+          "compressedSha256": "4cf6935d0e2389f620339832e19f52ee09d5c8abd00ec90f20b6228809b35aa1",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "5413fca6c35cd9c50157df1ebd425d6ca02713bfedc1ba7e5fb3050a437b13b6",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/20260715140639--d488b9e1-165b-41ff-bf5d-90f34b77a6c5--851ed786-73b8-49be-88ab-80774e392956.zst",
+          "compression": "zstd",
+          "compressedSize": 373002,
+          "compressedSha256": "f84c1b8e554cb5f20f43d489a08f3e52ab127ea25f872603944d32d77941e4bc",
+          "decompressedSize": 1104678,
+          "decompressedSha256": "5ce5f840335d9cbbbd76ef160ee2566ebe239d820d66a827996f40dd01467a92",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "th",
+      "target": "en",
+      "mozillaSource": "th",
+      "mozillaTarget": "en",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/505ecdab-e15c-4c3a-8bb3-d8e81520e0e1.zst",
+          "compression": "zstd",
+          "compressedSize": 1646914,
+          "compressedSha256": "5dd4e3082a661fe63f4f279f091be69a6ca21d5496849dbc9f270cab51dd14e4",
+          "decompressedSize": 4487056,
+          "decompressedSha256": "3a7661a7f5c811c83f05f53008083b042fea0334fc6044ca1fda4982a8d48453",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/21bd4fc2-ddd2-406c-a6fe-ae65381baff8.zst",
+          "compression": "zstd",
+          "compressedSize": 22425194,
+          "compressedSha256": "27c4f9cc9d2ade0cfaaf3734c667342033a6687b7831051bd8eda48e3ba272c7",
+          "decompressedSize": 31561787,
+          "decompressedSha256": "f70a501324743668b031bee19cd001a66839e8e5dfc0b4a1c44d5ea99d4e8d66",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/dc20c451-7d9f-451d-8164-c0b5fd2ef42f.zst",
+          "compression": "zstd",
+          "compressedSize": 372594,
+          "compressedSha256": "d4ed7d2c170c75e9e08bc9e012b80d889018fb1d79f9945edb73907de58c5bc5",
+          "decompressedSize": 995429,
+          "decompressedSha256": "b625d3dcdfa2b4bbec496c9a0a30d169c917464ac5ea75506c0699972fea95f0",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "zh-Hans",
+      "target": "en",
+      "mozillaSource": "zh-Hans",
+      "mozillaTarget": "en",
+      "modelVersion": "3.1",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/a2261cbe-7fe7-498d-a128-c08d918b42fc.zst",
+          "compression": "zstd",
+          "compressedSize": 3427789,
+          "compressedSha256": "59d9e4341d8cd4403ea1d12fc54c6100c4f25a7529df1f21f3d35952808e7d45",
+          "decompressedSize": 9219192,
+          "decompressedSha256": "8524dd4c93ffd7f0ae7be32f77a7c14fea7cdbbebe34ea6ad0ec368d5ddd8b13",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/8bb74789-fad9-40e0-8f49-d3e017106138.zst",
+          "compression": "zstd",
+          "compressedSize": 32186434,
+          "compressedSha256": "37af47d465cd0bfdf5cf3c6452e860c6682519a7109f86c33cf5f332a3f4cfa4",
+          "decompressedSize": 43977787,
+          "decompressedSha256": "5cd149601802fc8a18124a1c1306144dbbedc058630c4ddb2d53aa76fa9c7c06",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "vocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/369efa59-d98e-4aa9-8a91-363ba16c3ba7.zst",
+          "compression": "zstd",
+          "compressedSize": 611595,
+          "compressedSha256": "4f9c18c3665d995845a4e3ff71476a881a2c4257a5caf88a042237f4d1f14e58",
+          "decompressedSize": 1359697,
+          "decompressedSha256": "dff594318ab7d8b7b60b844ab98ebe6b932ae8045fab15235404c787715965b3",
+          "installedName": "vocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    },
+    {
+      "source": "zh-Hant",
+      "target": "en",
+      "mozillaSource": "zh-Hant",
+      "mozillaTarget": "en",
+      "modelVersion": "3.0",
+      "architecture": "base-memory",
+      "files": [
+        {
+          "type": "lex",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/931f8f78-1b3e-4c16-8514-2b17df2cf9cf.zst",
+          "compression": "zstd",
+          "compressedSize": 2360209,
+          "compressedSha256": "45332eaa996fe1b1c00c1a9fe084dfa513d84fc963c02fa84a0e9d247593685f",
+          "decompressedSize": 6385944,
+          "decompressedSha256": "aa7daf6cfc85c0cd2c10e2944d66f6da55497c9c6408789f3adfded4074c2fb1",
+          "installedName": "lex.bin"
+        },
+        {
+          "type": "model",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/32debe3a-b7f3-4e08-a771-e0cfa573d1fa.zst",
+          "compression": "zstd",
+          "compressedSize": 33343885,
+          "compressedSha256": "5409128464ba483dcc9b8a9994a232fbc3499be55c1bfc3dafc21e8219285a45",
+          "decompressedSize": 43849787,
+          "decompressedSha256": "0aee91790894458f5d367551f6edcd4c9cb97852c34f221bcbf9f4701ebcf0cd",
+          "installedName": "model.bin"
+        },
+        {
+          "type": "srcvocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/981d1f3a-8b0f-4773-bde8-1fb82af4e654.zst",
+          "compression": "zstd",
+          "compressedSize": 354022,
+          "compressedSha256": "7f71a3343b2ba095545e64ad7799f5b1dae978ab5dbeea0702b6ec948654bde7",
+          "decompressedSize": 769669,
+          "decompressedSha256": "5cc6a76611dbf86219f109141533606b15ecb34eee83673bb86b2c16b14734db",
+          "installedName": "srcvocab.spm"
+        },
+        {
+          "type": "trgvocab",
+          "url": "https://firefox-settings-attachments.cdn.mozilla.net/main-workspace/translations-models-v2/113f0d05-ad64-4311-b74f-9366f2a8c628.zst",
+          "compression": "zstd",
+          "compressedSize": 347743,
+          "compressedSha256": "48763c078bb47d9be23559a1e50971545874382fc68a51faa7a39c2ff922768b",
+          "decompressedSize": 812572,
+          "decompressedSha256": "7bf002db37c10d3b114cc5588d7fdcb16c57d0fd1e2c34354c22cc9f0b6c3c29",
+          "installedName": "trgvocab.spm"
+        }
+      ],
+      "licenseFiles": [
+        "MPL-2.0.txt"
+      ]
+    }
+  ]
+}

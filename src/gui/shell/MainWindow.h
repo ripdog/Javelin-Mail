@@ -56,7 +56,6 @@ namespace javelin::app
     class MessageNavigationPort;
     class OnboardingPort;
     class SearchSession;
-    class TranslationPort;
     struct OpenEmailRoute;
 } // namespace javelin::app
 namespace javelin::app::undo
@@ -92,6 +91,10 @@ namespace javelin::gui::settings
     class GuiSettings;
     struct ConnectionSettings;
 } // namespace javelin::gui::settings
+namespace javelin::gui::translation
+{
+    class TranslationService;
+}
 
 namespace javelin::gui::shell
 {
@@ -146,7 +149,7 @@ namespace javelin::gui::shell
                             javelin::jmap::cache::IdentityReader& identityReader,
                             javelin::jmap::cache::MessageViewReader& messageViewReader,
                             javelin::jmap::cache::QueryReader& queryReader,
-                            javelin::app::TranslationPort& translationPort,
+                            javelin::gui::translation::TranslationService& translationService,
                             javelin::app::ComposeCommandPort& composeCommandPort,
                             javelin::app::ContactCommandPort& contactCommandPort,
                             javelin::app::MailCommandPort& mailCommandPort,
@@ -287,7 +290,7 @@ namespace javelin::gui::shell
         javelin::jmap::cache::IdentityReader& m_identityReader;
         javelin::jmap::cache::MessageViewReader& m_messageViewReader;
         javelin::jmap::cache::QueryReader& m_queryReader;
-        javelin::app::TranslationPort& m_translationPort;
+        javelin::gui::translation::TranslationService& m_translationService;
         javelin::app::ComposeCommandPort& m_composeCommandPort;
         javelin::app::ContactCommandPort& m_contactCommandPort;
         javelin::app::MailCommandPort& m_mailCommandPort;

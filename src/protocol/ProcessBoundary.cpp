@@ -273,26 +273,6 @@ namespace javelin::protocol
                                                     QStringLiteral("update.remoteContentDomains")))
                     return error;
             }
-            if (request.update.translation.has_value())
-            {
-                const auto& translation = *request.update.translation;
-                if (auto error = optionalStringError(
-                        translation.apiKeyOverride,
-                        QStringLiteral("update.translation.apiKeyOverride"), limits))
-                    return error;
-                if (auto error = requiredStringError(
-                        translation.targetLanguage,
-                        QStringLiteral("update.translation.targetLanguage"), limits))
-                    return error;
-                if (auto error = validateStringList(
-                        translation.autoTranslateSenders,
-                        QStringLiteral("update.translation.autoTranslateSenders")))
-                    return error;
-                if (auto error = validateStringList(
-                        translation.autoTranslateDomains,
-                        QStringLiteral("update.translation.autoTranslateDomains")))
-                    return error;
-            }
             if (request.update.appearance.has_value() &&
                 (request.update.appearance->messageColorMode < 0 ||
                  request.update.appearance->messageColorMode > 2))
@@ -510,15 +490,6 @@ namespace javelin::protocol
                     };
                     addStrings(value.update.remoteContentSenders);
                     addStrings(value.update.remoteContentDomains);
-                    if (value.update.translation.has_value())
-                    {
-                        size += stringSize(value.update.translation->apiKeyOverride) +
-                                stringSize(value.update.translation->targetLanguage);
-                        for (const auto& sender : value.update.translation->autoTranslateSenders)
-                            size += stringSize(sender);
-                        for (const auto& domain : value.update.translation->autoTranslateDomains)
-                            size += stringSize(domain);
-                    }
                     if (value.update.attachments.has_value())
                         size += stringSize(value.update.attachments->directory);
                     if (value.update.appearance.has_value())

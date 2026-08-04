@@ -87,13 +87,12 @@ namespace
         {
             return SettingsSnapshotReply{
                 .snapshot = {.revision = {.value = 5},
-                             .schemaVersion = 2,
+                             .schemaVersion = 3,
                              .accounts = {},
                              .syncedMailboxSelections = {},
                              .notificationMailboxSelections = {},
                              .remoteContentSenders = {},
                              .remoteContentDomains = {},
-                             .translation = {},
                              .appearance = {},
                              .attachments = {},
                              .undoSendDelaySeconds = 10,
@@ -254,7 +253,7 @@ namespace
         REQUIRE(std::holds_alternative<SettingsSnapshotReply>(settings));
         const auto& settingsSnapshot = std::get<SettingsSnapshotReply>(settings).snapshot;
         CHECK(settingsSnapshot.revision.value == 5);
-        CHECK(settingsSnapshot.schemaVersion == 2);
+        CHECK(settingsSnapshot.schemaVersion == 3);
         CHECK(settingsSnapshot.workspace.mainWindowState == QByteArrayLiteral("window-state"));
         REQUIRE(settingsSnapshot.workspace.calendarColorOverrides.size() == 1);
         CHECK(settingsSnapshot.workspace.calendarColorOverrides.front().calendarId ==
@@ -280,11 +279,6 @@ namespace
                  .notificationMailboxSelections = std::nullopt,
                  .remoteContentSenders = std::nullopt,
                  .remoteContentDomains = std::nullopt,
-                 .translation = TranslationSettings{.enabled = true,
-                                                    .apiKeyOverride = {},
-                                                    .targetLanguage = QStringLiteral("mi-NZ"),
-                                                    .autoTranslateSenders = {},
-                                                    .autoTranslateDomains = {}},
                  .appearance = std::nullopt,
                  .attachments = std::nullopt,
                  .undoSendDelaySeconds = std::nullopt,
@@ -624,27 +618,20 @@ TEST_CASE("endpoint exposes settings, handshake, lifecycle and events through ty
     CHECK(completed->result == completion.result);
 
     endpoint.detachEventSink(sink);
-    const auto update = endpoint.updateSettings(
-        {.baseRevision = {.value = 5},
-         .update = {.accounts = std::nullopt,
-                    .syncedMailboxSelections = std::nullopt,
-                    .notificationMailboxSelections = std::nullopt,
-                    .remoteContentSenders = std::nullopt,
-                    .remoteContentDomains = std::nullopt,
-                    .translation = TranslationSettings{.enabled = true,
-                                                       .apiKeyOverride = {},
-                                                       .targetLanguage = QStringLiteral("mi-NZ"),
-                                                       .autoTranslateSenders = {},
-                                                       .autoTranslateDomains = {}},
-                    .appearance = std::nullopt,
-                    .attachments = std::nullopt,
-                    .undoSendDelaySeconds = std::nullopt,
-                    .workspace = std::nullopt}});
+    const auto update =
+        endpoint.updateSettings({.baseRevision = {.value = 5},
+                                 .update = {.accounts = std::nullopt,
+                                            .syncedMailboxSelections = std::nullopt,
+                                            .notificationMailboxSelections = std::nullopt,
+                                            .remoteContentSenders = std::nullopt,
+                                            .remoteContentDomains = std::nullopt,
+                                            .appearance = std::nullopt,
+                                            .attachments = std::nullopt,
+                                            .undoSendDelaySeconds = std::nullopt,
+                                            .workspace = std::nullopt}});
     CHECK(std::holds_alternative<SettingsUpdated>(update));
     REQUIRE(handler.receivedSettingsUpdate.has_value());
-    REQUIRE(handler.receivedSettingsUpdate->update.translation.has_value());
-    CHECK(handler.receivedSettingsUpdate->update.translation->targetLanguage ==
-          QStringLiteral("mi-NZ"));
+    CHECK_FALSE(handler.receivedSettingsUpdate->update.appearance.has_value());
 }
 
 TEST_CASE("socket frame codec handles partial, oversized, and unknown frames", "[protocol][socket]")

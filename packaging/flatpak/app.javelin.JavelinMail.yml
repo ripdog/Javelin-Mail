@@ -43,7 +43,7 @@ modules:
     buildsystem: simple
     build-commands:
       - test -f /app/include/QtWebEngineCore/QWebEngineUrlSchemeHandler
-      - cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS=-Wno-error=maybe-uninitialized -DCMAKE_INSTALL_PREFIX=/app -DBUILD_TESTING=OFF -DJAVELIN_ENABLE_LOCAL_DATA_INSTALL=OFF -DJAVELIN_INSTALL_SYSTEMD_USER_SERVICE=OFF -DFETCHCONTENT_SOURCE_DIR_GLAZE=/run/build/javelin-mail/third-party/glaze -DFETCHCONTENT_SOURCE_DIR_FASTTEXT=/run/build/javelin-mail/third-party/fastText
+      - cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS=-Wno-error=maybe-uninitialized -DCMAKE_INSTALL_PREFIX=/app -DBUILD_TESTING=OFF -DJAVELIN_ENABLE_LOCAL_DATA_INSTALL=OFF -DJAVELIN_INSTALL_SYSTEMD_USER_SERVICE=OFF -DFETCHCONTENT_SOURCE_DIR_GLAZE=/run/build/javelin-mail/third-party/glaze -DFETCHCONTENT_SOURCE_DIR_FASTTEXT=/run/build/javelin-mail/third-party/fastText -DFETCHCONTENT_SOURCE_DIR_MOZILLA_TRANSLATIONS=/run/build/javelin-mail/third-party/mozilla-translations
       - cmake --build build --parallel 2
       - cmake --install build
       - install -Dm755 packaging/flatpak/javelin-flatpak /app/bin/javelin-flatpak
@@ -73,3 +73,9 @@ modules:
         url: https://github.com/facebookresearch/fastText/archive/refs/tags/v0.9.2.tar.gz
         sha256: 7ea4edcdb64bfc6faaaec193ef181bdc108ee62bb6a04e48b2e80b639a99e27e
         dest: third-party/fastText
+      - type: git
+        url: https://github.com/mozilla/translations.git
+        commit: 4732dc947bc952abb019aabfe5582006d4fc3337
+        disable-submodules: false
+        disable-shallow-clone: true
+        dest: third-party/mozilla-translations

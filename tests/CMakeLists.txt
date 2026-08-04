@@ -20,6 +20,34 @@ javelin_enable_static_analysis(javelin_protocol_tests)
 javelin_enable_sanitizers(javelin_protocol_tests)
 catch_discover_tests(javelin_protocol_tests)
 
+add_executable(javelin_translation_tests
+    app/TranslationServiceTest.cpp
+    jmap/TranslationCacheRepositoryTest.cpp
+    jmap/LanguageDetectionTest.cpp
+)
+if(JAVELIN_ENABLE_BERGAMOT_TRANSLATION)
+    target_sources(javelin_translation_tests PRIVATE
+        gui/TranslationModelManifestTest.cpp
+    )
+endif()
+target_include_directories(javelin_translation_tests
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/tests
+)
+target_link_libraries(javelin_translation_tests
+    PRIVATE
+        Catch2::Catch2WithMain
+        QCoro6::Core
+        Qt::Network
+        Qt::Sql
+        javelin_translation
+)
+target_compile_options(javelin_translation_tests PRIVATE -fexceptions)
+javelin_set_project_warnings(javelin_translation_tests)
+javelin_enable_static_analysis(javelin_translation_tests)
+javelin_enable_sanitizers(javelin_translation_tests)
+catch_discover_tests(javelin_translation_tests)
+
 add_executable(javelin_jmap_tests
     ${PROJECT_SOURCE_DIR}/src/app/ApplicationErrorCoordinator.cpp
     ${PROJECT_SOURCE_DIR}/src/app/ApplicationErrorCoordinator.h
@@ -73,10 +101,6 @@ add_executable(javelin_jmap_tests
     ${PROJECT_SOURCE_DIR}/src/app/MessageNavigationPort.h
     ${PROJECT_SOURCE_DIR}/src/app/SettingsRepository.cpp
     ${PROJECT_SOURCE_DIR}/src/app/SettingsRepository.h
-    ${PROJECT_SOURCE_DIR}/src/app/TranslationService.cpp
-    ${PROJECT_SOURCE_DIR}/src/app/TranslationService.h
-    ${PROJECT_SOURCE_DIR}/src/app/TranslationSettings.cpp
-    ${PROJECT_SOURCE_DIR}/src/app/TranslationSettingsPolicy.cpp
     ${PROJECT_SOURCE_DIR}/src/app/WorkScheduler.cpp
     ${PROJECT_SOURCE_DIR}/src/app/WorkScheduler.h
     ${PROJECT_SOURCE_DIR}/src/app/WorkTaskPort.h
@@ -112,7 +136,6 @@ add_executable(javelin_jmap_tests
     jmap/JmapCoreMessageContentTest.cpp
     jmap/JmapCoreTest.cpp
     jmap/JmapTransportPreferenceRepositoryTest.cpp
-    jmap/LanguageDetectionTest.cpp
     jmap/MailVaultTest.cpp
     jmap/LongPollMailboxObserverTest.cpp
     jmap/LongPollWorkerTest.cpp
@@ -136,7 +159,6 @@ add_executable(javelin_jmap_tests
     app/RemoteCodecTest.cpp
     app/StateChangePolicyTest.cpp
     app/SettingsRepositoryTest.cpp
-    app/TranslationServiceTest.cpp
     app/WorkSchedulerTest.cpp
     jmap/MailMethodsTest.cpp
     jmap/MailDeltaRefreshExecutorTest.cpp
@@ -167,7 +189,6 @@ add_executable(javelin_jmap_tests
     jmap/SyncPlannerTest.cpp
     jmap/SyncReconcilerTest.cpp
     jmap/ThreadRepositoryTest.cpp
-    jmap/TranslationCacheRepositoryTest.cpp
     jmap/WebSocketPushChannelTest.cpp
     gui/MonthCalendarWidgetTest.cpp
     gui/RecurrencePatternTest.cpp

@@ -11,7 +11,6 @@
 #include "app/MessageNavigationPort.h"
 #include "app/PerformanceMetrics.h"
 #include "app/SearchSession.h"
-#include "app/TranslationApplicationPorts.h"
 #include "app/UndoApplicationPorts.h"
 #include "gui/IconUtils.h"
 #include "gui/logging/LogViewerDialog.h"
@@ -53,6 +52,7 @@
 #include "gui/shell/TabBarPresenter.h"
 #include "gui/shell/TabPersistence.h"
 #include "gui/sieve/SieveEditorDialog.h"
+#include "gui/translation/TranslationService.h"
 #include "jmap/cache/AccountReadRepository.h"
 #include "jmap/cache/ContactReader.h"
 #include "jmap/cache/IdentityReader.h"
@@ -252,7 +252,7 @@ namespace javelin::gui::shell
                            javelin::jmap::cache::IdentityReader& identityReader,
                            javelin::jmap::cache::MessageViewReader& messageViewReader,
                            javelin::jmap::cache::QueryReader& queryReader,
-                           javelin::app::TranslationPort& translationPort,
+                           javelin::gui::translation::TranslationService& translationService,
                            javelin::app::ComposeCommandPort& composeCommandPort,
                            javelin::app::ContactCommandPort& contactCommandPort,
                            javelin::app::MailCommandPort& mailCommandPort,
@@ -270,7 +270,7 @@ namespace javelin::gui::shell
           m_calendarCommandPort(calendarCommandPort),
           m_contactIdentityLookup(contactIdentityLookup), m_identityReader(identityReader),
           m_messageViewReader(messageViewReader), m_queryReader(queryReader),
-          m_translationPort(translationPort), m_composeCommandPort(composeCommandPort),
+          m_translationService(translationService), m_composeCommandPort(composeCommandPort),
           m_contactCommandPort(contactCommandPort), m_mailCommandPort(mailCommandPort),
           m_sieveCommandPort(sieveCommandPort), m_accountRefreshPort(accountRefreshPort),
           m_onboardingPort(onboardingPort), m_messageContentPort(messageContentPort),
@@ -1303,7 +1303,7 @@ namespace javelin::gui::shell
         messageLayout->addWidget(messageListArea, 1);
 
         m_messageViewContainer = new javelin::gui::messageview::MessageViewContainer(
-            m_settings, m_translationPort, m_contactIdentityLookup, this);
+            m_settings, m_translationService, m_contactIdentityLookup, this);
         connect(m_messageViewContainer,
                 &javelin::gui::messageview::MessageViewContainer::saveAttachmentRequested, this,
                 [this](const QString& accountId, const QString& emailId, const QString& partId)
@@ -2856,9 +2856,13 @@ namespace javelin::gui::shell
 
     void MainWindow::openPreferencesForConnection(const QString& connectionId)
     {
-        javelin::gui::settings::PreferencesDialog dialog{m_settings,       m_accountCommandPort,
-                                                         m_onboardingPort, m_accountReader,
-                                                         m_mailboxReader,  this};
+        javelin::gui::settings::PreferencesDialog dialog{m_settings,
+                                                         m_accountCommandPort,
+                                                         m_onboardingPort,
+                                                         m_translationService,
+                                                         m_accountReader,
+                                                         m_mailboxReader,
+                                                         this};
         connect(&dialog, &javelin::gui::settings::PreferencesDialog::accountAdded, this,
                 [this](const javelin::gui::settings::ConnectionSettings& settings)
                 { m_accountRefreshController->refreshConnection(settings); });
@@ -2869,7 +2873,6 @@ namespace javelin::gui::shell
             dialog.selectConfiguredAccount(connectionId);
         if (dialog.exec() == QDialog::Accepted)
         {
-            m_translationPort.reloadSettings();
             m_messageViewContainer->appearanceSettingsChanged();
             m_messageViewContainer->translationSettingsChanged();
             m_statusBar->showMessage(QStringLiteral("Saved preferences."), 3000);

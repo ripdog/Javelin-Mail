@@ -1957,6 +1957,14 @@ namespace javelin::jmap::cache
                                 "CURRENT_TIMESTAMP,PRIMARY KEY(kind,claim_key)) STRICT"),
                         },
                 },
+                MigrationStep{
+                    .version = 39,
+                    .name = QStringLiteral("drop_daemon_translation_cache"),
+                    .statements =
+                        {
+                            QStringLiteral("DROP TABLE IF EXISTS translation_cache"),
+                        },
+                },
             },
         };
     }

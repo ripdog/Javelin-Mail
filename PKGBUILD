@@ -19,6 +19,7 @@ depends=(
   'qt6-svg'
   'qt6-webengine'
   'qt6-websockets'
+  'zstd'
 )
 makedepends=(
   'boost'

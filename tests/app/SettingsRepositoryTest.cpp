@@ -21,7 +21,6 @@ namespace
     using javelin::protocol::AccountSettings;
     using javelin::protocol::SettingsSnapshot;
     using javelin::protocol::SettingsUpdate;
-    using javelin::protocol::TranslationSettings;
 
     [[nodiscard]] SettingsRepository repositoryFor(const QString& path)
     {
@@ -35,7 +34,6 @@ namespace
                 .notificationMailboxSelections = std::nullopt,
                 .remoteContentSenders = std::nullopt,
                 .remoteContentDomains = std::nullopt,
-                .translation = std::nullopt,
                 .appearance = std::nullopt,
                 .attachments = std::nullopt,
                 .undoSendDelaySeconds = std::nullopt,
@@ -110,12 +108,11 @@ TEST_CASE("settings repository creates and persists its schema identity", "[app]
     const auto* snapshot = std::get_if<SettingsSnapshot>(&result);
     REQUIRE(snapshot != nullptr);
     CHECK(snapshot->revision.value == 0);
-    CHECK(snapshot->schemaVersion == 2);
-    CHECK(snapshot->translation.targetLanguage == QStringLiteral("en"));
+    CHECK(snapshot->schemaVersion == 3);
     CHECK(snapshot->undoSendDelaySeconds == 10);
 
     QSettings persisted{path, QSettings::IniFormat};
-    CHECK(persisted.value(QStringLiteral("settings/schemaVersion")).toUInt() == 2);
+    CHECK(persisted.value(QStringLiteral("settings/schemaVersion")).toUInt() == 3);
     CHECK(persisted.value(QStringLiteral("settings/revision")).toULongLong() == 0);
 }
 
@@ -147,13 +144,6 @@ TEST_CASE("settings repository migrates the complete legacy operational shape", 
     CHECK(snapshot->syncedMailboxSelections.front().mailboxIds ==
           std::vector<QString>{QStringLiteral("inbox"), QStringLiteral("archive")});
     REQUIRE(snapshot->notificationMailboxSelections.size() == 1);
-    CHECK_FALSE(snapshot->translation.enabled);
-    CHECK(snapshot->translation.apiKeyOverride == QStringLiteral("translation-key"));
-    CHECK(snapshot->translation.targetLanguage == QStringLiteral("ja"));
-    CHECK(snapshot->translation.autoTranslateSenders ==
-          std::vector<QString>{QStringLiteral("sender@example.test")});
-    CHECK(snapshot->translation.autoTranslateDomains ==
-          std::vector<QString>{QStringLiteral("example.test")});
     CHECK(snapshot->appearance.messageColorMode == 2);
     CHECK_FALSE(snapshot->attachments.alwaysAsk);
     CHECK(snapshot->attachments.directory == QStringLiteral("/tmp/mail"));
@@ -170,8 +160,11 @@ TEST_CASE("settings repository migrates the complete legacy operational shape", 
     CHECK(snapshot->workspace.calendarColorOverrides.front().color == QStringLiteral("#123456"));
 
     QSettings migrated{path, QSettings::IniFormat};
-    CHECK(migrated.value(QStringLiteral("settings/schemaVersion")).toUInt() == 2);
+    CHECK(migrated.value(QStringLiteral("settings/schemaVersion")).toUInt() == 3);
     CHECK(migrated.value(QStringLiteral("settings/revision")).toULongLong() == 0);
+    CHECK_FALSE(migrated.value(QStringLiteral("translation/enabled")).toBool());
+    CHECK(migrated.value(QStringLiteral("translation/targetLanguage")).toString() ==
+          QStringLiteral("JA"));
     CHECK_FALSE(migrated.contains(QStringLiteral("mainWindow/geometry")));
     CHECK_FALSE(migrated.contains(QStringLiteral("calendar/colorOverrides")));
 }
@@ -192,13 +185,13 @@ TEST_CASE("settings repository migrates schema one workspace state", "[app][sett
     const auto result = repository.load();
     const auto* snapshot = std::get_if<SettingsSnapshot>(&result);
     REQUIRE(snapshot != nullptr);
-    CHECK(snapshot->schemaVersion == 2);
+    CHECK(snapshot->schemaVersion == 3);
     CHECK(snapshot->revision.value == 0);
     CHECK(javelin::gui::shell::deserializeMainWindowState(snapshot->workspace.mainWindowState, {})
               .activeTabIndex == 4);
 
     QSettings migrated{path, QSettings::IniFormat};
-    CHECK(migrated.value(QStringLiteral("settings/schemaVersion")).toUInt() == 2);
+    CHECK(migrated.value(QStringLiteral("settings/schemaVersion")).toUInt() == 3);
     CHECK_FALSE(migrated.contains(QStringLiteral("mainWindow/activeTabIndex")));
 }
 
@@ -235,11 +228,6 @@ TEST_CASE("settings updates require the current revision and round-trip typed va
             .accountId = QStringLiteral("account-1"),
             .mailboxIds = {},
         }};
-    update.translation = TranslationSettings{.enabled = false,
-                                             .apiKeyOverride = QStringLiteral(" key "),
-                                             .targetLanguage = QStringLiteral("DE"),
-                                             .autoTranslateSenders = {},
-                                             .autoTranslateDomains = {}};
     update.undoSendDelaySeconds = 45;
     update.workspace = javelin::protocol::WorkspaceSettings{
         .formatVersion = 1,
@@ -262,9 +250,6 @@ TEST_CASE("settings updates require the current revision and round-trip typed va
     CHECK(reloaded->syncedMailboxSelections.front().mailboxIds.empty());
     REQUIRE(reloaded->notificationMailboxSelections.size() == 1);
     CHECK(reloaded->notificationMailboxSelections.front().mailboxIds.empty());
-    CHECK_FALSE(reloaded->translation.enabled);
-    CHECK(reloaded->translation.apiKeyOverride == QStringLiteral("key"));
-    CHECK(reloaded->translation.targetLanguage == QStringLiteral("de"));
     CHECK(reloaded->undoSendDelaySeconds == 45);
     CHECK(reloaded->workspace.mainWindowState == QByteArrayLiteral("workspace-state"));
     REQUIRE(reloaded->workspace.calendarColorOverrides.size() == 1);

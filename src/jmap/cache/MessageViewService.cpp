@@ -65,8 +65,6 @@ namespace javelin::jmap::cache
             .plainTextBody = std::move(plainTextBody),
             .htmlBody = parsed.htmlBody,
             .htmlRenderDocument = std::nullopt,
-            .languageDetection = std::nullopt,
-            .shouldOfferTranslation = false,
             .attachments = parsed.attachments,
         };
 

@@ -2,7 +2,6 @@
 
 #include "jmap/cache/Database.h"
 #include "jmap/domain/MailEntities.h"
-#include "jmap/language/LanguageDetection.h"
 #include "jmap/render/HtmlMessageDocumentBuilder.h"
 
 #include <QFuture>
@@ -49,8 +48,6 @@ namespace javelin::jmap::cache
         std::optional<MessageBody> plainTextBody;
         std::optional<MessageBody> htmlBody;
         std::optional<javelin::jmap::render::HtmlRenderDocument> htmlRenderDocument;
-        std::optional<javelin::jmap::language::LanguageDetectionResult> languageDetection;
-        bool shouldOfferTranslation = false;
         std::vector<MessageAttachment> attachments;
     };
 

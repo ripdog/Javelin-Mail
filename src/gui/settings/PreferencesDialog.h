@@ -1,9 +1,9 @@
 #pragma once
 
-#include "app/TranslationApplicationPorts.h"
 #include "gui/messageview/MessageAppearance.h"
 #include "gui/settings/ConnectionSettings.h"
 #include "gui/settings/GuiSettings.h"
+#include "gui/translation/TranslationTypes.h"
 
 #include <KConfigDialog>
 #include <QHash>
@@ -38,6 +38,11 @@ namespace javelin::app
     class OnboardingPort;
 } // namespace javelin::app
 
+namespace javelin::gui::translation
+{
+    class TranslationService;
+}
+
 namespace javelin::gui::settings
 {
 
@@ -46,12 +51,12 @@ namespace javelin::gui::settings
         Q_OBJECT
 
       public:
-        explicit PreferencesDialog(GuiSettings& settings,
-                                   javelin::app::AccountCommandPort& accountCommandPort,
-                                   javelin::app::OnboardingPort& onboardingPort,
-                                   javelin::jmap::cache::AccountReader& accountReader,
-                                   javelin::jmap::cache::MailboxReader& mailboxReader,
-                                   QWidget* parent = nullptr);
+        explicit PreferencesDialog(
+            GuiSettings& settings, javelin::app::AccountCommandPort& accountCommandPort,
+            javelin::app::OnboardingPort& onboardingPort,
+            javelin::gui::translation::TranslationService& translationService,
+            javelin::jmap::cache::AccountReader& accountReader,
+            javelin::jmap::cache::MailboxReader& mailboxReader, QWidget* parent = nullptr);
         ~PreferencesDialog() override;
 
         void selectConfiguredAccount(const QString& connectionId);
@@ -77,6 +82,10 @@ namespace javelin::gui::settings
         void refreshAutoTranslateList();
         void removeSelectedAutoTranslateEntries();
         void updateTranslationControls();
+        void updateLocalTranslationTargets();
+        void refreshInstalledLocalModels();
+        void downloadSelectedLocalModels();
+        void removeSelectedLocalModels();
         void selectAttachmentDirectory();
         [[nodiscard]] bool validateCurrentSettings();
         void updateAttachmentDirectoryControls();
@@ -89,6 +98,7 @@ namespace javelin::gui::settings
         javelin::protocol::SettingsRevision m_baseRevision;
         javelin::app::AccountCommandPort& m_accountCommandPort;
         javelin::app::OnboardingPort& m_onboardingPort;
+        javelin::gui::translation::TranslationService& m_translationService;
         javelin::jmap::cache::AccountReader& m_accountReader;
         javelin::jmap::cache::MailboxReader& m_mailboxReader;
         std::vector<ConnectionSettings> m_accounts;
@@ -96,7 +106,7 @@ namespace javelin::gui::settings
         QStringList m_loadedAccountIds;
         QStringList m_remoteContentSenders;
         QStringList m_remoteContentDomains;
-        javelin::app::TranslationSettings m_translationSettings;
+        javelin::gui::translation::TranslationSettings m_translationSettings;
         QStringList m_autoTranslateSenders;
         QStringList m_autoTranslateDomains;
         javelin::gui::messageview::MessageAppearanceSettings m_messageAppearanceSettings;
@@ -112,10 +122,18 @@ namespace javelin::gui::settings
         QLabel* m_sessionUrlLabel = nullptr;
         QListWidget* m_remoteContentList = nullptr;
         QPushButton* m_removeRemoteContentButton = nullptr;
-        QCheckBox* m_translationEnabledCheckBox = nullptr;
+        QComboBox* m_translationProvider = nullptr;
         QWidget* m_translationControls = nullptr;
         QComboBox* m_translationTargetLanguage = nullptr;
+        QWidget* m_googleTranslationControls = nullptr;
         QLineEdit* m_translationApiKeyEdit = nullptr;
+        QWidget* m_localTranslationControls = nullptr;
+        QComboBox* m_localTranslationSource = nullptr;
+        QComboBox* m_localTranslationTarget = nullptr;
+        QPushButton* m_downloadLocalModelsButton = nullptr;
+        QListWidget* m_installedLocalModels = nullptr;
+        QPushButton* m_removeLocalModelsButton = nullptr;
+        QLabel* m_localModelStatus = nullptr;
         QListWidget* m_autoTranslateList = nullptr;
         QPushButton* m_removeAutoTranslateButton = nullptr;
         QComboBox* m_messageColorMode = nullptr;

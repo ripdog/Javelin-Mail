@@ -1,5 +1,7 @@
 #pragma once
 
+#include "gui/translation/LanguageDetection.h"
+#include "gui/translation/TranslationTypes.h"
 #include "jmap/cache/MessageViewReader.h"
 #include "jmap/cache/QueryReader.h"
 
@@ -23,9 +25,9 @@ class QToolButton;
 class QVBoxLayout;
 class QWidget;
 
-namespace javelin::app
+namespace javelin::gui::translation
 {
-    class TranslationPort;
+    class TranslationService;
 }
 namespace javelin::jmap::contacts
 {
@@ -47,7 +49,7 @@ namespace javelin::gui::messageview
       public:
         explicit MessageViewContainer(
             javelin::gui::settings::GuiSettings& settings,
-            javelin::app::TranslationPort& translationPort,
+            javelin::gui::translation::TranslationService& translationService,
             javelin::jmap::contacts::ContactIdentityLookup& contactIdentityLookup,
             QWidget* parent = nullptr);
         ~MessageViewContainer() override;
@@ -90,7 +92,8 @@ namespace javelin::gui::messageview
         void updateLanguageBanner();
         void startLanguageDetection();
         void translateCurrentMessage();
-        void translateCurrentMessage(bool automatic, bool allowNetwork);
+        void translateCurrentMessage(bool automatic,
+                                     javelin::gui::translation::ExternalFetchPolicy fetchPolicy);
         void restoreCurrentTranslation();
         void updateTranslateOptionsMenu();
         void setAutoTranslateSender(bool enabled);
@@ -139,7 +142,7 @@ namespace javelin::gui::messageview
         QToolButton* m_translateButton = nullptr;
         QToolButton* m_translateOptionsButton = nullptr;
         javelin::gui::settings::GuiSettings& m_settings;
-        javelin::app::TranslationPort& m_translationPort;
+        javelin::gui::translation::TranslationService& m_translationService;
         javelin::jmap::contacts::ContactIdentityLookup& m_contactIdentityLookup;
         QWidget* m_bodyControlsWidget = nullptr;
         QStackedWidget* m_bodyStack = nullptr;
@@ -163,6 +166,8 @@ namespace javelin::gui::messageview
         bool m_autoTranslateAttempted = false;
         bool m_translationWasAutomatic = false;
         bool m_languageDetectionStarted = false;
+        std::optional<javelin::gui::translation::LanguageDetectionResult> m_languageDetection;
+        bool m_shouldOfferTranslation = false;
         bool m_htmlDocumentLoaded = false;
     };
 

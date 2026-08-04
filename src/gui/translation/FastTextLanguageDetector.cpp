@@ -1,4 +1,4 @@
-#include "jmap/language/FastTextLanguageDetector.h"
+#include "gui/translation/FastTextLanguageDetector.h"
 
 #include <algorithm>
 #include <cctype>
@@ -11,7 +11,7 @@
 #include <fasttext.h>
 #endif
 
-namespace javelin::jmap::language
+namespace javelin::gui::translation
 {
     namespace
     {
@@ -106,7 +106,6 @@ namespace javelin::jmap::language
         std::istringstream input{std::move(normalizedInput)};
         std::vector<std::pair<fasttext::real, std::string>> predictions;
         m_model->predictLine(input, predictions, languagePredictionCount, 0.0F);
-
         if (predictions.empty())
         {
             return std::nullopt;
@@ -118,7 +117,6 @@ namespace javelin::jmap::language
         {
             return std::nullopt;
         }
-
         const auto english =
             std::ranges::find_if(predictions, [](const auto& prediction)
                                  { return normalizeFastTextLabel(prediction.second) == "en"; });
@@ -134,5 +132,4 @@ namespace javelin::jmap::language
         return std::nullopt;
 #endif
     }
-
-} // namespace javelin::jmap::language
+} // namespace javelin::gui::translation
