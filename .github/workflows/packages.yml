@@ -50,7 +50,7 @@ jobs:
     name: Flatpak
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/flathub-infra/flatpak-github-actions:kde-6.9
+      image: ghcr.io/flathub-infra/flatpak-github-actions:kde-6.10
       options: --privileged
     steps:
       - name: Check out source
@@ -125,7 +125,12 @@ jobs:
             https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/1-alpha-20250213-1/linuxdeploy-plugin-appimage-x86_64.AppImage \
             -o tools/linuxdeploy-plugin-appimage
           chmod +x tools/linuxdeploy tools/linuxdeploy-plugin-qt tools/linuxdeploy-plugin-appimage packaging/appimage/AppRun
-          find /usr/lib/qt6/plugins/sqldrivers -type f ! -name 'libqsqlite.so' -delete
+          while IFS= read -r -d '' plugin; do
+            if ldd "$plugin" 2>/dev/null | grep -q 'not found'; then
+              echo "Pruning Qt plugin with unresolved dependencies: $plugin"
+              rm -f "$plugin"
+            fi
+          done < <(find /usr/lib/qt6/plugins -type f -name '*.so' -print0)
           export PATH="$GITHUB_WORKSPACE/tools:$PATH"
           export QMAKE=/usr/bin/qmake6
           export NO_STRIP=1
