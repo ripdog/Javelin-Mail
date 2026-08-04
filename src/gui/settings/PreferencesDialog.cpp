@@ -113,6 +113,13 @@ namespace javelin::gui::settings
             return comboBox.currentText().trimmed();
         }
 
+        [[nodiscard]] QString languageDisplayName(const QStringView languageCode)
+        {
+            const QLocale locale{languageCode.toString()};
+            const auto name = QLocale::languageToString(locale.language());
+            return locale.language() == QLocale::C ? languageCode.toString() : name;
+        }
+
     } // namespace
 
     PreferencesDialog::PreferencesDialog(
@@ -494,10 +501,12 @@ namespace javelin::gui::settings
                 });
         connect(&m_translationService,
                 &javelin::gui::translation::TranslationService::localModelDownloadProgress, this,
-                [this](const QString& direction, const qint64 received, const qint64 total)
+                [this](const QString& sourceLanguage, const QString& targetLanguage,
+                       const qint64 received, const qint64 total)
                 {
-                    m_localModelStatus->setText(QStringLiteral("Downloading %1: %2 of %3")
-                                                    .arg(direction,
+                    m_localModelStatus->setText(QStringLiteral("Downloading %1 → %2: %3 of %4")
+                                                    .arg(languageDisplayName(sourceLanguage),
+                                                         languageDisplayName(targetLanguage),
                                                          QLocale{}.formattedDataSize(received),
                                                          QLocale{}.formattedDataSize(total)));
                 });

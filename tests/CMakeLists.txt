@@ -22,12 +22,23 @@ catch_discover_tests(javelin_protocol_tests)
 
 add_executable(javelin_translation_tests
     app/TranslationServiceTest.cpp
+    gui/GoogleTranslationBackendTest.cpp
     jmap/TranslationCacheRepositoryTest.cpp
     jmap/LanguageDetectionTest.cpp
 )
 if(JAVELIN_ENABLE_BERGAMOT_TRANSLATION)
     target_sources(javelin_translation_tests PRIVATE
         gui/TranslationModelManifestTest.cpp
+        gui/TranslationModelStoreTest.cpp
+    )
+    target_link_libraries(javelin_translation_tests PRIVATE PkgConfig::ZSTD)
+    set_source_files_properties(
+        "${JAVELIN_BERGAMOT_SOURCE_DIR}/LICENSE"
+        PROPERTIES QT_RESOURCE_ALIAS "MPL-2.0.txt")
+    qt_add_resources(javelin_translation_tests "translation_test_licenses"
+        PREFIX "/javelin/translation/licenses"
+        FILES
+            "${JAVELIN_BERGAMOT_SOURCE_DIR}/LICENSE"
     )
 endif()
 target_include_directories(javelin_translation_tests

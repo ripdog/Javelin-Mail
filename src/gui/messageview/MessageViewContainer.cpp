@@ -694,6 +694,35 @@ namespace javelin::gui::messageview
                         m_fromLabel->setText(
                             QStringLiteral("From: %1").arg(contactAwareSenderLabel()));
                 });
+        connect(&m_translationService,
+                &javelin::gui::translation::TranslationService::localModelDownloadProgress, this,
+                [this](const QString& sourceLanguage, const QString& targetLanguage,
+                       const qint64 received, const qint64 total)
+                {
+                    if (!m_translationInProgress)
+                    {
+                        return;
+                    }
+                    const auto direction =
+                        QStringLiteral("%1 → %2").arg(languageName(sourceLanguage.toStdString()),
+                                                      languageName(targetLanguage.toStdString()));
+                    if (total > 0)
+                    {
+                        const auto percentage = static_cast<int>(std::clamp(
+                            100.0 * static_cast<double>(received) / static_cast<double>(total), 0.0,
+                            100.0));
+                        m_translationProgressText =
+                            QStringLiteral("Downloading %1 translation model… %2%")
+                                .arg(direction)
+                                .arg(percentage);
+                    }
+                    else
+                    {
+                        m_translationProgressText =
+                            QStringLiteral("Downloading %1 translation model…").arg(direction);
+                    }
+                    updateLanguageBanner();
+                });
         updatePresentation();
     }
 
@@ -718,6 +747,7 @@ namespace javelin::gui::messageview
         ++m_translationRequestToken;
         m_translationInProgress = false;
         m_translationError.clear();
+        m_translationProgressText.clear();
         m_autoTranslateAttempted = false;
         m_translationWasAutomatic = false;
         if (m_messageTranslated)
@@ -735,8 +765,11 @@ namespace javelin::gui::messageview
         }
         if (m_languageDetection.has_value())
         {
-            m_shouldOfferTranslation = javelin::gui::translation::shouldOfferTranslation(
-                *m_languageDetection, m_translationService.targetLanguage().toStdString());
+            m_shouldOfferTranslation =
+                javelin::gui::translation::shouldOfferTranslation(
+                    *m_languageDetection, m_translationService.targetLanguage().toStdString()) &&
+                m_translationService.supportsTranslationRoute(
+                    QString::fromStdString(m_languageDetection->languageCode));
             updateLanguageBanner();
             maybeAutoTranslateCurrentMessage();
             return;
@@ -1011,7 +1044,9 @@ namespace javelin::gui::messageview
 
         if (m_translationInProgress)
         {
-            m_languageStatusLabel->setText(QStringLiteral("Translating message..."));
+            m_languageStatusLabel->setText(m_translationProgressText.isEmpty()
+                                               ? QStringLiteral("Translating message…")
+                                               : m_translationProgressText);
             return;
         }
 
@@ -1160,6 +1195,7 @@ namespace javelin::gui::messageview
         const auto requestToken = ++m_translationRequestToken;
         m_translationInProgress = true;
         m_translationError.clear();
+        m_translationProgressText.clear();
         m_translationWasAutomatic = automatic;
         updateLanguageBanner();
 
@@ -1283,6 +1319,7 @@ namespace javelin::gui::messageview
         m_messageTranslated = false;
         m_originalPlainText.clear();
         m_translationError.clear();
+        m_translationProgressText.clear();
         updateLanguageBanner();
     }
 
@@ -1322,7 +1359,9 @@ namespace javelin::gui::messageview
                     m_shouldOfferTranslation =
                         detection.has_value() &&
                         javelin::gui::translation::shouldOfferTranslation(
-                            *detection, m_translationService.targetLanguage().toStdString());
+                            *detection, m_translationService.targetLanguage().toStdString()) &&
+                        m_translationService.supportsTranslationRoute(
+                            QString::fromStdString(detection->languageCode));
                     updateLanguageBanner();
                     maybeAutoTranslateCurrentMessage();
                 });

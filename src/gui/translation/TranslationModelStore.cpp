@@ -246,13 +246,20 @@ namespace javelin::gui::translation
         auto cleanup =
             qScopeGuard([&temporaryDirectory]() { QDir{temporaryDirectory}.removeRecursively(); });
 
+        qint64 totalBytes = 0;
         for (const auto& file : direction.files)
         {
-            if (const auto error =
-                    co_await downloadAndDecompress(direction, file, temporaryDirectory))
+            totalBytes += file.compressedSize;
+        }
+        qint64 completedBytes = 0;
+        for (const auto& file : direction.files)
+        {
+            if (const auto error = co_await downloadAndDecompress(
+                    direction, file, temporaryDirectory, completedBytes, totalBytes))
             {
                 co_return error;
             }
+            completedBytes += file.compressedSize;
         }
         if (const auto error = writeInstalledMetadata(temporaryDirectory, m_manifest, direction))
         {
@@ -296,7 +303,8 @@ namespace javelin::gui::translation
     }
 
     QCoro::Task<std::optional<TranslationError>> TranslationModelStore::downloadAndDecompress(
-        TranslationModelDirection direction, TranslationModelFile file, QString temporaryDirectory)
+        TranslationModelDirection direction, TranslationModelFile file, QString temporaryDirectory,
+        const qint64 completedBytes, const qint64 totalBytes)
     {
         const auto compressedPath =
             QDir{temporaryDirectory}.filePath(file.installedName + QStringLiteral(".zst.part"));
@@ -329,7 +337,8 @@ namespace javelin::gui::translation
                 reply->abort();
                 return;
             }
-            Q_EMIT downloadProgress(direction.id(), received, file.compressedSize);
+            Q_EMIT downloadProgress(direction.source, direction.target, completedBytes + received,
+                                    totalBytes);
         };
         const auto readyConnection = connect(reply, &QNetworkReply::readyRead, this, drain);
         co_await qCoro(reply).waitForFinished();

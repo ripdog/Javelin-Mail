@@ -24,6 +24,7 @@ COLLECTION_URL = (
 ATTACHMENT_BASE_URL = "https://firefox-settings-attachments.cdn.mozilla.net/"
 ENGINE_COMMIT = "4732dc947bc952abb019aabfe5582006d4fc3337"
 ENGINE_VERSION = "v0.6.0"
+MODEL_MAJOR_VERSION = 3
 STABLE_VERSION = re.compile(r"^[0-9]+(?:\.[0-9]+)*$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 REQUIRED_COMMON = frozenset({"model", "lex"})
@@ -72,8 +73,14 @@ def choose_candidates(records: list[dict[str, Any]]) -> list[Candidate]:
         file_type = str(record.get("fileType", ""))
         if not STABLE_VERSION.fullmatch(version):
             continue
-        if architecture not in ARCHITECTURE_ORDER or file_type not in KNOWN_TYPES:
+        if version_key(version)[0] != MODEL_MAJOR_VERSION:
             continue
+        if architecture not in ARCHITECTURE_ORDER:
+            continue
+        if file_type not in KNOWN_TYPES:
+            raise ValueError(
+                f"record {record.get('id')} has unknown file type {file_type!r}"
+            )
         grouped[
             (
                 str(record.get("sourceLanguage", "")),
@@ -105,6 +112,17 @@ def choose_candidates(records: list[dict[str, Any]]) -> list[Candidate]:
                 None,
             )
             if choice is not None:
+                file_types = [str(record.get("fileType", "")) for record in choice.records]
+                duplicates = sorted(
+                    file_type
+                    for file_type in set(file_types)
+                    if file_types.count(file_type) > 1
+                )
+                if duplicates:
+                    raise ValueError(
+                        f"direction {choice.source}->{choice.target} has duplicate files: "
+                        + ", ".join(duplicates)
+                    )
                 selected.append(choice)
                 break
     return sorted(selected, key=lambda candidate: (candidate.source, candidate.target))

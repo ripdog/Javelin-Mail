@@ -230,15 +230,12 @@ namespace javelin::gui::translation
 
     void BergamotTranslationBackend::releaseResources()
     {
-        auto future = QtConcurrent::run(&m_workerPool,
-                                        [this]
-                                        {
-                                            if (m_workerState != nullptr)
-                                            {
-                                                m_workerState->models.clear();
-                                                m_workerState->lru.clear();
-                                            }
-                                        });
+        static_cast<void>(QtConcurrent::run(&m_workerPool, [this] { clearLoadedModels(); }));
+    }
+
+    void BergamotTranslationBackend::releaseResourcesAndWait()
+    {
+        auto future = QtConcurrent::run(&m_workerPool, [this] { clearLoadedModels(); });
         future.waitForFinished();
     }
 
@@ -311,6 +308,15 @@ namespace javelin::gui::translation
                 .code = TranslationErrorCode::InferenceFailed,
                 .message = QStringLiteral("Local translation failed unexpectedly."),
             };
+        }
+    }
+
+    void BergamotTranslationBackend::clearLoadedModels()
+    {
+        if (m_workerState != nullptr)
+        {
+            m_workerState->models.clear();
+            m_workerState->lru.clear();
         }
     }
 

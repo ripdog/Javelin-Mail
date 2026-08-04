@@ -28,12 +28,14 @@ namespace javelin::gui::translation
                                        QStringView targetLanguage) const override;
         [[nodiscard]] QCoro::Task<BackendResult> translate(BackendRequest request) override;
         void releaseResources() override;
+        void releaseResourcesAndWait() override;
 
       private:
         struct WorkerState;
 
         [[nodiscard]] BackendResult translateOnWorker(InstalledTranslationRoute installedRoute,
                                                       QVector<QString> texts);
+        void clearLoadedModels();
         void destroyWorkerState();
 
         const TranslationModelManifest& m_manifest;

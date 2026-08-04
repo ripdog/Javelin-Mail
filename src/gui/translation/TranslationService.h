@@ -39,6 +39,7 @@ namespace javelin::gui::translation
         [[nodiscard]] const TranslationSettings& settings() const;
         [[nodiscard]] bool isEnabled() const;
         [[nodiscard]] bool localProviderAvailable() const;
+        [[nodiscard]] bool supportsTranslationRoute(QStringView sourceLanguage) const;
         [[nodiscard]] QString targetLanguage() const;
         [[nodiscard]] QStringList localSourceLanguages() const;
         [[nodiscard]] QStringList localTargetLanguages(QStringView sourceLanguage) const;
@@ -62,7 +63,8 @@ namespace javelin::gui::translation
 
       Q_SIGNALS:
         void settingsChanged();
-        void localModelDownloadProgress(QString direction, qint64 received, qint64 total);
+        void localModelDownloadProgress(QString sourceLanguage, QString targetLanguage,
+                                        qint64 received, qint64 total);
         void installedLocalModelsChanged();
         void diagnosticOccurred(QString message);
 

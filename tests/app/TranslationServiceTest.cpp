@@ -84,7 +84,19 @@ namespace
             };
         }
 
+        void releaseResources() override
+        {
+            ++asynchronousReleases;
+        }
+
+        void releaseResourcesAndWait() override
+        {
+            ++synchronousReleases;
+        }
+
         int calls = 0;
+        int asynchronousReleases = 0;
+        int synchronousReleases = 0;
         qsizetype receivedTexts = 0;
         ExternalFetchPolicy lastPolicy = ExternalFetchPolicy::InstalledAndCachedOnly;
     };
@@ -227,6 +239,70 @@ TEST_CASE("automatic translation does not fetch without an explicit saved rule",
     REQUIRE_FALSE(
         fixture.service.setAutoTranslateDomain(QStringLiteral("Example.test"), true).has_value());
     CHECK(fixture.service.shouldAutoTranslate(QString{}, QStringLiteral("example.test")));
+}
+
+TEST_CASE("leaving local translation releases models without blocking settings changes",
+          "[translation][service][lifecycle]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir settingsDirectory;
+    QTemporaryDir cacheDirectory;
+    REQUIRE(settingsDirectory.isValid());
+    REQUIRE(cacheDirectory.isValid());
+    useTemporarySettings(settingsDirectory);
+
+    TranslationSettingsStore store;
+    REQUIRE_FALSE(store
+                      .save({
+                          .provider = TranslationProvider::Local,
+                          .apiKeyOverride = {},
+                          .targetLanguage = QStringLiteral("en"),
+                          .autoTranslateSenders = {},
+                          .autoTranslateDomains = {},
+                      })
+                      .has_value());
+    FakeBackend backend;
+    {
+        ServiceFixture fixture{cacheDirectory.filePath(QStringLiteral("cache.sqlite3")), &backend};
+        REQUIRE_FALSE(fixture.service
+                          .saveSettings({
+                              .provider = TranslationProvider::Google,
+                              .apiKeyOverride = {},
+                              .targetLanguage = QStringLiteral("en"),
+                              .autoTranslateSenders = {},
+                              .autoTranslateDomains = {},
+                          })
+                          .has_value());
+        CHECK(backend.asynchronousReleases == 1);
+        CHECK(backend.synchronousReleases == 0);
+    }
+    CHECK(backend.synchronousReleases == 1);
+}
+
+TEST_CASE("translation route offers follow the active provider", "[translation][service][policy]")
+{
+    ApplicationGuard application;
+    Q_UNUSED(application);
+    QTemporaryDir settingsDirectory;
+    QTemporaryDir cacheDirectory;
+    REQUIRE(settingsDirectory.isValid());
+    REQUIRE(cacheDirectory.isValid());
+    useTemporarySettings(settingsDirectory);
+
+    ServiceFixture fixture{cacheDirectory.filePath(QStringLiteral("cache.sqlite3"))};
+    CHECK(fixture.service.supportsTranslationRoute(QStringLiteral("fr")));
+    CHECK_FALSE(fixture.service.supportsTranslationRoute(QStringLiteral("en")));
+    REQUIRE_FALSE(fixture.service
+                      .saveSettings({
+                          .provider = TranslationProvider::Disabled,
+                          .apiKeyOverride = {},
+                          .targetLanguage = QStringLiteral("en"),
+                          .autoTranslateSenders = {},
+                          .autoTranslateDomains = {},
+                      })
+                      .has_value());
+    CHECK_FALSE(fixture.service.supportsTranslationRoute(QStringLiteral("fr")));
 }
 
 TEST_CASE("translation service returns identity text without invoking a provider",

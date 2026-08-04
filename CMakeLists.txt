@@ -1753,12 +1753,16 @@ if(JAVELIN_ENABLE_LOCAL_DATA_INSTALL AND JAVELIN_ENABLE_BERGAMOT_TRANSLATION)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${PROJECT_SOURCE_DIR}/res/models/translations/manifest-v1.json"
             "${_local_translation_notice_dir}/manifest-v1.json"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${PROJECT_SOURCE_DIR}/res/models/translations/README.md"
+            "${_local_translation_notice_dir}/README.md"
         COMMAND ${CMAKE_COMMAND} -E touch "${_install_translation_data_stamp}"
         DEPENDS
             "${JAVELIN_BERGAMOT_SOURCE_DIR}/LICENSE"
             "${JAVELIN_BERGAMOT_SOURCE_DIR}/inference/3rd_party/ssplit-cpp/LICENSE.md"
             "${JAVELIN_BERGAMOT_SOURCE_DIR}/inference/marian-fork/LICENSE.md"
             "${PROJECT_SOURCE_DIR}/res/models/translations/manifest-v1.json"
+            "${PROJECT_SOURCE_DIR}/res/models/translations/README.md"
         COMMENT "Installing local translation resources"
         VERBATIM
     )

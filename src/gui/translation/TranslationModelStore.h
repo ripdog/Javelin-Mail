@@ -51,7 +51,8 @@ namespace javelin::gui::translation
         void cleanupStaleInstallations();
 
       Q_SIGNALS:
-        void downloadProgress(QString direction, qint64 received, qint64 total);
+        void downloadProgress(QString sourceLanguage, QString targetLanguage, qint64 received,
+                              qint64 total);
         void installedModelsChanged();
 
       private:
@@ -59,7 +60,7 @@ namespace javelin::gui::translation
         install(TranslationModelDirection direction);
         [[nodiscard]] QCoro::Task<std::optional<TranslationError>>
         downloadAndDecompress(TranslationModelDirection direction, TranslationModelFile file,
-                              QString temporaryDirectory);
+                              QString temporaryDirectory, qint64 completedBytes, qint64 totalBytes);
         [[nodiscard]] bool validateInstalledMetadata(const TranslationModelDirection& direction,
                                                      const QString& directory,
                                                      TranslationError* error) const;

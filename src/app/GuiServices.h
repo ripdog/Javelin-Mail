@@ -151,11 +151,13 @@ namespace javelin::app
         std::unique_ptr<javelin::gui::translation::TranslationCache> m_translationCache;
         std::unique_ptr<javelin::gui::translation::GoogleTranslationBackend>
             m_googleTranslationBackend;
+#if JAVELIN_ENABLE_BERGAMOT_TRANSLATION
         std::unique_ptr<javelin::gui::translation::TranslationModelManifest>
             m_translationModelManifest;
         std::unique_ptr<javelin::gui::translation::TranslationModelStore> m_translationModelStore;
         std::unique_ptr<javelin::gui::translation::BergamotTranslationBackend>
             m_bergamotTranslationBackend;
+#endif
         std::unique_ptr<javelin::gui::translation::TranslationService> m_translationService;
         std::unique_ptr<RemoteActionClient> m_remoteClient;
         std::unique_ptr<RemoteAccountCommandPort> m_accountCommands;

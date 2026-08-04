@@ -73,7 +73,10 @@ namespace javelin::gui::translation
         m_detectionPool.clear();
         m_detectionPool.waitForDone();
         m_languageDetector.reset();
-        releaseLocalModels();
+        if (m_localBackend != nullptr)
+        {
+            m_localBackend->releaseResourcesAndWait();
+        }
     }
 
     const TranslationSettings& TranslationService::settings() const
@@ -89,6 +92,31 @@ namespace javelin::gui::translation
     bool TranslationService::localProviderAvailable() const
     {
         return m_localBackend != nullptr;
+    }
+
+    bool TranslationService::supportsTranslationRoute(const QStringView sourceLanguage) const
+    {
+        const auto source = canonicalLanguageTag(sourceLanguage.toString());
+        const auto target = canonicalLanguageTag(m_settings.targetLanguage);
+        if (source.isEmpty() || target.isEmpty() || source == target)
+        {
+            return false;
+        }
+
+        switch (m_settings.provider)
+        {
+        case TranslationProvider::Disabled:
+            return false;
+        case TranslationProvider::Google:
+            return true;
+        case TranslationProvider::Local:
+#if JAVELIN_ENABLE_BERGAMOT_TRANSLATION
+            return m_localManifest != nullptr && m_localManifest->route(source, target).supported();
+#else
+            return false;
+#endif
+        }
+        return false;
     }
 
     QString TranslationService::targetLanguage() const
@@ -226,7 +254,10 @@ namespace javelin::gui::translation
                 .message = QStringLiteral("That local translation route is not supported."),
             };
         }
-        releaseLocalModels();
+        if (m_localBackend != nullptr)
+        {
+            m_localBackend->releaseResourcesAndWait();
+        }
         return m_localModelStore->remove(route.legs);
 #else
         (void)sourceLanguage;

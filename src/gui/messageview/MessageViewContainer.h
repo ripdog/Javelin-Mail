@@ -163,6 +163,7 @@ namespace javelin::gui::messageview
         bool m_messageTranslated = false;
         QString m_originalPlainText;
         QString m_translationError;
+        QString m_translationProgressText;
         bool m_autoTranslateAttempted = false;
         bool m_translationWasAutomatic = false;
         bool m_languageDetectionStarted = false;

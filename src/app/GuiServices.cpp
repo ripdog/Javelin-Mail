@@ -109,6 +109,8 @@ namespace javelin::app
             std::make_unique<javelin::gui::translation::GoogleTranslationBackend>(
                 *m_networkAccessManager);
         javelin::gui::translation::TranslationBackend* localBackend = nullptr;
+        javelin::gui::translation::TranslationModelManifest* localManifest = nullptr;
+        javelin::gui::translation::TranslationModelStore* localModelStore = nullptr;
 #if JAVELIN_ENABLE_BERGAMOT_TRANSLATION
         javelin::gui::translation::TranslationError manifestError;
         m_translationModelManifest =
@@ -122,6 +124,8 @@ namespace javelin::app
                 std::make_unique<javelin::gui::translation::BergamotTranslationBackend>(
                     *m_translationModelManifest, *m_translationModelStore);
             localBackend = m_bergamotTranslationBackend.get();
+            localManifest = m_translationModelManifest.get();
+            localModelStore = m_translationModelStore.get();
         }
         else
         {
@@ -130,8 +134,7 @@ namespace javelin::app
 #endif
         m_translationService = std::make_unique<javelin::gui::translation::TranslationService>(
             *m_translationSettingsStore, *m_translationCache, *m_googleTranslationBackend,
-            languageModelPath(), localBackend, m_translationModelManifest.get(),
-            m_translationModelStore.get());
+            languageModelPath(), localBackend, localManifest, localModelStore);
         m_remoteClient = std::make_unique<RemoteActionClient>(m_session);
         m_calendarReader = std::make_unique<RemoteCalendarReader>(*m_remoteClient);
         m_accountCommands = std::make_unique<RemoteAccountCommandPort>(*m_remoteClient);

@@ -17,5 +17,9 @@ namespace javelin::gui::translation
         virtual void releaseResources()
         {
         }
+        virtual void releaseResourcesAndWait()
+        {
+            releaseResources();
+        }
     };
 } // namespace javelin::gui::translation

@@ -652,7 +652,7 @@ QCoro6::Core
 QCoro6::Network
 fasttext_javelin
 bergamot-translator-source   only when enabled
-ZLIB::ZLIB                   only when enabled
+PkgConfig::ZSTD              only when enabled
 ```
 
 `javelin_gui` may link `javelin_translation`; the `javelin` executable obtains it transitively. Remove
@@ -708,6 +708,7 @@ The generated manifest records:
         {
           "type": "model",
           "url": "https://firefox-settings-attachments.cdn.mozilla.net/...",
+          "compression": "zstd",
           "compressedSize": 31973916,
           "compressedSha256": "...",
           "decompressedSize": 43977787,
