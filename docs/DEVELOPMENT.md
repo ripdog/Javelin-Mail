@@ -37,8 +37,9 @@ versions pinned in `cmake/Dependencies.cmake`. fastText is fetched when local la
 enabled; its compact language model is already included in the repository. On x86-64, local message
 translation also fetches Mozilla's `translations` source at the exact audited commit recorded in
 `cmake/Dependencies.cmake`, builds its native Bergamot/Marian inference target, and links it only into
-the GUI translation dependency closure. Zstandard development files are required to verify and
-unpack current Firefox model attachments.
+the GUI translation dependency closure. A BLAS implementation with the CBLAS interface is required
+for Marian's floating-point matrix operations. Zstandard development files are required to verify
+and unpack current Firefox model attachments.
 
 ### Arch Linux
 
@@ -48,7 +49,8 @@ A suitable base environment can be installed with:
 sudo pacman -S --needed \
   base-devel ccache cmake extra-cmake-modules git ninja \
   qt6-base qt6-svg qt6-tools qt6-webengine qt6-websockets \
-  kconfigwidgets kcoreaddons ktexteditor kxmlgui kmime messagelib zstd
+  kconfigwidgets kcoreaddons ktexteditor kxmlgui kmime messagelib \
+  blas cblas zstd
 ```
 
 Installed `qcoro`, `glaze`, and `catch2` packages are optional because CMake can fetch them. A fresh

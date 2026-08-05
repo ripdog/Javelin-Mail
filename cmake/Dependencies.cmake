@@ -106,6 +106,20 @@ function(javelin_fetch_fasttext)
 endfunction()
 
 function(javelin_fetch_bergamot)
+    find_package(BLAS REQUIRED)
+    find_path(JAVELIN_BERGAMOT_CBLAS_INCLUDE_DIR
+        NAMES cblas.h
+        PATH_SUFFIXES openblas
+        REQUIRED)
+    find_library(JAVELIN_BERGAMOT_CBLAS_LIBRARY
+        NAMES cblas openblas
+        REQUIRED)
+    set(cblas_cblas_LIBRARY "${JAVELIN_BERGAMOT_CBLAS_LIBRARY}"
+        CACHE FILEPATH "CBLAS library used by Marian" FORCE)
+    set(cblas_cblas_INCLUDE "${JAVELIN_BERGAMOT_CBLAS_INCLUDE_DIR}"
+        CACHE PATH "CBLAS headers used by Marian" FORCE)
+    unset(cblas_cblas_WORKS CACHE)
+
     set(COMPILE_WASM OFF CACHE BOOL "" FORCE)
     set(USE_WASM_COMPATIBLE_SOURCE OFF CACHE BOOL "" FORCE)
     set(COMPILE_TESTS OFF CACHE BOOL "" FORCE)
@@ -135,6 +149,10 @@ function(javelin_fetch_bergamot)
         SOURCE_SUBDIR inference
     )
     FetchContent_MakeAvailable(mozilla_translations)
+    if(NOT cblas_cblas_WORKS)
+        message(FATAL_ERROR "Marian could not link the required CBLAS implementation")
+    endif()
+
     set_property(DIRECTORY "${mozilla_translations_SOURCE_DIR}/inference"
                  PROPERTY EXCLUDE_FROM_ALL YES)
     foreach(optional_tool IN ITEMS translator-cli spm_encode spm_decode spm_normalize
