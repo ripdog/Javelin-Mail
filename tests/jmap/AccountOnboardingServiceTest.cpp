@@ -59,6 +59,30 @@ TEST_CASE("OAuth refresh refuses an insecure token endpoint", "[jmap][auth][onbo
     CHECK(result.error == QStringLiteral("OAuth refresh information is incomplete."));
 }
 
+TEST_CASE("OAuth metadata URLs require secure endpoint syntax", "[jmap][auth][onboarding]")
+{
+    using javelin::jmap::auth::detail::isSecureOAuthUrl;
+
+    CHECK(isSecureOAuthUrl(QUrl{QStringLiteral("https://auth.example.com/token")}));
+    CHECK(isSecureOAuthUrl(QUrl{QStringLiteral("https://auth.example.com/authorize?prompt=login")}));
+    CHECK_FALSE(isSecureOAuthUrl(QUrl{QStringLiteral("http://auth.example.com/token")}));
+    CHECK_FALSE(isSecureOAuthUrl(QUrl{QStringLiteral("https://user@auth.example.com/token")}));
+    CHECK_FALSE(isSecureOAuthUrl(QUrl{QStringLiteral("https://auth.example.com/token#fragment")}));
+}
+
+TEST_CASE("OAuth protected-resource metadata uses exact resource identifiers",
+          "[jmap][auth][onboarding]")
+{
+    using javelin::jmap::auth::detail::resourceMetadataMatches;
+
+    CHECK(resourceMetadataMatches(QStringLiteral("https://mail.example.com/jmap"),
+                                  QStringLiteral("https://mail.example.com/jmap")));
+    CHECK_FALSE(resourceMetadataMatches(QStringLiteral("https://mail.example.com"),
+                                        QStringLiteral("https://mail.example.com/jmap")));
+    CHECK_FALSE(resourceMetadataMatches(QStringLiteral("https://mail.example.com/jmap/"),
+                                        QStringLiteral("https://mail.example.com/jmap")));
+}
+
 TEST_CASE("OAuth dynamic registration canonicalizes loopback callback addresses",
           "[jmap][auth][onboarding]")
 {

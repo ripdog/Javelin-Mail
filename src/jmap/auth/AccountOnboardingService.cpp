@@ -166,6 +166,18 @@ namespace javelin::jmap::auth
         return redirect.toString();
     }
 
+    bool detail::isSecureOAuthUrl(const QUrl& url)
+    {
+        return url.isValid() && url.scheme() == QStringLiteral("https") &&
+               !url.host().isEmpty() && url.userInfo().isEmpty() && !url.hasFragment();
+    }
+
+    bool detail::resourceMetadataMatches(const QString& returnedResource,
+                                         const QString& expectedResource)
+    {
+        return !returnedResource.isEmpty() && returnedResource == expectedResource;
+    }
+
     namespace
     {
         struct HttpResult
@@ -176,13 +188,22 @@ namespace javelin::jmap::auth
             QString error;
         };
 
-        [[nodiscard]] QCoro::Task<HttpResult> get(QNetworkAccessManager& manager, const QUrl& url,
-                                                  const QByteArray& bearer = {})
+        enum class RedirectTrust : std::uint8_t
+        {
+            Resource,
+            OAuthEndpoint,
+        };
+
+        [[nodiscard]] QCoro::Task<HttpResult>
+        get(QNetworkAccessManager& manager, const QUrl& url, const QByteArray& bearer = {},
+            const RedirectTrust redirectTrust = RedirectTrust::OAuthEndpoint)
         {
             QNetworkRequest request{url};
             request.setTransferTimeout(30'000);
-            request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
-                                 QNetworkRequest::NoLessSafeRedirectPolicy);
+            request.setAttribute(
+                QNetworkRequest::RedirectPolicyAttribute,
+                redirectTrust == RedirectTrust::Resource ? QNetworkRequest::NoLessSafeRedirectPolicy
+                                                         : QNetworkRequest::SameOriginRedirectPolicy);
             request.setRawHeader(QByteArrayLiteral("Accept"),
                                  QByteArrayLiteral("application/json"));
             if (!bearer.isEmpty())
@@ -208,7 +229,7 @@ namespace javelin::jmap::auth
             QNetworkRequest request{url};
             request.setTransferTimeout(30'000);
             request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
-                                 QNetworkRequest::NoLessSafeRedirectPolicy);
+                                 QNetworkRequest::SameOriginRedirectPolicy);
             request.setRawHeader(QByteArrayLiteral("Accept"),
                                  QByteArrayLiteral("application/json"));
             request.setRawHeader(QByteArrayLiteral("Content-Type"), contentType);
@@ -232,32 +253,46 @@ namespace javelin::jmap::auth
             return error ? std::nullopt : std::optional<Value>{std::move(value)};
         }
 
+        struct ProtectedResourceMetadataCandidate
+        {
+            QUrl metadataUrl;
+            QString expectedResource;
+        };
+
         [[nodiscard]] QString resourceMetadataFromChallenge(const QByteArray& header);
 
-        [[nodiscard]] QStringList protectedResourceMetadataUrls(const QUrl& sessionUrl,
-                                                                const QByteArray& challenge)
+        [[nodiscard]] std::vector<ProtectedResourceMetadataCandidate>
+        protectedResourceMetadataUrls(const QUrl& sessionUrl, const QByteArray& challenge)
         {
-            const auto advertised = resourceMetadataFromChallenge(challenge);
+            const auto sessionResource = sessionUrl.toString(QUrl::FullyEncoded);
+            const auto advertised = QUrl{resourceMetadataFromChallenge(challenge)};
             if (!advertised.isEmpty())
-                return {advertised};
+            {
+                if (!detail::isSecureOAuthUrl(advertised))
+                    return {};
+                return {{.metadataUrl = advertised, .expectedResource = sessionResource}};
+            }
 
-            QUrl url;
-            url.setScheme(sessionUrl.scheme());
-            url.setHost(sessionUrl.host());
-            url.setPort(sessionUrl.port());
-            url.setPath(QStringLiteral("/.well-known/oauth-protected-resource"));
-            QStringList candidates;
+            QUrl origin;
+            origin.setScheme(sessionUrl.scheme());
+            origin.setHost(sessionUrl.host());
+            origin.setPort(sessionUrl.port());
+            QUrl metadataUrl = origin;
+            metadataUrl.setPath(QStringLiteral("/.well-known/oauth-protected-resource"));
+
+            std::vector<ProtectedResourceMetadataCandidate> candidates;
             if (!sessionUrl.path().isEmpty() && sessionUrl.path() != QStringLiteral("/"))
             {
                 auto resourcePath = sessionUrl.path();
                 if (!resourcePath.startsWith(QLatin1Char('/')))
                     resourcePath.prepend(QLatin1Char('/'));
-                auto pathUrl = url;
-                pathUrl.setPath(url.path() + resourcePath);
-                candidates.push_back(pathUrl.toString());
+                auto pathUrl = metadataUrl;
+                pathUrl.setPath(metadataUrl.path() + resourcePath);
+                candidates.push_back(
+                    {.metadataUrl = std::move(pathUrl), .expectedResource = sessionResource});
             }
-            candidates.push_back(url.toString());
-            candidates.removeDuplicates();
+            candidates.push_back({.metadataUrl = std::move(metadataUrl),
+                                  .expectedResource = origin.toString(QUrl::FullyEncoded)});
             return candidates;
         }
 
@@ -290,8 +325,7 @@ namespace javelin::jmap::auth
 
         [[nodiscard]] bool isSecureServerUrl(const QUrl& url)
         {
-            return url.isValid() && url.scheme() == QStringLiteral("https") &&
-                   !url.host().isEmpty();
+            return detail::isSecureOAuthUrl(url);
         }
 
         [[nodiscard]] QString oauthErrorText(const QByteArray& body)
@@ -466,7 +500,8 @@ namespace javelin::jmap::auth
         }
         result.sessionUrl = sessionUrl->toString();
 
-        const auto sessionResponse = co_await get(m_networkAccessManager, *sessionUrl);
+        const auto sessionResponse =
+            co_await get(m_networkAccessManager, *sessionUrl, {}, RedirectTrust::Resource);
         if (sessionResponse.statusCode == 200)
         {
             const auto parsed = api::parseSession(sessionResponse.body.toStdString());
@@ -492,12 +527,16 @@ namespace javelin::jmap::auth
         }
 
         HttpResult resourceResponse;
-        for (const auto& metadataUrl :
+        QString expectedResource;
+        for (const auto& candidate :
              protectedResourceMetadataUrls(*sessionUrl, sessionResponse.authenticateHeader))
         {
-            resourceResponse = co_await get(m_networkAccessManager, QUrl{metadataUrl});
+            resourceResponse = co_await get(m_networkAccessManager, candidate.metadataUrl);
             if (resourceResponse.statusCode == 200)
+            {
+                expectedResource = candidate.expectedResource;
                 break;
+            }
         }
         if (resourceResponse.statusCode != 200)
         {
@@ -506,28 +545,43 @@ namespace javelin::jmap::auth
             co_return result;
         }
         const auto resource = parseJson<detail::ProtectedResourceMetadata>(resourceResponse.body);
-        if (!resource.has_value() || resource->resource.empty() ||
-            resource->authorizationServers.empty() ||
-            !isSecureServerUrl(QUrl{QString::fromStdString(resource->resource)}))
+        const auto returnedResource =
+            resource.has_value() ? QString::fromStdString(resource->resource) : QString{};
+        if (!resource.has_value() || resource->authorizationServers.empty() ||
+            !detail::resourceMetadataMatches(returnedResource, expectedResource) ||
+            !isSecureServerUrl(QUrl{returnedResource}))
         {
             appendOAuthFeatures(result, false);
             result.succeeded = true;
             co_return result;
         }
 
-        result.resourceUrl = QString::fromStdString(resource->resource);
+        result.resourceUrl = returnedResource;
         result.scopes = strings(resource->scopesSupported);
         result.issuer = QString::fromStdString(resource->authorizationServers.front());
+        const QUrl issuerUrl{result.issuer};
+        if (!detail::isSecureOAuthUrl(issuerUrl) || issuerUrl.hasQuery())
+        {
+            appendOAuthFeatures(result, false);
+            result.succeeded = true;
+            co_return result;
+        }
         const auto metadataResponse =
             co_await get(m_networkAccessManager, QUrl{authorizationMetadataUrl(result.issuer)});
         const auto metadata = parseJson<detail::AuthorizationServerMetadata>(metadataResponse.body);
+        const auto authorizationEndpoint =
+            metadata.has_value() ? QString::fromStdString(metadata->authorizationEndpoint)
+                                 : QString{};
+        const auto tokenEndpoint =
+            metadata.has_value() ? QString::fromStdString(metadata->tokenEndpoint) : QString{};
         if (metadataResponse.statusCode == 200 && metadata.has_value() &&
-            !metadata->authorizationEndpoint.empty() && !metadata->tokenEndpoint.empty() &&
-            metadata->issuer == result.issuer)
+            metadata->issuer == result.issuer &&
+            detail::isSecureOAuthUrl(QUrl{authorizationEndpoint}) &&
+            detail::isSecureOAuthUrl(QUrl{tokenEndpoint}))
         {
             result.issuer = QString::fromStdString(metadata->issuer);
-            result.authorizationEndpoint = QString::fromStdString(metadata->authorizationEndpoint);
-            result.tokenEndpoint = QString::fromStdString(metadata->tokenEndpoint);
+            result.authorizationEndpoint = authorizationEndpoint;
+            result.tokenEndpoint = tokenEndpoint;
             if (result.scopes.isEmpty())
                 result.scopes = strings(metadata->scopesSupported);
             const bool openPublicClient =
@@ -545,9 +599,13 @@ namespace javelin::jmap::auth
                 !requestedScopes(result.scopes).isEmpty();
             if (openPublicClient)
             {
-                result.registrationEndpoint =
+                const auto registrationEndpoint =
                     QString::fromStdString(*metadata->registrationEndpoint);
-                result.refreshTokensSupported = true;
+                if (detail::isSecureOAuthUrl(QUrl{registrationEndpoint}))
+                {
+                    result.registrationEndpoint = registrationEndpoint;
+                    result.refreshTokensSupported = true;
+                }
             }
         }
         appendOAuthFeatures(result, !result.registrationEndpoint.isEmpty());

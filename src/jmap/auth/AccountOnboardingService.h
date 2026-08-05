@@ -5,6 +5,7 @@
 #include <QCoroTask>
 
 #include <QNetworkAccessManager>
+#include <QUrl>
 
 #include <unordered_map>
 
@@ -13,6 +14,9 @@ namespace javelin::jmap::auth
     namespace detail
     {
         [[nodiscard]] QString registrationRedirectUri(const QString& callbackUri);
+        [[nodiscard]] bool isSecureOAuthUrl(const QUrl& url);
+        [[nodiscard]] bool resourceMetadataMatches(const QString& returnedResource,
+                                                   const QString& expectedResource);
     }
 
     class AccountOnboardingService final
