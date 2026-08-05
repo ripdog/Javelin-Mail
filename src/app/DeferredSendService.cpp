@@ -335,8 +335,20 @@ namespace javelin::app
         }
         if (!std::get<bool>(released))
         {
-            scheduleNext();
-            return;
+            const auto found = m_repository.find(sendId);
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&found))
+            {
+                qWarning().noquote()
+                    << QStringLiteral("Check released deferred send:") << error->message;
+                scheduleNext();
+                return;
+            }
+            const auto& send = std::get<std::optional<PendingSend>>(found);
+            if (!send.has_value() || send->status != DeferredSendStatus::Scheduled)
+            {
+                scheduleNext();
+                return;
+            }
         }
         dispatchDue();
     }
