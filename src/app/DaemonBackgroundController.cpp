@@ -135,17 +135,43 @@ namespace javelin::app
                         m_services.calendarNotificationService().dismiss(key);
                 });
         connect(&m_services.deferredSendService(), &DeferredSendService::undoableSendScheduled,
-                m_notifications.get(), &DesktopNotificationController::notifyUndoableSend);
-        connect(&m_services.deferredSendService(), &DeferredSendService::undoableSendWaiting,
-                m_notifications.get(),
-                [this](const QString& sendId, const QString& title, const QString& message)
-                { m_notifications->notifyUndoableSend(sendId, title, message, 0); });
+                this,
+                [this](const QString& sendId, const QString& title, const QString& message,
+                       const int timeoutMs)
+                {
+                    const bool lifetimeTracked =
+                        m_notifications->notifyUndoableSend(sendId, title, message, timeoutMs);
+                    if (lifetimeTracked)
+                        m_services.deferredSendService().notificationWindowPresented(sendId);
+                });
+        connect(
+            &m_services.deferredSendService(), &DeferredSendService::undoableSendWaiting,
+            m_notifications.get(),
+            [this](const QString& sendId, const QString& title, const QString& message)
+            { static_cast<void>(m_notifications->notifyUndoableSend(sendId, title, message, 0)); });
         connect(&m_services.deferredSendService(), &DeferredSendService::undoableSendClosed,
                 m_notifications.get(),
                 &DesktopNotificationController::closeUndoableSendNotification);
+        connect(m_notifications.get(), &DesktopNotificationController::undoableSendWindowEnded,
+                this, [this](const QString& sendId, DesktopNotificationCloseReason)
+                { m_services.deferredSendService().notificationWindowEnded(sendId); });
         connect(m_notifications.get(), &DesktopNotificationController::undoSendRequested, this,
                 [this](const QString& sendId)
-                { static_cast<void>(m_services.deferredSendService().cancelTargeted(sendId)); });
+                {
+                    const auto cancelled = m_services.deferredSendService().cancelTargeted(sendId);
+                    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&cancelled))
+                    {
+                        m_notifications->notifyError({}, QStringLiteral("Unable to undo message"),
+                                                     error->message, false, false);
+                    }
+                    else if (!std::get<bool>(cancelled))
+                    {
+                        m_notifications->notifyError(
+                            {}, QStringLiteral("Unable to undo message"),
+                            QStringLiteral("The message has already started sending."), false,
+                            false);
+                    }
+                });
         connect(&m_services.deferredSendService(), &DeferredSendService::draftRestoreRequested,
                 this,
                 [this](const QString& accountId, const QString& draftEmailId,
@@ -195,6 +221,7 @@ namespace javelin::app
 
     void DaemonBackgroundController::stop()
     {
+        m_notifications->closeAllUndoableSendNotifications();
         if (!m_started && !m_tray->isAvailable())
             return;
         m_notificationRetryTimer.stop();
