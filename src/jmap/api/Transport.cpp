@@ -238,10 +238,13 @@ namespace javelin::jmap::api
         activeReplies.swap(m_activeReplies);
         for (const auto& reply : activeReplies)
         {
-            if (!reply.isNull())
+            if (auto* activeReply = reply.data(); activeReply != nullptr)
             {
-                reply->setProperty(networkInvalidatedProperty, true);
-                reply->abort();
+                activeReply->setProperty(networkInvalidatedProperty, true);
+            }
+            if (auto* activeReply = reply.data(); activeReply != nullptr)
+            {
+                activeReply->abort();
             }
         }
         m_networkAccessManager.clearConnectionCache();
