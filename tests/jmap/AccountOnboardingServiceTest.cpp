@@ -83,17 +83,37 @@ TEST_CASE("OAuth protected-resource metadata uses exact resource identifiers",
                                         QStringLiteral("https://mail.example.com/jmap")));
 }
 
-TEST_CASE("OAuth dynamic registration canonicalizes loopback callback addresses",
+TEST_CASE("OAuth dynamic registration preserves exact loopback callback addresses",
           "[jmap][auth][onboarding]")
 {
     using javelin::jmap::auth::detail::registrationRedirectUri;
 
     CHECK(registrationRedirectUri(QStringLiteral("http://127.0.0.1:49152/oauth/callback")) ==
-          QStringLiteral("http://localhost/oauth/callback"));
+          QStringLiteral("http://127.0.0.1:49152/oauth/callback"));
     CHECK(registrationRedirectUri(QStringLiteral("http://[::1]:49152/oauth/callback")) ==
-          QStringLiteral("http://localhost/oauth/callback"));
-    CHECK(registrationRedirectUri(QStringLiteral("http://localhost:49152/oauth/callback")) ==
-          QStringLiteral("http://localhost/oauth/callback"));
+          QStringLiteral("http://[::1]:49152/oauth/callback"));
+}
+
+TEST_CASE("OAuth start callback identity survives the daemon boundary",
+          "[jmap][auth][onboarding]")
+{
+    const javelin::app::OAuthStartResult result{
+        .succeeded = true,
+        .error = {},
+        .flowId = QStringLiteral("flow-id"),
+        .authorizationUrl = QStringLiteral("https://auth.example.com/authorize"),
+        .callbackState = QStringLiteral("callback-state"),
+    };
+
+    const auto encoded = javelin::app::remote::encode(result);
+    REQUIRE(std::holds_alternative<QByteArray>(encoded));
+    const auto decoded = javelin::app::remote::decodeValue<javelin::app::OAuthStartResult>(
+        std::get<QByteArray>(encoded));
+    REQUIRE(std::holds_alternative<javelin::app::OAuthStartResult>(decoded));
+    const auto& restored = std::get<javelin::app::OAuthStartResult>(decoded);
+    CHECK(restored.flowId == result.flowId);
+    CHECK(restored.authorizationUrl == result.authorizationUrl);
+    CHECK(restored.callbackState == result.callbackState);
 }
 
 TEST_CASE("OAuth discovery resource survives the daemon boundary", "[jmap][auth][onboarding]")

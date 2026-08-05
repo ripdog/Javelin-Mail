@@ -362,14 +362,20 @@ namespace javelin::gui::onboarding
         }
         if (m_callbackServer->isListening())
             m_callbackServer->close();
-        if (!m_callbackServer->listen(QHostAddress::LocalHost, 0))
+        if (!m_callbackServer->listen(QHostAddress::LocalHost, 0) &&
+            !m_callbackServer->listen(QHostAddress::LocalHostIPv6, 0))
         {
             m_authenticationStatus->setText(
                 i18n("Javelin couldn’t prepare a secure browser callback."));
             return;
         }
-        const auto redirect = QStringLiteral("http://127.0.0.1:%1/oauth/callback")
-                                  .arg(m_callbackServer->serverPort());
+        const bool ipv6 =
+            m_callbackServer->serverAddress().protocol() == QAbstractSocket::IPv6Protocol;
+        const auto redirect =
+            ipv6 ? QStringLiteral("http://[::1]:%1/oauth/callback")
+                       .arg(m_callbackServer->serverPort())
+                 : QStringLiteral("http://127.0.0.1:%1/oauth/callback")
+                       .arg(m_callbackServer->serverPort());
         setBusy(true, i18n("Preparing secure sign-in…"));
         auto task = m_onboarding.startOAuth({.discovery = *m_discovery, .redirectUri = redirect});
         QCoro::connect(
@@ -390,6 +396,7 @@ namespace javelin::gui::onboarding
                     return;
                 }
                 m_oauthFlowId = result.flowId;
+                m_oauthState = result.callbackState;
                 m_authenticationStatus->setText(
                     i18n("Finish signing in in your browser. You can return here when it closes."));
                 if (!QDesktopServices::openUrl(QUrl{result.authorizationUrl}))
@@ -403,25 +410,97 @@ namespace javelin::gui::onboarding
         while (m_callbackServer != nullptr && m_callbackServer->hasPendingConnections())
         {
             auto* socket = m_callbackServer->nextPendingConnection();
+            connect(socket, &QTcpSocket::disconnected, socket, &QTcpSocket::deleteLater);
             connect(
                 socket, &QTcpSocket::readyRead, this,
                 [this, socket]
                 {
                     if (socket->property("javelinCallbackHandled").toBool())
                         return;
+
+                    const auto respond = [socket](const QByteArray& status, const QString& text)
+                    {
+                        const auto body = text.toUtf8();
+                        socket->write(QByteArrayLiteral("HTTP/1.1 ") + status +
+                                      QByteArrayLiteral(
+                                          "\r\nContent-Type: text/html; charset=utf-8"
+                                          "\r\nCache-Control: no-store"
+                                          "\r\nConnection: close\r\nContent-Length: ") +
+                                      QByteArray::number(body.size()) +
+                                      QByteArrayLiteral("\r\n\r\n") + body);
+                        socket->disconnectFromHost();
+                    };
+
                     auto request = socket->property("javelinCallbackRequest").toByteArray();
                     request += socket->readAll();
+                    constexpr qsizetype maximumCallbackRequestBytes = 16 * 1024;
+                    if (request.size() > maximumCallbackRequestBytes)
+                    {
+                        socket->setProperty("javelinCallbackHandled", true);
+                        respond(QByteArrayLiteral("413 Payload Too Large"),
+                                i18n("<h1>Invalid sign-in response</h1>"));
+                        return;
+                    }
                     socket->setProperty("javelinCallbackRequest", request);
-                    const auto firstLineEnd = request.indexOf("\r\n");
-                    if (firstLineEnd < 0)
+                    const auto headerEnd = request.indexOf("\r\n\r\n");
+                    if (headerEnd < 0)
                         return;
-                    const auto firstLine = request.first(firstLineEnd);
-                    const auto parts = firstLine.split(' ');
-                    if (parts.size() < 2)
-                        return;
+
                     socket->setProperty("javelinCallbackHandled", true);
-                    const QUrl callbackUrl{QStringLiteral("http://127.0.0.1") +
-                                           QString::fromLatin1(parts.at(1))};
+                    const auto headerLines = request.first(headerEnd).split('\n');
+                    if (headerLines.empty())
+                    {
+                        respond(QByteArrayLiteral("400 Bad Request"),
+                                i18n("<h1>Invalid sign-in response</h1>"));
+                        return;
+                    }
+                    const auto requestParts = headerLines.front().trimmed().simplified().split(' ');
+                    if (requestParts.size() != 3 || requestParts.at(0) != QByteArrayLiteral("GET") ||
+                        !requestParts.at(2).startsWith(QByteArrayLiteral("HTTP/1.")))
+                    {
+                        respond(QByteArrayLiteral("405 Method Not Allowed"),
+                                i18n("<h1>Invalid sign-in response</h1>"));
+                        return;
+                    }
+
+                    QByteArray host;
+                    for (const auto& rawLine : headerLines)
+                    {
+                        const auto line = rawLine.trimmed();
+                        if (line.left(5).compare(QByteArrayLiteral("Host:"),
+                                                 Qt::CaseInsensitive) == 0)
+                        {
+                            host = line.sliced(5).trimmed();
+                            break;
+                        }
+                    }
+                    const bool ipv6 = m_callbackServer != nullptr &&
+                                      m_callbackServer->serverAddress().protocol() ==
+                                          QAbstractSocket::IPv6Protocol;
+                    QByteArray expectedHost =
+                        ipv6 ? QByteArrayLiteral("[::1]:") : QByteArrayLiteral("127.0.0.1:");
+                    expectedHost += QByteArray::number(m_callbackServer == nullptr
+                                                           ? 0
+                                                           : m_callbackServer->serverPort());
+                    if (host.compare(expectedHost, Qt::CaseInsensitive) != 0)
+                    {
+                        respond(QByteArrayLiteral("400 Bad Request"),
+                                i18n("<h1>Invalid sign-in response</h1>"));
+                        return;
+                    }
+
+                    const auto target = QString::fromLatin1(requestParts.at(1));
+                    const QUrl callbackUrl{(ipv6 ? QStringLiteral("http://[::1]")
+                                                 : QStringLiteral("http://127.0.0.1")) +
+                                           target};
+                    if (!callbackUrl.isValid() ||
+                        callbackUrl.path() != QStringLiteral("/oauth/callback"))
+                    {
+                        respond(QByteArrayLiteral("404 Not Found"),
+                                i18n("<h1>Invalid sign-in response</h1>"));
+                        return;
+                    }
+
                     const QUrlQuery query{callbackUrl};
                     const auto code =
                         query.queryItemValue(QStringLiteral("code"), QUrl::FullyDecoded);
@@ -431,27 +510,36 @@ namespace javelin::gui::onboarding
                         query.queryItemValue(QStringLiteral("iss"), QUrl::FullyDecoded);
                     const auto error =
                         query.queryItemValue(QStringLiteral("error"), QUrl::FullyDecoded);
-                    const QByteArray body =
-                        (error.isEmpty()
-                             ? i18n("<h1>Signed in</h1><p>You can close this tab and return to "
-                                    "Javelin.</p>")
-                             : i18n("<h1>Sign-in was cancelled</h1><p>You can return to Javelin "
-                                    "and try again.</p>"))
-                            .toUtf8();
-                    socket->write(QByteArrayLiteral(
-                                      "HTTP/1.1 200 OK\r\nContent-Type: text/html; "
-                                      "charset=utf-8\r\nConnection: close\r\nContent-Length: ") +
-                                  QByteArray::number(body.size()) + QByteArrayLiteral("\r\n\r\n") +
-                                  body);
-                    socket->disconnectFromHost();
-                    if (m_callbackServer != nullptr)
-                        m_callbackServer->close();
+                    if (state.isEmpty() || state != m_oauthState || !m_discovery.has_value() ||
+                        issuer != m_discovery->issuer)
+                    {
+                        respond(QByteArrayLiteral("400 Bad Request"),
+                                i18n("<h1>Invalid sign-in response</h1>"));
+                        return;
+                    }
                     if (!error.isEmpty())
                     {
+                        respond(QByteArrayLiteral("200 OK"),
+                                i18n("<h1>Sign-in was cancelled</h1><p>You can return to Javelin "
+                                     "and try again.</p>"));
+                        if (m_callbackServer != nullptr)
+                            m_callbackServer->close();
                         m_authenticationStatus->setText(i18n(
                             "Sign-in was cancelled. You can try again or use manual details."));
                         return;
                     }
+                    if (code.isEmpty())
+                    {
+                        respond(QByteArrayLiteral("400 Bad Request"),
+                                i18n("<h1>Invalid sign-in response</h1>"));
+                        return;
+                    }
+
+                    respond(QByteArrayLiteral("200 OK"),
+                            i18n("<h1>Sign-in received</h1><p>You can close this tab and return to "
+                                 "Javelin.</p>"));
+                    if (m_callbackServer != nullptr)
+                        m_callbackServer->close();
                     setBusy(true, i18n("Finishing sign-in…"));
                     auto task = m_onboarding.finishOAuth(
                         {.flowId = m_oauthFlowId, .code = code, .state = state, .issuer = issuer});

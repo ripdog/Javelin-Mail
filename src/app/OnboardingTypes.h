@@ -62,6 +62,7 @@ namespace javelin::app
         QString error;
         QString flowId;
         QString authorizationUrl;
+        QString callbackState;
     };
 
     struct OAuthFinishRequest

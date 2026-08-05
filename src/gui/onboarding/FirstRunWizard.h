@@ -78,6 +78,7 @@ namespace javelin::gui::onboarding
         QString m_connectionId;
         QString m_discoveredEmail;
         QString m_oauthFlowId;
+        QString m_oauthState;
         std::optional<javelin::app::AccountDiscoveryResult> m_discovery;
         std::optional<javelin::app::AccountAuthenticationResult> m_authentication;
         bool m_firstRun = true;

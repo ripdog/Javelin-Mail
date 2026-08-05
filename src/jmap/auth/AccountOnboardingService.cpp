@@ -154,16 +154,7 @@ namespace javelin::jmap::auth
 
     QString detail::registrationRedirectUri(const QString& callbackUri)
     {
-        QUrl redirect{callbackUri};
-        if (redirect.scheme() == QStringLiteral("http") &&
-            (redirect.host() == QStringLiteral("localhost") ||
-             redirect.host() == QStringLiteral("127.0.0.1") ||
-             redirect.host() == QStringLiteral("::1")))
-        {
-            redirect.setHost(QStringLiteral("localhost"));
-            redirect.setPort(-1);
-        }
-        return redirect.toString();
+        return QUrl{callbackUri}.toString(QUrl::FullyEncoded);
     }
 
     bool detail::isSecureOAuthUrl(const QUrl& url)
@@ -485,6 +476,14 @@ namespace javelin::jmap::auth
     {
     }
 
+    void AccountOnboardingService::pruneExpiredFlows()
+    {
+        constexpr qint64 flowLifetimeSeconds = 10 * 60;
+        const auto cutoff = QDateTime::currentSecsSinceEpoch() - flowLifetimeSeconds;
+        std::erase_if(m_pendingFlows, [cutoff](const auto& entry)
+                      { return entry.second.createdAtEpochSeconds < cutoff; });
+    }
+
     QCoro::Task<javelin::app::AccountDiscoveryResult>
     AccountOnboardingService::discover(javelin::app::AccountDiscoveryRequest request)
     {
@@ -617,6 +616,14 @@ namespace javelin::jmap::auth
     AccountOnboardingService::startOAuth(javelin::app::OAuthStartRequest request)
     {
         javelin::app::OAuthStartResult result;
+        pruneExpiredFlows();
+        constexpr std::size_t maximumPendingFlows = 8;
+        if (m_pendingFlows.size() >= maximumPendingFlows)
+        {
+            result.error = QStringLiteral(
+                "Too many browser sign-in attempts are still open. Finish or retry one of them.");
+            co_return result;
+        }
         if (!request.discovery.succeeded || request.discovery.registrationEndpoint.isEmpty() ||
             request.discovery.resourceUrl.isEmpty() || request.redirectUri.isEmpty() ||
             !isSecureServerUrl(QUrl{request.discovery.registrationEndpoint}) ||
@@ -673,6 +680,7 @@ namespace javelin::jmap::auth
             .clientId = QString::fromStdString(registered->clientId),
             .codeVerifier = randomUrlSafe(48),
             .state = randomUrlSafe(32),
+            .createdAtEpochSeconds = QDateTime::currentSecsSinceEpoch(),
         };
         const auto challenge = QString::fromLatin1(
             QCryptographicHash::hash(flow.codeVerifier.toLatin1(), QCryptographicHash::Sha256)
@@ -693,6 +701,7 @@ namespace javelin::jmap::auth
 
         result.flowId = QUuid::createUuid().toString(QUuid::WithoutBraces);
         result.authorizationUrl = authorizationUrl.toString();
+        result.callbackState = flow.state;
         m_pendingFlows.insert_or_assign(result.flowId, std::move(flow));
         result.succeeded = true;
         co_return result;
@@ -701,6 +710,7 @@ namespace javelin::jmap::auth
     QCoro::Task<javelin::app::AccountAuthenticationResult>
     AccountOnboardingService::finishOAuth(javelin::app::OAuthFinishRequest request)
     {
+        pruneExpiredFlows();
         const auto found = m_pendingFlows.find(request.flowId);
         if (found == m_pendingFlows.end())
         {
@@ -708,8 +718,7 @@ namespace javelin::jmap::auth
             co_return authenticationError(
                 QStringLiteral("This sign-in attempt has expired. Please try again."));
         }
-        auto flow = std::move(found->second);
-        m_pendingFlows.erase(found);
+        const auto& pending = found->second;
 
         if (request.code.isEmpty())
         {
@@ -717,7 +726,7 @@ namespace javelin::jmap::auth
             co_return authenticationError(
                 QStringLiteral("The mail service did not return an authorization code."));
         }
-        if (request.state != flow.state)
+        if (request.state != pending.state)
         {
             qCWarning(oauthLog) << "OAuth callback state did not match the pending flow";
             co_return authenticationError(QStringLiteral(
@@ -727,18 +736,20 @@ namespace javelin::jmap::auth
         if (request.issuer.isEmpty())
         {
             qCWarning(oauthLog).noquote()
-                << "OAuth callback did not include iss; expected" << flow.discovery.issuer;
+                << "OAuth callback did not include iss; expected" << pending.discovery.issuer;
             co_return authenticationError(QStringLiteral(
                 "The mail service did not identify the authorization server in its response."));
         }
-        if (request.issuer != flow.discovery.issuer)
+        if (request.issuer != pending.discovery.issuer)
         {
             qCWarning(oauthLog).noquote() << "OAuth callback issuer mismatch; expected"
-                                          << flow.discovery.issuer << "but got" << request.issuer;
+                                          << pending.discovery.issuer << "but got" << request.issuer;
             co_return authenticationError(
                 QStringLiteral("The authorization response came from an unexpected server."));
         }
 
+        auto flow = std::move(found->second);
+        m_pendingFlows.erase(found);
         const auto body = formBody({
             {QStringLiteral("grant_type"), QStringLiteral("authorization_code")},
             {QStringLiteral("code"), request.code},

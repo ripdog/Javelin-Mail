@@ -43,7 +43,10 @@ namespace javelin::jmap::auth
             QString clientId;
             QString codeVerifier;
             QString state;
+            qint64 createdAtEpochSeconds = 0;
         };
+
+        void pruneExpiredFlows();
 
         QNetworkAccessManager& m_networkAccessManager;
         std::unordered_map<QString, PendingOAuthFlow> m_pendingFlows;
