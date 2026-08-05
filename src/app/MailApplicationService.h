@@ -185,6 +185,11 @@ namespace javelin::app
         getEffectiveCalendarEvent(std::string_view accountId,
                                   const std::optional<std::string>& eventId) override;
         [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
+        setCalendarSubscribed(
+            std::string ownerAccountId, std::string accountId, std::string calendarId,
+            bool subscribed,
+            javelin::app::undo::CommandOrigin origin = javelin::app::undo::CommandOrigin::User);
+        [[nodiscard]] QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
         setDefaultCalendar(
             std::string ownerAccountId, std::string accountId, std::string calendarId,
             javelin::app::undo::CommandOrigin origin = javelin::app::undo::CommandOrigin::User);

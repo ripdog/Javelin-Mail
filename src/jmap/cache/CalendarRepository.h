@@ -46,6 +46,10 @@ namespace javelin::jmap::cache
         [[nodiscard]] std::optional<DatabaseError>
         setCalendarVisible(std::string_view accountId, std::string_view calendarId, bool visible);
         [[nodiscard]] std::optional<DatabaseError>
+        applyCalendarSubscription(DatabaseTransaction& transaction, std::string_view accountId,
+                                  std::string_view calendarId, std::string_view state,
+                                  bool subscribed);
+        [[nodiscard]] std::optional<DatabaseError>
         applyCalendarDefaults(DatabaseTransaction& transaction, std::string_view accountId,
                               std::string_view state,
                               const std::unordered_map<std::string, bool>& defaults);

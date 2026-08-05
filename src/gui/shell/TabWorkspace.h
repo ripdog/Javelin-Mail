@@ -70,7 +70,6 @@ namespace javelin::gui::shell
 
     struct CalendarTabState
     {
-        std::string accountId;
         QString title;
         javelin::gui::calendar::MonthCalendarWidget* widget = nullptr;
         TabSelectionState selection;

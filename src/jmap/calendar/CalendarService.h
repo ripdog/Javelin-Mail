@@ -43,6 +43,9 @@ namespace javelin::jmap::calendar
                               std::string accountId, std::optional<std::string> eventId,
                               std::string uid);
         [[nodiscard]] QCoro::Task<CalendarMutationResult>
+        setCalendarSubscribed(LiveConnectionSettings settings, std::string ownerAccountId,
+                              std::string accountId, std::string calendarId, bool subscribed);
+        [[nodiscard]] QCoro::Task<CalendarMutationResult>
         setDefaultCalendar(LiveConnectionSettings settings, std::string ownerAccountId,
                            std::string accountId, std::string calendarId);
         [[nodiscard]] QCoro::Task<CalendarMutationResult>

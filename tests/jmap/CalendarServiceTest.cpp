@@ -101,6 +101,147 @@ namespace
     }
 } // namespace
 
+TEST_CASE("calendar subscriptions project and reconcile server outcomes",
+          "[jmap][calendar][subscriptions]")
+{
+    ensureApplication();
+    QTemporaryDir directory;
+    REQUIRE(directory.isValid());
+    auto opened = javelin::jmap::cache::DatabaseConnection::open(
+        {.connectionName = QStringLiteral("calendar-subscription-mutation"),
+         .databasePath = directory.filePath(QStringLiteral("cache.sqlite3"))});
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    javelin::jmap::cache::SessionRepository sessions{connection};
+    REQUIRE_FALSE(sessions.replace("a1", session()).has_value());
+    javelin::jmap::cache::CalendarRepository calendars{connection};
+    const javelin::jmap::calendar::Calendar work{
+        .accountId = "a1",
+        .id = "work",
+        .name = "Work",
+        .description = std::nullopt,
+        .color = "#2457a6",
+        .sortOrder = 0,
+        .isSubscribed = true,
+        .isVisible = true,
+        .isDefault = true,
+        .timeZone = std::nullopt,
+        .defaultAlertsWithTime = {},
+        .defaultAlertsWithoutTime = {},
+        .myRights = {.mayReadFreeBusy = true,
+                     .mayReadItems = true,
+                     .mayWriteAll = true,
+                     .mayWriteOwn = true,
+                     .mayUpdatePrivate = true,
+                     .mayRSVP = true,
+                     .mayShare = false,
+                     .mayDelete = false},
+    };
+    REQUIRE_FALSE(calendars.replaceCalendars("a1", "c1", {work}).has_value());
+    FakeMethodTransport transport;
+    javelin::jmap::calendar::CalendarService service{connection, transport};
+    const javelin::jmap::LiveConnectionSettings settings{
+        .sessionUrl = "https://example.test/.well-known/jmap",
+        .loginEmail = "alice@example.test",
+        .apiKey = "secret"};
+
+    const auto subscribed = [&calendars]
+    {
+        const auto listed = calendars.listCalendars("a1");
+        REQUIRE(std::holds_alternative<std::vector<javelin::jmap::calendar::Calendar>>(listed));
+        const auto& values = std::get<std::vector<javelin::jmap::calendar::Calendar>>(listed);
+        REQUIRE(values.size() == 1);
+        return values.front().isSubscribed;
+    };
+
+    SECTION("accepted update commits the projected subscription")
+    {
+        transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+            .methodResponses =
+                {{.name = "Calendar/set",
+                  .arguments =
+                      R"({"accountId":"a1","oldState":"c1","newState":"c2","created":{},"updated":{"work":{}},"destroyed":[],"notCreated":{},"notUpdated":{},"notDestroyed":{}})",
+                  .callId = "calendar-set-subscription"}},
+            .createdIds = std::nullopt,
+            .sessionState = "s2"});
+        transport.beforeReturn = [&subscribed] { CHECK_FALSE(subscribed()); };
+
+        const auto result =
+            QCoro::waitFor(service.setCalendarSubscribed(settings, "a1", "a1", "work", false));
+
+        REQUIRE(std::holds_alternative<javelin::jmap::calendar::CommittedMutation>(result));
+        CHECK_FALSE(subscribed());
+        REQUIRE(transport.request.has_value());
+        CHECK(transport.request->envelope.methodCalls.front().arguments.find(
+                  R"("update":{"work":{"isSubscribed":false}})") != std::string::npos);
+    }
+
+    SECTION("definitive rejection restores the confirmed subscription")
+    {
+        transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+            .methodResponses =
+                {{.name = "Calendar/set",
+                  .arguments =
+                      R"({"accountId":"a1","oldState":"c1","newState":"c1","created":{},"updated":{},"destroyed":[],"notCreated":{},"notUpdated":{"work":{"type":"forbidden","description":"protected"}},"notDestroyed":{}})",
+                  .callId = "calendar-set-subscription"}},
+            .createdIds = std::nullopt,
+            .sessionState = "s2"});
+        transport.beforeReturn = [&subscribed] { CHECK_FALSE(subscribed()); };
+
+        const auto result =
+            QCoro::waitFor(service.setCalendarSubscribed(settings, "a1", "a1", "work", false));
+
+        REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
+        CHECK(subscribed());
+    }
+
+    SECTION("ambiguous transport preserves the projected subscription as unknown")
+    {
+        transport.results.push_back(javelin::jmap::api::TransportError{
+            .code = javelin::jmap::api::TransportErrorCode::NetworkFailure,
+            .message = "Connection closed after Calendar/set dispatch",
+        });
+
+        const auto result =
+            QCoro::waitFor(service.setCalendarSubscribed(settings, "a1", "a1", "work", false));
+
+        REQUIRE(std::holds_alternative<javelin::jmap::OperationError>(result));
+        CHECK_FALSE(subscribed());
+        javelin::jmap::sync::MutationJournalRepository journal{connection};
+        const auto active = journal.listActive({.accountId = "a1", .dataType = "Calendar"});
+        REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::MutationRecord>>(active));
+        REQUIRE(std::get<std::vector<javelin::jmap::sync::MutationRecord>>(active).size() == 1);
+        CHECK(std::get<std::vector<javelin::jmap::sync::MutationRecord>>(active).front().status ==
+              javelin::jmap::sync::MutationStatus::Unknown);
+
+        transport.results.push_back(javelin::jmap::api::ResponseEnvelope{
+            .methodResponses =
+                {{.name = "Calendar/get",
+                  .arguments =
+                      R"({"accountId":"a1","state":"c2","list":[{"id":"work","name":"Work","color":"#2457a6","sortOrder":0,"isSubscribed":false,"isVisible":true,"isDefault":true,"myRights":{"mayReadFreeBusy":true,"mayReadItems":true,"mayWriteAll":true,"mayWriteOwn":true,"mayUpdatePrivate":true,"mayRSVP":true,"mayShare":false,"mayDelete":false}}],"notFound":[]})",
+                  .callId = "calendar-get"},
+                 {.name = "CalendarEvent/query",
+                  .arguments =
+                      R"({"accountId":"a1","queryState":"q2","canCalculateChanges":false,"position":0,"ids":[],"total":0,"limit":100})",
+                  .callId = "calendar-event-query"},
+                 {.name = "CalendarEvent/query",
+                  .arguments =
+                      R"({"accountId":"a1","queryState":"qb2","canCalculateChanges":false,"position":0,"ids":[],"total":0,"limit":100})",
+                  .callId = "calendar-base-event-query"}},
+            .createdIds = std::nullopt,
+            .sessionState = "s3"});
+        const auto refreshed = QCoro::waitFor(service.refresh(
+            settings, "a1",
+            {.start = {.value = "2026-08-01T00:00:00"}, .end = {.value = "2026-09-01T00:00:00"}},
+            {.value = "Pacific/Auckland"}));
+        REQUIRE(std::holds_alternative<javelin::jmap::calendar::RefreshedRange>(refreshed));
+        const auto resolved = journal.listActive({.accountId = "a1", .dataType = "Calendar"});
+        REQUIRE(std::holds_alternative<std::vector<javelin::jmap::sync::MutationRecord>>(resolved));
+        CHECK(std::get<std::vector<javelin::jmap::sync::MutationRecord>>(resolved).empty());
+        CHECK_FALSE(subscribed());
+    }
+}
+
 TEST_CASE("calendar manager mutations project, reconcile, and preserve uncertainty",
           "[jmap][calendar][service]")
 {

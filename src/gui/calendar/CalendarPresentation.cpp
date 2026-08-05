@@ -4,6 +4,7 @@
 
 #include <ranges>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace javelin::gui::calendar
 {
@@ -15,6 +16,7 @@ namespace javelin::gui::calendar
     {
         CalendarAccountPresentation result;
         std::unordered_map<std::string, QColor> colors;
+        std::unordered_set<std::string> subscribedCalendars;
         result.calendars.reserve(calendars.size());
         for (const auto& calendar : calendars)
         {
@@ -22,14 +24,15 @@ namespace javelin::gui::calendar
             const auto color =
                 calendar.color ? QColor{QString::fromStdString(*calendar.color)} : fallbackColor;
             colors.emplace(key, color);
+            if (calendar.isSubscribed)
+                subscribedCalendars.insert(key);
             result.calendars.push_back({
                 .id = key,
                 .accountId = account.accountId,
                 .accountName = QString::fromStdString(account.name),
-                .name = QStringLiteral("%1 — %2").arg(QString::fromStdString(calendar.name),
-                                                      QString::fromStdString(account.name)),
+                .name = QString::fromStdString(calendar.name),
                 .color = color,
-                .visible = calendar.isVisible,
+                .subscribed = calendar.isSubscribed,
                 .writable = calendar.myRights.mayWriteAll || calendar.myRights.mayWriteOwn,
                 .deletable = calendar.myRights.mayDelete,
                 .defaultDestination = calendar.isDefault,
@@ -48,8 +51,12 @@ namespace javelin::gui::calendar
             if (event == events.end())
                 continue;
             const auto calendarId = std::ranges::find_if(
-                event->second->calendarIds, [&account, &colors](const auto& item)
-                { return item.second && colors.contains(account.accountId + '\n' + item.first); });
+                event->second->calendarIds,
+                [&account, &subscribedCalendars](const auto& item)
+                {
+                    return item.second &&
+                           subscribedCalendars.contains(account.accountId + '\n' + item.first);
+                });
             if (calendarId == event->second->calendarIds.end())
                 continue;
             auto startTime = QDateTime::fromString(

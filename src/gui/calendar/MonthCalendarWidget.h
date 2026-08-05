@@ -45,7 +45,7 @@ namespace javelin::gui::calendar
         QString accountName;
         QString name;
         QColor color;
-        bool visible = true;
+        bool subscribed = false;
         bool writable = false;
         bool deletable = false;
         bool defaultDestination = false;
@@ -72,7 +72,6 @@ namespace javelin::gui::calendar
         void setEvents(std::vector<MonthEvent> events);
         void setCalendars(std::vector<CalendarDisplay> calendars);
         void setCalendarAccounts(std::vector<CalendarAccountDisplay> accounts);
-        void setHiddenCalendars(std::vector<std::string> calendarIds);
         void applicationPaletteChanged();
 
         [[nodiscard]] QDate displayedMonth() const;
@@ -98,7 +97,7 @@ namespace javelin::gui::calendar
         void eventActivated(const QString& accountId, const QString& eventId,
                             const QString& recurrenceId);
         void emptyTimeActivated(const QDate& date);
-        void calendarVisibilityChanged(const QString& calendarId, bool visible);
+        void calendarSubscriptionChanged(const QString& calendarId, bool subscribed);
         void defaultCalendarChanged(const QString& calendarId);
         void calendarCreationRequested(const QString& accountId, const QString& name,
                                        const QString& color);
@@ -132,8 +131,6 @@ namespace javelin::gui::calendar
         std::vector<CalendarDisplay> m_calendars;
         std::vector<CalendarAccountDisplay> m_calendarAccounts;
         std::vector<MonthEvent> m_events;
-        std::vector<std::string> m_hiddenCalendars;
-        std::vector<std::string> m_knownCalendars;
         std::unordered_map<std::string, QColor> m_customCalendarColors;
         bool m_eventRebuildPending = false;
     };

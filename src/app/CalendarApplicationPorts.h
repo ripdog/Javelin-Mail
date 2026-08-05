@@ -36,6 +36,9 @@ namespace javelin::app
                             javelin::jmap::calendar::DeleteEventCommand command,
                             undo::CommandOrigin origin = undo::CommandOrigin::User) = 0;
         [[nodiscard]] virtual QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
+        setCalendarSubscribed(std::string ownerAccountId, std::string accountId,
+                              std::string calendarId, bool subscribed) = 0;
+        [[nodiscard]] virtual QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
         setDefaultCalendar(std::string ownerAccountId, std::string accountId,
                            std::string calendarId,
                            undo::CommandOrigin origin = undo::CommandOrigin::User) = 0;

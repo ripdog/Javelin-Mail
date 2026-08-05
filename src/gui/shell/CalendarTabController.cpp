@@ -3,6 +3,7 @@
 #include "gui/calendar/CalendarPresentation.h"
 #include "gui/calendar/EventDialog.h"
 #include "gui/calendar/MonthCalendarWidget.h"
+#include "gui/settings/GuiSettings.h"
 #include "jmap/calendar/CalendarEventEditing.h"
 #include "jmap/calendar/CalendarReader.h"
 
@@ -33,8 +34,23 @@ namespace javelin::gui::shell
 {
     Q_LOGGING_CATEGORY(logCalendarOperations, "user.operations")
 
+    namespace
+    {
+        [[nodiscard]] QString
+        calendarAccountLabel(const javelin::gui::settings::GuiSettings& settings,
+                             const javelin::jmap::cache::CalendarAccount& account)
+        {
+            const auto configured =
+                settings.accountForCachedId(QString::fromStdString(account.accountId));
+            if (!configured.displayName.isEmpty())
+                return configured.displayName;
+            return account.name.empty() ? QString::fromStdString(account.accountId)
+                                        : QString::fromStdString(account.name);
+        }
+    } // namespace
+
     CalendarTabController::CalendarTabController(
-        javelin::gui::settings::WorkspaceSettingsPort& settings,
+        javelin::gui::settings::GuiSettings& settings,
         javelin::jmap::calendar::CalendarReader& calendarReader,
         javelin::app::CalendarCommandPort& calendarCommandPort, QStackedWidget& contentStack,
         std::vector<TabState>& tabs, QObject* parent)
@@ -78,7 +94,7 @@ namespace javelin::gui::shell
         if (accounts == nullptr || accounts->empty())
         {
             Q_EMIT statusMessage(
-                i18n("The configured server does not support JMAP Calendars draft-26."), 10000);
+                i18n("None of the configured servers support JMAP Calendars draft-26."), 10000);
             return;
         }
 
@@ -87,7 +103,7 @@ namespace javelin::gui::shell
         accountDisplays.reserve(accounts->size());
         for (const auto& account : *accounts)
             accountDisplays.push_back(
-                {.id = account.accountId, .name = QString::fromStdString(account.name)});
+                {.id = account.accountId, .name = calendarAccountLabel(m_settings, account)});
         widget->setCalendarAccounts(std::move(accountDisplays));
         const auto loadVisible =
             [this, widget, accounts = *accounts](const QDate& start, const QDate& end)
@@ -108,8 +124,10 @@ namespace javelin::gui::shell
                     m_calendarReader.loadCached(account.accountId, interval, timeZone);
                 const auto* window =
                     std::get_if<std::optional<javelin::jmap::cache::CalendarWindow>>(&loaded);
+                auto displayAccount = account;
+                displayAccount.name = calendarAccountLabel(m_settings, account).toStdString();
                 auto presentation = javelin::gui::calendar::buildCalendarAccountPresentation(
-                    account,
+                    displayAccount,
                     calendars != nullptr ? *calendars
                                          : std::vector<javelin::jmap::calendar::Calendar>{},
                     window != nullptr ? *window
@@ -127,21 +145,34 @@ namespace javelin::gui::shell
         };
         connect(widget, &javelin::gui::calendar::MonthCalendarWidget::visibleIntervalChanged,
                 widget, loadVisible);
-        connect(widget, &javelin::gui::calendar::MonthCalendarWidget::calendarVisibilityChanged,
+        connect(widget, &javelin::gui::calendar::MonthCalendarWidget::calendarSubscriptionChanged,
                 widget,
-                [this, loadVisible, widget](const QString& displayId, const bool visible)
+                [this, accounts = *accounts, loadVisible, widget](const QString& displayId,
+                                                                  const bool subscribed)
                 {
                     const auto separator = displayId.indexOf(QLatin1Char('\n'));
                     if (separator <= 0 || separator == displayId.size() - 1)
                         return;
-                    const auto result = m_calendarCommandPort.setCalendarVisible(
-                        displayId.first(separator).toStdString(),
-                        displayId.sliced(separator + 1).toStdString(), visible);
-                    if (const auto* error = std::get_if<javelin::jmap::OperationError>(&result))
-                    {
-                        Q_EMIT operationFailed(*error);
-                        loadVisible(widget->visibleStart(), widget->visibleEnd());
-                    }
+                    const auto accountId = displayId.first(separator).toStdString();
+                    const auto account = std::ranges::find(
+                        accounts, accountId, &javelin::jmap::cache::CalendarAccount::accountId);
+                    if (account == accounts.end())
+                        return;
+                    auto task = m_calendarCommandPort.setCalendarSubscribed(
+                        account->ownerAccountId, accountId,
+                        displayId.sliced(separator + 1).toStdString(), subscribed);
+                    QCoro::connect(std::move(task), widget,
+                                   [this, loadVisible,
+                                    widget](javelin::jmap::calendar::CalendarMutationResult result)
+                                   {
+                                       if (const auto* error =
+                                               std::get_if<javelin::jmap::OperationError>(&result))
+                                       {
+                                           Q_EMIT operationFailed(*error);
+                                           loadVisible(widget->visibleStart(),
+                                                       widget->visibleEnd());
+                                       }
+                                   });
                 });
         connect(
             widget, &javelin::gui::calendar::MonthCalendarWidget::defaultCalendarChanged, widget,
@@ -272,10 +303,12 @@ namespace javelin::gui::shell
                         continue;
                     for (const auto& calendar : *calendars)
                     {
+                        if (!calendar.isSubscribed)
+                            continue;
                         auto choice = calendar;
                         if (accounts.size() > 1)
                             choice.name += QStringLiteral(" — %1")
-                                               .arg(QString::fromStdString(account.name))
+                                               .arg(calendarAccountLabel(m_settings, account))
                                                .toStdString();
                         const auto writable =
                             choice.myRights.mayWriteAll || choice.myRights.mayWriteOwn;
@@ -482,7 +515,10 @@ namespace javelin::gui::shell
                         editableEvent.title = *existingOverride->second.title;
                 }
 
-                auto* dialog = new javelin::gui::calendar::EventDialog(*calendars, widget);
+                std::vector<javelin::jmap::calendar::Calendar> subscribedCalendars;
+                std::ranges::copy_if(*calendars, std::back_inserter(subscribedCalendars),
+                                     [](const auto& calendar) { return calendar.isSubscribed; });
+                auto* dialog = new javelin::gui::calendar::EventDialog(subscribedCalendars, widget);
                 dialog->setAttribute(Qt::WA_DeleteOnClose, false);
                 dialog->setEvent(editableEvent);
                 dialog->setOccurrenceMode(editScope == EditScope::Occurrence);
@@ -564,11 +600,9 @@ namespace javelin::gui::shell
             });
         refreshVisible(widget->visibleStart(), widget->visibleEnd());
         m_contentStack.addWidget(widget);
-        m_tabs.push_back(
-            TabState{.content = CalendarTabState{.accountId = accounts->front().ownerAccountId,
-                                                 .title = i18n("Calendar"),
-                                                 .widget = widget,
-                                                 .selection = {}}});
+        m_tabs.push_back(TabState{
+            .content =
+                CalendarTabState{.title = i18n("Calendar"), .widget = widget, .selection = {}}});
         const auto index = static_cast<int>(m_tabs.size() - 1);
         if (displayedMonth.has_value() && displayedMonth->isValid())
             widget->setDisplayedMonth(*displayedMonth);

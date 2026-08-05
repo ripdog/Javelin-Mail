@@ -78,7 +78,7 @@ namespace javelin::gui::shell
                     return PersistedCalendarTab{
                         .common =
                             {
-                                .accountId = content.accountId,
+                                .accountId = {},
                                 .title = content.title,
                                 .selection = persistSelection(content.selection),
                             },

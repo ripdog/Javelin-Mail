@@ -193,7 +193,8 @@ namespace javelin::protocol
         OnboardingStartOAuth,
         OnboardingFinishOAuth,
         OnboardingAuthenticateManually,
-        Last = OnboardingAuthenticateManually,
+        CalendarSetSubscribed,
+        Last = CalendarSetSubscribed,
     };
 
     struct RemoteActionCommand

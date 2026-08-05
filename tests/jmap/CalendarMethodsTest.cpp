@@ -109,6 +109,7 @@ TEST_CASE("calendar set changes the server default through the draft argument", 
     const auto method = javelin::jmap::api::calendarSet({.accountId = "a1",
                                                          .ifInState = "calendar-state-1",
                                                          .create = {},
+                                                         .update = {},
                                                          .destroy = {},
                                                          .onDestroyRemoveEvents = false,
                                                          .onSuccessSetIsDefault = "personal"});
@@ -122,6 +123,24 @@ TEST_CASE("calendar set changes the server default through the draft argument", 
     REQUIRE(response.ok());
     CHECK(response.value->updated.at("work").isDefault == std::optional<bool>{false});
     CHECK(response.value->updated.at("personal").isDefault == std::optional<bool>{true});
+}
+
+TEST_CASE("calendar set serializes an exact subscription update", "[jmap][calendar]")
+{
+    const auto method = javelin::jmap::api::calendarSet({
+        .accountId = "a1",
+        .ifInState = "c1",
+        .create = {},
+        .update = {{"work", {.isSubscribed = false}}},
+        .destroy = {},
+        .onDestroyRemoveEvents = false,
+        .onSuccessSetIsDefault = std::nullopt,
+    });
+
+    REQUIRE(method.has_value());
+    CHECK(method->arguments.find(R"("update":{"work":{"isSubscribed":false}})") !=
+          std::string::npos);
+    CHECK(method->arguments.find(R"("name")") == std::string::npos);
 }
 
 TEST_CASE("calendar set serializes creation and destructive deletion", "[jmap][calendar]")
@@ -145,6 +164,7 @@ TEST_CASE("calendar set serializes creation and destructive deletion", "[jmap][c
         .accountId = "a1",
         .ifInState = "c1",
         .create = {{"new-calendar", calendar}},
+        .update = {},
         .destroy = {"old-calendar"},
         .onDestroyRemoveEvents = true,
         .onSuccessSetIsDefault = std::nullopt,

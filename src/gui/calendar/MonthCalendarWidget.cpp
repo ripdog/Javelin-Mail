@@ -284,23 +284,7 @@ namespace javelin::gui::calendar
 
     void MonthCalendarWidget::setCalendars(std::vector<CalendarDisplay> calendars)
     {
-        const auto previousHiddenCalendars = m_hiddenCalendars;
         m_calendars = std::move(calendars);
-        m_hiddenCalendars.clear();
-        std::vector<std::string> knownCalendars;
-        knownCalendars.reserve(m_calendars.size());
-        for (const auto& calendar : m_calendars)
-        {
-            const auto wasHidden = std::ranges::find(previousHiddenCalendars, calendar.id) !=
-                                   previousHiddenCalendars.end();
-            const auto wasKnown =
-                std::ranges::find(m_knownCalendars, calendar.id) != m_knownCalendars.end();
-            const auto isVisible = wasKnown ? !wasHidden : calendar.visible;
-            knownCalendars.push_back(calendar.id);
-            if (!isVisible)
-                m_hiddenCalendars.push_back(calendar.id);
-        }
-        m_knownCalendars = std::move(knownCalendars);
         applyCalendarColors();
         rebuildCalendarMenu();
         rebuildEvents();
@@ -309,13 +293,6 @@ namespace javelin::gui::calendar
     void MonthCalendarWidget::setCalendarAccounts(std::vector<CalendarAccountDisplay> accounts)
     {
         m_calendarAccounts = std::move(accounts);
-    }
-
-    void MonthCalendarWidget::setHiddenCalendars(std::vector<std::string> calendarIds)
-    {
-        m_hiddenCalendars = std::move(calendarIds);
-        rebuildCalendarMenu();
-        rebuildEvents();
     }
 
     void MonthCalendarWidget::applicationPaletteChanged()
@@ -351,37 +328,49 @@ namespace javelin::gui::calendar
     void MonthCalendarWidget::rebuildCalendarMenu()
     {
         m_calendarMenu->clear();
-        for (const auto& calendar : m_calendars)
+        for (const auto& account : m_calendarAccounts)
         {
-            auto* action = m_calendarMenu->addAction(
-                colorSwatch(effectiveCalendarColor(calendar.id)), calendar.name);
-            action->setCheckable(true);
-            action->setChecked(std::ranges::find(m_hiddenCalendars, calendar.id) ==
-                               m_hiddenCalendars.end());
-            connect(action, &QAction::toggled, this,
-                    [this, id = calendar.id](const bool visible)
-                    {
-                        if (visible)
-                            std::erase(m_hiddenCalendars, id);
-                        else if (std::ranges::find(m_hiddenCalendars, id) ==
-                                 m_hiddenCalendars.end())
-                            m_hiddenCalendars.push_back(id);
-                        rebuildEvents();
-                        Q_EMIT calendarVisibilityChanged(QString::fromStdString(id), visible);
-                    });
+            m_calendarMenu->addSection(account.name);
+            for (const auto& calendar : m_calendars)
+            {
+                if (calendar.accountId != account.id)
+                    continue;
+                auto* action = m_calendarMenu->addAction(
+                    colorSwatch(effectiveCalendarColor(calendar.id)), calendar.name);
+                action->setCheckable(true);
+                action->setChecked(calendar.subscribed);
+                connect(action, &QAction::toggled, this,
+                        [this, action, id = calendar.id](const bool subscribed)
+                        {
+                            action->setEnabled(false);
+                            Q_EMIT calendarSubscriptionChanged(QString::fromStdString(id),
+                                                               subscribed);
+                        });
+            }
         }
         auto* destinations = m_calendarMenu->addMenu(i18n("Default for New Events"));
         auto* destinationGroup = new QActionGroup(destinations);
         destinationGroup->setExclusive(true);
-        for (const auto& calendar : m_calendars)
+        for (const auto& account : m_calendarAccounts)
         {
-            auto* action = destinations->addAction(calendar.name);
-            action->setCheckable(true);
-            action->setChecked(calendar.defaultDestination);
-            action->setEnabled(calendar.writable);
-            destinationGroup->addAction(action);
-            connect(action, &QAction::triggered, this, [this, id = calendar.id]
-                    { Q_EMIT defaultCalendarChanged(QString::fromStdString(id)); });
+            bool accountAdded = false;
+            for (const auto& calendar : m_calendars)
+            {
+                if (calendar.accountId != account.id || !calendar.subscribed)
+                    continue;
+                if (!accountAdded)
+                {
+                    destinations->addSection(account.name);
+                    accountAdded = true;
+                }
+                auto* action = destinations->addAction(calendar.name);
+                action->setCheckable(true);
+                action->setChecked(calendar.defaultDestination);
+                action->setEnabled(calendar.writable);
+                destinationGroup->addAction(action);
+                connect(action, &QAction::triggered, this, [this, id = calendar.id]
+                        { Q_EMIT defaultCalendarChanged(QString::fromStdString(id)); });
+            }
         }
         if (!m_calendars.empty())
             m_calendarMenu->addSeparator();
@@ -400,8 +389,12 @@ namespace javelin::gui::calendar
         auto pendingColors = m_customCalendarColors;
         for (const auto& calendar : m_calendars)
         {
-            auto* item = new QListWidgetItem(colorSwatch(effectiveCalendarColor(calendar.id)),
-                                             calendar.name, list);
+            const auto label = m_calendarAccounts.size() > 1
+                                   ? i18nc("@item calendar and account", "%1 — %2", calendar.name,
+                                           calendar.accountName)
+                                   : calendar.name;
+            auto* item =
+                new QListWidgetItem(colorSwatch(effectiveCalendarColor(calendar.id)), label, list);
             item->setData(Qt::UserRole, QString::fromStdString(calendar.id));
             item->setData(Qt::UserRole + 1, calendar.deletable);
         }
@@ -706,9 +699,6 @@ namespace javelin::gui::calendar
             std::vector<const MonthEvent*> matching;
             for (const auto& event : m_events)
             {
-                if (std::ranges::find(m_hiddenCalendars, event.calendarId) !=
-                    m_hiddenCalendars.end())
-                    continue;
                 if (event.start.date() <= date && eventLastDate(event) >= date)
                     matching.push_back(&event);
             }
@@ -773,8 +763,7 @@ namespace javelin::gui::calendar
         auto* layout = new QVBoxLayout(dialog);
         for (const auto& event : m_events)
         {
-            if (std::ranges::find(m_hiddenCalendars, event.calendarId) != m_hiddenCalendars.end() ||
-                event.start.date() > date || eventLastDate(event) < date)
+            if (event.start.date() > date || eventLastDate(event) < date)
                 continue;
             auto* chip = new EventChip(event, date, dialog);
             connect(chip, &QToolButton::clicked, dialog,

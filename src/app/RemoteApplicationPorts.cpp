@@ -203,6 +203,18 @@ namespace javelin::app
     }
 
     QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
+    RemoteCalendarCommandPort::setCalendarSubscribed(std::string ownerAccountId,
+                                                     std::string accountId, std::string calendarId,
+                                                     const bool subscribed)
+    {
+        auto result = co_await call<javelin::jmap::calendar::CalendarMutationResult>(
+            m_client, javelin::protocol::RemoteActionKind::CalendarSetSubscribed, ownerAccountId,
+            accountId, calendarId, subscribed);
+        noteCalendarChanged(ownerAccountId);
+        co_return result;
+    }
+
+    QCoro::Task<javelin::jmap::calendar::CalendarMutationResult>
     RemoteCalendarCommandPort::setDefaultCalendar(std::string ownerAccountId, std::string accountId,
                                                   std::string calendarId,
                                                   const undo::CommandOrigin origin)

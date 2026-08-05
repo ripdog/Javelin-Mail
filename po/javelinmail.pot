@@ -625,17 +625,37 @@ msgstr ""
 msgid "The calendar visibility history is invalid."
 msgstr ""
 
-#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:2166
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:2167
+#, kde-format
+msgid "The calendar subscription history is invalid."
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:2186
 #, kde-format
 msgid "The calendar preference history is invalid."
 msgstr ""
 
-#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:2198
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:2222
+#, kde-format
+msgid "Subscribe to Calendar"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:2222
+#, kde-format
+msgid "Unsubscribe from Calendar"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:2264
+#, kde-format
+msgid "Change calendar subscription"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:2295
 #, kde-format
 msgid "Change Default Calendar"
 msgstr ""
 
-#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:2240
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/app/MailApplicationService.cpp:2336
 #, kde-format
 msgid "Change default calendar"
 msgstr ""
@@ -1342,7 +1362,13 @@ msgstr ""
 msgid "Default for New Events"
 msgstr ""
 
-#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/MonthCalendarWidget.cpp:389
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/MonthCalendarWidget.cpp:392
+#, kde-format
+msgctxt "@item calendar and account"
+msgid "%1 — %2"
+msgstr ""
+
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/calendar/MonthCalendarWidget.cpp:384
 #, kde-format
 msgid "Manage Calendars…"
 msgstr ""
@@ -4176,9 +4202,9 @@ msgstr ""
 msgid "Refreshing mail from server..."
 msgstr ""
 
-#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/CalendarTabController.cpp:81
+#: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/CalendarTabController.cpp:97
 #, kde-format
-msgid "The configured server does not support JMAP Calendars draft-26."
+msgid "None of the configured servers support JMAP Calendars draft-26."
 msgstr ""
 
 #: /home/ripdog/CLionProjects/Javelin-Mail/src/gui/shell/CalendarTabController.cpp:289

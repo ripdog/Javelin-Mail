@@ -22,6 +22,10 @@ namespace javelin::gui::shell
                                ? std::optional<std::string>{std::nullopt}
                                : std::optional<std::string>{content.session->accountId()};
                 }
+                else if constexpr (std::is_same_v<Content, CalendarTabState>)
+                {
+                    return std::nullopt;
+                }
                 else
                 {
                     return content.accountId.empty()

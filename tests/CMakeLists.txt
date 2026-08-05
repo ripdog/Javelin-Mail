@@ -230,6 +230,7 @@ add_executable(javelin_jmap_tests
     gui/PaginationTest.cpp
     gui/RefreshGenerationTest.cpp
     gui/PlainTextLinkifierTest.cpp
+    ${PROJECT_SOURCE_DIR}/src/gui/calendar/CalendarPresentation.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/calendar/MonthCalendarLayout.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/calendar/RecurrencePattern.cpp
     ${PROJECT_SOURCE_DIR}/src/gui/settings/ConnectionSettingsAdapter.cpp

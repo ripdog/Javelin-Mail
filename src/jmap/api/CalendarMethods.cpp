@@ -252,11 +252,17 @@ namespace javelin::jmap::api::detail
         std::vector<std::string> properties;
     };
 
+    struct RawCalendarUpdate
+    {
+        std::optional<bool> isSubscribed;
+    };
+
     struct RawCalendarSetRequest
     {
         std::string accountId;
         std::optional<std::string> ifInState;
         std::unordered_map<std::string, RawCalendarCreate> create;
+        std::unordered_map<std::string, RawCalendarUpdate> update;
         std::vector<std::string> destroy;
         bool onDestroyRemoveEvents = false;
         std::optional<std::string> onSuccessSetIsDefault;
@@ -331,6 +337,7 @@ JAVELIN_GLZ_META(RawCalendarGetResponse, "accountId", &T::accountId, "state", &T
 JAVELIN_GLZ_META(RawCalendarCreate, "name", &T::name, "description", &T::description, "color",
                  &T::color, "sortOrder", &T::sortOrder, "isSubscribed", &T::isSubscribed,
                  "isVisible", &T::isVisible, "timeZone", &T::timeZone);
+JAVELIN_GLZ_META(RawCalendarUpdate, "isSubscribed", &T::isSubscribed);
 JAVELIN_GLZ_META(RawQueryFilter, "inCalendar", &T::inCalendar, "after", &T::after, "before",
                  &T::before, "text", &T::text, "uid", &T::uid);
 JAVELIN_GLZ_META(RawQueryRequest, "accountId", &T::accountId, "filter", &T::filter,
@@ -383,8 +390,9 @@ JAVELIN_GLZ_META(RawEventGetResponse, "accountId", &T::accountId, "state", &T::s
 JAVELIN_GLZ_META(RawSetError, "type", &T::type, "description", &T::description, "properties",
                  &T::properties);
 JAVELIN_GLZ_META(RawCalendarSetRequest, "accountId", &T::accountId, "ifInState", &T::ifInState,
-                 "create", &T::create, "destroy", &T::destroy, "onDestroyRemoveEvents",
-                 &T::onDestroyRemoveEvents, "onSuccessSetIsDefault", &T::onSuccessSetIsDefault);
+                 "create", &T::create, "update", &T::update, "destroy", &T::destroy,
+                 "onDestroyRemoveEvents", &T::onDestroyRemoveEvents, "onSuccessSetIsDefault",
+                 &T::onSuccessSetIsDefault);
 JAVELIN_GLZ_META(RawCalendarSetResult, "id", &T::id, "isDefault", &T::isDefault);
 JAVELIN_GLZ_META(RawCalendarSetResponse, "accountId", &T::accountId, "oldState", &T::oldState,
                  "newState", &T::newState, "created", &T::created, "updated", &T::updated,
@@ -908,10 +916,16 @@ namespace javelin::jmap::api
                                                            ? std::optional{calendar.timeZone->value}
                                                            : std::nullopt,
                                        });
+        std::unordered_map<std::string, detail::RawCalendarUpdate> update;
+        update.reserve(request.update.size());
+        for (const auto& [calendarId, patch] : request.update)
+            update.emplace(calendarId,
+                           detail::RawCalendarUpdate{.isSubscribed = patch.isSubscribed});
         const auto arguments = serialize(
             detail::RawCalendarSetRequest{.accountId = request.accountId,
                                           .ifInState = request.ifInState,
                                           .create = std::move(create),
+                                          .update = std::move(update),
                                           .destroy = request.destroy,
                                           .onDestroyRemoveEvents = request.onDestroyRemoveEvents,
                                           .onSuccessSetIsDefault = request.onSuccessSetIsDefault});

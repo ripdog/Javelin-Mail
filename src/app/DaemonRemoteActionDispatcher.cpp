@@ -80,6 +80,7 @@ namespace javelin::app
             case Kind::CalendarCreateEvent:
             case Kind::CalendarUpdateEvent:
             case Kind::CalendarDeleteEvent:
+            case Kind::CalendarSetSubscribed:
             case Kind::CalendarSetDefault:
             case Kind::CalendarCreate:
             case Kind::CalendarDelete:
@@ -368,6 +369,16 @@ namespace javelin::app
                 {
                     return launch(m_services.calendarCommandPort().deleteCalendarEvent(
                         std::move(ownerAccountId), std::move(eventCommand), origin));
+                });
+        case Kind::CalendarSetSubscribed:
+            return decodeAndApply<std::string, std::string, std::string, bool>(
+                command.payload, invalidPayload,
+                [&](std::string ownerAccountId, std::string accountId, std::string calendarId,
+                    const bool subscribed)
+                {
+                    return launch(m_services.calendarCommandPort().setCalendarSubscribed(
+                        std::move(ownerAccountId), std::move(accountId), std::move(calendarId),
+                        subscribed));
                 });
         case Kind::CalendarSetDefault:
             return decodeAndApply<std::string, std::string, std::string, undo::CommandOrigin>(
