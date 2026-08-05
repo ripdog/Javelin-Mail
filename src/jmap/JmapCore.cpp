@@ -318,6 +318,51 @@ namespace javelin::jmap
             return filtered;
         }
 
+        using EmailMutationRecords = std::vector<javelin::jmap::sync::EmailMutationRecord>;
+        using EmailMutationRecordsResult = std::variant<EmailMutationRecords, OperationError>;
+
+        [[nodiscard]] EmailMutationRecordsResult
+        loadEmailMutationRecords(javelin::jmap::sync::EmailMutationJournal& journal,
+                                 const std::string_view accountId, const std::string_view emailId)
+        {
+            const auto result = journal.listForEmail(accountId, emailId);
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
+                return javelin::jmap::operationError(*error);
+            return std::get<EmailMutationRecords>(result);
+        }
+
+        [[nodiscard]] javelin::jmap::domain::Email
+        reprojectActiveEmailMutations(javelin::jmap::domain::Email baseEmail,
+                                      const EmailMutationRecords& records)
+        {
+            return javelin::jmap::sync::projectEmailMutations(baseEmail,
+                                                              activeEmailMutations(records));
+        }
+
+        [[nodiscard]] std::optional<OperationError> compactSettledAcceptedEmailMutations(
+            javelin::jmap::sync::MutationProjectionTransaction& transaction,
+            const EmailMutationRecords& records)
+        {
+            const bool unresolved = std::ranges::any_of(
+                records,
+                [](const auto& record)
+                {
+                    return record.status == javelin::jmap::sync::MutationStatus::Pending ||
+                           record.status == javelin::jmap::sync::MutationStatus::InFlight ||
+                           record.status == javelin::jmap::sync::MutationStatus::Unknown;
+                });
+            if (unresolved)
+                return std::nullopt;
+            for (const auto& record : records)
+            {
+                if (record.status != javelin::jmap::sync::MutationStatus::Accepted)
+                    continue;
+                if (const auto error = transaction.remove(record.mutationId))
+                    return javelin::jmap::operationError(*error);
+            }
+            return std::nullopt;
+        }
+
         [[nodiscard]] javelin::jmap::cache::MessageListItem
         messageListItemFromEmail(const javelin::jmap::domain::Email& email,
                                  const std::size_t threadMessageCount)
@@ -1592,7 +1637,7 @@ namespace javelin::jmap
             return std::nullopt;
         };
         const auto rejectSubmittedMutations =
-            [this, &accountId, &mergedEmails, &mutationsByEmailId,
+            [this, &accountId, &emailMutationJournal, &mergedEmails, &mutationsByEmailId,
              &mutationIdsByEmailId]() -> std::optional<OperationError>
         {
             auto transactionResult = javelin::jmap::sync::MutationProjectionTransaction::begin(
@@ -1622,11 +1667,6 @@ namespace javelin::jmap
                 auto restored = projectedEmail;
                 restored.mailboxIds = *actions->second.front().baseMailboxIds;
                 restored.keywords = *actions->second.front().baseKeywords;
-                if (const auto error =
-                        emails.upsertMany(transaction.cacheTransaction(), accountId, {restored}))
-                {
-                    return javelin::jmap::operationError(*error);
-                }
                 for (const auto& mutationId : mutationIdsByEmailId.at(emailId))
                 {
                     if (const auto error = transaction.transition(
@@ -1635,6 +1675,19 @@ namespace javelin::jmap
                         return javelin::jmap::operationError(*error);
                     }
                 }
+                auto recordsResult =
+                    loadEmailMutationRecords(emailMutationJournal, accountId, emailId);
+                if (const auto* error = std::get_if<OperationError>(&recordsResult))
+                    return *error;
+                const auto& records = std::get<EmailMutationRecords>(recordsResult);
+                auto reprojected = reprojectActiveEmailMutations(std::move(restored), records);
+                if (const auto error =
+                        emails.upsertMany(transaction.cacheTransaction(), accountId, {reprojected}))
+                {
+                    return javelin::jmap::operationError(*error);
+                }
+                if (const auto error = compactSettledAcceptedEmailMutations(transaction, records))
+                    return *error;
             }
             if (const auto error = transaction.commit())
                 return javelin::jmap::operationError(*error);
@@ -1792,6 +1845,12 @@ namespace javelin::jmap
                     }
                 }
 
+                auto recordsResult =
+                    loadEmailMutationRecords(emailMutationJournal, accountId, emailId);
+                if (const auto* error = std::get_if<OperationError>(&recordsResult))
+                    co_return *error;
+                const auto& records = std::get<EmailMutationRecords>(recordsResult);
+
                 if (destroyedEmailIds.contains(emailId))
                 {
                     const std::array destroyed{emailId};
@@ -1801,19 +1860,8 @@ namespace javelin::jmap
                         co_return javelin::jmap::operationError(*error);
                     }
                 }
-                else if (const auto error = emailRepository.upsertMany(
-                             transaction.cacheTransaction(), accountId, {email}))
-                {
-                    co_return javelin::jmap::operationError(*error);
-                }
-
-                for (const auto& mutationId : idsIt->second)
-                {
-                    if (const auto error = transaction.remove(mutationId))
-                    {
-                        co_return javelin::jmap::operationError(*error);
-                    }
-                }
+                if (const auto error = compactSettledAcceptedEmailMutations(transaction, records))
+                    co_return *error;
                 continue;
             }
 
@@ -1833,18 +1881,33 @@ namespace javelin::jmap
                 auto restored = email;
                 restored.mailboxIds = *actionsIt->second.front().baseMailboxIds;
                 restored.keywords = *actionsIt->second.front().baseKeywords;
+                for (const auto& mutationId : idsIt->second)
+                {
+                    if (const auto error = transaction.transition(
+                            mutationId, javelin::jmap::sync::MutationStatus::Rejected))
+                    {
+                        co_return javelin::jmap::operationError(*error);
+                    }
+                }
+                auto recordsResult =
+                    loadEmailMutationRecords(emailMutationJournal, accountId, emailId);
+                if (const auto* error = std::get_if<OperationError>(&recordsResult))
+                    co_return *error;
+                const auto& records = std::get<EmailMutationRecords>(recordsResult);
+                auto reprojected = reprojectActiveEmailMutations(std::move(restored), records);
                 if (const auto error = emailRepository.upsertMany(transaction.cacheTransaction(),
-                                                                  accountId, {restored}))
+                                                                  accountId, {reprojected}))
                 {
                     co_return javelin::jmap::operationError(*error);
                 }
+                if (const auto error = compactSettledAcceptedEmailMutations(transaction, records))
+                    co_return *error;
+                continue;
             }
             for (const auto& mutationId : idsIt->second)
             {
-                const auto status = failedEmailIds.contains(emailId)
-                                        ? javelin::jmap::sync::MutationStatus::Rejected
-                                        : javelin::jmap::sync::MutationStatus::Pending;
-                if (const auto error = transaction.transition(mutationId, status))
+                if (const auto error = transaction.transition(
+                        mutationId, javelin::jmap::sync::MutationStatus::Pending))
                 {
                     co_return javelin::jmap::operationError(*error);
                 }
