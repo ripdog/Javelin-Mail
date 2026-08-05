@@ -51,6 +51,7 @@
 #include <algorithm>
 #include <functional>
 #include <iterator>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 
@@ -67,6 +68,7 @@ namespace javelin::gui::contacts
             Ungrouped = 4,
             AddressBook = 5,
             AccountStarred = 6,
+            NoSubscribedAddressBooks = 7,
         };
 
         constexpr int groupFilterModeRole = Qt::UserRole + 10;
@@ -1202,7 +1204,7 @@ namespace javelin::gui::contacts
             reloadContacts();
             return;
         }
-        const auto result = m_repository.listAddressBooks(*accountId);
+        const auto result = m_repository.listAddressBooks(*accountId, false);
         if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&result))
         {
             Q_EMIT statusMessageRequested(error->message, 10000);
@@ -1217,10 +1219,6 @@ namespace javelin::gui::contacts
             if (book.isDefault)
             {
                 label += i18nc("@item address book suffix", " (default)");
-            }
-            if (!book.isSubscribed)
-            {
-                label += i18nc("@item address book suffix", " (unsubscribed)");
             }
             entries.push_back({.label = std::move(label), .id = QString::fromStdString(book.id)});
         }
@@ -1273,7 +1271,35 @@ namespace javelin::gui::contacts
                 showSelectedContact();
             return;
         }
-        const auto bookId = currentAddressBookId();
+        std::unordered_map<std::string, std::vector<javelin::jmap::api::AddressBook>>
+            subscribedAddressBooks;
+        subscribedAddressBooks.reserve(m_accounts.size());
+        for (const auto& contactsAccount : m_accounts)
+        {
+            auto listed = m_repository.listAddressBooks(contactsAccount.accountId, false);
+            if (const auto* error = std::get_if<javelin::jmap::cache::DatabaseError>(&listed))
+            {
+                Q_EMIT statusMessageRequested(error->message, 10000);
+                return;
+            }
+            subscribedAddressBooks.emplace(
+                contactsAccount.accountId,
+                std::get<std::vector<javelin::jmap::api::AddressBook>>(std::move(listed)));
+        }
+        const auto belongsToSubscribedAddressBook =
+            [&subscribedAddressBooks](const javelin::jmap::contacts::ContactSummary& contact)
+        {
+            const auto books = subscribedAddressBooks.find(contact.accountId);
+            return books != subscribedAddressBooks.end() &&
+                   std::ranges::any_of(contact.addressBookIds,
+                                       [&books](const auto& addressBookId)
+                                       {
+                                           return std::ranges::contains(
+                                               books->second, addressBookId,
+                                               &javelin::jmap::api::AddressBook::id);
+                                       });
+        };
+
         m_groups.clear();
         for (const auto& contactsAccount : m_accounts)
         {
@@ -1286,7 +1312,7 @@ namespace javelin::gui::contacts
             }
             for (const auto& contact :
                  std::get<std::vector<javelin::jmap::contacts::ContactSummary>>(unfiltered))
-                if (contact.kind == "group")
+                if (contact.kind == "group" && belongsToSubscribedAddressBook(contact))
                     m_groups.push_back(contact);
         }
         std::ranges::sort(m_groups, {}, &javelin::jmap::contacts::ContactSummary::displayName);
@@ -1334,21 +1360,31 @@ namespace javelin::gui::contacts
                     .accountId = QString::fromStdString(contactsAccount.accountId),
                     .addressBookId = {},
                 });
-                const auto listedBooks =
-                    m_repository.listAddressBooks(contactsAccount.accountId, false);
-                if (const auto* books =
-                        std::get_if<std::vector<javelin::jmap::api::AddressBook>>(&listedBooks))
-                    for (const auto& book : *books)
-                        rows.push_back({
-                            .key = QStringLiteral("book:%1:%2")
-                                       .arg(QString::fromStdString(contactsAccount.accountId),
-                                            QString::fromStdString(book.id)),
-                            .label = QString::fromStdString(book.name),
-                            .mode = GroupFilterMode::AddressBook,
-                            .groupId = {},
-                            .accountId = QString::fromStdString(contactsAccount.accountId),
-                            .addressBookId = QString::fromStdString(book.id),
-                        });
+                const auto& books = subscribedAddressBooks.at(contactsAccount.accountId);
+                if (books.empty())
+                {
+                    rows.push_back({
+                        .key = QStringLiteral("no-subscribed-books:%1")
+                                   .arg(QString::fromStdString(contactsAccount.accountId)),
+                        .label = i18n("No subscribed address books"),
+                        .mode = GroupFilterMode::NoSubscribedAddressBooks,
+                        .groupId = {},
+                        .accountId = QString::fromStdString(contactsAccount.accountId),
+                        .addressBookId = {},
+                    });
+                    continue;
+                }
+                for (const auto& book : books)
+                    rows.push_back({
+                        .key = QStringLiteral("book:%1:%2")
+                                   .arg(QString::fromStdString(contactsAccount.accountId),
+                                        QString::fromStdString(book.id)),
+                        .label = QString::fromStdString(book.name),
+                        .mode = GroupFilterMode::AddressBook,
+                        .groupId = {},
+                        .accountId = QString::fromStdString(contactsAccount.accountId),
+                        .addressBookId = QString::fromStdString(book.id),
+                    });
                 rows.push_back({
                     .key = QStringLiteral("starred:%1")
                                .arg(QString::fromStdString(contactsAccount.accountId)),
@@ -1387,25 +1423,26 @@ namespace javelin::gui::contacts
             keys.reserve(rows.size());
             for (const auto& row : rows)
                 keys.push_back(row.key);
-            mergeListItems(*m_groupList, keys,
-                           [&rows](QListWidgetItem& item, const std::size_t index)
-                           {
-                               const auto& row = rows[index];
-                               item.setText(row.label);
-                               item.setData(groupFilterModeRole, static_cast<int>(row.mode));
-                               item.setData(groupIdRole, row.groupId);
-                               item.setData(groupAccountIdRole, row.accountId);
-                               item.setData(groupAddressBookIdRole, row.addressBookId);
-                               item.setFlags(row.mode == GroupFilterMode::Divider
-                                                 ? Qt::NoItemFlags
-                                                 : Qt::ItemIsSelectable | Qt::ItemIsEnabled);
-                               item.setTextAlignment(row.mode == GroupFilterMode::Divider
-                                                         ? Qt::AlignCenter
-                                                         : Qt::AlignLeft);
-                               item.setIcon(row.mode == GroupFilterMode::Group
-                                                ? QIcon::fromTheme(QStringLiteral("system-users"))
-                                                : QIcon{});
-                           });
+            mergeListItems(
+                *m_groupList, keys,
+                [&rows](QListWidgetItem& item, const std::size_t index)
+                {
+                    const auto& row = rows[index];
+                    item.setText(row.label);
+                    item.setData(groupFilterModeRole, static_cast<int>(row.mode));
+                    item.setData(groupIdRole, row.groupId);
+                    item.setData(groupAccountIdRole, row.accountId);
+                    item.setData(groupAddressBookIdRole, row.addressBookId);
+                    item.setFlags(row.mode == GroupFilterMode::Divider ||
+                                          row.mode == GroupFilterMode::NoSubscribedAddressBooks
+                                      ? Qt::NoItemFlags
+                                      : Qt::ItemIsSelectable | Qt::ItemIsEnabled);
+                    item.setTextAlignment(row.mode == GroupFilterMode::Divider ? Qt::AlignCenter
+                                                                               : Qt::AlignLeft);
+                    item.setIcon(row.mode == GroupFilterMode::Group
+                                     ? QIcon::fromTheme(QStringLiteral("system-users"))
+                                     : QIcon{});
+                });
             QListWidgetItem* restoredGroup = nullptr;
             for (int row = 0; row < m_groupList->count(); ++row)
             {
@@ -1465,7 +1502,8 @@ namespace javelin::gui::contacts
                         continue;
                     for (const auto& contact : *values)
                     {
-                        if (contact.kind != "group" && memberUids.contains(contact.uid) &&
+                        if (contact.kind != "group" && belongsToSubscribedAddressBook(contact) &&
+                            memberUids.contains(contact.uid) &&
                             listedUids.insert(contact.uid).second)
                             m_contacts.push_back(contact);
                     }
@@ -1507,14 +1545,7 @@ namespace javelin::gui::contacts
                 for (const auto& contact :
                      std::get<std::vector<javelin::jmap::contacts::ContactSummary>>(filtered))
                 {
-                    const bool visible = std::ranges::any_of(
-                        contact.addressBookIds,
-                        [this, &contactsAccount](const auto& addressBookId)
-                        {
-                            return !m_hiddenAddressBooks.contains(
-                                contactSelectionKey(contactsAccount.accountId, addressBookId));
-                        });
-                    if (contact.kind != "group" && visible &&
+                    if (contact.kind != "group" && belongsToSubscribedAddressBook(contact) &&
                         ((activeMode != GroupFilterMode::Starred &&
                           activeMode != GroupFilterMode::AccountStarred) ||
                          contact.isImportant) &&
@@ -1950,18 +1981,11 @@ namespace javelin::gui::contacts
             {
                 auto* action = menu.addAction(QString::fromStdString(book.name));
                 action->setCheckable(true);
-                const auto key = contactSelectionKey(account.accountId, book.id);
-                action->setChecked(!m_hiddenAddressBooks.contains(key));
-                action->setEnabled(!m_busy);
+                action->setChecked(book.isSubscribed);
+                action->setEnabled(!m_busy && !account.isReadOnly);
                 connect(action, &QAction::toggled, this,
-                        [this, key](const bool visible)
-                        {
-                            if (visible)
-                                m_hiddenAddressBooks.erase(key);
-                            else
-                                m_hiddenAddressBooks.insert(key);
-                            reloadContacts();
-                        });
+                        [this, accountId = account.accountId, book](const bool subscribed)
+                        { setAddressBookSubscription(accountId, book, subscribed); });
             }
         }
         menu.addSeparator();
@@ -2957,19 +2981,19 @@ namespace javelin::gui::contacts
             i18n("Changing default address book…"));
     }
 
-    void ContactsManagerWidget::toggleAddressBookSubscription(std::string accountId,
-                                                              javelin::jmap::api::AddressBook book)
+    void ContactsManagerWidget::setAddressBookSubscription(std::string accountId,
+                                                           javelin::jmap::api::AddressBook book,
+                                                           const bool subscribed)
     {
         const auto account = std::ranges::find(m_accounts, accountId,
                                                &javelin::jmap::cache::ContactAccount::accountId);
-        if (account == m_accounts.end() || account->isReadOnly)
+        if (account == m_accounts.end() || account->isReadOnly || book.isSubscribed == subscribed)
             return;
-        auto changed = book;
-        changed.isSubscribed = !changed.isSubscribed;
+        book.isSubscribed = subscribed;
         applyAddressBookMutation(
             javelin::app::UpdateAddressBookCommand{
                 .accountId = std::move(accountId),
-                .addressBook = std::move(changed),
+                .addressBook = std::move(book),
             },
             i18n("Updating subscription…"));
     }
@@ -3276,7 +3300,7 @@ namespace javelin::gui::contacts
                 {
                     if (auto book = selectedBook())
                     {
-                        toggleAddressBookSubscription(accountId(), std::move(*book));
+                        setAddressBookSubscription(accountId(), *book, !book->isSubscribed);
                         dialog.accept();
                     }
                 });

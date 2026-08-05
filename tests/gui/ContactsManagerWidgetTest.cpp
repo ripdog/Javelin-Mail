@@ -4,9 +4,11 @@
 #include "jmap/cache/ContactRepository.h"
 #include "jmap/cache/SessionRepository.h"
 
+#include <QAction>
 #include <QComboBox>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QMenu>
 #include <QPushButton>
 #include <QStackedWidget>
 #include <QTemporaryDir>
@@ -15,10 +17,12 @@
 
 namespace
 {
-    [[nodiscard]] javelin::jmap::api::Session session()
+    [[nodiscard]] javelin::jmap::api::Session session(std::string accountId = "a1",
+                                                      std::string accountName = "Personal",
+                                                      std::string username = "alice@example.test")
     {
         javelin::jmap::api::Session value;
-        value.username = "alice@example.test";
+        value.username = std::move(username);
         value.apiUrl = "https://example.test/jmap";
         value.downloadUrl = "https://example.test/download/{accountId}/{blobId}/{name}";
         value.uploadUrl = "https://example.test/upload/{accountId}";
@@ -35,25 +39,26 @@ namespace
             .collationAlgorithms = {},
         };
         value.capabilities.contacts = true;
-        value.primaryAccounts.contactsAccountId = "a1";
+        value.primaryAccounts.contactsAccountId = accountId;
         value.accounts.emplace(
-            "a1", javelin::jmap::api::Account{
-                      .id = "a1",
-                      .name = "Personal",
-                      .isPersonal = true,
-                      .isReadOnly = false,
-                      .accountCapabilities = {.mail = false,
-                                              .submission = false,
-                                              .contacts =
-                                                  javelin::jmap::api::ContactsCapability{
-                                                      .maxAddressBooksPerCard = std::nullopt,
-                                                      .mayCreateAddressBook = true},
-                                              .calendars = std::nullopt},
-                  });
+            accountId, javelin::jmap::api::Account{
+                           .id = accountId,
+                           .name = std::move(accountName),
+                           .isPersonal = true,
+                           .isReadOnly = false,
+                           .accountCapabilities = {.mail = false,
+                                                   .submission = false,
+                                                   .contacts =
+                                                       javelin::jmap::api::ContactsCapability{
+                                                           .maxAddressBooksPerCard = std::nullopt,
+                                                           .mayCreateAddressBook = true},
+                                                   .calendars = std::nullopt},
+                       });
         return value;
     }
 
-    [[nodiscard]] javelin::jmap::api::AddressBook book(std::string id, std::string name)
+    [[nodiscard]] javelin::jmap::api::AddressBook book(std::string id, std::string name,
+                                                       const bool subscribed = true)
     {
         return {
             .id = std::move(id),
@@ -61,18 +66,20 @@ namespace
             .description = std::nullopt,
             .sortOrder = 0,
             .isDefault = true,
-            .isSubscribed = true,
+            .isSubscribed = subscribed,
             .shareWith = std::nullopt,
             .myRights = {.mayRead = true, .mayWrite = true, .mayShare = false, .mayDelete = true}};
     }
 
-    [[nodiscard]] javelin::jmap::contacts::ContactSummary contact(std::string name,
-                                                                  std::string email)
+    [[nodiscard]] javelin::jmap::contacts::ContactSummary
+    contact(std::string name, std::string email, std::string accountId = "a1",
+            std::string id = "card-1", std::string uid = "uid-card-1",
+            std::string addressBookId = "book-1")
     {
         return {
-            .accountId = "a1",
-            .id = "card-1",
-            .uid = "uid-card-1",
+            .accountId = std::move(accountId),
+            .id = id,
+            .uid = uid,
             .kind = "individual",
             .displayName = name,
             .organization = std::nullopt,
@@ -81,27 +88,37 @@ namespace
                         .label = std::nullopt,
                         .preference = std::nullopt,
                         .contexts = {}}},
-            .addressBookIds = {"book-1"},
+            .addressBookIds = {addressBookId},
             .isImportant = false,
             .document =
-                R"({"id":"card-1","uid":"uid-card-1","kind":"individual","addressBookIds":{"book-1":true},"name":{"full":")" +
-                name + R"("},"emails":{"email-1":{"address":")" + email + R"("}}})"};
+                QStringLiteral(
+                    R"({"id":"%1","uid":"%2","kind":"individual","addressBookIds":{"%3":true},"name":{"full":"%4"},"emails":{"email-1":{"address":"%5"}}})")
+                    .arg(QString::fromStdString(id), QString::fromStdString(uid),
+                         QString::fromStdString(addressBookId), QString::fromStdString(name),
+                         QString::fromStdString(email))
+                    .toStdString()};
     }
 
-    [[nodiscard]] javelin::jmap::contacts::ContactSummary group()
+    [[nodiscard]] javelin::jmap::contacts::ContactSummary
+    group(std::string name = "Friends", std::string accountId = "a1", std::string id = "group-1",
+          std::string uid = "uid-group-1", std::string addressBookId = "book-1")
     {
         return {
-            .accountId = "a1",
-            .id = "group-1",
-            .uid = "uid-group-1",
+            .accountId = std::move(accountId),
+            .id = id,
+            .uid = uid,
             .kind = "group",
-            .displayName = "Friends",
+            .displayName = name,
             .organization = std::nullopt,
             .emails = {},
-            .addressBookIds = {"book-1"},
+            .addressBookIds = {addressBookId},
             .isImportant = false,
             .document =
-                R"({"id":"group-1","uid":"uid-group-1","kind":"group","addressBookIds":{"book-1":true},"name":{"full":"Friends"},"members":{"uid-card-1":true}})"};
+                QStringLiteral(
+                    R"({"id":"%1","uid":"%2","kind":"group","addressBookIds":{"%3":true},"name":{"full":"%4"},"members":{"uid-card-1":true}})")
+                    .arg(QString::fromStdString(id), QString::fromStdString(uid),
+                         QString::fromStdString(addressBookId), QString::fromStdString(name))
+                    .toStdString()};
     }
 
     class RefreshPort final : public javelin::app::ContactRefreshPort
@@ -126,10 +143,28 @@ namespace
         }
 
       public:
+        std::string lastOwnerAccountId;
+        std::optional<javelin::app::AddressBookCommand> lastAddressBookCommand;
+
         QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
-        mutateAddressBook(std::string, javelin::app::AddressBookCommand) override
+        mutateAddressBook(std::string ownerAccountId,
+                          javelin::app::AddressBookCommand command) override
         {
-            co_return unused();
+            const auto accountId =
+                std::visit([](const auto& value) { return value.accountId; }, command);
+            lastOwnerAccountId = std::move(ownerAccountId);
+            lastAddressBookCommand = std::move(command);
+            co_return javelin::jmap::contacts::ContactMutationSummary{
+                .accountId = accountId,
+                .newState = {},
+                .createdId = std::nullopt,
+                .createdIds = {},
+                .receipt = {.domains = {},
+                            .acceptedObjectIds = {},
+                            .rejectedObjectIds = {},
+                            .affectedCacheViews = {},
+                            .incompleteMaterialization = false},
+            };
         }
         QCoro::Task<javelin::jmap::contacts::ContactMutationResult>
         saveContact(std::string, javelin::app::SaveContactCommand) override
@@ -212,8 +247,7 @@ TEST_CASE("Contacts refresh merges rows without disturbing selection or editor d
     RefreshPort refresh;
     CommandPort commands;
     javelin::gui::settings::GuiSettings settings{javelin::protocol::SettingsSnapshot{}};
-    javelin::gui::contacts::ContactsManagerWidget widget{settings, repository, refresh, commands,
-                                                         "a1"};
+    javelin::gui::contacts::ContactsManagerWidget widget{settings, repository, refresh, commands};
     auto* books = widget.findChild<QComboBox*>(QStringLiteral("contactsAddressBookCombo"));
     auto* groups = widget.findChild<QListWidget*>(QStringLiteral("contactsGroupList"));
     auto* contacts = widget.findChild<QListWidget*>(QStringLiteral("contactsContactList"));
@@ -264,4 +298,110 @@ TEST_CASE("Contacts refresh merges rows without disturbing selection or editor d
     CHECK(groups->isEnabled());
     CHECK(contacts->isEnabled());
     CHECK(save->isEnabled());
+}
+
+TEST_CASE("Contacts address book subscriptions drive the group list across servers",
+          "[gui][contacts][subscriptions]")
+{
+    QTemporaryDir directory;
+    auto opened = javelin::jmap::cache::DatabaseConnection::open({
+        .connectionName = QStringLiteral("contacts-manager-subscription-test"),
+        .databasePath = directory.filePath(QStringLiteral("cache.sqlite3")),
+    });
+    REQUIRE(std::holds_alternative<javelin::jmap::cache::DatabaseConnection>(opened));
+    auto connection = std::get<javelin::jmap::cache::DatabaseConnection>(std::move(opened));
+    javelin::jmap::cache::SessionRepository sessions{connection};
+    if (const auto error = sessions.replace("a1", session("a1", "Personal", "alice@example.test")))
+        FAIL(error->message.toStdString());
+    if (const auto error = sessions.replace("a2", session("a2", "Work", "alice@work.test")))
+        FAIL(error->message.toStdString());
+
+    javelin::jmap::cache::ContactRepository repository{connection};
+    REQUIRE_FALSE(
+        repository
+            .replaceAll("a1",
+                        {book("personal-book", "Personal Book"),
+                         book("hidden-personal-book", "Hidden Personal Book", false)},
+                        {contact("Alice", "alice@example.test", "a1", "alice", "uid-alice",
+                                 "personal-book"),
+                         contact("Hidden Person", "hidden@example.test", "a1", "hidden-person",
+                                 "uid-hidden", "hidden-personal-book"),
+                         group("Friends", "a1", "friends", "uid-friends", "personal-book"),
+                         group("Hidden Friends", "a1", "hidden-friends", "uid-hidden-friends",
+                               "hidden-personal-book")},
+                        "b1", "c1")
+            .has_value());
+    REQUIRE_FALSE(repository
+                      .replaceAll("a2", {book("work-book", "Work Book", false)},
+                                  {contact("Work Person", "person@work.test", "a2", "work-person",
+                                           "uid-work-person", "work-book"),
+                                   group("Work Friends", "a2", "work-friends", "uid-work-friends",
+                                         "work-book")},
+                                  "b2", "c2")
+                      .has_value());
+
+    RefreshPort refresh;
+    CommandPort commands;
+    javelin::gui::settings::GuiSettings settings{javelin::protocol::SettingsSnapshot{}};
+    javelin::gui::contacts::ContactsManagerWidget widget{settings, repository, refresh, commands};
+    auto* books = widget.findChild<QComboBox*>(QStringLiteral("contactsAddressBookCombo"));
+    auto* groups = widget.findChild<QListWidget*>(QStringLiteral("contactsGroupList"));
+    auto* contacts = widget.findChild<QListWidget*>(QStringLiteral("contactsContactList"));
+    REQUIRE(books != nullptr);
+    REQUIRE(groups != nullptr);
+    REQUIRE(contacts != nullptr);
+
+    const auto findGroupRow = [groups](const QString& text)
+    {
+        for (int row = 0; row < groups->count(); ++row)
+            if (groups->item(row)->text() == text)
+                return row;
+        return -1;
+    };
+    CHECK(books->findText(QStringLiteral("Personal Book (default)")) >= 0);
+    CHECK(books->findText(QStringLiteral("Hidden Personal Book")) == -1);
+    CHECK(findGroupRow(QStringLiteral("Personal Book")) >= 0);
+    CHECK(findGroupRow(QStringLiteral("Friends")) >= 0);
+    CHECK(findGroupRow(QStringLiteral("Hidden Personal Book")) == -1);
+    CHECK(findGroupRow(QStringLiteral("Hidden Friends")) == -1);
+    CHECK(findGroupRow(QStringLiteral("Work Book")) == -1);
+    CHECK(findGroupRow(QStringLiteral("Work Friends")) == -1);
+
+    const int workHeader = findGroupRow(QStringLiteral("Work"));
+    REQUIRE(workHeader >= 0);
+    REQUIRE(workHeader + 1 < groups->count());
+    CHECK(groups->item(workHeader + 1)->text() == QStringLiteral("No subscribed address books"));
+    CHECK(groups->item(workHeader + 1)->flags() == Qt::NoItemFlags);
+    CHECK(workHeader + 2 == groups->count());
+    REQUIRE(contacts->count() == 1);
+    CHECK(contacts->item(0)->text() == QStringLiteral("Alice"));
+
+    QMenu menu;
+    widget.populateAddressBookMenu(menu);
+    const auto findAction = [&menu](const QString& text) -> QAction*
+    {
+        for (auto* action : menu.actions())
+            if (action->text() == text)
+                return action;
+        return nullptr;
+    };
+    auto* personalAction = findAction(QStringLiteral("Personal Book"));
+    auto* hiddenPersonalAction = findAction(QStringLiteral("Hidden Personal Book"));
+    auto* workAction = findAction(QStringLiteral("Work Book"));
+    REQUIRE(personalAction != nullptr);
+    REQUIRE(hiddenPersonalAction != nullptr);
+    REQUIRE(workAction != nullptr);
+    CHECK(personalAction->isChecked());
+    CHECK_FALSE(hiddenPersonalAction->isChecked());
+    CHECK_FALSE(workAction->isChecked());
+
+    workAction->trigger();
+    REQUIRE(commands.lastAddressBookCommand.has_value());
+    CHECK(commands.lastOwnerAccountId == "a2");
+    const auto* update =
+        std::get_if<javelin::app::UpdateAddressBookCommand>(&*commands.lastAddressBookCommand);
+    REQUIRE(update != nullptr);
+    CHECK(update->accountId == "a2");
+    CHECK(update->addressBook.id == "work-book");
+    CHECK(update->addressBook.isSubscribed);
 }

@@ -10,7 +10,6 @@
 
 #include <optional>
 #include <string>
-#include <unordered_set>
 #include <vector>
 
 class QComboBox;
@@ -106,8 +105,8 @@ namespace javelin::gui::contacts
         void editAddressBook(std::string accountId, javelin::jmap::api::AddressBook book);
         void deleteAddressBook(std::string accountId, javelin::jmap::api::AddressBook book);
         void setDefaultAddressBook(std::string accountId, javelin::jmap::api::AddressBook book);
-        void toggleAddressBookSubscription(std::string accountId,
-                                           javelin::jmap::api::AddressBook book);
+        void setAddressBookSubscription(std::string accountId, javelin::jmap::api::AddressBook book,
+                                        bool subscribed);
         void editAddressBookSharing(std::string accountId, javelin::jmap::api::AddressBook book);
         void applyAddressBookMutation(javelin::app::AddressBookCommand command,
                                       QString progressMessage);
@@ -134,7 +133,6 @@ namespace javelin::gui::contacts
         std::vector<javelin::jmap::api::AddressBook> m_addressBooks;
         std::vector<javelin::jmap::contacts::ContactSummary> m_contacts;
         std::vector<javelin::jmap::contacts::ContactSummary> m_groups;
-        std::unordered_set<std::string> m_hiddenAddressBooks;
         bool m_busy = false;
         bool m_refreshInFlight = false;
         std::size_t m_pendingRefreshes = 0;
