@@ -366,7 +366,12 @@ javelin_set_project_warnings(javelin_composer_gui_tests)
 javelin_enable_static_analysis(javelin_composer_gui_tests)
 javelin_enable_sanitizers(javelin_composer_gui_tests)
 target_compile_options(javelin_composer_gui_tests PRIVATE -fexceptions)
-catch_discover_tests(javelin_composer_gui_tests DISCOVERY_MODE PRE_TEST)
+# KDE PIM keeps its generated settings singleton and KConfig caches alive until
+# process exit. Keep ASan/UBSan enabled for these tests, but do not treat those
+# external process-lifetime allocations as Javelin leaks.
+catch_discover_tests(javelin_composer_gui_tests
+    DISCOVERY_MODE PRE_TEST
+    PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0:halt_on_error=1")
 
 foreach(localized_test_target IN ITEMS
         javelin_translation_tests
