@@ -830,9 +830,18 @@ namespace javelin::gui::contacts
         for (int row = 0; row < m_groupList->count(); ++row)
         {
             auto* item = m_groupList->item(row);
-            if (item->data(groupFilterModeRole).toInt() == state.groupFilterMode &&
-                (state.groupFilterMode != static_cast<int>(GroupFilterMode::Group) ||
-                 item->data(groupIdRole).toString().toStdString() == state.groupId))
+            const auto mode = static_cast<GroupFilterMode>(item->data(groupFilterModeRole).toInt());
+            const bool identityMatches =
+                (mode != GroupFilterMode::Group ||
+                 (item->data(groupIdRole).toString().toStdString() == state.groupId &&
+                  item->data(groupAccountIdRole).toString().toStdString() == state.accountId)) &&
+                (mode != GroupFilterMode::AddressBook ||
+                 (item->data(groupAccountIdRole).toString().toStdString() == state.accountId &&
+                  item->data(groupAddressBookIdRole).toString().toStdString() ==
+                      state.addressBookId)) &&
+                (mode != GroupFilterMode::AccountStarred ||
+                 item->data(groupAccountIdRole).toString().toStdString() == state.accountId);
+            if (item->data(groupFilterModeRole).toInt() == state.groupFilterMode && identityMatches)
             {
                 m_groupList->setCurrentItem(item);
                 break;
@@ -1235,6 +1244,13 @@ namespace javelin::gui::contacts
         const QString selectedGroupId = selectedGroupItem == nullptr
                                             ? QString{}
                                             : selectedGroupItem->data(groupIdRole).toString();
+        const QString selectedGroupAccountId =
+            selectedGroupItem == nullptr ? QString{}
+                                         : selectedGroupItem->data(groupAccountIdRole).toString();
+        const QString selectedGroupAddressBookId =
+            selectedGroupItem == nullptr
+                ? QString{}
+                : selectedGroupItem->data(groupAddressBookIdRole).toString();
         const QString selectedId =
             m_contactList->currentItem() == nullptr
                 ? QString{}
@@ -1396,9 +1412,17 @@ namespace javelin::gui::contacts
                 auto* item = m_groupList->item(row);
                 const auto mode =
                     static_cast<GroupFilterMode>(item->data(groupFilterModeRole).toInt());
-                if (mode == selectedGroupMode &&
+                const bool identityMatches =
                     (mode != GroupFilterMode::Group ||
-                     item->data(groupIdRole).toString() == selectedGroupId))
+                     (item->data(groupIdRole).toString() == selectedGroupId &&
+                      item->data(groupAccountIdRole).toString() == selectedGroupAccountId)) &&
+                    (mode != GroupFilterMode::AddressBook ||
+                     (item->data(groupAccountIdRole).toString() == selectedGroupAccountId &&
+                      item->data(groupAddressBookIdRole).toString() ==
+                          selectedGroupAddressBookId)) &&
+                    (mode != GroupFilterMode::AccountStarred ||
+                     item->data(groupAccountIdRole).toString() == selectedGroupAccountId);
+                if (mode == selectedGroupMode && identityMatches)
                 {
                     restoredGroup = item;
                     break;
