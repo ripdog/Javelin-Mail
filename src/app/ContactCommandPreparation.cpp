@@ -92,8 +92,12 @@ namespace javelin::app
         request.accountId = std::move(command.accountId);
         if (creating)
         {
+            const auto prepared = javelin::jmap::contacts::prepareContactDocument(
+                std::get<std::string>(document), true);
+            if (!std::holds_alternative<std::string>(prepared))
+                return invalidContactCommand(std::get<std::string_view>(prepared));
             request.create.emplace("new-contact", javelin::jmap::api::ContactDocument{
-                                                      .json = std::get<std::string>(document)});
+                                                      .json = std::get<std::string>(prepared)});
         }
         else if (command.contactId->empty())
         {

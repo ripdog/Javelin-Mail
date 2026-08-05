@@ -84,7 +84,10 @@ TEST_CASE("new contacts receive a uid during command preparation", "[app][contac
     const auto* request = std::get_if<javelin::jmap::api::ContactCardSetRequest>(&prepared);
     REQUIRE(request != nullptr);
     REQUIRE(request->create.contains("new-contact"));
-    CHECK(request->create.at("new-contact").json.find("\"uid\"") != std::string::npos);
+    const auto& json = request->create.at("new-contact").json;
+    CHECK(json.find("\"uid\"") != std::string::npos);
+    CHECK(json.find(R"("@type":"Card")") != std::string::npos);
+    CHECK(json.find(R"("version":"1.0")") != std::string::npos);
 }
 
 TEST_CASE("contact save commands prepare protocol requests outside the GUI", "[app][contacts]")
